@@ -30,8 +30,7 @@ async function freePort() {
   return port
 }
 
-async function startProxy(dir: string, env: Record<string, string>, upstreamCa: string) {
-  const port = await freePort()
+function spawnProxy(dir: string, env: Record<string, string>, upstreamCa: string, port: number) {
   const proc = Bun.spawn(
     [
       'mitmdump',
@@ -54,25 +53,38 @@ async function startProxy(dir: string, env: Record<string, string>, upstreamCa: 
       stderr: 'pipe',
     },
   )
-  const { promise: listening, resolve } = Promise.withResolvers<boolean>()
   let output = ''
   const drain = async (stream: ReadableStream<Uint8Array>) => {
     const decoder = new TextDecoder()
-    for await (const chunk of stream) {
-      output += decoder.decode(chunk)
-      if (output.includes('listening at')) resolve(true)
-    }
+    for await (const chunk of stream) output += decoder.decode(chunk)
   }
-  void Promise.all([drain(proc.stdout), drain(proc.stderr)]).then(() => resolve(false))
-  const timer = setTimeout(() => resolve(false), 90_000)
-  const started = await listening
-  clearTimeout(timer)
-  if (!started || output.includes('error in script')) {
-    proc.kill()
+  const drained = Promise.all([drain(proc.stdout), drain(proc.stderr)])
+  // On CI runners mitmdump's log only arrives when it exits, so readiness is the open port.
+  const exited = async () => {
     await proc.exited
-    throw new Error(`mitmdump did not start (exit ${proc.exitCode}): ${output}`)
+    await drained
+    return output
   }
-  return { proc, port, output: () => output }
+  return { proc, port, exited }
+}
+
+async function startProxy(dir: string, env: Record<string, string>, upstreamCa: string) {
+  const proxy = spawnProxy(dir, env, upstreamCa, await freePort())
+  const deadline = Date.now() + 90_000
+  while (proxy.proc.exitCode === null && Date.now() < deadline) {
+    const open = await Bun.connect({
+      hostname: '127.0.0.1',
+      port: proxy.port,
+      socket: { data() {} },
+    }).then(
+      (socket) => (socket.end(), true),
+      () => false,
+    )
+    if (open) return proxy
+    await Bun.sleep(200)
+  }
+  proxy.proc.kill()
+  throw new Error(`mitmdump did not start: ${await proxy.exited()}`)
 }
 
 const echo = (request: Request) =>
@@ -172,19 +184,18 @@ describe.skipIf(!available)('egress addon', () => {
     expect((await send(`http://localhost:${plain.port}/packages/x`)).authorization).toBeNull()
   })
 
-  test('never logs header values', () => {
-    expect(proxy.output()).not.toContain(token)
+  test('never logs header values', async () => {
+    proxy.proc.kill()
+    expect(await proxy.exited()).not.toContain(token)
   })
 
   test('refuses to start when a referenced variable is missing', async () => {
     const empty = await mkdtemp(join(tmpdir(), 'egress-proxy-'))
     try {
       await writeFile(join(empty, 'rules.json'), JSON.stringify(rules))
-      const failure = await startProxy(empty, {}, join(dir, 'upstream.crt')).then(
-        () => 'started',
-        (error: unknown) => String(error),
-      )
-      expect(failure).toContain("environment variable 'EGRESS_TEST_TOKEN' is not set")
+      const failed = spawnProxy(empty, {}, join(dir, 'upstream.crt'), await freePort())
+      expect(await failed.exited()).toContain("environment variable 'EGRESS_TEST_TOKEN' is not set")
+      expect(failed.proc.exitCode).not.toBe(0)
     } finally {
       await rm(empty, { recursive: true, force: true })
     }
