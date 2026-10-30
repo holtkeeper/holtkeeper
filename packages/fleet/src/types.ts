@@ -25,8 +25,13 @@ export interface LibraryUsage {
 export interface TrackedLibrary {
   ecosystem: Ecosystem
   name: string
-  /** Latest release according to the registry; absent when the registry did not answer. */
+  /**
+   * Latest release: the version in the source of the analyzed repository that defines the library,
+   * else the registry's; absent when neither is known.
+   */
   latest?: string
+  /** The analyzed repository that defines the library, as `forge:path`; `latest` comes from it. */
+  definedIn?: string
   /** `option`: listed in `libraries`; `auto`: used by at least `minRepos` repositories. */
   reason: 'option' | 'auto'
   usages: LibraryUsage[]

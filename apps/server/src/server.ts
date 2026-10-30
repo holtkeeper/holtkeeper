@@ -280,6 +280,7 @@ export async function startServer(
     store: server.store,
     vault,
     configSource: managed.source,
+    readOnly: managed.readOnly,
     limiter,
     credentials,
     settings: [
@@ -354,6 +355,7 @@ export async function startServer(
     analyzers,
     agentFor,
     gitKeyFor: forgeGitKeys({ store: server.store, credentials }),
+    readOnly: managed.readOnly,
     admission,
     artifacts,
     now: deps.now,

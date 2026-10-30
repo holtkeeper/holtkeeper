@@ -1,4 +1,5 @@
 import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
+import { loadPackageCatalog } from '@holtkeeper/depgraph'
 import { z } from 'zod'
 
 import { analyzeLicenses } from './analyze.ts'
@@ -130,13 +131,14 @@ export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
 
 /**
  * The `licenses` analyzer: lists third-party packages of a checkout with their licenses through
- * osv-scanner and judges them against the allow and deny lists.
+ * osv-scanner and judges them against the allow and deny lists. Packages that analyzed
+ * repositories define (their newest `depgraph` records in history) are `internal` instead.
  */
 export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
   kind: 'licenses',
   analysis: licensesAnalysis,
   scope: 'repo',
-  needs: { checkout: true },
+  needs: { checkout: true, history: true },
   options: licensesOptionsSchema,
   flags: [
     {
@@ -163,12 +165,19 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
     },
   ],
   presets: licensePresets,
-  async run({ dir, ref, runner, options, signal }) {
+  async run({ dir, ref, runner, options, history, signal }) {
     if (!dir) throw new Error('the licenses analyzer needs a checkout')
+    const catalog = history ? await loadPackageCatalog(history.analyses) : undefined
     const data = await analyzeLicenses({
       dir,
       runner,
       policy: options,
+      ...(catalog && {
+        internal: (ecosystem: string, name: string) => {
+          const found = catalog.find(ecosystem, name)
+          return found && `${found.repo.forge}:${found.repo.path}`
+        },
+      }),
       ...(signal ? { signal } : {}),
     })
     return { data, ...(ref ? { ref } : {}) }

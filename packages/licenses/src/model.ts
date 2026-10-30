@@ -2,8 +2,11 @@ import { z } from 'zod'
 
 import type { LicenseVerdict } from './spdx.ts'
 
-/** Verdict of one package: a license verdict, or `ignored` when the policy ignores the package. */
-export type PackageVerdict = LicenseVerdict | 'ignored'
+/**
+ * Verdict of one package: a license verdict, `ignored` when the policy ignores the package, or
+ * `internal` when one of the analyzed repositories defines it.
+ */
+export type PackageVerdict = LicenseVerdict | 'ignored' | 'internal'
 
 /** One third-party package with the licenses its registry declares. */
 export interface LicensedPackage {
@@ -20,6 +23,8 @@ export interface LicensedPackage {
   verdict: PackageVerdict
   /** Licenses responsible for a verdict other than `allowed`. */
   culprits?: string[]
+  /** For `internal` packages: the repository that defines it, as `forge:path`. */
+  definedIn?: string
 }
 
 /** The policy a run evaluated against, kept so reports can show it. */
@@ -45,7 +50,7 @@ export interface LicensesData {
   }
 }
 
-const verdict = z.enum(['allowed', 'unknown', 'unlisted', 'denied', 'ignored'])
+const verdict = z.enum(['allowed', 'unknown', 'unlisted', 'denied', 'ignored', 'internal'])
 
 /** Validates `LicensesData` uploads. */
 export const licensesDataSchema: z.ZodType<LicensesData> = z.object({
@@ -68,6 +73,7 @@ export const licensesDataSchema: z.ZodType<LicensesData> = z.object({
       groups: z.array(z.string()).optional(),
       verdict,
       culprits: z.array(z.string()).optional(),
+      definedIn: z.string().optional(),
     }),
   ),
 })

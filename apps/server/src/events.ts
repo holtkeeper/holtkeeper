@@ -161,7 +161,8 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
- * Events by `jobs.botUsername` or carrying Holtkeeper's note marker are ignored. A job already
+ * Events of repositories `deps.readOnly` marks read-only are ignored, except tags. Events by
+ * `jobs.botUsername` or carrying Holtkeeper's note marker are ignored. A job already
  * queued or running with the same ref and options is not queued again, so the same change seen
  * by a webhook and by polling runs once.
  */
@@ -539,6 +540,8 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
   }
 
   return async (event, source) => {
+    if (event.kind !== 'tag' && (await deps.readOnly?.(event.repo)))
+      return ignore('the repository is read-only')
     const handle = handlers(source)
     if (event.kind === 'tag') return handle.handleTag(event)
     if (event.kind === 'mergeRequest') return handle.handleMergeRequest(event)

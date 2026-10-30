@@ -15,7 +15,7 @@ import {
 import { fleetTotals, type LibrarySummary, type MatrixCell, summarizeLibrary } from './matrix.ts'
 import { fleetDataSchema } from './schema.ts'
 import { type Lag, parseVersion } from './semver.ts'
-import type { FleetData, TemplateResult, TemplateStatus } from './types.ts'
+import type { FleetData, TemplateResult, TemplateStatus, TrackedLibrary } from './types.ts'
 
 /** Library columns shown in the version matrix; the libraries table lists all of them. */
 const matrixLimit = 40
@@ -185,6 +185,14 @@ function versionsSection(data: FleetData, summaries: LibrarySummary[]): Section 
   }
 }
 
+function libraryCell(library: TrackedLibrary): Cell {
+  const hints = [
+    library.reason === 'auto' ? 'tracked automatically' : undefined,
+    library.definedIn ? `defined in ${library.definedIn}` : undefined,
+  ].filter(Boolean)
+  return hints.length > 0 ? { text: library.name, hint: hints.join('; ') } : library.name
+}
+
 function librariesSection(
   summaries: LibrarySummary[],
   previous: LibrarySummary[] | undefined,
@@ -214,10 +222,7 @@ function librariesSection(
   const rows = summaries.map((summary) => {
     const old = before.get(summary.id)
     return {
-      library:
-        summary.library.reason === 'option'
-          ? summary.library.name
-          : { text: summary.library.name, hint: 'tracked automatically' },
+      library: libraryCell(summary.library),
       ecosystem: summary.library.ecosystem,
       latest: summary.library.latest ?? null,
       versions: summary.versions.join(', '),

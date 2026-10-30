@@ -13,7 +13,7 @@ import {
   workspaceDirs,
 } from './manifests.ts'
 import type { VersionRegistry } from './registry.ts'
-import { minimumOfRange } from './semver.ts'
+import { compareVersionText, minimumOfRange } from './semver.ts'
 import { compareWithTemplate, templateChange, type TemplateSpec } from './templates.ts'
 import type {
   Ecosystem,
@@ -36,6 +36,11 @@ export interface AnalyzeFleetOptions {
   repos: RepoRef[]
   forge: FleetForge
   registry: VersionRegistry
+  /**
+   * Libraries analyzed repositories outside the group define, e.g. from their `depgraph` records.
+   * Libraries the group's own manifests define need no entry.
+   */
+  internal?: (ecosystem: Ecosystem, name: string) => InternalLibrary | undefined
   /** Library names or globs always tracked, e.g. `react`, `@company/*`, `github.com/company/**`. */
   libraries?: string[]
   /** Also track every library used directly by at least this many repositories; `0` disables. Default 3. */
@@ -50,6 +55,13 @@ export interface AnalyzeFleetOptions {
   log?: (line: string) => void
 }
 
+/** A library an analyzed repository defines, with the version in its source. */
+export interface InternalLibrary {
+  version: string
+  /** `forge:path` of the defining repository. */
+  definedIn: string
+}
+
 interface Found {
   ecosystem: Ecosystem
   name: string
@@ -59,6 +71,8 @@ interface Found {
 interface RepoScan {
   repo: FleetRepo
   found: Found[]
+  /** Versioned packages the repository's manifests define. */
+  defines: { ecosystem: Ecosystem; name: string; version: string }[]
   notes: FleetNote[]
 }
 
@@ -168,6 +182,9 @@ async function scanNpm(forge: FleetForge, path: string, maxWorkspaces: number, s
     }
   })
   const own = new Set(manifests.map(({ manifest }) => manifest.name).filter(Boolean))
+  for (const { manifest } of manifests)
+    if (manifest.name && manifest.version)
+      scan.defines.push({ ecosystem: 'npm', name: manifest.name, version: manifest.version })
   for (const { dir, manifest } of manifests) {
     for (const dependency of manifest.dependencies) {
       if (own.has(dependency.name) || dependency.declared.startsWith('workspace:')) continue
@@ -227,7 +244,12 @@ async function scanGo(forge: FleetForge, path: string, maxWorkspaces: number, sc
 }
 
 async function scanRepo(forge: FleetForge, ref: RepoRef, maxWorkspaces: number): Promise<RepoScan> {
-  const scan: RepoScan = { repo: { path: ref.path, manifests: [] }, found: [], notes: [] }
+  const scan: RepoScan = {
+    repo: { path: ref.path, manifests: [] },
+    found: [],
+    defines: [],
+    notes: [],
+  }
   try {
     const info = await forge.getRepository(ref.path)
     scan.repo.webUrl = info.webUrl
@@ -335,6 +357,7 @@ export async function analyzeFleet(options: AnalyzeFleetOptions): Promise<FleetD
     repos,
     forge,
     registry,
+    internal,
     libraries = [],
     minRepos = 3,
     maxWorkspaces = 20,
@@ -351,17 +374,28 @@ export async function analyzeFleet(options: AnalyzeFleetOptions): Promise<FleetD
   const found = scans.flatMap((scan) => scan.found)
   const notes = scans.flatMap((scan) => scan.notes)
 
+  const defined = new Map<string, InternalLibrary>()
+  for (const scan of scans)
+    for (const own of scan.defines) {
+      const key = libraryKey(own.ecosystem, own.name)
+      const known = defined.get(key)
+      if (known && compareVersionText(known.version, own.version) >= 0) continue
+      defined.set(key, { version: own.version, definedIn: `${forgeId}:${scan.repo.path}` })
+    }
+
   const selected = selectLibraries(found, libraries, minRepos, maxLibraries)
   const byKey = Map.groupBy(found, (entry) => libraryKey(entry.ecosystem, entry.name))
   const tracked: TrackedLibrary[] = await mapLimit(
     selected,
     8,
     async ({ ecosystem, name, reason }) => {
-      const latest = await registry.latest(ecosystem, name)
+      const own = defined.get(libraryKey(ecosystem, name)) ?? internal?.(ecosystem, name)
+      const latest = own?.version ?? (await registry.latest(ecosystem, name))
       return {
         ecosystem,
         name,
         ...(latest ? { latest } : {}),
+        ...(own ? { definedIn: own.definedIn } : {}),
         reason,
         usages: (byKey.get(libraryKey(ecosystem, name)) ?? []).map((entry) => entry.usage),
       }

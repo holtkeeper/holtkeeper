@@ -18,6 +18,7 @@ import type { AnalysisRecord, AuditTrigger, Job, Store } from '@holtkeeper/store
 import { auditReportSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
+import type { ReadOnlyRepos } from './read-only.ts'
 import { jobTarget } from './routes/jobs.ts'
 
 export type { AgentFor, AnyAnalyzer } from '@holtkeeper/jobs'
@@ -29,6 +30,8 @@ export interface JobsOptions {
   agentFor?: AgentFor
   /** The SSH key of each forge, for job checkouts. */
   gitKeyFor?: GitKeyFor
+  /** Repositories nothing may be pushed to over git (the `repo.readOnly` setting). */
+  readOnly?: ReadOnlyRepos
   now: () => Date
   /** Where artifacts returned by analyzer runs are stored; without it they are dropped. */
   artifacts?: ArtifactStore
@@ -197,6 +200,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine | undef
     analyzers: options.analyzers,
     ...(options.agentFor && { agentFor: options.agentFor }),
     ...(options.gitKeyFor && { gitKeyFor: options.gitKeyFor }),
+    ...(options.readOnly && { readOnly: options.readOnly }),
     now,
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),

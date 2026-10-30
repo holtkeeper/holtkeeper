@@ -4,7 +4,7 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
 
 ## Public API
 
-- `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout`. Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
+- `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout` and `history` (for [internal packages](#internal-packages)). Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
   - `allow: string[]` — SPDX ids, `*` patterns or whole expressions. Default `defaultAllow`: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, BlueOak-1.0.0.
   - `deny: string[]` — same forms. Default `defaultDeny`: `GPL-*`, `AGPL-*`, `SSPL-*`.
   - `ignore: string[]` — package names (`*` allowed, e.g. `@company/*`) whose licenses are not judged.
@@ -12,9 +12,9 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
   - `requireProjectLicense: boolean` (`--require-project-license`) — default false; when true, a repository without a license file at its root gets a warning.
   - `presets` — `licensePresets`, offered by the panel for the `analyzers.licenses` setting (see [Presets](#presets)).
 - `licensesAnalysis` — the `AnalysisKind` (`schema: licensesDataSchema`, `summarize`, `toReport(current, previous)`); `licensesReport(data, { previous?, ref?, compareTo?, generatedAt? })` builds the report directly.
-- `analyzeLicenses({ dir, runner, policy?, binary?, args?, signal? }): Promise<LicensesData>` — runs osv-scanner through the `CommandRunner` and evaluates.
+- `analyzeLicenses({ dir, runner, policy?, internal?, binary?, args?, signal? }): Promise<LicensesData>` — runs osv-scanner through the `CommandRunner` and evaluates.
 - `parseOsvLicenses(output, dir): ScannedPackage[]` — osv-scanner JSON to packages.
-- `evaluatePackages(packages, policy)`, `resolvePolicy(options)` — pure policy application.
+- `evaluatePackages(packages, policy, internal?)`, `resolvePolicy(options)` — pure policy application; `internal: (ecosystem, name) => 'forge:path' | undefined` names the repository that defines a package.
 - `projectLicenseFiles(dir)` — names of license files at the root of `dir` (`LICENSE`, `LICENCE`, `COPYING`, `UNLICENSE`, with any `.`/`-`/`_` suffix such as `LICENSE.md` or `LICENSE-MIT`).
 - `parseLicense(text)`, `formatLicense(node)`, `licenseEvaluator(policy)`, `evaluateLicenses(licenses, policy)` — the SPDX expression engine.
 - Helpers: `isViolation`, `packageKey`, `licenseText`.
@@ -30,6 +30,10 @@ With osv-scanner 2.7, `--licenses` without a value turns on license data (no all
 A package found in several lockfiles becomes one entry with every source (relative to the checkout). `UNKNOWN` is dropped when the package also has a real license.
 
 **Network:** license data comes from deps.dev; with `--offline` (through `args`) every package comes back unknown.
+
+## Internal packages
+
+deps.dev knows only public packages, so a company's own libraries would all come back `UNKNOWN`. The analyzer reads the newest `depgraph` record of every repository in its history (`loadPackageCatalog` of [@holtkeeper/depgraph](../../depgraph/docs/README.md#internal-packages)): a package one of them defines as a versioned workspace gets the verdict `internal` with `definedIn: 'forge:path'` and is not judged. `ignore` still wins. Nothing needs configuring: once the library repositories are analyzed by `depgraph` (the default `security-weekly` schedule does), their consumers see the packages as internal. The report counts them in an `internal` metric, lists them in an **Internal packages** section and shows `internal` in the license mix.
 
 ## Data
 
@@ -50,8 +54,9 @@ interface LicensesData {
     sources: string[] // lockfiles, relative to the checkout
     licenses: string[] // SPDX expressions; empty = nothing known
     groups?: string[] // dependency groups, e.g. dev
-    verdict: 'allowed' | 'unknown' | 'unlisted' | 'denied' | 'ignored'
+    verdict: 'allowed' | 'unknown' | 'unlisted' | 'denied' | 'ignored' | 'internal'
     culprits?: string[] // licenses responsible for a verdict other than allowed
+    definedIn?: string // internal packages: forge:path of the repository that defines it
   }[]
   project?: { licenseFiles: string[] } // license files at the repository root; missing in older records
 }

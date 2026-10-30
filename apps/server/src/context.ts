@@ -21,6 +21,7 @@ import type { z } from 'zod'
 
 import type { AuditEnrichment } from './audit.ts'
 import type { MediaEngine } from './media/engine.ts'
+import type { ReadOnlyRepos } from './read-only.ts'
 
 /** Everything route handlers use. Built once by `createServer`; tests build it with fakes. */
 export interface ServerDeps {
@@ -35,6 +36,8 @@ export interface ServerDeps {
   config: HoltkeeperConfig
   /** Panel-managed configuration; config routes answer 503 without it. */
   configSource?: ConfigSource
+  /** The `repo.readOnly` setting; events of read-only repositories other than tags are ignored. */
+  readOnly?: ReadOnlyRepos
   /** Shared per-credential limits for forge clients, agents and job admission. */
   limiter?: Limiter
   auth: AuthProvider

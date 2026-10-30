@@ -86,6 +86,11 @@ export interface ContextFactoryOptions {
    * over SSH; with `signing` usage and an identity they sign commits and offer a `publisher`.
    */
   gitKeyFor?: GitKeyFor
+  /**
+   * Repositories Holtkeeper must not change. Their checkouts get no `publisher`, so nothing is
+   * pushed over git; changes through the forge API are the forge client's to refuse.
+   */
+  readOnly?: (repo: RepoRef) => boolean | Promise<boolean>
   /** Parent directory of checkouts. Default: the OS temp directory. */
   workDir?: string
   /** The scoped `toolchain` setting per repository, applied over the detected toolchain. */
@@ -184,6 +189,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
       const repository = await clientOf(repo.forge).getRepository(repo.path)
       const credentials = gitCredentialsOf(definitionOf(repo.forge))
       const keyed = keyOptions(await factory.gitKeyFor?.(repo.forge))
+      const publishes = Boolean(keyed.signing) && !(await factory.readOnly?.(repo))
       const result = await checkoutRepo({
         cloneUrl: repository.cloneUrl,
         ref: ref ?? repository.defaultBranch,
@@ -200,7 +206,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
         dir: result.dir,
         sha: result.sha,
         ref: result.ref,
-        ...(keyed.signing && commit && push && { publisher: { commit, push } }),
+        ...(publishes && commit && push && { publisher: { commit, push } }),
         async cleanup() {
           checkouts.delete(tracked)
           await result.cleanup()

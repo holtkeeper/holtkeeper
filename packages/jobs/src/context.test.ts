@@ -195,7 +195,7 @@ describe('createContextFactory', () => {
 const commit = async () => ({ sha: 'def' })
 const push = async () => ({ pushed: true, sha: 'def' })
 
-const setup = (gitKey: ForgeGitKey | undefined) => {
+const setup = (gitKey: ForgeGitKey | undefined, readOnly = false) => {
   const seen: CheckoutOptions[] = []
   const contextFor = createContextFactory({
     config,
@@ -203,6 +203,7 @@ const setup = (gitKey: ForgeGitKey | undefined) => {
     cacheDir: '/cache',
     runner: createFakeRunner().runner,
     gitKeyFor: async (forgeId) => (forgeId === 'work' ? gitKey : undefined),
+    readOnly: async () => readOnly,
     checkout: async (options) => {
       seen.push(options)
       return { dir: '/tmp/co', sha: 'abc', ref: 'trunk', cleanup: async () => {}, commit, push }
@@ -239,6 +240,12 @@ describe('forge SSH keys in checkouts', () => {
       credentials: { username: 'oauth2', password: 'tok' },
     })
     expect(checkout?.publisher).toEqual({ commit, push })
+  })
+
+  test('offers no publisher for read-only repositories', async () => {
+    const { checkout, options } = await setup(key, true).open()
+    expect(options?.signing).toBeDefined()
+    expect(checkout?.publisher).toBeUndefined()
   })
 
   test('without host keys git stays on HTTPS; without identity nothing is signed', async () => {

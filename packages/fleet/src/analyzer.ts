@@ -1,4 +1,5 @@
 import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { loadPackageCatalog } from '@holtkeeper/depgraph'
 import { z } from 'zod'
 
 import { analyzeFleet } from './analyze.ts'
@@ -33,14 +34,18 @@ export interface FleetAnalyzerDependencies {
   registry?: () => VersionRegistry
 }
 
-/** The `fleet` analyzer (group scope, forge API only); inject a registry for tests or mirrors. */
+/**
+ * The `fleet` analyzer (group scope, forge API only); inject a registry for tests or mirrors.
+ * Libraries analyzed repositories define take their latest version from their source: the group's
+ * manifests, else the newest `depgraph` records in history.
+ */
 export function createFleetAnalyzer(dependencies: FleetAnalyzerDependencies = {}) {
   const registryOf = dependencies.registry ?? (() => createHttpRegistry())
   return defineAnalyzer<FleetData, FleetOptions>({
     kind: 'fleet',
     analysis: fleetAnalysis,
     scope: 'group',
-    needs: { forge: true },
+    needs: { forge: true, history: true },
     options: fleetOptionsSchema,
     flags: [
       {
@@ -54,14 +59,26 @@ export function createFleetAnalyzer(dependencies: FleetAnalyzerDependencies = {}
         description: 'also track libraries used by this many repositories (default 3, 0 disables)',
       },
     ],
-    async run({ repo, repos, forge, options, log }) {
+    async run({ repo, repos, forge, options, history, log }) {
       if (!forge) throw new Error('the fleet analyzer needs a forge')
+      const catalog = history ? await loadPackageCatalog(history.analyses) : undefined
       const data = await analyzeFleet({
         group: repo.path,
         forgeId: repo.forge,
         repos: repos ?? [],
         forge,
         registry: registryOf(),
+        ...(catalog && {
+          internal: (ecosystem: string, name: string) => {
+            const found = catalog.find(ecosystem, name)
+            return (
+              found && {
+                version: found.version,
+                definedIn: `${found.repo.forge}:${found.repo.path}`,
+              }
+            )
+          },
+        }),
         libraries: options.libraries,
         minRepos: options.minRepos,
         maxWorkspaces: options.maxWorkspaces,

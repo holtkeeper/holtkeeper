@@ -280,3 +280,38 @@ test('the analyzer runs through the forge with an injected registry', async () =
   expect(data.group).toBe('acme')
   expect(data.libraries.map((library) => library.name)).toEqual(['@acme/ui', 'react'])
 })
+
+describe('internal libraries', () => {
+  const files = {
+    'acme/ui-lib': { 'package.json': '{"name":"@acme/ui","version":"3.2.0"}' },
+    'acme/web': {
+      'package.json':
+        '{"name":"web","dependencies":{"@acme/ui":"^3.0.0","@acme/player":"^1.0.0","react":"^19.0.0"}}',
+    },
+  }
+  const libraryRepos = ['acme/ui-lib', 'acme/web'].map((path) => ({ forge: 'work', path }))
+
+  test('take their latest version from the defining repository, not the registry', async () => {
+    const registry = fakeRegistry({ 'npm:@acme/ui': '9.9.9', 'npm:react': '19.1.0' })
+    const result = await analyzeFleet({
+      group: 'acme',
+      forgeId: 'work',
+      repos: libraryRepos,
+      forge: fakeForge(files),
+      registry,
+      internal: (ecosystem, name) =>
+        name === '@acme/player' ? { version: '1.4.0', definedIn: 'work:video/player' } : undefined,
+      libraries: ['@acme/*', 'react'],
+      minRepos: 0,
+    })
+    expect(
+      result.libraries.map(({ name, latest, definedIn }) => ({ name, latest, definedIn })),
+    ).toEqual([
+      { name: '@acme/player', latest: '1.4.0', definedIn: 'work:video/player' },
+      { name: '@acme/ui', latest: '3.2.0', definedIn: 'work:acme/ui-lib' },
+      { name: 'react', latest: '19.1.0', definedIn: undefined },
+    ])
+    expect(registry.calls).toEqual(['npm:react'])
+    expect(fleetDataSchema.parse(result)).toEqual(result)
+  })
+})

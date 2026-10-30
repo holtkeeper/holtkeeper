@@ -7,7 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
     "zod": "^4.6.7"
   }
 }

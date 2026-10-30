@@ -233,6 +233,16 @@ A panel forge can issue an SSH key on the account behind its token (`POST /api/f
 
 Jobs use the key through `gitKeyFor` (see [@holtkeeper/jobs](../../../packages/jobs/docs/README.md#context)): clone, fetch and push over SSH, signed commits for propagate and port. Running git over SSH and signing needs `ssh`, `ssh-keyscan` and `ssh-keygen` on the host (`openssh-client` in the worker image).
 
+### Read-only repositories
+
+The scoped setting `repo.readOnly` (everything, groups, repository patterns or paths; the most specific entry wins) makes Holtkeeper a pure analytics tool for the repositories it covers:
+
+- Every forge client of the effective config, file and panel forges alike, goes through `readOnlyDefinition` of [@holtkeeper/forge](../../../packages/forge/docs/README.md#read-only-repositories): comments, reviews, thread replies, labels, merges, branches, commits, tags, pipeline jobs, deploy keys and project webhooks of those repositories are refused with `ReadOnlyRepositoryError` before they are sent. The setting is read at each write, so a change applies at once.
+- Merge request, note and pipeline events of those repositories are ignored (`ignored: 'the repository is read-only'`): no policies, reviews, commands or acknowledgements. Tag events still queue their analyzers.
+- Job checkouts of those repositories get no `publisher`, so nothing is pushed over git.
+
+Analyses, schedules and links between repositories (dependency inventory, fleet, internal packages) keep working. Jobs that would change such a repository, such as propagate or audit fixes, fail with the read-only error.
+
 ## Roles, health and metrics
 
 `startServer(config, { roles, worker, drainTimeoutMs })` runs what `roles` asks for (`roles.ts`, default `['all']`): `web` serves the API, UI and webhooks; `worker` runs the job worker; `scheduler` runs schedules, credential rotation, artifact and audit retention, only while this process holds the leader lease (`leader.ts`: `kv.acquireLease` on `leader:scheduler`, 30 s TTL, renewed every 10 s; a failed renewal stops the duties). Processes without `web` serve only the operational endpoints. `worker: { concurrency?, maxJobs? }` overrides `jobs.concurrency` and makes the worker stop after `maxJobs` jobs; `RunningServer.exhausted` then resolves.

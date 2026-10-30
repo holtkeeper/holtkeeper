@@ -47,6 +47,7 @@ export const fleetDataSchema: z.ZodType<FleetData> = z.object({
       ecosystem: z.enum(['npm', 'Go']),
       name: z.string().min(1),
       latest: z.string().optional(),
+      definedIn: z.string().optional(),
       reason: z.enum(['option', 'auto']),
       usages: z.array(
         z.object({

@@ -4,7 +4,7 @@ Fleet drift across the repositories of one config group: which versions of share
 
 ## Analyzer
 
-`fleetAnalyzer` (kind `fleet`, scope `group`, needs `forge`) and `createFleetAnalyzer({ registry? })` to inject a `VersionRegistry` factory (called once per run). The record's repo is `{ forge, path: <group> }`.
+`fleetAnalyzer` (kind `fleet`, scope `group`, needs `forge` and `history`) and `createFleetAnalyzer({ registry? })` to inject a `VersionRegistry` factory (called once per run). The record's repo is `{ forge, path: <group> }`.
 
 Options (`fleetOptionsSchema`):
 
@@ -25,7 +25,7 @@ Options (`fleetOptionsSchema`):
 
 Each usage's comparable `version` is the resolved version, else the lowest version the declared range admits (`^18.2.0` → `18.2.0`). Archived repositories are listed and skipped; repositories that fail `getRepository` keep an `error`.
 
-Latest versions come from `VersionRegistry.latest(ecosystem, name)`. `createHttpRegistry({ fetch?, npmUrl?, goProxyUrl? })` asks registry.npmjs.org (`dist-tags.latest`) and proxy.golang.org (`/@latest`), caches per instance and answers `undefined` on failures.
+A library an analyzed repository defines takes its latest version from that repository's source and records it as `definedIn` (`forge:path`): first a `package.json` with `name` and `version` in the group, else the newest `depgraph` records in history (`loadPackageCatalog` of [@holtkeeper/depgraph](../../depgraph/docs/README.md#internal-packages), passed to `analyzeFleet` as `internal`). Such libraries never reach the registry, so a public package with the same name cannot pose as their latest. Other latest versions come from `VersionRegistry.latest(ecosystem, name)`. `createHttpRegistry({ fetch?, npmUrl?, goProxyUrl? })` asks registry.npmjs.org (`dist-tags.latest`) and proxy.golang.org (`/@latest`), caches per instance and answers `undefined` on failures.
 
 ## Templates
 

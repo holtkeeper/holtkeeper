@@ -54,15 +54,27 @@ const namePattern = (pattern: string) =>
       .join('.*')}$`,
   )
 
-/** Judges every package against the policy. Pure: the same packages and policy give the same verdicts. */
+/**
+ * The repository (`forge:path`) that defines a package, or `undefined` for third-party packages.
+ * Packages it names are `internal` and not judged.
+ */
+export type InternalPackages = (ecosystem: string, name: string) => string | undefined
+
+/**
+ * Judges every package against the policy: `ignore` first, then `internal`, then the licenses.
+ * Pure: the same packages, policy and internal packages give the same verdicts.
+ */
 export function evaluatePackages(
   packages: readonly ScannedPackage[],
   policy: LicensePolicyData,
+  internal?: InternalPackages,
 ): LicensedPackage[] {
   const evaluate = licenseEvaluator(policy)
   const ignored = policy.ignore.map(namePattern)
   return packages.map((pkg) => {
     if (ignored.some((pattern) => pattern.test(pkg.name))) return { ...pkg, verdict: 'ignored' }
+    const definedIn = internal?.(pkg.ecosystem, pkg.name)
+    if (definedIn !== undefined) return { ...pkg, verdict: 'internal', definedIn }
     const result = evaluate(pkg.licenses)
     const strict = result.verdict === 'unknown' && policy.unknown === 'violation'
     const verdict = strict ? 'unlisted' : result.verdict
@@ -80,6 +92,8 @@ export interface AnalyzeLicensesOptions {
   dir: string
   runner: CommandRunner
   policy?: LicensePolicyOptions
+  /** Packages the analyzed repositories define; they are listed but not judged. */
+  internal?: InternalPackages
   /** Path or name of the osv-scanner binary. */
   binary?: string
   /** Extra arguments for `osv-scanner scan source`. */
@@ -112,6 +126,7 @@ export async function analyzeLicenses({
   dir,
   runner,
   policy,
+  internal,
   binary = 'osv-scanner',
   args = [],
   signal,
@@ -145,6 +160,7 @@ export async function analyzeLicenses({
     packages: evaluatePackages(
       parseOsvLicenses(stdout.trim() ? JSON.parse(stdout) : {}, root),
       resolved,
+      internal,
     ),
     project: { licenseFiles: await projectLicenseFiles(root) },
   }

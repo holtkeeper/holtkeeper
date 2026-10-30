@@ -69,6 +69,10 @@ Optional: `ensureWebhook(target, { url, secret, events })` makes sure a hook wit
 | `note`         | `repo`, `mergeRequest`, `mergeRequestState`, `headSha?`, `author`, `body`, `discussionId?`, `inThread` (a diff or discussion note rather than a standalone comment)                   |
 | `pipeline`     | `repo`, `mergeRequest`, `pipelineId`, `status`, `sha`, `actor`; only finished merge request pipelines                                                                                 |
 
+## Read-only repositories
+
+`readOnlyForge(forge, isReadOnly)` returns `forge` with every change to a repository for which `isReadOnly(path)` (sync or async) is true rejected with `ReadOnlyRepositoryError` (`repo`, `operation`) before anything reaches the forge: `createBranch`, `deleteBranch`, `commit`, `createTag`, the merge request writes (`createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`), `submitReview`, `replyToDiscussion`, `resolveDiscussion`, `playJob`, `retryJob`, deploy keys (`registerSshKey` with a deploy scope, `enableDeployKey`) and project webhooks (`ensureWebhook` with `{ project }`). Reads, user keys, group webhooks and removing keys and hooks pass through; optional methods stay absent when the forge lacks them. `readOnlyDefinition(definition, isReadOnly)` does the same for every client a `ForgeDefinition` creates, including those of its `withFetch` copies.
+
 ## Secrets
 
 ```ts

@@ -33,6 +33,14 @@ All pure.
 - `versionDrift(versions): 'none' | 'patch' | 'minor' | 'major'` — between the lowest and highest version; `major` when they are not semver-compatible (below 1.0 a minor bump is breaking).
 - `fleetLibraries(entries: { origin, data }[]): FleetLibrary[]` — one entry per library across repositories: `versions` in use, `latest` (highest in use, or the version in the fleet's own `source` when higher), `drift`, `usages` with their `lag` behind `latest`, and `behind` (usages with a lag). Sorted by drift, then `behind`, then usage count.
 
+## Internal packages
+
+Packages the analyzed repositories define, for analyses that must tell them from third-party ones (licenses, fleet).
+
+- `latestDepgraphs(analyses, { accept?, maxRecords? })` — the newest valid `depgraph` record of every repository from an `AnalysisStore`, by `forge:path`; `accept` filters records (e.g. by visibility), at most `maxRecords` (default 2000) are read.
+- `packageCatalog(entries: { repo, data }[]): PackageCatalog` — every versioned workspace (`ownPackages`) with the repository that defines it; when several define the same package, the highest version wins. `find(ecosystem, name)` returns `InternalPackage { ecosystem, name, version, repo, path? }`.
+- `loadPackageCatalog(analyses, options?)` — both together.
+
 ## Running sources
 
 `analyzeDependencies({ dir, sources }): Promise<DepgraphData>` runs every source whose `detect` is true. A source that throws ends up in `errors`; the other layers are kept.

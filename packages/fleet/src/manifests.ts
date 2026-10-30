@@ -9,6 +9,7 @@ export interface Declaration {
 
 export interface PackageManifest {
   name?: string
+  version?: string
   dependencies: Declaration[]
   /** Workspace patterns from `workspaces` (array or `{ packages }`), negations dropped. */
   workspaces: string[]
@@ -51,6 +52,7 @@ export function parsePackageJson(text: string): PackageManifest {
   const patterns = isRecord(raw) ? strings(raw['packages']) : strings(raw)
   return {
     ...(typeof json['name'] === 'string' ? { name: json['name'] } : {}),
+    ...(typeof json['version'] === 'string' ? { version: json['version'] } : {}),
     dependencies,
     workspaces: patterns.filter((pattern) => !pattern.startsWith('!')),
   }

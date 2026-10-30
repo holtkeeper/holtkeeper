@@ -15,7 +15,7 @@ const pkg = (
   sources: ['package-lock.json'],
   licenses,
   verdict,
-  ...(verdict === 'allowed' || verdict === 'ignored'
+  ...(verdict === 'allowed' || verdict === 'ignored' || verdict === 'internal'
     ? {}
     : { culprits: licenses.length > 0 ? licenses : ['UNKNOWN'] }),
   ...extra,
@@ -91,6 +91,35 @@ test('license mix, unknown and packages sections', () => {
   const [packages] = report.sections[3]?.blocks ?? []
   expect(packages?.type === 'table' && packages.rows.length).toBe(5)
   expect(report.sections[0]?.blocks).toHaveLength(1)
+})
+
+test('internal packages get their own section and metric and read as internal', () => {
+  const report = licensesReport(
+    data([
+      pkg('react', 'allowed', ['MIT']),
+      pkg('@co/ui', 'internal', [], { definedIn: 'work:libs/ui' }),
+    ]),
+  )
+  expect(report.metrics.find((m) => m.id === 'internal')?.value).toBe(1)
+  expect(report.sections.map((s) => s.id)).toEqual([
+    'violations',
+    'license-mix',
+    'unknown',
+    'internal',
+    'packages',
+  ])
+  const [table] = report.sections[3]?.blocks ?? []
+  expect(table?.type === 'table' && table.rows).toEqual([
+    { package: '@co/ui', version: '1.0.0', definedIn: 'work:libs/ui', source: 'package-lock.json' },
+  ])
+  const [chart] = report.sections[1]?.blocks ?? []
+  expect(chart?.type === 'chart' && chart.data).toEqual([
+    { license: 'internal', packages: 1 },
+    { license: 'MIT', packages: 1 },
+  ])
+  expect(licensesAnalysis.schema.safeParse(data([pkg('@co/ui', 'internal', [])])).success).toBe(
+    true,
+  )
 })
 
 test('the analysis kind validates data and builds a report with its subject', () => {

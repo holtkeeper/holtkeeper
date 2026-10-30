@@ -1,4 +1,5 @@
 export * from './analyze.ts'
+export * from './catalog.ts'
 export * from './cycles.ts'
 export * from './duplicates.ts'
 export { GraphBuilder } from './graph.ts'

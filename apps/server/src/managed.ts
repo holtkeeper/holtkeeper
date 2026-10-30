@@ -1,5 +1,6 @@
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialService, CredentialView } from '@holtkeeper/credentials'
+import { type ForgeDefinition, readOnlyDefinition } from '@holtkeeper/forge'
 import { type Limiter, resolveLimitPolicy } from '@holtkeeper/limits'
 import {
   type ConfigSource,
@@ -10,6 +11,7 @@ import type { SettingEntry, Store } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
 
 import { fileForgeKey, globalLimits, limitFileForges, limitedFetch } from './limits.ts'
+import { type ReadOnlyRepos, readOnlyRepos } from './read-only.ts'
 
 export interface ManagedConfigOptions {
   file: HoltkeeperConfig
@@ -25,6 +27,8 @@ export interface ManagedConfigOptions {
 /** A running config source plus what keeps it current. */
 export interface ManagedConfig {
   source: ConfigSource
+  /** The `repo.readOnly` setting; every forge client of `source` already refuses writes it forbids. */
+  readOnly: ReadOnlyRepos
   /** Re-reads limit settings and credentials, reconfigures the limiter, then rebuilds the config. */
   refresh(): Promise<void>
   stop(): void
@@ -33,7 +37,8 @@ export interface ManagedConfig {
 /**
  * The server's `ConfigSource`: the file config (its forges' HTTP calls limited under
  * `forge:<id>`) plus the store's panel documents, panel GitLab forges built with their
- * credential's token and a `fetch` limited under the credential id.
+ * credential's token and a `fetch` limited under the credential id. Every forge client refuses
+ * changes to repositories the `repo.readOnly` setting marks read-only.
  */
 export async function startManagedConfig(options: ManagedConfigOptions): Promise<ManagedConfig> {
   const { store, vault, credentials, limiter } = options
@@ -54,29 +59,38 @@ export async function startManagedConfig(options: ManagedConfigOptions): Promise
   }
   await loadLimits()
 
+  let current = (): HoltkeeperConfig => options.file
+  const readOnly = readOnlyRepos(store, () => current())
+  const guarded = (id: string, definition: ForgeDefinition) =>
+    readOnlyDefinition(definition, (path) => readOnly({ forge: id, path }))
+  const gitlab = gitlabForgeFactory({
+    fetchFor: (doc) => {
+      const view = views.get(doc.data.credentialId)
+      return limitedFetch(
+        limiter,
+        view ?? { id: doc.data.credentialId, kind: doc.data.kind },
+        entries,
+      )
+    },
+  })
+
   const file: HoltkeeperConfig = {
     ...options.file,
-    forges: limitFileForges(options.file.forges, limiter, entries),
+    forges: Object.fromEntries(
+      Object.entries(limitFileForges(options.file.forges, limiter, entries)).map(
+        ([id, definition]) => [id, guarded(id, definition)],
+      ),
+    ),
   }
   const source = await createConfigSource({
     file,
     ...(store.config && { store: store.config }),
-    forgeFactories: {
-      gitlab: gitlabForgeFactory({
-        fetchFor: (doc) => {
-          const view = views.get(doc.data.credentialId)
-          return limitedFetch(
-            limiter,
-            view ?? { id: doc.data.credentialId, kind: doc.data.kind },
-            entries,
-          )
-        },
-      }),
-    },
+    forgeFactories: { gitlab: (doc, token) => guarded(doc.id, gitlab(doc, token)) },
     revealToken: (id) => credentials.reveal(id),
     openSecret: (sealed) => vault.open(sealed),
     ...(options.log && { log: options.log }),
   })
+  current = () => source.current()
 
   const refresh = async () => {
     try {
@@ -92,6 +106,7 @@ export async function startManagedConfig(options: ManagedConfigOptions): Promise
 
   return {
     source,
+    readOnly,
     refresh,
     stop() {
       clearInterval(timer)

@@ -112,6 +112,22 @@ test('unknown: violation judges packages without a usable license not allowed', 
   expect(resolvePolicy({ unknown: 'warn' })).toEqual(resolvePolicy())
 })
 
+const internal = (ecosystem: string, name: string) =>
+  ecosystem === 'npm' && name.startsWith('@co/') ? 'work:libs/ui' : undefined
+
+test('packages analyzed repositories define are internal; ignore still wins', () => {
+  const result = evaluatePackages(
+    [scanned('@co/ui', []), scanned('@co/skip', []), scanned('left-pad', [])],
+    resolvePolicy({ ignore: ['@co/skip'], unknown: 'violation' }),
+    internal,
+  )
+  expect(result.map(({ name, verdict, definedIn }) => [name, verdict, definedIn])).toEqual([
+    ['@co/ui', 'internal', 'work:libs/ui'],
+    ['@co/skip', 'ignored', undefined],
+    ['left-pad', 'unlisted', undefined],
+  ])
+})
+
 test('finds license files at the repository root only', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-licenses-'))
   await writeFile(join(dir, 'LICENSE-MIT'), 'MIT')

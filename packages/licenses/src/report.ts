@@ -12,7 +12,7 @@ import {
 } from './model.ts'
 
 /** How many rows long lists show before summarizing the rest; slices in the donut. */
-const limits = { packages: 2000, unknown: 500, slices: 12 }
+const limits = { packages: 2000, unknown: 500, internal: 500, slices: 12 }
 
 const verdictTone: Record<PackageVerdict, Tone> = {
   allowed: 'good',
@@ -20,6 +20,7 @@ const verdictTone: Record<PackageVerdict, Tone> = {
   unlisted: 'warning',
   denied: 'bad',
   ignored: 'neutral',
+  internal: 'neutral',
 }
 
 const verdictLabel: Record<PackageVerdict, string> = {
@@ -28,6 +29,7 @@ const verdictLabel: Record<PackageVerdict, string> = {
   unlisted: 'not allowed',
   denied: 'denied',
   ignored: 'ignored',
+  internal: 'internal',
 }
 
 function counts(data: LicensesData) {
@@ -37,6 +39,7 @@ function counts(data: LicensesData) {
     violations: data.packages.filter(isViolation).length,
     denied: data.packages.filter((pkg) => pkg.verdict === 'denied').length,
     unknown: data.packages.filter((pkg) => pkg.verdict === 'unknown').length,
+    internal: data.packages.filter((pkg) => pkg.verdict === 'internal').length,
     licenses: licenses.size,
   }
 }
@@ -72,6 +75,14 @@ function metrics(data: LicensesData, previous?: LicensesData): Metric[] {
       ...problem(now.unknown, 'warning'),
     },
     metric('licenses', 'Distinct licenses', now.licenses, { previous: before?.licenses }),
+    ...(now.internal > 0 || (before?.internal ?? 0) > 0
+      ? [
+          metric('internal', 'Internal packages', now.internal, {
+            previous: before?.internal,
+            hint: 'Defined by analyzed repositories; not judged',
+          }),
+        ]
+      : []),
     ...(data.policy.requireProjectLicense && data.project
       ? [
           {
@@ -191,10 +202,14 @@ function violationsSection(
   }
 }
 
+/** A package's license as the report shows it; internal packages read `internal`. */
+const shownLicense = (pkg: LicensedPackage) =>
+  pkg.verdict === 'internal' && pkg.licenses.length === 0 ? 'internal' : licenseText(pkg)
+
 function mixSection(data: LicensesData): Section {
   const byLicense = new Map<string, number>()
   for (const pkg of data.packages) {
-    const text = licenseText(pkg)
+    const text = shownLicense(pkg)
     byLicense.set(text, (byLicense.get(text) ?? 0) + 1)
   }
   const sorted = [...byLicense].toSorted((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -265,12 +280,43 @@ function unknownSection(data: LicensesData): Section {
   }
 }
 
+function internalSection(data: LicensesData): Section | undefined {
+  const rows = data.packages
+    .filter((pkg) => pkg.verdict === 'internal')
+    .map((pkg) => ({
+      package: pkg.name,
+      version: pkg.version,
+      definedIn: pkg.definedIn ?? null,
+      source: pkg.sources.join(', '),
+    }))
+  if (rows.length === 0) return undefined
+  return {
+    id: 'internal',
+    title: 'Internal packages',
+    description:
+      'Packages that analyzed repositories define. Their licenses are not judged; registries outside the company know nothing about them.',
+    blocks: [
+      {
+        type: 'table',
+        columns: [
+          { key: 'package', label: 'Package', format: 'code' },
+          { key: 'version', label: 'Version', unit: 'version' },
+          { key: 'definedIn', label: 'Repository', format: 'code' },
+          { key: 'source', label: 'Source', format: 'code' },
+        ],
+        rows: rows.slice(0, limits.internal),
+      },
+      ...capped(rows, limits.internal, 'packages'),
+    ],
+  }
+}
+
 function packagesSection(data: LicensesData): Section {
   const rows: Record<string, Cell>[] = data.packages.map((pkg) => ({
     package: pkg.name,
     version: pkg.version,
     ecosystem: pkg.ecosystem,
-    license: licenseText(pkg),
+    license: shownLicense(pkg),
     verdict: { text: verdictLabel[pkg.verdict], tone: verdictTone[pkg.verdict] },
     kind: kindOf(pkg) ?? null,
     source: pkg.sources.join(', '),
@@ -313,6 +359,7 @@ export function licensesReport(
       violationsSection(data, previous, compareTo),
       mixSection(data),
       unknownSection(data),
+      ...[internalSection(data)].filter((section) => section !== undefined),
       packagesSection(data),
     ],
   }

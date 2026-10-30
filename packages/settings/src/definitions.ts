@@ -263,6 +263,22 @@ Prefer a narrow scope: allow an advisory for the one repository that cannot upgr
   schema: allowlistSchema,
 })
 
+export const repoReadOnly = defineSetting({
+  key: 'repo.readOnly',
+  label: 'Read-only',
+  description:
+    'Only analyze: never comment, review, open merge requests, push or react to merge request events.',
+  section: 'Repositories',
+  help: `Turn it on for repositories Holtkeeper should only read: shared libraries, vendored code, repositories of other teams.
+
+- Analyses, schedules, tag-triggered jobs and links between repositories keep working.
+- Every change through the forge is refused before it is sent: comments, reviews, thread replies, labels, merges, branches, commits, tags, pipeline jobs, deploy keys and project webhooks. Jobs that try one fail with a read-only error.
+- Merge request, comment and pipeline events of the repository are ignored, so no policies, reviews or commands run for it.
+
+Set it for everything to make Holtkeeper a pure analytics tool, or for a group or repository pattern only.`,
+  schema: z.boolean(),
+})
+
 /** Settings Holtkeeper knows about out of the box; plugins can register more. */
 export const builtinSettings: SettingDefinition[] = [
   llmProvider,
@@ -276,4 +292,5 @@ export const builtinSettings: SettingDefinition[] = [
   auditFix,
   auditUpgrade,
   auditAllowlist,
+  repoReadOnly,
 ]
