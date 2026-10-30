@@ -151,8 +151,8 @@ securityContext:
     - --role
     - worker
     - --drain-timeout
-    - {{ .ctx.Values.worker.drainTimeout | quote }}
-    {{- with .ctx.Values.worker.concurrency }}
+    - {{ .worker.drainTimeout | quote }}
+    {{- with .worker.concurrency }}
     - --concurrency
     - {{ . | quote }}
     {{- end }}
@@ -160,7 +160,7 @@ securityContext:
     - --max-jobs
     - {{ .maxJobs | quote }}
     {{- end }}
-    {{- range .ctx.Values.worker.extraArgs }}
+    {{- range .worker.extraArgs }}
     - {{ . | quote }}
     {{- end }}
   ports:
@@ -176,7 +176,7 @@ securityContext:
   securityContext:
     {{- toYaml .ctx.Values.containerSecurityContext | nindent 4 }}
   resources:
-    {{- toYaml .ctx.Values.worker.resources | nindent 4 }}
+    {{- toYaml .worker.resources | nindent 4 }}
   volumeMounts:
     {{- include "holtkeeper.configMount" .ctx | nindent 4 }}
     - name: workspace
@@ -200,6 +200,15 @@ securityContext:
   {{- end }}
 {{- end -}}
 
+{{/*
+The settings of one worker pool: `worker` with the pool's fields on top. Pass the root context as
+`ctx` and the pool (or an empty dict for the single default Deployment) as `pool`.
+*/}}
+{{- define "holtkeeper.workerPool" -}}
+{{- $pool := omit .pool "name" "spread" -}}
+{{- toYaml (mergeOverwrite (deepCopy (omit .ctx.Values.worker "pools")) $pool) -}}
+{{- end -}}
+
 {{- define "holtkeeper.scheduling" -}}
 {{- with .nodeSelector }}
 nodeSelector:
@@ -211,6 +220,10 @@ tolerations:
 {{- end }}
 {{- with .affinity }}
 affinity:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .topologySpreadConstraints }}
+topologySpreadConstraints:
   {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end -}}

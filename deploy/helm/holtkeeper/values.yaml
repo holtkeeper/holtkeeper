@@ -109,6 +109,15 @@ worker:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  topologySpreadConstraints: []
+  # Several worker Deployments instead of one, e.g. per node class. Each pool is `worker` with its
+  # own fields on top (replicas, concurrency, resources, nodeSelector, tolerations, affinity, ...),
+  # named `<release>-worker-<name>` and labelled `holtkeeper.dev/worker-pool: <name>`.
+  # `spread: true` places its pods on different nodes (at most one more on any node). Not with KEDA.
+  #   pools:
+  #     - { name: small, replicas: 3, concurrency: 2, spread: true }
+  #     - { name: big, replicas: 1, concurrency: 4, nodeSelector: { kubernetes.io/hostname: big } }
+  pools: []
 
 # A separate scheduler Deployment. Disabled: the web pods run the scheduler under the same leader
 # lease (only one of them acts at a time).

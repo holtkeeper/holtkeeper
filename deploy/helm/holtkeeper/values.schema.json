@@ -309,6 +309,67 @@
         },
         "affinity": {
           "type": "object"
+        },
+        "topologySpreadConstraints": {
+          "type": "array"
+        },
+        "pools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$"
+              },
+              "spread": {
+                "type": "boolean"
+              },
+              "replicas": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "concurrency": {
+                "type": ["integer", "null"],
+                "minimum": 1
+              },
+              "maxJobs": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "drainTimeout": {
+                "type": "string",
+                "pattern": "^[0-9]+(ms|s|m)?$"
+              },
+              "terminationGracePeriodSeconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "resources": {
+                "type": "object"
+              },
+              "extraArgs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "nodeSelector": {
+                "type": "object"
+              },
+              "tolerations": {
+                "type": "array"
+              },
+              "affinity": {
+                "type": "object"
+              },
+              "topologySpreadConstraints": {
+                "type": "array"
+              }
+            }
+          }
         }
       }
     },

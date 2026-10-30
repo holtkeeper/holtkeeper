@@ -28,7 +28,7 @@ spec:
         restartPolicy: Never
         terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
         containers:
-          {{- include "holtkeeper.workerContainer" (dict "ctx" $ "maxJobs" 1) | nindent 10 }}
+          {{- include "holtkeeper.workerContainer" (dict "ctx" $ "worker" .Values.worker "maxJobs" 1) | nindent 10 }}
         volumes:
           {{- include "holtkeeper.workerVolumes" . | nindent 10 }}
         {{- include "holtkeeper.scheduling" .Values.worker | nindent 8 }}

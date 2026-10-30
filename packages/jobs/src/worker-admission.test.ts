@@ -85,6 +85,78 @@ describe('worker admission', () => {
     await worker.stop()
   })
 
+  test('a freed slot goes to the job waiting longest', async () => {
+    const store = memoryStore()
+    const order: string[] = []
+    const gate = Promise.withResolvers<void>()
+    const worker = createWorker({
+      store,
+      analyzers: [
+        analyzer('step', async ({ repo }) => {
+          order.push(repo.path)
+          if (repo.path === 'a') await gate.promise
+          return { data: {} }
+        }),
+      ],
+      contextFor,
+      concurrency: 1,
+      maxWaiting: 5,
+      pollMs: 5,
+      admissionPollMs: 5,
+      admission: () => true,
+    })
+    for (const path of ['a', 'b', 'c', 'd']) {
+      await store.jobs.enqueue({
+        analyzer: 'step',
+        repo: { forge: 'work', path },
+        trigger: 'manual',
+        createdAt: new Date().toISOString(),
+      })
+    }
+    await worker.start()
+    await until(() => order.length === 1)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    gate.resolve()
+    await until(async () => (await store.jobs.list({ status: 'succeeded' })).length === 4)
+    expect(order).toEqual(['a', 'b', 'c', 'd'])
+    await worker.stop()
+  })
+
+  test('a refused job does not hold up younger jobs on other credentials', async () => {
+    const store = memoryStore()
+    const order: string[] = []
+    let busy = true
+    const worker = createWorker({
+      store,
+      analyzers: [
+        analyzer('step', async ({ repo }) => {
+          order.push(repo.path)
+          return { data: {} }
+        }),
+      ],
+      contextFor,
+      concurrency: 1,
+      pollMs: 5,
+      admissionPollMs: 5,
+      admission: (job: Job) => job.repo.path !== 'ai' || !busy,
+    })
+    for (const path of ['ai', 'b', 'c']) {
+      await store.jobs.enqueue({
+        analyzer: 'step',
+        repo: { forge: 'work', path },
+        trigger: 'manual',
+        createdAt: new Date().toISOString(),
+      })
+    }
+    await worker.start()
+    await until(() => order.length === 2)
+    expect(order).toEqual(['b', 'c'])
+    busy = false
+    await until(() => order.length === 3)
+    expect(order).toEqual(['b', 'c', 'ai'])
+    await worker.stop()
+  })
+
   test('stops claiming once maxWaiting jobs wait', async () => {
     const store = memoryStore()
     const ran: string[] = []

@@ -97,7 +97,7 @@ The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 - a ConfigMap with `holtkeeper.config.ts` (`config.content`, default the chart's `files/holtkeeper.config.ts`; or `config.existingConfigMap`), mounted read-only; pods restart when it changes;
 - `existingSecret` → environment of every container (`HOLTKEEPER_VAULT_KEY`, `HOLTKEEPER_DATABASE_URL`, `HOLTKEEPER_S3_*`, `HOLTKEEPER_ROOT_PASSWORD`, `HOLTKEEPER_SESSION_SECRET`, `HOLTKEEPER_WEBHOOK_SECRET`, `GITLAB_TOKEN`, ...); `env` for plain values (`HOLTKEEPER_AUTH=users` switches the default config from the `root` password to accounts with passkeys: the first start logs the admin's setup link, `HOLTKEEPER_ADMIN_NAME`/`HOLTKEEPER_ADMIN_EMAIL` name that admin, `HOLTKEEPER_PUBLIC_URL` is required);
 - `web` Deployment + Service (+ Ingress, + HPA on CPU, + PodDisruptionBudget), roles `web,scheduler`;
-- `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB;
+- `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB; or, with `worker.pools`, one Deployment per pool (`<release>-worker-<name>`, label `holtkeeper.dev/worker-pool`), each `worker` with the pool's own fields on top, e.g. 2 jobs per small node and 4 on a big one; `spread: true` keeps a pool's pods on different nodes;
 - optional `scheduler` Deployment (`scheduler.enabled`; the web pods then run `web` only);
 - optional ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies;
 - a ServiceAccount without any Role: nothing talks to the Kubernetes API and no pod-creation rights are needed. Tokens are not mounted.
@@ -117,7 +117,7 @@ helm install holtkeeper deploy/helm/holtkeeper --set existingSecret=holtkeeper \
 ### Scaling
 
 - **Web**: stateless; scale with `web.replicas` or `web.hpa`. Only one web pod runs the scheduler at a time (lease).
-- **Workers**: `worker.replicas` × `concurrency` is the job parallelism. With `keda.enabled` a ScaledObject scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus (`keda.threshold` queued jobs per replica). The queue also enforces one running job per repository, so more workers than active repositories do not help.
+- **Workers**: `worker.replicas` × `concurrency` (summed over `worker.pools`) is the job parallelism. A worker hands a free slot to the job it claimed first among those its credential limits admit, so a long-waiting job is not starved by a stream of short ones. With `keda.enabled` a ScaledObject scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus (`keda.threshold` queued jobs per replica). The queue also enforces one running job per repository, so more workers than active repositories do not help.
 - **Limits**: set `limits.distributed: true` (the default config does when Postgres is used) so forge and AI tokens are rate-limited across all workers, not per pod.
 
 ### Isolation: one job per worker pod

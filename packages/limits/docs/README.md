@@ -114,7 +114,7 @@ const admission = limitJobs({
 createJobEngine({ ..., admission })
 ```
 
-A refused job stays claimed without a concurrency slot (`waiting for capacity` in its log) and is asked again every second; the worker meanwhile claims other jobs, up to `maxWaiting` refused ones.
+A refused job stays claimed without a concurrency slot (`waiting for capacity` in its log) and is asked again every second; the worker meanwhile claims other jobs, up to `maxWaiting` refused ones. Free slots go to waiting jobs in the order they were claimed: the oldest one the hook admits gets it, so a job is never starved by younger ones that merely asked first.
 
 ## Testing
 

@@ -87,7 +87,7 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 
 `createWorker({ store, analyzers, contextFor, concurrency, timeoutMs, now, settingOptions?, onFinished? })`:
 
-1. On `start`, running jobs whose heartbeat is older than `staleMs` (2 min) are requeued (or failed when out of attempts). Then it claims jobs up to `concurrency`, polling every 5 s.
+1. On `start`, running jobs whose heartbeat is older than `staleMs` (2 min) are requeued (or failed when out of attempts). Then it claims jobs up to `concurrency`, polling every 5 s. With an `admission` hook, claimed jobs wait for a slot in claim order: a freed slot goes to the oldest waiting job the hook admits.
 2. Options: shallow merge, later wins — the analyzer's schema defaults, the job's options when it came from a schedule/tag/webhook (schedule options), `settingOptions(job)` (the server resolves the scoped setting `analyzers.<kind>`), then the job's options for manual jobs. The merged result is validated with the analyzer's `options`; invalid options or an unknown analyzer fail the job without retry.
 3. `contextFor(job, analyzer, { signal, log, options })` builds the `AnalyzerContext`.
 4. The run gets an `AbortSignal` that fires on timeout, on `stop`, or when a heartbeat (every 15 s) finds the job canceled. Log lines go to `appendLog` (the job keeps the last 200).

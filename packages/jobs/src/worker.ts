@@ -189,6 +189,38 @@ export function createWorker(options: WorkerOptions): Worker {
     }
   }
 
+  /** Claimed jobs waiting for a slot, in the order they were claimed. */
+  const queue: { job: Job; ticket: Ticket }[] = []
+  let pumping: Promise<void> | undefined
+
+  /**
+   * Hands free slots to waiting jobs, oldest claim first. A job the admission hook refuses
+   * (its forge or AI credential is busy) is passed over for younger ones, so one saturated
+   * credential does not block the rest, but it never loses a free slot to a younger job that
+   * merely asked first.
+   */
+  function pump(): Promise<void> {
+    pumping ??= drain().finally(() => {
+      pumping = undefined
+    })
+    return pumping
+  }
+
+  async function drain() {
+    for (const entry of queue.slice()) {
+      if (admitted >= concurrency) return
+      // oxlint-disable-next-line no-await-in-loop -- strictly oldest first
+      if (!(await admit(entry.job)) || admitted >= concurrency) continue
+      const index = queue.indexOf(entry)
+      if (index === -1) continue
+      queue.splice(index, 1)
+      waiting--
+      admitted++
+      entry.ticket.held = true
+      if (entry.ticket.refill) void fill()
+    }
+  }
+
   /** Resolves once the job holds a concurrency slot. */
   async function waitForAdmission(
     job: Job,
@@ -196,24 +228,22 @@ export function createWorker(options: WorkerOptions): Worker {
     signal: AbortSignal,
     log: (line: string) => void,
   ) {
+    const entry = { job, ticket }
+    queue.push(entry)
     let told = false
-    for (;;) {
-      if (
-        admitted < concurrency &&
-        (await abortable(admit(job), signal)) &&
-        admitted < concurrency
-      ) {
-        waiting--
-        admitted++
-        ticket.held = true
-        if (ticket.refill) void fill()
-        return
+    try {
+      for (;;) {
+        await abortable(pump(), signal)
+        if (ticket.held) return
+        if (!told) {
+          log('waiting for capacity')
+          told = true
+        }
+        await sleep(admissionPollMs, signal)
       }
-      if (!told) {
-        log('waiting for capacity')
-        told = true
-      }
-      await sleep(admissionPollMs, signal)
+    } finally {
+      const index = queue.indexOf(entry)
+      if (index !== -1) queue.splice(index, 1)
     }
   }
 
@@ -342,8 +372,10 @@ export function createWorker(options: WorkerOptions): Worker {
     if (ticket.held) admitted++
     else waiting++
     const run = execute(job, ticket).finally(() => {
-      if (ticket.held) admitted--
-      else waiting--
+      if (ticket.held) {
+        admitted--
+        if (queue.length) void pump()
+      } else waiting--
       active.delete(run)
       if (claimed >= maxJobs && active.size === 0) exhausted.resolve()
       if (refill) void fill()
