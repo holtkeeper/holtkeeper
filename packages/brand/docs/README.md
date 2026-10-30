@@ -18,6 +18,14 @@ copy them from there instead of editing them here.
 | `@holtkeeper/brand/knowledge.svg`    | Knowledge agents read before tasks  |
 | `@holtkeeper/brand/repos.svg`        | Repositories                        |
 | `@holtkeeper/brand/credentials.svg`  | Credentials                         |
+| `@holtkeeper/brand/coverage.svg`     | Test coverage                       |
+| `@holtkeeper/brand/testids.svg`      | Test ids in frontend templates      |
+| `@holtkeeper/brand/branches.svg`     | Branches to clean up                |
+| `@holtkeeper/brand/ci.svg`           | CI job durations and failures       |
+| `@holtkeeper/brand/licenses.svg`     | Dependency licenses                 |
+| `@holtkeeper/brand/api.svg`          | Public API of packages              |
+| `@holtkeeper/brand/fleet.svg`        | Fleet: shared versions and drift    |
+| `@holtkeeper/brand/stack.svg`        | Tech stack and end of life          |
 
 ```ts
 import auditIcon from '@holtkeeper/brand/audit.svg'

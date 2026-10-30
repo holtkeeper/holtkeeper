@@ -1,12 +1,12 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
-import { LogOut, Menu, X } from 'lucide-react'
+import { ArrowUpRight, BookText, LogOut, Menu, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useAuthMutations } from '../../api/queries.ts'
 import { Avatar, BrandIcon, Button, Tooltip, notify } from '../../ui/index.ts'
-import { visibleNav } from './nav.ts'
+import { docsUrl, groupNav, visibleNav } from './nav.ts'
 import { useSession } from './session.ts'
 import { ThemeToggle } from './ThemeToggle.tsx'
 
@@ -25,36 +25,61 @@ function Brand() {
 function Nav({ onNavigate }: { onNavigate?: () => void }) {
   const { principal, auth } = useSession()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const items = visibleNav(principal, auth)
+  const groups = groupNav(visibleNav(principal, auth))
   return (
-    <nav aria-label="Main" className="flex flex-col gap-0.5">
-      {items.map((item) => {
-        const active = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)
-        return (
-          <Link
-            key={item.to}
-            to={item.to}
-            {...(onNavigate ? { onClick: onNavigate } : {})}
-            aria-current={active ? 'page' : undefined}
-            className={`relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
-              active
-                ? 'font-medium text-accent-soft-foreground'
-                : 'text-muted hover:bg-default-soft hover:text-foreground'
-            }`}
-          >
-            {active ? (
-              <motion.span
-                layoutId="nav-active"
-                className="absolute inset-0 rounded-xl bg-accent-soft"
-                transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-              />
-            ) : null}
-            <item.icon className="relative size-4" />
-            <span className="relative">{item.label}</span>
-          </Link>
-        )
-      })}
+    <nav
+      aria-label="Main"
+      className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1"
+    >
+      {groups.map((group) => (
+        <div key={group.section} className="flex flex-col gap-0.5">
+          <h2 className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted/70">
+            {group.section}
+          </h2>
+          {group.items.map((item) => {
+            const active = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                {...(onNavigate ? { onClick: onNavigate } : {})}
+                aria-current={active ? 'page' : undefined}
+                className={`relative flex items-center gap-3 rounded-xl px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
+                  active
+                    ? 'font-medium text-accent-soft-foreground'
+                    : 'text-muted hover:bg-default-soft hover:text-foreground'
+                }`}
+              >
+                {active ? (
+                  <motion.span
+                    layoutId="nav-active"
+                    className="absolute inset-0 rounded-xl bg-accent-soft"
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                  />
+                ) : null}
+                <item.icon className="relative size-4" />
+                <span className="relative">{item.label}</span>
+              </Link>
+            )
+          })}
+        </div>
+      ))}
     </nav>
+  )
+}
+
+function DocsLink() {
+  return (
+    <a
+      href={docsUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="flex items-center gap-3 rounded-xl px-3 py-1.5 text-sm text-muted transition-colors hover:bg-default-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
+    >
+      <BookText className="size-4" />
+      <span>Documentation</span>
+      <ArrowUpRight className="ml-auto size-3.5 opacity-60" />
+    </a>
   )
 }
 
@@ -128,7 +153,10 @@ export function AppShell() {
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-6 border-r border-separator px-3 py-4 lg:flex">
         <Brand />
         <Nav />
-        <div className="mt-auto px-3 text-xs text-muted">Keeps every repository in shape.</div>
+        <div className="flex flex-col gap-2">
+          <DocsLink />
+          <div className="px-3 text-xs text-muted">Keeps every repository in shape.</div>
+        </div>
       </aside>
 
       <AnimatePresence>
@@ -164,6 +192,7 @@ export function AppShell() {
                 </Button>
               </div>
               <Nav onNavigate={() => setDrawer(false)} />
+              <DocsLink />
             </motion.aside>
           </motion.div>
         ) : null}

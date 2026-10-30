@@ -104,7 +104,7 @@ function CatalogView({ tab }: { tab: string }) {
   return (
     <Page
       title="Public API"
-      icon="knowledge"
+      icon="api"
       description="What every package exports, per released version, for people and for agents over MCP"
       actions={
         <div className="flex flex-wrap items-center gap-2">
@@ -363,7 +363,7 @@ function PackageView({ name, version, repo }: { name: string; version?: string; 
           Public API
         </Link>
       }
-      icon="knowledge"
+      icon="api"
       description={data?.package.description ?? (data ? repoKey(data.repo) : undefined)}
       actions={
         data ? (

@@ -1,21 +1,22 @@
 import { expect, test } from 'bun:test'
 
-import { visibleNav } from './nav.ts'
+import { groupNav, visibleNav } from './nav.ts'
+
+const principal = {
+  id: 'a',
+  name: 'A',
+  provider: 'users',
+  grants: [
+    { scope: { repos: ['w:x/**'] }, actions: ['audits:read' as const, 'users:read' as const] },
+  ],
+}
 
 test('hides items the principal cannot use and Users outside the users provider', () => {
-  const principal = {
-    id: 'a',
-    name: 'A',
-    provider: 'users',
-    grants: [
-      { scope: { repos: ['w:x/**'] }, actions: ['audits:read' as const, 'users:read' as const] },
-    ],
-  }
   expect(visibleNav(principal, { provider: 'users', methods: [] }).map((i) => i.label)).toEqual([
     'Dashboard',
+    'Activity',
     'Audits',
     'Users',
-    'Activity',
   ])
   expect(
     visibleNav(principal, { provider: 'none', methods: [] }).map((i) => i.label),
@@ -25,19 +26,28 @@ test('hides items the principal cannot use and Users outside the users provider'
     grants: [{ scope: { all: true }, actions: ['analyses:read' as const] }],
   }
   expect(visibleNav(analyst, { provider: 'none', methods: [] }).map((i) => i.label)).toEqual([
-    'Releases',
-    'Bundles',
-    'Dependencies',
+    'Fleet',
+    'Tech stack',
+    'Activity',
+    'Licenses',
     'Code quality',
     'Test coverage',
     'Test ids',
+    'Dependencies',
+    'Bundles',
+    'Public API',
+    'Releases',
     'Branches',
     'CI jobs',
-    'Licenses',
-    'Fleet',
-    'Tech stack',
-    'Public API',
     'Jobs',
-    'Activity',
+  ])
+})
+
+test('groups visible items under their headings and drops empty ones', () => {
+  const groups = groupNav(visibleNav(principal, { provider: 'users', methods: [] }))
+  expect(groups.map((g) => [g.section, g.items.map((i) => i.label)])).toEqual([
+    ['Overview', ['Dashboard', 'Activity']],
+    ['Security', ['Audits']],
+    ['Admin', ['Users']],
   ])
 })
