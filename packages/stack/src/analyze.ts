@@ -1,16 +1,20 @@
 import { posix } from 'node:path'
 
-import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import type { CiVariable, GitForge, RepoRef } from '@holtkeeper/forge'
 import { detectToolchainFrom, subProjects, type Tool } from '@holtkeeper/toolchain'
 
 import { hasEnded, isLts } from './assess.ts'
 import { type ComponentInfo, imageComponent, toolComponent } from './catalog.ts'
 import {
+  type CiInclude,
+  ciIncludes,
   dockerfileReferences,
   isPrerelease,
+  nameVersion,
   parseImageRef,
   type References,
   tagVersion,
+  variablesOf,
   variantFamily,
   yamlReferences,
 } from './references.ts'
@@ -26,7 +30,10 @@ import type {
 import { compareVersionText, parseVersion } from './version.ts'
 
 /** The forge calls the analysis makes; it never clones. */
-export type StackForge = Pick<GitForge, 'readFile' | 'getRepository' | 'listFiles'>
+export type StackForge = Pick<
+  GitForge,
+  'readFile' | 'getRepository' | 'listFiles' | 'listCiVariables' | 'listImageTags'
+>
 
 export interface AnalyzeStackOptions {
   /** Group name, stored as the record's subject. */
@@ -160,6 +167,20 @@ function toolFound(
 function imageFound(repo: string, file: string, via: UsageVia, ref: string): Found | undefined {
   const image = parseImageRef(ref)
   if (!image) return undefined
+  const named = nameVersion(image.repository)
+  if (named)
+    return {
+      info: toolComponent(named.tool),
+      usage: {
+        repo,
+        file,
+        via,
+        declared: `${image.repository.split('/').at(-1)}:${image.tag ?? 'latest'}`,
+        version: named.version,
+        ...(named.variant ? { variant: named.variant } : {}),
+        image: ref,
+      },
+    }
   const { version, variant } = tagVersion(image.tag)
   return {
     info: imageComponent(image),
@@ -175,12 +196,96 @@ function imageFound(repo: string, file: string, via: UsageVia, ref: string): Fou
   }
 }
 
-async function scanRepo(forge: StackForge, ref: RepoRef, maxFiles: number): Promise<RepoScan> {
+/** What repositories of one run share: group variables and files of other projects. */
+interface Shared {
+  groupVariables: Map<string, Promise<CiVariable[] | undefined>>
+  projectFiles: Map<string, Promise<string | undefined>>
+  /** Repositories and groups whose CI/CD variables the token could not read. */
+  unreadable: { repos: Set<string>; groups: Set<string> }
+}
+
+const isGitLabCi = (file: string) =>
+  posix.basename(file) === '.gitlab-ci.yml' || file.startsWith('.gitlab/')
+
+/** Variables by key, `*`-scoped ones winning over environment-scoped ones. */
+function variableMap(variables: CiVariable[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const variable of variables)
+    if (!(variable.key in map) || variable.environmentScope === '*')
+      map[variable.key] = variable.value
+  return map
+}
+
+/**
+ * The CI/CD variables a repository's pipelines receive from the forge: its groups' from the top
+ * down, then its own, over GitLab's predefined project variables.
+ */
+async function ciVariables(
+  forge: StackForge,
+  path: string,
+  defaultBranch: string | undefined,
+  shared: Shared,
+): Promise<Record<string, string>> {
+  const segments = path.split('/')
+  const predefined: Record<string, string> = {
+    CI_PROJECT_PATH: path,
+    CI_PROJECT_NAME: segments.at(-1) ?? path,
+    CI_PROJECT_NAMESPACE: segments.slice(0, -1).join('/'),
+    CI_PROJECT_ROOT_NAMESPACE: segments[0] ?? path,
+    ...(defaultBranch ? { CI_DEFAULT_BRANCH: defaultBranch } : {}),
+  }
+  const list = forge.listCiVariables?.bind(forge)
+  if (!list) return predefined
+  const groups = segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join('/'))
+  const groupLists = await Promise.all(
+    groups.map((group) => {
+      let pending = shared.groupVariables.get(group)
+      if (!pending) {
+        pending = list({ kind: 'group', path: group }).catch(() => undefined)
+        shared.groupVariables.set(group, pending)
+      }
+      return pending
+    }),
+  )
+  const own = await list({ kind: 'repo', path }).catch(() => undefined)
+  groups.forEach((group, index) => {
+    if (!groupLists[index]) shared.unreadable.groups.add(group)
+  })
+  if (!own) shared.unreadable.repos.add(path)
+  return Object.assign(
+    predefined,
+    ...groupLists.map((variables) => variableMap(variables ?? [])),
+    variableMap(own ?? []),
+  )
+}
+
+const globPattern = (glob: string) =>
+  new RegExp(
+    `^${glob
+      .split(/(\*\*\/?|\*)/)
+      .map((part) =>
+        part.startsWith('**')
+          ? '(?:.*/)?'
+          : part === '*'
+            ? '[^/]*'
+            : part.replace(/[.+?^${}()|[\]\\/]/g, '\\$&'),
+      )
+      .join('')}$`,
+  )
+
+async function scanRepo(
+  forge: StackForge,
+  ref: RepoRef,
+  maxFiles: number,
+  shared: Shared,
+): Promise<RepoScan> {
   const path = ref.path
   const scan: RepoScan = { repo: { path, files: [] }, found: [], notes: [] }
+  let defaultBranch: string | undefined
   try {
     const info = await forge.getRepository(path)
     scan.repo.webUrl = info.webUrl
+    defaultBranch = info.defaultBranch
     if (info.archived) {
       scan.repo.archived = true
       return scan
@@ -206,6 +311,31 @@ async function scanRepo(forge: StackForge, ref: RepoRef, maxFiles: number): Prom
       scan.notes.push({ repo: path, message: `${file} could not be read: ${message(error)}` })
       return undefined
     }
+  }
+  const parse = (file: string, text: string): unknown => {
+    try {
+      return Bun.YAML.parse(text)
+    } catch (error) {
+      scan.notes.push({ repo: path, message: `${file} could not be parsed: ${message(error)}` })
+      return undefined
+    }
+  }
+  const record = (file: string, via: UsageVia, references: References) => {
+    if (!scan.repo.files.includes(file)) scan.repo.files.push(file)
+    for (const reference of references.references) {
+      const found =
+        reference.type === 'image'
+          ? imageFound(path, file, via, reference.ref)
+          : toolFound(path, file, via, { name: reference.tool, version: reference.declared })
+      if (found) scan.found.push(found)
+      else if (reference.type === 'image')
+        scan.notes.push({ repo: path, message: `${file}: cannot parse image "${reference.ref}"` })
+    }
+    for (const value of references.unresolved)
+      scan.notes.push({
+        repo: path,
+        message: `${file}: "${value}" uses variables that could not be expanded`,
+      })
   }
 
   const projects = ['', ...subProjects(files ?? [])]
@@ -244,34 +374,96 @@ async function scanRepo(forge: StackForge, ref: RepoRef, maxFiles: number): Prom
       repo: path,
       message: `read ${maxFiles} of ${candidates.length} image, CI and deployment files (maxFiles)`,
     })
-  const texts = await Promise.all(candidates.slice(0, maxFiles).map(({ file }) => read(file)))
-  candidates.slice(0, maxFiles).forEach(({ file, via }, index) => {
-    const text = texts[index]
-    if (text === undefined) return
-    let references: References
-    try {
-      references =
-        via === 'dockerfile' ? dockerfileReferences(text) : yamlReferences(Bun.YAML.parse(text))
-    } catch (error) {
-      scan.notes.push({ repo: path, message: `${file} could not be parsed: ${message(error)}` })
-      return
+  const shown = candidates.slice(0, maxFiles)
+  const texts = new Map(
+    await Promise.all(shown.map(async ({ file }) => [file, await read(file)] as const)),
+  )
+  const ci = shown.some(({ file }) => isGitLabCi(file))
+    ? await ciVariables(forge, path, defaultBranch, shared)
+    : {}
+
+  // A GitLab pipeline: the entry file and everything it includes, with variables merged so the
+  // entry file wins over its includes.
+  const done = new Set<string>()
+  const pipeline = async (entry: string) => {
+    const tree: { label: string; document: unknown }[] = []
+    const seen = new Set<string>()
+    const visit = async (label: string, text: string | undefined, depth: number) => {
+      if (text === undefined || seen.has(label) || tree.length >= 30) return
+      seen.add(label)
+      const document = parse(label, text)
+      if (document === undefined) return
+      const { includes, skipped } = ciIncludes(document)
+      for (const value of skipped)
+        scan.notes.push({ repo: path, message: `${label}: include ${value} was not read` })
+      if (depth < 4)
+        for (const include of includes)
+          // oxlint-disable-next-line no-await-in-loop -- includes merge in order
+          await visitInclude(include, depth + 1)
+      tree.push({ label, document })
     }
-    scan.repo.files.push(file)
-    for (const reference of references.references) {
-      const found =
-        reference.type === 'image'
-          ? imageFound(path, file, via, reference.ref)
-          : toolFound(path, file, via, { name: reference.tool, version: reference.declared })
-      if (found) scan.found.push(found)
-      else if (reference.type === 'image')
-        scan.notes.push({ repo: path, message: `${file}: cannot parse image "${reference.ref}"` })
+    const visitInclude = async (include: CiInclude, depth: number) => {
+      if (include.type === 'local') {
+        const matches = include.file.includes('*')
+          ? (files ?? []).filter((file) => globPattern(include.file).test(file))
+          : [include.file]
+        for (const file of matches)
+          // oxlint-disable-next-line no-await-in-loop -- includes merge in order
+          await visit(file, texts.get(file) ?? (await read(file)), depth)
+        return
+      }
+      const key = `${include.project}@${include.ref ?? ''}:${include.file}`
+      let pending = shared.projectFiles.get(key)
+      if (!pending) {
+        pending = forge.readFile(include.project, include.file, include.ref).catch(() => undefined)
+        shared.projectFiles.set(key, pending)
+      }
+      const text = await pending
+      if (text === undefined)
+        scan.notes.push({
+          repo: path,
+          message: `include ${include.project}:${include.file} could not be read`,
+        })
+      await visit(`${include.project}:${include.file}`, text, depth)
     }
-    for (const value of references.unresolved)
-      scan.notes.push({
-        repo: path,
-        message: `${file}: "${value}" uses variables that could not be expanded`,
-      })
-  })
+    await visit(entry, texts.get(entry), 0)
+    const variables = Object.assign(
+      {},
+      ...tree.map(({ document }) =>
+        variablesOf(
+          typeof document === 'object' && document !== null
+            ? Reflect.get(document, 'variables')
+            : undefined,
+        ),
+      ),
+    )
+    for (const { label } of tree) done.add(label)
+    return { tree, variables }
+  }
+
+  const root = texts.has('.gitlab-ci.yml') ? await pipeline('.gitlab-ci.yml') : undefined
+  const pipelines = root ? [root] : []
+  for (const { file } of shown)
+    if (isGitLabCi(file) && !done.has(file)) {
+      // oxlint-disable-next-line no-await-in-loop -- child pipelines share the include cache
+      const child = await pipeline(file)
+      // Child pipelines receive the parent's global variables, which win over their own.
+      pipelines.push({ tree: child.tree, variables: { ...child.variables, ...root?.variables } })
+    }
+  for (const { tree, variables } of pipelines)
+    for (const { label, document } of tree)
+      record(label, 'ci', yamlReferences(document, { inherited: variables, ci }))
+
+  for (const { file, via } of shown) {
+    const text = texts.get(file)
+    if (text === undefined || done.has(file) || isGitLabCi(file)) continue
+    if (via === 'dockerfile') {
+      record(file, via, dockerfileReferences(text))
+      continue
+    }
+    const document = parse(file, text)
+    if (document !== undefined) record(file, via, yamlReferences(document))
+  }
   return scan
 }
 
@@ -369,9 +561,14 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
     now = new Date(),
     log,
   } = options
+  const shared: Shared = {
+    groupVariables: new Map(),
+    projectFiles: new Map(),
+    unreadable: { repos: new Set(), groups: new Set() },
+  }
   const scans = await mapLimit(repos, concurrency, (ref) => {
     log?.(`reading ${ref.path}`)
-    return scanRepo(forge, ref, maxFiles)
+    return scanRepo(forge, ref, maxFiles, shared)
   })
   const ignored = ignore.map(globToRegExp)
   const isIgnored = (info: ComponentInfo) =>
@@ -388,12 +585,33 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
     byId.set(info.id, entry)
   }
 
+  const forgeTags = forge.listImageTags?.bind(forge)
+  const lookups: VersionSources | undefined = sources && {
+    ...sources,
+    imageTags: async (registry, repository) =>
+      (registry !== 'docker.io' && forgeTags
+        ? await forgeTags(`${registry}/${repository}`).catch(() => undefined)
+        : undefined) ?? sources.imageTags(registry, repository),
+  }
   const components = await mapLimit([...byId.values()], 8, async ({ info, component }) => {
-    if (!sources) return component
+    if (!lookups) return component
     log?.(`looking up ${component.id}`)
-    return { ...component, ...(await resolveLatest(component, info, sources, now)) }
+    return { ...component, ...(await resolveLatest(component, info, lookups, now)) }
   })
   const notes = scans.flatMap((scan) => scan.notes)
+  const { unreadable } = shared
+  if (
+    (unreadable.repos.size || unreadable.groups.size) &&
+    notes.some((note) => note.message.includes('could not be expanded'))
+  )
+    notes.push({
+      message: `CI/CD variables could not be read for ${[
+        unreadable.repos.size ? `${unreadable.repos.size} of ${scans.length} repositories` : '',
+        unreadable.groups.size ? `groups ${[...unreadable.groups].toSorted().join(', ')}` : '',
+      ]
+        .filter(Boolean)
+        .join(' and ')}; the token needs maintainer access there to expand them`,
+    })
   for (const component of components)
     if (
       sources &&
@@ -403,6 +621,8 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
       notes.push({
         message: `latest version of ${component.name} is unknown; lag is not shown for it`,
       })
+
+  const unique = new Map(notes.map((note) => [`${note.repo ?? ''}\0${note.message}`, note]))
 
   return {
     group,
@@ -414,6 +634,6 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
         new Set(b.usages.map((usage) => usage.repo)).size -
           new Set(a.usages.map((usage) => usage.repo)).size || a.name.localeCompare(b.name),
     ),
-    notes,
+    notes: [...unique.values()],
   }
 }

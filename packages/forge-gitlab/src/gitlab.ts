@@ -139,6 +139,23 @@ const tagRecordSchema = z.object({
   created_at: time,
 })
 
+const ciVariableSchema = z.object({
+  key: z.string(),
+  value: z.string().nullable().optional(),
+  variable_type: z.string().optional(),
+  masked: z.boolean().optional(),
+  hidden: z.boolean().optional(),
+  environment_scope: z.string().optional(),
+})
+
+const registryRepositorySchema = z.object({
+  location: z.string(),
+  tags: z
+    .array(z.object({ name: z.string() }))
+    .nullable()
+    .optional(),
+})
+
 const branchRecordSchema = z.object({
   name: z.string(),
   merged: z.boolean().nullable().optional(),
@@ -459,6 +476,9 @@ const draftTitle = (title: string, draft: boolean) => {
 
 const isNotFound = (error: unknown): error is GitLabApiError =>
   error instanceof GitLabApiError && error.status === 404
+
+const isDenied = (error: unknown): error is GitLabApiError =>
+  error instanceof GitLabApiError && [401, 403, 404].includes(error.status)
 
 const project = (repo: string) => `projects/${encode(repo)}`
 
@@ -948,6 +968,52 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         default: branch.default ?? false,
         ...(branch.web_url ? { webUrl: branch.web_url } : {}),
       }))
+    },
+
+    async listCiVariables(scope) {
+      const base = scope.kind === 'repo' ? project(scope.path) : `groups/${encode(scope.path)}`
+      try {
+        const list = await take(client.paginate(`${base}/variables`, ciVariableSchema), undefined)
+        return list.flatMap((variable) =>
+          variable.masked ||
+          variable.hidden ||
+          variable.variable_type === 'file' ||
+          typeof variable.value !== 'string'
+            ? []
+            : [
+                {
+                  key: variable.key,
+                  value: variable.value,
+                  environmentScope: variable.environment_scope ?? '*',
+                },
+              ],
+        )
+      } catch (error) {
+        if (isDenied(error)) return undefined
+        throw error
+      }
+    },
+
+    async listImageTags(image) {
+      const segments = image.split('/').slice(1)
+      // The project is some prefix of the image path; the longest one that has the image wins.
+      for (let length = segments.length; length >= 2; length--) {
+        const path = segments.slice(0, length).join('/')
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- the longest matching project wins
+          const repositories = await take(
+            client.paginate(`${project(path)}/registry/repositories`, registryRepositorySchema, {
+              tags: true,
+            }),
+            undefined,
+          )
+          const found = repositories.find((repository) => repository.location === image)
+          if (found) return (found.tags ?? []).map((tag) => tag.name)
+        } catch (error) {
+          if (!isDenied(error)) throw error
+        }
+      }
+      return undefined
     },
 
     async getMergeRequest(repo, id) {

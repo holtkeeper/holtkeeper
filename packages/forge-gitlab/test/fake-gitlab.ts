@@ -258,6 +258,20 @@ export class FakeGitLab {
     this.avatars.set(`${kind}:${path}`, data)
   }
 
+  /** CI/CD variables by `projects:path` or `groups:path`; `'denied'` answers 403. */
+  readonly ciVariables = new Map<string, Record<string, unknown>[] | 'denied'>()
+
+  setCiVariables(
+    kind: 'projects' | 'groups',
+    path: string,
+    variables: Record<string, unknown>[] | 'denied',
+  ) {
+    this.ciVariables.set(`${kind}:${path}`, variables)
+  }
+
+  /** Container registry repositories by project path, as `GET /projects/:id/registry/repositories?tags=true` lists them. */
+  readonly registry = new Map<string, { location: string; tags: string[] }[]>()
+
   addPipeline(
     project: FakeProject,
     ref: string,
@@ -443,6 +457,30 @@ export class FakeGitLab {
       return new Response(avatar, { status: 200, headers: { 'Content-Type': 'image/png' } })
     }
 
+    if (method === 'GET' && (s[0] === 'projects' || s[0] === 'groups') && s[2] === 'variables') {
+      const variables = this.ciVariables.get(`${s[0]}:${s[1] ?? ''}`)
+      if (variables === 'denied') return json(403, { message: '403 Forbidden' })
+      if (!variables) return json(404, { message: '404 Not Found' })
+      return this.page(url, variables)
+    }
+    if (method === 'GET' && s[0] === 'projects' && s[2] === 'registry' && s[3] === 'repositories') {
+      const repositories = this.registry.get(s[1] ?? '')
+      if (!repositories) return json(404, { message: '404 Project Not Found' })
+      return this.page(
+        url,
+        repositories.map((repository) => ({
+          location: repository.location,
+          ...(q.get('tags') === 'true'
+            ? {
+                tags: repository.tags.map((name) => ({
+                  name,
+                  path: `${repository.location}:${name}`,
+                })),
+              }
+            : {}),
+        })),
+      )
+    }
     if (method === 'GET' && s[0] === 'users' && s.length === 1)
       return json(
         200,

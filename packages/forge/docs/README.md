@@ -24,15 +24,15 @@ interface ForgeDefinition {
 
 Repositories are addressed by their full path (`games/app-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
 
-| Area                 | Methods                                                                                                                     |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                     |
-| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                              |
-| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                |
-| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                           |
-| Tags                 | `createTag`                                                                                                                 |
-| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                          |
-| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches` |
+| Area                 | Methods                                                                                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                         |
+| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                  |
+| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                    |
+| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                               |
+| Tags                 | `createTag`                                                                                                                                                     |
+| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                              |
+| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags` |
 
 ### Listing files
 
@@ -42,16 +42,18 @@ Repositories are addressed by their full path (`games/app-x`), merge requests by
 
 Optional, read-only history for delivery analytics (`@holtkeeper/delivery`). Adapters may lag behind, so callers check that a method exists before calling it. Lists are newest first, times are ISO 8601, durations are seconds and absent while unknown, and `limit` caps the result (all matching items when omitted).
 
-| Method                                                                      | Returns                                                                                                                                                                                                                       |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `listMergeRequests(repo, { state?, updatedAfter?, targetBranch?, limit? })` | `MergeRequestRecord`: a `MergeRequest` plus `createdAt`, `updatedAt`, `mergedAt?`, `closedAt?`, `firstCommitAt?`, `changesCount?` and `headSha?` (the last three only when cheap for the provider); `state` defaults to `all` |
-| `listPipelineRuns(repo, { ref?, after?, limit? })`                          | `PipelineRun`: a `Pipeline` plus `createdAt`, `updatedAt?`, `startedAt?`, `finishedAt?`, `durationSeconds?`, `queuedSeconds?`, `source?`; `after` filters by creation time                                                    |
-| `listJobRuns(repo, pipelineId)`                                             | `JobRun`: a `Job` plus `pipelineId`, timing, `retried` (a later attempt replaced it) and `allowFailure`; retried attempts are included                                                                                        |
-| `listProjectJobRuns(repo, { after?, limit? })`                              | `JobRun`s of every pipeline, newest first, retried attempts included, with `ref`, `sha` and `tag` (the pipeline ran for a tag) of their pipeline; much cheaper than `listJobRuns` per pipeline for long histories             |
-| `getRepositoryAvatar(repo)`                                                 | `ForgeImage { data, contentType }`: the project's avatar, else the nearest parent group's; `undefined` when none has one. `imageType(bytes)` tells PNG, JPEG, GIF, WebP and SVG apart by signature                            |
-| `listDeployments(repo, { environment?, after?, limit? })`                   | `Deployment`: `id`, `environment`, `status` (`pending`, `running`, `success`, `failed`, `canceled`, `skipped`, `blocked`), `sha`, `ref`, `createdAt`, `finishedAt?`; `after` filters by update time                           |
-| `listTags(repo, { limit? })`                                                | `TagRecord`: a `Tag` plus `committedAt` (date of the tagged commit) and `createdAt?` (annotated tags)                                                                                                                         |
-| `listBranches(repo)`                                                        | `BranchRecord`: every branch with `name`, head `sha`, `committedAt`, `authorName?`, `authorEmail?`, `merged` (head reachable from the default branch; squash merges do not count), `protected`, `default`, `webUrl?`          |
+| Method                                                                      | Returns                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listMergeRequests(repo, { state?, updatedAfter?, targetBranch?, limit? })` | `MergeRequestRecord`: a `MergeRequest` plus `createdAt`, `updatedAt`, `mergedAt?`, `closedAt?`, `firstCommitAt?`, `changesCount?` and `headSha?` (the last three only when cheap for the provider); `state` defaults to `all`         |
+| `listPipelineRuns(repo, { ref?, after?, limit? })`                          | `PipelineRun`: a `Pipeline` plus `createdAt`, `updatedAt?`, `startedAt?`, `finishedAt?`, `durationSeconds?`, `queuedSeconds?`, `source?`; `after` filters by creation time                                                            |
+| `listJobRuns(repo, pipelineId)`                                             | `JobRun`: a `Job` plus `pipelineId`, timing, `retried` (a later attempt replaced it) and `allowFailure`; retried attempts are included                                                                                                |
+| `listProjectJobRuns(repo, { after?, limit? })`                              | `JobRun`s of every pipeline, newest first, retried attempts included, with `ref`, `sha` and `tag` (the pipeline ran for a tag) of their pipeline; much cheaper than `listJobRuns` per pipeline for long histories                     |
+| `getRepositoryAvatar(repo)`                                                 | `ForgeImage { data, contentType }`: the project's avatar, else the nearest parent group's; `undefined` when none has one. `imageType(bytes)` tells PNG, JPEG, GIF, WebP and SVG apart by signature                                    |
+| `listDeployments(repo, { environment?, after?, limit? })`                   | `Deployment`: `id`, `environment`, `status` (`pending`, `running`, `success`, `failed`, `canceled`, `skipped`, `blocked`), `sha`, `ref`, `createdAt`, `finishedAt?`; `after` filters by update time                                   |
+| `listTags(repo, { limit? })`                                                | `TagRecord`: a `Tag` plus `committedAt` (date of the tagged commit) and `createdAt?` (annotated tags)                                                                                                                                 |
+| `listBranches(repo)`                                                        | `BranchRecord`: every branch with `name`, head `sha`, `committedAt`, `authorName?`, `authorEmail?`, `merged` (head reachable from the default branch; squash merges do not count), `protected`, `default`, `webUrl?`                  |
+| `listCiVariables({ kind, path })`                                           | `CiVariable { key, value, environmentScope }` defined directly on a repository or group (no inherited ones); masked, hidden and file variables are left out. `undefined` when the token may not read them or the scope does not exist |
+| `listImageTags(image)`                                                      | Tags of an image (`registry/path`, no tag) in the forge's own container registry; `undefined` when the forge does not serve it or the token may not read it                                                                           |
 
 This covers the first milestones (browserslist, audit, releases). Diffs, line threads with suggestions and webhook events are added with code review.
 

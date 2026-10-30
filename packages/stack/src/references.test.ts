@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test'
 
 import {
+  ciIncludes,
   dockerfileReferences,
   latestTag,
+  nameVersion,
   parseImageRef,
   tagVersion,
   variantFamily,
@@ -133,4 +135,68 @@ test('picks the newest release tag in the variant family usages prefer', () => {
   expect(latestTag(tags, ['alpine'])).toBe('1.27.3')
   expect(latestTag(['1.25-alpine', '1.27-alpine'], ['alpine'])).toBe('1.27')
   expect(latestTag(['latest'], [''])).toBeUndefined()
+})
+
+test('expands variables with GitLab precedence: CI over job over top level over inherited', () => {
+  const document = Bun.YAML.parse(`
+variables:
+  BASE: node
+  TAG: '20'
+build:
+  variables:
+    TAG: '22'
+  image: $BASE:$TAG
+test:
+  image: \${REGISTRY}/tools:\${TOOLS_TAG:-1.0}
+lint:
+  image: $IMAGE
+`)
+  expect(
+    yamlReferences(document, {
+      inherited: { BASE: 'ignored', REGISTRY: 'registry.example.com/$GROUP' },
+      ci: { GROUP: 'acme', IMAGE: 'alpine:3.20' },
+    }).references,
+  ).toEqual([
+    { type: 'image', ref: 'ignored:22' },
+    { type: 'image', ref: 'registry.example.com/acme/tools:1.0' },
+    { type: 'image', ref: 'alpine:3.20' },
+  ])
+})
+
+test('lists GitLab includes it can follow', () => {
+  const document = Bun.YAML.parse(`
+include:
+  - local: /ci/build.yml
+  - 'ci/test.yml'
+  - project: acme/ci-templates
+    ref: v2
+    file: [node.yml, /docker.yml]
+  - remote: https://example.com/ci.yml
+  - template: Auto-DevOps.gitlab-ci.yml
+`)
+  expect(ciIncludes(document)).toEqual({
+    includes: [
+      { type: 'local', file: 'ci/build.yml' },
+      { type: 'local', file: 'ci/test.yml' },
+      { type: 'project', project: 'acme/ci-templates', file: 'node.yml', ref: 'v2' },
+      { type: 'project', project: 'acme/ci-templates', file: 'docker.yml', ref: 'v2' },
+    ],
+    skipped: ['https://example.com/ci.yml', 'Auto-DevOps.gitlab-ci.yml'],
+  })
+})
+
+test('reads tool versions written into image names', () => {
+  expect(nameVersion('acme/infrastructure/baseimages/bun-1-3-slim')).toEqual({
+    tool: 'bun',
+    version: '1.3',
+    variant: 'slim',
+  })
+  expect(nameVersion('baseimages/node-22-alpine-build-tools')).toEqual({
+    tool: 'node',
+    version: '22',
+    variant: 'alpine-build-tools',
+  })
+  expect(nameVersion('acme/python3.12')).toEqual({ tool: 'python', version: '3.12' })
+  expect(nameVersion('library/node')).toBeUndefined()
+  expect(nameVersion('prom/node-exporter')).toBeUndefined()
 })

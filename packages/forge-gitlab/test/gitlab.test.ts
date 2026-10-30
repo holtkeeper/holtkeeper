@@ -665,6 +665,52 @@ describe('insight reads', () => {
     expect(server.calls.at(-1)?.url).toContain('/projects/g%2Fsub%2Fa/avatar')
   })
 
+  test('lists CI/CD variables without masked, hidden or file ones and skips denied scopes', async () => {
+    const { server, forge } = setup()
+    server.addProject('g/sub/a')
+    server.setCiVariables('projects', 'g/sub/a', [
+      {
+        key: 'IMAGE',
+        value: 'node:22',
+        variable_type: 'env_var',
+        masked: false,
+        environment_scope: '*',
+      },
+      {
+        key: 'TOKEN',
+        value: 'secret',
+        variable_type: 'env_var',
+        masked: true,
+        environment_scope: '*',
+      },
+      { key: 'HIDDEN', value: null, variable_type: 'env_var', masked: true, hidden: true },
+      { key: 'KUBECONFIG', value: 'apiVersion: v1', variable_type: 'file', masked: false },
+    ])
+    server.setCiVariables('groups', 'g', 'denied')
+    expect(await forge.listCiVariables?.({ kind: 'repo', path: 'g/sub/a' })).toEqual([
+      { key: 'IMAGE', value: 'node:22', environmentScope: '*' },
+    ])
+    expect(await forge.listCiVariables?.({ kind: 'group', path: 'g' })).toBeUndefined()
+    expect(await forge.listCiVariables?.({ kind: 'group', path: 'g/sub' })).toBeUndefined()
+    expect(server.calls.at(-1)?.url).toContain('/groups/g%2Fsub/variables')
+  })
+
+  test('lists registry tags from the longest project path that has the image', async () => {
+    const { server, forge } = setup()
+    server.registry.set('g/images', [
+      { location: 'registry.example.com/g/images/bun-1-3', tags: ['latest', '1.3.2'] },
+    ])
+    expect(await forge.listImageTags?.('registry.example.com/g/images/bun-1-3')).toEqual([
+      'latest',
+      '1.3.2',
+    ])
+    expect(server.calls.map((call) => new URL(call.url).pathname)).toEqual([
+      '/api/v4/projects/g%2Fimages%2Fbun-1-3/registry/repositories',
+      '/api/v4/projects/g%2Fimages/registry/repositories',
+    ])
+    expect(await forge.listImageTags?.('ghcr.io/g/images/bun-1-3')).toBeUndefined()
+  })
+
   test('lists deployments by environment, ordered by update when filtered by time', async () => {
     const { server, forge } = setup()
     const project = server.addProject('g/a')

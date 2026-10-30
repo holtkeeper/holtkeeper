@@ -63,12 +63,22 @@ export const isPrerelease = (variant: string | undefined) =>
 
 const unquote = (value: string) => value.replace(/^(["'])(.*)\1$/, '$2')
 
-const expand = (value: string, variables: Record<string, string>) =>
-  value.replace(
-    /\$\{(\w+)(?::?-([^}]*))?\}|\$(\w+)/g,
-    (whole, braced?: string, fallback?: string, bare?: string) =>
-      variables[braced ?? bare ?? ''] ?? fallback ?? whole,
-  )
+const pattern = /\$\{\{\s*env\.(\w+)\s*\}\}|\$\{(\w+)(?::?-([^}]*))?\}|\$(\w+)/g
+
+/** Expands `$VAR`, `${VAR}`, `${VAR:-default}` and `${{ env.VAR }}`, following variables that name others. */
+export function expand(value: string, variables: Record<string, string>): string {
+  let current = value
+  for (let pass = 0; pass < 5 && current.includes('$'); pass++) {
+    const next = current.replace(
+      pattern,
+      (whole, env?: string, braced?: string, fallback?: string, bare?: string) =>
+        variables[env ?? braced ?? bare ?? ''] ?? fallback ?? whole,
+    )
+    if (next === current) break
+    current = next
+  }
+  return current
+}
 
 /**
  * Images a Dockerfile builds from: every `FROM` except earlier stages and `scratch`, with `ARG`
@@ -120,7 +130,8 @@ const setupActions: Record<string, { tool: string; input: string }> = {
 const scalar = (value: unknown) =>
   typeof value === 'string' ? value : typeof value === 'number' ? String(value) : undefined
 
-const variablesOf = (value: unknown): Record<string, string> => {
+/** `variables` (GitLab) or `env` (GitHub) of a YAML node as plain strings. */
+export const variablesOf = (value: unknown): Record<string, string> => {
   if (!isRecord(value)) return {}
   const variables: Record<string, string> = {}
   for (const [name, entry] of Object.entries(value)) {
@@ -130,38 +141,53 @@ const variablesOf = (value: unknown): Record<string, string> => {
   return variables
 }
 
+export interface YamlReferenceOptions {
+  /** Variables the file's own top-level ones give way to, e.g. merged from a whole GitLab pipeline. */
+  inherited?: Record<string, string>
+  /** Variables that win over every YAML definition, e.g. the forge's CI/CD variables. */
+  ci?: Record<string, string>
+}
+
 /**
  * Images and tool versions a parsed YAML document names: `image` keys (a string, GitLab's
  * `{ name }` or Helm's `{ registry?, repository, tag? }`), `services` lists, GitHub Actions
  * `container`, `docker://` steps and setup actions (`actions/setup-node` with `node-version`,
- * expanding `${{ matrix.* }}` lists). Top-level `variables` and `env` are expanded.
+ * expanding `${{ matrix.* }}` lists). Variables expand with GitLab's precedence: `ci` over
+ * `variables`/`env` of the job or step over the top-level ones over `inherited`.
  */
-export function yamlReferences(document: unknown): References {
+export function yamlReferences(document: unknown, options: YamlReferenceOptions = {}): References {
   const result: References = { references: [], unresolved: [] }
   const root = isRecord(document) ? document : {}
-  const variables = { ...variablesOf(root.variables), ...variablesOf(root.env) }
+  const ci = options.ci ?? {}
+  const top = { ...variablesOf(root.variables), ...variablesOf(root.env), ...options.inherited }
 
-  const image = (value: string) => {
-    const expanded = expand(value.trim(), variables)
+  const image = (value: string, variables: Record<string, string>) => {
+    const expanded = expand(value.trim(), { ...variables, ...ci })
     if (!expanded) return
     if (expanded.includes('$')) result.unresolved.push(value)
     else result.references.push({ type: 'image', ref: expanded })
   }
-  const imageValue = (value: unknown) => {
+  const imageValue = (value: unknown, variables: Record<string, string>) => {
     const text = scalar(value)
-    if (text !== undefined) return image(text)
+    if (text !== undefined) return image(text, variables)
     if (!isRecord(value)) return
     const name = scalar(value.name)
-    if (name !== undefined) return image(name)
+    if (name !== undefined) return image(name, variables)
     const repository = scalar(value.repository)
     if (repository === undefined) return
     const registry = scalar(value.registry)
     const tag = scalar(value.tag)
-    image(`${registry ? `${registry}/` : ''}${repository}${tag ? `:${tag}` : ''}`)
+    image(`${registry ? `${registry}/` : ''}${repository}${tag ? `:${tag}` : ''}`, variables)
   }
-  const tool = (name: string, value: unknown, matrix: Record<string, unknown>) => {
-    const text = scalar(value)
-    if (text === undefined) return
+  const tool = (
+    name: string,
+    value: unknown,
+    matrix: Record<string, unknown>,
+    variables: Record<string, string>,
+  ) => {
+    const raw = scalar(value)
+    if (raw === undefined) return
+    const text = expand(raw, { ...variables, ...ci })
     const key = /^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$/.exec(text.trim())?.[1]
     if (key) {
       const values = matrix[key]
@@ -177,26 +203,109 @@ export function yamlReferences(document: unknown): References {
     else result.references.push({ type: 'tool', tool: name, declared: text })
   }
 
-  const walk = (node: unknown, matrix: Record<string, unknown>) => {
+  const walk = (
+    node: unknown,
+    matrix: Record<string, unknown>,
+    variables: Record<string, string>,
+  ) => {
     if (Array.isArray(node)) {
-      for (const item of node) walk(item, matrix)
+      for (const item of node) walk(item, matrix, variables)
       return
     }
     if (!isRecord(node)) return
     const strategy = isRecord(node.strategy) ? node.strategy : undefined
     const scope = strategy && isRecord(strategy.matrix) ? { ...matrix, ...strategy.matrix } : matrix
+    const own =
+      node === root
+        ? variables
+        : { ...variables, ...variablesOf(node.variables), ...variablesOf(node.env) }
     const uses = scalar(node.uses)
-    if (uses?.startsWith('docker://')) image(uses.slice('docker://'.length))
+    if (uses?.startsWith('docker://')) image(uses.slice('docker://'.length), own)
     const action = uses ? setupActions[uses.split('@')[0] ?? ''] : undefined
-    if (action && isRecord(node.with)) tool(action.tool, node.with[action.input], scope)
+    if (action && isRecord(node.with)) tool(action.tool, node.with[action.input], scope, own)
     for (const [key, value] of Object.entries(node)) {
-      if (key === 'image') imageValue(value)
-      else if (key === 'container' && typeof value === 'string') image(value)
+      if (key === 'image') imageValue(value, own)
+      else if (key === 'container' && typeof value === 'string') image(value, own)
       else if (key === 'services' && Array.isArray(value))
-        for (const entry of value) imageValue(entry)
-      if (key !== 'image' && (isRecord(value) || Array.isArray(value))) walk(value, scope)
+        for (const entry of value) imageValue(entry, own)
+      if (key !== 'image' && key !== 'variables' && (isRecord(value) || Array.isArray(value)))
+        walk(value, scope, own)
     }
   }
-  walk(root, {})
+  walk(root, {}, top)
   return result
+}
+
+/** A GitLab `include` the analysis can follow: a file of this repository or of another project. */
+export type CiInclude =
+  | { type: 'local'; file: string }
+  | { type: 'project'; project: string; file: string; ref?: string }
+
+/**
+ * `include` entries of a GitLab CI document: local files and files of other projects. Remote
+ * URLs, templates and components are returned as `skipped`.
+ */
+export function ciIncludes(document: unknown): { includes: CiInclude[]; skipped: string[] } {
+  const result: { includes: CiInclude[]; skipped: string[] } = { includes: [], skipped: [] }
+  const raw = isRecord(document) ? document.include : undefined
+  for (const entry of Array.isArray(raw) ? raw : raw === undefined ? [] : [raw]) {
+    const text = scalar(entry)
+    if (text !== undefined) {
+      if (/^https?:\/\//.test(text)) result.skipped.push(text)
+      else result.includes.push({ type: 'local', file: text.replace(/^\/+/, '') })
+      continue
+    }
+    if (!isRecord(entry)) continue
+    const local = scalar(entry.local)
+    const project = scalar(entry.project)
+    if (local !== undefined)
+      result.includes.push({ type: 'local', file: local.replace(/^\/+/, '') })
+    else if (project !== undefined) {
+      const ref = scalar(entry.ref)
+      const files = Array.isArray(entry.file) ? entry.file : [entry.file]
+      for (const file of files) {
+        const path = scalar(file)
+        if (path !== undefined)
+          result.includes.push({
+            type: 'project',
+            project,
+            file: path.replace(/^\/+/, ''),
+            ...(ref ? { ref } : {}),
+          })
+      }
+    } else {
+      const other = scalar(entry.remote) ?? scalar(entry.template) ?? scalar(entry.component)
+      if (other !== undefined) result.skipped.push(other)
+    }
+  }
+  return result
+}
+
+const nameVersionPattern =
+  /^(node|nodejs|bun|deno|go|golang|python|ruby|php|java|jdk|openjdk|temurin|rust|postgres|postgresql|redis|nginx|alpine|ubuntu|debian)[-_]?v?(\d+(?:[-._]\d+){0,2})(?:[-_.](.+))?$/i
+
+const nameAliases: Record<string, string> = {
+  nodejs: 'node',
+  golang: 'go',
+  jdk: 'java',
+  openjdk: 'java',
+  temurin: 'java',
+  postgresql: 'postgres',
+}
+
+/**
+ * A tool version written into an image name, as in-house base images do: `bun-1-3-slim` →
+ * `bun` `1.3` + `slim`, `node-22-alpine-build-tools` → `node` `22` + `alpine-build-tools`.
+ */
+export function nameVersion(
+  repository: string,
+): { tool: string; version: string; variant?: string } | undefined {
+  const match = nameVersionPattern.exec(repository.split('/').at(-1) ?? '')
+  if (!match?.[1] || !match[2]) return undefined
+  const name = match[1].toLowerCase()
+  return {
+    tool: nameAliases[name] ?? name,
+    version: match[2].replace(/[-_]/g, '.'),
+    ...(match[3] ? { variant: match[3] } : {}),
+  }
 }

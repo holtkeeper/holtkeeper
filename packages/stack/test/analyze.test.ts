@@ -64,7 +64,7 @@ function fakeSources(): VersionSources & { calls: string[] } {
     },
     async npm(name) {
       calls.push(`npm:${name}`)
-      return { pnpm: '10.20.0' }[name]
+      return { pnpm: '10.20.0', bun: '1.4.4' }[name]
     },
     async pypi() {
       return undefined
@@ -265,4 +265,75 @@ test('skips lookups without sources', async () => {
   })
   expect(data.components.every((component) => component.latest === undefined)).toBe(true)
   expect(data.notes).toEqual([])
+})
+
+test('expands CI images through includes, child pipelines and forge variables', async () => {
+  const monorepo = {
+    '.gitlab-ci.yml': [
+      'include:',
+      '  - project: acme/ci',
+      '    file: images.yml',
+      '  - local: packages/*/.gitlab-ci.yml',
+      'variables:',
+      '  CI_IMAGE_DEPLOY_HELM: $REGISTRY/helm:3.16',
+    ].join('\n'),
+    'packages/loader/.gitlab-ci.yml': 'deploy:\n  image: $CI_IMAGE_DEPLOY_HELM\n',
+    'packages/wrapper/.gitlab-ci.yml': 'build:\n  image: $CI_IMAGE_BUILD_BUN13_ALPINE\n',
+    'services/.gitlab-ci.yml':
+      'child:\n  image: $CI_IMAGE_DEPLOY_HELM\n  services: [$SECRET_IMAGE]\n',
+  }
+  const templates = {
+    'images.yml':
+      'variables:\n  CI_IMAGE_BUILD_BUN13_ALPINE: registry.gitlab.com/acme/baseimages/bun-1-3-alpine:latest\n',
+  }
+  const base = fakeForge({ 'acme/monorepo': monorepo, 'acme/ci': templates })
+  const scopes: string[] = []
+  const forge: StackForge = {
+    ...base,
+    async listCiVariables(scope) {
+      scopes.push(`${scope.kind}:${scope.path}`)
+      if (scope.kind === 'group')
+        return [{ key: 'REGISTRY', value: 'registry.gitlab.com/acme', environmentScope: '*' }]
+      return undefined
+    },
+    async listImageTags(image) {
+      return image === 'registry.gitlab.com/acme/helm' ? ['3.15', '3.17', 'latest'] : undefined
+    },
+  }
+  const data = await analyzeStack({
+    group: 'acme',
+    repos: [{ forge: 'work', path: 'acme/monorepo' }],
+    forge,
+    sources: fakeSources(),
+    now,
+  })
+
+  const usages = data.components
+    .flatMap((component) =>
+      component.usages.map(
+        (usage) => `${component.id} ${usage.file} ${usage.version ?? usage.declared}`,
+      ),
+    )
+    .toSorted((a, b) => a.localeCompare(b))
+  expect(usages).toEqual([
+    'bun packages/wrapper/.gitlab-ci.yml 1.3',
+    'image:registry.gitlab.com/acme/helm packages/loader/.gitlab-ci.yml 3.16',
+    'image:registry.gitlab.com/acme/helm services/.gitlab-ci.yml 3.16',
+  ])
+  expect(data.components.find((component) => component.id.endsWith('/helm'))?.latest).toBe('3.17')
+  expect(data.repos[0]?.files).toContain('acme/ci:images.yml')
+  expect(scopes.toSorted((a, b) => a.localeCompare(b))).toEqual([
+    'group:acme',
+    'repo:acme/monorepo',
+  ])
+  expect(data.notes).toEqual([
+    {
+      repo: 'acme/monorepo',
+      message: 'services/.gitlab-ci.yml: "$SECRET_IMAGE" uses variables that could not be expanded',
+    },
+    {
+      message:
+        'CI/CD variables could not be read for 1 of 1 repositories; the token needs maintainer access there to expand them',
+    },
+  ])
 })

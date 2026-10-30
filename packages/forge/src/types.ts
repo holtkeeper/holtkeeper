@@ -335,6 +335,20 @@ export interface ReviewOutcome {
   failed: { comment: ReviewComment; error: string }[]
 }
 
+/** A CI/CD variable pipelines of a repository receive, as the forge stores it. */
+export interface CiVariable {
+  key: string
+  value: string
+  /** Environments it applies to; `*` for all. */
+  environmentScope: string
+}
+
+/** Whose CI/CD variables to read: one repository's own, or one group's (not its parents'). */
+export interface CiVariableScope {
+  kind: 'repo' | 'group'
+  path: string
+}
+
 export interface GitForge {
   readonly kind: string
 
@@ -426,6 +440,22 @@ export interface GitForge {
    * has one. `contentType` is a raster or SVG image type.
    */
   getRepositoryAvatar?(repo: string): Promise<ForgeImage | undefined>
+
+  // CI/CD settings. Optional so forges can add them one by one.
+
+  /**
+   * CI/CD variables defined directly on a repository or group, without inherited ones. Masked,
+   * hidden and file variables are left out, so values are never secrets the forge protects.
+   * `undefined` when the token may not read them (they usually need maintainer access) or the
+   * scope does not exist.
+   */
+  listCiVariables?(scope: CiVariableScope): Promise<CiVariable[] | undefined>
+  /**
+   * Tags of a container image in this forge's own registry, e.g.
+   * `registry.example.com/group/project/image` (no tag); `undefined` when this forge does not
+   * serve the image or the token may not read it.
+   */
+  listImageTags?(image: string): Promise<string[] | undefined>
 
   // SSH keys. Optional so forges can add them one by one.
 
