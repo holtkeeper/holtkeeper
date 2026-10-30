@@ -66,6 +66,7 @@
 | `@holtkeeper/testids`             | Test id attributes on interactive elements of frontend templates       | [packages/testids/docs](../packages/testids/docs/README.md)                         |
 | `@holtkeeper/licenses`            | Dependency licenses against an allowlist                               | [packages/licenses/docs](../packages/licenses/docs/README.md)                       |
 | `@holtkeeper/fleet`               | Library versions and config drift across repositories                  | [packages/fleet/docs](../packages/fleet/docs/README.md)                             |
+| `@holtkeeper/stack`               | Runtimes, package managers and images across repositories, end of life | [packages/stack/docs](../packages/stack/docs/README.md)                             |
 | `@holtkeeper/release-risk`        | Release risk score and summary                                         | [packages/release-risk/docs](../packages/release-risk/docs/README.md)               |
 | `@holtkeeper/branches`            | Branches to clean up: merged, closed unmerged or stale                 | [packages/branches/docs](../packages/branches/docs/README.md)                       |
 | `@holtkeeper/delivery`            | DORA metrics and CI health                                             | [packages/delivery/docs](../packages/delivery/docs/README.md)                       |

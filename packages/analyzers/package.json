@@ -33,6 +33,7 @@
     "@holtkeeper/release-risk": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",
+    "@holtkeeper/stack": "workspace:*",
     "@holtkeeper/testids": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",
     "@holtkeeper/vuln": "workspace:*",

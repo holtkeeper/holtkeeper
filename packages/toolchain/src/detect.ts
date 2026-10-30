@@ -11,7 +11,9 @@ import {
   sdkmanJava,
 } from './versions.ts'
 
-type Read = (file: string) => Promise<string | undefined>
+/** Reads a repository-relative file; `undefined` when it does not exist or cannot be read. */
+export type ReadFile = (file: string) => Promise<string | undefined>
+type Read = ReadFile
 
 interface Entry {
   tool: Tool
@@ -409,7 +411,7 @@ async function walk(dir: string, maxDepth: number): Promise<string[]> {
 }
 
 /** Directories (repository-relative, without the root) that contain a toolchain file. */
-function subProjects(files: readonly string[]): string[] {
+export function subProjects(files: readonly string[]): string[] {
   const dirs = new Set<string>()
   for (const file of files) {
     const normalized = file.replace(/\\/g, '/').replace(/^\.\//, '')
@@ -438,14 +440,25 @@ const reader =
  * disagreement is reported in `notes`. Never throws for unreadable or malformed files.
  */
 export async function detectToolchain(dir: string, files?: readonly string[]): Promise<Toolchain> {
-  const root = await detectProject(reader(dir), '')
+  return detectToolchainFrom(reader(dir), files ?? (await walk(dir, 3)))
+}
+
+/**
+ * `detectToolchain` over any file source, e.g. a forge API: `read` gets repository-relative paths
+ * and `files` lists the repository's files (only the root project is read when it is empty).
+ */
+export async function detectToolchainFrom(
+  read: ReadFile,
+  files: readonly string[],
+): Promise<Toolchain> {
+  const root = await detectProject(read, '')
   const tools = [...root.tools]
   const notes = [...root.notes]
   let packageManager = root.packageManager
   const defaults = [...root.implied]
 
-  for (const sub of subProjects(files ?? (await walk(dir, 3)))) {
-    const project = await detectProject(reader(join(dir, sub)), sub)
+  for (const sub of subProjects(files)) {
+    const project = await detectProject((file) => read(posix.join(sub, file)), sub)
     notes.push(...project.notes)
     for (const tool of project.tools) {
       const existing = tools.find((t) => t.name === tool.name)

@@ -1,4 +1,10 @@
-export { detectToolchain, toolchainFiles } from './detect.ts'
+export {
+  detectToolchain,
+  detectToolchainFrom,
+  type ReadFile,
+  subProjects,
+  toolchainFiles,
+} from './detect.ts'
 export { mergeToolchain, miseExecArgs, miseToolSpecs } from './merge.ts'
 export {
   type EffectiveToolchain,

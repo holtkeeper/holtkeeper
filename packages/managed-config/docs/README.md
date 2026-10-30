@@ -63,6 +63,7 @@ Every default schedule covers all groups and spreads its repository jobs over 01
 | `quality-weekly`  | `quality` (`coverage: skip`, so no test runs), `licenses`, `fleet` | Sunday nights    |
 | `tests-weekly`    | `coverage`, `testids`                                              | Wednesday nights |
 | `branches-weekly` | `branches`                                                         | Tuesday nights   |
+| `stack-weekly`    | `stack`                                                            | Monday nights    |
 
 The default trigger `tag` queues `changelog` and `release-risk` for every new or moved tag, from webhooks or polling.
 

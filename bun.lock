@@ -275,6 +275,7 @@
         "@holtkeeper/release-risk": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
+        "@holtkeeper/stack": "workspace:*",
         "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
@@ -798,6 +799,17 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/stack": {
+      "name": "@holtkeeper/stack",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/toolchain": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/store": {
       "name": "@holtkeeper/store",
       "version": "0.0.0",
@@ -1255,6 +1267,8 @@
     "@holtkeeper/settings": ["@holtkeeper/settings@workspace:packages/settings"],
 
     "@holtkeeper/ssh-keys": ["@holtkeeper/ssh-keys@workspace:packages/ssh-keys"],
+
+    "@holtkeeper/stack": ["@holtkeeper/stack@workspace:packages/stack"],
 
     "@holtkeeper/store": ["@holtkeeper/store@workspace:packages/store"],
 

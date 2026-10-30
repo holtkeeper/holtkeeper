@@ -5,7 +5,7 @@ import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useGroups, usePutGroup, useRepos } from '../../api/queries.ts'
-import { fleetView } from '../../lib/analyses.ts'
+import { fleetView, stackView } from '../../lib/analyses.ts'
 import { formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import {
@@ -105,6 +105,13 @@ export function GroupPage() {
             label: 'Fleet',
             content: (
               <AnalysisRecords page={fleetView} repo={{ forge, path: groupId }} group={groupId} />
+            ),
+          },
+          {
+            id: 'stack',
+            label: 'Stack',
+            content: (
+              <AnalysisRecords page={stackView} repo={{ forge, path: groupId }} group={groupId} />
             ),
           },
         ]

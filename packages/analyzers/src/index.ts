@@ -23,6 +23,7 @@ import { secretsCheck } from '@holtkeeper/quality-secrets'
 import { testGapsCheck } from '@holtkeeper/quality-tests'
 import { releaseRiskAnalyzer } from '@holtkeeper/release-risk'
 import { createReviewAnalyzer } from '@holtkeeper/review'
+import { stackAnalyzer } from '@holtkeeper/stack'
 import { testIdsAnalyzer } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
 import { z } from 'zod'
@@ -166,6 +167,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   licensesAnalyzer,
   releaseRiskAnalyzer,
   fleetAnalyzer,
+  stackAnalyzer,
   assetsAnalyzer,
   deliveryAnalyzer,
   branchesAnalyzer,

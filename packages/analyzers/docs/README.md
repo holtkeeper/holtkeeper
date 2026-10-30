@@ -17,6 +17,7 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `licenses`     | repo  | third-party licenses judged against allow and deny lists                  |
 | `release-risk` | repo  | how risky a release is, from the analyses already stored                  |
 | `fleet`        | group | shared library versions and config drift across a group                   |
+| `stack`        | group | runtimes, package managers and images: versions, lag and end of life      |
 | `assets`       | repo  | asset inventory checked against budgets, with smaller formats suggested   |
 | `delivery`     | repo  | DORA metrics, CI health and merge request flow                            |
 | `branches`     | repo  | branches to clean up: merged, closed unmerged or stale, per author        |

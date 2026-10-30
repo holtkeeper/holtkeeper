@@ -32,6 +32,8 @@ miseExecArgs(toolchain) // ['mise', 'exec', 'node@20', 'pnpm@9.12.0', '--']
 
 Without a pinned version, some files imply a default (reported in `notes`): `package.json` → `node lts`, `pnpm-lock.yaml` → `pnpm latest`, `yarn.lock` → `yarn 1` (classic lockfile) or `latest`, `uv.lock` → `uv`, `poetry.lock` → `poetry`, `Cargo.toml` → `rust stable`. Lockfiles also set `packageManager` when the field is missing.
 
+`detectToolchainFrom(read, files)` is the same detection over any file source, e.g. a forge API: `read` takes repository-relative paths and answers `undefined` for missing files, `files` lists the repository (empty reads only the root). `subProjects(files)` returns the sub-project directories it would visit.
+
 Ranges (`engines.node`, `requires-python`) are constraints: a pinned version from any other file wins, and a pin outside the range becomes a note. Disagreeing files become notes too (`.nvmrc asks for node 18; using 20 from mise.toml`). Malformed files are noted and skipped; detection never throws.
 
 **Monorepos.** Directories below the root that contain one of `toolchainFiles` are sub-projects: from `files` when given (repository-relative paths, e.g. from `git ls-files`), otherwise found by walking three levels deep (skipping dot directories, `node_modules`, `vendor`, `target`, `dist`, `build`, `out`). The root wins for every tool it names; sub-projects add tools the root does not name (first in path order), and conflicts are reported as notes with the sub-project path. Implied defaults apply only after all sub-projects, so `packages/a/.nvmrc` beats a root `package.json` without a version.

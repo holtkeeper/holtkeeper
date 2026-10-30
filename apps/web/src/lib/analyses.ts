@@ -101,6 +101,13 @@ export const fleetView = {
   trend: [/behind-major/i, /drifted/i],
 } as const
 
+/** The group-scoped `stack` analysis, shown as a tab of each group next to fleet drift. */
+export const stackView = {
+  kind: 'stack',
+  title: 'Tech stack',
+  trend: [/^eol$/i, /behind-major/i],
+} as const
+
 /**
  * Metrics worth charting across records: numeric in the newest record, one per pattern in
  * `prefer` (in that order), or the first numeric metric when none matches. Empty without data.

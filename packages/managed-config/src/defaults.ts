@@ -20,7 +20,8 @@ const nights = { allow: [{ days: [...everyDay], from: '01:00', to: '07:00' }] }
  * Schedules an install starts with, every group, repository jobs spread over the night: CI job
  * history nightly, delivery metrics on Mondays, vulnerability audit and dependency graph on
  * Saturdays, code quality (without running tests), licenses and fleet drift on Sundays, test
- * coverage and frontend test ids on Wednesdays, branches to clean up on Tuesdays.
+ * coverage and frontend test ids on Wednesdays, branches to clean up on Tuesdays and the tech
+ * stack of every group on Mondays.
  * Analyzers the server does not have are dropped, schedules left empty are skipped.
  */
 export const defaultSchedules: DefaultSchedule[] = [
@@ -87,6 +88,17 @@ export const defaultSchedules: DefaultSchedule[] = [
       enabled: true,
       analyzers: ['branches'],
       cron: '0 1 * * 2',
+      windows: nights,
+      spread: true,
+    },
+  },
+  {
+    id: 'stack-weekly',
+    data: {
+      name: 'Tech stack, weekly',
+      enabled: true,
+      analyzers: ['stack'],
+      cron: '0 1 * * 1',
       windows: nights,
       spread: true,
     },
