@@ -17,6 +17,7 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
+import { PollAttempts } from './Attempts.tsx'
 import { pollEventLabel, pollingCadence } from './updates.ts'
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -149,6 +150,10 @@ function PollingPanel({
             {polling.lastError}
           </Notice>
         ) : null}
+        <div className="flex flex-col gap-2">
+          <h4 className="text-sm font-medium">Recent polls</h4>
+          <PollAttempts attempts={polling.attempts} />
+        </div>
       </div>
     </Panel>
   )

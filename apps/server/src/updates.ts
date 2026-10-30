@@ -23,16 +23,51 @@ import { fileForgeKey, globalLimits } from './limits.ts'
 const seenKey = (repo: RepoRef) => `webhook-seen:${repo.forge}:${repo.path}`
 const stateKey = (repo: RepoRef) => `poll:${repo.forge}:${repo.path}`
 const lockKey = (repo: RepoRef) => `poll-lock:${repo.forge}:${repo.path}`
+const groupKey = (group: string) => `poll-group:${group}`
 const repoId = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
 /** A repository counts as reached by webhooks for this long after a delivery about it. */
 const WEBHOOK_FRESH_MS = 24 * 3_600_000
 const LOCK_TTL_SECONDS = 120
 const REPO_LIST_TTL_MS = 30 * 60_000
+/** Attempts kept per repository and per group. */
+const MAX_ATTEMPTS = 20
 
 /** Records that a webhook delivered an event about `repo`. */
 export async function markWebhookSeen(kv: KvStore, repo: RepoRef, now: Date) {
   await kv.set(seenKey(repo), now.toISOString(), 7 * 86_400)
+}
+
+/** How an attempt started: on its schedule or from a person. */
+type AttemptTrigger = 'scheduled' | 'manual'
+
+/** One poll of a repository. */
+interface PollAttempt {
+  at: string
+  trigger: AttemptTrigger
+  durationMs: number
+  events?: number
+  enqueued?: number
+  requests?: number
+  error?: string
+}
+
+/** One listing of a group's repositories on its forge. */
+interface ListingAttempt {
+  at: string
+  trigger: AttemptTrigger
+  durationMs: number
+  repos?: number
+  error?: string
+}
+
+/** What polling knows about a group's repositories, as stored. */
+interface GroupListing {
+  /** Repositories of the last successful listing. */
+  repos: RepoRef[]
+  listedAt?: string
+  /** Newest first. */
+  attempts: ListingAttempt[]
 }
 
 /** Polling state of one repository, as stored. */
@@ -48,6 +83,8 @@ interface PollState {
   intervalMs?: number
   /** How much the key's budget slowed polling down; 1 when it did not. */
   stretch?: number
+  /** Newest first. */
+  attempts?: PollAttempt[]
 }
 
 /** How a repository is polled right now. */
@@ -79,6 +116,12 @@ interface PollerOptions {
 const isPollState = (value: unknown): value is PollState =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+const isGroupListing = (value: unknown): value is GroupListing =>
+  typeof value === 'object' && value !== null && 'repos' in value && 'attempts' in value
+
+const withAttempt = <T>(attempts: readonly T[] | undefined, attempt: T) =>
+  [attempt, ...(attempts ?? [])].slice(0, MAX_ATTEMPTS)
+
 /** The interval a repository's settings ask for now; `undefined` while webhooks replace polling. */
 const wantedInterval = (current: PollStatus) =>
   current.viaWebhook
@@ -105,22 +148,64 @@ function createPoller(options: PollerOptions) {
   const { config, store, kv, limiter } = options
   const spend = createSpendWindow()
   const busy = new Set<string>()
-  let repos: { at: number; list: RepoRef[] } | undefined
 
+  const readListing = async (group: string): Promise<GroupListing | undefined> => {
+    const value = await kv.get(groupKey(group))
+    return isGroupListing(value) ? value : undefined
+  }
+
+  /** Lists a group's repositories on its forge now and records the attempt. */
+  const listGroup = async (group: string, trigger: AttemptTrigger): Promise<GroupListing> => {
+    const started = options.now()
+    const previous = await readListing(group)
+    const attempt = (result: { repos?: number; error?: string }): ListingAttempt => ({
+      at: started.toISOString(),
+      trigger,
+      durationMs: options.now().getTime() - started.getTime(),
+      ...result,
+    })
+    let listing: GroupListing
+    try {
+      const repos = await groupRepositories(config)(group)
+      listing = {
+        repos,
+        listedAt: started.toISOString(),
+        attempts: withAttempt(previous?.attempts, attempt({ repos: repos.length })),
+      }
+    } catch (error) {
+      options.log(`polling: could not list group ${group}: ${messageOf(error)}`)
+      listing = {
+        repos: previous?.repos ?? [],
+        ...(previous?.listedAt && { listedAt: previous.listedAt }),
+        attempts: withAttempt(previous?.attempts, attempt({ error: messageOf(error) })),
+      }
+    }
+    await kv.set(groupKey(group), listing)
+    return listing
+  }
+
+  /**
+   * Repositories of every group, listed again once the last attempt is older than 30 minutes, plus
+   * exact repositories the `polling` setting names. A group that never listed falls back to its
+   * exact include paths.
+   */
   const knownRepos = async (): Promise<RepoRef[]> => {
     const now = options.now().getTime()
-    if (repos && now - repos.at < REPO_LIST_TTL_MS) return repos.list
     const found = new Map<string, RepoRef>()
-    const resolve = groupRepositories(config)
     for (const [name, group] of Object.entries(config.groups)) {
-      try {
-        for (const repo of await resolve(name)) found.set(repoId(repo), repo)
-      } catch (error) {
+      // oxlint-disable-next-line no-await-in-loop -- groups are listed one after another
+      const stored = await readListing(name)
+      const lastAt = stored?.attempts[0]?.at
+      const listing =
+        stored && lastAt && now - Date.parse(lastAt) < REPO_LIST_TTL_MS
+          ? stored
+          : // oxlint-disable-next-line no-await-in-loop
+            await listGroup(name, 'scheduled')
+      for (const repo of listing.repos) found.set(repoId(repo), repo)
+      if (!listing.listedAt)
         for (const path of group.include)
           if (staticPrefix(path) === path)
             found.set(`${group.forge}:${path}`, { forge: group.forge, path })
-        options.log(`polling: could not list group ${name}: ${messageOf(error)}`)
-      }
     }
     for (const entry of await store.settings.list(pollingSetting.key))
       for (const pattern of entry.scope.repos ?? []) {
@@ -129,9 +214,7 @@ function createPoller(options: PollerOptions) {
         if (separator > 0 && staticPrefix(path) === path)
           found.set(pattern, { forge: pattern.slice(0, separator), path })
       }
-    const list = [...found.values()].filter((repo) => repo.forge in config.forges)
-    repos = { at: now, list }
-    return list
+    return [...found.values()].filter((repo) => repo.forge in config.forges)
   }
 
   const budgetOf = async (key: string, forgeId: string) => {
@@ -173,7 +256,12 @@ function createPoller(options: PollerOptions) {
   }
 
   /** Polls one repository now and dispatches what changed; never throws. */
-  const pollOne = async (repo: RepoRef, settings: PollingConfig, key: string) => {
+  const pollOne = async (
+    repo: RepoRef,
+    settings: PollingConfig,
+    key: string,
+    trigger: AttemptTrigger,
+  ) => {
     const holder = crypto.randomUUID()
     if (kv.acquireLease) {
       const lease = await kv.acquireLease(lockKey(repo), holder, LOCK_TTL_SECONDS)
@@ -181,6 +269,12 @@ function createPoller(options: PollerOptions) {
     }
     const started = options.now()
     const state = await readState(repo)
+    const attempt = (result: Omit<PollAttempt, 'at' | 'trigger' | 'durationMs'>): PollAttempt => ({
+      at: started.toISOString(),
+      trigger,
+      durationMs: options.now().getTime() - started.getTime(),
+      ...result,
+    })
     try {
       const definition = config.forges[repo.forge]
       if (!definition) throw new Error(`forge ${repo.forge} is not configured`)
@@ -208,6 +302,10 @@ function createPoller(options: PollerOptions) {
         lastPolledAt: started.toISOString(),
         lastRequests: result.requests,
         lastEvents: result.events.length,
+        attempts: withAttempt(
+          state.attempts,
+          attempt({ events: result.events.length, enqueued, requests: result.requests }),
+        ),
       }
       delete next.lastError
       await kv.set(stateKey(repo), next)
@@ -218,6 +316,7 @@ function createPoller(options: PollerOptions) {
         ...state,
         lastPolledAt: started.toISOString(),
         lastError: messageOf(error),
+        attempts: withAttempt(state.attempts, attempt({ error: messageOf(error) })),
       } satisfies PollState)
       return { error: messageOf(error) }
     } finally {
@@ -280,7 +379,7 @@ function createPoller(options: PollerOptions) {
             if (budget !== undefined && spend.used(key, options.now().getTime()) + cost > budget)
               break
             // oxlint-disable-next-line no-await-in-loop
-            await pollOne(repo, settings, key)
+            await pollOne(repo, settings, key, 'scheduled')
           }
         } finally {
           busy.delete(key)
@@ -295,8 +394,12 @@ function createPoller(options: PollerOptions) {
     /** Polls one repository now, whatever its schedule and whether polling is enabled for it. */
     async pollNow(repo: RepoRef) {
       const current = await status(repo)
-      return pollOne(repo, current.config, current.key)
+      return pollOne(repo, current.config, current.key, 'manual')
     },
+    /** The stored listing of a group. */
+    listing: readListing,
+    /** Lists a group's repositories now; the next tick polls what it found. */
+    listGroup: (group: string) => listGroup(group, 'manual'),
     /** Ticks every `tickMs` until the returned function is called; a leader duty. */
     start() {
       let running: Promise<void> | undefined

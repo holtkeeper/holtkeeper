@@ -872,6 +872,8 @@ export interface RepoUpdatesView {
     lastError?: string
     lastEvents?: number
     lastRequests?: number
+    /** Recent polls, newest first. */
+    attempts: PollAttemptView[]
   }
   /** Last webhook delivery about the repository through any webhook URL. */
   webhookSeenAt?: Timestamp
@@ -887,6 +889,40 @@ export interface RepoUpdatesView {
   }
   /** Whether the forge can register the webhook itself. */
   canRegister: boolean
+}
+
+/** One poll of a repository: on its schedule or started by a person. */
+export interface PollAttemptView {
+  at: Timestamp
+  trigger: 'scheduled' | 'manual'
+  durationMs: number
+  /** Changes found. */
+  events?: number
+  /** Jobs the changes queued. */
+  enqueued?: number
+  requests?: number
+  error?: string
+}
+
+/** One listing of a group's repositories on its forge. */
+export interface ListingAttemptView {
+  at: Timestamp
+  trigger: 'scheduled' | 'manual'
+  durationMs: number
+  /** Repositories found; absent when the listing failed. */
+  repos?: number
+  error?: string
+}
+
+/** `GET /api/repos/updates/groups/:group`: the repositories polling knows for a group. */
+export interface GroupListingView {
+  group: string
+  forge: string
+  /** From the last successful listing; kept when a later one fails. */
+  repos: RepoRef[]
+  listedAt?: Timestamp
+  /** Newest first. */
+  attempts: ListingAttemptView[]
 }
 
 /** `POST /api/repos/updates/webhook`: issues (or rotates) the repository's webhook URL. */

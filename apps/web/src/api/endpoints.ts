@@ -12,6 +12,7 @@ import type {
   ForgeSshKeyInput,
   ForgeSshKeyResult,
   GroupDocumentData,
+  GroupListingView,
   PutConfigInput,
   AuditRunDetail,
   AuditRunList,
@@ -71,6 +72,10 @@ export const api = {
     request<RepoUpdatesView>('POST', '/api/repos/updates/webhook', { body: input }),
   removeRepoWebhook: (repo: string) =>
     request<void>('DELETE', '/api/repos/updates/webhook', { query: { repo } }),
+  groupListing: (group: string) =>
+    request<GroupListingView>('GET', `/api/repos/updates/groups/${id(group)}`),
+  listGroup: (group: string) =>
+    request<GroupListingView>('POST', `/api/repos/updates/groups/${id(group)}/list`),
 
   auditRuns: (query: { repo?: RepoRef; limit?: number; before?: string }) =>
     request<AuditRunList>('GET', '/api/audit-runs', {

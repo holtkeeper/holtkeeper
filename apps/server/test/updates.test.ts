@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { RepoUpdatesView } from '@holtkeeper/api'
+import type { GroupListingView, RepoUpdatesView } from '@holtkeeper/api'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -25,9 +25,14 @@ let mergeRequests: MergeRequestRecord[]
 let registered: WebhookSpec[]
 let removed: string[]
 let now: Date
+let visible: boolean
 
 const fakeForge = {
   kind: 'gitlab',
+  getRepository: async (path: string) => {
+    if (!visible) throw new Error('404 Project Not Found')
+    return { path, name: path, defaultBranch: 'main', webUrl: '', cloneUrl: '', archived: false }
+  },
   listMergeRequests: async () => mergeRequests,
   listPipelines: async () => [],
   listTags: async () => [],
@@ -107,6 +112,7 @@ beforeEach(() => {
   registered = []
   removed = []
   now = new Date('2026-10-30T12:00:00.000Z')
+  visible = true
 })
 
 describe('repository webhook', () => {
@@ -188,5 +194,36 @@ describe('polling', () => {
     expect(jobs).toMatchObject([
       { analyzer: 'review', ref: NEXT, trigger: 'poll', options: { mergeRequest: 7 } },
     ])
+    const view = (await (
+      await createApp(serverDeps).request('/api/repos/updates?repo=work:games/a')
+    ).json()) as RepoUpdatesView
+    expect(view.polling.attempts.map((a) => [a.trigger, a.events, a.enqueued])).toEqual([
+      ['scheduled', 1, 1],
+      ['scheduled', 0, 0],
+    ])
+  })
+
+  test('a group can be listed again by hand, and its attempts are kept', async () => {
+    visible = false
+    const app = createApp(deps())
+    const failed = (await (
+      await app.request('/api/repos/updates/groups/games/list', { method: 'POST' })
+    ).json()) as GroupListingView
+    expect(failed.repos).toEqual([])
+    expect(failed.attempts[0]).toMatchObject({ trigger: 'manual', error: '404 Project Not Found' })
+
+    visible = true
+    now = new Date(now.getTime() + 1000)
+    const listed = (await (
+      await app.request('/api/repos/updates/groups/games/list', { method: 'POST' })
+    ).json()) as GroupListingView
+    expect(listed.repos).toEqual([{ forge: 'work', path: 'games/a' }])
+    expect(listed.attempts.map((a) => a.repos ?? a.error)).toEqual([1, '404 Project Not Found'])
+
+    const shown = (await (
+      await app.request('/api/repos/updates/groups/games')
+    ).json()) as GroupListingView
+    expect(shown.listedAt).toBe(now.toISOString())
+    expect((await app.request('/api/repos/updates/groups/nope')).status).toBe(404)
   })
 })

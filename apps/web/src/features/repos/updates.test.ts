@@ -15,6 +15,7 @@ const view = (
     events: ['mergeRequests'],
     withWebhookMs: 3_600_000,
     key: 'forge:work',
+    attempts: [],
     ...polling,
   },
   viaWebhook,

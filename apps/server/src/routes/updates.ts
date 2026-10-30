@@ -1,4 +1,9 @@
-import type { RepoPollResult, RepoUpdatesView, RepoWebhookInput } from '@holtkeeper/api'
+import type {
+  GroupListingView,
+  RepoPollResult,
+  RepoUpdatesView,
+  RepoWebhookInput,
+} from '@holtkeeper/api'
 import type { RepoRef, WebhookEvent } from '@holtkeeper/forge'
 import type { RegisteredWebhook } from '@holtkeeper/store'
 import { Hono } from 'hono'
@@ -36,7 +41,9 @@ export interface UpdateRoutesOptions {
  * webhook state, `POST /repos/updates/poll` polls it now, `POST /repos/updates/webhook` issues or
  * rotates its webhook URL (optionally registering it on the forge) and `DELETE
  * /repos/updates/webhook?repo=` turns the URL off and removes hooks Holtkeeper registered.
- * Reading needs `settings:read` on the repository, the rest `settings:write`; the webhook URL is
+ * `GET /repos/updates/groups/:group` shows the repositories polling knows for a group and its
+ * recent listings; `POST /repos/updates/groups/:group/list` lists them on the forge now.
+ * Reading needs `settings:read` on the repository (or group), the rest `settings:write`; the webhook URL is
  * only shown to callers with `settings:write`. All answer 503 without a key-value store.
  */
 export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
@@ -81,6 +88,7 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
         ...(state.lastError && { lastError: state.lastError }),
         ...(state.lastEvents !== undefined && { lastEvents: state.lastEvents }),
         ...(state.lastRequests !== undefined && { lastRequests: state.lastRequests }),
+        attempts: state.attempts ?? [],
       },
       ...(status.webhookSeenAt && { webhookSeenAt: status.webhookSeenAt }),
       viaWebhook: status.viaWebhook,
@@ -139,6 +147,36 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
     const repo = repoOf(c.req.query('repo'))
     authorize(c, 'settings:read', target(repo))
     return c.json<RepoUpdatesView>(await view(c, repo, canWrite(c, repo)))
+  })
+
+  const groupOf = (c: AppContext, action: 'settings:read' | 'settings:write') => {
+    const group = c.req.param('group') ?? ''
+    const definition = deps.config.groups[group]
+    if (!definition) throw new HTTPException(404, { message: `group ${group} is not configured` })
+    authorize(c, action, { kind: 'scope', scope: { groups: [group] } })
+    return { group, forge: definition.forge }
+  }
+
+  const listingView = async (group: string, forge: string): Promise<GroupListingView> => {
+    const listing = await parts().poller.listing(group)
+    return {
+      group,
+      forge,
+      repos: listing?.repos ?? [],
+      ...(listing?.listedAt && { listedAt: listing.listedAt }),
+      attempts: listing?.attempts ?? [],
+    }
+  }
+
+  app.get('/repos/updates/groups/:group', async (c) => {
+    const { group, forge } = groupOf(c, 'settings:read')
+    return c.json<GroupListingView>(await listingView(group, forge))
+  })
+
+  app.post('/repos/updates/groups/:group/list', async (c) => {
+    const { group, forge } = groupOf(c, 'settings:write')
+    await parts().poller.listGroup(group)
+    return c.json<GroupListingView>(await listingView(group, forge))
   })
 
   app.post('/repos/updates/poll', async (c) => {

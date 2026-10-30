@@ -23,6 +23,7 @@ import {
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
+import { GroupListing } from './GroupListing.tsx'
 
 /** One group: its repositories and patterns, settings made for it and its knowledge. */
 export function GroupPage() {
@@ -61,6 +62,7 @@ export function GroupPage() {
               </Notice>
             )
           ) : null}
+          {can('settings:read') && definition ? <GroupListing group={groupId} /> : null}
           <Panel title="Known repositories" contentClassName="p-2">
             {members.length === 0 ? (
               <EmptyState

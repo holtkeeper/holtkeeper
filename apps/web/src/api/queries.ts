@@ -32,6 +32,7 @@ export const keys = {
   me: ['me'] as const,
   repos: ['repos'] as const,
   repoUpdates: (repo: RepoRef) => ['repos', 'updates', repoKey(repo)] as const,
+  groupListing: (group: string) => ['repos', 'updates', 'group', group] as const,
   auditRuns: (repo?: RepoRef, limit?: number) =>
     ['audit-runs', 'list', repo ? repoKey(repo) : '*', limit ?? 0] as const,
   auditRun: (runId: string) => ['audit-runs', 'detail', runId] as const,
@@ -200,6 +201,24 @@ export function useRepoUpdateMutations(repo: RepoRef) {
       onSuccess,
     }),
   }
+}
+
+/** The repositories polling knows for a group and its recent listings on the forge. */
+export const useGroupListing = (group: string, enabled = true) =>
+  useQuery({
+    queryKey: keys.groupListing(group),
+    queryFn: () => api.groupListing(group),
+    enabled,
+    refetchInterval: 30_000,
+  })
+
+/** Lists a group's repositories on its forge now. */
+export function useListGroup(group: string) {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.listGroup(group),
+    onSuccess: (listing) => client.setQueryData(keys.groupListing(group), listing),
+  })
 }
 
 export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: api.settings })
