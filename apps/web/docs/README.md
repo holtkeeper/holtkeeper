@@ -45,6 +45,7 @@ src/
     format.ts         relative dates, durations, expiry tone
     scope.ts          scope description, normalisation, pattern validation
     schema.ts         JSON Schema → setting editor kind
+    schema-form.ts    JSON Schema → form fields (objects, records, lists, variants, $ref)
     severity.ts, repo.ts, theme.ts
   ui/                 thin wrappers over HeroUI and shared visual pieces
   features/<area>/    one folder per page: shell, auth, dashboard, audits, repos, analyses,

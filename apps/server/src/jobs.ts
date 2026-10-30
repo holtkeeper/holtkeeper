@@ -74,6 +74,15 @@ export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] 
     description: `Options for the ${analyzer.kind} analyzer in this scope; unset options keep their defaults.`,
     section: 'Analyzers',
     schema: partialOptions(analyzer.options),
+    ...(analyzer.options instanceof z.ZodObject
+      ? {
+          form: z.object(
+            Object.fromEntries(
+              Object.entries(analyzer.options.shape).map(([key, field]) => [key, field.optional()]),
+            ),
+          ),
+        }
+      : {}),
   }))
 }
 

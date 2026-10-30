@@ -76,6 +76,7 @@ export function EntryDialog({
       <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
       <ValueEditor
         editor={editor}
+        schema={definition.schema}
         initial={value}
         onChange={setValue}
         label="Value"

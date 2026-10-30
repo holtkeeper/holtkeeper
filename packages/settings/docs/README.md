@@ -15,7 +15,7 @@ defineSetting({
 })
 ```
 
-Built in: `llm.provider` (the id or name of an AI provider credential, see [@holtkeeper/agent](../../agent/docs/README.md#providers); the legacy value `anthropic` means "Anthropic API with `llm.apiKey`"), `llm.model`, `llm.apiKey` (secret), `llm.models`, `agent.tools` (`context7`, `maxResultLines`, `knowledgeTokens`), `llm.budget` (see [@holtkeeper/ai-usage](../../ai-usage/docs/README.md)), `review.instructions`, `audit.fix`, `audit.upgrade`, `audit.allowlist`. Plugins add their own; the server validates values against the schema and exposes it as JSON Schema so the UI can build forms.
+Built in: `llm.provider` (the id or name of an AI provider credential, see [@holtkeeper/agent](../../agent/docs/README.md#providers); the legacy value `anthropic` means "Anthropic API with `llm.apiKey`"), `llm.model`, `llm.apiKey` (secret), `llm.models`, `agent.tools` (`context7`, `maxResultLines`, `knowledgeTokens`), `llm.budget` (see [@holtkeeper/ai-usage](../../ai-usage/docs/README.md)), `review.instructions`, `audit.fix`, `audit.upgrade`, `audit.allowlist`. Plugins add their own; the server validates values against the schema and exposes it as JSON Schema so the UI can build forms. When `schema` cannot describe the shape (a refined record that checks fields one by one, like `analyzers.<kind>`), `form` gives the shape shown to editors instead.
 
 ## Resolution
 

@@ -28,6 +28,11 @@ describe('server jobs', () => {
     expect(setting?.schema.parse({ depth: 3 })).toEqual({ depth: 3 })
     expect(setting?.schema.safeParse({ mode: 'c' }).success).toBeFalse()
     expect(setting?.schema.safeParse({ nope: 1 }).success).toBeFalse()
+    expect(z.toJSONSchema(setting!.form!, { io: 'input' })).toMatchObject({
+      type: 'object',
+      properties: { depth: { default: 1 }, mode: { enum: ['a', 'b'], default: 'a' } },
+    })
+    expect(z.toJSONSchema(setting!.form!, { io: 'input' })).not.toHaveProperty('required')
   })
 
   test('scopedAnalyzerOptions picks the most specific setting for the job', async () => {

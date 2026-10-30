@@ -1,3 +1,5 @@
+import { initialValue } from './schema-form.ts'
+
 /** Which editor a setting value gets, derived from its JSON Schema. */
 export type EditorKind =
   | { kind: 'secret' }
@@ -54,7 +56,7 @@ export function defaultValue(schema: unknown): unknown {
       case 'string':
         return ''
       default:
-        return schema.type === 'array' ? [] : schema.type === 'object' ? {} : null
+        return initialValue(schema, schema)
     }
   }
   return null

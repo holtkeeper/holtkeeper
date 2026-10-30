@@ -44,7 +44,10 @@ export function settingRoutes(deps: ServerDeps) {
     description: definition.description,
     section: definition.section,
     secret: definition.secret ?? false,
-    schema: z.toJSONSchema(definition.schema, { unrepresentable: 'any' }),
+    schema: z.toJSONSchema(definition.form ?? definition.schema, {
+      unrepresentable: 'any',
+      io: 'input',
+    }),
   }))
   const app = new Hono<Env>()
 

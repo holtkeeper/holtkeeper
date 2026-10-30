@@ -9,6 +9,11 @@ export interface SettingDefinition<Schema extends z.ZodType = z.ZodType> {
   /** Section in the UI, e.g. `AI`, `Audit`. */
   section: string
   schema: Schema
+  /**
+   * Shape described to editors as JSON Schema when `schema` cannot carry it, e.g. a refined record
+   * that checks fields one by one. Defaults to `schema`.
+   */
+  form?: z.ZodType
   /** Secret values are sealed in storage and never sent back to clients. */
   secret?: boolean
 }
@@ -28,7 +33,8 @@ export const llmProvider = defineSetting({
 export const llmModel = defineSetting({
   key: 'llm.model',
   label: 'Model',
-  description: 'Model id, e.g. claude-opus-5-5 or claude-sonnet-5-5.',
+  description:
+    'Model id, e.g. claude-opus-5-5, or <prefix>@latest (claude-opus@latest) for the newest version the provider lists.',
   section: 'AI',
   schema: z.string().min(1),
 })

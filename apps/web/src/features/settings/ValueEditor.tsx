@@ -1,31 +1,31 @@
 import { useState } from 'react'
 
-import { type EditorKind, parseJson } from '../../lib/schema.ts'
+import type { EditorKind } from '../../lib/schema.ts'
 import { Select, Switch, TextField } from '../../ui/index.ts'
+import { StructuredEditor } from './SchemaField.tsx'
 
 /**
  * Edits one setting value with the editor its schema calls for. Reports `undefined` through
- * `onChange` while the input cannot be turned into a value (invalid JSON, empty secret).
+ * `onChange` while the input cannot be turned into a value (invalid field, invalid JSON, empty
+ * secret).
  */
 export function ValueEditor({
   editor,
+  schema,
   initial,
   onChange,
   label,
   hasStoredSecret,
 }: {
   editor: EditorKind
+  schema: unknown
   initial: unknown
   onChange: (value: unknown) => void
   label: string
   hasStoredSecret?: boolean
 }) {
   const [text, setText] = useState(() =>
-    editor.kind === 'json'
-      ? JSON.stringify(initial ?? null, null, 2)
-      : typeof initial === 'string' || typeof initial === 'number'
-        ? String(initial)
-        : '',
+    typeof initial === 'string' || typeof initial === 'number' ? String(initial) : '',
   )
   const [error, setError] = useState<string>()
 
@@ -92,21 +92,7 @@ export function ValueEditor({
       )
     default:
       return (
-        <TextField
-          label={label}
-          multiline
-          rows={10}
-          mono
-          value={text}
-          error={error}
-          description="JSON. Arrays like the allowlist are edited here as a whole."
-          onChange={(value) => {
-            setText(value)
-            const result = parseJson(value)
-            setError(result.ok ? undefined : result.error)
-            onChange(result.ok ? result.value : undefined)
-          }}
-        />
+        <StructuredEditor schema={schema} initial={initial} onChange={onChange} label={label} />
       )
   }
 }
