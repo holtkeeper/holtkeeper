@@ -256,7 +256,7 @@ Jobs use the key through `gitKeyFor` (see [@holtkeeper/jobs](../../../packages/j
 
 ### Egress rules
 
-`GET /api/egress/rules` serves `EgressRulesResponse` to an egress proxy (such as [docker/egress-proxy](../../../docker/egress-proxy/README.md)) that sends `Authorization: Bearer <server.egress.secret>`; without `server.egress` it answers 404, with a wrong secret 401, and no session or MCP token grants it. Every panel GitLab forge with `packages` on (the "Packages for jobs" switch) gives one rule: `GET`/`HEAD` to its package registries (`gitlabPackageRegistry`) get `Authorization: Bearer <token>` with its credential's current token, read with `reveal` on every request, so rotations reach the proxy on its next read. Forges whose credential cannot be read are left out and logged. The response is `no-store`.
+`GET /api/egress/rules` serves `EgressRulesResponse` to an egress proxy (such as [docker/egress-proxy](../../../docker/egress-proxy/README.md)) that sends `Authorization: Bearer <server.egress.secret>`; without `server.egress` it answers 404, with a wrong secret 401, and no session or MCP token grants it. Every panel GitLab forge gives one rule unless its document has `packages: false` (the "Packages for jobs" switch, on by default): `GET`/`HEAD` to its package registries (`gitlabPackageRegistry`) get `Authorization: Bearer <token>` with its credential's current token, read with `reveal` on every request, so rotations reach the proxy on its next read. Forges whose credential cannot be read are left out and logged. The response is `no-store`.
 
 ### Read-only repositories
 

@@ -14,7 +14,8 @@ const sameSecret = (given: string, expected: string) =>
   timingSafeEqual(digest(given), digest(expected))
 
 /**
- * Egress proxy rules from the panel forges with `packages` on: GET and HEAD requests to their
+ * Egress proxy rules from the panel GitLab forges (all but those with `packages: false`): GET and
+ * HEAD requests to their
  * package registries get `Authorization: Bearer <token>` with the forge credential's current token.
  * Forges whose credential cannot be read are left out.
  */
@@ -25,7 +26,7 @@ async function egressRules(
   const forges = (await deps.store.config?.list('forge')) ?? []
   const rules: EgressRule[] = []
   for (const forge of forges) {
-    if (!forge.data.packages || forge.data.kind !== 'gitlab') continue
+    if (forge.data.packages === false || forge.data.kind !== 'gitlab') continue
     try {
       const token = await deps.credentials.reveal(forge.data.credentialId)
       rules.push({

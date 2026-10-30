@@ -628,7 +628,7 @@ export interface ForgeDocumentData {
   kind: 'gitlab' | 'github'
   url: string
   credentialId: string
-  /** Jobs read this forge's package registries with its token, through the egress proxy. */
+  /** Jobs read this forge's package registries with its token, through the egress proxy. Default on. */
   packages?: boolean
   webhook?: ForgeWebhook
   sshKey?: ForgeSshKey

@@ -11,7 +11,7 @@ describe('forge form', () => {
     })
     expect(
       validateForgeDraft(
-        { id: 'work', url: 'ssh://gitlab.test', credentialId: 'c1', packages: false },
+        { id: 'work', url: 'ssh://gitlab.test', credentialId: 'c1', packages: true },
         ['work'],
       ),
     ).toEqual({ id: 'A forge with this id exists', url: 'An http(s) URL' })
@@ -32,15 +32,16 @@ describe('forge form', () => {
     })
   })
 
-  test('sends packages only when on', () => {
+  test('packages are on by default and sent only when turned off', () => {
+    expect(toForgeDraft().packages).toBe(true)
     const draft = toForgeDraft({
       type: 'forge',
       id: 'work',
       provenance: 'panel',
-      data: { kind: 'gitlab', url: 'https://gitlab.test', credentialId: 'c1', packages: true },
+      data: { kind: 'gitlab', url: 'https://gitlab.test', credentialId: 'c1', packages: false },
     })
-    expect(draft.packages).toBe(true)
-    expect(toForgeInput(draft).packages).toBe(true)
-    expect(toForgeInput({ ...draft, packages: false })).not.toHaveProperty('packages')
+    expect(draft.packages).toBe(false)
+    expect(toForgeInput(draft).packages).toBe(false)
+    expect(toForgeInput({ ...draft, packages: true })).not.toHaveProperty('packages')
   })
 })

@@ -108,7 +108,7 @@ Failures are `GitLabApiError` with `status` and a message like `GitLab POST /api
 
 ### Package registries
 
-`gitlabPackageRegistry(url)` returns `{ host, paths }`: the host of the instance and a regular expression for its package registry endpoints (`/api/v4/packages/…`, `/api/v4/groups/:id/-/packages/…`, `/api/v4/projects/:id/packages/…`; npm, Maven, PyPI, generic and the rest), keeping an instance's sub-path. The server builds egress proxy rules from it for forges with "Packages for jobs" on, so a GitLab token reads packages for jobs without them seeing it. GitLab accepts personal, group and project access tokens there as `Authorization: Bearer`.
+`gitlabPackageRegistry(url)` returns `{ host, paths }`: the host of the instance and a regular expression for its package registry endpoints (`/api/v4/packages/…`, `/api/v4/groups/:id/-/packages/…`, `/api/v4/projects/:id/packages/…`; npm, Maven, PyPI, generic and the rest), keeping an instance's sub-path. The server builds egress proxy rules from it for panel forges ("Packages for jobs", on by default), so a GitLab token reads packages for jobs without them seeing it. GitLab accepts personal, group and project access tokens there as `Authorization: Bearer`.
 
 ## Token rotation
 

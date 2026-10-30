@@ -118,7 +118,7 @@ export function ForgesSection() {
                         {forge.id}
                         <Chip variant="secondary">{forge.data.kind}</Chip>
                         {panel ? null : <Chip>config file</Chip>}
-                        {forge.data.packages ? <Chip>packages for jobs</Chip> : null}
+                        {forge.data.packages === false ? <Chip>no packages for jobs</Chip> : null}
                       </div>
                       <div className="truncate font-mono text-xs text-muted">
                         {forge.data.url}

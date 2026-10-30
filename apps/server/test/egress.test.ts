@@ -36,7 +36,12 @@ const putForge = (id: string, url: string, packages?: boolean) =>
     type: 'forge',
     id,
     updatedAt: '2026-10-30T12:00:00.000Z',
-    data: { kind: 'gitlab', url, credentialId: tokenId, ...(packages && { packages }) },
+    data: {
+      kind: 'gitlab',
+      url,
+      credentialId: tokenId,
+      ...(packages !== undefined && { packages }),
+    },
   })
 
 const rules = (app: ReturnType<typeof appWith>, authorization?: string) =>
@@ -59,8 +64,8 @@ beforeEach(async () => {
       'root',
     )
   ).id
-  await putForge('cloud', 'https://gitlab.com', true)
-  await putForge('other', 'https://other.test')
+  await putForge('cloud', 'https://gitlab.com')
+  await putForge('other', 'https://other.test', false)
 })
 
 describe('egress rules', () => {
@@ -75,7 +80,7 @@ describe('egress rules', () => {
     expect((await rules(app, `Bearer ${secret}`)).status).toBe(200)
   })
 
-  test('covers forges with packages on, with the current token', async () => {
+  test('covers GitLab forges unless packages are off, with the current token', async () => {
     const app = appWith({ egress: { secret } })
     const response = await rules(app, `Bearer ${secret}`)
     expect(response.headers.get('cache-control')).toBe('no-store')

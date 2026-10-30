@@ -6,7 +6,7 @@ Holtkeeper does not depend on it: `jobs.execution.egress` (`EgressProxy` of [`@h
 
 ## Rules
 
-Rules come from a JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`, used when it exists), from a URL (`EGRESS_RULES_URL`), or both, file rules first. Holtkeeper serves such a URL at `GET /api/egress/rules` for forges with "Packages for jobs" on, carrying each forge credential's current token ([server docs](../../apps/server/docs/README.md#egress-rules)). The document looks the same either way:
+Rules come from a JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`, used when it exists), from a URL (`EGRESS_RULES_URL`), or both, file rules first. Holtkeeper serves such a URL at `GET /api/egress/rules` for panel GitLab forges ("Packages for jobs", on by default), carrying each forge credential's current token ([server docs](../../apps/server/docs/README.md#egress-rules)). The document looks the same either way:
 
 ```json
 {

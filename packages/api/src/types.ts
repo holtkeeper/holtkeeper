@@ -568,7 +568,7 @@ export interface EgressRule {
 
 /**
  * `GET /api/egress/rules` with `Authorization: Bearer <server.egress.secret>`: the rules for the
- * panel forges with `packages` on, carrying their credential's current token. Never cache it longer
+ * panel GitLab forges (all but those with `packages: false`), carrying their credential's current token. Never cache it longer
  * than a minute: rotation revokes the previous token at once.
  */
 export interface EgressRulesResponse {
@@ -854,7 +854,7 @@ export interface ForgeConfigView {
   url: string
   /** Panel forges only. */
   credentialId?: string
-  /** Jobs read its package registries with its token, through the egress proxy. */
+  /** Panel forges: jobs read its package registries with its token, through the egress proxy. */
   packages?: boolean
   webhook?: {
     /** Where the forge sends events: `${publicUrl}/api/webhooks/<forgeId>`. */

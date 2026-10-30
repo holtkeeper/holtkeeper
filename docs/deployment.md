@@ -142,7 +142,7 @@ egressProxy:
     certManager: true # or existingSecret: a kubernetes.io/tls Secret with the CA
 ```
 
-With `forgeRules` (the default) the proxy reads its rules from the web pods (`GET /api/egress/rules`, authenticated with `HOLTKEEPER_EGRESS_SECRET` from the top-level `existingSecret`, which the bundled config also turns into `server.egress`). Turn on **Packages for jobs** on a forge in the panel, and its token, the same credential the forge uses, is added to downloads from that forge's package registries, always the current one after a rotation. Static `rules` can be added for other registries:
+With `forgeRules` (the default) the proxy reads its rules from the web pods (`GET /api/egress/rules`, authenticated with `HOLTKEEPER_EGRESS_SECRET` from the top-level `existingSecret`, which the bundled config also turns into `server.egress`). Every panel GitLab forge then has its token, the same credential the forge uses, added to downloads from its package registries, always the current one after a rotation; the forge's **Packages for jobs** switch turns that off. Static `rules` can be added for other registries:
 
 ```yaml
 egressProxy:
