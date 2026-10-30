@@ -3,6 +3,7 @@
 **/node_modules
 **/dist
 **/coverage
+!packages/coverage
 **/*.log
 **/.DS_Store
 **/*.db
