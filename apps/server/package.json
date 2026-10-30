@@ -45,6 +45,7 @@
   },
   "devDependencies": {
     "@holtkeeper/auth-header": "workspace:*",
-    "@holtkeeper/auth-none": "workspace:*"
+    "@holtkeeper/auth-none": "workspace:*",
+    "ai": "^7.0.157"
   }
 }

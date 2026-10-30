@@ -51,3 +51,7 @@ export const putSettingSchema = z.object({
   scope: scopeSchema,
   value: z.unknown(),
 })
+
+export const credentialTestSchema = z
+  .object({ model: z.string().trim().min(1).optional() })
+  .default({})

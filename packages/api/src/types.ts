@@ -177,8 +177,51 @@ export interface ProviderModelView {
     cacheReadPerMTok?: number
     cacheWritePerMTok?: number
   }
-  /** `provider`: listed by the provider's API; `config`: only named in the credential's options. */
-  source: 'provider' | 'config'
+  /** Whether the model calls tools, when the catalog says; agents need it. */
+  toolCall?: boolean
+  contextWindow?: number
+  /**
+   * `provider`: listed by the provider's API; `catalog`: from the AI catalog; `config`: only named in
+   * the credential's options.
+   */
+  source: 'provider' | 'catalog' | 'config'
+}
+
+/** A provider of the AI catalog (models.dev) that `ai-sdk` credentials can use. */
+export interface AiCatalogProviderView {
+  id: string
+  name: string
+  /** AI SDK package Holtkeeper talks to it with. */
+  package: string
+  /** API root of OpenAI-compatible providers. */
+  api?: string
+  doc?: string
+  /** Environment variables its key usually lives in, e.g. `OPENROUTER_API_KEY`. */
+  env: string[]
+  /** Models that call tools, which agents can use. */
+  toolModels: number
+}
+
+/** `GET /api/ai/providers` — `error` when the catalog could not be loaded. */
+export interface AiCatalogProviderList {
+  providers: AiCatalogProviderView[]
+  /** AI SDK packages a provider of your own can use. */
+  packages: string[]
+  error?: string
+}
+
+/** `POST /api/credentials/:id/test` — asks an `ai-sdk` provider's model for a one-word reply. */
+export interface CredentialTestInput {
+  /** Default: the credential's `model` option. */
+  model?: string
+}
+
+export interface CredentialTestResult {
+  ok: boolean
+  model: string
+  reply?: string
+  latencyMs?: number
+  error?: string
 }
 
 /** `GET /api/credentials/:id/models` — `error` when the provider's API could not be asked. */

@@ -1,5 +1,6 @@
 import type { Action, Principal, RepoTarget, Target } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
+import type { AiCatalog, LanguageModelFactory } from '@holtkeeper/agent'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
@@ -48,6 +49,10 @@ export interface ServerDeps {
   artifacts?: ArtifactStore
   /** Image engine of the media routes. Default: `@holtkeeper/media`, loaded on first use. */
   media?: MediaEngine
+  /** Provider and model catalog of `ai-sdk` credentials; catalog routes answer an error without it. */
+  aiCatalog?: AiCatalog
+  /** Replaces the AI SDK models of `ai-sdk` credential tests; for tests. */
+  languageModel?: LanguageModelFactory
   /** Areas the storage overview reports, e.g. artifacts, git mirrors, the database. */
   storage?: StorageProvider[]
   now: () => Date

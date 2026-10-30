@@ -1,5 +1,6 @@
 import type {
   ActivityList,
+  AiCatalogProviderList,
   AnalysisDetail,
   AnalysisKindList,
   AnalysisList,
@@ -9,6 +10,8 @@ import type {
   AuditRunList,
   CreateCredentialInput,
   CredentialList,
+  CredentialTestInput,
+  CredentialTestResult,
   CredentialView,
   InviteUserInput,
   LinkInfo,
@@ -83,6 +86,13 @@ export const api = {
     request<CredentialView>('POST', `/api/credentials/${id(credentialId)}/rotate`),
   credentialModels: (credentialId: string) =>
     request<ProviderModelList>('GET', `/api/credentials/${id(credentialId)}/models`),
+  testCredential: (credentialId: string, model?: string) =>
+    request<CredentialTestResult>('POST', `/api/credentials/${id(credentialId)}/test`, {
+      body: (model ? { model } : {}) satisfies CredentialTestInput,
+    }),
+  aiProviders: () => request<AiCatalogProviderList>('GET', '/api/ai/providers'),
+  aiProviderModels: (providerId: string) =>
+    request<ProviderModelList>('GET', `/api/ai/providers/${id(providerId)}/models`),
 
   settings: () => request<SettingList>('GET', '/api/settings'),
   putSetting: (input: PutSettingInput) =>

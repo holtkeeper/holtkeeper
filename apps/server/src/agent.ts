@@ -5,9 +5,12 @@ import {
   type AgentResult,
   type AgentTask,
   type ConcurrencyLimiter,
+  type AiCatalog,
   type AiProvider,
   type CreateAgentOptions,
   type ModelCatalog,
+  type ModelListing,
+  type ModelPricing,
   type ProviderAgent,
   type Toolset,
   createAgent,
@@ -245,6 +248,14 @@ export interface SettingsAgentOptions {
   rateLimiter?: Limiter
   /** Listings that `@latest` model references resolve against. Default: `modelCatalog()`. */
   models?: ModelCatalog
+  /** Models and prices of `ai-sdk` providers, for `@latest` and cost. */
+  aiCatalog?: AiCatalog
+}
+
+/** Prices of the listed models that have them, by model id; `undefined` when none do. */
+function pricingOf(listing: ModelListing): Record<string, ModelPricing> | undefined {
+  const priced = listing.models.flatMap((m) => (m.pricing ? [[m.id, m.pricing] as const] : []))
+  return priced.length ? Object.fromEntries(priced) : undefined
 }
 
 /** What a caller may tell `settingsAgentFor` about the job an agent is for. */
@@ -269,7 +280,8 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
   const now = options.now ?? (() => new Date())
   const log = options.log ?? (() => {})
   const limiters = new Map<string, ConcurrencyLimiter>()
-  const catalog = options.models ?? modelCatalog()
+  const catalog =
+    options.models ?? modelCatalog(options.aiCatalog ? { catalog: options.aiCatalog } : {})
   const routingFor = async (key: string, provider: AiProvider, routing: CreateAgentOptions) => ({
     ...routing,
     ...(await resolveProviderRouting(provider, routing, () => catalog.list(key, provider))),
@@ -327,9 +339,13 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         secret: await vault.open(credential.secret),
         ...(credential.options && { options: credential.options }),
       }
+      const key = `${credential.id}:${credential.updatedAt}`
+      const pricing =
+        credential.kind === 'ai-sdk' ? pricingOf(await catalog.list(key, aiProvider)) : undefined
       agent = createAgent(aiProvider, {
-        ...(await routingFor(`${credential.id}:${credential.updatedAt}`, aiProvider, routing)),
+        ...(await routingFor(key, aiProvider, routing)),
         ...(limiter && { limiter }),
+        ...(pricing && { pricing }),
       })
     } catch (error) {
       log(

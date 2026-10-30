@@ -1,3 +1,5 @@
+export * from './ai-sdk.ts'
+export * from './catalog.ts'
 export * from './claude.ts'
 export * from './factory.ts'
 export * from './local-tools.ts'

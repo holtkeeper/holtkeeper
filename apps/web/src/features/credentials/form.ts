@@ -14,10 +14,36 @@ export const aiProviderKinds: readonly string[] = [
   'bedrock',
   'vertex',
   'openai-compatible',
+  'ai-sdk',
 ]
 
 /** Credential kinds the UI offers; anything else is stored as `other`. */
-export const credentialKinds = ['gitlab', 'github', 'anthropic', 'other'] as const
+export const credentialKinds = ['gitlab', 'github', 'ai-sdk', 'anthropic', 'other'] as const
+
+/** Package for providers of your own and catalog providers without a package of their own. */
+export const OPENAI_COMPATIBLE = '@ai-sdk/openai-compatible'
+
+/** AI provider part of the form (kind `ai-sdk`). */
+export interface AiDraft {
+  /** Catalog provider id, or a name of your own. */
+  provider: string
+  /** Whether `provider` is not from the catalog. */
+  custom: boolean
+  package: string
+  baseUrl: string
+  model: string
+  /** Every other option as JSON: headers, settings, models, modelMap, pricing, limits. */
+  advanced: string
+}
+
+const emptyAi: AiDraft = {
+  provider: '',
+  custom: false,
+  package: OPENAI_COMPATIBLE,
+  baseUrl: '',
+  model: '',
+  advanced: '',
+}
 
 /** Editable state of the credential form. Numbers stay strings until submit. */
 export interface CredentialDraft {
@@ -30,6 +56,7 @@ export interface CredentialDraft {
   rotation: boolean
   daysBefore: string
   lifetimeDays: string
+  ai: AiDraft
 }
 
 const defaultUrls: Record<string, string> = {
@@ -40,6 +67,35 @@ const defaultUrls: Record<string, string> = {
 
 /** Default URL for a kind, or empty for `other`. */
 export const defaultUrl = (kind: string): string => defaultUrls[kind] ?? ''
+
+const text = (value: unknown) => (typeof value === 'string' ? value : '')
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+function aiDraftOf(options: Record<string, unknown> | undefined): AiDraft {
+  if (!options) return emptyAi
+  const { provider, package: pkg, baseUrl, model, ...rest } = options
+  return {
+    provider: text(provider),
+    custom: false,
+    package: text(pkg) || OPENAI_COMPATIBLE,
+    baseUrl: text(baseUrl),
+    model: text(model),
+    advanced: Object.keys(rest).length ? JSON.stringify(rest, null, 2) : '',
+  }
+}
+
+/** Parses the advanced options; `undefined` when they are not a JSON object. */
+function parseAdvanced(advanced: string): Record<string, unknown> | undefined {
+  if (!advanced.trim()) return {}
+  try {
+    const value: unknown = JSON.parse(advanced)
+    return isRecord(value) ? value : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /** Form state for a new credential or an existing one (its secret is never known). */
 export function toDraft(credential?: CredentialView): CredentialDraft {
@@ -53,22 +109,51 @@ export function toDraft(credential?: CredentialView): CredentialDraft {
     rotation: credential?.rotation?.enabled ?? false,
     daysBefore: String(credential?.rotation?.daysBefore ?? 14),
     lifetimeDays: String(credential?.rotation?.lifetimeDays ?? 90),
+    ai: credential?.kind === 'ai-sdk' ? aiDraftOf(credential.options) : emptyAi,
   }
 }
 
-/** Field errors of a draft; empty when it can be submitted. */
-export function validateDraft(
-  draft: CredentialDraft,
-  isNew: boolean,
-): Partial<Record<keyof CredentialDraft, string>> {
-  const errors: Partial<Record<keyof CredentialDraft, string>> = {}
-  if (!draft.name.trim()) errors.name = 'Name is required'
+const isHttpUrl = (value: string) => {
   try {
-    const url = new URL(draft.url)
-    if (url.protocol !== 'https:' && url.protocol !== 'http:')
-      errors.url = 'Use an http or https URL'
+    return ['http:', 'https:'].includes(new URL(value).protocol)
   } catch {
-    errors.url = 'Enter a full URL, e.g. https://gitlab.example.com'
+    return false
+  }
+}
+
+/** The credential URL of an AI provider: its base URL, else the catalog's API or docs. */
+const endpointOf = (draft: CredentialDraft) =>
+  draft.ai.baseUrl.trim() || draft.url.trim() || 'https://models.dev'
+
+function validateAi(ai: AiDraft): DraftErrors {
+  const errors: DraftErrors = {}
+  if (!ai.provider.trim()) errors.provider = ai.custom ? 'Name the provider' : 'Choose a provider'
+  if (ai.baseUrl.trim() && !isHttpUrl(ai.baseUrl.trim()))
+    errors.baseUrl = 'Use an http or https URL'
+  else if (ai.custom && ai.package === OPENAI_COMPATIBLE && !ai.baseUrl.trim())
+    errors.baseUrl = 'An OpenAI-compatible provider needs its base URL'
+  if (!parseAdvanced(ai.advanced)) errors.advanced = 'Advanced options must be a JSON object'
+  return errors
+}
+
+/** Field errors of a draft by field; AI provider fields have their own keys. */
+export type DraftErrors = Partial<
+  Record<keyof CredentialDraft | 'provider' | 'baseUrl' | 'advanced', string>
+>
+
+/** Field errors of a draft; empty when it can be submitted. */
+export function validateDraft(draft: CredentialDraft, isNew: boolean): DraftErrors {
+  const errors: DraftErrors = {}
+  if (!draft.name.trim()) errors.name = 'Name is required'
+  if (draft.kind === 'ai-sdk') Object.assign(errors, validateAi(draft.ai))
+  else {
+    try {
+      const url = new URL(draft.url)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:')
+        errors.url = 'Use an http or https URL'
+    } catch {
+      errors.url = 'Enter a full URL, e.g. https://gitlab.example.com'
+    }
   }
   if (isNew && !draft.secret) errors.secret = 'Secret is required'
   if (isEmptyScope(draft.scope)) errors.scope = 'Choose at least one group or repository pattern'
@@ -83,12 +168,25 @@ export function validateDraft(
   return errors
 }
 
+/** `options` of an AI provider credential. */
+function aiOptions(ai: AiDraft): Record<string, unknown> {
+  return {
+    ...parseAdvanced(ai.advanced),
+    provider: ai.provider.trim(),
+    package: ai.package,
+    ...(ai.baseUrl.trim() && { baseUrl: ai.baseUrl.trim() }),
+    ...(ai.model.trim() && { model: ai.model.trim() }),
+  }
+}
+
 /** Request body for `POST /api/credentials`. */
 export function toCreateInput(draft: CredentialDraft): CreateCredentialInput {
+  const ai = draft.kind === 'ai-sdk'
   return {
     name: draft.name.trim(),
     kind: draft.kind,
-    url: draft.url.trim(),
+    url: ai ? endpointOf(draft) : draft.url.trim(),
+    ...(ai && { options: aiOptions(draft.ai) }),
     scope: normalizeScope(draft.scope),
     secret: draft.secret,
     ...(draft.expires ? { expiresAt: `${draft.expires}T00:00:00.000Z` } : {}),
@@ -104,4 +202,30 @@ export function toCreateInput(draft: CredentialDraft): CreateCredentialInput {
 export function toUpdateInput(draft: CredentialDraft): UpdateCredentialInput {
   const { secret, ...input } = toCreateInput(draft)
   return secret ? { ...input, secret } : input
+}
+
+/** Catalog providers whose name or id contains `query`, best matches (name prefix) first. */
+export function filterProviders<P extends { id: string; name: string }>(
+  providers: readonly P[],
+  query: string,
+): P[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...providers]
+  return providers
+    .filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q))
+    .toSorted(
+      (a, b) =>
+        Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)),
+    )
+}
+
+/** Models agents can use (they call tools), newest first. */
+export function agentModels<M extends { id: string; toolCall?: boolean; createdAt?: string }>(
+  models: readonly M[],
+): M[] {
+  return models
+    .filter((m) => m.toolCall !== false)
+    .toSorted(
+      (a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || a.id.localeCompare(b.id),
+    )
 }

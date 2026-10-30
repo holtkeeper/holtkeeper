@@ -64,6 +64,7 @@ export function ModelsDialog({
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-xs">{model.id}</span>
                     {model.source === 'config' ? <Chip>configured</Chip> : null}
+                    {model.toolCall === false ? <Chip tone="warning">no tools</Chip> : null}
                   </span>
                   {model.name ? (
                     <span className="block text-xs text-muted">{model.name}</span>

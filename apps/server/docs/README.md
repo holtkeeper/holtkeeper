@@ -79,6 +79,8 @@ Everything a route needs comes through `ServerDeps`, so tests build the app with
 
 `GET /api/credentials/:id/models` (`credentials:read`) lists an AI provider credential's models with prices (`listProviderModels`, 15 s timeout); a provider API failure comes back as `error` next to the configured models.
 
+`ai-sdk` credentials (see [@holtkeeper/agent](../../../packages/agent/docs/README.md#ai-sdk-adapter)) use the models.dev catalog (`ServerOptions.aiCatalog`, default `modelsDevCatalog()`): `GET /api/ai/providers` lists the providers Holtkeeper can talk to and the AI SDK packages a provider of your own can use (any signed-in caller; a catalog that cannot load comes back as `error`), `GET /api/ai/providers/:id/models` one provider's models. Their credential models come from the catalog, catalog prices price their runs (a credential's `pricing` wins), and `POST /api/credentials/:id/test { model? }` (`credentials:write`) asks the model (default the credential's `model`) for a one-word reply: `CredentialTestResult { ok, model, reply?, latencyMs?, error? }`.
+
 The agent is wrapped by `withServerDefaults(agent, options)`, so every task gets:
 
 - toolsets `code` (`codeTools`), `docs` (`docsTools`, with the job's runner when the caller passes `{ runner }` as second argument of `agentFor`, else `runner`) and `knowledge` (`knowledgeTools(knowledgeAccess({ store }))` for the repository and the task's kind); a task toolset with the same name wins;

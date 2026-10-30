@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception'
 import { auditMiddleware } from './audit.ts'
 import { type Env, type ServerDeps, authorize, limitParam } from './context.ts'
 import { accountRoutes } from './routes/accounts.ts'
+import { aiCatalogRoutes } from './routes/ai-catalog.ts'
 import { aiRoutes } from './routes/ai.ts'
 import { analysisRoutes } from './routes/analyses.ts'
 import { artifactRoutes } from './routes/artifacts.ts'
@@ -75,6 +76,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', webhookRoutes(deps))
   api.route('/', configRoutes(deps))
   api.route('/', aiRoutes(deps))
+  api.route('/', aiCatalogRoutes(deps))
   api.route('/', artifactRoutes(deps))
   api.route('/', mediaRoutes(deps))
   api.route('/', storageRoutes(deps))

@@ -112,6 +112,30 @@ export const useCredentialModels = (credentialId: string) =>
     staleTime: 10 * 60_000,
   })
 
+/** Providers of the AI catalog, for `ai-sdk` credentials. */
+export const useAiProviders = (enabled = true) =>
+  useQuery({
+    queryKey: ['ai', 'providers'],
+    queryFn: api.aiProviders,
+    staleTime: 3_600_000,
+    enabled,
+  })
+
+/** Models of a catalog provider; idle without one. */
+export const useAiProviderModels = (providerId: string | undefined) =>
+  useQuery({
+    queryKey: ['ai', 'providers', providerId, 'models'],
+    queryFn: () => api.aiProviderModels(providerId ?? ''),
+    staleTime: 3_600_000,
+    enabled: providerId !== undefined,
+  })
+
+/** Asks an `ai-sdk` credential's model for a one-word reply. */
+export const useTestCredential = () =>
+  useMutation({
+    mutationFn: ({ id, model }: { id: string; model?: string }) => api.testCredential(id, model),
+  })
+
 /** Create, update, rotate and delete credentials; each refreshes the list. */
 export function useCredentialMutations() {
   const client = useQueryClient()

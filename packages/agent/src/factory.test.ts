@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { MockLanguageModelV4 } from 'ai/test'
 
 import type { ClaudeQuery } from './claude.ts'
-import { createAgent, limitConcurrency } from './factory.ts'
+import { createAgent, limitConcurrency, pingAiSdkProvider } from './factory.ts'
 import type { Agent, AgentResult } from './types.ts'
 
 async function failure(promise: Promise<unknown>): Promise<string> {
@@ -151,5 +152,94 @@ describe('limitConcurrency', () => {
     expect(await failure(second)).toContain('stop')
     release?.()
     expect((await first).text).toBe('ok')
+  })
+})
+
+const reply = (text: string) =>
+  new MockLanguageModelV4({
+    doGenerate: {
+      content: [{ type: 'text', text }],
+      finishReason: { unified: 'stop', raw: 'stop' },
+      usage: {
+        inputTokens: { total: 1_000_000, noCache: 1_000_000, cacheRead: 0, cacheWrite: 0 },
+        outputTokens: { total: 0, text: 0, reasoning: 0 },
+      },
+      warnings: [],
+    },
+  })
+
+describe('ai-sdk providers', () => {
+  test('routes models, merges catalog prices under the provider pricing and reports the model', async () => {
+    const ids: string[] = []
+    const agent = createAgent(
+      {
+        kind: 'ai-sdk',
+        url: 'https://openrouter.ai/api/v1',
+        secret: 'sk-or',
+        options: {
+          provider: 'openrouter',
+          package: '@openrouter/ai-sdk-provider',
+          model: 'openai/gpt-5',
+          models: { triage: 'openai/gpt-5-mini' },
+          pricing: { 'openai/gpt-5': { inputPerMTok: 2, outputPerMTok: 8 } },
+        },
+      },
+      {
+        pricing: {
+          'openai/gpt-5': { inputPerMTok: 99, outputPerMTok: 99 },
+          'openai/gpt-5-mini': { inputPerMTok: 0.5, outputPerMTok: 1 },
+        },
+        languageModel: (id) => {
+          ids.push(id)
+          return reply('ok')
+        },
+      },
+    )
+    expect(agent.provider).toBe('ai-sdk')
+    expect(agent.modelFor('triage')).toBe('openai/gpt-5-mini')
+    expect(agent.modelFor('review')).toBe('openai/gpt-5')
+    expect((await agent.run({ dir: '/tmp', prompt: 'p', capabilities: [] })).costUsd).toBe(2)
+    expect(
+      (await agent.run({ dir: '/tmp', prompt: 'p', capabilities: [], taskKind: 'triage' })).costUsd,
+    ).toBe(0.5)
+    expect(ids).toEqual(['openai/gpt-5', 'openai/gpt-5-mini'])
+  })
+
+  test('options are validated: shipped packages only, OpenAI-compatible by default', () => {
+    expect(() =>
+      createAgent({
+        kind: 'ai-sdk',
+        url: 'https://x.test',
+        secret: 's',
+        options: { provider: 'x', package: 'left-pad' },
+      }),
+    ).toThrow('options.package')
+    expect(() =>
+      createAgent({ kind: 'ai-sdk', url: 'https://x.test', secret: 's', options: {} }),
+    ).toThrow('options.provider')
+    expect(
+      createAgent({
+        kind: 'ai-sdk',
+        url: 'https://x.test',
+        secret: 's',
+        options: { provider: 'mine' },
+      }).provider,
+    ).toBe('ai-sdk')
+  })
+
+  test('ping asks the model for a short reply', async () => {
+    const provider = {
+      kind: 'ai-sdk',
+      url: 'https://x.test',
+      secret: 's',
+      options: { provider: 'mine' },
+    }
+    const result = await pingAiSdkProvider(provider, 'm', { languageModel: () => reply(' OK ') })
+    expect(result.text).toBe('OK')
+    expect(
+      await failure(
+        pingAiSdkProvider({ ...provider, kind: 'openai-compatible', options: {} }, 'm'),
+      ),
+    ).toContain('cannot be pinged')
   })
 })

@@ -1,12 +1,15 @@
-import type { CredentialView } from '@holtkeeper/api'
+import type { AiCatalogProviderView, CredentialView } from '@holtkeeper/api'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useCredentialMutations, useRepos } from '../../api/queries.ts'
 import { Button, Dialog, Notice, Select, Switch, TextField, notify } from '../../ui/index.ts'
 import { ScopeEditor } from '../access/ScopeEditor.tsx'
+import { AiProviderFields } from './AiProviderFields.tsx'
 import {
+  type AiDraft,
   type CredentialDraft,
+  type DraftErrors,
   credentialKinds,
   defaultUrl,
   toCreateInput,
@@ -31,7 +34,21 @@ export function CredentialDialog({
   const { create, update } = useCredentialMutations()
   const repos = useRepos()
   const groups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
-  const errors = submitted ? validateDraft(draft, isNew) : {}
+  const [keyHint, setKeyHint] = useState<string>()
+  const errors: DraftErrors = submitted ? validateDraft(draft, isNew) : {}
+  const ai = draft.kind === 'ai-sdk'
+  const setAi = (patch: Partial<AiDraft>) => setDraft((d) => ({ ...d, ai: { ...d.ai, ...patch } }))
+  const [autoName, setAutoName] = useState<string>()
+  const pick = (provider: AiCatalogProviderView | undefined) => {
+    const name = provider?.name ?? ''
+    setKeyHint(provider?.env[0])
+    setDraft((d) => ({
+      ...d,
+      name: !d.name.trim() || d.name === autoName ? name : d.name,
+      url: provider?.api ?? provider?.doc ?? '',
+    }))
+    setAutoName(name)
+  }
   const mutation = isNew ? create : update
   const set = <K extends keyof CredentialDraft>(key: K, value: CredentialDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }))
@@ -99,7 +116,9 @@ export function CredentialDialog({
                     ? 'GitHub'
                     : kind === 'anthropic'
                       ? 'Anthropic'
-                      : 'Other',
+                      : kind === 'ai-sdk'
+                        ? 'AI provider'
+                        : 'Other',
             }))}
             value={credentialKinds.some((kind) => kind === draft.kind) ? draft.kind : 'other'}
             onChange={(kind) =>
@@ -111,17 +130,21 @@ export function CredentialDialog({
             }
           />
         </div>
+        {ai ? (
+          <AiProviderFields ai={draft.ai} errors={errors} onChange={setAi} onPick={pick} />
+        ) : (
+          <TextField
+            label="URL"
+            type="url"
+            value={draft.url}
+            onChange={(v) => set('url', v)}
+            error={errors.url}
+            isRequired
+            mono
+          />
+        )}
         <TextField
-          label="URL"
-          type="url"
-          value={draft.url}
-          onChange={(v) => set('url', v)}
-          error={errors.url}
-          isRequired
-          mono
-        />
-        <TextField
-          label="Secret"
+          label={ai ? 'API key' : 'Secret'}
           type="password"
           value={draft.secret}
           onChange={(v) => set('secret', v)}
@@ -129,7 +152,13 @@ export function CredentialDialog({
           isRequired={isNew}
           autoComplete="new-password"
           mono
-          description={isNew ? 'Token or API key.' : 'Leave empty to keep the stored secret.'}
+          description={
+            !isNew
+              ? 'Leave empty to keep the stored secret.'
+              : ai
+                ? `The provider's key${keyHint ? ` (usually in ${keyHint})` : ''}; for Vertex or Bedrock optionally their credentials as JSON.`
+                : 'Token or API key.'
+          }
         />
         <TextField
           label="Expires"
@@ -147,35 +176,37 @@ export function CredentialDialog({
           />
           {errors.scope ? <span className="text-xs text-danger">{errors.scope}</span> : null}
         </div>
-        <fieldset className="flex flex-col gap-3 rounded-xl border border-separator p-3">
-          <legend className="px-1 text-sm font-medium">Rotation</legend>
-          <Switch
-            label="Rotate automatically"
-            isSelected={draft.rotation}
-            onChange={(on) => set('rotation', on)}
-            description="Supported for forge tokens that can issue their own replacement."
-          />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField
-              label="Days before expiry"
-              type="number"
-              min={1}
-              value={draft.daysBefore}
-              onChange={(v) => set('daysBefore', v)}
-              error={errors.daysBefore}
-              isDisabled={!draft.rotation}
+        {ai ? null : (
+          <fieldset className="flex flex-col gap-3 rounded-xl border border-separator p-3">
+            <legend className="px-1 text-sm font-medium">Rotation</legend>
+            <Switch
+              label="Rotate automatically"
+              isSelected={draft.rotation}
+              onChange={(on) => set('rotation', on)}
+              description="Supported for forge tokens that can issue their own replacement."
             />
-            <TextField
-              label="New token lifetime (days)"
-              type="number"
-              min={1}
-              value={draft.lifetimeDays}
-              onChange={(v) => set('lifetimeDays', v)}
-              error={errors.lifetimeDays}
-              isDisabled={!draft.rotation}
-            />
-          </div>
-        </fieldset>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                label="Days before expiry"
+                type="number"
+                min={1}
+                value={draft.daysBefore}
+                onChange={(v) => set('daysBefore', v)}
+                error={errors.daysBefore}
+                isDisabled={!draft.rotation}
+              />
+              <TextField
+                label="New token lifetime (days)"
+                type="number"
+                min={1}
+                value={draft.lifetimeDays}
+                onChange={(v) => set('lifetimeDays', v)}
+                error={errors.lifetimeDays}
+                isDisabled={!draft.rotation}
+              />
+            </div>
+          </fieldset>
+        )}
         <button type="submit" hidden />
       </form>
     </Dialog>

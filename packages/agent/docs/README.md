@@ -51,13 +51,14 @@ What a task gets:
 
 An AI provider is a credential (`@holtkeeper/credentials`) whose `kind` is one of `AI_PROVIDER_KINDS` and whose `options` hold the provider configuration. `createAgent({ kind, url, secret, options }, { runner?, model?, models?, maxTurns?, limiter? })` validates them with `providerOptionsSchema` (a zod discriminated union on `kind`; throws listing every problem) and returns a `ProviderAgent` (`Agent` plus `provider` kind and `modelFor(taskKind)`, the provider's model name after routing and `modelMap`). The endpoint is `options.baseUrl`, else the credential `url`.
 
-| `kind`                 | Runs on          | Secret                                                                                                  | Options                                                                             |
-| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `anthropic`            | Claude Agent SDK | API key                                                                                                 | `baseUrl?`                                                                          |
-| `anthropic-compatible` | Claude Agent SDK | gateway key or token                                                                                    | `baseUrl?`, `authHeader: 'x-api-key' \| 'bearer'` (default `x-api-key`), `headers?` |
-| `bedrock`              | Claude Agent SDK | with `credentials: 'secret'`: Bedrock API key or `{ accessKeyId, secretAccessKey, sessionToken? }` JSON | `region`, `baseUrl?`, `credentials: 'env' \| 'secret'` (default `env`)              |
-| `vertex`               | Claude Agent SDK | with `credentials: 'secret'`: service account key JSON                                                  | `region`, `projectId`, `baseUrl?`, `credentials` (default `env`)                    |
-| `openai-compatible`    | own tool loop    | API key (`Authorization: Bearer`)                                                                       | `baseUrl?`, `headers?`, `supportsTools` (must be `true`), `jsonMode?`               |
+| `kind`                 | Runs on          | Secret                                                                                                  | Options                                                                                          |
+| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `anthropic`            | Claude Agent SDK | API key                                                                                                 | `baseUrl?`                                                                                       |
+| `anthropic-compatible` | Claude Agent SDK | gateway key or token                                                                                    | `baseUrl?`, `authHeader: 'x-api-key' \| 'bearer'` (default `x-api-key`), `headers?`              |
+| `bedrock`              | Claude Agent SDK | with `credentials: 'secret'`: Bedrock API key or `{ accessKeyId, secretAccessKey, sessionToken? }` JSON | `region`, `baseUrl?`, `credentials: 'env' \| 'secret'` (default `env`)                           |
+| `vertex`               | Claude Agent SDK | with `credentials: 'secret'`: service account key JSON                                                  | `region`, `projectId`, `baseUrl?`, `credentials` (default `env`)                                 |
+| `openai-compatible`    | own tool loop    | API key (`Authorization: Bearer`)                                                                       | `baseUrl?`, `headers?`, `supportsTools` (must be `true`), `jsonMode?`                            |
+| `ai-sdk`               | Vercel AI SDK    | the provider's API key; for Vertex or Bedrock optionally their credentials as JSON                      | `provider`, `package` (default `@ai-sdk/openai-compatible`), `baseUrl?`, `headers?`, `settings?` |
 
 Common options: `model` and `models` (per task kind) as defaults that `createAgent`'s `model`/`models` override, `modelMap` (logical id → the provider's model name, e.g. `claude-opus-5-5` → `corp-opus`), `pricing` (`{ [model]: { inputPerMTok, outputPerMTok, cacheReadPerMTok?, cacheWritePerMTok? } }`, keyed by provider or logical name), `timeoutMs` (one model request) and `maxConcurrency` (runs at once; pass a shared `limiter` from `createLimiter` so every agent of one credential shares the slots). `{secret}` in a header value is replaced by the credential secret, so a gateway that wants the key in a custom header needs no secret in `options`. With `env` credentials the secret is unused; store any placeholder.
 
@@ -123,6 +124,33 @@ Requests go to `<url>/chat/completions`. A header named `Authorization` in `head
 - Every connection: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, so Claude Code strips provider credentials from Bash and other subprocesses; `API_TIMEOUT_MS` from `timeoutMs`; `ANTHROPIC_DEFAULT_HAIKU_MODEL` when `modelMap` maps `claude-haiku-5-5` (Claude Code's background model). Non-Anthropic connections also set `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
 - `modelMap` is applied to the routed model; when `pricing` has the task's model (provider or logical name), `costUsd` is computed from usage instead of taken from the SDK, whose price table does not know proxy model names.
 
+## AI SDK adapter
+
+The `ai-sdk` kind reaches any provider of the [Vercel AI SDK](https://ai-sdk.dev/docs/foundations/providers-and-models): OpenAI, Anthropic, Google, Vertex, Bedrock, Azure, Mistral, Groq, xAI, DeepSeek, Cohere, Together, Fireworks, Cerebras, DeepInfra, Perplexity, the Vercel AI Gateway, OpenRouter and Ollama ship as packages (`AI_SDK_PACKAGES`); every other OpenAI-compatible API, from the catalog or of your own, goes through `@ai-sdk/openai-compatible` with its base URL.
+
+```json
+{
+  "name": "OpenRouter",
+  "kind": "ai-sdk",
+  "url": "https://openrouter.ai/api/v1",
+  "secret": "<OPENROUTER_API_KEY>",
+  "scope": { "all": true },
+  "options": {
+    "provider": "openrouter",
+    "package": "@openrouter/ai-sdk-provider",
+    "model": "openai/gpt-5"
+  }
+}
+```
+
+- `provider` is the catalog id (`openrouter`, `groq`, `moonshotai`, ...) or a name of your own; `package` picks the AI SDK provider. `settings` go to its `create...` function as they are (`{ region }` for Bedrock, `{ project, location }` for Vertex, `{ resourceName }` for Azure). The OpenAI-compatible package needs a base URL: `baseUrl`, else the credential `url`.
+- `aiSdkLanguageModel(connection, modelId)` builds the model; `createAiSdkAgent({ languageModel, model?, models?, modelMap?, pricing?, timeoutMs?, maxTurns?, runner?, limits? })` runs it with the same tools, prompt and output handling as the OpenAI-compatible adapter below, on `generateText` with `stopWhen: stepCountIs(maxTurns)` and one tool call at a time. There is no default model: `models[taskKind]`, else `model`, else the run throws.
+- `pingAiSdkProvider(provider, model)` asks the model for a one-word reply (the server's credential test).
+
+### Catalog
+
+`modelsDevCatalog({ url?, ttlMs?, fetch? })` loads [models.dev](https://github.com/anomalyco/models.dev) (`MODELS_DEV_URL`) on first use, caches it for a day and keeps the last good copy when a refresh fails. `parseModelsDev(json)` reads its providers (`id`, `name`, `package`, `api?`, `doc?`, `env`) and models (`toolCall`, `reasoning`, `releaseDate`, `contextWindow`, `outputLimit`, `pricing` per MTok). `isSupportedProvider` says whether Holtkeeper can talk to one (its package ships, or it has an OpenAI-compatible `api`). With `catalog` in `listProviderModels` deps, `ai-sdk` providers list the catalog's models; providers of your own list their `/models`.
+
 ## OpenAI-compatible adapter
 
 `openAICompatibleAgent({ baseUrl, apiKey?, headers?, model?, models?, modelMap?, pricing?, timeoutMs?, maxTurns?, jsonMode?, runner?, limits? })` (`createOpenAICompatibleAgent(options, { fetch })` for tests) runs a bounded tool loop over Chat Completions with `tools`:
@@ -142,7 +170,7 @@ Requests go to `<url>/chat/completions`. A header named `Authorization` in `head
 
 ## Limitations
 
-- The OpenAI-compatible adapter does not mount external MCP servers (`task.mcpServers`), has no sandbox of its own (command confinement is the runner's job: use the container runner for untrusted repositories) and does not stream.
+- The OpenAI-compatible and AI SDK adapters do not mount external MCP servers (`task.mcpServers`), has no sandbox of its own (command confinement is the runner's job: use the container runner for untrusted repositories) and does not stream.
 - A Vertex key file written for a run lives outside `task.dir`, which the file tools cannot reach; a sandboxed Bash command could read it while the run lasts.
 
 - Path confinement covers the file tools. Shell commands are confined by the sandbox, which depends on the platform (Seatbelt on macOS, bubblewrap on Linux); where it is unavailable Claude Code decides how to proceed.

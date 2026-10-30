@@ -8,12 +8,13 @@ import {
   RefreshCw,
   Trash2,
   TriangleAlert,
+  Zap,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentialMutations, useCredentials } from '../../api/queries.ts'
+import { useCredentialMutations, useCredentials, useTestCredential } from '../../api/queries.ts'
 import {
   daysUntil,
   expiryTone,
@@ -64,6 +65,7 @@ export function CredentialsPage() {
   const { can } = useSession()
   const credentials = useCredentials()
   const { rotate, remove } = useCredentialMutations()
+  const test = useTestCredential()
   const [editing, setEditing] = useState<CredentialView | 'new' | null>(null)
   const [deleting, setDeleting] = useState<CredentialView | null>(null)
   const [browsing, setBrowsing] = useState<CredentialView | null>(null)
@@ -155,10 +157,38 @@ export function CredentialsPage() {
                       : `Added ${formatDate(credential.createdAt)}`}
                   </span>
                   {aiProviderKinds.includes(credential.kind) ? (
-                    <Button variant="ghost" size="sm" onPress={() => setBrowsing(credential)}>
-                      <Boxes className="size-3.5" />
-                      Models
-                    </Button>
+                    <span className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onPress={() => setBrowsing(credential)}>
+                        <Boxes className="size-3.5" />
+                        Models
+                      </Button>
+                      {credential.kind === 'ai-sdk' && writable ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          isPending={test.isPending && test.variables?.id === credential.id}
+                          onPress={() =>
+                            test.mutate(
+                              { id: credential.id },
+                              {
+                                onSuccess: (result) =>
+                                  result.ok
+                                    ? notify.success(
+                                        `${credential.name} answered in ${result.latencyMs ?? 0} ms`,
+                                        `${result.model}: ${result.reply ?? ''}`,
+                                      )
+                                    : notify.error(`${credential.name} failed`, result.error),
+                                onError: (error) =>
+                                  notify.error(`${credential.name} failed`, messageOf(error)),
+                              },
+                            )
+                          }
+                        >
+                          <Zap className="size-3.5" />
+                          Test
+                        </Button>
+                      ) : null}
+                    </span>
                   ) : null}
                   {writable ? (
                     <div className="flex items-center gap-1">

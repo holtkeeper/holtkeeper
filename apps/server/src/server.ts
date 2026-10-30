@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { aiProviderOptionsValidator } from '@holtkeeper/agent'
+import { type AiCatalog, aiProviderOptionsValidator, modelsDevCatalog } from '@holtkeeper/agent'
 import { builtinAnalyzers, reviewChecks } from '@holtkeeper/analyzers'
 import {
   type ArtifactStore,
@@ -71,6 +71,8 @@ export interface ServerOptions {
   artifacts?: ArtifactStore
   /** Image engine of the media routes. Default `@holtkeeper/media`. */
   media?: MediaEngine
+  /** Provider and model catalog of `ai-sdk` credentials. Default `modelsDevCatalog()`. */
+  aiCatalog?: AiCatalog
   /**
    * More areas for the storage overview, e.g. `mirrorStorage(jobs.cacheDir)` from
    * `@holtkeeper/workspace` or `miseCacheStorage(...)` from `@holtkeeper/exec-container`.
@@ -205,9 +207,10 @@ export async function startServer(
   const replacements: Record<string, AnyAnalyzer> = { review, tracker }
   const analyzers =
     options.analyzers ?? builtinAnalyzers.map((analyzer) => replacements[analyzer.kind] ?? analyzer)
+  const aiCatalog = options.aiCatalog ?? modelsDevCatalog()
   const agentFor =
     options.agentFor ??
-    settingsAgentFor({ config, store: server.store, vault, rateLimiter: limiter })
+    settingsAgentFor({ config, store: server.store, vault, rateLimiter: limiter, aiCatalog })
   const artifacts = options.artifacts ?? artifactStoreFor(server)
   const deps: ServerDeps = {
     config,
@@ -230,6 +233,7 @@ export async function startServer(
     analyzers,
     documentSinks,
     artifacts,
+    aiCatalog,
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),

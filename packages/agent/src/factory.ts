@@ -1,5 +1,7 @@
 import type { CommandRunner } from '@holtkeeper/exec'
+import { type LanguageModel, generateText } from 'ai'
 
+import { type AiSdkConnection, aiSdkLanguageModel, createAiSdkAgent } from './ai-sdk.ts'
 import {
   type ClaudeAgentOptions,
   type ClaudeQuery,
@@ -11,11 +13,51 @@ import { createOpenAICompatibleAgent, type OpenAICompatibleAgentDependencies } f
 import {
   type AiProvider,
   type AiProviderKind,
+  type ModelPricing,
+  type ProviderOptions,
   mapModel,
   parseProviderOptions,
   renderHeaders,
 } from './provider.ts'
 import type { Agent, AgentResult, AgentTask } from './types.ts'
+
+type AiSdkOptions = Extract<ProviderOptions, { kind: 'ai-sdk' }>
+
+/** How an `ai-sdk` provider is reached: its package, endpoint, secret, headers and settings. */
+function aiSdkConnection(provider: AiProvider, parsed: AiSdkOptions): AiSdkConnection {
+  const endpoint =
+    parsed.baseUrl ?? (parsed.package === '@ai-sdk/openai-compatible' ? provider.url : undefined)
+  return {
+    package: parsed.package,
+    name: parsed.provider,
+    secret: provider.secret,
+    ...(endpoint && { baseUrl: endpoint }),
+    ...(parsed.headers && { headers: renderHeaders(parsed.headers, provider.secret) }),
+    ...(parsed.settings && { settings: parsed.settings }),
+  }
+}
+
+/** A one-word reply of an `ai-sdk` provider's `model` and how long it took; throws on failure. */
+export async function pingAiSdkProvider(
+  provider: AiProvider,
+  model: string,
+  options: { signal?: AbortSignal; languageModel?: (modelId: string) => LanguageModel } = {},
+): Promise<{ text: string; latencyMs: number }> {
+  const parsed = parseProviderOptions(provider)
+  if (parsed.kind !== 'ai-sdk') throw new Error(`${parsed.kind} providers cannot be pinged`)
+  const modelId = mapModel(model, parsed.modelMap)
+  const started = Date.now()
+  const result = await generateText({
+    model:
+      options.languageModel?.(modelId) ??
+      aiSdkLanguageModel(aiSdkConnection(provider, parsed), modelId),
+    prompt: 'Reply with the single word OK.',
+    maxOutputTokens: 16,
+    maxRetries: 0,
+    ...(options.signal && { abortSignal: options.signal }),
+  })
+  return { text: result.text.trim(), latencyMs: Date.now() - started }
+}
 
 /** An agent built from a provider, telling which provider kind and model a task kind runs on. */
 export interface ProviderAgent extends Agent {
@@ -37,9 +79,12 @@ export interface CreateAgentOptions {
    * one per agent.
    */
   limiter?: ConcurrencyLimiter
+  /** Prices to fall back on, e.g. from the catalog; the provider's `pricing` option wins. */
+  pricing?: Record<string, ModelPricing>
   /** Test seams. */
   query?: ClaudeQuery
   fetch?: OpenAICompatibleAgentDependencies['fetch']
+  languageModel?: (modelId: string) => LanguageModel
 }
 
 /** A shared slot pool: at most `max` callbacks run at once, the rest wait in order. */
@@ -101,8 +146,9 @@ export function limitConcurrency<A extends Agent>(agent: A, limit: number | Conc
  * The agent for an AI provider credential. `kind` and `options` are validated with
  * `providerOptionsSchema` (throws listing every problem); the endpoint is `options.baseUrl`, else
  * the credential `url`. Anthropic, Anthropic-compatible, Bedrock and Vertex providers run on the
- * Claude Agent SDK; OpenAI-compatible ones on the built-in tool loop. `maxConcurrency` limits
- * parallel runs of the returned agent.
+ * Claude Agent SDK; OpenAI-compatible ones on the built-in tool loop; `ai-sdk` ones on the Vercel
+ * AI SDK through their package (the OpenAI-compatible package falls back to the credential `url`).
+ * `maxConcurrency` limits parallel runs of the returned agent.
  */
 export function createAgent(provider: AiProvider, options: CreateAgentOptions = {}): ProviderAgent {
   const parsed = parseProviderOptions(provider)
@@ -115,14 +161,24 @@ export function createAgent(provider: AiProvider, options: CreateAgentOptions = 
   const shared = {
     ...routing,
     ...(parsed.modelMap && { modelMap: parsed.modelMap }),
-    ...(parsed.pricing && { pricing: parsed.pricing }),
+    ...((parsed.pricing || options.pricing) && {
+      pricing: { ...options.pricing, ...parsed.pricing },
+    }),
     ...(parsed.timeoutMs !== undefined && { timeoutMs: parsed.timeoutMs }),
     ...(options.maxTurns !== undefined && { maxTurns: options.maxTurns }),
   }
-  const baseUrl = ('baseUrl' in parsed ? parsed.baseUrl : undefined) ?? provider.url
+  const baseUrl = parsed.baseUrl ?? provider.url
 
   let agent: Agent
-  if (parsed.kind === 'openai-compatible') {
+  if (parsed.kind === 'ai-sdk') {
+    const connection = aiSdkConnection(provider, parsed)
+    agent = createAiSdkAgent({
+      ...shared,
+      languageModel:
+        options.languageModel ?? ((modelId) => aiSdkLanguageModel(connection, modelId)),
+      ...(options.runner && { runner: options.runner }),
+    })
+  } else if (parsed.kind === 'openai-compatible') {
     const headers = renderHeaders(parsed.headers, provider.secret)
     const auth = Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')
     agent = createOpenAICompatibleAgent(
@@ -176,7 +232,13 @@ export function createAgent(provider: AiProvider, options: CreateAgentOptions = 
   const withProvider: ProviderAgent = {
     name: agent.name,
     provider: parsed.kind,
-    modelFor: (taskKind) => mapModel(modelFor(routing, taskKind), parsed.modelMap),
+    modelFor: (taskKind) =>
+      mapModel(
+        parsed.kind === 'ai-sdk'
+          ? (taskKind !== undefined && routing.models?.[taskKind]) || routing.model || ''
+          : modelFor(routing, taskKind),
+        parsed.modelMap,
+      ),
     run: (task) => agent.run(task),
   }
   if (!parsed.maxConcurrency) return withProvider

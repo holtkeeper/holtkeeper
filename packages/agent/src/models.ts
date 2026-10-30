@@ -1,3 +1,4 @@
+import type { AiCatalog } from './catalog.ts'
 import {
   type AiProvider,
   type ModelPricing,
@@ -16,8 +17,15 @@ export interface ProviderModel {
   createdAt?: string
   /** Prices from the provider's `pricing` option, else from the provider's own listing. */
   pricing?: ModelPricing
-  /** `provider`: listed by the provider's API; `config`: only named in the provider's options. */
-  source: 'provider' | 'config'
+  /** Whether the model calls tools, when the catalog says. */
+  toolCall?: boolean
+  /** Context window in tokens, when the catalog says. */
+  contextWindow?: number
+  /**
+   * `provider`: listed by the provider's API; `catalog`: from the AI catalog; `config`: only named
+   * in the provider's options.
+   */
+  source: 'provider' | 'catalog' | 'config'
 }
 
 /** The models of a provider; `error` says why the provider's API could not be asked. */
@@ -29,6 +37,8 @@ export interface ModelListing {
 export interface ListModelsDependencies {
   fetch?: typeof fetch
   signal?: AbortSignal
+  /** Lists the models of `ai-sdk` providers; without it only their API (if OpenAI-compatible) is asked. */
+  catalog?: AiCatalog
 }
 
 /** Suffix of a model reference that resolves to the newest listed version, e.g. `claude-opus@latest`. */
@@ -139,13 +149,42 @@ async function openAIModels(
   })
 }
 
+async function catalogModels(
+  provider: AiProvider,
+  options: Extract<ProviderOptions, { kind: 'ai-sdk' }>,
+  deps: ListModelsDependencies,
+): Promise<ProviderModel[]> {
+  const entry = (await deps.catalog?.providers())?.find((p) => p.id === options.provider)
+  if (entry) {
+    return entry.models.map((model) => ({
+      id: model.id,
+      ...(model.name && { name: model.name }),
+      ...(dateOf(model.releaseDate) && { createdAt: dateOf(model.releaseDate) }),
+      ...(model.pricing && { pricing: model.pricing }),
+      toolCall: model.toolCall,
+      ...(model.contextWindow !== undefined && { contextWindow: model.contextWindow }),
+      source: 'catalog' as const,
+    }))
+  }
+  if (options.package !== '@ai-sdk/openai-compatible') return []
+  const headers = renderHeaders(options.headers, provider.secret)
+  const auth = Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')
+  return openAIModels(
+    options.baseUrl ?? provider.url,
+    { ...(!auth && provider.secret && { authorization: `Bearer ${provider.secret}` }), ...headers },
+    deps,
+  )
+}
+
 function remoteModels(
   provider: AiProvider,
   options: ProviderOptions,
   deps: ListModelsDependencies,
 ): Promise<ProviderModel[]> | undefined {
-  const baseUrl = ('baseUrl' in options ? options.baseUrl : undefined) ?? provider.url
+  const baseUrl = options.baseUrl ?? provider.url
   switch (options.kind) {
+    case 'ai-sdk':
+      return catalogModels(provider, options, deps)
     case 'anthropic':
       return anthropicModels(
         baseUrl || ANTHROPIC_URL,
@@ -201,7 +240,8 @@ function configuredModels(options: ProviderOptions): string[] {
 
 /**
  * The models of an AI provider: what its API lists (Anthropic and Anthropic-compatible
- * `/v1/models`, OpenAI-compatible `/models`; Bedrock and Vertex have none), plus every model its
+ * `/v1/models`, OpenAI-compatible `/models`; Bedrock and Vertex have none; `ai-sdk` providers from
+ * `deps.catalog`, else their OpenAI-compatible `/models`), plus every model its
  * options name. Prices come from the `pricing` option (by provider or logical name), else from the
  * listing when it carries OpenRouter-style per-token prices. A failing API call is reported in
  * `error` with the configured models still returned.

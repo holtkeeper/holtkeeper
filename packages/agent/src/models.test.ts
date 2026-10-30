@@ -206,3 +206,75 @@ describe('latest', () => {
     expect(calls).toHaveLength(3)
   })
 })
+
+describe('ai-sdk models', () => {
+  const catalog = {
+    providers: async () => [
+      {
+        id: 'openrouter',
+        name: 'OpenRouter',
+        package: '@openrouter/ai-sdk-provider',
+        env: [],
+        models: [
+          {
+            id: 'openai/gpt-5',
+            toolCall: true,
+            reasoning: true,
+            releaseDate: '2026-08-07',
+            contextWindow: 400_000,
+            pricing: { inputPerMTok: 1.25, outputPerMTok: 10 },
+          },
+          { id: 'old/model', toolCall: false, reasoning: false, releaseDate: 'someday' },
+        ],
+      },
+    ],
+  }
+
+  test('come from the catalog, with configured prices winning', async () => {
+    const listing = await listProviderModels(
+      {
+        kind: 'ai-sdk',
+        url: 'https://openrouter.ai/api/v1',
+        secret: 's',
+        options: {
+          provider: 'openrouter',
+          package: '@openrouter/ai-sdk-provider',
+          pricing: { 'openai/gpt-5': { inputPerMTok: 1, outputPerMTok: 2 } },
+        },
+      },
+      { catalog },
+    )
+    expect(listing.models).toEqual([
+      {
+        id: 'openai/gpt-5',
+        createdAt: '2026-08-07T00:00:00.000Z',
+        pricing: { inputPerMTok: 1, outputPerMTok: 2 },
+        toolCall: true,
+        contextWindow: 400_000,
+        source: 'catalog',
+      },
+      { id: 'old/model', toolCall: false, source: 'catalog' },
+    ])
+  })
+
+  test('a provider of your own lists its OpenAI-compatible /models', async () => {
+    const seen: string[] = []
+    const listing = await listProviderModels(
+      {
+        kind: 'ai-sdk',
+        url: 'https://llm.corp.test/v1',
+        secret: 'k',
+        options: { provider: 'corp' },
+      },
+      {
+        catalog,
+        fetch: (async (url: string, init?: RequestInit) => {
+          seen.push(`${url} ${new Headers(init?.headers).get('authorization')}`)
+          return Response.json({ data: [{ id: 'corp-large' }] })
+        }) as unknown as typeof fetch,
+      },
+    )
+    expect(seen).toEqual(['https://llm.corp.test/v1/models Bearer k'])
+    expect(listing.models).toEqual([{ id: 'corp-large', source: 'provider' }])
+  })
+})

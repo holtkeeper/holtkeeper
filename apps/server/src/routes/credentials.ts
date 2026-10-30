@@ -1,13 +1,32 @@
 import type { Scope } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
-import { isAiProviderKind, listProviderModels, providerOptionsIssues } from '@holtkeeper/agent'
-import type { CredentialList, CredentialView, ProviderModelList } from '@holtkeeper/api'
+import {
+  type AiProvider,
+  isAiProviderKind,
+  listProviderModels,
+  pingAiSdkProvider,
+  providerOptionsIssues,
+} from '@holtkeeper/agent'
+import type {
+  CredentialList,
+  CredentialTestResult,
+  CredentialView,
+  ProviderModelList,
+} from '@holtkeeper/api'
 import { parseCredentialInput } from '@holtkeeper/credentials'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import { REDACTED, diffChanges } from '../audit.ts'
-import { type AppContext, type Env, type ServerDeps, authorize, principalOf } from '../context.ts'
+import {
+  type AppContext,
+  type Env,
+  type ServerDeps,
+  authorize,
+  principalOf,
+  readBody,
+} from '../context.ts'
+import { credentialTestSchema } from '../schemas.ts'
 
 const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
 
@@ -22,7 +41,8 @@ const secretChange = (input: unknown) =>
  * Forge accounts and API keys. Validation and sealing happen in the credential service; routes
  * only check permissions against the credential's scope.
  */
-export function credentialRoutes({ credentials, store, vault }: ServerDeps) {
+export function credentialRoutes(deps: ServerDeps) {
+  const { credentials, store, vault } = deps
   const app = new Hono<Env>()
 
   const existing = async (c: AppContext, action: 'credentials:read' | 'credentials:write') => {
@@ -84,8 +104,11 @@ export function credentialRoutes({ credentials, store, vault }: ServerDeps) {
     return c.body(null, 204)
   })
 
-  app.get('/credentials/:id/models', async (c) => {
-    const credential = await existing(c, 'credentials:read')
+  const aiProvider = async (
+    c: AppContext,
+    action: 'credentials:read' | 'credentials:write',
+  ): Promise<AiProvider> => {
+    const credential = await existing(c, action)
     if (!isAiProviderKind(credential.kind)) {
       throw new HTTPException(400, { message: 'not an AI provider credential' })
     }
@@ -93,16 +116,49 @@ export function credentialRoutes({ credentials, store, vault }: ServerDeps) {
     if (issues.length) throw new HTTPException(400, { message: issues.join('; ') })
     const stored = await store.credentials.get(credential.id)
     if (!stored) throw new HTTPException(404, { message: 'credential not found' })
-    const listing = await listProviderModels(
-      {
-        kind: credential.kind,
-        url: credential.url,
-        secret: await vault.open(stored.secret),
-        ...(credential.options && { options: credential.options }),
-      },
-      { signal: AbortSignal.timeout(15_000) },
-    )
+    return {
+      kind: credential.kind,
+      url: credential.url,
+      secret: await vault.open(stored.secret),
+      ...(credential.options && { options: credential.options }),
+    }
+  }
+
+  app.get('/credentials/:id/models', async (c) => {
+    const listing = await listProviderModels(await aiProvider(c, 'credentials:read'), {
+      signal: AbortSignal.timeout(15_000),
+      ...(deps.aiCatalog && { catalog: deps.aiCatalog }),
+    })
     return c.json<ProviderModelList>(listing)
+  })
+
+  app.post('/credentials/:id/test', async (c) => {
+    const provider = await aiProvider(c, 'credentials:write')
+    if (provider.kind !== 'ai-sdk') {
+      throw new HTTPException(400, { message: 'only ai-sdk providers can be tested' })
+    }
+    const input = await readBody(c, credentialTestSchema)
+    const configured = provider.options?.['model']
+    const model = input.model ?? (typeof configured === 'string' ? configured : undefined)
+    if (!model) throw new HTTPException(400, { message: 'name a model to test' })
+    try {
+      const reply = await pingAiSdkProvider(provider, model, {
+        signal: AbortSignal.timeout(30_000),
+        ...(deps.languageModel && { languageModel: deps.languageModel }),
+      })
+      return c.json<CredentialTestResult>({
+        ok: true,
+        model,
+        reply: reply.text,
+        latencyMs: reply.latencyMs,
+      })
+    } catch (error) {
+      return c.json<CredentialTestResult>({
+        ok: false,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   })
 
   app.post('/credentials/:id/rotate', async (c) => {

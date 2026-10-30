@@ -9,6 +9,7 @@ export const AI_PROVIDER_KINDS = [
   'bedrock',
   'vertex',
   'openai-compatible',
+  'ai-sdk',
 ] as const
 
 export type AiProviderKind = (typeof AI_PROVIDER_KINDS)[number]
@@ -47,6 +48,33 @@ const common = {
 }
 
 const credentialsSource = z.enum(['env', 'secret']).default('env')
+
+/** Vercel AI SDK provider packages the `ai-sdk` kind can use. */
+export const AI_SDK_PACKAGE_NAMES = [
+  '@ai-sdk/openai',
+  '@ai-sdk/openai-compatible',
+  '@ai-sdk/anthropic',
+  '@ai-sdk/google',
+  '@ai-sdk/google-vertex',
+  '@ai-sdk/google-vertex/anthropic',
+  '@ai-sdk/amazon-bedrock',
+  '@ai-sdk/azure',
+  '@ai-sdk/mistral',
+  '@ai-sdk/groq',
+  '@ai-sdk/xai',
+  '@ai-sdk/deepseek',
+  '@ai-sdk/cohere',
+  '@ai-sdk/togetherai',
+  '@ai-sdk/fireworks',
+  '@ai-sdk/cerebras',
+  '@ai-sdk/deepinfra',
+  '@ai-sdk/perplexity',
+  '@ai-sdk/gateway',
+  '@openrouter/ai-sdk-provider',
+  'ollama-ai-provider-v2',
+] as const
+
+export type AiSdkPackage = (typeof AI_SDK_PACKAGE_NAMES)[number]
 
 /**
  * Provider configuration, discriminated by `kind`. It is what an AI provider credential stores in
@@ -100,6 +128,20 @@ export const providerOptionsSchema = z.discriminatedUnion('kind', [
       .refine((value) => value, 'the provider must support tool calling'),
     /** Send `response_format: { type: 'json_object' }` for tasks with structured output. */
     jsonMode: z.boolean().optional(),
+  }),
+  z.object({
+    kind: z.literal('ai-sdk'),
+    ...common,
+    /** Catalog provider id (models.dev), or a name of your own for a provider it lacks. */
+    provider: z.string().min(1),
+    /** The AI SDK package that talks to it. */
+    package: z.enum(AI_SDK_PACKAGE_NAMES).default('@ai-sdk/openai-compatible'),
+    /** API root; the OpenAI-compatible package falls back to the credential URL. */
+    baseUrl: httpUrl.optional(),
+    /** Extra request headers; `{secret}` in a value is replaced by the credential secret. */
+    headers: z.record(headerName, headerValue).optional(),
+    /** Further settings of the package's provider, e.g. `{ region }` or `{ project, location }`. */
+    settings: z.record(z.string(), z.unknown()).optional(),
   }),
 ])
 
