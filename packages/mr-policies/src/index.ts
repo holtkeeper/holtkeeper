@@ -32,4 +32,3 @@ export {
   mergeRequestPoliciesSetting,
   policiesSettingKey,
 } from './settings.ts'
-export { scopeSpecificity } from './specificity.ts'

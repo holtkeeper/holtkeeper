@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@holtkeeper/access": "workspace:*",
     "@holtkeeper/core": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/forge-gitlab": "workspace:*",

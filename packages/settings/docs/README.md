@@ -38,9 +38,10 @@ The model references assume an Anthropic provider; with another one, change `llm
 
 `resolveSetting(entries, key, repo)` picks, among entries whose scope covers the repository, the most specific:
 
-1. exact repository paths (`games/slots-x`)
-2. path globs (`games/slots-*`)
-3. groups (`games`)
-4. everything
+1. exact repository paths (`games/app-x`)
+2. path globs (`games/app-*`)
+3. group intersections (`[['frontend', 'storefront']]`), more groups first
+4. groups (`games`)
+5. everything
 
-Ties go to the most recently updated entry. `resolveSettings(entries, repo)` resolves every key at once; the API exposes it as `GET /api/settings/resolve?repo=forge:path`.
+Ties go to the most recently updated entry. The ranking is `scopeSpecificity` of [@holtkeeper/access](../../access/docs/README.md), shared with merge request policies, knowledge and AI budgets. `resolveSettings(entries, repo)` resolves every key at once; the API exposes it as `GET /api/settings/resolve?repo=forge:path`.

@@ -38,32 +38,32 @@ describe('runTracker on the feature-flag case', () => {
     expect(data.errors).toEqual([])
     expect(data.entities.map((entity) => entity.key)).toEqual([
       'ghost_flag',
-      'legacy_bonus',
-      'new_lobby',
+      'legacy_widget',
+      'new_hub',
       'old_tables',
       'removed_flag',
-      'turbo_spin',
+      'turbo_mode',
     ])
-    const lobby = data.entities.find((entity) => entity.key === 'new_lobby')!
-    expect(lobby.attrs.default?.value).toBe('false')
-    expect(lobby.attrs.description?.value).toBe('Redesigned lobby')
-    expect(lobby.attrs.owner?.value).toBe('@abc')
-    expect(lobby.environments).toEqual({ prod: { value: 'false' }, dev: { value: 'true' } })
+    const hub = data.entities.find((entity) => entity.key === 'new_hub')!
+    expect(hub.attrs.default?.value).toBe('false')
+    expect(hub.attrs.description?.value).toBe('Redesigned hub')
+    expect(hub.attrs.owner?.value).toBe('@abc')
+    expect(hub.environments).toEqual({ prod: { value: 'false' }, dev: { value: 'true' } })
     expect(
-      lobby.occurrences
+      hub.occurrences
         .filter((occurrence) => occurrence.role === 'usage')
         .map((occurrence) => `${occurrence.repo}/${occurrence.file}:${occurrence.line}`),
-    ).toEqual(['games/poker/src/table.tsx:1', 'games/slots/src/lobby.ts:1'])
+    ).toEqual(['games/adventure/src/board.tsx:1', 'games/app/src/hub.ts:1'])
     expect(
-      lobby.occurrences.find((occurrence) => occurrence.role === 'documentation')?.document,
+      hub.occurrences.find((occurrence) => occurrence.role === 'documentation')?.document,
     ).toEqual({
       provider: 'confluence',
       ref: '12345',
       title: 'Feature flags',
       url: 'https://wiki.example.com/pages/12345',
     })
-    expect(forge.reads).not.toContain('infra/helm/charts/poker/Chart.yaml')
-    expect(forge.reads).toContain('infra/helm/charts/slots/values-prod.yaml')
+    expect(forge.reads).not.toContain('infra/helm/charts/adventure/Chart.yaml')
+    expect(forge.reads).toContain('infra/helm/charts/app/values-prod.yaml')
     expect(documents.reads).toEqual(['12345'])
     expect(data.sourcesRead.find((read) => read.source === 'helm')).toMatchObject({
       repo: 'infra/helm',
@@ -75,12 +75,12 @@ describe('runTracker on the feature-flag case', () => {
   test('applies every rule', async () => {
     const data = await run().data
     expect(data.findings.map((finding) => finding.id).toSorted()).toEqual([
-      'attribute-mismatch:turbo_spin:prod',
-      'documented-missing:legacy_bonus',
+      'attribute-mismatch:turbo_mode:prod',
+      'documented-missing:legacy_widget',
       'stale-config:removed_flag',
       'undefined:ghost_flag',
       'undocumented:old_tables',
-      'undocumented:turbo_spin',
+      'undocumented:turbo_mode',
       'unused:old_tables',
     ])
   })
@@ -97,7 +97,7 @@ describe('runTracker on the feature-flag case', () => {
     })
     expect(section?.content).toStartWith('<h2>Flag inventory</h2><table>')
     expect(section?.content).toContain(
-      '<tr><td>new_lobby</td><td>Redesigned lobby</td><td>@abc</td><td>games/poker, games/slots</td><td>false</td></tr>',
+      '<tr><td>new_hub</td><td>Redesigned hub</td><td>@abc</td><td>games/adventure, games/app</td><td>false</td></tr>',
     )
     expect(
       data.publications.find((publication) => publication.output === 'chat')?.content,
@@ -118,7 +118,7 @@ describe('runTracker on the feature-flag case', () => {
       '## Feature flags\n\n| Key | Description | Defined in | Used in | Environments | Documented |',
     )
     expect(text).toContain(
-      '| new_lobby | Redesigned lobby | games/poker/src/flags.json, games/slots/src/flags.json | games/poker, games/slots | dev: true; prod: false | yes |',
+      '| new_hub | Redesigned hub | games/adventure/src/flags.json, games/app/src/flags.json | games/adventure, games/app | dev: true; prod: false | yes |',
     )
     expect(text).toContain('### Findings\n\n- error: Feature flag ghost_flag is referenced')
   })

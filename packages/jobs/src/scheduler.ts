@@ -1,5 +1,6 @@
+import { groupsMatch } from '@holtkeeper/access'
 import type { AnyAnalyzer } from '@holtkeeper/analyzer'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { Job, JobStore } from '@holtkeeper/store'
 
@@ -89,7 +90,7 @@ export async function planSchedule(
   }: { config: HoltkeeperConfig; analyzers: AnyAnalyzer[]; resolveRepos: ResolveRepos },
 ): Promise<JobRequest[]> {
   const byKind = new Map(analyzers.map((analyzer) => [analyzer.kind, analyzer]))
-  const groups = schedule.groups ?? Object.keys(config.groups)
+  const entries = schedule.groups ?? Object.keys(config.groups)
   const selected = schedule.analyzers.flatMap((kind) => {
     const analyzer = byKind.get(kind)
     return analyzer ? [analyzer] : []
@@ -99,10 +100,12 @@ export async function planSchedule(
 
   if (selected.some((analyzer) => analyzer.scope === 'repo')) {
     const repos = new Map<string, RepoRef>()
-    for (const group of groups) {
-      for (const repo of await resolveRepos(group)) {
+    for (const entry of entries) {
+      const [first = '', ...rest] = typeof entry === 'string' ? [entry] : entry
+      for (const repo of await resolveRepos(first)) {
         if (schedule.repos && !schedule.repos.some((pattern) => matchesRepoGlob(pattern, repo)))
           continue
+        if (rest.length && !groupsMatch([entry], resolveRepo(config, repo).groups)) continue
         repos.set(`${repo.forge}:${repo.path}`, repo)
       }
     }
@@ -119,7 +122,7 @@ export async function planSchedule(
   }
 
   for (const analyzer of selected.filter((a) => a.scope === 'group')) {
-    for (const group of groups) {
+    for (const group of entries.filter((entry) => typeof entry === 'string')) {
       const forge = config.groups[group]?.forge
       if (!forge) continue
       requests.push({

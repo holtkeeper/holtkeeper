@@ -18,7 +18,7 @@ export const normalizeStepSchema = z.custom<NormalizeStep>(
   'expected lower, upper, snake, kebab, camel, trim-prefix:<p> or trim-suffix:<s>',
 )
 
-/** Words of an identifier in any casing: `newLobbyV2`, `NEW_LOBBY_V2`, `new-lobby-v2` → `new lobby v2`. */
+/** Words of an identifier in any casing: `newHubV2`, `NEW_HUB_V2`, `new-hub-v2` → `new hub v2`. */
 export function keyWords(key: string): string[] {
   return key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')

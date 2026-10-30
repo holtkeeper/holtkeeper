@@ -86,7 +86,7 @@ const knowledgeEntry = (
 
 const usage = (overrides: Partial<Omit<AiUsageRecord, 'id'>> = {}): Omit<AiUsageRecord, 'id'> => ({
   at: '2026-10-01T10:00:00.000Z',
-  repo: { forge: 'work', path: 'games/slots' },
+  repo: { forge: 'work', path: 'games/app' },
   groups: ['games'],
   taskKind: 'review',
   actor: 'jane',
@@ -755,7 +755,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect((await store.aiUsage.list({ analyzer: 'review' })).length).toBe(1)
       expect((await store.aiUsage.list({ group: 'tools' })).length).toBe(1)
       expect(
-        (await store.aiUsage.list({ repo: { forge: 'work', path: 'games/slots' } })).length,
+        (await store.aiUsage.list({ repo: { forge: 'work', path: 'games/app' } })).length,
       ).toBe(2)
       expect(
         (
@@ -783,7 +783,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         usage({
           at: '2026-10-11T08:00:00.000Z',
           model: 'claude-sonnet-5-5',
-          groups: ['games', 'slots'],
+          groups: ['games', 'web'],
           costUsd: 0.25,
         }),
       )
@@ -838,13 +838,13 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(byGroup.map((b) => [b.key.group, b.runs])).toEqual([
         ['', 1],
         ['games', 3],
-        ['slots', 1],
+        ['web', 1],
       ])
       const byRepo = await store.aiUsage.aggregate({
         groupBy: ['repo', 'analyzer', 'taskKind', 'provider'],
       })
       expect(byRepo.map((b) => b.key)).toEqual([
-        { repo: 'work:games/slots', analyzer: '', taskKind: 'review', provider: 'anthropic' },
+        { repo: 'work:games/app', analyzer: '', taskKind: 'review', provider: 'anthropic' },
         { repo: 'work:misc/x', analyzer: '', taskKind: 'review', provider: 'anthropic' },
       ])
 
@@ -857,7 +857,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(october[0]?.costUsd).toBeCloseTo(0.25)
       expect(await store.aiUsage.aggregate({ filter: { model: 'nothing' } })).toEqual([])
       expect(
-        (await store.aiUsage.aggregate({ filter: { scopes: [{ groups: ['slots'] }] } }))[0]?.runs,
+        (await store.aiUsage.aggregate({ filter: { scopes: [{ groups: ['web'] }] } }))[0]?.runs,
       ).toBe(1)
     })
 

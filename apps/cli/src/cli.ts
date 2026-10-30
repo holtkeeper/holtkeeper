@@ -123,7 +123,7 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
         const separator = target?.indexOf(':') ?? -1
         if (!target || separator < 1) {
           throw new UsageError(
-            'explain expects a repository as <forge>:<path>, e.g. work:games/slots-x',
+            'explain expects a repository as <forge>:<path>, e.g. work:games/app-x',
           )
         }
         const config = await loadConfig(values.config)

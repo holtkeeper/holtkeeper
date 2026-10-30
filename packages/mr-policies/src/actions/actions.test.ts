@@ -53,7 +53,7 @@ describe('approve', () => {
       {
         method: 'submitReview',
         args: [
-          'games/slots',
+          'games/app',
           7,
           {
             refs: { baseSha: 'base', startSha: 'start', headSha: 'sha1' },
@@ -172,7 +172,7 @@ describe('comment, close, draft', () => {
       { type: 'comment', body: '{author}: {sourceBranch} → {targetBranch} ({title}) {unknown}' },
     ])
     expect(outcome?.status).toBe('done')
-    expect(calls[0]?.args[2]).toBe('alice: feature/slots → main (feat: add slots) {unknown}')
+    expect(calls[0]?.args[2]).toBe('alice: feature/app → main (feat: add app) {unknown}')
   })
 
   test('closes open merge requests only', async () => {
@@ -208,7 +208,7 @@ describe('assignReviewers', () => {
       },
     )
     expect(outcome?.status).toBe('done')
-    expect(calls[0]).toEqual({ method: 'assignReviewers', args: ['games/slots', 7, ['bob']] })
+    expect(calls[0]).toEqual({ method: 'assignReviewers', args: ['games/app', 7, ['bob']] })
   })
 })
 
@@ -280,6 +280,6 @@ describe('dry run', () => {
 
 test('renderTemplate leaves unknown placeholders', () => {
   expect(renderTemplate('{id} in {repo} by {actor} {nope}', mrEvent())).toBe(
-    '7 in games/slots by alice {nope}',
+    '7 in games/app by alice {nope}',
   )
 })

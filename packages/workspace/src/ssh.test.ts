@@ -13,12 +13,8 @@ const key = generateKeyPair({ type: 'ed25519', comment: 'bot' })
 
 describe('sshCloneUrl', () => {
   test('turns HTTPS clone URLs into scp-like SSH URLs', () => {
-    expect(sshCloneUrl('https://gitlab.test/games/slots.git')).toBe(
-      'git@gitlab.test:games/slots.git',
-    )
-    expect(sshCloneUrl('https://gitlab.test:8443/games/slots/')).toBe(
-      'git@gitlab.test:games/slots.git',
-    )
+    expect(sshCloneUrl('https://gitlab.test/games/app.git')).toBe('git@gitlab.test:games/app.git')
+    expect(sshCloneUrl('https://gitlab.test:8443/games/app/')).toBe('git@gitlab.test:games/app.git')
   })
 
   test('keeps SSH URLs and refuses other schemes', () => {

@@ -3,12 +3,27 @@ import type {
   CredentialView,
   ForgeSshKeyInput,
   ForgeSshKeyView,
+  ForgeWebhookResult,
 } from '@holtkeeper/api'
-import { Fingerprint, GitBranch, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  Fingerprint,
+  GitBranch,
+  KeyRound,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Webhook,
+} from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentials, useForgeMutations, useForges } from '../../api/queries.ts'
+import {
+  useCredentials,
+  useForgeMutations,
+  useForges,
+  useRuntimeConfig,
+} from '../../api/queries.ts'
 import { formatDate } from '../../lib/format.ts'
 import {
   Button,
@@ -22,6 +37,7 @@ import {
   Panel,
   Placeholder,
   Select,
+  Switch,
   TextField,
   notify,
 } from '../../ui/index.ts'
@@ -53,6 +69,9 @@ export function ForgesSection() {
   const [issuing, setIssuing] = useState<ForgeEntry | null>(null)
   const [deleting, setDeleting] = useState<ForgeEntry | null>(null)
   const [unkeying, setUnkeying] = useState<ForgeEntry | null>(null)
+  const [hooking, setHooking] = useState<ForgeEntry | null>(null)
+  const runtime = useRuntimeConfig(readable)
+  const baseUrl = (runtime.data?.server?.publicUrl ?? window.location.origin).replace(/\/+$/, '')
   if (!readable) return null
   const list = forges.data?.entries ?? []
   const tokens = (credentials.data?.credentials ?? []).filter((c) => c.kind === 'gitlab')
@@ -158,6 +177,25 @@ export function ForgesSection() {
                     </Button>
                   </div>
                 ) : null}
+                {forge.data.credentialId ? (
+                  <WebhookSummary
+                    forge={forge}
+                    {...(writable ? { onIssue: () => setHooking(forge) } : {})}
+                  />
+                ) : (
+                  <div className="flex items-start gap-2 rounded-xl bg-default/60 p-3 text-xs text-muted">
+                    <Webhook className="mt-0.5 size-3.5 shrink-0" />
+                    <span>
+                      Webhook secret from{' '}
+                      <code className="font-mono">jobs.webhooks.{forge.id}.secret</code> in the
+                      config file; point hooks at{' '}
+                      <code className="font-mono">
+                        {baseUrl}/api/webhooks/{forge.id}
+                      </code>
+                      .
+                    </span>
+                  </div>
+                )}
               </li>
             )
           })}
@@ -175,6 +213,9 @@ export function ForgesSection() {
       ) : null}
       {issuing ? (
         <SshKeyDialog key={issuing.id} forge={issuing} onClose={() => setIssuing(null)} />
+      ) : null}
+      {hooking ? (
+        <WebhookDialog key={hooking.id} forge={hooking} onClose={() => setHooking(null)} />
       ) : null}
       <ConfirmDialog
         isOpen={deleting !== null}
@@ -248,6 +289,178 @@ function SshKeySummary({ sshKey, actions }: { sshKey: ForgeSshKeyView; actions: 
       </div>
       <CopyField value={sshKey.publicKey} label="public key" />
     </div>
+  )
+}
+
+function WebhookSummary({ forge, onIssue }: { forge: ForgeEntry; onIssue?: () => void }) {
+  const hook = forge.data.webhook
+  if (!hook)
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-separator p-3 text-sm text-muted">
+        <span className="flex items-center gap-2">
+          <Webhook className="size-4" />
+          No webhook secret. Events reach Holtkeeper only through polling.
+        </span>
+        {onIssue ? (
+          <Button variant="secondary" size="sm" onPress={onIssue}>
+            <KeyRound className="size-3.5" />
+            Generate secret
+          </Button>
+        ) : null}
+      </div>
+    )
+  const registered = hook.registered ?? []
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-default/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Webhook className="size-4 text-muted" />
+          Webhook
+          <Chip>Secret since {formatDate(hook.createdAt)}</Chip>
+          {registered.length ? (
+            <Chip tone="success">
+              {registered.length === 1
+                ? '1 hook registered'
+                : `${registered.length} hooks registered`}
+            </Chip>
+          ) : (
+            <Chip>Added by hand</Chip>
+          )}
+        </div>
+        {onIssue ? (
+          <Button variant="ghost" size="sm" onPress={onIssue}>
+            <RefreshCw className="size-3.5" />
+            Rotate
+          </Button>
+        ) : null}
+      </div>
+      <CopyField value={hook.url} label="webhook URL" />
+      {registered.length ? <RegisteredHooks hooks={registered} /> : null}
+    </div>
+  )
+}
+
+function RegisteredHooks({ hooks }: { hooks: ForgeWebhookResult['registered'] }) {
+  return (
+    <ul className="flex flex-col gap-0.5 text-xs text-muted">
+      {hooks.map((hook) => (
+        <li key={`${hook.scope}:${hook.target}:${hook.hookId}`}>
+          {hook.scope} <span className="font-mono">{hook.target}</span> · hook {hook.hookId}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function WebhookDialog({ forge, onClose }: { forge: ForgeEntry; onClose: () => void }) {
+  const current = forge.data.webhook
+  const [register, setRegister] = useState(true)
+  const [result, setResult] = useState<ForgeWebhookResult | null>(null)
+  const { issueWebhook } = useForgeMutations()
+
+  const submit = () =>
+    issueWebhook.mutate(
+      { id: forge.id, input: { register: register && forge.data.kind === 'gitlab' } },
+      {
+        onSuccess: (next) => {
+          setResult(next)
+          notify.success(current ? 'Webhook secret rotated' : 'Webhook secret generated', forge.id)
+        },
+      },
+    )
+
+  return (
+    <Dialog
+      isOpen
+      onOpenChange={(open) => !open && onClose()}
+      isDismissable={result === null}
+      title={current ? `Rotate the webhook secret of ${forge.id}` : `Webhook for ${forge.id}`}
+      description="GitLab sends tag push, merge request, comment and pipeline events with this secret as X-Gitlab-Token."
+      footer={
+        result ? (
+          <Button variant="primary" onPress={onClose}>
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button variant="tertiary" onPress={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" onPress={submit} isPending={issueWebhook.isPending}>
+              {current ? 'Rotate' : 'Generate'}
+            </Button>
+          </>
+        )
+      }
+    >
+      {result ? (
+        <div className="flex flex-col gap-4">
+          <Notice tone="warning" title="Copy the secret now">
+            {result.registered.length
+              ? 'It is shown only once.'
+              : 'It is shown only once. Paste it as the secret token of the hook in GitLab.'}
+          </Notice>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium">Secret token</span>
+            <CopyField value={result.secret} label="webhook secret" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium">URL</span>
+            <CopyField value={result.url} label="webhook URL" />
+          </div>
+          {result.registered.length ? (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">Registered on the forge</span>
+              <RegisteredHooks hooks={result.registered} />
+            </div>
+          ) : null}
+          {result.notes.length ? (
+            <Notice title="Notes">
+              <ul className="list-disc pl-4">
+                {result.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
+          {result.errors.length ? (
+            <Notice tone="danger" title="Not registered everywhere">
+              <ul className="list-disc pl-4">
+                {result.errors.map((error) => (
+                  <li key={error.target}>
+                    <span className="font-mono">{error.target}</span>: {error.error}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {issueWebhook.error ? (
+            <Notice tone="danger" title="No secret">
+              {messageOf(issueWebhook.error)}
+            </Notice>
+          ) : null}
+          {current ? (
+            <p className="text-sm text-muted">
+              The current secret stops working at once.{' '}
+              {current.registered?.length
+                ? 'Hooks registered before get the new secret.'
+                : 'Update the hooks you added by hand afterwards.'}
+            </p>
+          ) : null}
+          {forge.data.kind === 'gitlab' ? (
+            <Switch
+              label="Register on GitLab"
+              isSelected={register}
+              onChange={setRegister}
+              description="Adds or updates the hook on every group of this forge (project hooks on GitLab Free). The token needs the api scope and Maintainer or Owner role."
+            />
+          ) : null}
+        </div>
+      )}
+    </Dialog>
   )
 }
 

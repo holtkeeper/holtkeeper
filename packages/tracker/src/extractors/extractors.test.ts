@@ -58,19 +58,19 @@ describe('json-path', () => {
 })
 
 test('yaml-path', () => {
-  const text = 'featureFlags:\n  new_lobby: true\n  turbo: "off"\nother: 1\n'
+  const text = 'featureFlags:\n  new_hub: true\n  turbo: "off"\nother: 1\n'
   expect(extract(text, { kind: 'yaml-path', path: '$.featureFlags.*' }, file)).toEqual([
-    { key: 'new_lobby', line: 2, attrs: { value: 'true' } },
+    { key: 'new_hub', line: 2, attrs: { value: 'true' } },
     { key: 'turbo', line: 3, attrs: { value: 'off' } },
   ])
 })
 
 test('regex with named groups and lines', () => {
-  const text = 'a\nFLAG(new_lobby, on)\nb\nFLAG(turbo, off) FLAG(x, on)\n'
+  const text = 'a\nFLAG(new_hub, on)\nb\nFLAG(turbo, off) FLAG(x, on)\n'
   expect(
     extract(text, { kind: 'regex', pattern: 'FLAG\\((?<key>\\w+), (?<state>\\w+)\\)' }, file),
   ).toEqual([
-    { key: 'new_lobby', line: 2, attrs: { state: 'on' } },
+    { key: 'new_hub', line: 2, attrs: { state: 'on' } },
     { key: 'turbo', line: 4, attrs: { state: 'off' } },
     { key: 'x', line: 4, attrs: { state: 'on' } },
   ])
@@ -90,13 +90,13 @@ test('env', () => {
 
 describe('ast-grep', () => {
   const code =
-    'if (isEnabled(\'new_lobby\')) {}\nconst t = isEnabled("turbo", true)\nisEnabled(name)\nflags.bonus\n'
+    'if (isEnabled(\'new_hub\')) {}\nconst t = isEnabled("turbo", true)\nisEnabled(name)\nflags.widget\n'
 
   test('captures string literal keys with lines and attributes', () => {
     expect(
       extract(code, { kind: 'ast-grep', pattern: 'isEnabled($KEY)' }, { file: 'a.ts' }),
     ).toEqual([
-      { key: 'new_lobby', line: 1, attrs: {} },
+      { key: 'new_hub', line: 1, attrs: {} },
       { key: 'name', line: 3, attrs: {} },
     ])
     expect(
@@ -110,7 +110,7 @@ describe('ast-grep', () => {
       extract(code, { kind: 'ast-grep', pattern: 'flags.$KEY' }, { file: 'a.js' }).map(
         (found) => found.key,
       ),
-    ).toEqual(['bonus'])
+    ).toEqual(['widget'])
   })
 
   test('picks the language from the extension or config', () => {
@@ -135,9 +135,9 @@ describe('ast-grep', () => {
 })
 
 test('lines', () => {
-  const text = '# flags\nnew_lobby\n\n  turbo  \n'
+  const text = '# flags\nnew_hub\n\n  turbo  \n'
   expect(extract(text, { kind: 'lines' }, file)).toEqual([
-    { key: 'new_lobby', line: 2, attrs: {} },
+    { key: 'new_hub', line: 2, attrs: {} },
     { key: 'turbo', line: 4, attrs: {} },
   ])
   expect(

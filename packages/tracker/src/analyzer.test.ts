@@ -49,7 +49,7 @@ test('accepts inline definitions and rejects unknown ids', async () => {
         {
           kind: 'files',
           role: 'definition',
-          repos: ['games/slots'],
+          repos: ['games/app'],
           paths: ['src/flags.json'],
           extract: { kind: 'json-path', path: '$.flags[*].name' },
         },
@@ -63,7 +63,7 @@ test('accepts inline definitions and rejects unknown ids', async () => {
     runner,
     options: inline,
   })
-  expect(data.entities.map((entity) => entity.key)).toEqual(['new_lobby', 'turbo_spin'])
+  expect(data.entities.map((entity) => entity.key)).toEqual(['new_hub', 'turbo_mode'])
   expect(
     analyzer.run({
       repo: { forge: 'work', path: 'games' },

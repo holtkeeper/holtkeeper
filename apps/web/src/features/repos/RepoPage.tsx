@@ -5,9 +5,12 @@ import { useRepos } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import { Chip, EmptyState, LinkButton, Page, Tabs } from '../../ui/index.ts'
+import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
+import { MediaButton } from '../media/MediaDialog.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
+import { RepoConfig } from './RepoConfig.tsx'
 import { RepoUpdates } from './RepoUpdates.tsx'
 
 /** One repository: its groups, settings made for it and the knowledge agents read there. */
@@ -67,6 +70,7 @@ export function RepoPage() {
           },
         ]
       : []),
+    { id: 'config', label: 'Config', content: <RepoConfig repo={repo} /> },
   ]
   const selected = tabs.some((t) => t.id === search.tab) ? search.tab : tabs[0]?.id
 
@@ -91,6 +95,13 @@ export function RepoPage() {
       }
       actions={
         <>
+          <RunJobButton repo={repo} />
+          <MediaButton repo={repo} />
+          {can('analyses:read') ? (
+            <LinkButton to="/jobs" search={{ repo: repoKey(repo) }} variant="ghost">
+              Jobs
+            </LinkButton>
+          ) : null}
           {summary?.latestAudit ? (
             <LinkButton
               to="/audits/$runId"

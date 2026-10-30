@@ -11,19 +11,19 @@ import type {
 import { type RepoCursor, pollRepository } from './poll.ts'
 import { pollEventKinds } from './setting.ts'
 
-const repo = { forge: 'work', path: 'games/slots' }
+const repo = { forge: 'work', path: 'games/app' }
 
 const mr = (patch: Partial<MergeRequestRecord> = {}): MergeRequestRecord => ({
   id: 7,
-  title: 'Add reels',
+  title: 'Add board',
   description: '',
-  sourceBranch: 'reels',
+  sourceBranch: 'board',
   targetBranch: 'main',
   state: 'open',
   draft: false,
   labels: [],
   author: 'dev',
-  webUrl: 'https://gitlab.test/games/slots/-/merge_requests/7',
+  webUrl: 'https://gitlab.test/games/app/-/merge_requests/7',
   createdAt: '2026-10-30T10:00:00Z',
   updatedAt: '2026-10-30T10:00:00Z',
   headSha: 'a'.repeat(40),
@@ -102,7 +102,7 @@ describe('pollRepository', () => {
         ],
       },
     ]
-    state.pipelines = [{ id: 2, ref: 'reels', sha: 'c'.repeat(40), status: 'failed', webUrl: '' }]
+    state.pipelines = [{ id: 2, ref: 'board', sha: 'c'.repeat(40), status: 'failed', webUrl: '' }]
     state.tags = [{ name: 'v1.1.0', sha: 'd'.repeat(40), committedAt: '2026-10-30T11:01:00Z' }]
 
     const second = await poll(forge, first.cursor, '2026-10-30T11:05:00Z')

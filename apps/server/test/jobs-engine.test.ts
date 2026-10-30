@@ -117,4 +117,78 @@ describe('server jobs', () => {
     expect((await store.activity.list()).map((e) => e.action)).toEqual(['job.succeeded'])
     expect(lines.some((l) => l.startsWith('jobs:'))).toBeTrue()
   })
+
+  test('audit jobs get the audit settings and repository traits and store an audit run', async () => {
+    const store = memoryStore()
+    const config = parseConfig({
+      ...base,
+      repos: { 'games/*': { traits: { ssr: false } } },
+      jobs: {},
+    })
+    const at = now().toISOString()
+    const allowlist = [{ id: 'GHSA-1', reason: 'not reachable' }]
+    await store.settings.put({
+      id: 'f',
+      key: 'audit.fix',
+      scope: { all: true },
+      value: true,
+      secret: false,
+      updatedAt: at,
+    })
+    await store.settings.put({
+      id: 'a',
+      key: 'audit.allowlist',
+      scope: { groups: ['games'] },
+      value: allowlist,
+      secret: false,
+      updatedAt: at,
+    })
+    const report = {
+      scanner: 'osv-scanner',
+      findings: [],
+      ignored: [],
+      expired: [],
+      fixes: [],
+      resolved: [],
+      changedFiles: [],
+    }
+    let seen: unknown
+    const audit: AnyAnalyzer = {
+      kind: 'audit',
+      analysis: { kind: 'audit', label: 'Audit' } as AnyAnalyzer['analysis'],
+      scope: 'repo',
+      needs: {},
+      options: z.object({}).loose(),
+      run: async ({ options }) => {
+        seen = options
+        return { data: report }
+      },
+    }
+    const job = await store.jobs.enqueue({
+      analyzer: 'audit',
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'manual',
+      createdAt: at,
+      actor: 'jane',
+    })
+    expect(await scopedAnalyzerOptions(config, store, job)).toEqual({
+      fix: true,
+      allowlist,
+      traits: { ssr: false },
+    })
+
+    const engine = await startJobs({ config, store, analyzers: [audit], now, log: () => {} })
+    for (let i = 0; i < 50 && (await store.jobs.get(job.id))?.status !== 'succeeded'; i++)
+      await Bun.sleep(10)
+    await engine?.stop()
+
+    expect(seen).toMatchObject({ fix: true, traits: { ssr: false } })
+    const [run] = await store.auditRuns.list({})
+    expect(run).toMatchObject({
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'manual',
+      actor: 'jane',
+      report,
+    })
+  })
 })

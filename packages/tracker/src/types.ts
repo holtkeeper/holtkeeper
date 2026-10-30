@@ -57,7 +57,7 @@ export interface MergedAttr {
 /** A tracked thing (a feature flag, an env variable, ...) identified by its normalized key. */
 export interface Entity {
   key: string
-  /** Every spelling of the key found in sources, e.g. `FEATURE_NEW_LOBBY` and `newLobby`. */
+  /** Every spelling of the key found in sources, e.g. `FEATURE_NEW_HUB` and `newHub`. */
   labels: string[]
   /** Attributes outside environments, merged by role precedence (definition, documentation, config, usage, others). */
   attrs: Record<string, MergedAttr>

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { entry, repo } from '../test/entries.ts'
 import { matchesTask, renderEntry, selectForTask } from './select.ts'
 
-const slots = repo('games/slots', ['games'])
+const app = repo('games/app', ['games'])
 const reactMigration = entry({
   id: 'mig',
   kind: 'migration',
@@ -15,7 +15,7 @@ const reactMigration = entry({
 })
 
 describe('matchesTask', () => {
-  const task = { kind: 'review', repo: slots }
+  const task = { kind: 'review', repo: app }
 
   test('needs an accepted entry whose scope covers the repository', () => {
     expect(matchesTask(entry(), task)).toBeTrue()
@@ -33,12 +33,12 @@ describe('matchesTask', () => {
   test('migrations need an overlapping task package', () => {
     const propagate = (from: string, to: string) => ({
       kind: 'propagate',
-      repo: slots,
+      repo: app,
       packages: [{ ecosystem: 'npm', name: 'react', from, to }],
     })
     expect(matchesTask(reactMigration, propagate('18.3.1', '19.0.0'))).toBeTrue()
     expect(matchesTask(reactMigration, propagate('16.0.0', '17.0.0'))).toBeFalse()
-    expect(matchesTask(reactMigration, { kind: 'propagate', repo: slots })).toBeFalse()
+    expect(matchesTask(reactMigration, { kind: 'propagate', repo: app })).toBeFalse()
   })
 })
 
@@ -48,13 +48,13 @@ describe('selectForTask', () => {
       entry({ id: 'global', title: 'Vitest everywhere', updatedAt: '2026-10-05T00:00:00.000Z' }),
       entry({ id: 'group', scope: { groups: ['games'] }, title: 'Games use Pixi' }),
       entry({ id: 'glob', scope: { repos: ['games/**'] }, title: 'Glob rule' }),
-      entry({ id: 'exact', scope: { repos: ['work:games/slots'] }, title: 'Slots rule' }),
+      entry({ id: 'exact', scope: { repos: ['work:games/app'] }, title: 'App rule' }),
       entry({ id: 'global-old', title: 'Old global', updatedAt: '2026-09-01T00:00:00.000Z' }),
       entry({ id: 'global-hit', title: 'Snapshot rules', body: 'snapshot tests' }),
     ]
     const result = selectForTask({
       entries,
-      task: { kind: 'review', repo: slots, query: 'snapshot' },
+      task: { kind: 'review', repo: app, query: 'snapshot' },
       budgetTokens: 10_000,
     })
     expect(result.selected.map((s) => s.entry.id)).toEqual([
@@ -74,7 +74,7 @@ describe('selectForTask', () => {
     const replacement = entry({ id: 'new', title: 'New refs advice', supersedes: 'old' })
     const task = {
       kind: 'propagate',
-      repo: slots,
+      repo: app,
       packages: [{ ecosystem: 'npm', name: 'react', from: '18.3.1', to: '19.0.0' }],
     }
     const ids = selectForTask({
@@ -121,7 +121,7 @@ describe('selectForTask', () => {
     expect(result.markdown).toContain('[kb:last]')
 
     expect(
-      selectForTask({ entries: [small], task: { kind: 'review', repo: slots }, budgetTokens: 10 })
+      selectForTask({ entries: [small], task: { kind: 'review', repo: app }, budgetTokens: 10 })
         .markdown,
     ).toBe('')
   })

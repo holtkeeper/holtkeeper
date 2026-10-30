@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import { type GroupMatch, groupMatchSchema, groupNames } from '@holtkeeper/access'
 import type { AiProviderPlugin } from '@holtkeeper/agent'
 import type { AuthProvider } from '@holtkeeper/auth'
 import type { ForgeDefinition, Secret } from '@holtkeeper/forge'
@@ -171,8 +172,12 @@ const scheduleSchema = z
     spread: z.boolean().optional(),
     /** Analyzer kinds to run. */
     analyzers: z.array(z.string().min(1)).min(1),
-    /** Config groups whose repositories are analyzed; every group when omitted. */
-    groups: z.array(z.string()).optional(),
+    /**
+     * Config groups whose repositories are analyzed; every group when omitted. An entry can be a
+     * list of groups a repository must all belong to (`GroupMatch`); group-scope analyzers run
+     * only for single-group entries.
+     */
+    groups: z.array(groupMatchSchema).optional(),
     /** Only repositories matching one of these `forge:path` globs, e.g. `work:games/*`. */
     repos: z.array(z.string().regex(/^[^:]+:.+$/, 'expected forge:path')).optional(),
     /** Options per analyzer kind. */
@@ -228,8 +233,8 @@ const jobsSchema = z.object({
   onTag: z
     .object({
       analyzers: z.array(z.string().min(1)).min(1),
-      /** Only repositories of these groups; every repository when omitted. */
-      groups: z.array(z.string()).optional(),
+      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
+      groups: z.array(groupMatchSchema).optional(),
     })
     .optional(),
   /**
@@ -243,8 +248,8 @@ const jobsSchema = z.object({
       actions: z.array(z.enum(['open', 'update', 'reopen'])).optional(),
       /** Also run for draft merge requests. Default `false`. */
       draft: z.boolean().default(false),
-      /** Only repositories of these groups; every repository when omitted. */
-      groups: z.array(z.string()).optional(),
+      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
+      groups: z.array(groupMatchSchema).optional(),
     })
     .optional(),
   /** Analyzers run when a label is added to a merge request, by label. */
@@ -349,8 +354,8 @@ export const configSchema = z
       }
     }
 
-    const unknownGroups = (groups: string[] | undefined, path: PropertyKey[]) => {
-      for (const group of groups ?? []) {
+    const unknownGroups = (groups: GroupMatch[] | undefined, path: PropertyKey[]) => {
+      for (const group of groupNames(groups ?? [])) {
         if (!(group in config.groups)) {
           ctx.addIssue({ code: 'custom', path, message: `unknown group "${group}"` })
         }
@@ -401,15 +406,7 @@ export const configSchema = z
       }
       names.add(name)
 
-      for (const group of use.groups) {
-        if (!(group in config.groups)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [...path, 'groups'],
-            message: `unknown group "${group}"`,
-          })
-        }
-      }
+      unknownGroups(use.groups, [...path, 'groups'])
 
       const base = use.options ?? {}
       const variants: [PropertyKey[], object][] = [

@@ -124,11 +124,14 @@ At startup the server seeds the defaults of a fresh install (`seedDefaultSetting
 | Endpoint                      | Does                                                                                                                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/jobs`               | `?status=&repo=forge:path&limit=&before=`, newest first, without logs (`JobList`)                                                                                                |
+| `GET /api/jobs/analyzers`     | `JobAnalyzerList`: whether jobs are enabled and every analyzer with label, scope, needs, presets and its options as JSON Schema (for run forms); any signed-in caller            |
 | `GET /api/jobs/:id`           | one `Job` with its last 200 log lines                                                                                                                                            |
 | `POST /api/jobs`              | `CreateJobInput { analyzer, repo?, group?, ref?, options? }`: `repo` for repo-scope analyzers, `group` for group-scope ones; options are validated. 409 without a `jobs` section |
 | `POST /api/jobs/:id/cancel`   | cancels a queued or running job; 409 when it already finished                                                                                                                    |
 | `POST /api/webhooks/gitlab`   | GitLab webhook, see below                                                                                                                                                        |
 | `POST /api/webhooks/r/:token` | one repository's webhook, see [Repository updates](#repository-updates)                                                                                                          |
+
+**Audit jobs.** The `audit` analyzer (`@holtkeeper/analyzers`) scans the checkout with osv-scanner, applies the allowlist and, with `fix: true`, runs the fixers in the job's checkout (changes are not pushed). Before it runs, the server fills its options from the settings `audit.fix` and `audit.allowlist` that apply to the repository and from the repository's config `traits`; `analyzers.audit` and the job's own options win. A succeeded audit job is also stored as an audit run (trigger `manual` or `schedule`, `webhook` for event-driven ones), so it appears on the Audits page next to CLI uploads.
 
 Group jobs are permission-checked as their group (`{ forge, path: <group>, groups: [<group>] }`).
 
@@ -202,17 +205,19 @@ Merge request, note (`/holtkeeper <command>`, as a `command` event) and pipeline
 
 With `store.config`, forges, groups, repository traits, schedules and triggers can be edited in the panel on top of the config file ([@holtkeeper/managed-config](../../../packages/managed-config/docs/README.md) explains precedence and provenance). `deps.config` is a live view of the effective config: routes, the scheduler (which re-reads schedules every tick), the webhook routes and agents always see the current one. The source is rebuilt after every change and once a minute (rotated tokens, limit settings). Panel forges take their token from a stored credential; their clients are cached per document version and token.
 
-| Endpoint                                  | Does                                                                                                                                                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/config/<collection>`            | `ConfigEntryList`: effective entries with `provenance` (`file`, `panel`, `file+panel`) and the panel version. Collections: `forges`, `groups`, `repo-traits`, `schedules`, `triggers` |
-| `GET /api/config/<collection>/:id`        | `ConfigEntryDetail`: the entry and earlier versions of its panel document                                                                                                             |
-| `PUT /api/config/<collection>/:id`        | creates or replaces the panel document; the whole config is validated first (400 with the problem). Trigger ids are fixed: `tag`, `merge-request`, `label:<label>`, `command:<name>`  |
-| `DELETE /api/config/<collection>/:id`     | removes the panel document (the file entry, if any, applies again); 409 when the rest would become invalid                                                                            |
-| `POST /api/forges/:id/webhook`            | generates or rotates the webhook secret, optionally registers the hook (see above)                                                                                                    |
-| `POST /api/forges/:id/ssh-key`            | issues or rotates the forge's SSH key (see below)                                                                                                                                     |
-| `DELETE /api/forges/:id/ssh-key`          | removes the key from the forge account and deletes its credential                                                                                                                     |
-| `GET /api/config/export`                  | the effective config as `holtkeeper.config.ts` source, secrets as `env()` placeholders                                                                                                |
-| `GET /api/schedules/:id/preview?count=10` | `SchedulePreview`: the next run times (smart schedules: windows, zone, jitter)                                                                                                        |
+| Endpoint                                  | Does                                                                                                                                                                                        |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/config/<collection>`            | `ConfigEntryList`: effective entries with `provenance` (`file`, `panel`, `file+panel`) and the panel version. Collections: `forges`, `groups`, `repo-traits`, `schedules`, `triggers`       |
+| `GET /api/config/<collection>/:id`        | `ConfigEntryDetail`: the entry and earlier versions of its panel document                                                                                                                   |
+| `PUT /api/config/<collection>/:id`        | creates or replaces the panel document; the whole config is validated first (400 with the problem). Trigger ids are fixed: `tag`, `merge-request`, `label:<label>`, `command:<name>`        |
+| `DELETE /api/config/<collection>/:id`     | removes the panel document (the file entry, if any, applies again); 409 when the rest would become invalid                                                                                  |
+| `POST /api/forges/:id/webhook`            | generates or rotates the webhook secret, optionally registers the hook (see above)                                                                                                          |
+| `POST /api/forges/:id/ssh-key`            | issues or rotates the forge's SSH key (see below)                                                                                                                                           |
+| `DELETE /api/forges/:id/ssh-key`          | removes the key from the forge account and deletes its credential                                                                                                                           |
+| `GET /api/config/export`                  | the effective config as `holtkeeper.config.ts` source, secrets as `env()` placeholders                                                                                                      |
+| `GET /api/config/runtime`                 | `RuntimeConfigView`: the parts only the file sets (`dryRun`, job execution, server storage and retention, limits, AI provider packages, plugin uses), without secrets                       |
+| `GET /api/repos/explain?repo=`            | `RepoExplain`, like `holtkeeper explain`: groups, merged traits, plugins (options only with `settings:read` on the repository), schedules and triggers that queue jobs for it; `repos:read` |
+| `GET /api/schedules/:id/preview?count=10` | `SchedulePreview`: the next run times (smart schedules: windows, zone, jitter)                                                                                                              |
 
 Every change is logged: `config.<type>.created|updated|removed`, `config.forge.webhook_created|webhook_rotated`, subject `<type>:<id>`.
 
@@ -236,7 +241,7 @@ One `@holtkeeper/limits` limiter is shared by the server (`deps.limiter`): GitLa
 
 ## Feeding audits
 
-`holtkeeper audit <dir> --upload http://localhost:7420 --repo work:games/slots-x` posts a report as the current CLI user. Machine credentials (API tokens) for CI are not implemented yet; until then CI uploads work with `noAuth` or `headerAuth` behind a proxy that authenticates CI.
+`holtkeeper audit <dir> --upload http://localhost:7420 --repo work:games/app-x` posts a report as the current CLI user. Machine credentials (API tokens) for CI are not implemented yet; until then CI uploads work with `noAuth` or `headerAuth` behind a proxy that authenticates CI.
 
 ## Artifacts
 
@@ -286,7 +291,7 @@ await appendAudit(deps.store, {
   actor: { id: 'gitlab:work:42', name: 'jane', provider: 'gitlab:work' },
   via: 'webhook', // or 'job' / 'system'
   action: 'mr.policy.label',
-  target: { type: 'merge-request', id: '17', repo: 'work:games/slots' },
+  target: { type: 'merge-request', id: '17', repo: 'work:games/app' },
   outcome: 'ok',
   details: { label: 'needs-review' },
 })

@@ -221,7 +221,7 @@ describe('knowledge routes', () => {
     expect(visible.entries.map((e) => e.id)).toEqual([games.id])
 
     const forRepo = (await (
-      await app.request('/api/knowledge?repo=work:games/slots', { headers: reader })
+      await app.request('/api/knowledge?repo=work:games/app', { headers: reader })
     ).json()) as KnowledgeList
     expect(forRepo.entries.map((e) => e.id).toSorted()).toEqual([games.id, global.id].toSorted())
     expect(

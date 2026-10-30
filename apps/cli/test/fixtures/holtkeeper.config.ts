@@ -18,6 +18,6 @@ export default defineConfig({
     },
   },
   groups: { games: { forge: 'work', include: ['games/*'] } },
-  repos: { 'games/slots-x': { traits: { ssr: true } } },
-  plugins: [greeter({ groups: ['games'], overrides: { 'games/slots-*': { greeting: 'hi' } } })],
+  repos: { 'games/app-x': { traits: { ssr: true } } },
+  plugins: [greeter({ groups: ['games'], overrides: { 'games/app-*': { greeting: 'hi' } } })],
 })

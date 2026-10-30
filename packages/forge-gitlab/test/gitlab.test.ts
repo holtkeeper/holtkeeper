@@ -107,17 +107,17 @@ describe('repositories', () => {
 
   test('gets a project by URL-encoded full path', async () => {
     const { server, forge } = setup()
-    server.addProject('games/sub/slots')
-    expect(await forge.getRepository('games/sub/slots')).toEqual({
-      path: 'games/sub/slots',
-      name: 'slots',
+    server.addProject('games/sub/app')
+    expect(await forge.getRepository('games/sub/app')).toEqual({
+      path: 'games/sub/app',
+      name: 'app',
       defaultBranch: 'main',
-      webUrl: 'https://gitlab.example.com/games/sub/slots',
-      cloneUrl: 'https://gitlab.example.com/games/sub/slots.git',
+      webUrl: 'https://gitlab.example.com/games/sub/app',
+      cloneUrl: 'https://gitlab.example.com/games/sub/app.git',
       archived: false,
     })
     const call = server.calls[0]
-    expect(call?.url).toBe('https://gitlab.example.com/api/v4/projects/games%2Fsub%2Fslots')
+    expect(call?.url).toBe('https://gitlab.example.com/api/v4/projects/games%2Fsub%2Fapp')
     expect(call?.method).toBe('GET')
     expect(call?.redirect).toBe('error')
     expect(call?.headers).toEqual({ 'PRIVATE-TOKEN': server.token, Accept: 'application/json' })

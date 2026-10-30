@@ -75,6 +75,10 @@ const report = await runAudit({ dir, scanner, fixers, allowlist, traits })
 
 The report lists remaining `findings`, `ignored`, `expired`, every `FixAttempt` (fixer, source, requested and claimed ids, changed files, notes, error), the `resolved` findings and all `changedFiles`.
 
+## JSON schemas
+
+`findingSchema` and `auditReportSchema` validate a `Finding` and an `AuditReport` received as JSON, e.g. reports uploaded by the CLI or CI and the data of `audit` analysis records.
+
 ## Adding an ecosystem
 
 Write a package with a `Fixer` for the ecosystem's manifest or lockfile and put it in the fixer chain after the osv fixer. Nothing in this package changes. A new scanner works the same way: implement `Scanner` and map its output to `Finding`.

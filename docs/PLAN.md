@@ -93,7 +93,7 @@ export default defineConfig({
     audit: { groups: ['games'], allowlist: [/* ... */] },
   },
   repos: {
-    'games/slots-x': { audit: { ssr: true } },
+    'games/app-x': { audit: { ssr: true } },
   },
 })
 ```
@@ -169,7 +169,7 @@ Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run o
 - **CLI** — the first interface: `run <plugin>`, `--repo`/`--group`, `--dry-run`, `validate-config`, `explain`, `audit`, `serve`.
 - **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and activity; audit ingestion; credential rotation._
 - **Web** — repositories and their state per plugin, run history with logs, manual runs, confirmations, audit allowlist, release dashboard. _Started: dashboard, audit reports, repositories, credentials, settings, users, activity._
-- **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/slots-x`), replies in threads. Slack first, the rest through Chat SDK adapters.
+- **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters.
 
 ### Access
 

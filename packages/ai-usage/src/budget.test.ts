@@ -7,7 +7,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { applicableBudgets, budgetGuard, budgetStatuses, parseBudgets } from './budget.ts'
 import { periodRange, previousMonth, projectMonthEnd } from './period.ts'
 
-const slots: RepoTarget = { forge: 'work', path: 'games/slots', groups: ['games'] }
+const app: RepoTarget = { forge: 'work', path: 'games/app', groups: ['games'] }
 
 const entry = (
   id: string,
@@ -22,8 +22,8 @@ const spend = (
   overrides: Partial<Omit<AiUsageRecord, 'id'>> = {},
 ): Omit<AiUsageRecord, 'id'> => ({
   at,
-  repo: { forge: slots.forge, path: slots.path },
-  groups: slots.groups,
+  repo: { forge: app.forge, path: app.path },
+  groups: app.groups,
   taskKind: 'review',
   actor: 'system',
   provider: 'anthropic',
@@ -71,14 +71,14 @@ describe('budget resolution', () => {
       entry('global', { all: true }, { monthlyUsd: 100, action: 'warn' }),
       entry('games', { groups: ['games'] }, { monthlyUsd: 50, action: 'block' }),
       entry('glob', { repos: ['work:games/**'] }, { monthlyUsd: 20, action: 'block' }),
-      entry('exact', { repos: ['work:games/slots'] }, { dailyUsd: 2, action: 'warn' }),
-      entry('broken', { repos: ['work:games/slots'] }, { action: 'explode' }),
+      entry('exact', { repos: ['work:games/app'] }, { dailyUsd: 2, action: 'warn' }),
+      entry('broken', { repos: ['work:games/app'] }, { action: 'explode' }),
       { ...entry('other', { all: true }, { monthlyUsd: 1, action: 'warn' }), key: 'llm.model' },
     ])
     expect(budgets.map((b) => b.id)).toEqual(['global', 'games', 'glob', 'exact'])
-    expect(applicableBudgets(budgets, slots).map((b) => b.id)).toEqual(['exact', 'global'])
+    expect(applicableBudgets(budgets, app).map((b) => b.id)).toEqual(['exact', 'global'])
     expect(
-      applicableBudgets(budgets, { forge: 'work', path: 'games/poker', groups: [] }).map(
+      applicableBudgets(budgets, { forge: 'work', path: 'games/adventure', groups: [] }).map(
         (b) => b.id,
       ),
     ).toEqual(['glob', 'global'])
@@ -103,7 +103,7 @@ describe('budget resolution', () => {
         '2026-02-01T00:00:00Z',
       ),
     ])
-    expect(applicableBudgets(budgets, slots).map((b) => b.id)).toEqual(['new'])
+    expect(applicableBudgets(budgets, app).map((b) => b.id)).toEqual(['new'])
   })
 })
 
@@ -126,12 +126,12 @@ describe('budgetGuard', () => {
   test('block denies once the limit is reached, warn only reports', async () => {
     const { guard, store } = await setup(
       [
-        entry('repo', { repos: ['work:games/slots'] }, { monthlyUsd: 10, action: 'block' }),
+        entry('repo', { repos: ['work:games/app'] }, { monthlyUsd: 10, action: 'block' }),
         entry('global', { all: true }, { dailyUsd: 1, action: 'warn' }),
       ],
       [spend('2026-10-02T00:00:00.000Z', 9), spend('2026-10-30T01:00:00.000Z', 1.5)],
     )
-    const decision = await guard.check({ repo: slots, taskKind: 'review' })
+    const decision = await guard.check({ repo: app, taskKind: 'review' })
     expect(decision.allowed).toBeFalse()
     expect(decision.exceeded.map((s) => [s.budgetId, s.period, s.action, s.spentUsd])).toEqual([
       ['repo', 'month', 'block', 10.5],
@@ -155,11 +155,11 @@ describe('budgetGuard', () => {
       [entry('global', { all: true }, { dailyUsd: 1, action: 'warn' })],
       [spend('2026-10-30T01:00:00.000Z', 2), spend('2026-10-31T01:00:00.000Z', 2)],
     )
-    await guard.check({ repo: slots, taskKind: 'review' })
-    await guard.check({ repo: slots, taskKind: 'review' })
+    await guard.check({ repo: app, taskKind: 'review' })
+    await guard.check({ repo: app, taskKind: 'review' })
     expect((await store.activity.list()).length).toBe(1)
     setNow('2026-10-31T12:00:00.000Z')
-    expect((await guard.check({ repo: slots, taskKind: 'review' })).exceeded.length).toBe(1)
+    expect((await guard.check({ repo: app, taskKind: 'review' })).exceeded.length).toBe(1)
     expect((await store.activity.list()).length).toBe(2)
   })
 
@@ -169,11 +169,11 @@ describe('budgetGuard', () => {
       [spend('2026-10-31T23:59:59.999Z', 4), spend('2026-10-15T00:00:00.000Z', 1)],
     )
     setNow('2026-10-31T23:59:59.999Z')
-    expect(
-      (await guard.check({ repo: slots, taskKind: 'x' })).exceeded.map((s) => s.period),
-    ).toEqual(['month', 'day'])
+    expect((await guard.check({ repo: app, taskKind: 'x' })).exceeded.map((s) => s.period)).toEqual(
+      ['month', 'day'],
+    )
     setNow('2026-11-01T00:00:00.000Z')
-    expect(await guard.check({ repo: slots, taskKind: 'x' })).toEqual({
+    expect(await guard.check({ repo: app, taskKind: 'x' })).toEqual({
       allowed: true,
       exceeded: [],
     })
@@ -187,8 +187,8 @@ describe('budgetGuard', () => {
         spend('2026-10-10T00:00:00.000Z', 5, { taskKind: 'port' }),
       ],
     )
-    expect((await guard.check({ repo: slots, taskKind: 'review' })).allowed).toBeFalse()
-    expect((await guard.check({ repo: slots, taskKind: 'port' })).allowed).toBeTrue()
+    expect((await guard.check({ repo: app, taskKind: 'review' })).allowed).toBeFalse()
+    expect((await guard.check({ repo: app, taskKind: 'port' })).allowed).toBeTrue()
   })
 
   test('cached spend is reused, bumped by note and refreshed after cacheMs', async () => {
@@ -196,19 +196,19 @@ describe('budgetGuard', () => {
       [entry('global', { all: true }, { monthlyUsd: 5, action: 'block' })],
       [spend('2026-10-10T00:00:00.000Z', 4)],
     )
-    expect((await guard.check({ repo: slots, taskKind: 'r' })).allowed).toBeTrue()
+    expect((await guard.check({ repo: app, taskKind: 'r' })).allowed).toBeTrue()
     await store.aiUsage.append(spend('2026-10-30T12:00:00.000Z', 3))
-    expect((await guard.check({ repo: slots, taskKind: 'r' })).allowed).toBeTrue()
+    expect((await guard.check({ repo: app, taskKind: 'r' })).allowed).toBeTrue()
     setNow('2026-10-30T12:00:02.000Z')
-    expect((await guard.check({ repo: slots, taskKind: 'r' })).allowed).toBeFalse()
+    expect((await guard.check({ repo: app, taskKind: 'r' })).allowed).toBeFalse()
 
     const fresh = await setup(
       [entry('global', { all: true }, { monthlyUsd: 5, action: 'block' })],
       [spend('2026-10-10T00:00:00.000Z', 4)],
     )
-    expect((await fresh.guard.check({ repo: slots, taskKind: 'r' })).allowed).toBeTrue()
+    expect((await fresh.guard.check({ repo: app, taskKind: 'r' })).allowed).toBeTrue()
     fresh.guard.note(spend('2026-10-30T12:00:00.000Z', 1))
-    expect((await fresh.guard.check({ repo: slots, taskKind: 'r' })).allowed).toBeFalse()
+    expect((await fresh.guard.check({ repo: app, taskKind: 'r' })).allowed).toBeFalse()
   })
 })
 

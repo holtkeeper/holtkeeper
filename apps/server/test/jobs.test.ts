@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { Job, JobList } from '@holtkeeper/api'
+import type { Job, JobAnalyzerList, JobList, RepoExplain, RuntimeConfigView } from '@holtkeeper/api'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -202,6 +202,66 @@ describe('job routes', () => {
     expect(
       (await send(app, 'POST', '/api/jobs', { analyzer: 'fleet', group: 'games' }, asGames)).status,
     ).toBe(201)
+  })
+})
+
+describe('analyzers, explain and runtime', () => {
+  test('lists analyzers with JSON Schema options', async () => {
+    const list = (await (await setup().request('/api/jobs/analyzers')).json()) as JobAnalyzerList
+    expect(list.enabled).toBeTrue()
+    expect(list.analyzers.map(({ kind, label, scope }) => ({ kind, label, scope }))).toEqual([
+      { kind: 'changelog', label: 'changelog', scope: 'repo' },
+      { kind: 'fleet', label: 'fleet', scope: 'group' },
+    ])
+    expect(list.analyzers[0]?.schema).toMatchObject({ properties: { from: { type: 'string' } } })
+    const off = (await (
+      await setup(noAuth(), parseConfig(baseConfig)).request('/api/jobs/analyzers')
+    ).json()) as JobAnalyzerList
+    expect(off.enabled).toBeFalse()
+  })
+
+  test('explains a repository and hides plugin options without settings:read', async () => {
+    const explained = (await (
+      await setup().request('/api/repos/explain?repo=work:games/a')
+    ).json()) as RepoExplain
+    expect(explained).toEqual({
+      repo: { forge: 'work', path: 'games/a' },
+      groups: ['games'],
+      traits: {},
+      plugins: [],
+      schedules: [],
+      triggers: [{ id: 'tag', analyzers: ['changelog', 'fleet', 'unknown'] }],
+    })
+    const tools = (await (
+      await setup().request('/api/repos/explain?repo=work:tools/x')
+    ).json()) as RepoExplain
+    expect(tools.triggers).toEqual([])
+    expect((await setup().request('/api/repos/explain')).status).toBe(400)
+    const reader = setup(
+      headerAuth({ roles: { r: [{ scope: { all: true }, actions: ['repos:read'] }] } }),
+    )
+    expect(
+      (
+        await reader.request('/api/repos/explain?repo=work:games/a', {
+          headers: { 'x-forwarded-user': 'r', 'x-forwarded-groups': 'r' },
+        })
+      ).status,
+    ).toBe(200)
+  })
+
+  test('shows the file-only config without secrets', async () => {
+    const view = (await (await setup().request('/api/config/runtime')).json()) as RuntimeConfigView
+    expect(view).toMatchObject({
+      dryRun: false,
+      jobs: { concurrency: 2, timeoutMinutes: 30, schedules: 0 },
+      limits: { distributed: false },
+      aiProviders: [],
+      plugins: [],
+    })
+    expect(JSON.stringify(view)).not.toContain('hook-secret')
+    expect((await setup(games).request('/api/config/runtime', { headers: asGames })).status).toBe(
+      403,
+    )
   })
 })
 

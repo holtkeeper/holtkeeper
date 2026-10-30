@@ -56,7 +56,7 @@ import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/cha
 const data = await analyzeChangelog({
   dir: '/path/to/clone',
   to: 'v1.1.0',
-  links: forgeLinks({ kind: 'gitlab', webUrl: 'https://gitlab.example.com/games/slots' }),
+  links: forgeLinks({ kind: 'gitlab', webUrl: 'https://gitlab.example.com/games/app' }),
 })
 const report = changelogAnalysis.toReport({
   id,

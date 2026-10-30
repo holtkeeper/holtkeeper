@@ -3,14 +3,19 @@ import {
   Activity,
   BookOpen,
   Boxes,
+  CalendarClock,
   FileSearch,
   FolderGit2,
   Gauge,
+  HardDrive,
   KeyRound,
   LayoutDashboard,
+  ListChecks,
   type LucideIcon,
   Network,
+  ScrollText,
   Settings2,
+  Sparkles,
   Tag,
   Timer,
   Users,
@@ -28,10 +33,15 @@ export interface NavItem {
     | '/dependencies'
     | '/quality'
     | '/ci'
+    | '/jobs'
     | '/knowledge'
     | '/credentials'
+    | '/automation'
     | '/settings'
+    | '/ai'
+    | '/storage'
     | '/users'
+    | '/audit-log'
     | '/activity'
   label: string
   icon: LucideIcon
@@ -50,10 +60,15 @@ const navItems: readonly NavItem[] = [
   { to: '/dependencies', label: 'Dependencies', icon: Network, requires: 'analyses:read' },
   { to: '/quality', label: 'Code quality', icon: Gauge, requires: 'analyses:read' },
   { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
+  { to: '/jobs', label: 'Jobs', icon: ListChecks, requires: 'analyses:read' },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen, requires: 'knowledge:read' },
   { to: '/credentials', label: 'Credentials', icon: KeyRound, requires: 'credentials:read' },
+  { to: '/automation', label: 'Automation', icon: CalendarClock, requires: 'settings:read' },
   { to: '/settings', label: 'Settings', icon: Settings2, requires: 'settings:read' },
+  { to: '/ai', label: 'AI usage', icon: Sparkles, requires: 'ai:read' },
+  { to: '/storage', label: 'Storage', icon: HardDrive, requires: 'settings:read' },
   { to: '/users', label: 'Users', icon: Users, requires: 'users:read', usersOnly: true },
+  { to: '/audit-log', label: 'Audit log', icon: ScrollText, requires: 'audit:read' },
   { to: '/activity', label: 'Activity', icon: Activity },
 ]
 

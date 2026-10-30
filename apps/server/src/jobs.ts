@@ -1,5 +1,5 @@
 import type { ArtifactStore } from '@holtkeeper/artifacts'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import {
   type AgentFor,
@@ -14,7 +14,8 @@ import {
   toolchainSetting,
 } from '@holtkeeper/jobs'
 import { type SettingDefinition, resolveSetting } from '@holtkeeper/settings'
-import type { AnalysisRecord, Job, Store } from '@holtkeeper/store'
+import type { AnalysisRecord, AuditTrigger, Job, Store } from '@holtkeeper/store'
+import { auditReportSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
 import { jobTarget } from './routes/jobs.ts'
@@ -127,8 +128,42 @@ export async function scopedAnalyzerOptions(
   job: Job,
 ): Promise<Record<string, unknown> | undefined> {
   const key = `analyzers.${job.analyzer}`
-  const entry = resolveSetting(await store.settings.list(key), key, jobTarget(config, job))
-  return entry && !entry.secret && isRecord(entry.value) ? entry.value : undefined
+  const target = jobTarget(config, job)
+  const entry = resolveSetting(await store.settings.list(key), key, target)
+  const scoped = entry && !entry.secret && isRecord(entry.value) ? entry.value : undefined
+  if (job.analyzer !== 'audit' || job.group !== undefined) return scoped
+
+  const valueOf = async (settingKey: string) => {
+    const found = resolveSetting(await store.settings.list(settingKey), settingKey, target)
+    return found && !found.secret ? found.value : undefined
+  }
+  const [fix, allowlist] = await Promise.all([valueOf('audit.fix'), valueOf('audit.allowlist')])
+  return {
+    ...(typeof fix === 'boolean' && { fix }),
+    ...(Array.isArray(allowlist) && { allowlist }),
+    traits: resolveRepo(config, job.repo).traits,
+    ...scoped,
+  }
+}
+
+const auditTriggers: Partial<Record<Job['trigger'], AuditTrigger>> = {
+  manual: 'manual',
+  schedule: 'schedule',
+}
+
+/** Stores a finished `audit` job's report as an audit run, so it shows up next to CLI uploads. */
+async function recordAuditRun(store: Store, job: Job, record: AnalysisRecord) {
+  if (job.analyzer !== 'audit' || record.kind !== 'audit') return
+  const parsed = auditReportSchema.safeParse(record.data)
+  if (!parsed.success) return
+  await store.auditRuns.add({
+    repo: job.repo,
+    trigger: auditTriggers[job.trigger] ?? 'webhook',
+    ...(job.actor !== undefined && { actor: job.actor }),
+    startedAt: job.startedAt ?? job.createdAt,
+    finishedAt: job.finishedAt ?? record.createdAt,
+    report: parsed.data,
+  })
 }
 
 /**
@@ -170,6 +205,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine | undef
     ...(options.admission && { admission: options.admission }),
     ...(options.worker && { worker: options.worker }),
     async onFinished(job, record) {
+      if (record) await recordAuditRun(store, job, record)
       await store.activity.append({
         at: now().toISOString(),
         actor: job.actor ?? 'system',

@@ -1,3 +1,4 @@
+import { type GroupMatch, can, groupsMatch } from '@holtkeeper/access'
 import type {
   ConfigEntryDetail,
   ConfigEntryList,
@@ -7,9 +8,11 @@ import type {
   ForgeSshKeyResult,
   ForgeWebhookInput,
   ForgeWebhookResult,
+  RepoExplain,
+  RuntimeConfigView,
   SchedulePreview,
 } from '@holtkeeper/api'
-import { ConfigError, type HoltkeeperConfig } from '@holtkeeper/core'
+import { ConfigError, type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
 import type { WebhookEvent, WebhookTarget } from '@holtkeeper/forge'
@@ -47,7 +50,9 @@ import {
   authorize,
   publicUrlOf,
   forgeFor,
+  parseRepo,
   readBody,
+  repoTarget,
 } from '../context.ts'
 import { issueForgeSshKey, removeForgeSshKey, sshKeyView } from '../ssh-keys.ts'
 
@@ -122,6 +127,60 @@ export function defaultWebhookTargets(config: HoltkeeperConfig, forgeId: string)
     }
   }
   return [...targets.values()]
+}
+
+/** The file-only parts of a config, without secrets. */
+function runtimeView(config: HoltkeeperConfig): RuntimeConfigView {
+  const { jobs, server } = config
+  const execution = jobs?.execution
+  const artifacts = server?.artifacts
+  return {
+    dryRun: config.dryRun,
+    ...(jobs && {
+      jobs: {
+        concurrency: jobs.concurrency,
+        timeoutMinutes: jobs.timeoutMinutes,
+        cacheDir: jobs.cacheDir,
+        ...(jobs.botUsername !== undefined && { botUsername: jobs.botUsername }),
+        ...(execution && {
+          execution: {
+            mode: execution.mode,
+            ...(execution.image !== undefined && { image: execution.image }),
+            ...(execution.engine !== undefined && { engine: execution.engine }),
+            ...(execution.network !== undefined && { network: execution.network }),
+            ...(execution.limits !== undefined && { limits: execution.limits }),
+            ...(execution.user !== undefined && { user: execution.user }),
+          },
+        }),
+        schedules: jobs.schedules.length,
+      },
+    }),
+    ...(server && {
+      server: {
+        ...(server.publicUrl !== undefined && { publicUrl: server.publicUrl }),
+        rotationIntervalMinutes: server.rotationIntervalMinutes,
+        artifacts:
+          artifacts?.kind === 's3'
+            ? {
+                kind: 's3',
+                bucket: artifacts.bucket,
+                ...(artifacts.endpoint !== undefined && { endpoint: artifacts.endpoint }),
+                ...(artifacts.region !== undefined && { region: artifacts.region }),
+                ...(artifacts.prefix !== undefined && { prefix: artifacts.prefix }),
+              }
+            : { kind: 'fs', dir: artifacts?.dir ?? server.artifactsDir ?? '.holtkeeper/artifacts' },
+        ...(server.retention && { retention: server.retention }),
+      },
+    }),
+    limits: { distributed: config.limits?.distributed ?? false },
+    aiProviders: (config.ai?.providers ?? []).map((provider) => provider.package),
+    plugins: config.plugins.map((use) => ({
+      name: use.plugin.name,
+      groups: use.groups,
+      exclude: use.exclude ?? [],
+      overrides: Object.keys(use.overrides ?? {}),
+    })),
+  }
 }
 
 const sameHook = (a: RegisteredWebhook, b: { scope: string; target: string }) =>
@@ -274,6 +333,47 @@ export function configRoutes(deps: ServerDeps) {
     return c.body(exportConfig(source.effective()), 200, {
       'content-type': 'text/typescript; charset=utf-8',
       'content-disposition': 'attachment; filename="holtkeeper.config.ts"',
+    })
+  })
+
+  app.get('/config/runtime', (c) => {
+    authorize(c, 'settings:read', GLOBAL)
+    return c.json<RuntimeConfigView>(runtimeView(deps.config))
+  })
+
+  app.get('/repos/explain', (c) => {
+    const repo = parseRepo(c.req.query('repo'))
+    if (!repo) throw new HTTPException(400, { message: 'repo is required (forge:path)' })
+    const config = deps.config
+    const target = repoTarget(config, repo)
+    const principal = authorize(c, 'repos:read', { kind: 'repo', repo: target })
+    const withOptions = can(principal, 'settings:read', { kind: 'repo', repo: target })
+    const resolved = resolveRepo(config, repo)
+    const key = `${repo.forge}:${repo.path}`
+    const inGroups = (groups: readonly GroupMatch[] | undefined) =>
+      !groups?.length || groupsMatch(groups, resolved.groups)
+    return c.json<RepoExplain>({
+      repo,
+      groups: resolved.groups,
+      traits: resolved.traits,
+      plugins: resolved.plugins.map(({ plugin, options }) => ({
+        name: plugin.name,
+        ...(withOptions && { options }),
+      })),
+      schedules: (config.jobs?.schedules ?? [])
+        .filter(
+          (schedule) =>
+            schedule.enabled &&
+            (groupsMatch(schedule.groups ?? [], resolved.groups) ||
+              (schedule.repos ?? []).includes(key)),
+        )
+        .map(({ name, title, analyzers }) => ({ name, ...(title && { title }), analyzers })),
+      triggers: triggersOf(config)
+        .filter(([, data]) => !('groups' in data) || inGroups(data.groups))
+        .map(([id, data]) => ({
+          id,
+          analyzers: data.on === 'command' ? [data.analyzer] : data.analyzers,
+        })),
     })
   })
 

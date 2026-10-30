@@ -19,7 +19,7 @@ const fileForge: ForgeDefinition = {
 const file = parseConfig({
   forges: { work: fileForge },
   groups: { games: { forge: 'work', include: ['games/*'] } },
-  repos: { 'games/slots-*': { traits: { slot: true } } },
+  repos: { 'games/app-*': { traits: { webgl: true } } },
   jobs: {
     schedules: [{ name: 'nightly', cron: '0 3 * * *', analyzers: ['depgraph'] }],
     onTag: { analyzers: ['changelog'] },
@@ -107,7 +107,7 @@ describe('effectiveConfig', () => {
       'forge:cloud': 'panel',
       'group:games': 'file+panel',
       'group:tools': 'panel',
-      'repoTraits:games/slots-*': 'file',
+      'repoTraits:games/app-*': 'file',
       'repoTraits:tools/*': 'panel',
       'schedule:nightly': 'file+panel',
       'schedule:office': 'panel',
@@ -211,9 +211,9 @@ export default defineConfig({
     },
   },`)
     expect(source).toContain(`  repos: {
-    'games/slots-*': {
+    'games/app-*': {
       traits: {
-        slot: true,
+        webgl: true,
       },
     },`)
     expect(source).toContain("webhookSecret: env('HOOK'),")

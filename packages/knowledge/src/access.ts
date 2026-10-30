@@ -1,10 +1,9 @@
 import type { Scope } from '@holtkeeper/access'
-import { scopeCoversRepo } from '@holtkeeper/access'
+import { scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import type { KnowledgeKind, KnowledgePackage, Store } from '@holtkeeper/store'
 
 import { proposeEntry } from './propose.ts'
 import { appliesToTask, withoutSuperseded } from './select.ts'
-import { specificity } from './text.ts'
 
 /** A repository as agent tools describe it. */
 export interface KnowledgeRepo {
@@ -93,7 +92,8 @@ export function knowledgeAccess({
       )
       return withoutSuperseded(applicable)
         .toSorted(
-          (a, b) => b.score - a.score || specificity(b.entry.scope) - specificity(a.entry.scope),
+          (a, b) =>
+            b.score - a.score || scopeSpecificity(b.entry.scope) - scopeSpecificity(a.entry.scope),
         )
         .slice(0, limit)
         .map(({ entry, score }) => ({

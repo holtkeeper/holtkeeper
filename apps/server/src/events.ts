@@ -1,3 +1,4 @@
+import { groupsMatch } from '@holtkeeper/access'
 import { resolveRepo } from '@holtkeeper/core'
 import type {
   ForgeEvent,
@@ -327,9 +328,11 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       const onTag = config.jobs?.onTag
       if (!onTag) return ignore('jobs.onTag is not configured')
       const repoGroups = resolveRepo(config, repo).groups
-      const groups = onTag.groups ? repoGroups.filter((g) => onTag.groups?.includes(g)) : repoGroups
-      if (onTag.groups && groups.length === 0)
+      if (onTag.groups && !groupsMatch(onTag.groups, repoGroups))
         return ignore('repository is not in jobs.onTag.groups')
+      const groups = onTag.groups
+        ? repoGroups.filter((group) => onTag.groups?.includes(group))
+        : repoGroups
       const requests = onTag.analyzers.flatMap((analyzer): JobRequest[] =>
         analyzers.get(analyzer)?.scope === 'group'
           ? groups.map((group) => ({ analyzer, repo: { forge: repo.forge, path: group }, group }))
@@ -376,7 +379,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         if (!action) reasons.push(`action ${event.action || '(none)'} brings no new commits`)
         else if (!actions.includes(action)) reasons.push(`action ${action} is not configured`)
         else if (mr.draft && !onMergeRequest.draft) reasons.push('merge request is a draft')
-        else if (onMergeRequest.groups && !groups.some((g) => onMergeRequest.groups?.includes(g)))
+        else if (onMergeRequest.groups && !groupsMatch(onMergeRequest.groups, groups))
           reasons.push('repository is not in jobs.onMergeRequest.groups')
         else for (const kind of repoAnalyzers(onMergeRequest.analyzers)) kinds.add(kind)
       }

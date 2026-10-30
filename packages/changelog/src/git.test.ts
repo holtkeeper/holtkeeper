@@ -89,19 +89,17 @@ describe('forgeLinks', () => {
   test('gitlab', () => {
     const links = forgeLinks({
       kind: 'gitlab',
-      webUrl: 'https://gitlab.example.com/games/slots/',
+      webUrl: 'https://gitlab.example.com/games/app/',
       ticketUrl: 'https://jira.example.com/browse/{id}',
     })
-    expect(links.commit('abc')).toBe('https://gitlab.example.com/games/slots/-/commit/abc')
+    expect(links.commit('abc')).toBe('https://gitlab.example.com/games/app/-/commit/abc')
     expect(links.compare('v1.0.0', 'v1.1.0')).toBe(
-      'https://gitlab.example.com/games/slots/-/compare/v1.0.0...v1.1.0',
+      'https://gitlab.example.com/games/app/-/compare/v1.0.0...v1.1.0',
     )
-    expect(links.mergeRequest(12)).toBe(
-      'https://gitlab.example.com/games/slots/-/merge_requests/12',
-    )
-    expect(links.tag('v1.1.0')).toBe('https://gitlab.example.com/games/slots/-/tags/v1.1.0')
+    expect(links.mergeRequest(12)).toBe('https://gitlab.example.com/games/app/-/merge_requests/12')
+    expect(links.tag('v1.1.0')).toBe('https://gitlab.example.com/games/app/-/tags/v1.1.0')
     expect(links.ticket('GTW-435')).toBe('https://jira.example.com/browse/GTW-435')
-    expect(links.ticket('#5')).toBe('https://gitlab.example.com/games/slots/-/issues/5')
+    expect(links.ticket('#5')).toBe('https://gitlab.example.com/games/app/-/issues/5')
   })
 
   test('github', () => {

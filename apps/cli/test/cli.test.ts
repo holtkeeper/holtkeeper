@@ -74,10 +74,10 @@ describe('cli', () => {
   })
 
   test('explains a repository', async () => {
-    const result = await run('explain', 'work:games/slots-x', '-c', config)
+    const result = await run('explain', 'work:games/app-x', '-c', config)
     expect(result.code).toBe(0)
     expect(JSON.parse(result.out)).toEqual({
-      repo: { forge: 'work', path: 'games/slots-x' },
+      repo: { forge: 'work', path: 'games/app-x' },
       groups: ['games'],
       traits: { ssr: true },
       plugins: [{ name: 'greeter', options: { greeting: 'hi' } }],
@@ -85,7 +85,7 @@ describe('cli', () => {
   })
 
   test('rejects a malformed repository', async () => {
-    const result = await run('explain', 'games/slots-x', '-c', config)
+    const result = await run('explain', 'games/app-x', '-c', config)
     expect(result.code).toBe(1)
     expect(result.err).toContain('<forge>:<path>')
   })

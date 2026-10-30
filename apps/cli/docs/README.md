@@ -24,7 +24,7 @@ Loads and validates the config, prints a short summary and exits with `0`. On er
 Prints, as JSON, what applies to a repository: its groups, merged traits and every plugin with its final options.
 
 ```sh
-holtkeeper explain work:games/slots-x
+holtkeeper explain work:games/app-x
 ```
 
 Matching is done against the config only; the forge is not contacted.
@@ -41,7 +41,7 @@ Scans a checkout (default: the current directory) with osv-scanner and prints fi
 | `--json`              | Print the full report as JSON.                                                                                                                                                                    |
 
 ```sh
-holtkeeper audit ./games/slots-x --fix --allowlist allowlist.json --trait ssr=false
+holtkeeper audit ./games/app-x --fix --allowlist allowlist.json --trait ssr=false
 ```
 
 Needs `osv-scanner` on `PATH`; fixing needs the project's package manager or `go`.

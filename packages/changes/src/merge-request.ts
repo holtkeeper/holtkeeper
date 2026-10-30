@@ -5,7 +5,7 @@ import type { CodeChange } from './types.ts'
 
 export interface MergeRequestOptions extends PlanOptions {
   forge: GitForge
-  /** Repository path on the forge, e.g. `games/slots-x`. */
+  /** Repository path on the forge, e.g. `games/app-x`. */
   repo: string
   changes: readonly CodeChange[]
   title: string

@@ -117,14 +117,14 @@ describe('rules', () => {
 test('buildEntities merges spellings and attributes by role precedence', () => {
   const [entity] = buildEntities(
     [
-      hit('newLobby', 'usage', {}, { description: 'from code' }),
-      hit('NEW_LOBBY', 'definition', {}, { description: 'from definition' }),
-      hit('new_lobby', 'config', { environment: 'prod' }, { value: 'true' }),
+      hit('newHub', 'usage', {}, { description: 'from code' }),
+      hit('NEW_HUB', 'definition', {}, { description: 'from definition' }),
+      hit('new_hub', 'config', { environment: 'prod' }, { value: 'true' }),
     ],
     ['snake'],
   )
-  expect(entity?.key).toBe('new_lobby')
-  expect(entity?.labels).toEqual(['newLobby', 'NEW_LOBBY', 'new_lobby'])
+  expect(entity?.key).toBe('new_hub')
+  expect(entity?.labels).toEqual(['newHub', 'NEW_HUB', 'new_hub'])
   expect(entity?.attrs.description?.value).toBe('from definition')
   expect(entity?.attrs.description?.values?.map((value) => value.value)).toEqual([
     'from definition',
@@ -132,8 +132,8 @@ test('buildEntities merges spellings and attributes by role precedence', () => {
   ])
   expect(entity?.environments).toEqual({ prod: { value: 'true' } })
   expect(entity?.occurrences.map((occurrence) => occurrence.raw)).toEqual([
-    'newLobby',
-    'NEW_LOBBY',
+    'newHub',
+    'NEW_HUB',
     undefined,
   ])
 })

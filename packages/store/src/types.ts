@@ -1,4 +1,4 @@
-import type { Grant, Scope } from '@holtkeeper/access'
+import type { Grant, GroupMatch, Scope } from '@holtkeeper/access'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AuditReport } from '@holtkeeper/vuln'
 
@@ -199,7 +199,7 @@ export interface ActivityEvent {
   actor: string
   /** Dotted verb, e.g. `credential.created`, `user.invited`, `audit.ingested`. */
   action: string
-  /** Object the action was about, e.g. a credential id or `work:games/slots-x`. */
+  /** Object the action was about, e.g. a credential id or `work:games/app-x`. */
   subject?: string
   details?: Record<string, unknown>
 }
@@ -664,7 +664,7 @@ export interface ScheduleDocumentData {
   name: string
   enabled: boolean
   analyzers: string[]
-  groups?: string[]
+  groups?: GroupMatch[]
   repos?: string[]
   options?: Record<string, Record<string, unknown>>
   cron?: string
@@ -681,13 +681,13 @@ export interface ScheduleDocumentData {
  * `merge-request`, `label:<label>` and `command:<name>`.
  */
 export type TriggerDocumentData =
-  | { on: 'tag'; analyzers: string[]; groups?: string[] }
+  | { on: 'tag'; analyzers: string[]; groups?: GroupMatch[] }
   | {
       on: 'mergeRequest'
       analyzers: string[]
       actions?: ('open' | 'update' | 'reopen')[]
       draft?: boolean
-      groups?: string[]
+      groups?: GroupMatch[]
     }
   | { on: 'label'; label: string; analyzers: string[] }
   | { on: 'command'; command: string; analyzer: string; args?: string[] }

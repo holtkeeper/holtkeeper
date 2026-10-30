@@ -111,13 +111,13 @@ describe('query building', () => {
     expect(
       coveredRepos(
         [
-          ['work', 'games/slots', ['games']],
+          ['work', 'games/app', ['games']],
           ['work', 'tools/cli', ['tools']],
         ],
         [{ groups: ['tools'] }],
       ),
     ).toEqual([['work', 'tools/cli', ['tools']]])
-    expect(coveredRepos([['work', 'games/slots', []]], [])).toEqual([])
+    expect(coveredRepos([['work', 'games/app', []]], [])).toEqual([])
   })
 
   test('job status lists', () => {

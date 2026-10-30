@@ -270,9 +270,17 @@
         "@holtkeeper/quality-secrets": "workspace:*",
         "@holtkeeper/quality-tests": "workspace:*",
         "@holtkeeper/release-risk": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
+        "@holtkeeper/vuln": "workspace:*",
+        "@holtkeeper/vuln-go": "workspace:*",
+        "@holtkeeper/vuln-js": "workspace:*",
+        "@holtkeeper/vuln-osv": "workspace:*",
         "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@holtkeeper/exec": "workspace:*",
       },
     },
     "packages/api": {
@@ -407,6 +415,7 @@
       "name": "@holtkeeper/core",
       "version": "0.0.0",
       "dependencies": {
+        "@holtkeeper/access": "workspace:*",
         "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
@@ -516,6 +525,7 @@
       "name": "@holtkeeper/jobs",
       "version": "0.0.0",
       "dependencies": {
+        "@holtkeeper/access": "workspace:*",
         "@holtkeeper/analyzer": "workspace:*",
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
@@ -559,6 +569,7 @@
       "name": "@holtkeeper/managed-config",
       "version": "0.0.0",
       "dependencies": {
+        "@holtkeeper/access": "workspace:*",
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/forge-gitlab": "workspace:*",

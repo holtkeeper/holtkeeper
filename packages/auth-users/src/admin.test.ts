@@ -33,7 +33,7 @@ describe('admin permissions', () => {
     const lead = principal([games(['users:read', 'users:write', 'repos:read'])])
     expect(isGlobalAdmin(lead)).toBe(false)
     expect(
-      canSeeUser(lead, user([{ scope: { repos: ['games/slots/**'] }, actions: ['repos:read'] }])),
+      canSeeUser(lead, user([{ scope: { repos: ['games/app/**'] }, actions: ['repos:read'] }])),
     ).toBe(true)
     expect(canSeeUser(lead, user([{ scope: { all: true }, actions: ['repos:read'] }]))).toBe(false)
     expect(canManageUser(lead, user([games(['audits:run'])]))).toBe(false)

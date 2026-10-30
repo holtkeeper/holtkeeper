@@ -77,7 +77,7 @@ export default defineConfig({
 
 ```sh
 holtkeeper validate-config
-holtkeeper explain work:games/slots-x
+holtkeeper explain work:games/app-x
 holtkeeper serve
 ```
 

@@ -1,9 +1,9 @@
-import { scopeCoversRepo } from '@holtkeeper/access'
+import { scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import type { KnowledgeEntry } from '@holtkeeper/store'
 
 import type { KnowledgeTask } from './model.ts'
 import { describePackage, packagesOverlap } from './semver.ts'
-import { estimateTokens, relevance, specificity } from './text.ts'
+import { estimateTokens, relevance } from './text.ts'
 
 /** Whether an entry is meant for tasks of `kind`: `appliesTo` holds the kind or `*`. */
 export const appliesToTask = (entry: KnowledgeEntry, kind: string): boolean =>
@@ -88,7 +88,7 @@ export function selectForTask({
       .map((entry) => ({
         entry,
         score: relevance(entry, query),
-        specificity: specificity(entry.scope),
+        specificity: scopeSpecificity(entry.scope),
       })),
   ).toSorted(
     (a, b) =>

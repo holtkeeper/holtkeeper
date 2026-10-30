@@ -1,4 +1,4 @@
-import type { Grant, Principal, Scope } from '@holtkeeper/access'
+import type { Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
 import type { AuthInfo } from '@holtkeeper/auth'
 import type { Conflict } from '@holtkeeper/changes'
 import type { FleetLibrary } from '@holtkeeper/depgraph'
@@ -486,6 +486,69 @@ export interface CreateJobInput {
   group?: string
   ref?: string
   options?: Record<string, unknown>
+}
+
+/** An analyzer jobs can run. `schema` is JSON Schema of its options, for building forms. */
+export interface JobAnalyzerView {
+  kind: string
+  label: string
+  /** `repo`: queued per repository; `group`: once per config group. */
+  scope: 'repo' | 'group'
+  needs: { checkout?: boolean; forge?: boolean; agent?: 'required' | 'optional'; history?: boolean }
+  schema: unknown
+  presets?: SettingPresetView[]
+}
+
+/** `GET /api/jobs/analyzers` — `enabled` is false when the config has no `jobs` section. */
+export interface JobAnalyzerList {
+  enabled: boolean
+  analyzers: JobAnalyzerView[]
+}
+
+/** `GET /api/repos/explain?repo=forge:path` — what the config applies to one repository. */
+export interface RepoExplain {
+  repo: RepoRef
+  groups: string[]
+  traits: Record<string, string | number | boolean>
+  /** Plugins with their final options; options are omitted when the caller cannot read settings. */
+  plugins: { name: string; options?: unknown }[]
+  /** Schedules and triggers that queue jobs for the repository. */
+  schedules: { name: string; title?: string; analyzers: string[] }[]
+  triggers: { id: string; analyzers: string[] }[]
+}
+
+/**
+ * `GET /api/config/runtime` — the parts of the config only the file sets, without secrets: job
+ * execution, server storage, limits, AI provider plugins and plugin uses.
+ */
+export interface RuntimeConfigView {
+  dryRun: boolean
+  jobs?: {
+    concurrency: number
+    timeoutMinutes: number
+    cacheDir: string
+    botUsername?: string
+    execution?: {
+      mode: 'host' | 'mise' | 'container'
+      image?: string
+      engine?: 'docker' | 'podman'
+      network?: 'none' | 'install' | 'full'
+      limits?: { cpus?: number; memory?: string; pids?: number }
+      user?: string
+    }
+    schedules: number
+  }
+  server?: {
+    publicUrl?: string
+    rotationIntervalMinutes: number
+    artifacts:
+      | { kind: 'fs'; dir: string }
+      | { kind: 's3'; bucket: string; endpoint?: string; region?: string; prefix?: string }
+    retention?: { days?: number; maxBytes?: number }
+  }
+  limits: { distributed: boolean }
+  aiProviders: string[]
+  plugins: { name: string; groups: GroupMatch[]; exclude: string[]; overrides: string[] }[]
 }
 
 /** A knowledge entry; `score` is set on search results (higher is more relevant). */

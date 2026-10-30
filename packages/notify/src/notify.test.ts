@@ -29,7 +29,7 @@ const failing: Fetch = async (url) => {
 const unauthorized: Fetch = async () => new Response('bad token Bearer token-1', { status: 401 })
 
 const message: Notification = {
-  title: 'Release risk: games/slots v2',
+  title: 'Release risk: games/app v2',
   text: '- [Breaking](https://x.example/a?b=1&c=2): drop <api>\n- **bold** & done',
   url: 'https://holt.example/analyses/1',
   tone: 'warning',
@@ -167,7 +167,7 @@ describe('reportNotification', () => {
   const report: Report = {
     kind: 'bundle',
     title: 'Bundle',
-    subject: { repo: { forge: 'work', path: 'games/slots' }, ref: 'v2', compareTo: 'v1' },
+    subject: { repo: { forge: 'work', path: 'games/app' }, ref: 'v2', compareTo: 'v1' },
     generatedAt: '2026-10-29T00:00:00.000Z',
     metrics: [
       {
@@ -203,7 +203,7 @@ describe('reportNotification', () => {
   test('title, fields with deltas, severe issues first with absolute links, worst tone', () => {
     const result = reportNotification(report, 'https://holt.example/analyses/1', { issues: 1 })
     expect(result).toEqual({
-      title: 'Bundle: games/slots v2',
+      title: 'Bundle: games/app v2',
       text: 'Compared with v1.\n\n- [Cycle](https://holt.example/analyses/9)\n- ...and 1 more',
       url: 'https://holt.example/analyses/1',
       tone: 'bad',

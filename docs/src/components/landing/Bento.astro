@@ -21,14 +21,14 @@ import reviewIcon from '@holtkeeper/brand/review.svg?url'
 import updatesIcon from '@holtkeeper/brand/updates.svg?url'
 
 const games: { name: string; state: 'ok' | 'fixed' | 'draft' }[] = [
-  { name: 'slots-x', state: 'ok' },
-  { name: 'roulette', state: 'ok' },
-  { name: 'blackjack', state: 'fixed' },
-  { name: 'poker', state: 'ok' },
-  { name: 'bingo', state: 'ok' },
-  { name: 'keno', state: 'fixed' },
-  { name: 'crash', state: 'draft' },
-  { name: 'lobby', state: 'ok' },
+  { name: 'app-x', state: 'ok' },
+  { name: 'puzzle', state: 'ok' },
+  { name: 'racing', state: 'fixed' },
+  { name: 'arcade', state: 'ok' },
+  { name: 'quiz', state: 'ok' },
+  { name: 'words', state: 'fixed' },
+  { name: 'runner', state: 'draft' },
+  { name: 'hub', state: 'ok' },
 ]
 
 const factors = [
@@ -64,9 +64,9 @@ const spark = (() => {
 })()
 
 const images = [
-  { file: 'lobby/hero.png', before: '1.84 MB', avif: '212 kB', webp: '348 kB', saved: '88%' },
-  { file: 'slots/reel-bg.jpg', before: '936 kB', avif: '141 kB', webp: '219 kB', saved: '85%' },
-  { file: 'ui/coin.png', before: '96 kB', avif: '11 kB', webp: '14 kB', saved: '89%' },
+  { file: 'hub/hero.png', before: '1.84 MB', avif: '212 kB', webp: '348 kB', saved: '88%' },
+  { file: 'app/banner-bg.jpg', before: '936 kB', avif: '141 kB', webp: '219 kB', saved: '85%' },
+  { file: 'ui/badge.png', before: '96 kB', avif: '11 kB', webp: '14 kB', saved: '89%' },
 ]
 
 const knowledge = [
@@ -79,7 +79,7 @@ const knowledge = [
   },
   {
     kind: 'decision',
-    title: 'Money is formatted with the player’s locale',
+    title: 'Money is formatted with the user’s locale',
     scope: 'games/*',
     applies: 'review',
     status: 'accepted',
@@ -87,24 +87,24 @@ const knowledge = [
   {
     kind: 'quirk',
     title: 'pixi.js textures must be destroyed on scene change',
-    scope: 'games/slots-*',
+    scope: 'games/app-*',
     applies: '*',
     status: 'proposed by agent',
   },
 ]
 
 const flags = [
-  { key: 'new_lobby', repos: 6, prod: 'on', stage: 'on', finding: '' },
-  { key: 'tournament_banner', repos: 3, prod: 'off', stage: 'on', finding: '' },
+  { key: 'new_hub', repos: 6, prod: 'on', stage: 'on', finding: '' },
+  { key: 'promo_banner', repos: 3, prod: 'off', stage: 'on', finding: '' },
   { key: 'legacy_wallet', repos: 2, prod: 'on', stage: 'on', finding: 'on everywhere · remove' },
-  { key: 'bonus_wheel', repos: 1, prod: '—', stage: '—', finding: 'not documented' },
+  { key: 'beta_widget', repos: 1, prod: '—', stage: '—', finding: 'not documented' },
 ]
 
 const usage = [
-  { repo: 'games/slots-x', usd: 41.2 },
-  { repo: 'games/lobby', usd: 33.6 },
-  { repo: 'games/poker', usd: 22.9 },
-  { repo: 'games/keno', usd: 14.1 },
+  { repo: 'games/app-x', usd: 41.2 },
+  { repo: 'games/hub', usd: 33.6 },
+  { repo: 'games/arcade', usd: 22.9 },
+  { repo: 'games/words', usd: 14.1 },
   { repo: 'tools/admin', usd: 6.4 },
 ]
 const usageMax = 50
@@ -136,7 +136,7 @@ const budget = 200
         </header>
         <div class="b-mock mr">
           <div class="mr-file">
-            <span>src/lobby/TournamentBanner.tsx</span>
+            <span>src/hub/PromoBanner.tsx</span>
             <span class="mr-stat"><b class="add">+12</b> <b class="del">−3</b></span>
           </div>
           <div class="mr-diff">
@@ -318,8 +318,8 @@ const budget = 200
               <div class="r-ticks"><span>v2.1</span><span>v2.4</span></div>
             </div>
             <ol class="r-log">
-              <li><span class="t feat">feat</span>lobby: tournament banner</li>
-              <li><span class="t fix">fix</span>slots: reel stops late on slow devices <span class="x">×4</span></li>
+              <li><span class="t feat">feat</span>hub: promo banner</li>
+              <li><span class="t fix">fix</span>app: banner renders late on slow devices <span class="x">×4</span></li>
               <li><span class="t perf">perf</span>assets: AVIF backgrounds</li>
               <li><span class="t brk">feat!</span>api: drop legacy session tokens</li>
             </ol>

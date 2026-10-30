@@ -1,22 +1,48 @@
-import type { RepoRef, Scope } from '@holtkeeper/api'
+import type { GroupMatch, RepoRef, Scope } from '@holtkeeper/api'
 
-import { repoKey } from './repo.ts'
+import { repoKey, validateGroupId } from './repo.ts'
 
 /** Whether the scope covers nothing: not `all` and no groups or repository patterns. */
 export const isEmptyScope = (scope: Scope): boolean =>
   !scope.all && !scope.groups?.length && !scope.repos?.length
 
-/** `everything`, or a list like `group games, work:games/**`. */
+/** A group list entry as typed in the panel: `frontend`, or `frontend + storefront`. */
+export const formatGroupMatch = (entry: GroupMatch): string =>
+  typeof entry === 'string' ? entry : entry.join(' + ')
+
+/** Reads `formatGroupMatch` text back; a single group stays a plain name. */
+export function parseGroupMatch(text: string): GroupMatch {
+  const groups = [...new Set(text.split('+').map((group) => group.trim()))].filter(Boolean)
+  return groups.length === 1 ? (groups[0] ?? '') : groups
+}
+
+/** Checks a group list entry typed in the panel; `undefined` when it looks valid. */
+export const validateGroupMatch = (text: string): string | undefined =>
+  text
+    .split('+')
+    .map(validateGroupId)
+    .find((error) => error !== undefined)
+
+/** `everything`, or a list like `group games, group frontend + storefront, work:games/**`. */
 export function describeScope(scope: Scope): string {
   if (scope.all) return 'everything'
-  const parts = [...(scope.groups ?? []).map((group) => `group ${group}`), ...(scope.repos ?? [])]
+  const parts = [
+    ...(scope.groups ?? []).map((entry) => `group ${formatGroupMatch(entry)}`),
+    ...(scope.repos ?? []),
+  ]
   return parts.length ? parts.join(', ') : 'nothing'
 }
 
 /** Drops empty lists and duplicates, and drops everything else when `all` is set. */
 export function normalizeScope(scope: Scope): Scope {
   if (scope.all) return { all: true }
-  const groups = [...new Set((scope.groups ?? []).map((g) => g.trim()).filter(Boolean))]
+  const byText = new Map(
+    (scope.groups ?? [])
+      .map((entry) => parseGroupMatch(formatGroupMatch(entry)))
+      .map((entry) => [formatGroupMatch(entry), entry]),
+  )
+  byText.delete('')
+  const groups = [...byText.values()]
   const repos = [...new Set((scope.repos ?? []).map((r) => r.trim()).filter(Boolean))]
   return { ...(groups.length ? { groups } : {}), ...(repos.length ? { repos } : {}) }
 }

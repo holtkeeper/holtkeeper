@@ -22,7 +22,7 @@ interface ForgeDefinition {
 
 ## GitForge
 
-Repositories are addressed by their full path (`games/slots-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
+Repositories are addressed by their full path (`games/app-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
 
 | Area                 | Methods                                                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------------------------------ |

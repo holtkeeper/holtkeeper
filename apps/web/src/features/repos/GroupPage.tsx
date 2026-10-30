@@ -20,6 +20,7 @@ import {
   Tabs,
   notify,
 } from '../../ui/index.ts'
+import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
@@ -131,6 +132,7 @@ export function GroupPage() {
           </span>
         ) : undefined
       }
+      actions={<RunJobButton group={groupId} />}
     >
       <Tabs
         aria-label="Group sections"

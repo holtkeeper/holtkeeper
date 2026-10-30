@@ -14,8 +14,8 @@ const scanner = osvScanner()
 
 /** Real audits of the fixtures, stored as runs of made-up repositories over the past days. */
 const repos = [
-  { path: 'games/slots-x', layout: { web: 'npm', server: 'go' }, fix: false },
-  { path: 'games/poker', layout: { '.': 'npm' }, fix: true },
+  { path: 'games/app-x', layout: { web: 'npm', server: 'go' }, fix: false },
+  { path: 'games/adventure', layout: { '.': 'npm' }, fix: true },
   { path: 'tools/deployer', layout: { '.': 'go' }, fix: false },
 ]
 
@@ -32,7 +32,7 @@ for (const [index, repo] of repos.entries()) {
       scanner,
       fixers: fix ? [osvFixer(), jsFixer(), goFixer()] : [],
       allowlist:
-        repo.path === 'games/slots-x'
+        repo.path === 'games/app-x'
           ? [
               {
                 id: 'GHSA-35jh-r3h4-6jhm',

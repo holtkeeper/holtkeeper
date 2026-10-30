@@ -38,8 +38,11 @@ export function fakeForge(
   }
 }
 
-export const gameRepos: RepoRef[] = ['games/slots', 'games/poker', 'games/roulette'].map(
-  (path) => ({ forge: 'work', path }),
+export const gameRepos: RepoRef[] = ['games/app', 'games/adventure', 'games/puzzle'].map(
+  (path) => ({
+    forge: 'work',
+    path,
+  }),
 )
 
 const flagsJson = (flags: Record<string, { default: boolean; description?: string }>) =>
@@ -51,28 +54,27 @@ const flagsJson = (flags: Record<string, { default: boolean; description?: strin
 
 /** Three game repositories, a Helm repository and nothing else. */
 export const forgeFiles: Record<string, Record<string, string>> = {
-  'games/slots': {
+  'games/app': {
     'src/flags.json': flagsJson({
-      new_lobby: { default: false, description: 'Redesigned lobby' },
-      turbo_spin: { default: true },
+      new_hub: { default: false, description: 'Redesigned hub' },
+      turbo_mode: { default: true },
     }),
-    'src/lobby.ts':
-      'if (isEnabled(\'new_lobby\')) showLobby()\nconst turbo = isEnabled("turbo_spin")\n',
+    'src/hub.ts': 'if (isEnabled(\'new_hub\')) showHub()\nconst turbo = isEnabled("turbo_mode")\n',
   },
-  'games/poker': {
-    'src/flags.json': flagsJson({ new_lobby: { default: false }, old_tables: { default: true } }),
-    'src/table.tsx':
-      "export const T = () => (isEnabled('new_lobby') ? <Lobby /> : null)\nisEnabled('ghost_flag')\n",
+  'games/adventure': {
+    'src/flags.json': flagsJson({ new_hub: { default: false }, old_tables: { default: true } }),
+    'src/board.tsx':
+      "export const T = () => (isEnabled('new_hub') ? <Hub /> : null)\nisEnabled('ghost_flag')\n",
   },
-  'games/roulette': {
+  'games/puzzle': {
     'src/app.ts': 'console.log("no flags")\n',
   },
   'infra/helm': {
-    'charts/slots/values-dev.yaml': 'featureFlags:\n  new_lobby: true\n  turbo_spin: true\n',
-    'charts/slots/values-prod.yaml':
-      'featureFlags:\n  new_lobby: false\n  turbo_spin: false\n  removed_flag: true\n',
-    'charts/poker/values-prod.yaml': 'featureFlags:\n  new_lobby: false\n',
-    'charts/poker/Chart.yaml': 'name: poker\n',
+    'charts/app/values-dev.yaml': 'featureFlags:\n  new_hub: true\n  turbo_mode: true\n',
+    'charts/app/values-prod.yaml':
+      'featureFlags:\n  new_hub: false\n  turbo_mode: false\n  removed_flag: true\n',
+    'charts/adventure/values-prod.yaml': 'featureFlags:\n  new_hub: false\n',
+    'charts/adventure/Chart.yaml': 'name: adventure\n',
     'docs/flags.md': 'old\n',
   },
 }
@@ -89,8 +91,8 @@ export const flagsPage: DocumentContent = {
     '<h2>Flags</h2>',
     '<table><tbody>',
     '<tr><th>Flag</th><th>Description</th><th>Owner</th></tr>',
-    '<tr><td><code>new_lobby</code></td><td>New &amp; shiny lobby</td><td><ac:link><ri:user ri:account-id="abc" /></ac:link></td></tr>',
-    '<tr><td>legacy_bonus</td><td>Old bonus round</td><td>Games</td></tr>',
+    '<tr><td><code>new_hub</code></td><td>New &amp; shiny hub</td><td><ac:link><ri:user ri:account-id="abc" /></ac:link></td></tr>',
+    '<tr><td>legacy_widget</td><td>Old extra level</td><td>Games</td></tr>',
     '</tbody></table>',
     '<ac:structured-macro ac:name="anchor"><ac:parameter ac:name="">holtkeeper:flags</ac:parameter></ac:structured-macro>',
   ].join(''),

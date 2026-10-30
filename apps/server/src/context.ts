@@ -1,6 +1,7 @@
 import type { Action, Principal, RepoTarget, Target } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
 import type { AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@holtkeeper/agent'
+import type { JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
@@ -68,6 +69,9 @@ export interface JobAnalyzerInfo {
   kind: string
   scope: 'repo' | 'group'
   options: z.ZodType
+  analysis?: { label: string }
+  needs?: JobAnalyzerView['needs']
+  presets?: { id: string; label: string; description?: string; options: unknown }[]
 }
 
 export interface Env {

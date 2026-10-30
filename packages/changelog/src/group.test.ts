@@ -64,15 +64,15 @@ describe('groupCommits', () => {
     commit('Revert "feat: new cache"', { body: 'This reverts commit abcdef1234567.' }),
     commit("Merge branch 'fix-upload' into 'main'", {
       parents: 2,
-      body: 'fix: retry upload\n\nSee merge request games/slots!42',
+      body: 'fix: retry upload\n\nSee merge request games/app!42',
     }),
     commit("Merge branch 'docs' into 'main'", {
       parents: 2,
-      body: 'See merge request games/slots!43',
+      body: 'See merge request games/app!43',
     }),
     commit("Merge branch 'docs' into 'main'", {
       parents: 2,
-      body: 'See merge request games/slots!44',
+      body: 'See merge request games/app!44',
     }),
   ]
   const groups = groupCommits(commits)

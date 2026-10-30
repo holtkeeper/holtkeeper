@@ -8,7 +8,7 @@ import { budgetGuard } from './budget.ts'
 import { computeCost, costOf, defaultPrices, priceFor } from './cost.ts'
 import { BudgetExceededError, meteredAgent, usageRecorder } from './meter.ts'
 
-const repo = { forge: 'work', path: 'games/slots', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app', groups: ['games'] }
 
 const fakeAgent = (outcome: AgentResult | Error, onRun = () => {}): Agent => ({
   name: 'fake',
@@ -73,7 +73,7 @@ describe('meteredAgent', () => {
     expect(records).toEqual([
       {
         at: '2026-10-30T10:00:00.000Z',
-        repo: { forge: 'work', path: 'games/slots' },
+        repo: { forge: 'work', path: 'games/app' },
         groups: ['games'],
         taskKind: 'review',
         jobId: 'j1',
@@ -170,7 +170,7 @@ describe('usageRecorder', () => {
       groupsOf: () => ['games'],
     })
     await record({
-      repo: { forge: 'work', path: 'games/slots' },
+      repo: { forge: 'work', path: 'games/app' },
       taskKind: 'review',
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
@@ -181,7 +181,7 @@ describe('usageRecorder', () => {
       durationMs: 10_000,
     })
     await record({
-      repo: { forge: 'work', path: 'games/slots', groups: ['other'] },
+      repo: { forge: 'work', path: 'games/app', groups: ['other'] },
       taskKind: 'review',
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',

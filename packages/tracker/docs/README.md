@@ -13,7 +13,7 @@ sources ──extract──▶ hits (raw key, line, attrs) ──normalize──
                                                                     └──▶ changes (repository files → merge requests)
 ```
 
-- **Entity** — `{ key, labels, attrs, environments, occurrences }`. `key` is the normalized key, `labels` every spelling found (`FEATURE_NEW_LOBBY`, `newLobby`). `attrs` merges attributes of occurrences without an environment; the value from the best-ranked role wins (`definition` > `documentation` > `config` > `usage` > others, then source order), each with its provenance (`from`), and `values` lists every distinct value when sources disagree. `environments` holds attributes per environment (e.g. Helm values per `values-<env>.yaml`).
+- **Entity** — `{ key, labels, attrs, environments, occurrences }`. `key` is the normalized key, `labels` every spelling found (`FEATURE_NEW_LOBBY`, `newHub`). `attrs` merges attributes of occurrences without an environment; the value from the best-ranked role wins (`definition` > `documentation` > `config` > `usage` > others, then source order), each with its provenance (`from`), and `values` lists every distinct value when sources disagree. `environments` holds attributes per environment (e.g. Helm values per `values-<env>.yaml`).
 - **Occurrence** — one place: `{ source, role, repo?, file?, line?, document?, environment?, raw?, attrs }`.
 - **Role** — what a source says about an entity: `definition`, `usage`, `config`, `documentation` or any custom string. Rules are configured in terms of roles.
 - **Finding** — `{ id, rule, ruleId, severity, key, message, environment?, occurrences }`; `id` (`<ruleId>:<key>[:<env>]`) is stable across runs, so reports show new and resolved findings.
@@ -33,7 +33,7 @@ sources ──extract──▶ hits (raw key, line, attrs) ──normalize──
 }
 ```
 
-Key normalization steps apply in order after trimming: `lower`, `upper`, `snake` (`new_lobby`), `kebab` (`new-lobby`), `camel` (`newLobby`), `trim-prefix:<p>` and `trim-suffix:<s>` (case-insensitive). Word splitting understands camelCase, snake_case, kebab-case and acronyms.
+Key normalization steps apply in order after trimming: `lower`, `upper`, `snake` (`new_hub`), `kebab` (`new-hub`), `camel` (`newHub`), `trim-prefix:<p>` and `trim-suffix:<s>` (case-insensitive). Word splitting understands camelCase, snake_case, kebab-case and acronyms.
 
 Sources and outputs get ids `<kind>-<n>` (1-based) unless they set `id`; rules default to their kind. Ids must be unique within a tracker.
 

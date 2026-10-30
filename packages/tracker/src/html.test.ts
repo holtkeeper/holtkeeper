@@ -8,7 +8,7 @@ describe('parseHtmlTables', () => {
       '<h2>Flags <em>live</em></h2>',
       '<table><tbody>',
       '<tr><th>Flag</th><th>Description</th><th>Owner</th></tr>',
-      '<tr><td><p><code>new_lobby</code></p></td><td>A &amp; B&nbsp;&#8212; <br/>c</td><td><ac:link><ri:user ri:account-id="u-1"/></ac:link></td></tr>',
+      '<tr><td><p><code>new_hub</code></p></td><td>A &amp; B&nbsp;&#8212; <br/>c</td><td><ac:link><ri:user ri:account-id="u-1"/></ac:link></td></tr>',
       '<tr><td colspan="2">wide</td><td><![CDATA[x < y]]></td></tr>',
       '</tbody></table>',
       '<h2>Other</h2><table><thead><tr><td>K</td></tr></thead><tbody><tr><td>v</td></tr></tbody></table>',
@@ -18,7 +18,7 @@ describe('parseHtmlTables', () => {
         heading: 'Flags live',
         headers: ['Flag', 'Description', 'Owner'],
         rows: [
-          ['new_lobby', 'A & B — c', '@u-1'],
+          ['new_hub', 'A & B — c', '@u-1'],
           ['wide', 'wide', 'x < y'],
         ],
       },
@@ -42,13 +42,13 @@ describe('parseHtmlTables', () => {
 
 test('parseMarkdownTables', () => {
   const markdown =
-    '# Flags\n\n| Flag | Description |\n| --- | :-: |\n| `new_lobby` | **New** lobby \\| v2 |\n| [x](http://a) |\n\ntext\n'
+    '# Flags\n\n| Flag | Description |\n| --- | :-: |\n| `new_hub` | **New** hub \\| v2 |\n| [x](http://a) |\n\ntext\n'
   expect(parseMarkdownTables(markdown)).toEqual([
     {
       heading: 'Flags',
       headers: ['Flag', 'Description'],
       rows: [
-        ['new_lobby', 'New lobby | v2'],
+        ['new_hub', 'New hub | v2'],
         ['x', ''],
       ],
     },

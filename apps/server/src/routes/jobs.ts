@@ -1,5 +1,5 @@
 import type { RepoTarget } from '@holtkeeper/access'
-import type { Job, JobList, JobSummary } from '@holtkeeper/api'
+import type { Job, JobAnalyzerList, JobAnalyzerView, JobList, JobSummary } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -41,6 +41,16 @@ export const jobTarget = (
 export function jobRoutes(deps: ServerDeps) {
   const { store, config } = deps
   const analyzers = new Map((deps.analyzers ?? []).map((analyzer) => [analyzer.kind, analyzer]))
+  const analyzerViews: JobAnalyzerView[] = [...analyzers.values()].map((analyzer) => ({
+    kind: analyzer.kind,
+    label: analyzer.analysis?.label ?? analyzer.kind,
+    scope: analyzer.scope,
+    needs: analyzer.needs ?? {},
+    schema: z.toJSONSchema(analyzer.options, { unrepresentable: 'any', io: 'input' }),
+    ...(analyzer.presets?.length && {
+      presets: analyzer.presets.map(({ options, ...preset }) => ({ ...preset, value: options })),
+    }),
+  }))
   const app = new Hono<Env>()
 
   const readable = async (c: AppContext, id: string) => {
@@ -69,6 +79,11 @@ export function jobRoutes(deps: ServerDeps) {
     })
     const visible = jobs.filter((job) => canSee(principal, 'analyses:read', jobTarget(config, job)))
     return c.json<JobList>({ jobs: visible.map(summary) })
+  })
+
+  app.get('/jobs/analyzers', (c) => {
+    principalOf(c)
+    return c.json<JobAnalyzerList>({ enabled: config.jobs !== undefined, analyzers: analyzerViews })
   })
 
   app.get('/jobs/:id', async (c) => c.json<Job>(await readable(c, c.req.param('id'))))

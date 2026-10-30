@@ -109,7 +109,7 @@ describe('evaluatePolicies', () => {
     const policies = [
       policy('global', { scope: { all: true } }),
       policy('group', { scope: { groups: ['games'] } }),
-      policy('exact', { scope: { repos: ['games/slots'] } }),
+      policy('exact', { scope: { repos: ['games/app'] } }),
       policy('glob-1', { scope: { repos: ['games/*'] } }),
       policy('glob-2', { scope: { repos: ['games/**'] }, stop: true }),
       policy('elsewhere', { scope: { repos: ['tools/**'] } }),

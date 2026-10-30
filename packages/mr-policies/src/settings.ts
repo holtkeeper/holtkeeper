@@ -1,11 +1,10 @@
-import { type RepoTarget, type Scope, scopeCoversRepo } from '@holtkeeper/access'
+import { type RepoTarget, type Scope, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import { z } from 'zod'
 
 import { builtinActions } from './actions/index.ts'
 import type { ActionRegistry } from './actions/provider.ts'
 import type { Policy } from './model.ts'
 import { conditionSchema, createPoliciesSchema, policiesSchema } from './schema.ts'
-import { scopeSpecificity } from './specificity.ts'
 
 /** Settings key under which policies are stored per scope. */
 export const policiesSettingKey = 'mergeRequests.policies'

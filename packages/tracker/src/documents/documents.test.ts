@@ -38,10 +38,10 @@ test('table: key column, mapped columns and heading filter', () => {
 
 test('list: code spans, separators, patterns, headings', () => {
   const html =
-    '<h2>Flags</h2><ul><li><code>new_lobby</code> — the lobby</li><li>turbo: faster spins</li><li>plain</li></ul><h2>Else</h2><ul><li>skip</li></ul>'
+    '<h2>Flags</h2><ul><li><code>new_hub</code> — the hub</li><li>turbo: faster animations</li><li>plain</li></ul><h2>Else</h2><ul><li>skip</li></ul>'
   expect(extractDocument(page('storage', html), { kind: 'list', heading: 'Flags' })).toEqual([
-    { key: 'new_lobby', attrs: { description: 'the lobby' } },
-    { key: 'turbo', attrs: { description: 'faster spins' } },
+    { key: 'new_hub', attrs: { description: 'the hub' } },
+    { key: 'turbo', attrs: { description: 'faster animations' } },
     { key: 'plain', attrs: {} },
   ])
   const markdown = '## Flags\n- `a` - first\n* [x] b: second\n1. c\n'

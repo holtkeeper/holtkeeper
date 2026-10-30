@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { policiesSchema } from './schema.ts'
 import { combinePolicies, mergeRequestPoliciesSetting } from './settings.ts'
 
-const repo = { forge: 'work', path: 'games/slots', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app', groups: ['games'] }
 
 describe('combinePolicies', () => {
   test('combines covering scopes most specific first; specific ids override', () => {
@@ -21,7 +21,7 @@ describe('combinePolicies', () => {
           value: [{ id: 'docs', name: 'Games docs', enabled: false }],
         },
         {
-          scope: { repos: ['games/slots'] },
+          scope: { repos: ['games/app'] },
           value: [{ id: 'own', name: 'Own', scope: { repos: ['games/**'] } }],
         },
         { scope: { repos: ['tools/**'] }, value: [{ id: 'tools', name: 'Tools' }] },
@@ -39,7 +39,7 @@ describe('combinePolicies', () => {
       ['global', 'Global', true],
     ])
     expect(policies[0]?.scope).toEqual({ repos: ['games/**'] })
-    expect(policies[0]?.within).toEqual({ repos: ['games/slots'] })
+    expect(policies[0]?.within).toEqual({ repos: ['games/app'] })
     expect(policies[1]?.scope).toEqual({ groups: ['games'] })
     expect(invalid).toHaveLength(1)
     expect(invalid[0]?.error).toContain('unknown action teleport')

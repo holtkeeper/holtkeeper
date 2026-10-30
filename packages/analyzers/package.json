@@ -29,8 +29,16 @@
     "@holtkeeper/quality-secrets": "workspace:*",
     "@holtkeeper/quality-tests": "workspace:*",
     "@holtkeeper/release-risk": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",
+    "@holtkeeper/vuln": "workspace:*",
+    "@holtkeeper/vuln-go": "workspace:*",
+    "@holtkeeper/vuln-js": "workspace:*",
+    "@holtkeeper/vuln-osv": "workspace:*",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@holtkeeper/exec": "workspace:*"
   }
 }

@@ -1,8 +1,8 @@
-import { type RepoTarget, scopeCoversRepo } from '@holtkeeper/access'
+import { type RepoTarget, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import { confluenceFromCredential } from '@holtkeeper/confluence'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
-import { resolveSetting, specificity } from '@holtkeeper/settings'
+import { resolveSetting } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import {
   type DocumentSink,
@@ -32,7 +32,7 @@ async function confluenceFor({ config, store, vault }: DocumentDeps, repo: RepoR
   const target = targetOf(config, repo)
   const credential = (await store.credentials.list())
     .filter((c) => c.kind === 'confluence' && scopeCoversRepo(c.scope, target))
-    .toSorted((a, b) => specificity(b.scope) - specificity(a.scope))[0]
+    .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope))[0]
   return credential
     ? confluenceFromCredential(credential, await vault.open(credential.secret))
     : undefined

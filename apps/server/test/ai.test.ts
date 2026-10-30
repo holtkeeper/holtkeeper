@@ -107,10 +107,10 @@ const getOverview = async (app: App, path: string, headers?: Headers) => {
 
 beforeEach(async () => {
   store = memoryStore()
-  await store.aiUsage.append(run('2026-10-10T00:00:00.000Z', 'games/slots', { costUsd: 4 }))
-  await store.aiUsage.append(run('2026-11-02T00:00:00.000Z', 'games/slots', { jobId: 'j1' }))
+  await store.aiUsage.append(run('2026-10-10T00:00:00.000Z', 'games/app', { costUsd: 4 }))
+  await store.aiUsage.append(run('2026-11-02T00:00:00.000Z', 'games/app', { jobId: 'j1' }))
   await store.aiUsage.append(
-    run('2026-11-03T00:00:00.000Z', 'games/poker', {
+    run('2026-11-03T00:00:00.000Z', 'games/adventure', {
       model: 'claude-sonnet-5-5',
       outcome: 'error',
       error: 'boom',
@@ -147,9 +147,9 @@ describe('ai routes', () => {
     )
     expect(status).toBe(200)
     expect(body.buckets.map((b) => [b.key.month, b.key.repo, b.costUsd])).toEqual([
-      ['2026-10', 'work:games/slots', 4],
-      ['2026-11', 'work:games/poker', 0.5],
-      ['2026-11', 'work:games/slots', 1],
+      ['2026-10', 'work:games/app', 4],
+      ['2026-11', 'work:games/adventure', 0.5],
+      ['2026-11', 'work:games/app', 1],
       ['2026-11', 'work:tools/cli', 3],
     ])
     expect(body.totals).toMatchObject({ runs: 4, errors: 1, costUsd: 8.5 })
@@ -172,13 +172,13 @@ describe('ai routes', () => {
   test('runs page newest first with a cursor and job links', async () => {
     const app = setup()
     const first = await getRuns(app, '/api/ai/runs?limit=2')
-    expect(first.body.runs.map((r) => r.repo.path)).toEqual(['tools/cli', 'games/poker'])
+    expect(first.body.runs.map((r) => r.repo.path)).toEqual(['tools/cli', 'games/adventure'])
     expect(first.body.next).toBe('2026-11-03T00:00:00.000Z')
     const second = await getRuns(app, `/api/ai/runs?limit=2&before=${first.body.next}`)
     expect(second.body.runs.map((r) => r.at.slice(5, 10))).toEqual(['11-02', '10-10'])
     expect(second.body.runs[0]?.jobId).toBe('j1')
     expect(second.body.next).toBeUndefined()
-    const repo = await getRuns(app, '/api/ai/runs?repo=work:games/poker')
+    const repo = await getRuns(app, '/api/ai/runs?repo=work:games/adventure')
     expect(repo.body.runs.map((r) => r.error)).toEqual(['boom'])
   })
 
@@ -189,8 +189,8 @@ describe('ai routes', () => {
     expect(body.previousMonth).toMatchObject({ key: '2026-10', totals: { runs: 1, costUsd: 4 } })
     expect(body.topRepos.map((b) => b.key.repo)).toEqual([
       'work:tools/cli',
-      'work:games/slots',
-      'work:games/poker',
+      'work:games/app',
+      'work:games/adventure',
     ])
     expect(body.topModels.map((b) => b.key.model)).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5'])
     expect(body.topTaskKinds.map((b) => b.key.taskKind)).toEqual(['port', 'review'])
@@ -211,14 +211,14 @@ describe('ai routes', () => {
 
     const runs = await getRuns(app, '/api/ai/runs', as('games-ai'))
     expect(runs.body.runs.map((r) => r.repo.path)).toEqual([
-      'games/poker',
-      'games/slots',
-      'games/slots',
+      'games/adventure',
+      'games/app',
+      'games/app',
     ])
     const usage = await getUsage(app, '/api/ai/usage?from=2026-01-01&groupBy=repo', as('games-ai'))
     expect(usage.body.buckets.map((b) => b.key.repo)).toEqual([
-      'work:games/poker',
-      'work:games/slots',
+      'work:games/adventure',
+      'work:games/app',
     ])
     expect(usage.body.totals.costUsd).toBeCloseTo(5.5)
     expect((await get(app, '/api/ai/runs?repo=work:tools/cli', as('games-ai'))).status).toBe(403)

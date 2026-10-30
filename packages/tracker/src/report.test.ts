@@ -43,12 +43,15 @@ describe('trackerAnalysis', () => {
     const current = await data()
     const helm = {
       ...forgeFiles['infra/helm'],
-      'charts/slots/values-prod.yaml': 'featureFlags:\n  new_lobby: false\n  turbo_spin: true\n',
+      'charts/app/values-prod.yaml': 'featureFlags:\n  new_hub: false\n  turbo_mode: true\n',
     }
     const before = await data({
       ...forgeFiles,
       'infra/helm': helm,
-      'games/poker': { ...forgeFiles['games/poker'], 'src/table.tsx': "isEnabled('new_lobby')\n" },
+      'games/adventure': {
+        ...forgeFiles['games/adventure'],
+        'src/board.tsx': "isEnabled('new_hub')\n",
+      },
     })
     const report = trackerAnalysis.toReport(
       record('a2', current),
@@ -89,14 +92,14 @@ describe('trackerAnalysis', () => {
     const matrix = report.sections[2]!.blocks[0]
     expect(matrix?.type === 'table' && matrix.columns.map((column) => column.label)).toEqual([
       'Feature flag',
-      'games/poker',
-      'games/slots',
+      'games/adventure',
+      'games/app',
       'env: dev',
       'env: prod',
     ])
     expect(
-      matrix?.type === 'table' && matrix.rows.find((row) => row.key === 'new_lobby'),
-    ).toMatchObject({ 'repo:games/poker': 'def usage', 'env:prod': 'false' })
+      matrix?.type === 'table' && matrix.rows.find((row) => row.key === 'new_hub'),
+    ).toMatchObject({ 'repo:games/adventure': 'def usage', 'env:prod': 'false' })
 
     const publications = report.sections[3]!.blocks.map((block) =>
       block.type === 'markdown' ? block.text : '',

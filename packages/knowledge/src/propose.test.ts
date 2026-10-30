@@ -8,10 +8,10 @@ import { proposeEntry } from './propose.ts'
 import { KnowledgeValidationError } from './schema.ts'
 
 const now = () => new Date('2026-10-30T12:00:00.000Z')
-const slots = repo('games/slots', ['games'])
+const app = repo('games/app', ['games'])
 const reactTask = {
   kind: 'propagate',
-  repo: slots,
+  repo: app,
   packages: [{ ecosystem: 'npm', name: 'react', from: '18.3.1', to: '19.0.0' }],
 }
 
@@ -40,7 +40,7 @@ describe('proposeEntry', () => {
       status: 'proposed',
       source: 'agent',
       author: 'agent:propagate',
-      scope: { repos: ['work:games/slots'] },
+      scope: { repos: ['work:games/app'] },
       packages: [{ ecosystem: 'npm', name: 'react', from: '>=18 <19', to: '>=19 <20' }],
       appliesTo: ['propagate', 'port', 'review'],
       createdAt: '2026-10-30T12:00:00.000Z',
@@ -57,7 +57,7 @@ describe('proposeEntry', () => {
       store,
       input: { title: 'Flaky e2e on CI', body: 'Workaround: retry once.' },
       actor: 'agent:review',
-      task: { kind: 'review', repo: slots },
+      task: { kind: 'review', repo: app },
       now,
       autoAccept: ['quirk'],
     })
@@ -79,7 +79,7 @@ describe('proposeEntry', () => {
         store,
         input: { title, body, ...(url && { evidence: [{ label: 'MR', url }] }) },
         actor: 'agent:review',
-        task: { kind: 'review', repo: slots },
+        task: { kind: 'review', repo: app },
         now,
       })
 
@@ -114,7 +114,7 @@ describe('proposeEntry', () => {
       store,
       input: { title: 'Old rule', body: 'Back again.' },
       actor: 'agent:review',
-      task: { kind: 'review', repo: slots },
+      task: { kind: 'review', repo: app },
       now,
     })
     expect(result.created).toBeTrue()
@@ -136,7 +136,7 @@ describe('proposeEntry', () => {
       store,
       input: { title: 'Upgrade', body: 'Notes.', kind: 'migration' },
       actor: 'agent:port',
-      task: { kind: 'port', repo: slots },
+      task: { kind: 'port', repo: app },
       now,
     }).catch((caught: unknown) => caught)
     expect(String(migration)).toContain('packages: a migration must name its packages')

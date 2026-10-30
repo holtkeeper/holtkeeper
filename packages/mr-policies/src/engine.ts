@@ -1,4 +1,4 @@
-import { scopeCoversRepo } from '@holtkeeper/access'
+import { scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import type { GitForge } from '@holtkeeper/forge'
 
 import { builtinActions } from './actions/index.ts'
@@ -19,7 +19,6 @@ import {
   type PolicyMemory,
   eventRepo,
 } from './model.ts'
-import { scopeSpecificity } from './specificity.ts'
 
 /** Input of `evaluatePolicies`. */
 export interface EvaluatePoliciesInput {

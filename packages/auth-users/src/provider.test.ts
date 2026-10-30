@@ -398,7 +398,7 @@ describe('admin api', () => {
     const { browser: leadBrowser } = await enroll(auth, invited.link)
     const leadPrincipal = defined(await leadBrowser.principal(auth))
 
-    const narrow = repoGrant(['games/slots/**'], ['repos:read'])
+    const narrow = repoGrant(['games/app/**'], ['repos:read'])
     const ok = await leadBrowser.send(
       auth,
       'POST',
@@ -754,7 +754,7 @@ describe('external accounts', () => {
         auth,
         'POST',
         '/admin/users',
-        { name: 'Dev', grants: [repoGrant(['games/slots/**'], ['repos:read'])] },
+        { name: 'Dev', grants: [repoGrant(['games/app/**'], ['repos:read'])] },
         root,
       ),
     )

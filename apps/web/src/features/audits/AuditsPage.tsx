@@ -17,6 +17,7 @@ import {
   SeverityBar,
 } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
+import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { triggerLabel } from './labels.ts'
 
 const allRepos = '*'
@@ -42,13 +43,16 @@ export function AuditsPage() {
       icon="audit"
       description={repo ? `Runs of ${repoKey(repo)}` : 'Runs across every repository you can see'}
       actions={
-        <Select
-          aria-label="Repository"
-          className="w-72"
-          options={options}
-          value={search.repo ?? allRepos}
-          onChange={(id) => void navigate({ search: id === allRepos ? {} : { repo: id } })}
-        />
+        <>
+          <Select
+            aria-label="Repository"
+            className="w-72"
+            options={options}
+            value={search.repo ?? allRepos}
+            onChange={(id) => void navigate({ search: id === allRepos ? {} : { repo: id } })}
+          />
+          <RunJobButton analyzer="audit" label="Run audit" {...(repo ? { repo } : {})} />
+        </>
       }
     >
       {repo && list.length > 1 ? (

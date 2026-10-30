@@ -9,9 +9,9 @@ import { checkout, mirrorName } from './checkout.ts'
 
 describe('mirrorName', () => {
   test('is stable, readable and ignores credentials in the URL', () => {
-    const name = mirrorName('https://gitlab.test/games/slots-x.git')
-    expect(name).toMatch(/^games-slots-x-[0-9a-f]{12}\.git$/)
-    expect(mirrorName('https://bot:secret@gitlab.test/games/slots-x.git')).toBe(name)
+    const name = mirrorName('https://gitlab.test/games/app-x.git')
+    expect(name).toMatch(/^games-app-x-[0-9a-f]{12}\.git$/)
+    expect(mirrorName('https://bot:secret@gitlab.test/games/app-x.git')).toBe(name)
     expect(mirrorName('https://gitlab.test/games/other.git')).not.toBe(name)
   })
 })

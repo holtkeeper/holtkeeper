@@ -56,13 +56,13 @@ const ann: [string, string] = ['Ann Lee', 'ann@example.com']
 const bob: [string, string] = ['Борис', 'bob@example.com']
 const links = forgeLinks({
   kind: 'gitlab',
-  webUrl: 'https://gitlab.example.com/games/slots',
+  webUrl: 'https://gitlab.example.com/games/app',
   ticketUrl: 'https://jira.example.com/browse/{id}',
 })
 
 const record = (data: ChangelogData, ref: string) => ({
   id: ref,
-  repo: { forge: 'work', path: 'games/slots' },
+  repo: { forge: 'work', path: 'games/app' },
   kind: 'changelog',
   ref,
   createdAt: data.to.date,
@@ -75,7 +75,7 @@ beforeAll(async () => {
   await git(['config', 'user.name', 'Ann Lee'])
   await git(['config', 'user.email', 'ann@example.com'])
 
-  await Bun.write(join(dir, 'README.md'), 'Slots\n'.repeat(20))
+  await Bun.write(join(dir, 'README.md'), 'App\n'.repeat(20))
   await commit('chore: initial import', '2026-10-01T09:00:00Z', ann)
   await git(['tag', '-a', 'v1.0.0', '-m', 'Release 1.0.0'], '2026-10-01T10:00:00Z')
 
@@ -125,7 +125,7 @@ describe.skipIf(!Bun.which('git'))('changelog of a real repository', () => {
     expect(data.to.name).toBe('v1.1.0')
     expect(data.commits).toHaveLength(6)
     expect(data.diff?.files).toBe(7)
-    expect(data.links?.commit).toBe('https://gitlab.example.com/games/slots/-/commit/{sha}')
+    expect(data.links?.commit).toBe('https://gitlab.example.com/games/app/-/commit/{sha}')
     expect(changelogDataSchema.parse(JSON.parse(JSON.stringify(data)))).toEqual(data)
 
     const head = await analyzeChangelog({ dir, to: 'HEAD' })
@@ -199,7 +199,7 @@ describe.skipIf(!Bun.which('git'))('changelog of a real repository', () => {
     expect(retry.title).toBe('fix(upload): retry upload ×3')
     expect(retry.children).toHaveLength(3)
     expect(retry.tags).toEqual(['upload', 'GTW-500'])
-    expect(retry.href).toStartWith('https://gitlab.example.com/games/slots/-/commit/')
+    expect(retry.href).toStartWith('https://gitlab.example.com/games/app/-/commit/')
     expect(timelines[1]!.items[0]!.tags).toEqual(['GTW-435'])
 
     const chart = activity!.blocks[0]!
@@ -226,7 +226,7 @@ describe.skipIf(!Bun.which('git'))('changelog of a real repository', () => {
 
     const markdown = compare!.blocks[0]!
     expect(markdown.type === 'markdown' && markdown.text).toContain(
-      '[Compare v1.0.0...v1.1.0](https://gitlab.example.com/games/slots/-/compare/v1.0.0...v1.1.0)',
+      '[Compare v1.0.0...v1.1.0](https://gitlab.example.com/games/app/-/compare/v1.0.0...v1.1.0)',
     )
   })
 })

@@ -40,7 +40,7 @@ const { id } = await forge.registerSshKey!({
   publicKey: pair.publicKey,
   usage: 'auth_and_signing', // 'auth' | 'signing' | 'auth_and_signing'
   expiresAt: '2027-04-01T00:00:00Z',
-  scope: { kind: 'user' }, // or { kind: 'deploy', repo: 'games/slots', canPush: true }
+  scope: { kind: 'user' }, // or { kind: 'deploy', repo: 'games/app', canPush: true }
 })
 await forge.enableDeployKey?.(id, { kind: 'deploy', repo: 'games/other', canPush: false })
 ```

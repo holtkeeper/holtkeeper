@@ -52,7 +52,7 @@ const config = parseConfig({
 describe('repos', () => {
   test('staticPrefix stops at the first wildcard segment', () => {
     expect(staticPrefix('games/*')).toBe('games')
-    expect(staticPrefix('games/slots/**')).toBe('games/slots')
+    expect(staticPrefix('games/app/**')).toBe('games/app')
     expect(staticPrefix('games/a')).toBe('games/a')
     expect(staticPrefix('*')).toBe('')
   })

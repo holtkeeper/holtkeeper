@@ -20,6 +20,7 @@ import {
   Tooltip,
   notify,
 } from '../../ui/index.ts'
+import { ExternalAccounts } from './ExternalAccounts.tsx'
 
 type Editing = { mode: 'add' } | { mode: 'rename'; id: string; label: string }
 
@@ -105,7 +106,7 @@ function PasskeyDialog({ editing, onClose }: { editing: Editing; onClose: () => 
   )
 }
 
-/** The signed-in user's own account: profile and passkeys. */
+/** The signed-in user's own account: profile, passkeys and linked external accounts. */
 export function AccountPage() {
   const account = useAccount()
   const { remove } = useAccountPasskeys()
@@ -253,6 +254,8 @@ export function AccountPage() {
           </AnimatePresence>
         </ul>
       </Panel>
+
+      <ExternalAccounts />
 
       {editing ? (
         <PasskeyDialog

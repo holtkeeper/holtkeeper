@@ -4,7 +4,7 @@ import type { Scope } from '@holtkeeper/access'
 import type { SettingEntry } from '@holtkeeper/store'
 
 import { builtinSettings } from './definitions.ts'
-import { resolveSetting, resolveSettings, specificity } from './resolve.ts'
+import { resolveSetting, resolveSettings } from './resolve.ts'
 
 const entry = (
   id: string,
@@ -20,18 +20,20 @@ const entry = (
   updatedAt,
 })
 
-const repo = { forge: 'work', path: 'games/slots-x', groups: ['games'] }
+const repo = { forge: 'work', path: 'games/app-x', groups: ['games'] }
 
 describe('resolveSetting', () => {
   const entries = [
     entry('global', { all: true }, 'claude-sonnet-5-5'),
     entry('group', { groups: ['games'] }, 'claude-opus-5-5'),
-    entry('glob', { repos: ['games/slots-*'] }, 'claude-haiku-5-5'),
+    entry('glob', { repos: ['games/app-*'] }, 'claude-haiku-5-5'),
   ]
 
   test('picks the most specific covering scope', () => {
     expect(resolveSetting(entries, 'llm.model', repo)?.id).toBe('glob')
-    expect(resolveSetting(entries, 'llm.model', { ...repo, path: 'games/poker' })?.id).toBe('group')
+    expect(resolveSetting(entries, 'llm.model', { ...repo, path: 'games/adventure' })?.id).toBe(
+      'group',
+    )
     expect(
       resolveSetting(entries, 'llm.model', { forge: 'work', path: 'tools/x', groups: [] })?.id,
     ).toBe('global')
@@ -41,7 +43,7 @@ describe('resolveSetting', () => {
   test('exact paths beat globs and newer entries break ties', () => {
     const more = [
       ...entries,
-      entry('exact', { repos: ['games/slots-x'] }, 'x'),
+      entry('exact', { repos: ['games/app-x'] }, 'x'),
       entry('glob2', { repos: ['games/*'] }, 'y', '2026-10-05'),
     ]
     expect(resolveSetting(more, 'llm.model', repo)?.id).toBe('exact')
@@ -63,14 +65,6 @@ describe('resolveSetting', () => {
       ['llm.model', 'glob'],
       ['audit.fix', 'fix'],
     ])
-  })
-})
-
-describe('specificity', () => {
-  test('orders scope kinds', () => {
-    expect(
-      [{ all: true }, { groups: ['g'] }, { repos: ['a/*'] }, { repos: ['a/b'] }].map(specificity),
-    ).toEqual([0, 1, 2, 3])
   })
 })
 

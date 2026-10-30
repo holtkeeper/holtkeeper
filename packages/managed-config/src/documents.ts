@@ -1,3 +1,4 @@
+import { groupMatchSchema } from '@holtkeeper/access'
 import { everyPattern, isTimeZone, looksLikeCron, weekdays } from '@holtkeeper/core'
 import type { ConfigDocumentType, TriggerDocumentData } from '@holtkeeper/store'
 import { Cron } from 'croner'
@@ -44,7 +45,7 @@ export const scheduleDataSchema = z
     name: z.string().min(1),
     enabled: z.boolean().default(true),
     analyzers: z.array(z.string().min(1)).min(1),
-    groups: z.array(z.string()).optional(),
+    groups: z.array(groupMatchSchema).optional(),
     repos: z.array(z.string().regex(/^[^:]+:.+$/, 'expected forge:path')).optional(),
     options: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
     cron: z
@@ -77,14 +78,14 @@ export const triggerDataSchema = z.discriminatedUnion('on', [
   z.object({
     on: z.literal('tag'),
     analyzers: analyzerList,
-    groups: z.array(z.string()).optional(),
+    groups: z.array(groupMatchSchema).optional(),
   }),
   z.object({
     on: z.literal('mergeRequest'),
     analyzers: analyzerList,
     actions: z.array(z.enum(['open', 'update', 'reopen'])).optional(),
     draft: z.boolean().optional(),
-    groups: z.array(z.string()).optional(),
+    groups: z.array(groupMatchSchema).optional(),
   }),
   z.object({ on: z.literal('label'), label: z.string().min(1), analyzers: analyzerList }),
   z.object({

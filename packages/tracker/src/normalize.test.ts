@@ -4,22 +4,20 @@ import { keyWords, normalizeKey, normalizeStepSchema } from './normalize.ts'
 
 describe('normalizeKey', () => {
   test('splits any casing into words', () => {
-    expect(keyWords('newLobbyV2')).toEqual(['new', 'Lobby', 'V2'])
-    expect(keyWords('NEW_LOBBY-v2')).toEqual(['NEW', 'LOBBY', 'v2'])
+    expect(keyWords('newHubV2')).toEqual(['new', 'Hub', 'V2'])
+    expect(keyWords('NEW_HUB-v2')).toEqual(['NEW', 'HUB', 'v2'])
     expect(keyWords('HTTPServer')).toEqual(['HTTP', 'Server'])
   })
 
   test('applies steps in order', () => {
-    expect(normalizeKey('  FEATURE_NEW_LOBBY ', ['trim-prefix:FEATURE_', 'snake'])).toBe(
-      'new_lobby',
-    )
-    expect(normalizeKey('newLobby', ['snake'])).toBe('new_lobby')
-    expect(normalizeKey('new-lobby', ['snake', 'upper'])).toBe('NEW_LOBBY')
-    expect(normalizeKey('NEW_LOBBY', ['camel'])).toBe('newLobby')
-    expect(normalizeKey('newLobby', ['kebab'])).toBe('new-lobby')
-    expect(normalizeKey('Lobby', ['lower'])).toBe('lobby')
-    expect(normalizeKey('lobby_enabled', ['trim-suffix:_ENABLED'])).toBe('lobby')
-    expect(normalizeKey('lobby', ['trim-prefix:feature_'])).toBe('lobby')
+    expect(normalizeKey('  FEATURE_NEW_HUB ', ['trim-prefix:FEATURE_', 'snake'])).toBe('new_hub')
+    expect(normalizeKey('newHub', ['snake'])).toBe('new_hub')
+    expect(normalizeKey('new-hub', ['snake', 'upper'])).toBe('NEW_HUB')
+    expect(normalizeKey('NEW_HUB', ['camel'])).toBe('newHub')
+    expect(normalizeKey('newHub', ['kebab'])).toBe('new-hub')
+    expect(normalizeKey('Hub', ['lower'])).toBe('hub')
+    expect(normalizeKey('hub_enabled', ['trim-suffix:_ENABLED'])).toBe('hub')
+    expect(normalizeKey('hub', ['trim-prefix:feature_'])).toBe('hub')
   })
 
   test('validates steps', () => {

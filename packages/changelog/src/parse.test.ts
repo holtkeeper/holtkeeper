@@ -64,7 +64,7 @@ describe('parseCommit', () => {
   test('GitLab merge commit takes the title from the body', () => {
     const parsed = parseCommit(
       "Merge branch 'feature/GTW-435-passkeys' into 'main'",
-      'feat: [GTW-435] passkeys\n\nCloses GTW-435\n\nSee merge request games/slots!42',
+      'feat: [GTW-435] passkeys\n\nCloses GTW-435\n\nSee merge request games/app!42',
     )
     expect(parsed).toMatchObject({
       merge: true,

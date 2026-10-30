@@ -34,36 +34,36 @@ const write = [
 ]
 
 let shared: Awaited<ReturnType<typeof project>>
-let slots: Awaited<ReturnType<typeof project>>
-let poker: Awaited<ReturnType<typeof project>>
+let app: Awaited<ReturnType<typeof project>>
+let adventure: Awaited<ReturnType<typeof project>>
 
 beforeAll(async () => {
   shared = await project({
-    'common/en/ui.json': { ok: 'OK', cancel: 'Cancel', spin: 'Spin the reels', title: 'Casino' },
+    'common/en/ui.json': { ok: 'OK', cancel: 'Cancel', play: 'Start the level', title: 'Games' },
     'common/ru/ui.json': { ok: 'ОК', cancel: 'Отмена', title: 'Казино' },
-    'games/slots-x/en/ui.json': { title: 'Slots X' },
-    'games/slots-x/ru/ui.json': { title: 'Слоты X' },
-    'games/slots-x/en/game.json': { reels: 'Reels', bonus: 'Bonus round', legacy: 'Old screen' },
-    'games/slots-x/ru/game.json': { reels: 'Барабаны', legacy: 'Старый экран' },
-    'games/poker/en/game.json': { fold: 'Fold the hand' },
-    'games/poker/ru/game.json': {},
+    'games/app-x/en/ui.json': { title: 'App X' },
+    'games/app-x/ru/ui.json': { title: 'Слоты X' },
+    'games/app-x/en/game.json': { board: 'Board', extra: 'Extra level', legacy: 'Old screen' },
+    'games/app-x/ru/game.json': { board: 'Поле', legacy: 'Старый экран' },
+    'games/adventure/en/game.json': { pause: 'Pause the game' },
+    'games/adventure/ru/game.json': {},
   })
-  slots = await project({
+  app = await project({
     'src/locales/en.json': { local: { banner: 'Play now for free' } },
     'src/locales/ru.json': {},
     'src/App.tsx': [
       "t('ui:ok')",
       "t('ui:title')",
-      "t('ui:spin')",
-      "t('game:reels')",
-      "t('game:bonus')",
+      "t('ui:play')",
+      "t('game:board')",
+      "t('game:extra')",
       "t('game:local.banner')",
     ].join('\n'),
   })
-  poker = await project({ 'src/Table.tsx': "t('game:fold')\nt('ui:ok')\n" })
+  adventure = await project({ 'src/Board.tsx': "t('game:pause')\nt('ui:ok')\n" })
 })
 afterAll(async () => {
-  await Promise.all([shared.cleanup(), slots.cleanup(), poker.cleanup()])
+  await Promise.all([shared.cleanup(), app.cleanup(), adventure.cleanup()])
 })
 
 const run = async (repoPath: string, dir: string) => {
@@ -81,7 +81,7 @@ const run = async (repoPath: string, dir: string) => {
 describe('layered catalogs', () => {
   let data: I18nData
   beforeAll(async () => {
-    data = await run('games/slots-x', slots.dir)
+    data = await run('games/app-x', app.dir)
   })
 
   test('merges layers in order and records provenance', () => {
@@ -110,9 +110,9 @@ describe('layered catalogs', () => {
   test('routes missing keys by the write rules', () => {
     expect(data.missing.map((m) => `${m.bundle}:${m.key}:${m.layer}:${m.file}`).toSorted()).toEqual(
       [
-        'game:bonus:game:games/slots-x/ru/game.json',
+        'game:extra:game:games/app-x/ru/game.json',
         'game:local.banner:local:src/locales/ru.json',
-        'ui:spin:common:common/ru/ui.json',
+        'ui:play:common:common/ru/ui.json',
       ],
     )
   })
@@ -128,13 +128,13 @@ describe('layered catalogs', () => {
       [
         'i18n:unused:work:i18n/translations:game',
         translationsRepo,
-        ['games/slots-x/en/game.json', 'games/slots-x/ru/game.json'],
+        ['games/app-x/en/game.json', 'games/app-x/ru/game.json'],
       ],
     ])
     const { files } = await applied(shared.dir, removal)
-    expect(JSON.parse(files.get('games/slots-x/en/game.json')!)).toEqual({
-      reels: 'Reels',
-      bonus: 'Bonus round',
+    expect(JSON.parse(files.get('games/app-x/en/game.json')!)).toEqual({
+      board: 'Board',
+      extra: 'Extra level',
     })
   })
 
@@ -143,11 +143,11 @@ describe('layered catalogs', () => {
     const byFile = new Map(added.map((c) => [c.edits[0]!.file, c]))
     expect([...byFile.keys()].toSorted()).toEqual([
       'common/ru/ui.json',
-      'games/slots-x/ru/game.json',
+      'games/app-x/ru/game.json',
       'src/locales/ru.json',
     ])
     expect(byFile.get('common/ru/ui.json')?.target).toEqual(translationsRepo)
-    expect(byFile.get('games/slots-x/ru/game.json')?.target).toEqual(translationsRepo)
+    expect(byFile.get('games/app-x/ru/game.json')?.target).toEqual(translationsRepo)
     expect(byFile.get('src/locales/ru.json')?.target).toBeUndefined()
 
     const external = added.filter((c) => c.target)
@@ -157,13 +157,13 @@ describe('layered catalogs', () => {
       ok: 'ОК',
       cancel: 'Отмена',
       title: 'Казино',
-      spin: 'TODO: Spin the reels',
+      play: 'TODO: Start the level',
     })
-    expect(files.get('games/slots-x/ru/game.json')).toBe(
-      '{\n  "reels": "Барабаны",\n  "bonus": "TODO: Bonus round",\n  "legacy": "Старый экран"\n}\n',
+    expect(files.get('games/app-x/ru/game.json')).toBe(
+      '{\n  "board": "Поле",\n  "extra": "TODO: Extra level",\n  "legacy": "Старый экран"\n}\n',
     )
     const local = await applied(
-      slots.dir,
+      app.dir,
       added.filter((c) => !c.target),
     )
     expect(JSON.parse(local.files.get('src/locales/ru.json')!)).toEqual({
@@ -172,18 +172,18 @@ describe('layered catalogs', () => {
   })
 
   test('another game sees its own folder over the same common layer', async () => {
-    const other = await run('games/poker', poker.dir)
+    const other = await run('games/adventure', adventure.dir)
     expect(other.missing.map((m) => `${m.key}:${m.file}`).toSorted()).toEqual([
-      'fold:games/poker/ru/game.json',
-      'spin:common/ru/ui.json',
+      'pause:games/adventure/ru/game.json',
+      'play:common/ru/ui.json',
     ])
     expect(other.provenance.find((p) => p.key === 'title')?.layer).toBe('common')
     expect(
-      other.changes.find((c) => c.edits[0]?.file === 'games/poker/ru/game.json')?.target,
+      other.changes.find((c) => c.edits[0]?.file === 'games/adventure/ru/game.json')?.target,
     ).toEqual(translationsRepo)
     expect(other.usage.unused.map((u) => `${u.key}:${u.shared}`).toSorted()).toEqual([
       'cancel:true',
-      'spin:true',
+      'play:true',
       'title:true',
     ])
   })
@@ -191,7 +191,7 @@ describe('layered catalogs', () => {
   test('the report shows layers, overrides and shared unused keys', () => {
     const record = {
       id: '1',
-      repo: { forge: 'work', path: 'games/slots-x' },
+      repo: { forge: 'work', path: 'games/app-x' },
       kind: 'i18n',
       createdAt: '2026-10-30T00:00:00Z',
       data,
@@ -218,8 +218,8 @@ describe('layered catalogs', () => {
     const options = i18nOptions.parse({ layers, write })
     const error = await i18nAnalyzer
       .run({
-        repo: { forge: 'work', path: 'games/slots-x' },
-        dir: slots.dir,
+        repo: { forge: 'work', path: 'games/app-x' },
+        dir: app.dir,
         runner: undefined as never,
         options,
       })

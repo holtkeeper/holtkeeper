@@ -1,6 +1,12 @@
 import type {
   ApplyChangesInput,
   AuditRunSummary,
+  ClearStorageInput,
+  CreateJobInput,
+  ForgeWebhookInput,
+  LinkAccountInput,
+  MediaApplyInput,
+  MediaVariantsInput,
   CreateCredentialInput,
   CreateKnowledgeInput,
   ForgeSshKeyInput,
@@ -25,7 +31,7 @@ import {
 } from '@tanstack/react-query'
 
 import { repoKey } from '../lib/repo.ts'
-import { api } from './endpoints.ts'
+import { type AiUsageQuery, type AuditLogQuery, type ConfigCollections, api } from './endpoints.ts'
 
 /** Query keys; invalidating a prefix refreshes everything below it. */
 export const keys = {
@@ -46,6 +52,11 @@ export const keys = {
   knowledge: ['knowledge'] as const,
   config: ['config'] as const,
   activity: ['activity'] as const,
+  jobs: ['jobs'] as const,
+  ai: ['ai'] as const,
+  auditLog: ['audit-log'] as const,
+  storage: ['storage'] as const,
+  accounts: ['accounts'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
@@ -305,6 +316,11 @@ export function useForgeMutations() {
       onSuccess,
     }),
     removeSshKey: useMutation({ mutationFn: (id: string) => api.removeForgeSshKey(id), onSuccess }),
+    issueWebhook: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: ForgeWebhookInput }) =>
+        api.issueForgeWebhook(id, input),
+      onSuccess,
+    }),
   }
 }
 
@@ -323,6 +339,207 @@ export function usePutGroup() {
       await client.invalidateQueries({ queryKey: keys.settings })
     },
   })
+}
+
+/** Entries of one config collection with their provenance; needs global `settings:read`. */
+export const useConfigEntries = <C extends keyof ConfigCollections>(
+  collection: C,
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [...keys.config, collection],
+    queryFn: () => api.configEntries(collection),
+    enabled,
+  })
+
+/** One config entry and the earlier versions of its panel document. */
+export const useConfigEntry = <C extends keyof ConfigCollections>(
+  collection: C,
+  entryId: string | undefined,
+) =>
+  useQuery({
+    queryKey: [...keys.config, collection, 'detail', entryId ?? ''],
+    queryFn: () => api.configEntry(collection, entryId ?? ''),
+    enabled: entryId !== undefined,
+  })
+
+/**
+ * Create, replace and remove panel documents of a collection; each refreshes the config,
+ * repositories and settings, which all depend on it.
+ */
+export function useConfigMutations<C extends keyof ConfigCollections>(collection: C) {
+  const client = useQueryClient()
+  const onSuccess = async () => {
+    await client.invalidateQueries({ queryKey: keys.config })
+    await client.invalidateQueries({ queryKey: keys.repos })
+    await client.invalidateQueries({ queryKey: ['explain'] })
+  }
+  return {
+    put: useMutation({
+      mutationFn: ({ id, data }: { id: string; data: PutConfigInput[ConfigCollections[C]] }) =>
+        api.putConfigEntry(collection, id, data),
+      onSuccess,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => api.deleteConfigEntry(collection, id),
+      onSuccess,
+    }),
+  }
+}
+
+/** Upcoming run times of a schedule of the effective config. */
+export const useSchedulePreview = (scheduleId: string | undefined, count = 10) =>
+  useQuery({
+    queryKey: [...keys.config, 'schedules', 'preview', scheduleId ?? '', count],
+    queryFn: () => api.schedulePreview(scheduleId ?? '', count),
+    enabled: scheduleId !== undefined,
+  })
+
+/** The file-only parts of the config: execution, storage, limits, plugins. */
+export const useRuntimeConfig = (enabled = true) =>
+  useQuery({ queryKey: [...keys.config, 'runtime'], queryFn: api.runtimeConfig, enabled })
+
+/** What the config applies to a repository: groups, traits, plugins, schedules and triggers. */
+export const useExplainRepo = (repo: RepoRef) =>
+  useQuery({ queryKey: ['explain', repoKey(repo)], queryFn: () => api.explainRepo(repo) })
+
+/** Analyzers jobs can run, with their option schemas; `enabled` is false without jobs. */
+export const useJobAnalyzers = () =>
+  useQuery({
+    queryKey: [...keys.jobs, 'analyzers'],
+    queryFn: api.jobAnalyzers,
+    staleTime: Infinity,
+  })
+
+const activeStatus = (status: string) => status === 'queued' || status === 'running'
+
+/** Jobs, newest first; refreshes every few seconds while some are queued or running. */
+export const useJobs = (filter: { status?: string; repo?: RepoRef; limit?: number } = {}) =>
+  useQuery({
+    queryKey: [
+      ...keys.jobs,
+      'list',
+      filter.status ?? '',
+      filter.repo ? repoKey(filter.repo) : '*',
+      filter.limit ?? 100,
+    ],
+    queryFn: () => api.jobs({ limit: 100, ...filter }),
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) =>
+      query.state.data?.jobs.some((job) => activeStatus(job.status)) ? 3_000 : 30_000,
+  })
+
+/** One job with its log; refreshes while it is queued or running. */
+export const useJob = (jobId: string | undefined) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'detail', jobId ?? ''],
+    queryFn: () => api.job(jobId ?? ''),
+    enabled: jobId !== undefined,
+    refetchInterval: (query) =>
+      query.state.data && activeStatus(query.state.data.status) ? 2_000 : false,
+  })
+
+/** Queue and cancel jobs; each refreshes every job list. */
+export function useJobMutations() {
+  const client = useQueryClient()
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.jobs })
+  return {
+    create: useMutation({ mutationFn: (input: CreateJobInput) => api.createJob(input), onSuccess }),
+    cancel: useMutation({ mutationFn: (id: string) => api.cancelJob(id), onSuccess }),
+  }
+}
+
+/** This month's AI usage at a glance; needs `ai:read`. */
+export const useAiOverview = (enabled = true) =>
+  useQuery({ queryKey: [...keys.ai, 'overview'], queryFn: api.aiOverview, enabled })
+
+/** AI usage sums grouped by `groupBy` (comma list of dimensions). */
+export const useAiUsage = (filter: AiUsageQuery & { groupBy?: string }) =>
+  useQuery({
+    queryKey: [...keys.ai, 'usage', filter],
+    queryFn: () => api.aiUsage(filter),
+    placeholderData: keepPreviousData,
+  })
+
+/** Individual AI runs, newest first, paged by time. */
+export function useAiRuns(filter: AiUsageQuery, pageSize = 50) {
+  return useInfiniteQuery({
+    queryKey: [...keys.ai, 'runs', filter],
+    queryFn: ({ pageParam }) =>
+      api.aiRuns({ ...filter, limit: pageSize, ...(pageParam ? { before: pageParam } : {}) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next,
+  })
+}
+
+/** Audit log events, newest first, paged by cursor; needs global `audit:read`. */
+export function useAuditLog(filter: AuditLogQuery, pageSize = 50) {
+  return useInfiniteQuery({
+    queryKey: [...keys.auditLog, 'list', filter],
+    queryFn: ({ pageParam }) =>
+      api.auditLog({ ...filter, limit: pageSize, ...(pageParam ? { cursor: pageParam } : {}) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+  })
+}
+
+/** How many audit log events match the filter. */
+export const useAuditLogCount = (filter: AuditLogQuery) =>
+  useQuery({
+    queryKey: [...keys.auditLog, 'count', filter],
+    queryFn: () => api.auditLogCount(filter),
+    placeholderData: keepPreviousData,
+  })
+
+/** Checks the audit log's hash chain. */
+export const useVerifyAuditLog = () =>
+  useMutation({
+    mutationFn: (range: { fromSeq?: number; toSeq?: number } = {}) => api.verifyAuditLog(range),
+  })
+
+/** Space used by the store, artifacts, caches and checkouts; needs global `settings:read`. */
+export const useStorage = (enabled = true) =>
+  useQuery({ queryKey: keys.storage, queryFn: api.storage, enabled })
+
+/** Clears one storage area; refreshes the overview. */
+export function useClearStorage() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input?: ClearStorageInput }) =>
+      api.clearStorage(id, input),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.storage }),
+  })
+}
+
+/** External accounts (GitLab, GitHub, Slack, ...) linked to the signed-in principal. */
+export const useAccounts = (enabled = true) =>
+  useQuery({ queryKey: keys.accounts, queryFn: api.accounts, enabled, retry: false })
+
+/** Link, unlink and verify external accounts; each refreshes the list. */
+export function useAccountMutations() {
+  const client = useQueryClient()
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.accounts })
+  return {
+    link: useMutation({
+      mutationFn: (input: LinkAccountInput) => api.linkAccount(input),
+      onSuccess,
+    }),
+    unlink: useMutation({ mutationFn: (id: string) => api.unlinkAccount(id), onSuccess }),
+    challenge: useMutation({ mutationFn: (id: string) => api.accountChallenge(id), onSuccess }),
+  }
+}
+
+/** Generates image variants and puts the chosen ones into a merge request or a ZIP download. */
+export function useMediaMutations() {
+  return {
+    variants: useMutation({ mutationFn: (input: MediaVariantsInput) => api.mediaVariants(input) }),
+    apply: useMutation({
+      mutationFn: (input: MediaApplyInput & { mode: 'merge-request' }) => api.applyMedia(input),
+    }),
+    zip: useMutation({
+      mutationFn: (input: MediaApplyInput & { mode: 'zip' }) => api.mediaZip(input),
+    }),
+  }
 }
 
 /** Activity events, newest first, paged by the oldest event's time. */

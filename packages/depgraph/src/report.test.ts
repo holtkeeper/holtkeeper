@@ -51,7 +51,7 @@ function data(duplicated: string): DepgraphData {
 
 const record = (ref: string, payload: DepgraphData) => ({
   id: ref,
-  repo: { forge: 'gitlab', path: 'games/slots' } as never,
+  repo: { forge: 'gitlab', path: 'games/app' } as never,
   kind: 'depgraph',
   ref,
   createdAt: '2026-10-01T00:00:00.000Z',
@@ -69,7 +69,7 @@ describe('depgraphAnalysis', () => {
 
   test('shows headline numbers with deltas where lower is better', () => {
     expect(report.subject).toEqual({
-      repo: { forge: 'gitlab', path: 'games/slots' },
+      repo: { forge: 'gitlab', path: 'games/app' },
       ref: 'v2',
       compareTo: 'v1',
     })

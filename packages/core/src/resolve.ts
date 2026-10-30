@@ -1,3 +1,4 @@
+import { groupsMatch } from '@holtkeeper/access'
 import type { RepoRef } from '@holtkeeper/forge'
 
 import type { HoltkeeperConfig } from './config.ts'
@@ -46,11 +47,7 @@ export function resolveRepo(config: HoltkeeperConfig, repo: RepoRef): ResolvedRe
   }
 
   const plugins = config.plugins
-    .filter(
-      (use) =>
-        use.groups.some((group) => groups.includes(group)) &&
-        !matchesAny(use.exclude ?? [], repo.path),
-    )
+    .filter((use) => groupsMatch(use.groups, groups) && !matchesAny(use.exclude ?? [], repo.path))
     .map((use) => ({ plugin: use.plugin, options: resolveOptions(use, repo.path) }))
 
   return { repo, groups, traits, plugins }

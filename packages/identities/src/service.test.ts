@@ -6,7 +6,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 
 import { createIdentities } from './service.ts'
 
-const games: RepoTarget = { forge: 'work', path: 'games/slots', groups: ['games'] }
+const games: RepoTarget = { forge: 'work', path: 'games/app', groups: ['games'] }
 
 const user = (id: string, overrides: Partial<User> = {}): User => ({
   id,

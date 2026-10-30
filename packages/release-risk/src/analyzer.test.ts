@@ -11,7 +11,7 @@ import type { ReleaseRiskData } from './schema.ts'
 import { deterministicSummary, summarizeRelease } from './summary.ts'
 import { audit, bundle, changelog, commit, finding, source } from './test-helpers.ts'
 
-const repo = { forge: 'work', path: 'games/slots' }
+const repo = { forge: 'work', path: 'games/app' }
 const runner = {} as Parameters<typeof releaseRiskAnalyzer.run>[0]['runner']
 
 async function seeded() {

@@ -9,7 +9,7 @@ import { z } from 'zod'
 
 import { cronError, nextRun } from './cron.ts'
 import { enqueueUnique } from './enqueue.ts'
-import { createScheduler, scheduleProblems, spreadRequests } from './scheduler.ts'
+import { createScheduler, planSchedule, scheduleProblems, spreadRequests } from './scheduler.ts'
 
 const analyzer = (kind: string, scope: 'repo' | 'group' = 'repo'): AnyAnalyzer => ({
   kind,
@@ -105,6 +105,41 @@ describe('scheduler', () => {
     ])
     expect(jobs[0]).toMatchObject({ trigger: 'schedule', options: { depth: 2 }, status: 'queued' })
     expect(await s.tick()).toEqual([])
+  })
+
+  test('group intersections pick repositories in every listed group', async () => {
+    const layered = parseConfig({
+      forges: { work: forge },
+      groups: {
+        frontend: { forge: 'work', include: ['shop/web', 'admin/ui'] },
+        storefront: { forge: 'work', include: ['shop/*'] },
+        'admin-panel': { forge: 'work', include: ['admin/*'] },
+      },
+    })
+    const members: Record<string, RepoRef[]> = {
+      frontend: [
+        { forge: 'work', path: 'shop/web' },
+        { forge: 'work', path: 'admin/ui' },
+      ],
+      'admin-panel': [
+        { forge: 'work', path: 'admin/ui' },
+        { forge: 'work', path: 'admin/api' },
+      ],
+    }
+    const requests = await planSchedule(
+      { analyzers: ['depgraph', 'fleet'], groups: [['frontend', 'storefront'], 'admin-panel'] },
+      {
+        config: layered,
+        analyzers,
+        resolveRepos: async (group) => members[group] ?? [],
+      },
+    )
+    expect(requests.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
+      'depgraph shop/web',
+      'depgraph admin/ui',
+      'depgraph admin/api',
+      'fleet admin-panel',
+    ])
   })
 
   test('repos globs filter across every group when none are named', async () => {

@@ -1,5 +1,31 @@
 import type {
+  AccountChallenge,
   ActivityList,
+  AiRunList,
+  AiUsageBuckets,
+  AiUsageOverview,
+  AuditList,
+  AuditVerifyResponse,
+  ClearStorageInput,
+  ClearStorageResult,
+  ConfigEntryDetail,
+  CreateJobInput,
+  ExternalAccountList,
+  ExternalAccountView,
+  ForgeWebhookInput,
+  ForgeWebhookResult,
+  Job,
+  JobAnalyzerList,
+  JobList,
+  LinkAccountInput,
+  MediaApplyInput,
+  MediaApplyResult,
+  MediaVariantsInput,
+  MediaVariantsResult,
+  RepoExplain,
+  RuntimeConfigView,
+  SchedulePreview,
+  StorageOverview,
   AiCatalogProviderList,
   AnalysisDetail,
   AnalysisKindList,
@@ -55,9 +81,53 @@ import type {
 } from '@simplewebauthn/browser'
 
 import { repoKey } from '../lib/repo.ts'
-import { request } from './client.ts'
+import { request, requestBlob, urlOf } from './client.ts'
 
 const id = (value: string) => encodeURIComponent(value)
+
+/** Config collections of `/api/config/<collection>` and the document type each holds. */
+export interface ConfigCollections {
+  forges: 'forge'
+  groups: 'group'
+  'repo-traits': 'repoTraits'
+  schedules: 'schedule'
+  triggers: 'trigger'
+}
+
+/** Filters of `GET /api/ai/usage` and `GET /api/ai/runs`. */
+export interface AiUsageQuery {
+  repo?: string
+  group?: string
+  model?: string
+  provider?: string
+  taskKind?: string
+  analyzer?: string
+  outcome?: string
+  from?: string
+  to?: string
+}
+
+/** Filters of `GET /api/audit` and its export. */
+export interface AuditLogQuery {
+  actor?: string
+  action?: string
+  targetType?: string
+  targetId?: string
+  repo?: string
+  outcome?: string
+  via?: string
+  from?: string
+  to?: string
+}
+
+type Query = Record<string, string | number | undefined>
+const toQuery = (value: object): Query =>
+  Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string | number] =>
+        typeof entry[1] === 'string' || typeof entry[1] === 'number',
+    ),
+  )
 
 /** Every server endpoint the UI uses. Nothing outside `src/api/` knows a URL. */
 export const api = {
@@ -159,6 +229,84 @@ export const api = {
   groups: () => request<ConfigEntryList<'group'>>('GET', '/api/config/groups'),
   putGroup: (groupId: string, data: GroupDocumentData) =>
     request<ConfigEntryView<'group'>>('PUT', `/api/config/groups/${id(groupId)}`, { body: data }),
+
+  configEntries: <C extends keyof ConfigCollections>(collection: C) =>
+    request<ConfigEntryList<ConfigCollections[C]>>('GET', `/api/config/${collection}`),
+  configEntry: <C extends keyof ConfigCollections>(collection: C, entryId: string) =>
+    request<ConfigEntryDetail<ConfigCollections[C]>>(
+      'GET',
+      `/api/config/${collection}/${id(entryId)}`,
+    ),
+  putConfigEntry: <C extends keyof ConfigCollections>(
+    collection: C,
+    entryId: string,
+    data: PutConfigInput[ConfigCollections[C]],
+  ) =>
+    request<ConfigEntryView<ConfigCollections[C]>>(
+      'PUT',
+      `/api/config/${collection}/${id(entryId)}`,
+      { body: data },
+    ),
+  deleteConfigEntry: (collection: keyof ConfigCollections, entryId: string) =>
+    request<void>('DELETE', `/api/config/${collection}/${id(entryId)}`),
+  schedulePreview: (scheduleId: string, count = 10) =>
+    request<SchedulePreview>('GET', `/api/schedules/${id(scheduleId)}/preview`, {
+      query: { count },
+    }),
+  issueForgeWebhook: (forgeId: string, input: ForgeWebhookInput) =>
+    request<ForgeWebhookResult>('POST', `/api/forges/${id(forgeId)}/webhook`, { body: input }),
+  configExportUrl: () => urlOf('/api/config/export'),
+  runtimeConfig: () => request<RuntimeConfigView>('GET', '/api/config/runtime'),
+  explainRepo: (repo: RepoRef) =>
+    request<RepoExplain>('GET', '/api/repos/explain', { query: { repo: repoKey(repo) } }),
+
+  jobAnalyzers: () => request<JobAnalyzerList>('GET', '/api/jobs/analyzers'),
+  jobs: (filter: { status?: string; repo?: RepoRef; limit?: number; before?: string }) =>
+    request<JobList>('GET', '/api/jobs', {
+      query: {
+        status: filter.status,
+        repo: filter.repo ? repoKey(filter.repo) : undefined,
+        limit: filter.limit,
+        before: filter.before,
+      },
+    }),
+  job: (jobId: string) => request<Job>('GET', `/api/jobs/${id(jobId)}`),
+  createJob: (input: CreateJobInput) => request<Job>('POST', '/api/jobs', { body: input }),
+  cancelJob: (jobId: string) => request<Job>('POST', `/api/jobs/${id(jobId)}/cancel`),
+
+  aiOverview: () => request<AiUsageOverview>('GET', '/api/ai/overview'),
+  aiUsage: (filter: AiUsageQuery & { groupBy?: string }) =>
+    request<AiUsageBuckets>('GET', '/api/ai/usage', { query: toQuery(filter) }),
+  aiRuns: (filter: AiUsageQuery & { before?: string; limit?: number }) =>
+    request<AiRunList>('GET', '/api/ai/runs', { query: toQuery(filter) }),
+
+  auditLog: (filter: AuditLogQuery & { cursor?: string; limit?: number }) =>
+    request<AuditList>('GET', '/api/audit', { query: toQuery(filter) }),
+  auditLogCount: (filter: AuditLogQuery) =>
+    request<{ count: number }>('GET', '/api/audit/count', { query: toQuery(filter) }),
+  verifyAuditLog: (range: { fromSeq?: number; toSeq?: number } = {}) =>
+    request<AuditVerifyResponse>('GET', '/api/audit/verify', { query: toQuery(range) }),
+  auditLogExportUrl: (filter: AuditLogQuery, format: 'csv' | 'ndjson') =>
+    urlOf('/api/audit/export', { ...toQuery(filter), format }),
+
+  storage: () => request<StorageOverview>('GET', '/api/storage'),
+  clearStorage: (providerId: string, input: ClearStorageInput = {}) =>
+    request<ClearStorageResult>('POST', `/api/storage/${id(providerId)}/clear`, { body: input }),
+
+  accounts: () => request<ExternalAccountList>('GET', '/api/accounts'),
+  linkAccount: (input: LinkAccountInput) =>
+    request<ExternalAccountView>('POST', '/api/accounts', { body: input }),
+  unlinkAccount: (accountId: string) => request<void>('DELETE', `/api/accounts/${id(accountId)}`),
+  accountChallenge: (accountId: string) =>
+    request<AccountChallenge>('POST', `/api/accounts/${id(accountId)}/challenge`),
+
+  artifactUrl: (artifactId: string) => urlOf(`/api/artifacts/${id(artifactId)}`),
+  mediaVariants: (input: MediaVariantsInput) =>
+    request<MediaVariantsResult>('POST', '/api/media/variants', { body: input }),
+  applyMedia: (input: MediaApplyInput & { mode: 'merge-request' }) =>
+    request<MediaApplyResult>('POST', '/api/media/apply', { body: input }),
+  mediaZip: (input: MediaApplyInput & { mode: 'zip' }) =>
+    requestBlob('POST', '/api/media/apply', { body: input }),
 
   activity: (query: { before?: string; limit?: number }) =>
     request<ActivityList>('GET', '/api/activity', { query }),

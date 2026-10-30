@@ -1,7 +1,13 @@
 import type { Scope } from '@holtkeeper/api'
 import { Globe2, Layers } from 'lucide-react'
 
-import { describeScope, validateRepoPattern } from '../../lib/scope.ts'
+import {
+  describeScope,
+  formatGroupMatch,
+  parseGroupMatch,
+  validateGroupMatch,
+  validateRepoPattern,
+} from '../../lib/scope.ts'
 import { Chip, Segmented, TagInput } from '../../ui/index.ts'
 
 /** Which repositories something applies to: everything, or groups plus `forge:path/**` patterns. */
@@ -50,10 +56,12 @@ export function ScopeEditor({
         <div className="flex flex-col gap-3 rounded-xl border border-separator p-3">
           <TagInput
             label="Groups"
-            values={value.groups ?? []}
-            onChange={(next) => onChange({ ...value, groups: next })}
+            values={(value.groups ?? []).map(formatGroupMatch)}
+            onChange={(next) => onChange({ ...value, groups: next.map(parseGroupMatch) })}
             placeholder="e.g. games"
             suggestions={groups}
+            validate={validateGroupMatch}
+            description="Join groups with + to require all of them: frontend + storefront"
           />
           <TagInput
             label="Repository patterns"

@@ -1,4 +1,4 @@
-import { type RepoTarget, type Scope, scopeCoversRepo } from '@holtkeeper/access'
+import { type RepoTarget, type Scope, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import type {
   ActivityStore,
   AiUsageRecord,
@@ -63,18 +63,6 @@ export interface BudgetGuard {
   note(record: Omit<AiUsageRecord, 'id'>): void
 }
 
-const hasWildcard = (pattern: string) => /[*?[\]{}]/.test(pattern)
-
-/** Same ranking as `@holtkeeper/settings`: all (0) < groups (1) < globs (2) < exact paths (3). */
-const specificity = (scope: Scope) =>
-  scope.repos?.some((pattern) => !hasWildcard(pattern))
-    ? 3
-    : scope.repos?.length
-      ? 2
-      : scope.groups?.length
-        ? 1
-        : 0
-
 /** Valid `llm.budget` entries; entries whose value does not parse are skipped. */
 export function parseBudgets(entries: readonly SettingEntry[]): ScopedBudget[] {
   return entries.flatMap((entry) => {
@@ -97,7 +85,7 @@ export function applicableBudgets(
   const newest = (a: ScopedBudget, b: ScopedBudget) => b.updatedAt.localeCompare(a.updatedAt)
   const specific = budgets
     .filter((b) => scopeCoversRepo(b.scope, repo))
-    .toSorted((a, b) => specificity(b.scope) - specificity(a.scope) || newest(a, b))[0]
+    .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope) || newest(a, b))[0]
   const global = budgets.filter((b) => b.scope.all).toSorted(newest)[0]
   return [specific, global].filter(
     (b, index, all): b is ScopedBudget => b !== undefined && all.indexOf(b) === index,

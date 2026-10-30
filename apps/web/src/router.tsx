@@ -93,6 +93,22 @@ const ActivityPage = lazyRouteComponent(
   'ActivityPage',
 )
 
+const JobsPage = lazyRouteComponent(() => import('./features/jobs/JobsPage.tsx'), 'JobsPage')
+const JobPage = lazyRouteComponent(() => import('./features/jobs/JobPage.tsx'), 'JobPage')
+const AutomationPage = lazyRouteComponent(
+  () => import('./features/automation/AutomationPage.tsx'),
+  'AutomationPage',
+)
+const AiUsagePage = lazyRouteComponent(() => import('./features/ai/AiUsagePage.tsx'), 'AiUsagePage')
+const AuditLogPage = lazyRouteComponent(
+  () => import('./features/audit-log/AuditLogPage.tsx'),
+  'AuditLogPage',
+)
+const StoragePage = lazyRouteComponent(
+  () => import('./features/storage/StoragePage.tsx'),
+  'StoragePage',
+)
+
 const auditsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'audits',
@@ -131,6 +147,23 @@ const groupRoute = createRoute({
   validateSearch: tabSearch,
 })
 
+const jobsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'jobs',
+  component: JobsPage,
+  validateSearch: (search: Record<string, unknown>): { repo?: string; status?: string } => ({
+    ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
+    ...(typeof search.status === 'string' && search.status ? { status: search.status } : {}),
+  }),
+})
+
+const automationRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'automation',
+  component: AutomationPage,
+  validateSearch: tabSearch,
+})
+
 const repoSearch = (search: Record<string, unknown>): { repo?: string } =>
   typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}
 
@@ -162,7 +195,13 @@ const routeTree = rootRoute.addChildren([
     analysisPage('quality', QualityPage),
     analysisPage('ci', CiJobsPage),
     analysisRoute,
+    jobsRoute,
+    page('jobs/$jobId', JobPage),
     page('knowledge', KnowledgePage),
+    automationRoute,
+    page('ai', AiUsagePage),
+    page('audit-log', AuditLogPage),
+    page('storage', StoragePage),
     page('credentials', CredentialsPage),
     settingsRoute,
     page('users', UsersPage),

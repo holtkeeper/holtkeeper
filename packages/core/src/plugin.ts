@@ -1,3 +1,4 @@
+import type { GroupMatch } from '@holtkeeper/access'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import type { z } from 'zod'
 
@@ -30,9 +31,13 @@ export interface Plugin<Schema extends OptionsSchema = OptionsSchema> {
   run(ctx: PluginContext<z.output<Schema>>): Promise<void>
 }
 
-/** How a config uses a plugin: groups it runs on, base options and per-path overrides. */
+/**
+ * How a config uses a plugin: groups it runs on, base options and per-path overrides. A `groups`
+ * entry can be a list of groups a repository must all belong to, e.g.
+ * `groups: ['tools', ['frontend', 'storefront']]`.
+ */
 export interface PluginTargets<Schema extends OptionsSchema = OptionsSchema> {
-  groups: string[]
+  groups: GroupMatch[]
   exclude?: string[]
   options?: z.input<Schema>
   overrides?: Record<string, Partial<z.input<Schema>>>

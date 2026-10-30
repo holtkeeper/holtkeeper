@@ -7,7 +7,7 @@ import { entry, repo } from '../test/entries.ts'
 import { knowledgeAccess } from './access.ts'
 
 const now = () => new Date('2026-10-30T12:00:00.000Z')
-const slots = repo('games/slots', ['games'])
+const app = repo('games/app', ['games'])
 
 let store: Store
 beforeEach(async () => {
@@ -31,7 +31,7 @@ beforeEach(async () => {
 describe('knowledgeAccess', () => {
   test('search returns accepted entries for the repository and task kind', async () => {
     const kb = knowledgeAccess({ store, now })
-    const results = await kb.search('snapshot', { repo: slots, taskKind: 'review' })
+    const results = await kb.search('snapshot', { repo: app, taskKind: 'review' })
     expect(results.map((r) => r.id)).toEqual(['games', 'global'])
     expect(results[1]).toEqual({
       id: 'global',
@@ -41,14 +41,14 @@ describe('knowledgeAccess', () => {
       score: expect.any(Number),
     })
     expect(
-      (await kb.search('snapshot', { repo: slots, taskKind: 'tests', limit: 1 })).map((r) => r.id),
+      (await kb.search('snapshot', { repo: app, taskKind: 'tests', limit: 1 })).map((r) => r.id),
     ).toHaveLength(1)
-    expect(await kb.search('"((', { repo: slots, taskKind: 'review' })).toEqual([])
+    expect(await kb.search('"((', { repo: app, taskKind: 'review' })).toEqual([])
   })
 
   test('a blank query lists applicable entries, most specific first', async () => {
     const kb = knowledgeAccess({ store, now })
-    const results = await kb.search('', { repo: slots, taskKind: 'review', limit: 10 })
+    const results = await kb.search('', { repo: app, taskKind: 'review', limit: 10 })
     expect(results[0]?.id).toBe('games')
     expect(results.map((r) => r.id).toSorted()).toEqual(['games', 'global', 'other'])
   })
@@ -57,7 +57,7 @@ describe('knowledgeAccess', () => {
     const kb = knowledgeAccess({ store, now, autoAccept: ['quirk'] })
     const ctx = {
       actor: 'agent:propagate',
-      repo: slots,
+      repo: app,
       taskKind: 'propagate',
       packages: [{ ecosystem: 'npm', name: 'react', from: '18.3.1', to: '19.0.0' }],
     }
@@ -101,13 +101,13 @@ describe('knowledgeAccess', () => {
       body: 'How to: run assets before tests.',
     }
     const ctx = { actor: 'agent:tests', taskKind: 'tests' }
-    const inGames = await kb.propose(proposal, { ...ctx, repo: slots })
+    const inGames = await kb.propose(proposal, { ...ctx, repo: app })
     const elsewhere = await kb.propose(
       { title: 'Regenerate the client', body: 'How to: run codegen after schema edits.' },
       { ...ctx, repo: { forge: 'work', path: 'tools/cli', groups: [] } },
     )
     expect(inGames.status).toBe('accepted')
     expect(elsewhere.status).toBe('proposed')
-    expect(seen).toEqual([slots.path, 'tools/cli'])
+    expect(seen).toEqual([app.path, 'tools/cli'])
   })
 })

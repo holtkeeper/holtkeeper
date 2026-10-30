@@ -24,6 +24,10 @@ import { createReviewAnalyzer } from '@holtkeeper/review'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
 import { z } from 'zod'
 
+import { auditAnalyzer } from './audit.ts'
+
+export { auditAnalysis, auditAnalyzer } from './audit.ts'
+
 const checkoutOf = (dir: string | undefined) => {
   if (!dir) throw new Error('this analyzer needs a checkout')
   return dir
@@ -165,4 +169,5 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   portAnalyzer,
   createReviewAnalyzer({ checks: reviewChecks() }),
   trackerAnalyzer,
+  auditAnalyzer,
 ]

@@ -97,7 +97,7 @@ export function mrEvent(
 ): MergeRequestEvent {
   const { mr, ...rest } = overrides
   return {
-    repo: { forge: 'work', path: 'games/slots' },
+    repo: { forge: 'work', path: 'games/app' },
     groups: ['games'],
     action: 'open',
     actor: 'alice',
@@ -105,9 +105,9 @@ export function mrEvent(
     ...rest,
     mr: {
       id: 7,
-      title: 'feat: add slots',
+      title: 'feat: add app',
       description: '',
-      sourceBranch: 'feature/slots',
+      sourceBranch: 'feature/app',
       targetBranch: 'main',
       state: 'open',
       draft: false,

@@ -64,6 +64,9 @@ describe('parseConfig', () => {
     })
     expect(message).toContain('plugin "greeter" is used twice')
     expect(message).toContain('unknown group "nope"')
+    expect(errorOf({ ...base, plugins: [greeter({ groups: [['games', 'gone']] })] })).toContain(
+      'unknown group "gone"',
+    )
   })
 
   test('accepts AI provider plugins once each', () => {
@@ -98,20 +101,20 @@ describe('resolveRepo', () => {
     ...base,
     repos: {
       'games/*': { traits: { ssr: false, runtime: 'browser' } },
-      'games/slots-x': { traits: { ssr: true } },
+      'games/app-x': { traits: { ssr: true } },
     },
     plugins: [
       greeter({
         groups: ['games'],
         exclude: ['games/skip-me'],
         options: { greeting: 'hi' },
-        overrides: { 'games/slots-*': { loud: true } },
+        overrides: { 'games/app-*': { loud: true } },
       }),
     ],
   })
 
   test('collects groups, traits and plugin options', () => {
-    const resolved = resolveRepo(config, { forge: 'work', path: 'games/slots-x' })
+    const resolved = resolveRepo(config, { forge: 'work', path: 'games/app-x' })
     expect(resolved.groups).toEqual(['games'])
     expect(resolved.traits).toEqual({ ssr: true, runtime: 'browser' })
     expect(resolved.plugins.map((p) => [p.plugin.name, p.options])).toEqual([
@@ -129,8 +132,29 @@ describe('resolveRepo', () => {
     expect(resolveRepo(config, { forge: 'work', path: 'tools/a/b' }).groups).toEqual(['tools'])
   })
 
+  test('runs plugins on repositories in every group of an intersection', () => {
+    const layered = parseConfig({
+      ...base,
+      groups: {
+        frontend: { forge: 'work', include: ['shop/web', 'admin/*-ui'] },
+        storefront: { forge: 'work', include: ['shop/*'] },
+        'admin-panel': { forge: 'work', include: ['admin/**'] },
+      },
+      plugins: [greeter({ groups: [['frontend', 'storefront']] })],
+    })
+    const pluginsOf = (path: string) =>
+      resolveRepo(layered, { forge: 'work', path }).plugins.map((p) => p.plugin.name)
+    expect(resolveRepo(layered, { forge: 'work', path: 'shop/web' }).groups).toEqual([
+      'frontend',
+      'storefront',
+    ])
+    expect(pluginsOf('shop/web')).toEqual(['greeter'])
+    expect(pluginsOf('shop/api')).toEqual([])
+    expect(pluginsOf('admin/orders-ui')).toEqual([])
+  })
+
   test('ignores repositories from other forges', () => {
-    expect(resolveRepo(config, { forge: 'other', path: 'games/slots-x' })).toMatchObject({
+    expect(resolveRepo(config, { forge: 'other', path: 'games/app-x' })).toMatchObject({
       groups: [],
       traits: {},
       plugins: [],

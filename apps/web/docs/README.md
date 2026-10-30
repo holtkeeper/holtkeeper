@@ -1,6 +1,6 @@
 # @holtkeeper/web
 
-The Holtkeeper admin panel: dashboards, audit reports, credentials, settings, users, your own account (passkeys, at `/account`) and the activity log. A single-page React app that talks only to the server's JSON API (`/api/*`) and auth endpoints (`/auth/*`). The server serves the built files from `apps/web/dist`.
+The Holtkeeper admin panel: dashboards, audit reports, background jobs, automation (schedules, triggers, repository traits), credentials, settings, AI usage, storage, users, your own account (passkeys and linked external accounts, at `/account`), the audit log and the activity log. A single-page React app that talks only to the server's JSON API (`/api/*`) and auth endpoints (`/auth/*`). The server serves the built files from `apps/web/dist`.
 
 Stack: React 19, HeroUI 3 (React Aria + Tailwind CSS 4), TanStack Router (code-based routes), TanStack Query, TanStack Table, Motion, Recharts, React Flow (`@xyflow/react`) with dagre layouts, lucide icons, `@simplewebauthn/browser` for passkeys.
 
@@ -43,15 +43,23 @@ src/
     diff.ts           unified and split diff rows with line numbers, hunk headers, stats
     selection.ts      change selection, "select all safe", conflicts per change, MR titles
     format.ts         relative dates, durations, expiry tone
-    scope.ts          scope description, normalisation, pattern validation
+    scope.ts          scope description, normalisation, pattern and group intersection text
     schema.ts         JSON Schema → setting editor kind (x-editor picks a dedicated editor)
     policies.ts       merge request policies: normalising, cleaning, plain-words summary, checks
     trackers.ts       trackers: part variants, roles provided and read (x-role), links, checks
+    jobs.ts           job status tones and labels, durations, analyzers per target scope
+    automation.ts     schedule, trigger and repository traits forms ↔ panel documents, cadence text
+    ai-usage.ts       USD and token formatting, month deltas, daily series, budget tone
+    audit-log.ts      audit log filter form → query, outcome tones, change values
+    storage.ts        provider ordering and shares, clear results
+    media.ts          image variant form validation, savings tone, snippet labels
+    accounts.ts       external account providers, verification labels, link form
     schema-form.ts    JSON Schema → form fields (objects, records, lists, variants, $ref)
     severity.ts, repo.ts, theme.ts
   ui/                 thin wrappers over HeroUI and shared visual pieces
   features/<area>/    one folder per page: shell, auth, dashboard, audits, repos, analyses,
-                      reports, credentials, settings, access (Scope/Grants editors), users, account, activity
+                      reports, credentials, settings, access (Scope/Grants editors), users, account, activity,
+                      jobs, automation, ai, audit-log, storage, media
 ```
 
 ## API client
@@ -59,6 +67,8 @@ src/
 Pages never call `fetch`. `api/endpoints.ts` maps every endpoint to a typed function using the shared types from `@holtkeeper/api` (types and browser-safe helpers only; no runtime code from other packages). `api/queries.ts` wraps them in hooks; mutations invalidate the affected query keys. Errors arrive as `ApiError` with the HTTP status; a 401 anywhere refetches `/api/me`, which shows the sign-in page.
 
 ## Access in the UI
+
+Scope editors (grants, settings, knowledge) and the schedule and trigger dialogs take group intersections as `frontend + storefront`: one tag that means both groups at once (`formatGroupMatch` / `parseGroupMatch` in `lib/scope.ts`).
 
 `lib/access.ts` `can(principal, action)` only asks whether any grant names the action (or `*`). It decides which navigation entries and buttons to show; the server still checks the exact scope on every request, and pages show "No access" on a 403.
 
@@ -73,6 +83,22 @@ The Credentials page also lists forges (global `settings:read`). With global `se
 ## Repositories and groups
 
 `/repos` shows headline cards (repositories, audited this week, with critical or high findings, active findings) and a table: the path with its namespace dimmed, forge and groups; active findings with a severity bar and fixed/allowlisted counts; the last audit with a freshness dot (week, month, older, never; `auditFreshness` in `lib/repo.ts`); and, with `analyses:read`, one icon per analysis kind linking to its newest record (dimmed when there is none, metrics in the tooltip). A strip of groups sits above it. **Add repository** (global `settings:write`) adds an exact path to an existing group of the chosen forge or to a new group through `PUT /api/config/groups/:id` (`withRepo` in `lib/repo.ts`); a group from the config file becomes a panel copy that replaces it. `/repos/view?repo=forge:path` and `/repos/groups/:id` show one repository or group with tabs: **Settings** (`ScopedSettings`: entries naming it, and for a repository the effective value and where it comes from; new entries start scoped to it), **Knowledge** (`ScopedKnowledge`), for a repository **Updates** (`RepoUpdates`: polling cadence, last and next poll, a warning when the token's budget slows it down, **Poll now** and the recent polls, scheduled or by hand, with their result; the repository's webhook URL with copy, **Regenerate**, **Turn off**, **Register on GitLab**, the last delivery and setup steps for adding it by hand) and, for a group, its include and exclude patterns, **Listing on the forge** (`GroupListing`: what the patterns resolve to, **List now** and the recent listings with their errors) and known repositories. `lib/scope.ts` `namesFocus` decides which entries belong to the page: the exact group, or the exact repository path with or without its forge.
+
+## Jobs
+
+`/jobs` lists background analyzer runs (`analyses:read`) with a status filter and an optional `?repo=` filter, refreshing every few seconds while some are queued or running. `/jobs/$jobId` shows a job's details, its options, error and a log that follows new lines, **Cancel** for queued and running jobs and **Open result** once it stored an analysis. `RunJobDialog` (`analyses:run`, only when the config has `jobs`) queues an analyzer: the target is fixed by the page (repository, group) or picked, the options form comes from the analyzer's JSON Schema (`GET /api/jobs/analyzers`) with its presets. Repository and group pages and the Audits page (**Run audit**, the `audit` analyzer) open it.
+
+## Automation
+
+`/automation` (`settings:read`, editing with global `settings:write`) edits what the config file's `jobs` and `repos` sections set, as panel documents layered over the file (`/api/config/<collection>`), with a provenance chip per entry and its earlier versions. **Schedules**: interval or cron, time zone, allow and deny windows, weekends, nights, holidays, jitter and spread, analyzers, groups and repositories, the next runs; switching a file schedule off stores a panel override. **Triggers**: tag, merge request, label and command triggers. **Traits**: repository traits per path pattern with typed values. **Runtime**: the file-only parts (`GET /api/config/runtime`: dry run, job execution, storage, limits, AI providers, plugin uses), read-only, and **Export config** (`GET /api/config/export`). The Credentials page's forges get a webhook block: a panel forge generates or rotates its secret and registers the hook on GitLab (`POST /api/forges/:id/webhook`), the secret shown once.
+
+## Repository config and media
+
+A repository's **Config** tab shows what the config applies to it (`GET /api/repos/explain`, like `holtkeeper explain`): groups, traits, plugins with options, and the schedules and triggers that queue jobs for it. **Optimize image** (`analyses:run`) generates image variants of a file (`POST /api/media/variants`), compares sizes, previews variants, shows markup snippets and puts the chosen files into a merge request or a ZIP (`POST /api/media/apply`).
+
+## AI usage, storage and audit log
+
+`/ai` (`ai:read`): this month against the previous one, budgets with month-end projections, daily cost for 30 days, top repositories, models and task kinds, and every run with links to its job and analysis. `/storage` (`settings:read`): space per storage area with breakdowns and **Clear** where the area allows it (`settings:write`). `/audit-log` (global `audit:read`): filters, count, events with expandable request details and changes, hash chain verification and CSV or NDJSON export of the filtered events. `/account` also lists linked external accounts, links new ones and issues verification codes.
 
 ## Knowledge
 

@@ -4,15 +4,15 @@ import type { CatalogSource, ChangeTarget } from './types.ts'
 
 /** Values of the repository placeholders in `files` templates. */
 export interface TemplateVars {
-  /** Full path of the analyzed repository, e.g. `games/slots-x`. */
+  /** Full path of the analyzed repository, e.g. `games/app-x`. */
   repo: string
-  /** Last path segment, e.g. `slots-x`. */
+  /** Last path segment, e.g. `app-x`. */
   repoName: string
   /** Path without the last segment, e.g. `games`. */
   group: string
 }
 
-/** `games/slots-x` → `{ repo: 'games/slots-x', repoName: 'slots-x', group: 'games' }`. */
+/** `games/app-x` → `{ repo: 'games/app-x', repoName: 'app-x', group: 'games' }`. */
 export function templateVars(repoPath: string): TemplateVars {
   const parts = repoPath.split('/').filter(Boolean)
   return {
@@ -98,7 +98,7 @@ export interface LayerSpec {
   namespace?: string
 }
 
-/** `gitlab:games/slots` → `{ forge: 'gitlab', path: 'games/slots' }`. */
+/** `gitlab:games/app` → `{ forge: 'gitlab', path: 'games/app' }`. */
 export function parseRepo(text: string): ChangeTarget {
   const colon = text.indexOf(':')
   if (colon <= 0 || colon === text.length - 1)

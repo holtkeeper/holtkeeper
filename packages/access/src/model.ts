@@ -27,13 +27,21 @@ export const actions = [
 export type Action = (typeof actions)[number]
 
 /**
+ * One entry of a group list: a group name, or a list of groups a repository must belong to all at
+ * once (`['frontend', 'storefront']`). Entries of a list combine with OR, groups inside an entry
+ * with AND.
+ */
+export type GroupMatch = string | string[]
+
+/**
  * Which repositories something applies to. `all` covers everything, including global objects.
- * Otherwise a repository is covered when it belongs to one of `groups` or its path matches one of
- * `repos`. A `repos` pattern is a path glob, optionally prefixed with a forge id: `work:games/**`.
+ * Otherwise a repository is covered when it matches one of `groups` (see `GroupMatch`) or its path
+ * matches one of `repos`. A `repos` pattern is a path glob, optionally prefixed with a forge id:
+ * `work:games/**`.
  */
 export interface Scope {
   all?: boolean
-  groups?: string[]
+  groups?: GroupMatch[]
   repos?: string[]
 }
 

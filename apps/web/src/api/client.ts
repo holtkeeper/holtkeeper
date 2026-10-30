@@ -66,6 +66,26 @@ export async function request<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/** Sends a JSON request like `request` and returns the response body as a file download. */
+export async function requestBlob(
+  method: 'GET' | 'POST',
+  path: string,
+  options: { body?: unknown; query?: Query } = {},
+): Promise<Blob> {
+  const response = await fetch(withQuery(path, options.query), {
+    method,
+    credentials: 'same-origin',
+    ...(options.body === undefined
+      ? {}
+      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(options.body) }),
+  })
+  if (!response.ok) throw new ApiError(response.status, await errorMessage(response))
+  return response.blob()
+}
+
+/** A same-origin URL with query parameters, for links and downloads. */
+export const urlOf = (path: string, query?: Query): string => withQuery(path, query)
+
 /** Human message for any thrown value. */
 export const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)

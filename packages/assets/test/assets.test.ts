@@ -120,7 +120,7 @@ test('inventories, checks budgets, suggests and reports', async () => {
 
   const record = (id: string, value: typeof data, ref: string) => ({
     id,
-    repo: { forge: 'gitlab', path: 'games/slots' },
+    repo: { forge: 'gitlab', path: 'games/app' },
     kind: 'assets',
     ref,
     createdAt: '2026-10-29T00:00:00.000Z',
@@ -157,7 +157,7 @@ test('the analyzer validates options and passes the runner for tool measurements
   const { runner, calls } = createFakeRunner(() => ({ exitCode: 127 }))
   const options = assetsAnalyzer.options.parse({ convert: 'tools', roots: ['public/**'] })
   const { data } = await assetsAnalyzer.run({
-    repo: { forge: 'gitlab', path: 'games/slots' },
+    repo: { forge: 'gitlab', path: 'games/app' },
     dir,
     runner,
     options,
