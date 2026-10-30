@@ -95,7 +95,7 @@ Jobs run inside the worker container in `mise` execution mode: the container is 
 The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 
 - a ConfigMap with `holtkeeper.config.ts` (`config.content`, default the chart's `files/holtkeeper.config.ts`; or `config.existingConfigMap`), mounted read-only; pods restart when it changes;
-- `existingSecret` → environment of every container (`HOLTKEEPER_VAULT_KEY`, `HOLTKEEPER_DATABASE_URL`, `HOLTKEEPER_S3_*`, `HOLTKEEPER_ROOT_PASSWORD`, `HOLTKEEPER_SESSION_SECRET`, `HOLTKEEPER_WEBHOOK_SECRET`, `GITLAB_TOKEN`, ...); `env` for plain values;
+- `existingSecret` → environment of every container (`HOLTKEEPER_VAULT_KEY`, `HOLTKEEPER_DATABASE_URL`, `HOLTKEEPER_S3_*`, `HOLTKEEPER_ROOT_PASSWORD`, `HOLTKEEPER_SESSION_SECRET`, `HOLTKEEPER_WEBHOOK_SECRET`, `GITLAB_TOKEN`, ...); `env` for plain values (`HOLTKEEPER_AUTH=users` switches the default config from the `root` password to accounts with passkeys: the first start logs the admin's setup link, `HOLTKEEPER_ADMIN_NAME`/`HOLTKEEPER_ADMIN_EMAIL` name that admin, `HOLTKEEPER_PUBLIC_URL` is required);
 - `web` Deployment + Service (+ Ingress, + HPA on CPU, + PodDisruptionBudget), roles `web,scheduler`;
 - `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB;
 - optional `scheduler` Deployment (`scheduler.enabled`; the web pods then run `web` only);

@@ -1,4 +1,5 @@
 import { passwordAuth } from '@holtkeeper/auth-password'
+import { usersAuth } from '@holtkeeper/auth-users'
 import { defineConfig } from '@holtkeeper/core'
 import { env } from '@holtkeeper/forge'
 import { gitlab } from '@holtkeeper/forge-gitlab'
@@ -11,9 +12,39 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
  *
  * - `HOLTKEEPER_DATABASE_URL` set: Postgres (required for more than one process), else SQLite in /data.
  * - `HOLTKEEPER_S3_BUCKET` set: artifacts in any S3-compatible storage (required for more than one process), else /data.
+ * - `HOLTKEEPER_AUTH=users`: accounts with passkeys; the first start logs the admin's setup link.
+ *   Needs `HOLTKEEPER_PUBLIC_URL`. Otherwise one `root` password (`HOLTKEEPER_ROOT_PASSWORD`).
  */
 const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
 const port = Number(process.env.HOLTKEEPER_PORT ?? 7420)
+const publicUrl = process.env.HOLTKEEPER_PUBLIC_URL
+const secureCookies = process.env.HOLTKEEPER_INSECURE_COOKIES !== '1'
+
+const store = multiProcess
+  ? postgresStore({ url: env('HOLTKEEPER_DATABASE_URL') })
+  : sqliteStore({ path: '/data/holtkeeper.db' })
+
+function auth() {
+  if (process.env.HOLTKEEPER_AUTH !== 'users')
+    return passwordAuth({
+      password: env('HOLTKEEPER_ROOT_PASSWORD'),
+      sessionSecret: env('HOLTKEEPER_SESSION_SECRET'),
+      secureCookies,
+    })
+  if (!publicUrl) throw new Error('HOLTKEEPER_AUTH=users needs HOLTKEEPER_PUBLIC_URL')
+  return usersAuth({
+    store: store.users,
+    activity: store.activity,
+    externalAccounts: store.externalAccounts,
+    sessionSecret: env('HOLTKEEPER_SESSION_SECRET'),
+    origin: publicUrl,
+    secureCookies,
+    bootstrap: {
+      name: process.env.HOLTKEEPER_ADMIN_NAME ?? 'Admin',
+      ...(process.env.HOLTKEEPER_ADMIN_EMAIL ? { email: process.env.HOLTKEEPER_ADMIN_EMAIL } : {}),
+    },
+  })
+}
 
 export default defineConfig({
   forges: process.env.GITLAB_URL
@@ -21,19 +52,13 @@ export default defineConfig({
     : {},
   groups: {},
   server: {
-    auth: passwordAuth({
-      password: env('HOLTKEEPER_ROOT_PASSWORD'),
-      sessionSecret: env('HOLTKEEPER_SESSION_SECRET'),
-      secureCookies: process.env.HOLTKEEPER_INSECURE_COOKIES !== '1',
-    }),
-    store: multiProcess
-      ? postgresStore({ url: env('HOLTKEEPER_DATABASE_URL') })
-      : sqliteStore({ path: '/data/holtkeeper.db' }),
+    auth: auth(),
+    store,
     ...(multiProcess ? {} : { databasePath: '/data/holtkeeper.db' }),
     vaultKey: env('HOLTKEEPER_VAULT_KEY'),
     hostname: '0.0.0.0',
     port,
-    ...(process.env.HOLTKEEPER_PUBLIC_URL ? { publicUrl: process.env.HOLTKEEPER_PUBLIC_URL } : {}),
+    ...(publicUrl ? { publicUrl } : {}),
     artifacts: process.env.HOLTKEEPER_S3_BUCKET
       ? {
           kind: 's3',
