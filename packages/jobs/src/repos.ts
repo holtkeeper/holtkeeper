@@ -18,8 +18,9 @@ const matches = (patterns: string[], path: string) =>
 
 /**
  * Lists a group's repositories from its forge: every include glob's static prefix is listed with
- * `GitForge.listRepositories`, then filtered by the include and exclude globs. Archived
- * repositories are skipped. Throws for unknown groups.
+ * `GitForge.listRepositories`, then filtered by the include and exclude globs; an include without
+ * wildcards is one repository, read with `GitForge.getRepository`. Archived repositories are
+ * skipped. Throws for unknown groups.
  */
 export function groupRepositories(config: HoltkeeperConfig): ResolveRepos {
   return async (name) => {
@@ -29,7 +30,15 @@ export function groupRepositories(config: HoltkeeperConfig): ResolveRepos {
     if (!definition) throw new Error(`unknown forge "${group.forge}"`)
     const forge = definition.create()
     const found = new Map<string, RepoRef>()
-    for (const namespace of new Set(group.include.map(staticPrefix))) {
+    const exact = group.include.filter((pattern) => !globChars.test(pattern))
+    for (const path of exact) {
+      if (matches(group.exclude, path)) continue
+      // oxlint-disable-next-line no-await-in-loop -- one repository after another keeps rate limits
+      const repository = await forge.getRepository(path)
+      if (!repository.archived) found.set(path, { forge: group.forge, path })
+    }
+    const globs = group.include.filter((pattern) => globChars.test(pattern))
+    for (const namespace of new Set(globs.map(staticPrefix))) {
       for await (const repository of forge.listRepositories(namespace)) {
         if (repository.archived) continue
         if (!matches(group.include, repository.path) || matches(group.exclude, repository.path))

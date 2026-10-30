@@ -81,7 +81,7 @@ The scheduler re-reads `config.jobs.schedules` on every tick (so a live config f
 - repo-scope analyzers: one job per repository of the schedule's groups that matches `repos`;
 - group-scope analyzers: one job per group, with `repo = { forge, path: <group> }` and `group` set.
 
-Jobs already queued or running for the same analyzer, repository and ref are skipped (`enqueueUnique`). `resolveRepos` defaults to `groupRepositories(config)`: it lists each include glob's static prefix with `GitForge.listRepositories`, filters by the group's include/exclude globs and skips archived repositories. `run(name)` enqueues one schedule now; `tick()` is exposed for tests.
+Jobs already queued or running for the same analyzer, repository and ref are skipped (`enqueueUnique`). `resolveRepos` defaults to `groupRepositories(config)`: it lists each include glob's static prefix with `GitForge.listRepositories`, reads includes without wildcards (exact repository paths) with `GitForge.getRepository` instead of listing them as namespaces, filters by the group's include/exclude globs and skips archived repositories. `run(name)` enqueues one schedule now; `tick()` is exposed for tests.
 
 ## Worker
 

@@ -14,19 +14,25 @@ const repository = (path: string, archived = false): Repository => ({
   archived,
 })
 
+const all = [
+  repository('games/a'),
+  repository('games/legacy-b'),
+  repository('games/old', true),
+  repository('games/deep/c'),
+  repository('tools/x'),
+]
+
 const listed: string[] = []
 const forge = {
   kind: 'fake',
   async *listRepositories(namespace: string) {
     listed.push(namespace)
-    const all = [
-      repository('games/a'),
-      repository('games/legacy-b'),
-      repository('games/old', true),
-      repository('games/deep/c'),
-      repository('tools/x'),
-    ]
     yield* all.filter((r) => r.path.startsWith(`${namespace}/`))
+  },
+  async getRepository(path: string) {
+    const found = all.find((r) => r.path === path)
+    if (!found) throw new Error(`404 ${path}`)
+    return found
   },
 } as unknown as GitForge
 
@@ -35,6 +41,11 @@ const config = parseConfig({
   groups: {
     games: { forge: 'work', include: ['games/*'], exclude: ['games/legacy-*'] },
     everything: { forge: 'work', include: ['games/**', 'tools/*'] },
+    picked: {
+      forge: 'work',
+      include: ['games/deep/c', 'games/old', 'tools/*'],
+      exclude: ['tools/x'],
+    },
   },
 })
 
@@ -57,6 +68,13 @@ describe('repos', () => {
     ])
     expect(listed).toContain('tools')
     expect(resolve('nope')).rejects.toThrow('unknown group')
+  })
+
+  test('groupRepositories reads exact paths instead of listing them as namespaces', async () => {
+    listed.length = 0
+    const resolve = groupRepositories(config)
+    expect((await resolve('picked')).map((r) => r.path)).toEqual(['games/deep/c'])
+    expect(listed).toEqual(['tools'])
   })
 
   test('matchesRepoGlob checks forge and path', () => {
