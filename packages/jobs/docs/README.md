@@ -129,11 +129,12 @@ execution: {
   limits: { cpus: 2, memory: '4g', pids: 1024 },
   network: 'install', // 'none' | 'install' (default) | 'full'
   user: '10001:10001', // default: the image's holtkeeper user
+  envAllowlist: ['GOPROXY'], // extra worker variables job commands keep
 }
 ```
 
 - **`host`** (default, also when `execution` is missing): every runner is the host runner, exactly as before.
-- **`mise`**: commands run on the host as `mise exec <tools> -- <command>` (`localMiseRunner`); tools are installed when the runner starts. For development.
+- **`mise`**: commands run on the host (in Kubernetes: the worker pod) as `mise exec <tools> -- <command>` (`localMiseRunner`); tools are installed when the runner starts. Commands keep only allowlisted variables of the worker's environment (`defaultLocalEnvAllowlist` plus `envAllowlist`), never `HOLTKEEPER_*`, so they do not inherit the server's secrets; see the exec-container docs for what this does not cover.
 - **`container`**: one sandboxed container per checkout (`containerRunner` from `@holtkeeper/exec-container`): read-only root, no capabilities, non-root, resource limits, network per policy, tools installed by mise into a shared cache volume. See [docker/worker](../../../docker/worker/README.md) for the image and the security model.
 
 For each checkout the factory runs `detectToolchain` (`@holtkeeper/toolchain`) on it, applies the scoped `toolchain` setting for that repository (`toolchainFor(repo)`, wired by the server; it can override tool versions, `image`, `network` and add `env`) with `mergeToolchain`, logs the tools and detection notes to the job log, and builds the runner with `createRunner`:

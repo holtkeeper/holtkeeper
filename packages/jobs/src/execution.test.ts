@@ -294,6 +294,34 @@ describe('createRunner', () => {
     expect(recorded.calls[0]?.command).toEqual(['mise', 'exec', 'go@1.23', '--', 'go', 'version'])
     expect(recorded.calls[0]?.options.env).toMatchObject({ MISE_IGNORED_CONFIG_PATHS: '/co/0' })
   })
+
+  test('mise mode hides the worker secrets and keeps envAllowlist', async () => {
+    const names = ['HOLTKEEPER_VAULT_KEY', 'HOLTKEEPER_DATABASE_URL', 'GOPROXY']
+    const previous = names.map((name) => Bun.env[name])
+    for (const name of names) Bun.env[name] = 'value'
+    try {
+      const recorded = createFakeRunner()
+      const runner = createRunner(
+        spec({
+          mode: 'mise',
+          execution: { mode: 'mise', envAllowlist: ['GOPROXY', 'HOLTKEEPER_VAULT_KEY'] },
+          hostRunner: recorded.runner,
+          toolchain: { tools: [], notes: [], env: {} },
+        }),
+      )
+      await runner.run(['go', 'version'], { cwd: '/co/0' })
+      const env = recorded.calls[0]?.options.env ?? {}
+      expect(names.filter((name) => !(name in env))).toEqual([])
+      expect([env['HOLTKEEPER_VAULT_KEY'], env['HOLTKEEPER_DATABASE_URL'], env['GOPROXY']]).toEqual(
+        [undefined, undefined, 'value'],
+      )
+    } finally {
+      names.forEach((name, index) => {
+        if (previous[index] === undefined) delete Bun.env[name]
+        else Bun.env[name] = previous[index]
+      })
+    }
+  })
 })
 
 test('runnerFactory is off in host mode', () => {

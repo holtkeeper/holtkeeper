@@ -218,6 +218,14 @@ const executionSchema = z.object({
     .string()
     .regex(/^\d+(:\d+)?$/, 'expected uid or uid:gid')
     .optional(),
+  /**
+   * Extra variables of the worker's environment that job commands keep, e.g. `GOPROXY`. `mise`
+   * keeps paths, locale, `MISE_*` and proxies by default, `container` nothing; `HOLTKEEPER_*` never
+   * passes in `mise` mode.
+   */
+  envAllowlist: z
+    .array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'expected a variable name'))
+    .optional(),
 })
 
 /** Background analyses: schedules, forge webhooks and the worker that runs them. */

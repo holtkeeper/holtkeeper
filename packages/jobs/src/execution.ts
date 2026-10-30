@@ -54,6 +54,7 @@ export const createRunner: CreateRunner = (spec) => {
       toolchain,
       hostRunner,
       env: toolchain.env,
+      ...(execution.envAllowlist && { envAllowlist: execution.envAllowlist }),
       ignoreConfigIn: [spec.dir, ...spec.extraMounts.map((mount) => mount.hostDir)],
     })
   return containerRunner({
@@ -66,6 +67,7 @@ export const createRunner: CreateRunner = (spec) => {
     ...networksFor(toolchain.network ?? execution.network ?? 'install'),
     ...(execution.user && { user: execution.user }),
     env: toolchain.env,
+    ...(execution.envAllowlist && { envAllowlist: execution.envAllowlist }),
     hostRunner,
     log,
   })

@@ -41,7 +41,16 @@ await runner.stop()
 
 ## localMiseRunner
 
-`localMiseRunner({ toolchain, hostRunner, env?, ignoreConfigIn? })` for development without containers: `start()` runs `mise install <specs>` once, `run()` prefixes commands with `mise exec <tools> --` on the host. `ignoreConfigIn` (e.g. the checkout) sets `MISE_IGNORED_CONFIG_PATHS`. No isolation beyond tool versions.
+`localMiseRunner({ toolchain, hostRunner, env?, envAllowlist?, hostEnv?, ignoreConfigIn? })` runs commands on the host, e.g. inside a worker pod or for development without containers: `start()` runs `mise install <specs>` once, `run()` prefixes commands with `mise exec <tools> --`. `ignoreConfigIn` (e.g. the checkout) sets `MISE_IGNORED_CONFIG_PATHS`.
+
+Environment, for `mise install` and every command: the variables of `hostEnv` (default `Bun.env`, i.e. what `hostRunner` would inherit) matched by `defaultLocalEnvAllowlist` or `envAllowlist`, then `MISE_IGNORED_CONFIG_PATHS`, `options.env`, then the run's `env`. Every other host variable is passed as `undefined`, which the `CommandRunner` contract defines as "remove", so no change to `@holtkeeper/exec` is needed and any runner that honours the contract drops it. `defaultLocalEnvAllowlist` is `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`/`TMP`/`TEMP`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`, `XDG_*`, `MISE_*`, the `HTTP(S)_PROXY`/`NO_PROXY` pairs, `SSL_CERT_FILE`, `SSL_CERT_DIR` and `NODE_EXTRA_CA_CERTS`. A trailing `*` matches a prefix but never a secret-looking name (`TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `…_KEY`), so `MISE_GITHUB_TOKEN` is dropped; list such a variable by its exact name to pass it. `HOLTKEEPER_*` never passes, even when listed. Variables the worker image sets for its own process (e.g. `NODE_ENV=production`) are not inherited either.
+
+Limits — the filter keeps secrets out of a command's environment, not out of its reach. Commands run as the worker's uid in the worker's mount and PID namespace, so a hostile command can still:
+
+- read `/proc/<worker pid>/environ` (same uid; deleting variables from `process.env` does not change it) and the read-only config file;
+- read other jobs' checkouts and the mirror cache under `/workspace`, and connect to whatever the worker's network allows (database, object store).
+
+Use `containerRunner`, or in Kubernetes the measures in [docs/deployment.md](../../../docs/deployment.md#isolation-one-job-per-worker-pod), for repositories you do not trust.
 
 ## Testing
 
