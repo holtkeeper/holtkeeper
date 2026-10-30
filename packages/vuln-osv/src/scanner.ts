@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises'
 import { type CommandRunner, localRunner, runChecked } from '@holtkeeper/exec'
 import type { Scanner } from '@holtkeeper/vuln'
 
+import { withResolvedLockfiles } from './lockfile.ts'
 import { parseScanOutput } from './parse.ts'
 
 export interface OsvScannerOptions {
@@ -30,21 +31,23 @@ export function osvScanner({
     async scan(dir, { signal } = {}) {
       // osv-scanner reports resolved paths; resolve too so sources come out relative to `dir`.
       const root = await realpath(dir)
-      const { stdout } = await runChecked(
-        runner,
-        [
-          binary,
-          'scan',
-          'source',
-          '--recursive',
-          '--allow-no-lockfiles',
-          '--format',
-          'json',
-          ...args,
-          root,
-        ],
-        { cwd: root, signal },
-        [0, VULNERABILITIES_FOUND],
+      const { stdout } = await withResolvedLockfiles(root, () =>
+        runChecked(
+          runner,
+          [
+            binary,
+            'scan',
+            'source',
+            '--recursive',
+            '--allow-no-lockfiles',
+            '--format',
+            'json',
+            ...args,
+            root,
+          ],
+          { cwd: root, signal },
+          [0, VULNERABILITIES_FOUND],
+        ),
       )
       const output: unknown = stdout.trim() ? JSON.parse(stdout) : {}
       return parseScanOutput(output, root)

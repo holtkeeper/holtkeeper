@@ -156,4 +156,22 @@ describe.skipIf(!hasOsv)('osv-scanner integration', () => {
     expect(report.changedFiles.toSorted()).toEqual(['package-lock.json', 'package.json'])
     expect(report.findings.length).toBeLessThan(report.resolved.length)
   }, 120_000)
+
+  test('finds vulnerabilities in a lockfile without resolved URLs and leaves it unchanged', async () => {
+    const lock = JSON.stringify({
+      name: 'app',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': { name: 'app', dependencies: { lodash: '4.17.15' } },
+        'node_modules/lodash': { version: '4.17.15' },
+      },
+    })
+    await writeFile(join(dir, 'package-lock.json'), lock)
+
+    const findings = await osvScanner({ runner: localRunner }).scan(dir)
+
+    expect(findings.some((f) => f.package.name === 'lodash')).toBe(true)
+    expect(await Bun.file(join(dir, 'package-lock.json')).text()).toBe(lock)
+  }, 120_000)
 })

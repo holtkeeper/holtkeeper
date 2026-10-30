@@ -12,6 +12,8 @@ osvScanner({ runner?, binary = 'osv-scanner', args = [] })
 
 Runs `osv-scanner scan source --recursive --allow-no-lockfiles --format json <dir>`. Only lockfiles and manifests are read; dependencies are not installed. Files ignored by `.gitignore` are skipped. Exit code `1` means "vulnerabilities found" and is not an error. `args` passes extra flags, e.g. `['--x-exclude', 'g:**/examples/**']` or `['--offline-vulnerabilities']`.
 
+osv-scanner treats an npm package without a `resolved` URL as local and never checks it, so a lockfile written with `omit-lockfile-registry-resolved` would scan as clean. For the duration of the scan, every `package-lock.json` and `npm-shrinkwrap.json` outside `node_modules` gets a registry `resolved` URL for such packages (workspace paths, links and `file:` versions excluded); each file is restored byte for byte afterwards, also when the scan fails.
+
 Mapping to `Finding`:
 
 - one finding per osv-scanner advisory group and package; the GHSA id is primary when the group has one, the rest become `aliases`;
