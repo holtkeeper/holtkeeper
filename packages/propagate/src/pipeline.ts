@@ -12,6 +12,7 @@ import { chainNotes, forgeNotes, nodeModulesNotes } from './notes.ts'
 import { type Planner, defaultPlanner, diskFiles, forgeFiles } from './plan.ts'
 import {
   type ChangedFile,
+  type GitPublisher,
   branchName,
   changedFiles,
   mergeRequestBody,
@@ -294,7 +295,8 @@ export interface Checkout {
   dir: string
   sha: string
   ref: string
-  cleanup(): Promise<void>
+  cleanup(): Promise<void> /** Commits signed with the forge's key; see `AnalyzerContext.checkout`. */
+  publisher?: GitPublisher
 }
 
 /** Checks out a repository; mirrors `AnalyzerContext.checkout`. */
@@ -483,6 +485,7 @@ export async function runPropagation(input: PropagationInput) {
             labels: settings.labels,
             failed,
             targetBranch: repository.defaultBranch,
+            ...(checkout.publisher && { mode: 'git' as const, git: checkout.publisher }),
           })
           if (mergeRequest) outcome.mergeRequest = mergeRequest
         } else if (result.bumps.length && !result.files.some((file) => manifests.has(file.path)))

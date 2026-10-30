@@ -14,6 +14,17 @@ function setup() {
   return { server, forge }
 }
 
+describe('current user', () => {
+  test('prefers the commit email', async () => {
+    const { forge } = setup()
+    expect(await forge.getCurrentUser!()).toEqual({
+      username: 'holtkeeper-bot',
+      name: 'Holtkeeper Bot',
+      email: 'bot-commits@example.com',
+    })
+  })
+})
+
 describe('user SSH keys', () => {
   test('register with usage_type and expiry, list and remove', async () => {
     const { server, forge } = setup()

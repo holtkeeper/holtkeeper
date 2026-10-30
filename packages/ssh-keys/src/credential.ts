@@ -26,14 +26,25 @@ export const sshKeyRegistrationRefSchema = z.object({
   id: z.string().min(1),
 })
 
-/** Non-secret `options` of a credential of kind `ssh`; the private key is the sealed secret. */
-export interface SshCredentialOptions {
+/**
+ * Non-secret `options` of a credential of kind `ssh`; the private key is the sealed secret. A type
+ * alias, so it is assignable to the credential service's `Record<string, unknown>` options.
+ */
+export type SshCredentialOptions = {
   publicKey: string
   fingerprint: string
   usage: SshKeyUsage
   registered: SshKeyRegistrationRef[]
   /** Pinned `known_hosts` contents for the forge's SSH endpoint. */
   knownHosts?: string
+  /** Author and committer of commits signed with the key; the forge account's verified email. */
+  identity?: SshCommitIdentity
+}
+
+/** Who signed commits are made by. */
+export interface SshCommitIdentity {
+  name: string
+  email: string
 }
 
 export const sshCredentialOptionsSchema = z
@@ -43,6 +54,7 @@ export const sshCredentialOptionsSchema = z
     usage: sshKeyUsageSchema,
     registered: z.array(sshKeyRegistrationRefSchema),
     knownHosts: z.string().optional(),
+    identity: z.object({ name: z.string().min(1), email: z.email() }).optional(),
   })
   .superRefine((options, context) => {
     let actual: string
@@ -88,6 +100,7 @@ export interface CreateSshCredentialOptions<Scope> {
   usage: SshKeyUsage
   registered?: SshKeyRegistrationRef[]
   knownHosts?: string
+  identity?: SshCommitIdentity
   expiresAt?: string
 }
 
@@ -101,6 +114,7 @@ export function createSshCredentialInput<Scope>(
     usage: input.usage,
     registered: input.registered ?? [],
     ...(input.knownHosts === undefined ? {} : { knownHosts: input.knownHosts }),
+    ...(input.identity === undefined ? {} : { identity: input.identity }),
   }
   return {
     name: input.name,

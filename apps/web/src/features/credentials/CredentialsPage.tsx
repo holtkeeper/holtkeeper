@@ -37,6 +37,7 @@ import {
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
 import { useSession } from '../shell/session.ts'
 import { CredentialDialog } from './CredentialDialog.tsx'
+import { ForgesSection } from './ForgesSection.tsx'
 import { aiProviderKinds } from './form.ts'
 import { ModelsDialog } from './ModelsDialog.tsx'
 
@@ -60,7 +61,7 @@ function Expiry({ at }: { at: string | undefined }) {
   )
 }
 
-/** Forge accounts and API keys with expiry, rotation and scope. */
+/** Forge accounts and API keys with expiry, rotation and scope, and the forges that use them. */
 export function CredentialsPage() {
   const { can } = useSession()
   const credentials = useCredentials()
@@ -235,6 +236,10 @@ export function CredentialsPage() {
           </AnimatePresence>
         </ul>
       )}
+
+      <div className="mt-6">
+        <ForgesSection />
+      </div>
 
       {browsing ? (
         <ModelsDialog key={browsing.id} credential={browsing} onClose={() => setBrowsing(null)} />

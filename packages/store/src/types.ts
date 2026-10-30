@@ -568,12 +568,19 @@ export interface ForgeWebhook {
   registered?: RegisteredWebhook[]
 }
 
+/** The SSH key a managed forge issued for its token's account, kept as an `ssh` credential. */
+export interface ForgeSshKey {
+  credentialId: string
+  createdAt: Timestamp
+}
+
 /** A forge managed in the panel. The token comes from the credential `credentialId`. */
 export interface ForgeDocumentData {
   kind: 'gitlab' | 'github'
   url: string
   credentialId: string
   webhook?: ForgeWebhook
+  sshKey?: ForgeSshKey
 }
 
 /** A group of repositories, as `groups.<id>` of the file config. */

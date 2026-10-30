@@ -341,6 +341,48 @@ describe.skipIf(!available)('runPort', () => {
     expect(fake.comments).toHaveLength(0)
   })
 
+  test('a checkout with a publisher commits and pushes over git instead of the forge API', async () => {
+    const fake = fakeForge({ repos: Object.keys(templates), source: mr })
+    const published: { repo: string; message: string; branch?: string }[] = []
+    const signedCheckout: CheckoutFn = async (ref, options) => {
+      const result = await checkout(ref, options)
+      return {
+        ...result,
+        publisher: {
+          async commit({ message }) {
+            published.push({ repo: ref.path, message })
+            return { sha: 'signed' }
+          },
+          async push({ branch }) {
+            const last = published.at(-1)
+            if (last) last.branch = branch
+            return { pushed: true, sha: 'signed' }
+          },
+        },
+      }
+    }
+    await runPort({
+      group: 'games',
+      forgeId: 'work',
+      repos: groupRepos(),
+      forge: fake.forge,
+      checkout: signedCheckout,
+      runner,
+      source: { repo: 'work:libs/core', mergeRequest: 7 },
+      targets: ['games/clean'],
+      steps: { verifier, fixer: noFix },
+    })
+    expect(fake.commits).toHaveLength(0)
+    expect(published).toEqual([
+      {
+        repo: 'games/clean',
+        message: 'Port: Require a password on login',
+        branch: 'holtkeeper/port/core-mr-7',
+      },
+    ])
+    expect(fake.mergeRequests.map((request) => request.repo)).toEqual(['games/clean'])
+  })
+
   test('a failing source comment is recorded, not thrown', async () => {
     const fake = fakeForge({ repos: Object.keys(templates), source: mr, failComment: true })
     const data = await runPort({

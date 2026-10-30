@@ -511,6 +511,7 @@ export async function runPort(input: PortInput): Promise<PortData> {
             labels: settings.labels,
             failed,
             targetBranch: repository.defaultBranch,
+            ...(checkout.publisher && { mode: 'git' as const, git: checkout.publisher }),
           })
           if (mergeRequest) outcome.mergeRequest = mergeRequest
         }

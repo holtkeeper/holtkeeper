@@ -3,11 +3,15 @@ import type {
   ConfigEntryList,
   ConfigEntryView,
   ConfigViewData,
+  ForgeSshKeyInput,
+  ForgeSshKeyResult,
   ForgeWebhookInput,
   ForgeWebhookResult,
   SchedulePreview,
 } from '@holtkeeper/api'
 import { ConfigError, type HoltkeeperConfig } from '@holtkeeper/core'
+import type { CredentialView } from '@holtkeeper/credentials'
+import { localRunner } from '@holtkeeper/exec'
 import type { WebhookEvent, WebhookTarget } from '@holtkeeper/forge'
 import { nextRuns, staticPrefix, systemTimeZone } from '@holtkeeper/jobs'
 import {
@@ -42,8 +46,10 @@ import {
   type ServerDeps,
   authorize,
   publicUrlOf,
+  forgeFor,
   readBody,
 } from '../context.ts'
+import { issueForgeSshKey, removeForgeSshKey, sshKeyView } from '../ssh-keys.ts'
 
 /** URL segment of each document type. */
 const configCollections: Record<string, ConfigDocumentType> = {
@@ -73,6 +79,12 @@ const webhookInputSchema = z.object({
         ),
     )
     .optional(),
+})
+
+const sshKeyInputSchema = z.object({
+  usage: z.enum(['auth', 'signing', 'auth_and_signing']).optional(),
+  expiresInDays: z.number().int().min(1).max(3650).optional(),
+  identity: z.object({ name: z.string().trim().min(1), email: z.email() }).optional(),
 })
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
@@ -142,6 +154,7 @@ export function configRoutes(deps: ServerDeps) {
     effective: EffectiveConfig,
     docs: readonly AnyConfigDocument[],
     type: ConfigDocumentType,
+    credentials: ReadonlyMap<string, CredentialView>,
   ): ConfigEntryView[] => {
     const { config, provenance } = effective
     const docOf = (id: string) => docs.find((doc) => doc.type === type && doc.id === id)
@@ -166,6 +179,10 @@ export function configRoutes(deps: ServerDeps) {
         return Object.entries(effective.forges).map(([id, origin]) => {
           const doc = docOf(id)
           const webhook = doc?.type === 'forge' ? doc.data.webhook : undefined
+          const sshKey =
+            doc?.type === 'forge' && doc.data.sshKey
+              ? sshKeyView(doc.data.sshKey, credentials.get(doc.data.sshKey.credentialId))
+              : undefined
           return entry(id, id, {
             kind: origin.kind,
             url: origin.url,
@@ -177,6 +194,7 @@ export function configRoutes(deps: ServerDeps) {
                 ...(webhook.registered && { registered: webhook.registered }),
               },
             }),
+            ...(sshKey && { sshKey }),
           })
         })
       case 'group':
@@ -204,10 +222,19 @@ export function configRoutes(deps: ServerDeps) {
     return triggersOf(config).map(([id, data]) => entry(id, id, data))
   }
 
+  const credentialViews = async (type: ConfigDocumentType) =>
+    new Map(
+      type === 'forge'
+        ? (await deps.credentials.list()).map((credential) => [credential.id, credential])
+        : [],
+    )
+
   const findEntry = async (c: AppContext, type: ConfigDocumentType, id: string) => {
     const { source, store } = managed()
     const docs = await store.list()
-    const found = view(c, source.effective(), docs, type).find((entry) => entry.id === id)
+    const found = view(c, source.effective(), docs, type, await credentialViews(type)).find(
+      (entry) => entry.id === id,
+    )
     if (!found) throw new HTTPException(404, { message: `${type} ${id} not found` })
     return found
   }
@@ -255,7 +282,7 @@ export function configRoutes(deps: ServerDeps) {
     const type = typeOf(c.req.param('collection'))
     const { source, store } = managed()
     return c.json<ConfigEntryList>({
-      entries: view(c, source.effective(), await store.list(), type),
+      entries: view(c, source.effective(), await store.list(), type, await credentialViews(type)),
     })
   })
 
@@ -284,8 +311,16 @@ export function configRoutes(deps: ServerDeps) {
           throw new HTTPException(400, {
             message: `credentialId: unknown credential ${data.credentialId}`,
           })
-        const webhook = (await store.get('forge', id))?.data.webhook
-        input = { ...meta, type, data: { ...data, ...(webhook && { webhook }) } }
+        const stored = (await store.get('forge', id))?.data
+        input = {
+          ...meta,
+          type,
+          data: {
+            ...data,
+            ...(stored?.webhook && { webhook: stored.webhook }),
+            ...(stored?.sshKey && { sshKey: stored.sshKey }),
+          },
+        }
         break
       }
       case 'group':
@@ -341,6 +376,16 @@ export function configRoutes(deps: ServerDeps) {
       } catch (error) {
         details.webhookError = messageOf(error)
       }
+    }
+    const sshKey = type === 'forge' ? (await store.get('forge', id))?.data.sshKey : undefined
+    if (sshKey) {
+      const errors = await removeForgeSshKey({
+        sshKey,
+        forge: deps.config.forges[id]?.create(),
+        credentials: deps.credentials,
+        actor: principal.id,
+      }).catch((error: unknown) => [messageOf(error)])
+      if (errors.length) details.sshKeyErrors = errors
     }
     await store.remove(type, id)
     await source.refresh()
@@ -437,6 +482,87 @@ export function configRoutes(deps: ServerDeps) {
       },
     )
     return c.json<ForgeWebhookResult>(result, 201)
+  })
+
+  const panelForge = async (id: string) => {
+    const doc = await managed().store.get('forge', id)
+    if (doc) return doc
+    const known = id in deps.config.forges
+    throw new HTTPException(known ? 409 : 404, {
+      message: known
+        ? `forge ${id} comes from the config file; add it in the panel to manage its SSH key`
+        : `forge ${id} not found`,
+    })
+  }
+
+  app.post('/forges/:id/ssh-key', async (c) => {
+    const principal = authorize(c, 'settings:write', GLOBAL)
+    const id = c.req.param('id')
+    const input: ForgeSshKeyInput = await readBody(c, sshKeyInputSchema)
+    const doc = await panelForge(id)
+    const forge = forgeFor(deps.config, id)
+    if (!forge.registerSshKey)
+      throw new HTTPException(409, { message: `forge ${id} cannot register SSH keys` })
+    let issued: Awaited<ReturnType<typeof issueForgeSshKey>>
+    try {
+      issued = await issueForgeSshKey({
+        forgeId: id,
+        doc,
+        forge,
+        credentials: deps.credentials,
+        input,
+        actor: principal.id,
+        runner: deps.hostRunner ?? localRunner,
+        now: deps.now(),
+      })
+    } catch (error) {
+      throw new HTTPException(502, { message: `SSH key not issued: ${messageOf(error)}` })
+    }
+    await save<'forge'>({
+      ...doc,
+      data: { ...doc.data, sshKey: issued.sshKey },
+      updatedAt: deps.now().toISOString(),
+      updatedBy: principal.id,
+    })
+    await activity(
+      principal.id,
+      doc.data.sshKey ? 'config.forge.ssh_key_rotated' : 'config.forge.ssh_key_created',
+      'forge',
+      id,
+      {
+        credentialId: issued.sshKey.credentialId,
+        ...(issued.notes.length && { notes: issued.notes }),
+      },
+    )
+    const sshKey = sshKeyView(issued.sshKey, await deps.credentials.get(issued.sshKey.credentialId))
+    if (!sshKey) throw new HTTPException(500, { message: 'the issued SSH key cannot be read back' })
+    return c.json<ForgeSshKeyResult>({ sshKey, notes: issued.notes }, 201)
+  })
+
+  app.delete('/forges/:id/ssh-key', async (c) => {
+    const principal = authorize(c, 'settings:write', GLOBAL)
+    const id = c.req.param('id')
+    const doc = await panelForge(id)
+    const sshKey = doc.data.sshKey
+    if (!sshKey) throw new HTTPException(404, { message: `forge ${id} has no SSH key` })
+    const errors = await removeForgeSshKey({
+      sshKey,
+      forge: deps.config.forges[id]?.create(),
+      credentials: deps.credentials,
+      actor: principal.id,
+    })
+    const { sshKey: _removed, ...data } = doc.data
+    await save<'forge'>({
+      ...doc,
+      data,
+      updatedAt: deps.now().toISOString(),
+      updatedBy: principal.id,
+    })
+    await activity(principal.id, 'config.forge.ssh_key_removed', 'forge', id, {
+      credentialId: sshKey.credentialId,
+      ...(errors.length && { errors }),
+    })
+    return c.body(null, 204)
   })
 
   app.get('/schedules/:id/preview', (c) => {

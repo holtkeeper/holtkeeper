@@ -183,10 +183,18 @@ With `store.config`, forges, groups, repository traits, schedules and triggers c
 | `PUT /api/config/<collection>/:id`        | creates or replaces the panel document; the whole config is validated first (400 with the problem). Trigger ids are fixed: `tag`, `merge-request`, `label:<label>`, `command:<name>`  |
 | `DELETE /api/config/<collection>/:id`     | removes the panel document (the file entry, if any, applies again); 409 when the rest would become invalid                                                                            |
 | `POST /api/forges/:id/webhook`            | generates or rotates the webhook secret, optionally registers the hook (see above)                                                                                                    |
+| `POST /api/forges/:id/ssh-key`            | issues or rotates the forge's SSH key (see below)                                                                                                                                     |
+| `DELETE /api/forges/:id/ssh-key`          | removes the key from the forge account and deletes its credential                                                                                                                     |
 | `GET /api/config/export`                  | the effective config as `holtkeeper.config.ts` source, secrets as `env()` placeholders                                                                                                |
 | `GET /api/schedules/:id/preview?count=10` | `SchedulePreview`: the next run times (smart schedules: windows, zone, jitter)                                                                                                        |
 
 Every change is logged: `config.<type>.created|updated|removed`, `config.forge.webhook_created|webhook_rotated`, subject `<type>:<id>`.
+
+### Forge SSH keys
+
+A panel forge can issue an SSH key on the account behind its token (`POST /api/forges/:id/ssh-key { usage?, expiresInDays?, identity? }`, global `settings:write`; file forges answer 409). The server generates an Ed25519 key, registers it as a user key (`usage` default `auth_and_signing`, expiry default 365 days), pins the forge host's SSH keys with `ssh-keyscan` (trust on first use; a failure is a note and git stays on HTTPS), reads the commit identity from `getCurrentUser` unless `identity` is given, and stores the key as an `ssh` credential with the token credential's scope. The forge document keeps only the credential id; the forge entry of `GET /api/config/forges` shows `sshKey` (public key, fingerprint, usage, expiry, identity, whether host keys are pinned), never the private key. Calling it again rotates the key in place (`rotateSshKey`: the new key is registered and stored before the old one is removed). Deleting the key or the forge removes the registration and the credential.
+
+Jobs use the key through `gitKeyFor` (see [@holtkeeper/jobs](../../../packages/jobs/docs/README.md#context)): clone, fetch and push over SSH, signed commits for propagate and port. Running git over SSH and signing needs `ssh`, `ssh-keyscan` and `ssh-keygen` on the host (`openssh-client` in the worker image).
 
 ## Roles, health and metrics
 

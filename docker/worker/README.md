@@ -1,6 +1,6 @@
 # Worker image
 
-The sandbox `@holtkeeper/exec-container` runs job commands in. `debian:stable-slim` with `git`, `ca-certificates`, `curl`, [mise](https://mise.jdx.dev), `osv-scanner` and `gitleaks` — no language runtimes. Node, Go, Python, ... are installed by mise on demand into the cache volume and shared between jobs.
+The sandbox `@holtkeeper/exec-container` runs job commands in. `debian:stable-slim` with `git`, `openssh-client` (git over SSH, host key scans and commit signing), `ca-certificates`, `curl`, [mise](https://mise.jdx.dev), `osv-scanner` and `gitleaks` — no language runtimes. Node, Go, Python, ... are installed by mise on demand into the cache volume and shared between jobs.
 
 | Tool        | Version      | Build argument        |
 | ----------- | ------------ | --------------------- |

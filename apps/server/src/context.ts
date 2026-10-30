@@ -5,6 +5,7 @@ import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
+import type { CommandRunner } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import type { Limiter } from '@holtkeeper/limits'
 import type { ConfigSource } from '@holtkeeper/managed-config'
@@ -55,6 +56,8 @@ export interface ServerDeps {
   aiProviders?: readonly AiProviderPlugin[]
   /** Replaces the AI SDK models of `ai-sdk` credential tests; for tests. */
   languageModel?: LanguageModelFactory
+  /** Runs host tools for routes, such as `ssh-keyscan` when a forge issues an SSH key. Default: `localRunner`. */
+  hostRunner?: CommandRunner
   /** Areas the storage overview reports, e.g. artifacts, git mirrors, the database. */
   storage?: StorageProvider[]
   now: () => Date

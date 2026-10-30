@@ -1,7 +1,7 @@
 import type { Grant, Principal, Scope } from '@holtkeeper/access'
 import type { AuthInfo } from '@holtkeeper/auth'
 import type { Conflict } from '@holtkeeper/changes'
-import type { RepoRef } from '@holtkeeper/forge'
+import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
 import type { Metric, Report } from '@holtkeeper/report'
 import type {
   ActivityEvent,
@@ -715,6 +715,24 @@ export interface ForgeConfigView {
     createdAt: Timestamp
     registered?: RegisteredWebhook[]
   }
+  sshKey?: ForgeSshKeyView
+}
+
+/**
+ * The SSH key a panel forge issued on its token's account. The private half never leaves the
+ * server; `credentialId` is the `ssh` credential that holds it.
+ */
+export interface ForgeSshKeyView {
+  credentialId: string
+  createdAt: Timestamp
+  publicKey: string
+  fingerprint: string
+  usage: SshKeyUsage
+  expiresAt?: Timestamp
+  /** Author of signed commits; absent when the account has no email to sign with. */
+  identity?: { name: string; email: string }
+  /** Whether the forge's SSH host keys are pinned; git over SSH needs them. */
+  hostKeysPinned: boolean
 }
 
 /** The data each config collection holds. */
@@ -782,6 +800,26 @@ export interface ForgeWebhookResult {
   notes: string[]
   /** Targets that could not be registered. */
   errors: { target: string; error: string }[]
+}
+
+/**
+ * `POST /api/forges/:id/ssh-key`: issues an SSH key on the account behind the forge's token, or
+ * rotates the one it has. Rotation keeps the key's usage and identity unless given here.
+ */
+export interface ForgeSshKeyInput {
+  /** Default `auth_and_signing`. */
+  usage?: SshKeyUsage
+  /** Days until the forge stops accepting the key. Default 365. */
+  expiresInDays?: number
+  /** Overrides the commit identity read from the forge account. */
+  identity?: { name: string; email: string }
+}
+
+/** Result of `POST /api/forges/:id/ssh-key`. */
+export interface ForgeSshKeyResult {
+  sshKey: ForgeSshKeyView
+  /** What did not fully work, e.g. host keys that could not be scanned. */
+  notes: string[]
 }
 
 /** `GET /api/schedules/:id/preview?count=10`: upcoming run times. */

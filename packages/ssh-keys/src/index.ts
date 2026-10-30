@@ -23,6 +23,7 @@ export {
   type CreateSshCredentialOptions,
   type SshCredential,
   type SshCredentialInput,
+  type SshCommitIdentity,
   type SshCredentialOptions,
   type SshKeyRegistrationRef,
   createSshCredentialInput,

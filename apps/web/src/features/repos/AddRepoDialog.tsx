@@ -3,7 +3,16 @@ import { useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { useForges, useGroups, usePutGroup } from '../../api/queries.ts'
 import { validateGroupId, validateRepoPath, withRepo } from '../../lib/repo.ts'
-import { Button, Dialog, Notice, Segmented, Select, TextField, notify } from '../../ui/index.ts'
+import {
+  Button,
+  Dialog,
+  LinkButton,
+  Notice,
+  Segmented,
+  Select,
+  TextField,
+  notify,
+} from '../../ui/index.ts'
 
 /**
  * Adds a repository by including its exact path in a group of the panel config, an existing one or
@@ -82,7 +91,12 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
         ) : null}
         {forges.isSuccess && forgeIds.length === 0 ? (
           <Notice tone="warning" title="No forge configured">
-            Add a GitLab or GitHub forge to the config first.
+            <span className="flex flex-col items-start gap-2">
+              Add a GitLab forge with its token first.
+              <LinkButton to="/credentials" size="sm">
+                Open Credentials
+              </LinkButton>
+            </span>
           </Notice>
         ) : null}
         <Select

@@ -9,7 +9,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import type { CheckoutOptions } from '@holtkeeper/workspace'
 import { z } from 'zod'
 
-import { createContextFactory } from './context.ts'
+import { type ForgeGitKey, createContextFactory } from './context.ts'
 
 const forge = {
   kind: 'fake',
@@ -189,5 +189,72 @@ describe('createContextFactory', () => {
     expect(
       contextFor(job({ repo: { forge: 'nope', path: 'a' } }), analyzer({}), io),
     ).rejects.toThrow('not configured')
+  })
+})
+
+const commit = async () => ({ sha: 'def' })
+const push = async () => ({ pushed: true, sha: 'def' })
+
+const setup = (gitKey: ForgeGitKey | undefined) => {
+  const seen: CheckoutOptions[] = []
+  const contextFor = createContextFactory({
+    config,
+    store: memoryStore(),
+    cacheDir: '/cache',
+    runner: createFakeRunner().runner,
+    gitKeyFor: async (forgeId) => (forgeId === 'work' ? gitKey : undefined),
+    checkout: async (options) => {
+      seen.push(options)
+      return { dir: '/tmp/co', sha: 'abc', ref: 'trunk', cleanup: async () => {}, commit, push }
+    },
+  })
+  const open = async () => {
+    const prepared = await contextFor(job(), analyzer({}), io)
+    const checkout = await prepared.context.checkout?.({ forge: 'work', path: 'games/a' })
+    return { checkout, options: seen.at(-1) }
+  }
+  return { open }
+}
+
+describe('forge SSH keys in checkouts', () => {
+  const key: ForgeGitKey = {
+    privateKey: 'PRIVATE',
+    publicKey: 'ssh-ed25519 AAAA bot',
+    usage: 'auth_and_signing',
+    knownHosts: 'forge.test ssh-ed25519 AAAA\n',
+    identity: { name: 'Bot', email: 'bot@forge.test' },
+  }
+
+  test('clones over SSH and signs with the key; offers a publisher', async () => {
+    const { open } = setup(key)
+    const { checkout, options } = await open()
+    expect(options).toMatchObject({
+      ssh: { privateKey: 'PRIVATE', knownHosts: key.knownHosts },
+      signing: {
+        privateKey: 'PRIVATE',
+        publicKey: key.publicKey,
+        name: 'Bot',
+        email: 'bot@forge.test',
+      },
+      credentials: { username: 'oauth2', password: 'tok' },
+    })
+    expect(checkout?.publisher).toEqual({ commit, push })
+  })
+
+  test('without host keys git stays on HTTPS; without identity nothing is signed', async () => {
+    const { knownHosts: _hosts, ...unpinned } = key
+    const first = await setup(unpinned).open()
+    expect(first.options?.ssh).toBeUndefined()
+    expect(first.options?.signing).toBeDefined()
+
+    const { identity: _identity, ...anonymous } = key
+    const second = await setup({ ...anonymous, usage: 'auth' }).open()
+    expect(second.options?.ssh).toBeDefined()
+    expect(second.options?.signing).toBeUndefined()
+    expect(second.checkout?.publisher).toBeUndefined()
+
+    const none = await setup(undefined).open()
+    expect(none.options).not.toHaveProperty('ssh')
+    expect(none.options).not.toHaveProperty('signing')
   })
 })

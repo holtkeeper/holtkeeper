@@ -189,6 +189,12 @@ const draftResponseSchema = z.union([draftSchema, z.array(draftSchema).length(1)
 const commitSchema = z.object({ id: z.string(), web_url: z.string() })
 const tagSchema = z.object({ name: z.string(), commit: z.object({ id: z.string() }) })
 const userSchema = z.object({ id: z.number(), username: z.string() })
+const currentUserSchema = z.object({
+  username: z.string(),
+  name: z.string(),
+  commit_email: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+})
 const anySchema = z.unknown()
 
 const toRepository = (project: z.infer<typeof projectSchema>): Repository => ({
@@ -572,6 +578,12 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
       }
       for (let item = first; !item.done; item = await iterator.next())
         yield toRepository(item.value)
+    },
+
+    async getCurrentUser() {
+      const user = await client.json('GET', 'user', currentUserSchema)
+      const email = user.commit_email || user.email
+      return { username: user.username, name: user.name, ...(email ? { email } : {}) }
     },
 
     async getRepository(repo) {

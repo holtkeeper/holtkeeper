@@ -66,6 +66,10 @@ Pages never call `fetch`. `api/endpoints.ts` maps every endpoint to a typed func
 
 Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog` (`size="xl"` for wide editors), `Markdown`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through.
 
+## Forges
+
+The Credentials page also lists forges (global `settings:read`). With global `settings:write` you add a GitLab forge (id, URL and a GitLab token credential, `PUT /api/config/forges/:id`), edit or delete panel forges, and issue, rotate or remove a forge's SSH key (`POST`/`DELETE /api/forges/:id/ssh-key`): what it is used for (clone and push, signing, or both), its lifetime and an optional commit identity. Forges from the config file are shown read-only. `forge-form.ts` holds the form's validation.
+
 ## Repositories and groups
 
 `/repos` lists repositories with a strip of groups. **Add repository** (global `settings:write`) adds an exact path to an existing group of the chosen forge or to a new group through `PUT /api/config/groups/:id` (`withRepo` in `lib/repo.ts`); a group from the config file becomes a panel copy that replaces it. `/repos/view?repo=forge:path` and `/repos/groups/:id` show one repository or group with tabs: **Settings** (`ScopedSettings`: entries naming it, and for a repository the effective value and where it comes from; new entries start scoped to it), **Knowledge** (`ScopedKnowledge`) and, for a group, its include and exclude patterns and known repositories. `lib/scope.ts` `namesFocus` decides which entries belong to the page: the exact group, or the exact repository path with or without its forge.

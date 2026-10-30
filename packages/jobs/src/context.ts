@@ -2,12 +2,13 @@ import type { AnalyzerContext, AnyAnalyzer } from '@holtkeeper/analyzer'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 import type { ManagedRunner } from '@holtkeeper/exec-container'
-import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import type { GitForge, RepoRef, SshKeyUsage } from '@holtkeeper/forge'
 import type { AnalysisStore, AuditRunStore, Job } from '@holtkeeper/store'
 import type { Toolchain } from '@holtkeeper/toolchain'
 import {
   type Checkout,
   type CheckoutOptions,
+  type GitCheckout,
   type GitCredentials,
   checkout,
 } from '@holtkeeper/workspace'
@@ -38,6 +39,20 @@ export type AgentFor = (
   job?: AgentJobInfo,
 ) => JobAgent | undefined | Promise<JobAgent | undefined>
 
+/** A forge's SSH key, for git over SSH and commit signing. */
+export interface ForgeGitKey {
+  privateKey: string
+  publicKey: string
+  usage: SshKeyUsage
+  /** Pinned host keys; git stays on HTTPS without them. */
+  knownHosts?: string
+  /** Author and committer of signed commits; commits are not signed without it. */
+  identity?: { name: string; email: string }
+}
+
+/** The SSH key of a forge by its config id; `undefined` when it has none. */
+export type GitKeyFor = (forgeId: string) => Promise<ForgeGitKey | undefined>
+
 /** An analyzer context without options, plus whatever must be released after the run. */
 export interface PreparedContext {
   context: Omit<AnalyzerContext<unknown>, 'options' | 'signal' | 'log'>
@@ -65,7 +80,12 @@ export interface ContextFactoryOptions {
   /** Repositories of a group, for group analyzers. Default: `groupRepositories(config)`. */
   resolveRepos?: ResolveRepos
   /** Default: `checkout` from `@holtkeeper/workspace`. */
-  checkout?: (options: CheckoutOptions) => Promise<Checkout>
+  checkout?: (options: CheckoutOptions) => Promise<Checkout & Partial<GitCheckout>>
+  /**
+   * The forge's SSH key: with `auth` usage and pinned host keys checkouts clone, fetch and push
+   * over SSH; with `signing` usage and an identity they sign commits and offer a `publisher`.
+   */
+  gitKeyFor?: GitKeyFor
   /** Parent directory of checkouts. Default: the OS temp directory. */
   workDir?: string
   /** The scoped `toolchain` setting per repository, applied over the detected toolchain. */
@@ -87,6 +107,22 @@ function gitCredentialsOf(definition: object): GitCredentials | undefined {
   return typeof username === 'string' && typeof password === 'string'
     ? { username, password }
     : undefined
+}
+
+const allows = (usage: SshKeyUsage, use: 'auth' | 'signing') =>
+  usage === use || usage === 'auth_and_signing'
+
+/** Checkout options for a forge key; HTTPS credentials stay the fallback for what it cannot do. */
+function keyOptions(key: ForgeGitKey | undefined): Pick<CheckoutOptions, 'ssh' | 'signing'> {
+  if (!key) return {}
+  return {
+    ...(allows(key.usage, 'auth') &&
+      key.knownHosts && { ssh: { privateKey: key.privateKey, knownHosts: key.knownHosts } }),
+    ...(allows(key.usage, 'signing') &&
+      key.identity && {
+        signing: { privateKey: key.privateKey, publicKey: key.publicKey, ...key.identity },
+      }),
+  }
 }
 
 /** Parses `forge:path`; a `RepoRef` is returned as is. */
@@ -147,18 +183,24 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
     const checkoutOf = async (repo: RepoRef, ref: string | undefined) => {
       const repository = await clientOf(repo.forge).getRepository(repo.path)
       const credentials = gitCredentialsOf(definitionOf(repo.forge))
+      const keyed = keyOptions(await factory.gitKeyFor?.(repo.forge))
       const result = await checkoutRepo({
         cloneUrl: repository.cloneUrl,
         ref: ref ?? repository.defaultBranch,
         ...(credentials && { credentials }),
+        ...keyed,
         cacheDir,
         runner,
         signal,
         log,
         ...(factory.workDir !== undefined && { workDir: factory.workDir }),
       })
-      const tracked: Checkout = {
-        ...result,
+      const { commit, push } = result
+      const tracked: Checkout & { publisher?: Pick<GitCheckout, 'commit' | 'push'> } = {
+        dir: result.dir,
+        sha: result.sha,
+        ref: result.ref,
+        ...(keyed.signing && commit && push && { publisher: { commit, push } }),
         async cleanup() {
           checkouts.delete(tracked)
           await result.cleanup()

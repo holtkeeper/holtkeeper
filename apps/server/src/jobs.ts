@@ -4,6 +4,7 @@ import type { RepoRef } from '@holtkeeper/forge'
 import {
   type AgentFor,
   type AnyAnalyzer,
+  type GitKeyFor,
   type JobEngine,
   type JobEngineOptions,
   type PersistArtifacts,
@@ -25,6 +26,8 @@ export interface JobsOptions {
   store: Store
   analyzers: AnyAnalyzer[]
   agentFor?: AgentFor
+  /** The SSH key of each forge, for job checkouts. */
+  gitKeyFor?: GitKeyFor
   now: () => Date
   /** Where artifacts returned by analyzer runs are stored; without it they are dropped. */
   artifacts?: ArtifactStore
@@ -158,6 +161,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine | undef
     store,
     analyzers: options.analyzers,
     ...(options.agentFor && { agentFor: options.agentFor }),
+    ...(options.gitKeyFor && { gitKeyFor: options.gitKeyFor }),
     now,
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),

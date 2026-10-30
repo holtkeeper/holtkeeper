@@ -33,6 +33,14 @@ export interface AnalyzerContext<Options> {
     ref: string
     cleanup: () => Promise<void>
     runner?: CommandRunner
+    /**
+     * Present when the forge has a signing key: commits made through it are signed with that key
+     * and pushed over git. Publish changes through it rather than the forge API to keep them signed.
+     */
+    publisher?: {
+      commit(input: { message: string; paths?: string[] }): Promise<{ sha: string } | undefined>
+      push(input: { branch: string }): Promise<{ pushed: boolean; sha: string }>
+    }
   }>
   /** Repositories of the group, for group analyzers. */
   repos?: RepoRef[]

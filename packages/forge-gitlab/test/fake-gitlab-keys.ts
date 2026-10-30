@@ -56,6 +56,14 @@ export class FakeGitLabKeys {
   }
 
   private route(method: string, s: string[], body: Record<string, unknown>): Response {
+    if (method === 'GET' && s.length === 1 && s[0] === 'user')
+      return json(200, {
+        id: 7,
+        username: 'holtkeeper-bot',
+        name: 'Holtkeeper Bot',
+        email: 'bot@example.com',
+        commit_email: 'bot-commits@example.com',
+      })
     if (s[0] === 'user' && s[1] === 'keys') {
       if (method === 'GET' && s.length === 2) return json(200, [...this.userKeys.values()])
       if (method === 'POST' && s.length === 2) {

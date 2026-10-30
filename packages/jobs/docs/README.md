@@ -99,7 +99,7 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 
 ## Context
 
-`createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, workDir?, toolchainFor?, createRunner?, detectToolchain? })` gives each analyzer what its `needs` ask for:
+`createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, gitKeyFor?, workDir?, toolchainFor?, createRunner?, detectToolchain? })` gives each analyzer what its `needs` ask for:
 
 | Need / member         | Provided                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------- |
@@ -112,6 +112,8 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 | always                | `checkout(repo, { ref?, writable? })` for on-demand checkouts, e.g. one per repository of a group |
 
 Every checkout uses `@holtkeeper/workspace` with the forge's `gitCredentials?()` and is a private worktree (so writable and read-only checkouts are made the same way). All checkouts, including on-demand ones the analyzer did not clean up, are removed after the run.
+
+`gitKeyFor(forgeId)` returns the forge's SSH key (`ForgeGitKey`: private and public key, usage, pinned `knownHosts`, commit `identity`), or `undefined`. A key with `auth` usage and pinned host keys makes the checkout clone, fetch and push over SSH; without host keys git stays on HTTPS. A key with `signing` usage and an identity signs the checkout's commits, and on-demand checkouts then carry a `publisher` (`commit`, `push`) that propagate and port use to publish signed commits over git instead of the forge API. The server wires it to the SSH keys panel forges issue.
 
 Checkouts returned by `context.checkout(...)` also carry a `runner` for commands in that checkout (see below). If the job's signal is already aborted when the context is ready, everything prepared is released and the context rejects.
 

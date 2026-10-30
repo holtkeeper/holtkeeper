@@ -1,7 +1,7 @@
 // oxlint-disable no-await-in-loop -- git and forge reads for one source run in order
 import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 import type { DiffFile, GitForge, RepoRef } from '@holtkeeper/forge'
-import { trimText } from '@holtkeeper/propagate'
+import { type GitPublisher, trimText } from '@holtkeeper/propagate'
 
 import { fileStat, parsePatch } from './patch.ts'
 import type { SourceChange, SourceFile, SourceSpec, StoredSourceFile } from './types.ts'
@@ -12,7 +12,8 @@ export interface Checkout {
   sha: string
   ref: string
   runner?: CommandRunner
-  cleanup(): Promise<void>
+  cleanup(): Promise<void> /** Commits signed with the forge's key; see `AnalyzerContext.checkout`. */
+  publisher?: GitPublisher
 }
 
 /** Checks out a repository; mirrors `AnalyzerContext.checkout`. */

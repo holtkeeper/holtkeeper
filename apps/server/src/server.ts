@@ -37,6 +37,7 @@ import {
   seedDefaultSettings,
 } from '@holtkeeper/settings'
 import { resolveSetting } from '@holtkeeper/settings'
+import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
 import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
 import { aesVault } from '@holtkeeper/vault'
@@ -62,6 +63,7 @@ import type { MediaEngine } from './media/engine.ts'
 import { createMediaReviewer } from './media/reviewer.ts'
 import { startOperations } from './operations.ts'
 import { type Role, roleDuties } from './roles.ts'
+import { forgeGitKeys } from './ssh-keys.ts'
 import { databaseStorage } from './storage.ts'
 import { serveWeb } from './web.ts'
 
@@ -182,7 +184,9 @@ export async function startServer(
     activity: server.store.activity,
     vault,
     rotators: [gitlabTokenRotator(), ...(options.rotators ?? [])],
-    validateOptions: aiProviderOptionsValidatorFor(aiProviders),
+    validateOptions: (kind, values) =>
+      validateSshCredentialOptions(kind, values) ??
+      aiProviderOptionsValidatorFor(aiProviders)(kind, values),
   })
   const duties = roleDuties(options.roles ?? ['all'])
   const limiterOptions = limiterOptionsFor(fileConfig, server.store)
@@ -323,6 +327,7 @@ export async function startServer(
     store: server.store,
     analyzers,
     agentFor,
+    gitKeyFor: forgeGitKeys({ store: server.store, credentials }),
     admission,
     artifacts,
     now: deps.now,

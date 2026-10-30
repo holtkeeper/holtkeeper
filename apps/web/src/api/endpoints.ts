@@ -9,7 +9,10 @@ import type {
   ConfigEntryList,
   ConfigEntryView,
   CreateKnowledgeInput,
+  ForgeSshKeyInput,
+  ForgeSshKeyResult,
   GroupDocumentData,
+  PutConfigInput,
   AuditRunDetail,
   AuditRunList,
   CreateCredentialInput,
@@ -127,6 +130,13 @@ export const api = {
   deleteKnowledge: (entryId: string) => request<void>('DELETE', `/api/knowledge/${id(entryId)}`),
 
   forges: () => request<ConfigEntryList<'forge'>>('GET', '/api/config/forges'),
+  putForge: (forgeId: string, data: PutConfigInput['forge']) =>
+    request<ConfigEntryView<'forge'>>('PUT', `/api/config/forges/${id(forgeId)}`, { body: data }),
+  deleteForge: (forgeId: string) => request<void>('DELETE', `/api/config/forges/${id(forgeId)}`),
+  issueForgeSshKey: (forgeId: string, input: ForgeSshKeyInput) =>
+    request<ForgeSshKeyResult>('POST', `/api/forges/${id(forgeId)}/ssh-key`, { body: input }),
+  removeForgeSshKey: (forgeId: string) =>
+    request<void>('DELETE', `/api/forges/${id(forgeId)}/ssh-key`),
   groups: () => request<ConfigEntryList<'group'>>('GET', '/api/config/groups'),
   putGroup: (groupId: string, data: GroupDocumentData) =>
     request<ConfigEntryView<'group'>>('PUT', `/api/config/groups/${id(groupId)}`, { body: data }),

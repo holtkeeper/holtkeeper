@@ -3,6 +3,8 @@ export {
   type AgentFor,
   type ContextFactoryOptions,
   type ContextFor,
+  type ForgeGitKey,
+  type GitKeyFor,
   type JobAgent,
   type PreparedContext,
   createContextFactory,

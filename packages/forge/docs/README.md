@@ -31,6 +31,7 @@ Repositories are addressed by their full path (`games/slots-x`), merge requests 
 | Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest` |
 | Pipelines            | `listPipelines`, `listJobs`, `playJob`, `retryJob`                                                           |
 | Tags                 | `createTag`                                                                                                  |
+| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                           |
 | Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listDeployments`, `listTags`                        |
 
 ### Listing files

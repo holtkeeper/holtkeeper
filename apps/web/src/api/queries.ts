@@ -3,9 +3,11 @@ import type {
   AuditRunSummary,
   CreateCredentialInput,
   CreateKnowledgeInput,
+  ForgeSshKeyInput,
   GroupDocumentData,
   InviteUserInput,
   KnowledgeStatus,
+  PutConfigInput,
   PutSettingInput,
   RepoRef,
   UpdateCredentialInput,
@@ -221,6 +223,32 @@ export function useKnowledgeMutations() {
 /** Forges of the effective config; needs global `settings:read`. */
 export const useForges = (enabled = true) =>
   useQuery({ queryKey: [...keys.config, 'forges'], queryFn: api.forges, enabled })
+
+/**
+ * Add, change and delete panel forges and issue, rotate or remove their SSH keys; each refreshes
+ * the config and the credentials, which hold the forges' tokens and keys.
+ */
+export function useForgeMutations() {
+  const client = useQueryClient()
+  const onSuccess = async () => {
+    await client.invalidateQueries({ queryKey: keys.config })
+    await client.invalidateQueries({ queryKey: keys.credentials })
+  }
+  return {
+    put: useMutation({
+      mutationFn: ({ id, data }: { id: string; data: PutConfigInput['forge'] }) =>
+        api.putForge(id, data),
+      onSuccess,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.deleteForge(id), onSuccess }),
+    issueSshKey: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: ForgeSshKeyInput }) =>
+        api.issueForgeSshKey(id, input),
+      onSuccess,
+    }),
+    removeSshKey: useMutation({ mutationFn: (id: string) => api.removeForgeSshKey(id), onSuccess }),
+  }
+}
 
 /** Repository groups of the effective config; needs global `settings:read`. */
 export const useGroups = (enabled = true) =>

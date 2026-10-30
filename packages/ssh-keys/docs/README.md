@@ -64,7 +64,7 @@ const input = createSshCredentialInput({
 await credentials.create(input, actor)
 ```
 
-`options` = `{ publicKey, fingerprint, usage, registered: { forge, scope, id }[], knownHosts? }` (`sshCredentialOptionsSchema`). Pass `validateSshCredentialOptions` as the credential service's `validateOptions` (combine it with validators of other kinds); it also checks that `fingerprint` matches `publicKey`. `readSshCredential(secret, options)` turns a revealed credential back into `{ privateKey, publicKey, … }` and refuses a secret that does not belong to the public key.
+`options` = `{ publicKey, fingerprint, usage, registered: { forge, scope, id }[], knownHosts?, identity?: { name, email } }` (`sshCredentialOptionsSchema`); `identity` is the author of commits signed with the key. Pass `validateSshCredentialOptions` as the credential service's `validateOptions` (combine it with validators of other kinds); it also checks that `fingerprint` matches `publicKey`. `readSshCredential(secret, options)` turns a revealed credential back into `{ privateKey, publicKey, … }` and refuses a secret that does not belong to the public key.
 
 ## Rotation
 

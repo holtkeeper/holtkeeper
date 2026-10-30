@@ -370,6 +370,9 @@ export interface GitForge {
     resolved: boolean,
   ): Promise<void>
 
+  /** The account behind the token, e.g. the identity for commits signed with its SSH key. */
+  getCurrentUser?(): Promise<ForgeUser>
+
   // SSH keys. Optional so forges can add them one by one.
 
   /** Registers a public key for the token's own user or as a deploy key of one repository. */
@@ -444,6 +447,13 @@ export interface ForgeDefinition {
 
 /** The `fetch` shape forge adapters call; the global `fetch` satisfies it. */
 export type ForgeFetch = (input: string, init: RequestInit) => Promise<Response>
+
+/** The forge account behind a token. `email` is the one commits should use to show as verified. */
+export interface ForgeUser {
+  username: string
+  name: string
+  email?: string
+}
 
 /** What an SSH key may be used for: git over SSH, commit signing, or both. */
 export type SshKeyUsage = 'auth' | 'signing' | 'auth_and_signing'

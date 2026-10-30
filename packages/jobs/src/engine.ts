@@ -5,7 +5,7 @@ import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { AnalysisRecord, Job, Store } from '@holtkeeper/store'
 
-import { type AgentFor, type ContextFor, createContextFactory } from './context.ts'
+import { type AgentFor, type ContextFor, type GitKeyFor, createContextFactory } from './context.ts'
 import type { ToolchainFor } from './execution.ts'
 import { type ResolveRepos, groupRepositories } from './repos.ts'
 import { type Scheduler, createScheduler } from './scheduler.ts'
@@ -21,6 +21,8 @@ export interface JobEngineOptions {
   resolveRepos?: ResolveRepos
   /** Replaces the default checkout-forge-agent-history context. */
   contextFor?: ContextFor
+  /** The SSH key of each forge, for checkouts; see `ContextFactoryOptions.gitKeyFor`. */
+  gitKeyFor?: GitKeyFor
   /** Scoped `toolchain` setting per repository, for `jobs.execution` modes `mise` and `container`. */
   toolchainFor?: ToolchainFor
   /** Scoped `analyzers.<kind>` setting for a job; see `WorkerOptions.settingOptions`. */
@@ -69,6 +71,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
         ...(options.runner && { runner: options.runner }),
         ...(options.agentFor && { agentFor: options.agentFor }),
         ...(options.toolchainFor && { toolchainFor: options.toolchainFor }),
+        ...(options.gitKeyFor && { gitKeyFor: options.gitKeyFor }),
       }),
     concurrency: jobs.concurrency,
     timeoutMs: jobs.timeoutMinutes * 60_000,

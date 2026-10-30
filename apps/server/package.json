@@ -35,6 +35,7 @@
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",
     "@holtkeeper/settings": "workspace:*",
+    "@holtkeeper/ssh-keys": "workspace:*",
     "@holtkeeper/store": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",
     "@holtkeeper/vault": "workspace:*",
