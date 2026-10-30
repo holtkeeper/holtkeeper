@@ -47,7 +47,8 @@ containerSecurityContext:
   capabilities:
     drop: [ALL]
 
-tmpSizeLimit: 1Gi
+# HOME is /tmp, so package manager and Go caches of dependency installs land here.
+tmpSizeLimit: 8Gi
 
 web:
   replicas: 2

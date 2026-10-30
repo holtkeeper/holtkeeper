@@ -102,7 +102,7 @@ The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 - optional ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies;
 - a ServiceAccount without any Role: nothing talks to the Kubernetes API and no pod-creation rights are needed. Tokens are not mounted.
 
-Every pod runs non-root (10001) with `readOnlyRootFilesystem`, no capabilities, `RuntimeDefault` seccomp; `/tmp`, `/workspace` (checkouts, mirror cache) and `/mise` (tools) are emptyDirs, `/mise` optionally a PVC (`worker.miseCache.type: pvc`, ReadWriteMany to share between workers). Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
+Every pod runs non-root (10001) with `readOnlyRootFilesystem`, no capabilities, `RuntimeDefault` seccomp; `/tmp` (also `HOME`, so bun, npm and Go caches of dependency installs; `tmpSizeLimit`, default 8Gi), `/workspace` (checkouts, mirror cache) and `/mise` (tools) are emptyDirs, `/mise` optionally a PVC (`worker.miseCache.type: pvc`, ReadWriteMany to share between workers). Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
 
 ```sh
 kubectl create secret generic holtkeeper --from-env-file=holtkeeper.env
