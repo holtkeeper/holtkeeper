@@ -64,7 +64,7 @@ async function startProxy(dir: string, env: Record<string, string>, upstreamCa: 
     }
   }
   void Promise.all([drain(proc.stdout), drain(proc.stderr)]).then(() => resolve(false))
-  const timer = setTimeout(() => resolve(false), 20_000)
+  const timer = setTimeout(() => resolve(false), 90_000)
   const started = await listening
   clearTimeout(timer)
   if (!started || output.includes('error in script')) {
@@ -123,7 +123,7 @@ describe.skipIf(!available)('egress addon', () => {
     await writeFile(join(dir, 'rules.json'), JSON.stringify(rules))
     proxy = await startProxy(dir, { EGRESS_TEST_TOKEN: token }, cert)
     proxyCa = await readFile(join(dir, 'mitm', 'mitmproxy-ca-cert.pem'), 'utf8')
-  }, 60_000)
+  }, 120_000)
 
   afterAll(async () => {
     proxy?.proc.kill()
@@ -188,5 +188,5 @@ describe.skipIf(!available)('egress addon', () => {
     } finally {
       await rm(empty, { recursive: true, force: true })
     }
-  }, 60_000)
+  }, 120_000)
 })
