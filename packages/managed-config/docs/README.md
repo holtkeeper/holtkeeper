@@ -55,12 +55,13 @@ A rebuild that fails validation keeps the previous config (`lastError()`). Panel
 
 Every default schedule covers all groups and spreads its repository jobs over 01:00–07:00 (server time zone):
 
-| Id                | Analyzers                                                                     | When            |
-| ----------------- | ----------------------------------------------------------------------------- | --------------- |
-| `ci-jobs-nightly` | `ci-jobs`                                                                     | every night     |
-| `delivery-weekly` | `delivery`                                                                    | Monday nights   |
-| `security-weekly` | `audit`, `depgraph`                                                           | Saturday nights |
-| `quality-weekly`  | `quality` (`coverage: skip`, so no test runs), `testids`, `licenses`, `fleet` | Sunday nights   |
+| Id                | Analyzers                                                          | When             |
+| ----------------- | ------------------------------------------------------------------ | ---------------- |
+| `ci-jobs-nightly` | `ci-jobs`                                                          | every night      |
+| `delivery-weekly` | `delivery`                                                         | Monday nights    |
+| `security-weekly` | `audit`, `depgraph`                                                | Saturday nights  |
+| `quality-weekly`  | `quality` (`coverage: skip`, so no test runs), `licenses`, `fleet` | Sunday nights    |
+| `testids-weekly`  | `testids`                                                          | Wednesday nights |
 
 The default trigger `tag` queues `changelog` and `release-risk` for every new or moved tag, from webhooks or polling.
 

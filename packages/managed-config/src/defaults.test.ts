@@ -14,7 +14,7 @@ import { scheduleDataSchema, triggerDataSchema } from './documents.ts'
 
 const file = parseConfig({ forges: {}, groups: {} })
 const now = () => new Date('2026-10-30T12:00:00.000Z')
-const kinds = ['ci-jobs', 'delivery', 'depgraph', 'quality', 'changelog']
+const kinds = ['ci-jobs', 'delivery', 'depgraph', 'quality', 'testids', 'changelog']
 
 describe('seedDefaults', () => {
   test('every default is a valid document', () => {
@@ -31,6 +31,7 @@ describe('seedDefaults', () => {
       'schedule:delivery-weekly',
       'schedule:security-weekly',
       'schedule:quality-weekly',
+      'schedule:testids-weekly',
       'trigger:tag',
     ])
     expect(await store.config?.get('schedule', 'security-weekly')).toMatchObject({
@@ -57,8 +58,24 @@ describe('seedDefaults', () => {
     await store.kv?.set(SCHEDULES_MARKER, { at: '2026-10-29T00:00:00.000Z' })
     expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
       'schedule:quality-weekly',
+      'schedule:testids-weekly',
       'trigger:tag',
     ])
+  })
+
+  test('a later default reaches installs that saw the earlier ones', async () => {
+    const store = memoryStore()
+    for (const id of ['ci-jobs-nightly', 'delivery-weekly', 'security-weekly', 'quality-weekly'])
+      // oxlint-disable-next-line no-await-in-loop
+      await store.kv?.set(defaultMarker('schedule', id), { at: '2026-10-29T00:00:00.000Z' })
+    await store.kv?.set(defaultMarker('trigger', 'tag'), { at: '2026-10-29T00:00:00.000Z' })
+    expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
+      'schedule:testids-weekly',
+    ])
+    expect((await store.config?.get('schedule', 'testids-weekly'))?.data).toMatchObject({
+      analyzers: ['testids'],
+      cron: '0 1 * * 3',
+    })
   })
 
   test('keeps panel documents and file-configured schedules and tag triggers', async () => {

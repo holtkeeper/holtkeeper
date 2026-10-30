@@ -22,7 +22,7 @@ Then, per file:
 - Lines are `DA` records (Go: statements' lines), functions `FN`/`FNDA` (Go: `go tool cover -func`), branches `BRDA` with a taken count above zero.
 - With `untested`, source files of the report's languages that the report does not mention (and that are not generated or type-only) are added with every code line (non-blank, non-comment) uncovered and `loaded: false`. That count includes lines the tools would not call executable, such as imports, so it errs on the side of more uncovered lines.
 
-`quality` keeps running its own `tests` check; the default `quality-weekly` schedule skips it (`coverage: skip`), and `coverage` is not on a default schedule because it runs whole test suites. Schedule it where the worker has the toolchain and the tests need no services, or point `file` at a report CI produces.
+`quality` keeps running its own `tests` check; the default `quality-weekly` schedule skips it (`coverage: skip`), and `coverage` is not on a default schedule: it runs whole test suites, and jobs install tools but not a project's dependencies, so JavaScript runners such as vitest or jest are missing from a fresh checkout. Schedule it for repositories whose tests run that way (Go, Bun without dependencies) or point `file` at a report CI produces.
 
 ## Data
 

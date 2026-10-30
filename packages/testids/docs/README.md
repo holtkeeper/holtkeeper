@@ -65,7 +65,7 @@ Only files with at least one interactive element are kept.
 - **Elements without a test id** — up to 300 issues, `file:line <Tag> → tag` with the reason.
 - **Changes** (with a previous analysis) — files whose number of missing test ids changed.
 
-It runs in the default `quality-weekly` schedule. The web panel shows it under **Test ids** (`/testids`).
+It runs in the default `testids-weekly` schedule (Wednesday nights). The web panel shows it under **Test ids** (`/testids`).
 
 ## Limitations
 
