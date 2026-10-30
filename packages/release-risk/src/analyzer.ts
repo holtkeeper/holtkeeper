@@ -59,6 +59,7 @@ export const releaseRiskAnalyzer = defineAnalyzer<ReleaseRiskData, ReleaseRiskOp
       ...(log ? { log } : {}),
     })
     const data: ReleaseRiskData = { ...assessment, summary }
-    return { data, ...(data.ref ? { ref: data.ref } : {}) }
+    const at = ref !== undefined ? inputs.changelog?.createdAt : undefined
+    return { data, ...(data.ref ? { ref: data.ref } : {}), ...(at ? { at } : {}) }
   },
 })

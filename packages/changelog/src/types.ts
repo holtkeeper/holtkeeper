@@ -154,6 +154,11 @@ export interface ChangelogData {
   files?: ChangedFile[]
   /** Set when `files` was cut at `maxChangedFiles`. */
   filesTruncated?: boolean
+  /**
+   * When `to` was released (ISO 8601): the tag's date for a tag or a commit carrying tags; absent
+   * for unreleased refs such as `HEAD` or a branch.
+   */
+  releasedAt?: string
   /** Packages a monorepo release published, by name; absent for plain releases. */
   packages?: PackageRelease[]
   links?: LinkTemplates

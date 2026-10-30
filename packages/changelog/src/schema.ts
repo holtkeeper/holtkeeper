@@ -69,6 +69,7 @@ export const changelogDataSchema: z.ZodType<ChangelogData> = z.object({
   diff: diffStat.optional(),
   files: z.array(changedFile).optional(),
   filesTruncated: z.boolean().optional(),
+  releasedAt: z.string().optional(),
   packages: z
     .array(
       z.object({

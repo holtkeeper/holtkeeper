@@ -34,6 +34,7 @@ interface ChangelogData {
   diff?: DiffStat // { files, insertions, deletions } between from and to
   files?: ChangedFile[] // most changed first, at most maxChangedFiles (5000)
   filesTruncated?: boolean // set when files were cut
+  releasedAt?: string // tag date when `to` is a tag or a tagged commit; absent for HEAD or branches
   packages?: PackageRelease[] // { name, version, tag, previous? } for monorepo releases
   links?: LinkTemplates
 }

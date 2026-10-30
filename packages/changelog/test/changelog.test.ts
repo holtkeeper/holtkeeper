@@ -123,6 +123,7 @@ describe.skipIf(!Bun.which('git'))('changelog of a real repository', () => {
     const data = await analyzeChangelog({ dir, to: 'v1.1.0', links })
     expect(data.from?.name).toBe('v1.0.0')
     expect(data.to.name).toBe('v1.1.0')
+    expect(data.releasedAt).toBe('2026-10-05T10:00:00Z')
     expect(data.commits).toHaveLength(6)
     expect(data.diff?.files).toBe(7)
     expect(data.links?.commit).toBe('https://gitlab.example.com/games/app/-/commit/{sha}')
@@ -130,6 +131,7 @@ describe.skipIf(!Bun.which('git'))('changelog of a real repository', () => {
 
     const head = await analyzeChangelog({ dir, to: 'HEAD' })
     expect(head.from?.name).toBe('v1.1.0')
+    expect(head.releasedAt).toBeUndefined()
     expect(head.commits.map((c) => c.subject)).toEqual(['fix: after release'])
     const files = Object.fromEntries((head.files ?? []).map((file) => [file.path, file]))
     expect(files['docs.md']).toMatchObject({

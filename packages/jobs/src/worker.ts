@@ -288,7 +288,7 @@ export function createWorker(options: WorkerOptions): Worker {
         contextFor(job, analyzer, { signal, log, options: parsed.data }),
         signal,
       )
-      let result: { data: unknown; ref?: string; artifacts?: AnalyzerArtifact[] }
+      let result: { data: unknown; ref?: string; at?: string; artifacts?: AnalyzerArtifact[] }
       try {
         result = await abortable(
           analyzer.run({ ...prepared.context, options: parsed.data, signal, log }),
@@ -304,7 +304,7 @@ export function createWorker(options: WorkerOptions): Worker {
         repo: job.repo,
         kind: analyzer.analysis.kind,
         ...(ref !== undefined && { ref }),
-        createdAt: at(),
+        createdAt: result.at ?? at(),
         ...(job.actor !== undefined && { actor: job.actor }),
         data: result.data,
       })

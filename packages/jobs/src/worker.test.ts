@@ -87,6 +87,25 @@ describe('worker', () => {
     expect(await worker.runNext()).toBeUndefined()
   })
 
+  test('records the analysis at the time the analyzer returns', async () => {
+    const release = analyzer('release', async () => ({ data: {}, at: '2026-01-15T09:00:00Z' }))
+    const plain = analyzer('plain', async () => ({ data: {} }))
+    const worker = createWorker({
+      store,
+      analyzers: [release, plain],
+      contextFor,
+      now: () => clock,
+    })
+    await enqueue('release')
+    const past = await worker.runNext()
+    expect((await store.analyses.get(past?.analysisId ?? ''))?.createdAt).toBe(
+      '2026-01-15T09:00:00Z',
+    )
+    await enqueue('plain')
+    const now = await worker.runNext()
+    expect((await store.analyses.get(now?.analysisId ?? ''))?.createdAt).toBe(clock.toISOString())
+  })
+
   test('persists returned artifacts after the record, tagged with it; failures are logged', async () => {
     const artifact = { id: 'a'.repeat(64), data: new Uint8Array([1, 2]), contentType: 'image/webp' }
     const optimize = analyzer('assets', async () => ({ data: {}, artifacts: [artifact] }))

@@ -4,7 +4,7 @@ Scores how risky a release is from analyses Holtkeeper already stored — change
 
 ## Analyzer
 
-`releaseRiskAnalyzer` — kind `release-risk`, scope `repo`, needs `history`, agent `optional`.
+`releaseRiskAnalyzer` — kind `release-risk`, scope `repo`, needs `history`, agent `optional`. Assessing a given ref, it is recorded at the time of that ref's changelog record, so past releases sort by release date.
 
 Options (zod `releaseRiskOptions`):
 

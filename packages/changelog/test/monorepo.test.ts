@@ -80,6 +80,7 @@ describe.skipIf(!Bun.which('git'))('monorepo releases', () => {
       'fix(common): shared deps',
       'feat(card): flip animation',
     ])
+    expect(byTag.releasedAt).toBe('2026-10-02T11:00:00Z')
     expect(byTag.packages).toEqual([
       { name: '@ui/card', version: '0.7.0', tag: '@ui/card@0.7.0', previous: '0.6.0' },
       { name: '@ui/common', version: '1.0.0', tag: '@ui/common@1.0.0' },

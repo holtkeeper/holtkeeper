@@ -121,10 +121,12 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   /**
    * Produces the data. `artifacts` are binary files the data refers to by `id` (e.g. the
    * `artifact` of `write-binary` edits); runners store them after the record, tagged with it.
+   * `at` (ISO 8601) is when the analyzed subject happened, such as a release's tag date; runners
+   * record the analysis at that time instead of the time of the run.
    */
   run(
     context: AnalyzerContext<Options>,
-  ): Promise<{ data: Data; ref?: string; artifacts?: AnalyzerArtifact[] }>
+  ): Promise<{ data: Data; ref?: string; at?: string; artifacts?: AnalyzerArtifact[] }>
 }
 
 export const defineAnalyzer = <Data, Options>(analyzer: Analyzer<Data, Options>) => analyzer

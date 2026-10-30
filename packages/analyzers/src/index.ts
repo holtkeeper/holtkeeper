@@ -59,7 +59,7 @@ export const changelogAnalyzer = defineAnalyzer({
         ? { links: forgeLinks({ kind: options.forge, webUrl: options.webUrl }) }
         : {}),
     })
-    return { data, ref: data.to.name }
+    return { data, ref: data.to.name, ...(data.releasedAt ? { at: data.releasedAt } : {}) }
   },
 })
 

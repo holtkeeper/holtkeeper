@@ -85,6 +85,7 @@ export async function analyzeChangelog({
   const found = from ? await history.resolve(dir, from) : previousRelease(refs, target)
   const base = found && monorepoRelease(refs, found)
   const packages = target.tags ? releasedPackages(refs, target) : []
+  const released = refs.some((ref) => ref.sha === target.sha && ref.name === target.name)
   const range = { to: target.sha, ...(base ? { from: base.sha } : {}) }
   const [commits, diff, changed] = await Promise.all([
     history.commits(dir, range),
@@ -105,6 +106,7 @@ export async function analyzeChangelog({
     ...(diff ? { diff } : {}),
     ...(files ? { files } : {}),
     ...(changed && changed.length > maxChangedFiles ? { filesTruncated: true } : {}),
+    ...(released || target.tags ? { releasedAt: target.date } : {}),
     ...(packages.length ? { packages } : {}),
     ...(links ? { links: links.templates } : {}),
   }
