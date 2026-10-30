@@ -11,7 +11,7 @@ import { analysisRoutes } from './routes/analyses.ts'
 import { artifactRoutes } from './routes/artifacts.ts'
 import { auditLogRoutes } from './routes/audit.ts'
 import { auditRoutes } from './routes/audits.ts'
-import { avatarRoutes, withAvatar } from './routes/avatars.ts'
+import { activityPeople, avatarRoutes, withAvatar } from './routes/avatars.ts'
 import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { jobRoutes } from './routes/jobs.ts'
@@ -86,7 +86,7 @@ export function createApp(deps: ServerDeps) {
       ...(before ? { before } : {}),
       limit: limitParam(c.req.query('limit')),
     })
-    return c.json<ActivityList>({ events })
+    return c.json<ActivityList>({ events, people: await activityPeople(deps, events) })
   })
   api.all('*', (c) => c.json<ApiError>({ error: 'not found' }, 404))
   app.route('/api', api)

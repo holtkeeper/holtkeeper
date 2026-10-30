@@ -8,6 +8,7 @@ import { useUserMutations, useUsers } from '../../api/queries.ts'
 import { summarizeGrants } from '../../lib/access.ts'
 import { formatDate, formatRelative } from '../../lib/format.ts'
 import {
+  Avatar,
   Button,
   Chip,
   ConfirmDialog,
@@ -45,6 +46,7 @@ export function UsersPage() {
   const canWrite = can('users:write')
   const canInvite = can('users:invite')
   const list = users.data?.users ?? []
+  const byName = new Map(list.map((u) => [u.id, u.name]))
 
   return (
     <Page
@@ -77,16 +79,23 @@ export function UsersPage() {
               >
                 <Panel>
                   <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1fr)_auto]">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate font-medium">{user.name}</span>
-                        {user.id === principal.id ? <Chip tone="accent">you</Chip> : null}
-                        {user.disabled ? <Chip tone="danger">disabled</Chip> : null}
-                      </div>
-                      <div className="truncate text-xs text-muted">{user.email ?? 'no email'}</div>
-                      <div className="mt-1 text-xs text-muted">
-                        Added {formatDate(user.createdAt)}
-                        {user.createdBy ? ` by ${user.createdBy}` : ''}
+                    <div className="flex min-w-0 gap-3">
+                      <Avatar src={user.avatarUrl} name={user.name} size="sm" className="mt-0.5" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium">{user.name}</span>
+                          {user.id === principal.id ? <Chip tone="accent">you</Chip> : null}
+                          {user.disabled ? <Chip tone="danger">disabled</Chip> : null}
+                        </div>
+                        <div className="truncate text-xs text-muted">
+                          {user.email ?? 'no email'}
+                        </div>
+                        <div className="mt-1 text-xs text-muted">
+                          Added {formatDate(user.createdAt)}
+                          {user.createdBy
+                            ? ` by ${byName.get(user.createdBy) ?? user.createdBy}`
+                            : ''}
+                        </div>
                       </div>
                     </div>
                     <div className="flex min-w-0 flex-col gap-1.5">

@@ -111,7 +111,7 @@ Agent runs recorded by [@holtkeeper/ai-usage](../../../packages/ai-usage/docs/RE
 
 ## Jobs and webhooks
 
-With a `jobs` section in the config (see [@holtkeeper/jobs](../../../packages/jobs/docs/README.md)), `startServer` starts a scheduler and a worker (`src/jobs.ts`) and stops them with the server. Pass the analyzers jobs may run as `ServerOptions.analyzers` and an `agentFor(repo)` for analyzers that use an LLM. Finished jobs are written to the activity log (`job.succeeded`, `job.failed`).
+With a `jobs` section in the config (see [@holtkeeper/jobs](../../../packages/jobs/docs/README.md)), `startServer` starts a scheduler and a worker (`src/jobs.ts`) and stops them with the server. Pass the analyzers jobs may run as `ServerOptions.analyzers` and an `agentFor(repo)` for analyzers that use an LLM. Finished jobs are written to the activity log (`job.succeeded`, `job.failed`). `GET /api/activity` returns `people` next to the events: name and avatar URL of every user among their actors and subjects, so clients never show bare ids.
 
 Analyzer options per scope come from the setting `analyzers.<kind>` (section `Analyzers`); `analyzerSettings(analyzers)` returns the definitions. A value is a partial options object, validated field by field and stored without defaults; it overrides schedule options and is overridden by a manual job's own options.
 

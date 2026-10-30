@@ -1,6 +1,7 @@
 import { Avatar, Style } from '@dicebear/core'
 import type { Principal } from '@holtkeeper/access'
-import type { MePrincipal, SetAvatarInput } from '@holtkeeper/api'
+import type { ActivityPerson, MePrincipal, SetAvatarInput } from '@holtkeeper/api'
+import type { ActivityEvent } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -55,6 +56,22 @@ export async function withAvatar(
   const user =
     principal.provider === 'users' ? await deps.store.users.getUser(principal.id) : undefined
   return { ...principal, avatarUrl: avatarUrl(user?.avatarSeed ?? principal.id) }
+}
+
+/** Names and avatars of the users among events' actors and subjects. */
+export async function activityPeople(
+  deps: Pick<ServerDeps, 'store'>,
+  events: readonly ActivityEvent[],
+): Promise<Record<string, ActivityPerson>> {
+  const ids = new Set(events.flatMap((e) => (e.subject ? [e.actor, e.subject] : [e.actor])))
+  const users = await Promise.all([...ids].map((id) => deps.store.users.getUser(id)))
+  return Object.fromEntries(
+    users.flatMap((user) =>
+      user
+        ? [[user.id, { name: user.name, avatarUrl: avatarUrl(user.avatarSeed ?? user.id) }]]
+        : [],
+    ),
+  )
 }
 
 const setAvatarSchema = z.object({

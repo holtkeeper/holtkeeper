@@ -189,6 +189,20 @@ export function useUserMutations() {
 /** The signed-in user's own account, with the `users` provider only. */
 export const useAccount = () => useQuery({ queryKey: keys.account, queryFn: api.account })
 
+/** Rerolls the signed-in user's avatar; `null` goes back to the default. */
+export function useSetAvatar() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (seed: string | null) => api.setAvatar(seed),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.me })
+      await client.invalidateQueries({ queryKey: keys.account })
+      await client.invalidateQueries({ queryKey: keys.users })
+      await client.invalidateQueries({ queryKey: keys.activity })
+    },
+  })
+}
+
 /** Adding, renaming and removing the signed-in user's own passkeys. */
 export function useAccountPasskeys() {
   const client = useQueryClient()

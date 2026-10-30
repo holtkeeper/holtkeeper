@@ -1,10 +1,20 @@
-import type { ActivityEvent } from '@holtkeeper/api'
+import type { ActivityEvent, ActivityPerson } from '@holtkeeper/api'
 import { Activity, FileSearch, KeyRound, Settings2, UserRound } from 'lucide-react'
 import { motion } from 'motion/react'
 
 import { useActivity } from '../../api/queries.ts'
 import { formatDate, formatRelative, isoDay } from '../../lib/format.ts'
-import { Button, EmptyState, ErrorState, Page, Panel, Placeholder } from '../../ui/index.ts'
+import { personOf } from '../../lib/people.ts'
+import {
+  Avatar,
+  Button,
+  EmptyState,
+  ErrorState,
+  Page,
+  Panel,
+  Placeholder,
+  Tooltip,
+} from '../../ui/index.ts'
 
 const iconFor = (action: string) => {
   const area = action.split('.')[0]
@@ -36,6 +46,8 @@ function Details({ details }: { details: Record<string, unknown> }) {
 export function ActivityPage() {
   const activity = useActivity()
   const events = activity.data?.pages.flatMap((page) => page.events) ?? []
+  const people: Record<string, ActivityPerson> = {}
+  for (const page of activity.data?.pages ?? []) Object.assign(people, page.people)
   const days = Map.groupBy(events, (event: ActivityEvent) => isoDay(event.at))
 
   return (
@@ -53,6 +65,8 @@ export function ActivityPage() {
               <ol className="relative flex flex-col gap-4 border-l border-separator pl-6">
                 {list.map((event, index) => {
                   const Icon = iconFor(event.action)
+                  const actor = personOf(people, event.actor)
+                  const subject = event.subject ? personOf(people, event.subject) : undefined
                   return (
                     <motion.li
                       key={event.id}
@@ -68,9 +82,33 @@ export function ActivityPage() {
                         <Icon className="size-3.5 text-muted" />
                       </span>
                       <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                        <span className="font-medium">{event.actor}</span>
+                        <Tooltip content={event.actor}>
+                          <span
+                            tabIndex={0}
+                            className="inline-flex items-center gap-1.5 self-center"
+                          >
+                            <Avatar src={actor.avatarUrl} name={actor.name} size="xs" />
+                            <span className={actor.known ? 'font-medium' : 'font-mono text-xs'}>
+                              {actor.name}
+                            </span>
+                          </span>
+                        </Tooltip>
                         <span className="text-muted">{verb(event.action)}</span>
-                        {event.subject ? (
+                        {subject?.known ? (
+                          event.subject === event.actor ? (
+                            <span className="text-muted">themselves</span>
+                          ) : (
+                            <Tooltip content={event.subject}>
+                              <span
+                                tabIndex={0}
+                                className="inline-flex items-center gap-1.5 self-center"
+                              >
+                                <Avatar src={subject.avatarUrl} name={subject.name} size="xs" />
+                                <span className="font-medium">{subject.name}</span>
+                              </span>
+                            </Tooltip>
+                          )
+                        ) : event.subject ? (
                           <span className="font-mono text-xs">{event.subject}</span>
                         ) : null}
                         <time dateTime={event.at} className="ml-auto text-xs text-muted">

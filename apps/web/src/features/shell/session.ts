@@ -1,11 +1,11 @@
-import type { Action, AuthInfo, Principal } from '@holtkeeper/api'
+import type { Action, AuthInfo, MePrincipal } from '@holtkeeper/api'
 import { createContext, use } from 'react'
 
 import { can } from '../../lib/access.ts'
 
 /** The signed-in principal and the auth provider's info, available below the app shell. */
 export interface Session {
-  principal: Principal
+  principal: MePrincipal
   auth: AuthInfo
 }
 

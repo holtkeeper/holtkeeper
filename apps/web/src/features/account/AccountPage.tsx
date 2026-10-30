@@ -1,12 +1,13 @@
-import { Fingerprint, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Dices, Fingerprint, Pencil, Plus, Trash2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type FormEvent, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useAccount, useAccountPasskeys } from '../../api/queries.ts'
+import { useAccount, useAccountPasskeys, useSetAvatar } from '../../api/queries.ts'
 import { formatDate, formatDateTime, formatRelative } from '../../lib/format.ts'
 import { isCancelled, passkeyName } from '../../lib/passkeys.ts'
 import {
+  Avatar,
   Button,
   ConfirmDialog,
   Dialog,
@@ -108,6 +109,7 @@ function PasskeyDialog({ editing, onClose }: { editing: Editing; onClose: () => 
 export function AccountPage() {
   const account = useAccount()
   const { remove } = useAccountPasskeys()
+  const avatar = useSetAvatar()
   const [editing, setEditing] = useState<Editing | null>(null)
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null)
 
@@ -134,12 +136,27 @@ export function AccountPage() {
     <Page title="Your account" description="How you sign in to Holtkeeper">
       <Panel>
         <div className="flex flex-wrap items-center gap-4">
-          <img src={user.avatarUrl} alt="" className="size-14 rounded-2xl bg-default" />
+          <Avatar key={user.avatarUrl} src={user.avatarUrl} name={user.name} size="lg" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-lg font-semibold">{user.name}</div>
             <div className="truncate text-sm text-muted">{user.email ?? 'No email'}</div>
           </div>
-          <div className="text-xs text-muted">Member since {formatDate(user.createdAt)}</div>
+          <div className="flex flex-col items-end gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              isPending={avatar.isPending}
+              onPress={() =>
+                avatar.mutate(crypto.randomUUID().slice(0, 12), {
+                  onError: (error) => notify.error('Avatar not changed', messageOf(error)),
+                })
+              }
+            >
+              <Dices className="size-3.5" />
+              New avatar
+            </Button>
+            <div className="text-xs text-muted">Member since {formatDate(user.createdAt)}</div>
+          </div>
         </div>
         {user.identities.length ? (
           <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted">

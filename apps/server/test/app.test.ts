@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type {
+  ActivityList,
   AnalysisDetail,
   AnalysisList,
   AnalysisSummary,
@@ -384,6 +385,33 @@ describe('server', () => {
   test('activity requires global user rights', async () => {
     expect((await setup().request('/api/activity')).status).toBe(200)
     expect((await setup(games).request('/api/activity', { headers: asGames })).status).toBe(403)
+  })
+
+  test('activity names the users among actors and subjects', async () => {
+    await store.users.putUser({
+      id: 'u1',
+      name: 'Ann',
+      grants: [],
+      disabled: false,
+      sessionVersion: 0,
+      createdAt: '2026-10-30T00:00:00.000Z',
+      avatarSeed: 'fox',
+    })
+    await store.activity.append({
+      at: '2026-10-30T10:00:00.000Z',
+      actor: 'u1',
+      action: 'user.login',
+      subject: 'u1',
+    })
+    await store.activity.append({
+      at: '2026-10-30T11:00:00.000Z',
+      actor: 'scheduler',
+      action: 'audit.ingested',
+      subject: 'work:games/a',
+    })
+    const list = (await (await setup().request('/api/activity')).json()) as ActivityList
+    expect(list.events).toHaveLength(2)
+    expect(list.people).toEqual({ u1: { name: 'Ann', avatarUrl: '/api/avatars/fox.svg' } })
   })
 
   test('routes auth endpoints to the provider and 404s unknown API paths', async () => {

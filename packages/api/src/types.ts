@@ -321,9 +321,17 @@ export interface IngestAnalysis {
   artifacts?: { id: string; base64: string; contentType?: string; name?: string }[]
 }
 
+/** A user an activity event names as actor or subject. */
+export interface ActivityPerson {
+  name: string
+  avatarUrl: string
+}
+
 /** `GET /api/activity` */
 export interface ActivityList {
   events: ActivityEvent[]
+  /** Users among the events' actors and subjects, by id; other ids (services, repos) are absent. */
+  people: Record<string, ActivityPerson>
 }
 
 // Users (only with the `users` auth provider), under `/auth/users`.

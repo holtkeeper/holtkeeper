@@ -13,12 +13,14 @@ import type {
   InviteUserInput,
   LinkInfo,
   LinkResponse,
+  MePrincipal,
   MeResponse,
   ProviderModelList,
   PutSettingInput,
   RepoList,
   RepoRef,
   ResolvedSettings,
+  SetAvatarInput,
   SettingList,
   SettingView,
   UpdateCredentialInput,
@@ -113,6 +115,8 @@ export const api = {
     }),
 
   account: () => request<UserView>('GET', '/auth/users/me'),
+  setAvatar: (seed: string | null) =>
+    request<MePrincipal>('PUT', '/api/me/avatar', { body: { seed } satisfies SetAvatarInput }),
   addPasskeyOptions: () =>
     request<PublicKeyCredentialCreationOptionsJSON>('POST', '/auth/users/me/passkeys/options'),
   addPasskeyVerify: (response: RegistrationResponseJSON, label?: string) =>

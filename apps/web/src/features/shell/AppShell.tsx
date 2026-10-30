@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useAuthMutations } from '../../api/queries.ts'
-import { BrandIcon, Button, Tooltip, notify } from '../../ui/index.ts'
+import { Avatar, BrandIcon, Button, Tooltip, notify } from '../../ui/index.ts'
 import { visibleNav } from './nav.ts'
 import { useSession } from './session.ts'
 import { ThemeToggle } from './ThemeToggle.tsx'
@@ -75,22 +75,11 @@ function Identity({ linked, children }: { linked: boolean; children: ReactNode }
 function Account() {
   const { principal, auth } = useSession()
   const { logout } = useAuthMutations()
-  const initials = principal.name
-    .split(/\s+/)
-    .map((part) => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase()
   return (
     <div className="flex items-center gap-2">
       <ThemeToggle />
       <Identity linked={auth.provider === 'users'}>
-        <span
-          aria-hidden
-          className="grid size-8 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-soft-foreground"
-        >
-          {initials || '?'}
-        </span>
+        <Avatar key={principal.avatarUrl} src={principal.avatarUrl} name={principal.name} />
         <div className="hidden leading-tight sm:block">
           <div className="max-w-40 truncate text-sm font-medium">{principal.name}</div>
           <div className="text-xs text-muted">via {principal.provider}</div>
