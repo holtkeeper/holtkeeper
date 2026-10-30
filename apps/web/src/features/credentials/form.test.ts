@@ -73,6 +73,7 @@ describe('AI provider credentials', () => {
       maxConcurrency: 4,
       headers: { 'X-Team': 'games' },
     },
+    rotatable: false,
     createdAt: '2026-10-30T00:00:00.000Z',
     updatedAt: '2026-10-30T00:00:00.000Z',
   }

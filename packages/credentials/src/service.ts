@@ -51,19 +51,18 @@ export interface CredentialService {
   /** The plaintext secret. For internal callers that use the credential; never expose it over an API. */
   reveal(id: string): Promise<string>
   /**
-   * Replaces the secret with a fresh token from the kind's rotator and stores it. On failure records
-   * `lastError` and rethrows. Concurrent calls for one id share a single rotation.
+   * Replaces the secret with a fresh token from the kind's rotator and stores it. A kind without a
+   * rotator throws `CredentialInputError` and changes nothing; any other failure records `lastError`
+   * and rethrows. Concurrent calls for one id share a single rotation.
    */
   rotate(id: string, actor: string): Promise<CredentialView>
   /**
-   * Rotates, one after another, every credential with rotation enabled whose `expiresAt` is within
+   * Rotates, one after another, every rotatable credential with rotation enabled whose `expiresAt` is within
    * `daysBefore` days or already past. Credentials without `expiresAt` are skipped. Never throws for
    * a single failed rotation; failures are in the results.
    */
   rotateDue(): Promise<RotationResult[]>
 }
-
-const toView = ({ secret: _secret, ...view }: StoredCredential): CredentialView => view
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -72,6 +71,11 @@ export function createCredentialService(options: CredentialServiceOptions): Cred
   const { credentials, activity, vault, now = () => new Date() } = options
   const rotators = new Map((options.rotators ?? []).map((rotator) => [rotator.kind, rotator]))
   const inFlight = new Map<string, Promise<CredentialView>>()
+
+  const toView = ({ secret: _secret, ...view }: StoredCredential): CredentialView => ({
+    ...view,
+    rotatable: rotators.has(view.kind),
+  })
 
   const checkOptions = (kind: string, value: Record<string, unknown> | undefined) => {
     const issues = options.validateOptions?.(kind, value) ?? []
@@ -115,11 +119,12 @@ export function createCredentialService(options: CredentialServiceOptions): Cred
 
   const doRotate = async (id: string, actor: string): Promise<CredentialView> => {
     const credential = await load(id)
+    const rotator = rotators.get(credential.kind)
+    if (!rotator)
+      throw new CredentialInputError([`kind: no token rotator for kind "${credential.kind}"`])
     let next: StoredCredential
     let rotated = false
     try {
-      const rotator = rotators.get(credential.kind)
-      if (!rotator) throw new Error(`no token rotator for kind "${credential.kind}"`)
       const token = await vault.open(credential.secret)
       const lifetimeDays = credential.rotation?.lifetimeDays ?? DEFAULT_LIFETIME_DAYS
       const result = await rotator.rotate({ url: credential.url, token, lifetimeDays })
@@ -226,7 +231,8 @@ export function createCredentialService(options: CredentialServiceOptions): Cred
     async rotateDue() {
       const at = now().getTime()
       const due = (await credentials.list()).filter(
-        ({ rotation, expiresAt }) =>
+        ({ kind, rotation, expiresAt }) =>
+          rotators.has(kind) &&
           rotation?.enabled &&
           expiresAt !== undefined &&
           Date.parse(expiresAt) - at <= rotation.daysBefore * DAY_MS,

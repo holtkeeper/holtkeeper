@@ -13,15 +13,15 @@ const credentials = createCredentialService({
 })
 ```
 
-| Method                     | Does                                                                                     |
-| -------------------------- | ---------------------------------------------------------------------------------------- |
-| `list()`, `get(id)`        | `CredentialView`s: everything except the secret (`options` included)                     |
-| `create(input, actor)`     | Validates, seals the secret, fills `expiresAt` from the rotator's `inspect` if not given |
-| `update(id, input, actor)` | Changes given fields; a new secret is sealed, re-inspected and clears `lastError`        |
-| `remove(id, actor)`        | Deletes                                                                                  |
-| `reveal(id)`               | The plaintext secret, for internal callers that use the credential; never send it out    |
-| `rotate(id, actor)`        | Rotates now (see below)                                                                  |
-| `rotateDue()`              | Rotates every credential that is due; returns `{ id, ok, error? }[]`                     |
+| Method                     | Does                                                                                           |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| `list()`, `get(id)`        | `CredentialView`s: everything except the secret, plus `rotatable` (a rotator handles the kind) |
+| `create(input, actor)`     | Validates, seals the secret, fills `expiresAt` from the rotator's `inspect` if not given       |
+| `update(id, input, actor)` | Changes given fields; a new secret is sealed, re-inspected and clears `lastError`              |
+| `remove(id, actor)`        | Deletes                                                                                        |
+| `reveal(id)`               | The plaintext secret, for internal callers that use the credential; never send it out          |
+| `rotate(id, actor)`        | Rotates now (see below)                                                                        |
+| `rotateDue()`              | Rotates every credential that is due; returns `{ id, ok, error? }[]`                           |
 
 Input that fails validation throws `CredentialInputError` with one `field: message` entry per problem; an unknown id throws `CredentialNotFoundError`. Validation requires a non-empty `name`, `kind` and `secret`, an http(s) `url`, a valid `Scope`, an ISO 8601 `expiresAt`, and a rotation policy with positive integer `daysBefore` < `lifetimeDays` (otherwise a fresh token would be due again at once).
 
@@ -66,14 +66,14 @@ interface TokenRotator {
 
 `rotate(id, actor)`:
 
-1. Picks the rotator for the credential's `kind` (none: fails).
+1. Picks the rotator for the credential's `kind`. Without one it throws `CredentialInputError` and leaves the credential (secret, `lastError`) untouched.
 2. Opens the sealed secret and asks the rotator for a new token valid for `rotation.lifetimeDays` (90 when the credential has no policy).
 3. Seals the new token and stores it together with the new `expiresAt`, `lastRotatedAt`, and a cleared `lastError`.
 4. On any failure stores `lastError`, logs `credential.rotation_failed` and rethrows.
 
 Concurrent `rotate` calls for the same credential share one rotation.
 
-A credential is **due** when `rotation.enabled` is set and `expiresAt` is within `daysBefore` days or already past. Credentials without `expiresAt` are never due; give one or use a kind whose rotator can `inspect`.
+A credential is **due** when a rotator handles its kind, `rotation.enabled` is set and `expiresAt` is within `daysBefore` days or already past. Credentials without `expiresAt` are never due; give one or use a kind whose rotator can `inspect`.
 
 ## Scheduling
 

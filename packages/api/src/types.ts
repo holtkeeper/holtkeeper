@@ -160,6 +160,8 @@ export interface CredentialView {
   rotation?: RotationPolicy
   lastRotatedAt?: Timestamp
   lastError?: string
+  /** Whether the server can issue a new token for this kind (`POST /api/credentials/:id/rotate`). */
+  rotatable: boolean
   /** Kind-specific, non-secret configuration, e.g. an AI provider's endpoint options. */
   options?: Record<string, unknown>
   createdAt: Timestamp

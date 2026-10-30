@@ -44,6 +44,8 @@ export interface CredentialView {
   rotation?: RotationPolicy
   lastRotatedAt?: Timestamp
   lastError?: string
+  /** Whether a token rotator handles this kind, so `rotate` can issue a new token. */
+  rotatable: boolean
   /** Kind-specific, non-secret configuration (e.g. an AI provider's endpoint options). */
   options?: Record<string, unknown>
   createdAt: Timestamp

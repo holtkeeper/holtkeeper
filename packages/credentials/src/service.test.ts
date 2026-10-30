@@ -214,12 +214,16 @@ describe('rotate', () => {
     ])
   })
 
-  test('fails without a rotator for the kind', async () => {
-    const { service } = setup([])
-    const { id } = await service.create(input({ kind: 'github' }), 'alice')
-    expect((await errorOf(service.rotate(id, 'bob'))).message).toMatch(
-      'no token rotator for kind "github"',
-    )
+  test('refuses a kind without a rotator and keeps the credential untouched', async () => {
+    const { store, service } = setup([])
+    const created = await service.create(input({ kind: 'github' }), 'alice')
+    expect(created.rotatable).toBe(false)
+    const error = await errorOf(service.rotate(created.id, 'bob'))
+    expect(error).toBeInstanceOf(CredentialInputError)
+    expect(error.message).toMatch('no token rotator for kind "github"')
+    expect(await service.get(created.id)).toEqual(created)
+    expect(await service.reveal(created.id)).toBe('glpat-secret')
+    expect(await actions(store)).toEqual([['credential.created', 'alice']])
   })
 
   test('concurrent calls share one rotation', async () => {
@@ -250,7 +254,7 @@ describe('rotateDue', () => {
       input({ rotation: { ...policy, enabled: false }, expiresAt: '2026-11-01T00:00:00Z' }),
       'a',
     )
-    const broken = await service.create(
+    await service.create(
       input({ kind: 'other', rotation: policy, expiresAt: '2026-11-01T00:00:00Z' }),
       'a',
     )
@@ -260,7 +264,6 @@ describe('rotateDue', () => {
       [
         { id: due.id, ok: true },
         { id: expired.id, ok: true },
-        { id: broken.id, ok: false, error: 'no token rotator for kind "other"' },
       ].toSorted((x, y) => x.id.localeCompare(y.id)),
     )
     expect(calls).toHaveLength(2)

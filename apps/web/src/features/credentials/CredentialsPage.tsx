@@ -138,9 +138,9 @@ export function CredentialsPage() {
                       Rotates {credential.rotation.daysBefore} d before ·{' '}
                       {credential.rotation.lifetimeDays} d lifetime
                     </Chip>
-                  ) : (
+                  ) : credential.rotatable ? (
                     <Chip>Manual rotation</Chip>
-                  )}
+                  ) : null}
                 </div>
                 {credential.lastError ? (
                   <div className="flex items-start gap-2 rounded-xl bg-danger-soft p-2.5 text-xs text-danger-soft-foreground">
@@ -192,20 +192,22 @@ export function CredentialsPage() {
                   ) : null}
                   {writable ? (
                     <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        isPending={rotate.isPending && rotate.variables === credential.id}
-                        onPress={() =>
-                          rotate.mutate(credential.id, {
-                            onSuccess: () => notify.success('Rotated', credential.name),
-                            onError: (error) => notify.error('Rotation failed', messageOf(error)),
-                          })
-                        }
-                      >
-                        <RefreshCw className="size-3.5" />
-                        Rotate now
-                      </Button>
+                      {credential.rotatable ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          isPending={rotate.isPending && rotate.variables === credential.id}
+                          onPress={() =>
+                            rotate.mutate(credential.id, {
+                              onSuccess: () => notify.success('Rotated', credential.name),
+                              onError: (error) => notify.error('Rotation failed', messageOf(error)),
+                            })
+                          }
+                        >
+                          <RefreshCw className="size-3.5" />
+                          Rotate now
+                        </Button>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="sm"
