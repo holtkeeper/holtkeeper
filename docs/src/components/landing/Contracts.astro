@@ -1,0 +1,214 @@
+---
+const contracts = [
+  {
+    area: 'Forge',
+    iface: 'GitForge',
+    href: '/modules/forge/',
+    impls: [{ name: 'GitLab' }, { name: 'GitHub', soon: true }],
+  },
+  {
+    area: 'Store',
+    iface: 'Store',
+    href: '/modules/store/',
+    impls: [{ name: 'SQLite' }, { name: 'PostgreSQL' }, { name: 'memory' }],
+  },
+  {
+    area: 'Artifacts',
+    iface: 'ArtifactStore',
+    href: '/modules/artifacts/',
+    impls: [{ name: 'folder' }, { name: 'S3' }, { name: 'memory' }],
+  },
+  {
+    area: 'Auth',
+    iface: 'AuthProvider',
+    href: '/modules/auth/',
+    impls: [{ name: 'none' }, { name: 'proxy headers' }, { name: 'password' }, { name: 'passkeys + OIDC' }],
+  },
+  {
+    area: 'AI',
+    iface: 'Agent',
+    href: '/modules/agent/',
+    impls: [
+      { name: 'Anthropic' },
+      { name: 'Anthropic-compatible proxy' },
+      { name: 'Bedrock' },
+      { name: 'Vertex' },
+      { name: 'OpenAI-compatible' },
+    ],
+  },
+  {
+    area: 'Execution',
+    iface: 'CommandRunner',
+    href: '/modules/exec/',
+    impls: [{ name: 'host' }, { name: 'mise' }, { name: 'container' }, { name: 'Kubernetes worker pods' }],
+  },
+  {
+    area: 'Vulnerabilities',
+    iface: 'Scanner · Fixer',
+    href: '/modules/vuln/',
+    impls: [{ name: 'OSV-Scanner' }, { name: 'npm · bun · pnpm · yarn' }, { name: 'Go modules' }],
+  },
+  {
+    area: 'Quality',
+    iface: 'QualityCheck',
+    href: '/modules/quality/',
+    impls: [
+      { name: 'linters via SARIF' },
+      { name: 'gitleaks' },
+      { name: 'knip' },
+      { name: 'jscpd' },
+      { name: 'conventions' },
+    ],
+  },
+  {
+    area: 'Notify',
+    iface: 'Notifier',
+    href: '/modules/notify/',
+    impls: [{ name: 'Slack' }, { name: 'webhook' }],
+  },
+  {
+    area: 'Docs',
+    iface: 'DocumentSink',
+    href: '/modules/confluence/',
+    impls: [{ name: 'Confluence Cloud' }, { name: 'Data Center' }],
+  },
+]
+---
+
+<section class="l-section contracts" id="contracts">
+  <div class="l-wrap">
+    <div class="l-head l-reveal">
+      <span class="l-eyebrow">Architecture</span>
+      <h2>Everything is <span class="l-grad">a contract.</span></h2>
+      <p>
+        Git hosting, storage, sign-in, LLMs and command execution sit behind interfaces with shared contract tests. A
+        new provider is a new adapter package; the core does not change.
+      </p>
+    </div>
+    <ul class="grid l-reveal">
+      {
+        contracts.map((c) => (
+          <li>
+            <a class="item" href={c.href}>
+              <span class="area">{c.area}</span>
+              <code class="iface">{c.iface}</code>
+              <span class="impls">
+                {c.impls.map((i) => (
+                  <span class:list={['impl', { soon: 'soon' in i && i.soon }]}>
+                    {i.name}
+                    {'soon' in i && i.soon && <em>soon</em>}
+                  </span>
+                ))}
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--l-line);
+    border-radius: 1.25rem;
+    background: var(--l-line);
+    list-style: none;
+    gap: 1px;
+  }
+  .item {
+    position: relative;
+    display: grid;
+    align-content: start;
+    gap: 0.6rem;
+    height: 100%;
+    min-height: 12.5rem;
+    padding: 1.35rem;
+    background: var(--l-card);
+    text-decoration: none;
+    transition: background-color 0.25s;
+  }
+  .item::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(18rem 10rem at 50% 0%, var(--l-amber-soft), transparent 70%);
+    opacity: 0;
+    transition: opacity 0.25s;
+    pointer-events: none;
+  }
+  .item:hover {
+    background: var(--l-card-2);
+  }
+  .item:hover::after {
+    opacity: 1;
+  }
+  .area {
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .iface {
+    justify-self: start;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.4rem;
+    color: var(--l-amber-ink);
+    font: 0.72rem var(--l-mono);
+    transition: border-color 0.25s;
+  }
+  .item:hover .iface {
+    border-color: var(--l-amber-line);
+  }
+  .impls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+  }
+  .impl {
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--l-line);
+    border-radius: 999px;
+    background: var(--l-bg-2);
+    color: var(--l-muted);
+    font-size: 0.74rem;
+    transition:
+      color 0.25s,
+      border-color 0.25s;
+  }
+  .item:hover .impl:not(.soon) {
+    border-color: var(--l-line-2);
+    color: var(--l-text);
+  }
+  .impl.soon {
+    border-style: dashed;
+    color: var(--l-dim);
+  }
+  .impl em {
+    color: var(--l-amber-ink);
+    font: normal 0.62rem var(--l-mono);
+    text-transform: uppercase;
+  }
+  @media (max-width: 68rem) {
+    .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 30rem) {
+    .grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .item {
+      min-height: 0;
+    }
+  }
+</style>

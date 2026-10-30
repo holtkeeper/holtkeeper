@@ -1,0 +1,395 @@
+---
+import { steps } from './minute.ts'
+
+const first = steps[0]!
+---
+
+<section class="l-section minute" id="minute">
+  <div class="l-wrap">
+    <div class="l-head l-reveal">
+      <span class="l-eyebrow">CLI first</span>
+      <h2>A minute with <span class="l-grad">Holtkeeper</span></h2>
+      <p>
+        Every analysis runs from one command — on a laptop, in CI or from cron. The server queues exactly the same
+        analyzers on webhooks and schedules.
+      </p>
+    </div>
+
+    <div class="demo l-reveal" data-demo data-steps={JSON.stringify(steps)}>
+      <ol class="steps">
+        {
+          steps.map((s, i) => (
+            <li>
+              <button type="button" class="step" data-step={i} aria-current={i === 0 ? 'step' : undefined}>
+                <span class="num">{String(i + 1).padStart(2, '0')}</span>
+                <span class="copy">
+                  <span class="title">{s.title}</span>
+                  <span class="text">{s.text}</span>
+                </span>
+                <span class="bar" aria-hidden="true">
+                  <span></span>
+                </span>
+              </button>
+            </li>
+          ))
+        }
+      </ol>
+
+      <figure class="term">
+        <div class="chrome">
+          <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="where">~/fleet — holtkeeper</span>
+          <button type="button" class="replay" data-replay hidden>
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+              <path
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                d="M2.8 8a5.2 5.2 0 1 0 1.6-3.8M2.6 2.2v2.6h2.6"></path>
+            </svg>
+            Replay
+          </button>
+        </div>
+        <pre class="screen" aria-live="off"><span class="ln cmd">{first.command}</span>{first.output.map(([kind, text]) => <span class={`ln ${kind}`}>{text || ' '}</span>)}</pre>
+        <figcaption class="sr-only">Terminal demo of the holtkeeper command line</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<script>
+  import type { DemoStep } from './minute.ts'
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  for (const root of document.querySelectorAll<HTMLElement>('[data-demo]')) {
+    const steps: DemoStep[] = JSON.parse(root.dataset.steps ?? '[]')
+    const screen = root.querySelector<HTMLElement>('.screen')!
+    const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-step]')]
+    const replay = root.querySelector<HTMLButtonElement>('[data-replay]')!
+    let run = 0
+    let paused = false
+
+    const wait = async (ms: number, token: number) => {
+      let left = ms
+      while (left > 0) {
+        if (token !== run) return false
+        await sleep(40)
+        if (!paused) left -= 40
+      }
+      return token === run
+    }
+
+    const line = (kind: string, text: string) => {
+      const span = document.createElement('span')
+      span.className = `ln ${kind}`
+      span.textContent = text || ' '
+      screen.append(span)
+      return span
+    }
+
+    const mark = (index: number, duration?: number) => {
+      buttons.forEach((b, i) => {
+        if (i === index) b.setAttribute('aria-current', 'step')
+        else b.removeAttribute('aria-current')
+        b.toggleAttribute('data-done', i < index)
+        const bar = b.querySelector<HTMLElement>('.bar > span')
+        if (!bar) return
+        bar.getAnimations().forEach((a) => a.cancel())
+        if (i === index && duration && !reduce) {
+          bar.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration, fill: 'forwards' })
+        }
+      })
+    }
+
+    const show = (index: number) => {
+      const step = steps[index]
+      if (!step) return
+      mark(index)
+      screen.replaceChildren()
+      line('cmd', step.command)
+      for (const [kind, text] of step.output) line(kind, text)
+    }
+
+    const play = async (from: number) => {
+      const token = ++run
+      replay.hidden = true
+      for (let i = from; i < steps.length; i++) {
+        const step = steps[i]!
+        const typing = step.command.length * 32
+        mark(i, typing + 450 + step.output.length * 45 + step.pause)
+        screen.replaceChildren()
+        const cmd = line('cmd', '')
+        cmd.classList.add('typing')
+        for (const ch of step.command) {
+          cmd.textContent += ch
+          if (!(await wait(32, token))) return
+        }
+        cmd.classList.remove('typing')
+        if (!(await wait(450, token))) return
+        for (const [kind, text] of step.output) {
+          line(kind, text)
+          if (!(await wait(45, token))) return
+        }
+        if (!(await wait(step.pause, token))) return
+      }
+      buttons.forEach((b) => b.toggleAttribute('data-done', true))
+      replay.hidden = false
+    }
+
+    buttons.forEach((button, i) =>
+      button.addEventListener('click', () => {
+        if (reduce) show(i)
+        else void play(i)
+      }),
+    )
+    replay.addEventListener('click', () => void play(0))
+    root.addEventListener('mouseenter', () => {
+      paused = true
+      root.toggleAttribute('data-paused', true)
+    })
+    root.addEventListener('mouseleave', () => {
+      paused = false
+      root.toggleAttribute('data-paused', false)
+    })
+
+    if (reduce) {
+      show(0)
+      continue
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        observer.disconnect()
+        void play(0)
+      },
+      { threshold: 0.35 },
+    )
+    observer.observe(root)
+  }
+</script>
+
+<style>
+  .demo {
+    display: grid;
+    grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
+  }
+  .steps {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .step {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.9rem;
+    width: 100%;
+    padding: 0.8rem 0.9rem;
+    overflow: hidden;
+    border: 1px solid transparent;
+    border-radius: 0.9rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color 0.2s,
+      border-color 0.2s;
+  }
+  .step:hover {
+    background: var(--l-surface);
+  }
+  .step[aria-current='step'] {
+    border-color: var(--l-line-2);
+    background: var(--l-surface);
+  }
+  .num {
+    display: grid;
+    place-items: center;
+    width: 1.8rem;
+    height: 1.8rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.5rem;
+    color: var(--l-dim);
+    font: 500 0.72rem var(--l-mono);
+    transition:
+      color 0.2s,
+      border-color 0.2s,
+      background-color 0.2s;
+  }
+  .step[aria-current='step'] .num {
+    border-color: var(--l-amber-line);
+    background: var(--l-amber-soft);
+    color: var(--l-amber-ink);
+  }
+  .step[data-done] .num {
+    border-color: var(--l-teal-line);
+    color: var(--l-teal);
+  }
+  .copy {
+    display: grid;
+    gap: 0.15rem;
+  }
+  .title {
+    font-size: 0.95rem;
+    font-weight: 560;
+    letter-spacing: -0.01em;
+  }
+  .text {
+    color: var(--l-muted);
+    font-size: 0.84rem;
+    line-height: 1.45;
+  }
+  .step:not([aria-current='step']) .text {
+    color: var(--l-dim);
+  }
+  .bar {
+    position: absolute;
+    right: 0.9rem;
+    bottom: 0;
+    left: 0.9rem;
+    height: 2px;
+    overflow: hidden;
+    border-radius: 2px;
+  }
+  .bar > span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--l-amber), var(--l-amber-2));
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .step:not([aria-current='step']) .bar > span {
+    transform: scaleX(0) !important;
+  }
+  :global([data-paused]) .bar > span {
+    opacity: 0.5;
+  }
+
+  .term {
+    overflow: hidden;
+    border: 1px solid var(--t-line);
+    border-radius: 1rem;
+    background: var(--t-bg);
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.05) inset,
+      0 40px 100px -50px var(--l-glow);
+  }
+  .chrome {
+    display: flex;
+    gap: 0.9rem;
+    align-items: center;
+    height: 2.6rem;
+    padding: 0 0.9rem;
+    border-bottom: 1px solid var(--t-line);
+    background: var(--t-bar);
+  }
+  .dots {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .dots i {
+    width: 0.68rem;
+    height: 0.68rem;
+    border-radius: 50%;
+    background: rgb(255 238 210 / 0.14);
+  }
+  .where {
+    color: var(--t-dim);
+    font: 0.75rem var(--l-mono);
+  }
+  .replay {
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-left: auto;
+    padding: 0.25rem 0.6rem;
+    border: 1px solid var(--t-line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--t-text);
+    font: 500 0.75rem var(--l-font);
+    cursor: pointer;
+  }
+  .replay[hidden] {
+    display: none;
+  }
+  .replay:hover {
+    border-color: rgb(245 181 68 / 0.6);
+  }
+  .screen {
+    height: 25.5rem;
+    margin: 0;
+    padding: 1.1rem 1.25rem;
+    overflow: auto hidden;
+    color: var(--t-text);
+    font: 0.8rem/1.6 var(--l-mono);
+    scrollbar-width: thin;
+  }
+  .screen :global(.ln) {
+    display: block;
+    white-space: pre;
+  }
+  .screen :global(.cmd) {
+    margin-bottom: 0.35rem;
+    color: var(--t-text);
+  }
+  .screen :global(.cmd)::before {
+    content: '$ ';
+    color: var(--t-amber);
+  }
+  .screen :global(.typing)::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1.05em;
+    margin-left: 1px;
+    vertical-align: -0.15em;
+    background: var(--t-amber);
+    animation: blink 1s steps(1) infinite;
+  }
+  .screen :global(.dim) {
+    color: var(--t-dim);
+  }
+  .screen :global(.head) {
+    color: #fff;
+    font-weight: 600;
+  }
+  .screen :global(.ok) {
+    color: var(--t-teal);
+  }
+  .screen :global(.warn) {
+    color: var(--t-amber);
+  }
+  .screen :global(.bad) {
+    color: var(--t-red);
+  }
+  .screen :global(.key) {
+    color: var(--t-blue);
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  @media (max-width: 56rem) {
+    .demo {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .steps {
+      grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+    }
+    .screen {
+      height: 22rem;
+      font-size: 0.72rem;
+    }
+  }
+</style>

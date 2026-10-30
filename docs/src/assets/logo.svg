@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="hk-rim" x1="4" y1="3" x2="28" y2="29" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#d9861c"/>
+    </linearGradient>
+    <linearGradient id="hk-flame" x1="16" y1="9" x2="16" y2="23" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff1c9"/>
+      <stop offset=".55" stop-color="#f5b544"/>
+      <stop offset="1" stop-color="#e5891d"/>
+    </linearGradient>
+  </defs>
+  <path d="M16 3.2 27.1 9.6v12.8L16 28.8 4.9 22.4V9.6Z" stroke="url(#hk-rim)" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M16 9.4a3.9 3.9 0 0 1 2.1 7.2l.9 5.6a.8.8 0 0 1-.8.9h-4.4a.8.8 0 0 1-.8-.9l.9-5.6A3.9 3.9 0 0 1 16 9.4Z" fill="url(#hk-flame)"/>
+</svg>

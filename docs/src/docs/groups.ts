@@ -1,0 +1,87 @@
+/** Sidebar groups of the Modules topic, in display order, with the Starlight icon each one shows. */
+export const moduleGroups = [
+  { label: 'Core & contracts', icon: 'puzzle', open: true },
+  { label: 'Server & UI', icon: 'desktop', open: true },
+  { label: 'Auth & access', icon: 'padlock' },
+  { label: 'Storage', icon: 'database' },
+  { label: 'Forge', icon: 'gitlab' },
+  { label: 'Execution & jobs', icon: 'server' },
+  { label: 'Analyses', icon: 'analytics' },
+  { label: 'Quality', icon: 'star' },
+  { label: 'Vulnerabilities', icon: 'warning' },
+  { label: 'AI', icon: 'random' },
+  { label: 'Media', icon: 'pen' },
+  { label: 'Integrations', icon: 'slack' },
+  { label: 'Other', icon: 'list-format' },
+] as const
+
+type GroupLabel = (typeof moduleGroups)[number]['label']
+
+const byName: Record<string, GroupLabel> = {
+  core: 'Core & contracts',
+  api: 'Core & contracts',
+  report: 'Core & contracts',
+  changes: 'Core & contracts',
+  analyzer: 'Core & contracts',
+  analyzers: 'Core & contracts',
+  settings: 'Core & contracts',
+  'managed-config': 'Core & contracts',
+  cli: 'Server & UI',
+  server: 'Server & UI',
+  web: 'Server & UI',
+  access: 'Auth & access',
+  auth: 'Auth & access',
+  identities: 'Auth & access',
+  vault: 'Auth & access',
+  credentials: 'Auth & access',
+  'ssh-keys': 'Auth & access',
+  store: 'Storage',
+  artifacts: 'Storage',
+  forge: 'Forge',
+  'mr-policies': 'Forge',
+  exec: 'Execution & jobs',
+  'exec-container': 'Execution & jobs',
+  workspace: 'Execution & jobs',
+  jobs: 'Execution & jobs',
+  toolchain: 'Execution & jobs',
+  limits: 'Execution & jobs',
+  changelog: 'Analyses',
+  bundles: 'Analyses',
+  depgraph: 'Analyses',
+  fleet: 'Analyses',
+  'release-risk': 'Analyses',
+  delivery: 'Analyses',
+  licenses: 'Analyses',
+  i18n: 'Analyses',
+  review: 'Analyses',
+  propagate: 'Analyses',
+  port: 'Analyses',
+  tracker: 'Analyses',
+  quality: 'Quality',
+  vuln: 'Vulnerabilities',
+  agent: 'AI',
+  'agent-tools': 'AI',
+  'ai-usage': 'AI',
+  knowledge: 'AI',
+  media: 'Media',
+  assets: 'Media',
+  notify: 'Integrations',
+  confluence: 'Integrations',
+}
+
+const byPrefix: [string, GroupLabel][] = [
+  ['auth-', 'Auth & access'],
+  ['store-', 'Storage'],
+  ['forge-', 'Forge'],
+  ['exec-', 'Execution & jobs'],
+  ['depgraph-', 'Analyses'],
+  ['quality-', 'Quality'],
+  ['vuln-', 'Vulnerabilities'],
+  ['agent-', 'AI'],
+  ['notify-', 'Integrations'],
+]
+
+/** The sidebar group of a module, by its directory name. */
+export function groupOf(dir: string): GroupLabel {
+  return byName[dir] ?? byPrefix.find(([prefix]) => dir.startsWith(prefix))?.[1] ?? 'Other'
+}

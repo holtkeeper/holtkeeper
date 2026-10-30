@@ -1,0 +1,61 @@
+image:
+  repository: registry.example.com/holtkeeper
+  tag: '1.2.3'
+  pullSecrets:
+    - name: registry
+existingSecret: holtkeeper-secrets
+env:
+  - name: HOLTKEEPER_S3_BUCKET
+    value: holtkeeper
+  - name: HOLTKEEPER_PUBLIC_URL
+    value: https://holtkeeper.example.com
+config:
+  content: |
+    import { defineConfig } from '@holtkeeper/core'
+    export default defineConfig({ forges: {} })
+web:
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-body-size: 20m
+    hosts:
+      - host: holtkeeper.example.com
+        paths: ['/']
+    tls:
+      - secretName: holtkeeper-tls
+        hosts: [holtkeeper.example.com]
+  hpa:
+    enabled: true
+worker:
+  concurrency: 1
+  miseCache:
+    type: pvc
+    storageClassName: nfs
+scheduler:
+  enabled: true
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: prometheus
+keda:
+  enabled: true
+networkPolicy:
+  enabled: true
+  webIngressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  metricsFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+  extraEgress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: databases
+      ports:
+        - { port: 5432, protocol: TCP }
+        - { port: 9000, protocol: TCP }

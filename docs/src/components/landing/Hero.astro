@@ -1,0 +1,307 @@
+---
+import { Icon } from '@astrojs/starlight/components'
+
+import CopyIcon from './CopyIcon.astro'
+
+const tabs = [
+  {
+    id: 'docker',
+    label: 'Docker',
+    command: 'docker compose -f deploy/docker-compose.yml up',
+    hint: 'web, workers, Postgres and MinIO · secrets from deploy/.env.example',
+  },
+  {
+    id: 'k8s',
+    label: 'Kubernetes',
+    command: 'helm install holtkeeper deploy/helm/holtkeeper',
+    hint: 'web, worker and scheduler Deployments · optional KEDA job per pod',
+  },
+  {
+    id: 'cli',
+    label: 'CLI',
+    command: 'bunx holtkeeper audit . --fix',
+    hint: 'scan with OSV-Scanner, fix, rescan · exits 1 while findings remain',
+  },
+]
+---
+
+<section class="hero">
+  <div class="l-grid-bg"></div>
+  <div class="glow" aria-hidden="true"></div>
+  <div class="l-wrap inner">
+    <a class="badge" href="/guide/plan/">
+      <span class="dot"></span>
+      Open source · self-hosted · MIT
+      <Icon name="right-arrow" size="0.85rem" />
+    </a>
+    <h1>
+      Keep every repository<br />
+      <span class="l-grad">in shape.</span>
+    </h1>
+    <p class="lead">
+      A self-hosted automation engine for fleets of GitLab and GitHub repositories: AI code review with one-click
+      suggestions, dependency waves that fix breaking changes, audits and releases — built on contracts you can swap.
+    </p>
+    <div class="cta">
+      <a class="l-btn l-btn-primary" href="/guide/getting-started/">
+        Get started
+        <Icon name="right-arrow" />
+      </a>
+      <a class="l-btn l-btn-ghost" href="#how">See how it works</a>
+    </div>
+
+    <div class="install">
+      {
+        tabs.map((t, i) => (
+          <>
+            <input type="radio" name="install" id={`install-${t.id}`} checked={i === 0} />
+            <label for={`install-${t.id}`}>{t.label}</label>
+          </>
+        ))
+      }
+      <span class="fill" aria-hidden="true"></span>
+      {
+        tabs.map((t) => (
+          <div class={`pane pane-${t.id}`}>
+            <div class="line">
+              <span class="prompt">$</span>
+              <code>{t.command}</code>
+              <button class="copy" type="button" data-copy={t.command} aria-label={`Copy: ${t.command}`}>
+                <CopyIcon />
+              </button>
+            </div>
+            <p class="hint">{t.hint}</p>
+          </div>
+        ))
+      }
+    </div>
+
+    <ul class="badges" aria-label="Built with">
+      <li><span>License</span>MIT</li>
+      <li><span>Types</span>TypeScript 7</li>
+      <li><span>Runtime</span>Bun 1.4</li>
+      <li><span>Forge</span>GitLab · GitHub soon</li>
+    </ul>
+  </div>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: 6.5rem 0 5.5rem;
+  }
+  .glow {
+    position: absolute;
+    top: -22rem;
+    left: 50%;
+    width: min(72rem, 140vw);
+    height: 44rem;
+    transform: translateX(-50%);
+    background:
+      radial-gradient(closest-side, var(--l-glow), transparent 72%),
+      radial-gradient(30rem 16rem at 72% 70%, var(--l-teal-soft), transparent 70%);
+    filter: blur(24px);
+    pointer-events: none;
+  }
+  .inner {
+    position: relative;
+    display: grid;
+    justify-items: center;
+    gap: 1.6rem;
+    text-align: center;
+  }
+  .badge {
+    display: inline-flex;
+    gap: 0.6rem;
+    align-items: center;
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 999px;
+    background: var(--l-surface);
+    color: var(--l-muted);
+    font-size: 0.85rem;
+    text-decoration: none;
+    transition:
+      border-color 0.15s,
+      color 0.15s;
+  }
+  .badge:hover {
+    border-color: var(--l-amber-line);
+    color: var(--l-text);
+  }
+  .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+    background: var(--l-teal);
+    animation: ping 2.2s infinite;
+  }
+  h1 {
+    font-size: clamp(2.9rem, 1.2rem + 6.4vw, 6rem);
+    font-weight: 680;
+    letter-spacing: -0.055em;
+    line-height: 0.98;
+    text-wrap: balance;
+  }
+  .lead {
+    max-width: 44rem;
+    color: var(--l-muted);
+    font-size: clamp(1.05rem, 0.95rem + 0.45vw, 1.28rem);
+    line-height: 1.55;
+    text-wrap: pretty;
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 0.25rem;
+  }
+
+  .install {
+    display: grid;
+    grid-template-columns: auto auto auto 1fr;
+    width: min(100%, 40rem);
+    margin-top: 1.5rem;
+    overflow: hidden;
+    border: 1px solid var(--l-line-2);
+    border-radius: 1rem;
+    background: var(--t-bg);
+    text-align: left;
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.05) inset,
+      0 30px 80px -40px var(--l-glow);
+  }
+  input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  label {
+    padding: 0.7rem 1.1rem;
+    border-bottom: 1px solid var(--t-line);
+    color: var(--t-dim);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+  label:hover {
+    color: var(--t-text);
+  }
+  .fill {
+    border-bottom: 1px solid var(--t-line);
+  }
+  input:checked + label {
+    border-bottom-color: var(--t-amber);
+    color: var(--t-text);
+    box-shadow: 0 1px 0 0 var(--t-amber);
+  }
+  input:focus-visible + label {
+    outline: 2px solid var(--t-amber);
+    outline-offset: -2px;
+  }
+  .pane {
+    display: none;
+    grid-column: 1 / -1;
+    padding: 1.05rem 1.1rem 0.95rem;
+  }
+  #install-docker:checked ~ .pane-docker,
+  #install-k8s:checked ~ .pane-k8s,
+  #install-cli:checked ~ .pane-cli {
+    display: block;
+  }
+  .line {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    font: 0.92rem var(--l-mono);
+  }
+  .prompt {
+    color: var(--t-amber);
+  }
+  code {
+    flex: 1;
+    overflow-x: auto;
+    color: var(--t-text);
+    font: inherit;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+  .copy {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--t-line);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: var(--t-dim);
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
+  }
+  .copy:hover {
+    border-color: rgb(245 181 68 / 0.5);
+    color: var(--t-text);
+  }
+  .copy[data-copied] {
+    border-color: var(--t-teal);
+    color: var(--t-teal);
+  }
+  .hint {
+    margin-top: 0.55rem;
+    padding-left: 1.45rem;
+    color: var(--t-dim);
+    font: 0.75rem var(--l-mono);
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin: 0.25rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .badges li {
+    display: inline-flex;
+    gap: 0.55rem;
+    align-items: center;
+    padding-right: 0.55rem;
+    overflow: hidden;
+    border: 1px solid var(--l-line);
+    border-radius: 0.45rem;
+    background: var(--l-surface);
+    color: var(--l-text);
+    font: 0.72rem/1 var(--l-mono);
+  }
+  .badges li > span {
+    padding: 0.4rem 0.55rem;
+    border-right: 1px solid var(--l-line);
+    background: var(--l-bg-2);
+    color: var(--l-dim);
+  }
+
+  @keyframes ping {
+    0% {
+      box-shadow: 0 0 0 0 var(--l-teal-line);
+    }
+    75%,
+    100% {
+      box-shadow: 0 0 0 8px transparent;
+    }
+  }
+  @media (max-width: 40rem) {
+    .hero {
+      padding-top: 4.5rem;
+    }
+    .hint {
+      padding-left: 0;
+    }
+  }
+</style>

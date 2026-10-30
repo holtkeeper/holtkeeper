@@ -1,0 +1,15 @@
+{
+  "name": "@holtkeeper/quality-duplication",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/quality": "workspace:*",
+    "jscpd": "^5.4.2",
+    "zod": "^4.6.7"
+  }
+}

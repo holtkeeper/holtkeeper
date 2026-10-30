@@ -1,0 +1,275 @@
+---
+import { getEntry } from 'astro:content'
+import { Box, Container, Database, HardDrive, Server, Timer } from 'lucide-react'
+
+import CopyIcon from './CopyIcon.astro'
+
+const guide = await getEntry('docs', 'guide/deployment')
+---
+
+<section class="l-section" id="deploy">
+  <div class="l-wrap">
+    <div class="l-head l-reveal">
+      <span class="l-eyebrow">Deploy</span>
+      <h2>Runs where <span class="l-grad">you do.</span></h2>
+      <p>
+        One image for every role: <code>holtkeeper serve --role web|worker|scheduler</code>. Start with a single
+        container and SQLite; add Postgres and S3 when more than one process shares the work.
+      </p>
+      {guide && <a class="more" href="/guide/deployment/">Read the deployment guide →</a>}
+    </div>
+
+    <div class="cards">
+      <article class="l-card card l-reveal">
+        <header>
+          <span class="tag"><Container size={14} /> Docker Compose</span>
+          <h3>Web, workers, Postgres and MinIO</h3>
+        </header>
+        <div class="topo">
+          <div class="node main">
+            <Server size={15} />
+            <span><b>web</b><i>API · panel · webhooks · scheduler</i></span>
+          </div>
+          <div class="workers">
+            {
+              [1, 2, 3].map((n) => (
+                <div class="node">
+                  <Box size={14} />
+                  <span>
+                    <b>worker {n}</b>
+                    <i>jobs · mise cache</i>
+                  </span>
+                </div>
+              ))
+            }
+          </div>
+          <div class="infra">
+            <div class="node dim"><Database size={14} /><span><b>postgres</b></span></div>
+            <div class="node dim"><HardDrive size={14} /><span><b>minio</b><i>artifacts</i></span></div>
+          </div>
+        </div>
+        <ul class="facts">
+          <li>Read-only root filesystem, every capability dropped, <code>no-new-privileges</code></li>
+          <li><code>--max-jobs 1</code> gives every job a fresh container</li>
+          <li>Single-container mode: SQLite and artifacts in one volume</li>
+        </ul>
+        <button class="cmd" type="button" data-copy="docker compose -f deploy/docker-compose.yml up -d --scale worker=3">
+          <span class="p">$</span> docker compose -f deploy/docker-compose.yml up -d --scale worker=3
+          <CopyIcon />
+        </button>
+      </article>
+
+      <article class="l-card card l-reveal">
+        <header>
+          <span class="tag"><Timer size={14} /> Kubernetes</span>
+          <h3>A Helm chart with one job per pod</h3>
+        </header>
+        <div class="topo">
+          <div class="node main">
+            <Server size={15} />
+            <span><b>web ×2</b><i>HPA · PDB · leader-elected scheduler</i></span>
+          </div>
+          <div class="workers pods">
+            {
+              ['job 4812', 'job 4813', 'job 4814', 'job 4815'].map((n, i) => (
+                <div class="node pod" style={`--i:${i}`}>
+                  <Box size={14} />
+                  <span>
+                    <b>{n}</b>
+                    <i>--max-jobs 1</i>
+                  </span>
+                </div>
+              ))
+            }
+          </div>
+          <div class="infra">
+            <div class="node dim"><Database size={14} /><span><b>Postgres</b></span></div>
+            <div class="node dim"><HardDrive size={14} /><span><b>S3</b><i>artifacts</i></span></div>
+          </div>
+        </div>
+        <ul class="facts">
+          <li>KEDA scales workers on <code>holtkeeper_jobs_queued</code>, or runs a Kubernetes Job per queued job</li>
+          <li>SIGTERM drains running jobs, then requeues what is left</li>
+          <li>Non-root pods, NetworkPolicy for worker egress, ServiceMonitor for <code>/metrics</code></li>
+        </ul>
+        <button class="cmd" type="button" data-copy="helm install holtkeeper deploy/helm/holtkeeper">
+          <span class="p">$</span> helm install holtkeeper deploy/helm/holtkeeper
+          <CopyIcon />
+        </button>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .l-head code {
+    padding: 0.1rem 0.4rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.4rem;
+    color: var(--l-text);
+    font: 0.86em var(--l-mono);
+  }
+  .more {
+    justify-self: start;
+    color: var(--l-amber-ink);
+    font-weight: 500;
+    text-decoration: none;
+  }
+  .more:hover {
+    text-decoration: underline;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    padding: 1.75rem;
+  }
+  header {
+    display: grid;
+    gap: 0.5rem;
+  }
+  .tag {
+    display: inline-flex;
+    gap: 0.45rem;
+    align-items: center;
+    color: var(--l-amber-ink);
+    font: 500 0.72rem var(--l-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  h3 {
+    font-size: 1.35rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+  }
+  .topo {
+    position: relative;
+    display: grid;
+    gap: 0.9rem;
+    padding: 1.1rem;
+    border: 1px solid var(--l-line);
+    border-radius: 0.9rem;
+    background:
+      radial-gradient(var(--l-line) 1px, transparent 1px) 0 0 / 14px 14px,
+      var(--l-bg-2);
+  }
+  .workers,
+  .infra {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+    gap: 0.5rem;
+  }
+  .node {
+    position: relative;
+    display: flex;
+    gap: 0.55rem;
+    align-items: center;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.6rem;
+    background: var(--l-card);
+    color: var(--l-muted);
+  }
+  .node span {
+    display: grid;
+    min-width: 0;
+  }
+  .node b {
+    color: var(--l-text);
+    font: 500 0.76rem var(--l-mono);
+  }
+  .node i {
+    overflow: hidden;
+    color: var(--l-dim);
+    font: normal 0.66rem var(--l-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .node.main {
+    border-color: var(--l-amber-line);
+    background: linear-gradient(180deg, var(--l-amber-soft), var(--l-card));
+    color: var(--l-amber-ink);
+  }
+  .node.dim {
+    border-style: dashed;
+  }
+  .pod {
+    animation: pod 6s ease-in-out infinite;
+    animation-delay: calc(var(--i) * 1.5s);
+  }
+  @keyframes pod {
+    0%,
+    100% {
+      border-color: var(--l-line-2);
+    }
+    15%,
+    55% {
+      border-color: var(--l-teal-line);
+      box-shadow: 0 0 20px -8px var(--l-teal);
+    }
+    70% {
+      opacity: 0.55;
+    }
+  }
+  .facts {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    color: var(--l-muted);
+    font-size: 0.9rem;
+    list-style: none;
+  }
+  .facts li {
+    position: relative;
+    padding-left: 1.1rem;
+  }
+  .facts li::before {
+    content: '';
+    position: absolute;
+    top: 0.62em;
+    left: 0;
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    background: var(--l-teal);
+  }
+  .facts code {
+    color: var(--l-text);
+    font: 0.85em var(--l-mono);
+  }
+  .cmd {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-top: auto;
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--t-line);
+    border-radius: 0.75rem;
+    background: var(--t-bg);
+    color: var(--t-text);
+    font: 0.82rem var(--l-mono);
+    text-align: left;
+    cursor: pointer;
+  }
+  .cmd :global(svg) {
+    margin-left: auto;
+    color: var(--t-dim);
+  }
+  .cmd[data-copied] :global(svg) {
+    color: var(--t-teal);
+  }
+  .p {
+    color: var(--t-amber);
+  }
+  @media (max-width: 56rem) {
+    .cards {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

@@ -1,0 +1,71 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 13,
+        "endLoc": {
+          "column": 1,
+          "line": 13,
+          "position": 369
+        },
+        "name": "src/a.ts",
+        "start": 1,
+        "startLoc": {
+          "column": 21,
+          "line": 1,
+          "position": 21
+        }
+      },
+      "format": "typescript",
+      "fragment": "export function total(items: { price: number; qty: number }[]) {\n  let sum = 0\n  for (const item of items) {\n    if (item.qty > 0) {\n      sum += item.price * item.qty\n    } else {\n      console.warn('skipping item with no quantity', item)\n    }\n  }\n  const tax = sum * 0.2\n  const shipping = sum > 100 ? 0 : 10\n  return Math.round((sum + tax + shipping) * 100) / 100\n}",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 13,
+      "secondFile": {
+        "end": 13,
+        "endLoc": {
+          "column": 1,
+          "line": 13,
+          "position": 374
+        },
+        "name": "src/b.ts",
+        "start": 1,
+        "startLoc": {
+          "column": 26,
+          "line": 1,
+          "position": 26
+        }
+      },
+      "tokens": 93
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-10-29T22:47:24.687Z",
+    "formats": {
+      "typescript": {
+        "clones": 1,
+        "duplicatedLines": 13,
+        "duplicatedTokens": 93,
+        "lines": 26,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 50.0,
+        "percentageTokens": 48.4375,
+        "sources": 2,
+        "tokens": 192
+      }
+    },
+    "total": {
+      "clones": 1,
+      "duplicatedLines": 13,
+      "duplicatedTokens": 93,
+      "lines": 26,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 50.0,
+      "percentageTokens": 48.4375,
+      "sources": 2,
+      "tokens": 192
+    }
+  }
+}

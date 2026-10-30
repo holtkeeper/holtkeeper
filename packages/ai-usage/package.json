@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/ai-usage",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

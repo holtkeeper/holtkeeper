@@ -1,0 +1,24 @@
+---
+import Pipeline from './pipeline/Pipeline.tsx'
+---
+
+<section class="l-section how" id="how">
+  <div class="l-wrap">
+    <div class="l-head l-head-center l-reveal">
+      <span class="l-eyebrow">How it works</span>
+      <h2>Events in. <span class="l-grad">Fixes out.</span></h2>
+      <p>
+        Webhooks, tags, schedules and comment commands become jobs. The engine applies merge request policies, queues
+        within each credential's limits, checks out the repository with its own toolchain and hands analyzers the
+        tools they need. Results land where your team already looks.
+      </p>
+    </div>
+    <Pipeline client:visible />
+  </div>
+</section>
+
+<style>
+  .how {
+    overflow: hidden;
+  }
+</style>

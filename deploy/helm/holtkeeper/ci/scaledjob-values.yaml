@@ -1,0 +1,7 @@
+existingSecret: holtkeeper-secrets
+keda:
+  enabled: true
+  scaledJob:
+    enabled: true
+networkPolicy:
+  enabled: true

@@ -1,0 +1,18 @@
+{
+  "name": "@holtkeeper/api",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/auth": "workspace:*",
+    "@holtkeeper/changes": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/vuln": "workspace:*"
+  }
+}

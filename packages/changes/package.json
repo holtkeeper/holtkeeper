@@ -1,0 +1,13 @@
+{
+  "name": "@holtkeeper/changes",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/forge": "workspace:*",
+    "diff": "^9.0.0"
+  }
+}

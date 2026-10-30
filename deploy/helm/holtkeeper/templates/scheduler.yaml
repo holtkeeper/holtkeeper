@@ -1,0 +1,63 @@
+{{- if .Values.scheduler.enabled }}
+{{- $component := dict "ctx" $ "component" "scheduler" }}
+# Every replica contends for the leader lease in the store; only the holder enqueues schedules and
+# runs rotation and retention sweeps, the others take over within one lease TTL.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-scheduler
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  replicas: {{ .Values.scheduler.replicas }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "holtkeeper.selectorLabels" $component | nindent 8 }}
+      annotations:
+        {{- include "holtkeeper.podAnnotations" . | nindent 8 }}
+    spec:
+      {{- include "holtkeeper.podSpecCommon" . | nindent 6 }}
+      containers:
+        - name: scheduler
+          image: {{ include "holtkeeper.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [-c, /app/config/holtkeeper.config.ts, --role, scheduler]
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+          env:
+            {{- include "holtkeeper.env" . | nindent 12 }}
+          {{- with (include "holtkeeper.envFrom" . | trim) }}
+          envFrom:
+            {{- . | nindent 12 }}
+          {{- end }}
+          {{- include "holtkeeper.probes" . | nindent 10 }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml .Values.scheduler.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "holtkeeper.configMount" . | nindent 12 }}
+      volumes:
+        {{- include "holtkeeper.configVolume" . | nindent 8 }}
+      {{- include "holtkeeper.scheduling" .Values.scheduler | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-scheduler
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "holtkeeper.selectorLabels" $component | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
+{{- end }}

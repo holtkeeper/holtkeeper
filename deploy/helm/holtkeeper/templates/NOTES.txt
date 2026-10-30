@@ -1,0 +1,14 @@
+Holtkeeper {{ .Chart.AppVersion }} is installed.
+
+  web:       {{ .Values.web.replicas }} replica(s), roles {{ include "holtkeeper.webRoles" . }}
+  workers:   {{ if and .Values.keda.enabled .Values.keda.scaledJob.enabled }}one Kubernetes Job per queued job (KEDA){{ else if .Values.keda.enabled }}scaled by KEDA on holtkeeper_jobs_queued{{ else }}{{ .Values.worker.replicas }} replica(s){{ end }}
+  scheduler: {{ if .Values.scheduler.enabled }}{{ .Values.scheduler.replicas }} dedicated replica(s){{ else }}inside the web pods{{ end }}, leader-elected through the store
+
+{{- if not .Values.existingSecret }}
+
+WARNING: existingSecret is empty; the default config reads HOLTKEEPER_VAULT_KEY and other secrets
+from the environment, so the pods will not start without them.
+{{- end }}
+
+Probes: /healthz (alive), /readyz (store, migrations, artifacts, not draining). Metrics: /metrics.
+More than one process needs Postgres (HOLTKEEPER_DATABASE_URL) and S3 artifacts (HOLTKEEPER_S3_BUCKET).

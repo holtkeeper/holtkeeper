@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/examples",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@holtkeeper/auth-none": "workspace:*",
+    "@holtkeeper/core": "workspace:*",
+    "@holtkeeper/store-sqlite": "workspace:*",
+    "@holtkeeper/vuln": "workspace:*",
+    "@holtkeeper/vuln-go": "workspace:*",
+    "@holtkeeper/vuln-js": "workspace:*",
+    "@holtkeeper/vuln-osv": "workspace:*"
+  }
+}

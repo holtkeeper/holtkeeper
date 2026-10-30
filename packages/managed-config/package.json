@@ -1,0 +1,17 @@
+{
+  "name": "@holtkeeper/managed-config",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/core": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/forge-gitlab": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "croner": "^9",
+    "zod": "^4.6.7"
+  }
+}

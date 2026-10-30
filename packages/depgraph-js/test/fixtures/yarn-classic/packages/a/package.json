@@ -1,0 +1,8 @@
+{
+  "name": "@fx/a",
+  "version": "1.0.0",
+  "dependencies": {
+    "@fx/b": "1.0.0",
+    "debug": "^4.3.0"
+  }
+}

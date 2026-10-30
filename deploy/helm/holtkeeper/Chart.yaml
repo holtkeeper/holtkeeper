@@ -1,0 +1,7 @@
+apiVersion: v2
+name: holtkeeper
+description: Holtkeeper — web API/UI, job workers and a leader-elected scheduler on one image
+type: application
+version: 0.1.0
+appVersion: '0.0.0'
+keywords: [holtkeeper, dependencies, security, gitlab]

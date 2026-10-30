@@ -1,0 +1,14 @@
+{
+  "name": "@holtkeeper/auth-password",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/auth": "workspace:*",
+    "@holtkeeper/forge": "workspace:*"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@holtkeeper/vault",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/forge": "workspace:*"
+  }
+}

@@ -1,0 +1,41 @@
+{{- if .Values.web.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-web
+  labels:
+    {{- include "holtkeeper.componentLabels" (dict "ctx" $ "component" "web") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.web.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "web") | nindent 6 }}
+{{- end }}
+{{- if and .Values.worker.pdb.enabled (not (and .Values.keda.enabled .Values.keda.scaledJob.enabled)) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-worker
+  labels:
+    {{- include "holtkeeper.componentLabels" (dict "ctx" $ "component" "worker") | nindent 4 }}
+spec:
+  maxUnavailable: {{ .Values.worker.pdb.maxUnavailable }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 6 }}
+{{- end }}
+{{- if and .Values.scheduler.enabled .Values.scheduler.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-scheduler
+  labels:
+    {{- include "holtkeeper.componentLabels" (dict "ctx" $ "component" "scheduler") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.scheduler.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "scheduler") | nindent 6 }}
+{{- end }}

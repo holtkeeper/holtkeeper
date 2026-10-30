@@ -11,54 +11,43 @@ This repository holds the public engine and generic plugins. The concrete setup 
 - **Config as code.** `defineConfig()` with full typing, presets and `extends` (like Renovate), repository groups and overrides per group or repository.
 - **CLI first.** Any task runs with a single command (`holtkeeper run audit --repo games/*`) — locally, from cron or from a scheduled pipeline. The server, webhooks, UI and bot are built on top of the same core.
 - **Safe by default.** `dryRun` mode, every change goes through an MR rather than a direct push, dangerous actions (release, deploy) require human confirmation.
+- **No build step.** Libraries export TypeScript source and Bun runs it directly; see [development.md](development.md#no-build-step).
 - **Reuse, don't rewrite.** Renovate for dependency updates, Chat SDK for bots, Claude Agent SDK for agentic tasks, gitbeaker/octokit for APIs.
 
 ## Stack
 
-| Area | Choice | Why |
-| --- | --- | --- |
-| Runtime, package manager, tests, bundler | **Bun 1.4** | One tool instead of node+pnpm+vitest+tsup, built-in workspaces, `bun:sqlite`, `Bun.$` for shell |
-| Type checking | **TypeScript 7** (tsgo, the native Go compiler) | Stable since 7.0, much faster type checking; used only as a checker (`tsc --noEmit`), Bun runs the code |
-| Linter | **oxlint** (+ type-aware rules via tsgolint) | Fastest option, compatible with ESLint/typescript-eslint rules, runs on the same tsgo |
-| Formatter | **oxfmt** | Prettier-compatible output, an order of magnitude faster; same Oxc ecosystem |
-| Dead code | **knip** | Unused files, exports and dependencies across the monorepo |
-| Git hooks | **lefthook** | Single binary, parallel execution |
-| Validation, config schema | **zod 4** | Types from schemas, `toJSONSchema()` for config autocompletion and UI forms |
-| HTTP server, API | **Hono** | Runs on `Bun.serve`, typed RPC client for the web app, webhook middleware |
-| Database | **SQLite (`bun:sqlite`) + Drizzle ORM** | Zero infrastructure to start; Drizzle allows moving to Postgres without a rewrite |
-| Job queue | Custom, on top of the same database | Retries, per-repository concurrency, run history; no Redis to start |
-| Web | **Vite 8 + React 19 + TanStack Router/Query** | Fast builds, typed routing, Hono RPC as the client |
-| Chat bot | **Chat SDK** (`chat` + `@chat-adapter/slack`) | Already an abstraction over Slack/Teams/Discord/Google Chat with cards, buttons and slash commands |
-| GitLab / GitHub API | **@gitbeaker/rest**, **@octokit/rest** | Complete typed clients |
-| AI agent | **Claude Agent SDK** | An agent with access to a repository checkout: reads code, runs commands, edits files |
-| Dependency updates | **Renovate** (as a CLI) | No reinventing package managers, changelogs, grouping and schedules |
-| CI for this repository | GitHub Actions | lint → typecheck → test → knip |
+| Area                                     | Choice                                                                                                                                             | Why                                                                                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime, package manager, tests, bundler | **Bun 1.4**                                                                                                                                        | One tool instead of node+pnpm+vitest+tsup, runs TypeScript without a build, built-in workspaces, `bun:sqlite`, `Bun.$` for shell |
+| Type checking                            | **TypeScript 7** (tsgo, the native Go compiler)                                                                                                    | Stable since 7.0, much faster type checking; used only as a checker (`tsc --noEmit`), Bun runs the code                          |
+| Linter                                   | **oxlint** (+ type-aware rules via tsgolint)                                                                                                       | Fastest option, compatible with ESLint/typescript-eslint rules, runs on the same tsgo                                            |
+| Formatter                                | **oxfmt**                                                                                                                                          | Prettier-compatible output, an order of magnitude faster; same Oxc ecosystem                                                     |
+| Dead code                                | **knip**                                                                                                                                           | Unused files, exports and dependencies across the monorepo                                                                       |
+| Git hooks                                | **lefthook**                                                                                                                                       | Single binary, parallel execution                                                                                                |
+| Validation, config schema                | **zod 4**                                                                                                                                          | Types from schemas, `toJSONSchema()` for config autocompletion and UI forms                                                      |
+| HTTP server, API                         | **Hono**                                                                                                                                           | Runs on `Bun.serve`, typed RPC client for the web app, webhook middleware                                                        |
+| Database                                 | **SQLite (`bun:sqlite`)** behind the `Store` contract                                                                                              | Zero infrastructure; another database is another `Store` implementation passing the shared contract tests                        |
+| Job queue                                | Custom, on top of the same database                                                                                                                | Retries, per-repository concurrency, run history; no Redis to start                                                              |
+| Web                                      | **Vite 8 + React 19 + TanStack Router/Query**                                                                                                      | Fast builds, typed routing, Hono RPC as the client                                                                               |
+| UI kit                                   | **HeroUI 3** (React Aria + Tailwind CSS 4), **Motion** for page and list transitions, **Recharts** for charts, **TanStack Table** for large tables | Polished, animated components out of the box with strong accessibility; Motion covers transitions HeroUI's CSS animations do not |
+| Chat bot                                 | **Chat SDK** (`chat` + `@chat-adapter/slack`)                                                                                                      | Already an abstraction over Slack/Teams/Discord/Google Chat with cards, buttons and slash commands                               |
+| GitLab / GitHub API                      | **@gitbeaker/rest**, **@octokit/rest**                                                                                                             | Complete typed clients                                                                                                           |
+| AI agent                                 | **Claude Agent SDK**                                                                                                                               | An agent with access to a repository checkout: reads code, runs commands, edits files                                            |
+| Vulnerability scanning                   | **OSV-Scanner** (binary)                                                                                                                           | Lockfile-based, many ecosystems, OSV ids                                                                                         |
+| Dependency updates                       | **Renovate** (as a CLI)                                                                                                                            | No reinventing package managers, changelogs, grouping and schedules                                                              |
+| CI for this repository                   | GitHub Actions                                                                                                                                     | lint → typecheck → test → knip                                                                                                   |
 
 Turborepo is not needed yet: `bun run --filter` is enough. Revisit if builds get slow.
 
 ## Monorepo layout
 
-```
-apps/
-  cli/              holtkeeper CLI: run, plan, validate-config
-  server/           Hono: webhooks, API, scheduler, queue workers
-  web/              web interface
-packages/
-  core/             defineConfig, config schema, plugin contract, task context, logger
-  forge/            GitForge interface + shared types + contract tests for adapters
-  forge-gitlab/     GitLab adapter
-  forge-github/     GitHub adapter
-  workspace/        cloning, git operations, package manager detection, command execution
-  agent/            AI agent interface + Claude Agent SDK adapter
-  chat/             notification/bot interface on top of Chat SDK
-  storage/          Drizzle schema, migrations, queue
-plugins/
-  review/           AI code review
-  browserslist/     caniuse-lite / browserslist updates
-  deps/             package update propagation + AI refactoring
-  audit/            vulnerability audit, autofix, allowlist
-  release/          develop → main, tags, deploy
-```
+- `apps/` — `cli`, `server`, `web`
+- `packages/` — contracts (`core`, `forge`, `exec`, `store`, `access`, `auth`, `report`, `changes`, `analyzer`, `vuln`, `quality`, `agent`) and their replaceable implementations
+- `plugins/` — automations on the plugin contract
+- `fixtures/` — vulnerable sample projects for tests
+- `examples/dev/` — local development config and demo data
+
+The full module list with links is in [docs/README.md](README.md). Every module has its own `docs/` folder.
 
 ## Core abstractions
 
@@ -146,10 +135,13 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 
 ### 4. Vulnerability audit
 
-- On a schedule and on MRs that touch the lockfile: `bun audit` / `npm audit` / `pnpm audit` depending on the repository, normalized into a shared format (GHSA/CVE, package, path, severity).
-- Autofix: update within range → `overrides`/`resolutions` → MR.
-- Allowlist: entries with a reason, author and expiry date; global, per group or per repository. Expired entries surface again.
-- Applicability rules: project properties in the config (`ssr: false`, `runtime: browser`) + agent classification of the vulnerability (does it affect SSR/Node-only code, is it a dev dependency). The agent proposes an allowlist entry, a human confirms (an MR to the private config or a Slack button).
+Status: scanner, fixers, allowlist and `holtkeeper audit` exist (see [packages/vuln](../packages/vuln/docs/README.md)); the plugin that opens MRs comes with the workspace and forge adapters.
+
+- One contract for every language: a `Scanner` produces `Finding`s, a chain of `Fixer`s changes the project, a rescan decides what was resolved. Ecosystems are added as fixer packages without touching the rest.
+- Scanning: **OSV-Scanner** reads lockfiles of any supported ecosystem (JS, Go, Python, Java, PHP, Rust, Ruby…) without installing dependencies.
+- Fixing: `osv-scanner fix` first where it works (npm `package-lock.json`, Maven `pom.xml`), then ecosystem fixers for the rest: JavaScript (bun, pnpm, yarn, npm leftovers — ranges and overrides), Go (`go get`). Next candidates: Python (uv, pip-tools, poetry), Rust, PHP.
+- Allowlist: entries with a reason, author, expiry date, package, path globs and trait conditions (`when: { ssr: false }`), applied by Holtkeeper after scanning so it is scanner-independent. Expired entries surface again. The agent will later propose entries for a human to confirm.
+- Optional sources later: Trivy for containers and IaC, Dependabot alerts when the forge is GitHub.
 
 ### 5. Releases
 
@@ -159,16 +151,41 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 - Everything is described as steps in the config (projects have different flows), with human confirmation on dangerous steps — a Slack or UI button.
 - Batch mode: "release all games in group X" with one command.
 
+## Analyses
+
+Every analysis produces its own data and renders it into the universal report format of [`@holtkeeper/report`](../packages/report/docs/README.md), so one UI shows all of them and compares any two runs (by default the previous release):
+
+- **Changelog** — commits between releases or tags, grouped by type and scope, identical messages collapsed, links to commits, merge requests and tickets.
+- **Bundle size** — per entrypoint and per package (source maps), raw/gzip/brotli, growth between releases. Any bundler.
+- **Dependencies** — workspace graph, package graph from lockfiles, module imports; cycles and libraries in several versions. JS and Go sources; more are new `GraphSource`s.
+- **Code quality** — naming conventions inferred from the project (ast-grep), test gaps from coverage with example tests written by the agent in the project's style, linters through SARIF (oxlint, ESLint, Biome, golangci-lint, ruff, Semgrep, ast-grep), duplication (jscpd).
+
+Suggested code changes from any analysis share one shape ([`@holtkeeper/changes`](../packages/changes/docs/README.md)) and can be accepted from a report as a patch or a merge request.
+
+Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run on every tag and on a schedule; fleet drift (library versions and shared configs across repositories); release risk; DORA and CI health; secret and license scanning; asset budgets; i18n gaps; dead code (knip); Sentry errors per release.
+
 ## Interfaces
 
-- **CLI** — the first interface: `run <plugin>`, `--repo`/`--group`, `--dry-run`, `validate-config`, `explain` (which rules apply to a repository).
-- **Server** — webhook intake, scheduler, queue, API for the web app and bot.
-- **Web** — repositories and their state per plugin, run history with logs, manual runs, confirmations, audit allowlist, release dashboard.
+- **CLI** — the first interface: `run <plugin>`, `--repo`/`--group`, `--dry-run`, `validate-config`, `explain`, `audit`, `serve`.
+- **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and activity; audit ingestion; credential rotation._
+- **Web** — repositories and their state per plugin, run history with logs, manual runs, confirmations, audit allowlist, release dashboard. _Started: dashboard, audit reports, repositories, credentials, settings, users, activity._
 - **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/slots-x`), replies in threads. Slack first, the rest through Chat SDK adapters.
+
+### Access
+
+Sign-in is a replaceable `AuthProvider`; permissions are the same everywhere:
+
+1. `noAuth()` — no sign-in, one root user.
+2. `headerAuth()` — users and grants from a reverse proxy's headers.
+3. `passwordAuth()` — root behind a password.
+4. `usersAuth()` — real users with passkeys only (setup and recovery through one-time links) or OIDC, with scoped grants: e.g. admins of `games/**` who can invite people only within that scope.
+
+Credentials (forge accounts, API keys) and settings (models, keys, review rules, audit policy) are scoped to everything, groups or repository patterns; the most specific setting wins. GitLab tokens rotate automatically before they expire.
 
 ## Milestones
 
 **0. Foundation**
+
 - Bun workspaces monorepo, TS 7, oxlint + oxfmt, knip, lefthook, CI.
 - `core`: config schema, `defineConfig`, plugin contract, config loading.
 - `forge` + `forge-gitlab` (primary), `forge-github` skeleton, contract tests.
@@ -176,7 +193,7 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 
 **1. Browserslist** — the first end-to-end scenario without AI.
 
-**2. Audit** — without the agent: report normalization, autofix, allowlist.
+**2. Audit** — without the agent: report normalization, autofix, allowlist. _Engine and CLI done; MR plugin pending the workspace._
 
 **3. Releases via CLI** — develop → main MR, tags, running jobs.
 
@@ -196,8 +213,15 @@ After milestone 0 every next milestone is immediately useful at work: plug it in
 
 ## Open questions
 
-- Publishing `@holtkeeper/*` packages: npm (changesets) or the private repository pulls them from git — this decides whether holtkeeper itself needs a release process from milestone 0.
+- Publishing `@holtkeeper/*` packages: packages ship TypeScript source; still open is npm (changesets) vs the private repository pulling them from git.
 - Where the server is hosted and where tasks run: a dedicated machine/container or GitLab CI runners (then the CLI mode stays primary for a long time).
 - Authentication: a bot account with a PAT, a GitLab group access token or an OAuth app (GitHub App) — this determines permissions and API limits.
 - Web interface access: is SSO via GitLab OAuth enough?
-- Repository license.
+
+## Decisions
+
+- Web UI kit: HeroUI 3. App code uses it through our own thin components where a swap would otherwise touch many screens (tables, forms, layout).
+
+- License: MIT.
+- No build step for libraries; consumers run Bun.
+- Agent instructions live in `AGENTS.md`; `CLAUDE.md` imports it.

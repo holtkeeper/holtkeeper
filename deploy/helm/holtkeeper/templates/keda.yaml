@@ -1,0 +1,58 @@
+{{- if .Values.keda.enabled }}
+{{- $trigger := dict "serverAddress" .Values.keda.serverAddress "query" (tpl .Values.keda.query .) "threshold" (toString .Values.keda.threshold) }}
+{{- if .Values.keda.scaledJob.enabled }}
+# One Kubernetes Job per queued Holtkeeper job: each pod runs `--max-jobs 1` and exits, so no
+# workspace, tool or process state survives from one job to the next.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-worker
+  labels:
+    {{- include "holtkeeper.componentLabels" (dict "ctx" $ "component" "worker") | nindent 4 }}
+spec:
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  maxReplicaCount: {{ .Values.keda.scaledJob.maxReplicaCount }}
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTargetRef:
+    backoffLimit: 0
+    activeDeadlineSeconds: {{ .Values.keda.scaledJob.activeDeadlineSeconds }}
+    template:
+      metadata:
+        labels:
+          {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 10 }}
+        annotations:
+          {{- include "holtkeeper.podAnnotations" . | nindent 10 }}
+      spec:
+        {{- include "holtkeeper.podSpecCommon" . | nindent 8 }}
+        restartPolicy: Never
+        terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+        containers:
+          {{- include "holtkeeper.workerContainer" (dict "ctx" $ "maxJobs" 1) | nindent 10 }}
+        volumes:
+          {{- include "holtkeeper.workerVolumes" . | nindent 10 }}
+        {{- include "holtkeeper.scheduling" .Values.worker | nindent 8 }}
+  triggers:
+    - type: prometheus
+      metadata:
+        {{- toYaml $trigger | nindent 8 }}
+{{- else }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-worker
+  labels:
+    {{- include "holtkeeper.componentLabels" (dict "ctx" $ "component" "worker") | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "holtkeeper.fullname" . }}-worker
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  triggers:
+    - type: prometheus
+      metadata:
+        {{- toYaml $trigger | nindent 8 }}
+{{- end }}
+{{- end }}

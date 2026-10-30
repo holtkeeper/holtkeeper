@@ -1,0 +1,89 @@
+{
+  "issues": [
+    {
+      "file": "src/orphan.ts",
+      "binaries": [],
+      "catalog": [],
+      "catalogReferences": [],
+      "dependencies": [],
+      "devDependencies": [],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [{ "name": "src/orphan.ts" }],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [],
+      "unresolved": []
+    },
+    {
+      "file": "package.json",
+      "binaries": [],
+      "catalog": [],
+      "catalogReferences": [],
+      "dependencies": [{ "name": "left-pad", "line": 6, "col": 6, "pos": 94 }],
+      "devDependencies": [{ "name": "is-odd", "line": 10, "col": 6, "pos": 168 }],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [],
+      "unresolved": []
+    },
+    {
+      "file": "src/index.ts",
+      "binaries": [],
+      "catalog": [],
+      "catalogReferences": [],
+      "dependencies": [],
+      "devDependencies": [],
+      "duplicates": [],
+      "enumMembers": [],
+      "exports": [],
+      "files": [],
+      "namespaceMembers": [],
+      "optionalPeerDependencies": [],
+      "types": [],
+      "unlisted": [{ "name": "chalk", "line": 2, "col": 19, "pos": 42 }],
+      "unresolved": [{ "name": "./missing.ts", "line": 4, "col": 8, "pos": 109 }]
+    },
+    {
+      "file": "src/util.ts",
+      "binaries": [],
+      "catalog": [],
+      "catalogReferences": [],
+      "dependencies": [],
+      "devDependencies": [],
+      "duplicates": [
+        [
+          { "name": "used", "line": 1, "col": 17, "pos": 16 },
+          { "name": "default", "line": 23, "col": 16, "pos": 336 }
+        ]
+      ],
+      "enumMembers": [{ "namespace": "Level", "name": "High", "line": 28, "col": 3, "pos": 396 }],
+      "exports": [
+        { "name": "unusedConst", "line": 7, "col": 14, "pos": 125 },
+        { "name": "unusedFn", "line": 9, "col": 17, "pos": 159 },
+        { "name": "local", "line": 22, "col": 10, "pos": 306 },
+        { "name": "other", "line": 22, "col": 17, "pos": 313 },
+        { "name": "default", "line": 23, "col": 16, "pos": 336 },
+        { "name": "alias", "line": 24, "col": 18, "pos": 358 }
+      ],
+      "files": [],
+      "namespaceMembers": [
+        { "namespace": "ns", "name": "dropped", "line": 33, "col": 16, "pos": 466 }
+      ],
+      "optionalPeerDependencies": [],
+      "types": [
+        { "name": "UnusedType", "line": 13, "col": 13, "pos": 198 },
+        { "name": "Color", "line": 15, "col": 13, "pos": 238 }
+      ],
+      "unlisted": [],
+      "unresolved": []
+    }
+  ]
+}

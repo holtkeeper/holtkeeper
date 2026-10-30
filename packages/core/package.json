@@ -1,0 +1,15 @@
+{
+  "name": "@holtkeeper/core",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/auth": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

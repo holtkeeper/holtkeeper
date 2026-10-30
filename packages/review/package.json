@@ -1,0 +1,21 @@
+{
+  "name": "@holtkeeper/review",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/agent-tools": "workspace:*",
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/changes": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/quality": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

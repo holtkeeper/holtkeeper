@@ -1,0 +1,8 @@
+{
+  "name": "fixture-npm",
+  "private": true,
+  "dependencies": {
+    "lodash": "4.17.15",
+    "express": "4.17.1"
+  }
+}

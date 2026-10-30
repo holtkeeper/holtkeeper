@@ -1,0 +1,26 @@
+{
+  "name": "@holtkeeper/cli",
+  "version": "0.0.0",
+  "license": "MIT",
+  "bin": {
+    "holtkeeper": "./src/bin.ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/cli.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/analyzers": "workspace:*",
+    "@holtkeeper/core": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/server": "workspace:*",
+    "@holtkeeper/vuln": "workspace:*",
+    "@holtkeeper/vuln-go": "workspace:*",
+    "@holtkeeper/vuln-js": "workspace:*",
+    "@holtkeeper/vuln-osv": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

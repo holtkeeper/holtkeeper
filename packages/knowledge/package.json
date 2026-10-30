@@ -1,0 +1,14 @@
+{
+  "name": "@holtkeeper/knowledge",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

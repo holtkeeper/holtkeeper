@@ -1,0 +1,10 @@
+{
+  "name": "@fx/c",
+  "version": "1.0.0",
+  "dependencies": {
+    "finalhandler": "1.2.0"
+  },
+  "devDependencies": {
+    "@fx/a": "*"
+  }
+}

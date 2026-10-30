@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/quality-lint",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/changes": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/quality": "workspace:*",
+    "@types/sarif": "^2.1.7",
+    "zod": "^4.6.7"
+  }
+}

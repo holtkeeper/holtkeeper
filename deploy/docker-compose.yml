@@ -1,0 +1,121 @@
+# Holtkeeper with Postgres and S3 artifacts: one `web` process (API, UI, webhooks and the
+# leader-elected scheduler) and any number of workers. Run from this directory:
+#   cp .env.example .env    # fill in the secrets and your S3 endpoint
+#   docker compose up -d --scale worker=3
+# Artifacts go to any S3-compatible storage you already run (S3_ENDPOINT in .env). To try it
+# without one, start the bundled Versity S3 Gateway too:
+#   docker compose --profile local-s3 up -d
+# Build the images first (see docs/deployment.md) or set HOLTKEEPER_IMAGE to a published one.
+#
+# Single container instead (SQLite and artifacts in a volume, no Postgres or S3): comment out
+# `web`, `worker` and `postgres` and uncomment `holtkeeper` below.
+
+x-holtkeeper: &holtkeeper
+  image: ${HOLTKEEPER_IMAGE:-holtkeeper:latest}
+  restart: unless-stopped
+  env_file: .env
+  environment: &holtkeeper-env
+    HOLTKEEPER_DATABASE_URL: postgres://holtkeeper:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/holtkeeper
+    HOLTKEEPER_S3_BUCKET: ${S3_BUCKET:-holtkeeper}
+    HOLTKEEPER_S3_ENDPOINT: ${S3_ENDPOINT:-http://versitygw:7070}
+    HOLTKEEPER_S3_REGION: ${S3_REGION:-us-east-1}
+    HOLTKEEPER_S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in .env}
+    HOLTKEEPER_S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
+  volumes:
+    - ./holtkeeper.config.ts:/app/config/holtkeeper.config.ts:ro
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  stop_grace_period: 60s
+  depends_on:
+    postgres:
+      condition: service_healthy
+    # Only with `--profile local-s3`; with your own S3 this dependency is skipped.
+    versitygw-init:
+      condition: service_completed_successfully
+      required: false
+
+services:
+  web:
+    <<: *holtkeeper
+    command: ['-c', '/app/config/holtkeeper.config.ts', '--role', 'web,scheduler']
+    ports:
+      - '${HOLTKEEPER_HTTP_PORT:-7420}:7420'
+
+  worker:
+    <<: *holtkeeper
+    # Add '--max-jobs', '1' to get a fresh container per job (restart: always brings it back).
+    command:
+      ['-c', '/app/config/holtkeeper.config.ts', '--role', 'worker', '--drain-timeout', '50s']
+    tmpfs:
+      - /tmp
+      - /workspace:uid=10001,gid=10001
+    volumes:
+      - ./holtkeeper.config.ts:/app/config/holtkeeper.config.ts:ro
+      - mise-cache:/mise
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: holtkeeper
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: holtkeeper
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U holtkeeper -d holtkeeper']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Versity S3 Gateway on a local folder, for trying Holtkeeper without an S3 service of your own.
+  versitygw:
+    image: ${VERSITYGW_IMAGE:-versity/versitygw:v1.10.0}
+    profiles: [local-s3]
+    restart: unless-stopped
+    command:
+      - --access
+      - ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID in .env}
+      - --secret
+      - ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
+      - --port
+      - :7070
+      - posix
+      - /data
+    volumes:
+      - s3-data:/data
+
+  # With the posix backend a bucket is a top-level directory.
+  versitygw-init:
+    image: busybox:1.37
+    profiles: [local-s3]
+    command: ['mkdir', '-p', '/data/${S3_BUCKET:-holtkeeper}']
+    volumes:
+      - s3-data:/data
+
+  # holtkeeper:
+  #   image: ${HOLTKEEPER_IMAGE:-holtkeeper:latest}
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   command: ['-c', '/app/config/holtkeeper.config.ts', '--role', 'all']
+  #   ports:
+  #     - '${HOLTKEEPER_HTTP_PORT:-7420}:7420'
+  #   read_only: true
+  #   tmpfs:
+  #     - /tmp
+  #     - /workspace:uid=10001,gid=10001
+  #   volumes:
+  #     - ./holtkeeper.config.ts:/app/config/holtkeeper.config.ts:ro
+  #     - data:/data
+  #     - mise-cache:/mise
+  #   stop_grace_period: 60s
+
+volumes:
+  postgres:
+  s3-data:
+  mise-cache:
+  # data:

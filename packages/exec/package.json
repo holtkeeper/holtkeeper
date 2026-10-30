@@ -1,0 +1,10 @@
+{
+  "name": "@holtkeeper/exec",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  }
+}

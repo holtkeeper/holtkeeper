@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/quality",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/changes": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

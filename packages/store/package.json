@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/store",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./memory": "./src/memory.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/vuln": "workspace:*"
+  }
+}

@@ -1,0 +1,93 @@
+---
+import { Icon } from '@astrojs/starlight/components'
+
+import Logo from '../../assets/logo.svg'
+---
+
+<section class="l-section cta-section">
+  <div class="l-wrap">
+    <div class="l-card cta l-reveal">
+      <div class="l-grid-bg"></div>
+      <div class="lantern" aria-hidden="true">
+        <Logo width={88} height={88} />
+      </div>
+      <h2>Give your fleet <span class="l-grad">a keeper.</span></h2>
+      <p>
+        Start with one command on one repository. When it earns its place, point the server at your groups and let
+        webhooks and schedules do the rest.
+      </p>
+      <div class="buttons">
+        <a class="l-btn l-btn-primary" href="/guide/getting-started/">
+          Get started
+          <Icon name="right-arrow" />
+        </a>
+        <a class="l-btn l-btn-ghost" href="https://github.com/holtkeeper/holtkeeper">
+          <Icon name="github" />
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .cta-section {
+    border-top: 0 !important;
+  }
+  .cta {
+    display: grid;
+    justify-items: center;
+    gap: 1.2rem;
+    padding: 5rem 2rem;
+    text-align: center;
+    background:
+      radial-gradient(36rem 18rem at 50% 0%, var(--l-amber-soft), transparent 70%),
+      linear-gradient(180deg, var(--l-card-2), var(--l-card));
+  }
+  .lantern {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 7rem;
+    height: 7rem;
+    margin-bottom: 0.5rem;
+  }
+  .lantern::before {
+    content: '';
+    position: absolute;
+    inset: -2rem;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, var(--l-glow), transparent);
+    animation: breathe 5s ease-in-out infinite;
+  }
+  .lantern :global(svg) {
+    position: relative;
+  }
+  h2 {
+    position: relative;
+    font-size: clamp(2.2rem, 1.3rem + 3vw, 3.75rem);
+    font-weight: 660;
+    letter-spacing: -0.05em;
+    line-height: 1.02;
+  }
+  p {
+    position: relative;
+    max-width: 36rem;
+    color: var(--l-muted);
+    font-size: 1.1rem;
+  }
+  .buttons {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 0.75rem;
+  }
+  @keyframes breathe {
+    50% {
+      opacity: 0.55;
+      transform: scale(0.92);
+    }
+  }
+</style>

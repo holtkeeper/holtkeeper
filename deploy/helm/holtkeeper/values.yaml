@@ -1,0 +1,162 @@
+# Holtkeeper chart. Every process runs the same image with `holtkeeper serve --role ...`.
+nameOverride: ''
+fullnameOverride: ''
+
+image:
+  repository: ghcr.io/holtkeeper/holtkeeper
+  # Default: the chart's appVersion.
+  tag: ''
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+
+# HTTP port of every process (API on web, probes and /metrics on all of them).
+port: 7420
+
+config:
+  # Content of holtkeeper.config.ts, mounted read-only at /app/config/holtkeeper.config.ts.
+  # Empty: the chart's files/holtkeeper.config.ts (Postgres when HOLTKEEPER_DATABASE_URL is set,
+  # S3 when HOLTKEEPER_S3_BUCKET is set, secrets from the environment).
+  content: ''
+  # Use this ConfigMap (key `holtkeeper.config.ts`) instead of rendering one.
+  existingConfigMap: ''
+
+# Secret whose keys become environment variables (HOLTKEEPER_VAULT_KEY, HOLTKEEPER_DATABASE_URL, ...).
+existingSecret: ''
+# Extra environment for every container, e.g. HOLTKEEPER_S3_BUCKET.
+env: []
+envFrom: []
+
+podAnnotations: {}
+
+serviceAccount:
+  create: true
+  name: ''
+  annotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+tmpSizeLimit: 1Gi
+
+web:
+  replicas: 2
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  extraArgs: []
+  terminationGracePeriodSeconds: 30
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ''
+    annotations: {}
+    hosts:
+      - host: holtkeeper.example.com
+        paths: ['/']
+    tls: []
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 75
+  pdb:
+    enabled: true
+    minAvailable: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  replicas: 2
+  # Jobs one pod runs at once. Default: jobs.concurrency from the config.
+  concurrency: null
+  # Exit after this many jobs, so the next ones get a fresh pod (see keda.scaledJob). 0: unlimited.
+  maxJobs: 0
+  # On SIGTERM running jobs get this long before they are requeued; keep below the grace period.
+  drainTimeout: 120s
+  terminationGracePeriodSeconds: 150
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { memory: 4Gi }
+  extraArgs: []
+  workspace:
+    sizeLimit: 20Gi
+  # Tools mise installs (Node, Go, ...): `emptyDir` per pod or a shared `pvc`.
+  miseCache:
+    type: emptyDir
+    sizeLimit: 10Gi
+    size: 20Gi
+    storageClassName: ''
+    accessModes: [ReadWriteMany]
+    existingClaim: ''
+  pdb:
+    enabled: true
+    maxUnavailable: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# A separate scheduler Deployment. Disabled: the web pods run the scheduler under the same leader
+# lease (only one of them acts at a time).
+scheduler:
+  enabled: false
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 192Mi }
+    limits: { memory: 512Mi }
+  pdb:
+    enabled: true
+    minAvailable: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+keda:
+  enabled: false
+  # Prometheus that scrapes holtkeeper_jobs_queued (from the web pods).
+  serverAddress: http://prometheus-operated.monitoring.svc:9090
+  query: max(holtkeeper_jobs_queued{namespace="{{ .Release.Namespace }}"})
+  # Queued jobs per worker replica.
+  threshold: '2'
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 300
+  # One Kubernetes Job (one pod, `--max-jobs 1`) per queued job instead of a scaled Deployment.
+  scaledJob:
+    enabled: false
+    maxReplicaCount: 20
+    activeDeadlineSeconds: 7200
+
+networkPolicy:
+  enabled: false
+  # Who may reach the web pods (the ingress controller); empty: anyone.
+  webIngressFrom: []
+  # Who may scrape /metrics of workers and schedulers (Prometheus); empty: nobody.
+  metricsFrom: []
+  # Egress of workers: forge, package registries, LLM APIs (HTTPS/SSH), DNS, database, object store.
+  workerEgress:
+    ports: [443, 80, 22]
+    cidrs: ['0.0.0.0/0']
+  # Where Postgres and the object store live, e.g. their pod selectors or CIDRs.
+  extraEgress: []

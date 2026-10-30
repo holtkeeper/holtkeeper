@@ -1,0 +1,35 @@
+{
+  "name": "@holtkeeper/analyzers",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/assets": "workspace:*",
+    "@holtkeeper/bundles": "workspace:*",
+    "@holtkeeper/changelog": "workspace:*",
+    "@holtkeeper/delivery": "workspace:*",
+    "@holtkeeper/depgraph": "workspace:*",
+    "@holtkeeper/depgraph-go": "workspace:*",
+    "@holtkeeper/depgraph-js": "workspace:*",
+    "@holtkeeper/fleet": "workspace:*",
+    "@holtkeeper/i18n": "workspace:*",
+    "@holtkeeper/licenses": "workspace:*",
+    "@holtkeeper/port": "workspace:*",
+    "@holtkeeper/propagate": "workspace:*",
+    "@holtkeeper/quality": "workspace:*",
+    "@holtkeeper/quality-conventions": "workspace:*",
+    "@holtkeeper/quality-deadcode": "workspace:*",
+    "@holtkeeper/quality-duplication": "workspace:*",
+    "@holtkeeper/quality-lint": "workspace:*",
+    "@holtkeeper/quality-secrets": "workspace:*",
+    "@holtkeeper/quality-tests": "workspace:*",
+    "@holtkeeper/release-risk": "workspace:*",
+    "@holtkeeper/review": "workspace:*",
+    "@holtkeeper/tracker": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

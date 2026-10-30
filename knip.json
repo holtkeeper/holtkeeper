@@ -1,0 +1,23 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/cli": {
+      "entry": ["test/fixtures/*.ts"]
+    },
+    "apps/web": {
+      "project": ["src/**/*.{ts,tsx,css}"]
+    },
+    ".": {
+      "entry": ["deploy/holtkeeper.config.ts", "deploy/helm/*/files/*.ts"]
+    },
+    "docs": {
+      "ignoreDependencies": ["@astrojs/check"]
+    },
+    "examples": {
+      "entry": ["dev/*.ts"]
+    },
+    "packages/quality-duplication": {
+      "ignoreDependencies": ["jscpd"]
+    }
+  }
+}

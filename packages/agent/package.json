@@ -1,0 +1,15 @@
+{
+  "name": "@holtkeeper/agent",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.312",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

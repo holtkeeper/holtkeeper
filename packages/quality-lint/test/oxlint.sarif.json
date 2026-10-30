@@ -1,0 +1,135 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "oxlint",
+          "version": "1.90.0",
+          "semanticVersion": "1.90.0",
+          "informationUri": "https://oxc.rs/docs/guide/usage/linter.html",
+          "rules": [
+            {
+              "id": "eslint(no-unused-vars)",
+              "name": "no-unused-vars",
+              "helpUri": "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unused-vars.html",
+              "properties": {
+                "category": "correctness",
+                "plugin": "eslint",
+                "fix": "conditional_dangerous_fix_or_suggestion"
+              }
+            },
+            {
+              "id": "eslint(no-debugger)",
+              "name": "no-debugger",
+              "helpUri": "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-debugger.html",
+              "properties": {
+                "category": "correctness",
+                "plugin": "eslint",
+                "fix": "fixable_suggestion"
+              }
+            },
+            {
+              "id": "eslint(no-unsafe-negation)",
+              "name": "no-unsafe-negation",
+              "helpUri": "https://oxc.rs/docs/guide/usage/linter/rules/eslint/no-unsafe-negation.html",
+              "properties": {
+                "category": "correctness",
+                "plugin": "eslint",
+                "fix": "fixable_fix"
+              }
+            }
+          ]
+        }
+      },
+      "artifacts": [
+        {
+          "location": {
+            "uri": "src/a.js"
+          }
+        },
+        {
+          "location": {
+            "uri": "src/b.ts"
+          }
+        }
+      ],
+      "results": [
+        {
+          "ruleId": "eslint(no-unused-vars)",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "Variable 'unused' is declared but never used. Unused variables should start with a '_'."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.js",
+                  "index": 0
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 7,
+                  "endLine": 1,
+                  "endColumn": 13
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "eslint(no-debugger)",
+          "ruleIndex": 1,
+          "level": "warning",
+          "message": {
+            "text": "`debugger` statement is not allowed"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.js",
+                  "index": 0
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1,
+                  "endLine": 2,
+                  "endColumn": 9
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "eslint(no-unsafe-negation)",
+          "ruleIndex": 2,
+          "level": "warning",
+          "message": {
+            "text": "Unexpected negation of the left operand of 'instanceof' operator."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/b.ts",
+                  "index": 1
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 5,
+                  "endLine": 2,
+                  "endColumn": 7
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "columnKind": "unicodeCodePoints"
+    }
+  ]
+}

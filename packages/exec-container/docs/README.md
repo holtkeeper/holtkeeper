@@ -1,0 +1,71 @@
+# @holtkeeper/exec-container
+
+`CommandRunner`s that run commands with a repository's toolchain: in a sandboxed container (docker or podman), or on the host through mise. Both are `ManagedRunner`s — `start()` before the first `run`, `stop()` when done.
+
+```ts
+import { localRunner } from '@holtkeeper/exec'
+import { containerRunner, networksFor } from '@holtkeeper/exec-container'
+
+const runner = containerRunner({
+  image: 'holtkeeper-worker:latest', // docker/worker
+  workspace: { hostDir: checkout.dir }, // mounted at /workspace
+  toolchain, // from @holtkeeper/toolchain
+  ...networksFor('install'), // { network: 'none', installNetwork: 'bridge' }
+  limits: { cpus: 2, memory: '4g', pids: 1024 },
+  envAllowlist: ['HTTPS_PROXY'],
+  hostRunner: localRunner,
+})
+await runner.start()
+await runner.run(['pnpm', 'install', '--offline'], { cwd: join(checkout.dir, 'web') })
+await runner.stop()
+```
+
+## containerRunner
+
+`start()`:
+
+1. When the toolchain has tools: `docker run --rm … image mise install node@20 pnpm@9.12.0` in a short-lived container with network `installNetwork` (default `bridge`) and **without** the checkout, so repository code never runs while the network is open. Tools land in the named volume `cacheVolume` (default `holtkeeper-mise-cache`, mounted at `/mise`) and are reused by later jobs.
+2. The job container: `docker run --detach --rm --init --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g --security-opt no-new-privileges --cap-drop ALL --user 10001:10001 --network none --cpus 2 --memory 4g --pids-limit 1024`, the cache volume, the checkout at `/workspace` (read-write), `extraMounts` (e.g. read-only extra checkouts), `sleep infinity`. A failed start throws and can be retried.
+
+`run(command, { cwd, env, timeoutMs, signal })`:
+
+- `cwd` is mapped from the host to the container through the mounts (the most specific wins); a directory outside every mount is rejected.
+- The command runs as `docker exec --workdir <mapped> -e NAME… <id> setsid -w sh -c '<record pid>' mise exec <tools> -- <command>`. Without tools there is no `mise exec` prefix.
+- Environment, per command only: allowlisted host variables (`envAllowlist`, read from `hostEnv`), `MISE_IGNORED_CONFIG_PATHS` (the mount points, so a repository's `mise.toml` cannot run code — versions come from the toolchain), `options.env`, then the run's `env` (`undefined` removes). Values travel through the engine CLI's environment (`-e NAME`), never through argv.
+- Any exit code is a result. Engine failures (no such container, daemon errors) reject.
+- On timeout or abort the command's whole process group is killed inside the container; if that fails, the container is killed (later runs then reject until `start` is called again). The engine CLI gets a 10 s grace period on top of `timeoutMs`.
+
+`stop()` removes the container (`docker rm --force`); safe to call repeatedly or without `start`.
+
+`engine` defaults to `detectEngine()`: docker when installed, else podman. The arguments are the same for both.
+
+## localMiseRunner
+
+`localMiseRunner({ toolchain, hostRunner, env?, ignoreConfigIn? })` for development without containers: `start()` runs `mise install <specs>` once, `run()` prefixes commands with `mise exec <tools> --` on the host. `ignoreConfigIn` (e.g. the checkout) sets `MISE_IGNORED_CONFIG_PATHS`. No isolation beyond tool versions.
+
+## Testing
+
+Unit tests assert the generated engine arguments with `createFakeRunner`. `test/container.test.ts` runs `node --version` for an `.nvmrc` fixture in a real container and checks the sandbox (non-root, no network, read-only root, timeouts); it is opt-in:
+
+```sh
+docker build -t holtkeeper-worker:dev docker/worker
+HOLTKEEPER_DOCKER_TESTS=1 bun test packages/exec-container/test
+```
+
+`HOLTKEEPER_WORKER_IMAGE` picks another image. The test uses the shared cache volume.
+
+## Tool cache size
+
+`miseCacheSize(options)` and `miseCacheStorage(options)` (a `StorageProvider` of the `@holtkeeper/artifacts` shape) report how much mise's installed tools take:
+
+- `{ mode: 'container', engine?, volume?, image?, hostRunner }` — the cache volume (default `holtkeeper-mise-cache`): `docker system df -v --format json`, falling back to `du -sk` in a throwaway `image` container (default `alpine`, no network). `clear()` removes the volume; the engine refuses while a job uses it.
+- `{ mode: 'host', dataDir? }` — `MISE_DATA_DIR` (default `~/.local/share/mise`); not clearable, the cache is shared with people's own mise.
+
+A missing volume or directory reports `available: false`.
+
+## Limitations
+
+- A command missing inside the container is a non-zero result, not a rejection as with `localRunner`.
+- Mount paths containing commas are rejected (`--mount` syntax).
+- With `network: 'none'` the job cannot download dependencies; analyzers that install packages need `install` with an offline-capable step or `full`.
+- Bind-mounted checkouts must be writable by the container user; on Linux run the server as uid 10001 or set `user`.

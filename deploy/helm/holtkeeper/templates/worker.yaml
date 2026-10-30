@@ -1,0 +1,66 @@
+{{- $component := dict "ctx" $ "component" "worker" }}
+{{- if not (and .Values.keda.enabled .Values.keda.scaledJob.enabled) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-worker
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.worker.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "holtkeeper.selectorLabels" $component | nindent 8 }}
+      annotations:
+        {{- include "holtkeeper.podAnnotations" . | nindent 8 }}
+    spec:
+      {{- include "holtkeeper.podSpecCommon" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      containers:
+        {{- include "holtkeeper.workerContainer" (dict "ctx" $ "maxJobs" .Values.worker.maxJobs) | nindent 8 }}
+      volumes:
+        {{- include "holtkeeper.workerVolumes" . | nindent 8 }}
+      {{- include "holtkeeper.scheduling" .Values.worker | nindent 6 }}
+{{- end }}
+---
+# Probes and /metrics of the workers; no API is served here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-worker
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "holtkeeper.selectorLabels" $component | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
+{{- if and (eq .Values.worker.miseCache.type "pvc") (not .Values.worker.miseCache.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-mise
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.worker.miseCache.accessModes | nindent 4 }}
+  {{- with .Values.worker.miseCache.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.worker.miseCache.size }}
+{{- end }}

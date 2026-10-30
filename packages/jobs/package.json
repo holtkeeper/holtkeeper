@@ -1,0 +1,21 @@
+{
+  "name": "@holtkeeper/jobs",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/core": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/exec-container": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/toolchain": "workspace:*",
+    "@holtkeeper/workspace": "workspace:*",
+    "croner": "^9",
+    "zod": "^4.6.7"
+  }
+}

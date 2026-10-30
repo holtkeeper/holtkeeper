@@ -1,0 +1,37 @@
+{
+  "name": "holtkeeper",
+  "private": true,
+  "license": "MIT",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "plugins/*",
+    "examples",
+    "docs"
+  ],
+  "type": "module",
+  "scripts": {
+    "prepare": "lefthook install",
+    "check": "bun run fmt:check && bun run lint && bun run typecheck && bun test && bun run knip",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint --type-aware",
+    "typecheck": "tsc && tsc -p apps/web",
+    "knip": "knip",
+    "dev:seed": "bun examples/dev/seed.ts",
+    "dev:server": "bun apps/cli/src/bin.ts serve -c examples/dev/holtkeeper.config.ts",
+    "dev:web": "bun run --filter @holtkeeper/web dev",
+    "docs:dev": "bun run --cwd docs dev",
+    "docs:build": "bun run --cwd docs build"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "knip": "^6.44.0",
+    "lefthook": "^2.2.2",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
+    "typescript": "7.0.2"
+  },
+  "packageManager": "bun@1.4.4"
+}

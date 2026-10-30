@@ -1,0 +1,11 @@
+{{- if not .Values.config.existingConfigMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "holtkeeper.configMapName" . }}
+  labels:
+    {{- include "holtkeeper.labels" . | nindent 4 }}
+data:
+  holtkeeper.config.ts: |
+    {{- include "holtkeeper.configContent" . | nindent 4 }}
+{{- end }}

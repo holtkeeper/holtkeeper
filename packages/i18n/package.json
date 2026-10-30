@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/i18n",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@ast-grep/napi": "^0.51.0",
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/changes": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "name": "@holtkeeper/auth-users",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/auth": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@simplewebauthn/server": "^14.0.3",
+    "openid-client": "^6.8.8",
+    "zod": "^4.6.7"
+  }
+}

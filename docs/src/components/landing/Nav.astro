@@ -1,0 +1,139 @@
+---
+import { Icon } from '@astrojs/starlight/components'
+
+import Logo from '../../assets/logo.svg'
+---
+
+<header class="nav">
+  <div class="l-wrap bar">
+    <a class="brand" href="/" aria-label="Holtkeeper home">
+      <Logo width={28} height={28} aria-hidden="true" />
+      <span>Holtkeeper</span>
+    </a>
+    <nav class="links" aria-label="Main">
+      <a href="/guide/getting-started/">Docs</a>
+      <a href="/modules/">Modules</a>
+      <a href="#how">How it works</a>
+      <a href="#deploy">Deploy</a>
+    </nav>
+    <div class="actions">
+      <a class="icon-btn gh" href="https://github.com/holtkeeper/holtkeeper" aria-label="Holtkeeper on GitHub">
+        <Icon name="github" size="1.1rem" />
+        <span class="gh-label">GitHub</span>
+      </a>
+      <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch color theme">
+        <Icon name="sun" size="1.05rem" class="sun" />
+        <Icon name="moon" size="1.05rem" class="moon" />
+      </button>
+      <a class="l-btn l-btn-primary small" href="/guide/getting-started/">Get started</a>
+    </div>
+  </div>
+</header>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-theme-toggle]')) {
+    button.addEventListener('click', () => {
+      const root = document.documentElement
+      const next = root.dataset.theme === 'light' ? 'dark' : 'light'
+      root.dataset.theme = next
+      try {
+        localStorage.setItem('starlight-theme', next)
+      } catch {}
+    })
+  }
+</script>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    border-bottom: 1px solid transparent;
+    background: color-mix(in srgb, var(--l-bg) 65%, transparent);
+    backdrop-filter: blur(16px) saturate(150%);
+    transition: border-color 0.2s;
+  }
+  :global(html[data-scrolled]) .nav {
+    border-bottom-color: var(--l-line);
+  }
+  .bar {
+    display: flex;
+    gap: 2.25rem;
+    align-items: center;
+    height: 4rem;
+  }
+  .brand {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    font-size: 1.05rem;
+    font-weight: 640;
+    letter-spacing: -0.03em;
+    text-decoration: none;
+  }
+  .links {
+    display: flex;
+    gap: 1.75rem;
+  }
+  .links a {
+    color: var(--l-muted);
+    font-size: 0.9rem;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .links a:hover {
+    color: var(--l-text);
+  }
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-left: auto;
+  }
+  .icon-btn {
+    display: inline-flex;
+    gap: 0.45rem;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.25rem;
+    height: 2.25rem;
+    padding-inline: 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 0.65rem;
+    background: transparent;
+    color: var(--l-muted);
+    font: 500 0.875rem var(--l-font);
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      background-color 0.15s,
+      border-color 0.15s;
+  }
+  .icon-btn:hover {
+    border-color: var(--l-line);
+    background: var(--l-surface);
+    color: var(--l-text);
+  }
+  :global(html[data-theme='dark']) .moon,
+  :global(html[data-theme='light']) .sun {
+    display: none;
+  }
+  .small {
+    height: 2.25rem;
+    margin-left: 0.4rem;
+    padding-inline: 0.95rem;
+    font-size: 0.875rem;
+  }
+  @media (max-width: 52rem) {
+    .links,
+    .gh-label {
+      display: none;
+    }
+  }
+  @media (max-width: 26rem) {
+    .small {
+      display: none;
+    }
+  }
+</style>

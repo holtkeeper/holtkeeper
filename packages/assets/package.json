@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/assets",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/media": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

@@ -1,0 +1,1322 @@
+---
+import {
+  BookOpen,
+  Check,
+  Flag,
+  Gauge,
+  Image,
+  LayoutDashboard,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  WalletCards,
+  Waves,
+  WandSparkles,
+} from 'lucide-react'
+
+const games: { name: string; state: 'ok' | 'fixed' | 'draft' }[] = [
+  { name: 'slots-x', state: 'ok' },
+  { name: 'roulette', state: 'ok' },
+  { name: 'blackjack', state: 'fixed' },
+  { name: 'poker', state: 'ok' },
+  { name: 'bingo', state: 'ok' },
+  { name: 'keno', state: 'fixed' },
+  { name: 'crash', state: 'draft' },
+  { name: 'lobby', state: 'ok' },
+]
+
+const factors = [
+  { label: 'Bundle growth', points: 9, max: 15 },
+  { label: 'Size of change', points: 8, max: 15 },
+  { label: 'Changed code without tests', points: 7, max: 15 },
+  { label: 'Breaking changes and reverts', points: 6, max: 20 },
+  { label: 'Contributors and hotspots', points: 4, max: 10 },
+]
+const score = factors.reduce((sum, f) => sum + f.points, 0)
+const gauge = { r: 62, cx: 80, cy: 78 }
+const arc = Math.PI * gauge.r
+const point = (fraction: number) => {
+  const angle = Math.PI * (1 - fraction)
+  return { x: gauge.cx + gauge.r * Math.cos(angle), y: gauge.cy - gauge.r * Math.sin(angle) }
+}
+const needle = point(score / 100)
+
+const treemap = [
+  { name: 'app', share: 38, x: 0, y: 0, w: 52, h: 100 },
+  { name: 'react-dom', share: 22, x: 52, y: 0, w: 48, h: 46 },
+  { name: 'pixi.js', share: 18, x: 52, y: 46, w: 26, h: 54 },
+  { name: '@company/ui', share: 12, x: 78, y: 46, w: 22, h: 32 },
+  { name: 'other', share: 10, x: 78, y: 78, w: 22, h: 22 },
+]
+const sizes = [312, 318, 316, 324, 331, 329, 342, 351]
+const spark = (() => {
+  const min = Math.min(...sizes) - 6
+  const max = Math.max(...sizes) + 6
+  return sizes
+    .map((v, i) => `${i === 0 ? 'M' : 'L'}${((i / (sizes.length - 1)) * 200).toFixed(1)} ${(46 - ((v - min) / (max - min)) * 42).toFixed(1)}`)
+    .join(' ')
+})()
+
+const images = [
+  { file: 'lobby/hero.png', before: '1.84 MB', avif: '212 kB', webp: '348 kB', saved: '88%' },
+  { file: 'slots/reel-bg.jpg', before: '936 kB', avif: '141 kB', webp: '219 kB', saved: '85%' },
+  { file: 'ui/coin.png', before: '96 kB', avif: '11 kB', webp: '14 kB', saved: '89%' },
+]
+
+const knowledge = [
+  {
+    kind: 'migration',
+    title: '@company/ui 3: Button lost the `kind` prop',
+    scope: 'games/**',
+    applies: 'propagate · port',
+    status: 'accepted',
+  },
+  {
+    kind: 'decision',
+    title: 'Money is formatted with the player’s locale',
+    scope: 'games/*',
+    applies: 'review',
+    status: 'accepted',
+  },
+  {
+    kind: 'quirk',
+    title: 'pixi.js textures must be destroyed on scene change',
+    scope: 'games/slots-*',
+    applies: '*',
+    status: 'proposed by agent',
+  },
+]
+
+const flags = [
+  { key: 'new_lobby', repos: 6, prod: 'on', stage: 'on', finding: '' },
+  { key: 'tournament_banner', repos: 3, prod: 'off', stage: 'on', finding: '' },
+  { key: 'legacy_wallet', repos: 2, prod: 'on', stage: 'on', finding: 'on everywhere · remove' },
+  { key: 'bonus_wheel', repos: 1, prod: '—', stage: '—', finding: 'not documented' },
+]
+
+const usage = [
+  { repo: 'games/slots-x', usd: 41.2 },
+  { repo: 'games/lobby', usd: 33.6 },
+  { repo: 'games/poker', usd: 22.9 },
+  { repo: 'games/keno', usd: 14.1 },
+  { repo: 'tools/admin', usd: 6.4 },
+]
+const usageMax = 50
+const spent = usage.reduce((sum, u) => sum + u.usd, 0)
+const budget = 200
+---
+
+<section class="l-section" id="features">
+  <div class="l-wrap">
+    <div class="l-head l-reveal">
+      <span class="l-eyebrow">What it does</span>
+      <h2>One engine. <span class="l-grad">Every chore of a fleet.</span></h2>
+      <p>
+        Analyzers share one report format, one queue and one way to propose changes — so a review comment, a lockfile
+        fix and a release summary all reach people the same way.
+      </p>
+    </div>
+
+    <div class="bento">
+      <article class="l-card b-card span-4 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><Sparkles size={14} /> AI review</span>
+          <h3>Comments with one-click suggestions</h3>
+          <p>
+            Reviews the diff with the full files, the project’s rules and team decisions. Re-pushes get an incremental
+            review; the bot resolves its own threads once fixed.
+          </p>
+        </header>
+        <div class="b-mock mr">
+          <div class="mr-file">
+            <span>src/lobby/TournamentBanner.tsx</span>
+            <span class="mr-stat"><b class="add">+12</b> <b class="del">−3</b></span>
+          </div>
+          <div class="mr-diff">
+            <div class="row"><i>40</i><i>40</i><code>  useEffect(() =&gt; {'{'}</code></div>
+            <div class="row add"><i></i><i>41</i><code>+   const id = setInterval(tick, 1000)</code></div>
+            <div class="row"><i>41</i><i>42</i><code>  {'}'}, [endsAt])</code></div>
+          </div>
+          <div class="mr-note">
+            <div class="mr-who">
+              <span class="avatar" aria-hidden="true"></span>
+              <b>holtkeeper</b>
+              <span class="bot">bot</span>
+              <span class="sev">major · correctness</span>
+            </div>
+            <p>The interval keeps running after the banner unmounts and ticks a stale state. Clear it in the cleanup.</p>
+            <div class="mr-suggest">
+              <div class="mr-suggest-head">Suggested change</div>
+              <div class="row del"><code>-   const id = setInterval(tick, 1000)</code></div>
+              <div class="row add"><code>+   const id = setInterval(tick, 1000)</code></div>
+              <div class="row add"><code>+   return () =&gt; clearInterval(id)</code></div>
+            </div>
+            <div class="mr-actions">
+              <span class="mr-btn primary"><Check size={13} /> Apply suggestion</span>
+              <span class="mr-btn">Add suggestion to batch</span>
+              <span class="mr-btn ghost">Reply</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="l-card b-card span-2 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><Gauge size={14} /> Release risk</span>
+          <h3>A score QA can act on</h3>
+          <p>From stored changelog, bundle, quality and audit records — no checkout needed.</p>
+        </header>
+        <div class="b-mock risk">
+          <svg viewBox="0 0 160 92" class="gauge" role="img" aria-label={`Risk score ${score} of 100, medium`}>
+            <defs>
+              <linearGradient id="risk-grad" x1="0" x2="1">
+                <stop offset="0" stop-color="var(--l-teal)"></stop>
+                <stop offset="0.5" stop-color="var(--l-amber)"></stop>
+                <stop offset="1" stop-color="var(--l-red)"></stop>
+              </linearGradient>
+            </defs>
+            <path
+              d={`M${gauge.cx - gauge.r} ${gauge.cy} A${gauge.r} ${gauge.r} 0 0 1 ${gauge.cx + gauge.r} ${gauge.cy}`}
+              class="track"></path>
+            <path
+              d={`M${gauge.cx - gauge.r} ${gauge.cy} A${gauge.r} ${gauge.r} 0 0 1 ${gauge.cx + gauge.r} ${gauge.cy}`}
+              class="value"
+              style={`stroke-dasharray:${arc};--off:${arc * (1 - score / 100)};--arc:${arc}`}></path>
+            <circle cx={needle.x} cy={needle.y} r="4.5" class="knob"></circle>
+            <text x="80" y="70" class="num">{score}</text>
+            <text x="80" y="86" class="lvl">medium · 85% confidence</text>
+          </svg>
+          <ul class="factors">
+            {
+              factors.map((f) => (
+                <li>
+                  <span class="f-label">{f.label}</span>
+                  <span class="f-bar">
+                    <span style={`width:${(f.points / f.max) * 100}%`} />
+                  </span>
+                  <span class="f-pts">+{f.points}</span>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </article>
+
+      <article class="l-card b-card span-3 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><Waves size={14} /> Dependency waves</span>
+          <h3>Update a library across the fleet</h3>
+          <p>
+            Bumps manifests and lockfiles, runs each repository’s checks, lets the agent fix what breaks and opens one
+            merge request per repository.
+          </p>
+        </header>
+        <div class="b-mock wave">
+          <div class="wave-top">
+            <code>@company/ui</code>
+            <span class="ver">2.9.4 → <b>3.0.0</b></span>
+            <span class="wave-sum">8 MRs</span>
+          </div>
+          <ul class="tiles">
+            {
+              games.map((g, i) => (
+                <li class={`tile ${g.state}`} style={`--i:${i}`}>
+                  <span class="tile-name">games/{g.name}</span>
+                  <span class="tile-state">
+                    {g.state === 'ok' && (
+                      <>
+                        <Check size={12} strokeWidth={3} /> checks passed
+                      </>
+                    )}
+                    {g.state === 'fixed' && (
+                      <>
+                        <WandSparkles size={12} /> fixed by agent
+                      </>
+                    )}
+                    {g.state === 'draft' && <>draft · needs-attention</>}
+                  </span>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </article>
+
+      <article class="l-card b-card span-3 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><ShieldAlert size={14} /> Audit</span>
+          <h3>Every ecosystem, one contract</h3>
+          <p>A scanner finds, a chain of fixers repairs, a rescan decides. The allowlist has reasons and expiry dates.</p>
+        </header>
+        <ol class="b-mock chain">
+          <li>
+            <span class="c-name">OSV-Scanner</span>
+            <span class="c-what">lockfiles of npm, Go, Python, Rust…</span>
+            <span class="c-num bad">9 found</span>
+          </li>
+          <li>
+            <span class="c-name">osv-scanner fix</span>
+            <span class="c-what">package-lock.json, pom.xml</span>
+            <span class="c-num ok">−5</span>
+          </li>
+          <li>
+            <span class="c-name">JS fixer</span>
+            <span class="c-what">bun · pnpm · yarn · npm leftovers</span>
+            <span class="c-num ok">−2</span>
+          </li>
+          <li>
+            <span class="c-name">Go fixer</span>
+            <span class="c-what">go get · go mod tidy</span>
+            <span class="c-num ok">−1</span>
+          </li>
+          <li class="last">
+            <span class="c-name">Rescan</span>
+            <span class="c-what">1 allowlisted · expires 2026-12-31</span>
+            <span class="c-num ok"><Check size={12} strokeWidth={3} /> clean</span>
+          </li>
+        </ol>
+      </article>
+
+      <article class="l-card b-card span-4 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><LayoutDashboard size={14} /> Reports</span>
+          <h3>Every analysis, one report format</h3>
+          <p>Bundle size per package, growth between releases, changelogs with identical messages collapsed.</p>
+        </header>
+        <div class="b-mock reports">
+          <div class="r-tree" role="img" aria-label="Bundle composition by package">
+            {
+              treemap.map((t) => (
+                <span class="cell" style={`left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%`}>
+                  <b>{t.name}</b>
+                  <i>{t.share}%</i>
+                </span>
+              ))
+            }
+          </div>
+          <div class="r-side">
+            <div class="r-spark">
+              <div class="r-spark-head">
+                <span>initial JS, gzip</span>
+                <b>351 kB <em>+2.6%</em></b>
+              </div>
+              <svg viewBox="0 0 200 48" preserveAspectRatio="none" aria-hidden="true">
+                <path d={`${spark} L200 48 L0 48 Z`} class="area"></path>
+                <path d={spark} class="line"></path>
+              </svg>
+              <div class="r-ticks"><span>v2.1</span><span>v2.4</span></div>
+            </div>
+            <ol class="r-log">
+              <li><span class="t feat">feat</span>lobby: tournament banner</li>
+              <li><span class="t fix">fix</span>slots: reel stops late on slow devices <span class="x">×4</span></li>
+              <li><span class="t perf">perf</span>assets: AVIF backgrounds</li>
+              <li><span class="t brk">feat!</span>api: drop legacy session tokens</li>
+            </ol>
+          </div>
+        </div>
+      </article>
+
+      <article class="l-card b-card span-2 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><ShieldCheck size={14} /> MR policies</span>
+          <h3>Rules before robots</h3>
+          <p>Approve, merge, label or skip analyses on merge request events — per scope, idempotent per commit.</p>
+        </header>
+        <pre class="b-mock code"><span class="p">{'{'}</span>
+  <span class="k">"id"</span>: <span class="s">"release-auto-approve"</span>,
+  <span class="k">"when"</span>: {'{'}
+    <span class="k">"sourceBranch"</span>: <span class="s">"release/*"</span>,
+    <span class="k">"targetBranch"</span>: <span class="s">"main"</span>,
+    <span class="k">"author"</span>: {'{'} <span class="k">"bot"</span>: <span class="n">true</span> {'}'}
+  {'}'},
+  <span class="k">"actions"</span>: [{'{'}
+    <span class="k">"type"</span>: <span class="s">"approve"</span>,
+    <span class="k">"requirePipeline"</span>: <span class="s">"success"</span>
+  {'}'}],
+  <span class="k">"skipAnalyzers"</span>: <span class="s">"*"</span>,
+  <span class="k">"stop"</span>: <span class="n">true</span>
+<span class="p">{'}'}</span></pre>
+      </article>
+
+      <article class="l-card b-card span-3 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><Image size={14} /> Images</span>
+          <h3>Smaller assets, ready markup</h3>
+          <p>AVIF and WebP variants with sharp, SVGs through SVGO, and the <code>&lt;picture&gt;</code> that uses them.</p>
+        </header>
+        <div class="b-mock img">
+          <table>
+            <thead>
+              <tr><th>file</th><th>before</th><th>avif</th><th>webp</th><th>saved</th></tr>
+            </thead>
+            <tbody>
+              {
+                images.map((i) => (
+                  <tr>
+                    <td>{i.file}</td>
+                    <td>{i.before}</td>
+                    <td>{i.avif}</td>
+                    <td>{i.webp}</td>
+                    <td class="saved">{i.saved}</td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+          <pre class="snippet"><span class="tg">&lt;picture&gt;</span>
+  <span class="tg">&lt;source</span> <span class="at">type</span>=<span class="s">"image/avif"</span> <span class="at">srcset</span>=<span class="s">"hero-640.avif 640w, …"</span><span class="tg"> /&gt;</span>
+  <span class="tg">&lt;source</span> <span class="at">type</span>=<span class="s">"image/webp"</span> <span class="at">srcset</span>=<span class="s">"hero-640.webp 640w, …"</span><span class="tg"> /&gt;</span>
+  <span class="tg">&lt;img</span> <span class="at">src</span>=<span class="s">"hero.png"</span> <span class="at">width</span>=<span class="s">"1920"</span> <span class="at">height</span>=<span class="s">"1080"</span><span class="tg"> /&gt;</span>
+<span class="tg">&lt;/picture&gt;</span></pre>
+        </div>
+      </article>
+
+      <article class="l-card b-card span-3 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><BookOpen size={14} /> Knowledge base</span>
+          <h3>Decisions the agent remembers</h3>
+          <p>Agents read and propose entries; people curate them. Scoped like settings, picked per task within a token budget.</p>
+        </header>
+        <ul class="b-mock kb">
+          {
+            knowledge.map((k) => (
+              <li class={`kb-card ${k.status === 'accepted' ? '' : 'proposed'}`}>
+                <div class="kb-top">
+                  <span class={`kb-kind ${k.kind}`}>{k.kind}</span>
+                  <span class="kb-status">{k.status}</span>
+                </div>
+                <p class="kb-title">{k.title}</p>
+                <div class="kb-meta">
+                  <span>scope <code>{k.scope}</code></span>
+                  <span>applies to <code>{k.applies}</code></span>
+                </div>
+              </li>
+            ))
+          }
+        </ul>
+      </article>
+
+      <article class="l-card b-card span-3 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><Flag size={14} /> Tracker</span>
+          <h3>Feature flags, kept in Confluence</h3>
+          <p>
+            Declarative trackers find entities across repositories and documents, flag what is wrong and rewrite one
+            marked section of a page.
+          </p>
+        </header>
+        <div class="b-mock flags">
+          <div class="page-bar">
+            <span class="page-dot"></span>
+            Confluence · Games / Feature flags
+            <span class="marker">holtkeeper section</span>
+          </div>
+          <table>
+            <thead><tr><th>flag</th><th>repos</th><th>stage</th><th>prod</th><th></th></tr></thead>
+            <tbody>
+              {
+                flags.map((f) => (
+                  <tr>
+                    <td><code>{f.key}</code></td>
+                    <td>{f.repos}</td>
+                    <td><span class={`st ${f.stage}`}>{f.stage}</span></td>
+                    <td><span class={`st ${f.prod}`}>{f.prod}</span></td>
+                    <td class="find">{f.finding}</td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="l-card b-card span-3 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><WalletCards size={14} /> AI usage</span>
+          <h3>Costs per repository, budgets per scope</h3>
+          <p>Every agent run is metered. Budgets warn or block per month, per day or per task kind; prompts are never stored.</p>
+        </header>
+        <div class="b-mock ai">
+          <div class="ai-top">
+            <div>
+              <span class="ai-label">games · this month</span>
+              <b>${spent.toFixed(2)}</b>
+            </div>
+            <div class="ai-budget">
+              <span>budget ${budget}</span>
+              <span class="ai-meter"><span style={`width:${(spent / budget) * 100}%`}></span></span>
+              <span class="ai-pct">{Math.round((spent / budget) * 100)}% · projected $171</span>
+            </div>
+          </div>
+          <ul class="ai-bars">
+            {
+              usage.map((u) => (
+                <li>
+                  <span class="ai-repo">{u.repo}</span>
+                  <span class="ai-bar">
+                    <span style={`width:${(u.usd / usageMax) * 100}%`} />
+                  </span>
+                  <span class="ai-usd">${u.usd.toFixed(2)}</span>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<style>
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .span-2 {
+    grid-column: span 2;
+  }
+  .span-3 {
+    grid-column: span 3;
+  }
+  .span-4 {
+    grid-column: span 4;
+  }
+  .b-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    padding: 1.6rem;
+  }
+  .b-head {
+    position: relative;
+    display: grid;
+    gap: 0.55rem;
+  }
+  .b-tag {
+    display: inline-flex;
+    gap: 0.45rem;
+    align-items: center;
+    color: var(--l-amber-ink);
+    font: 500 0.72rem var(--l-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .b-head h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+  }
+  .b-head p {
+    color: var(--l-muted);
+    font-size: 0.92rem;
+    line-height: 1.55;
+  }
+  .b-head code,
+  .b-mock code {
+    font-family: var(--l-mono);
+    font-size: 0.88em;
+  }
+  .b-mock {
+    position: relative;
+    margin: auto 0 0;
+    border: 1px solid var(--l-line);
+    border-radius: 0.9rem;
+    background: var(--l-bg-2);
+    font-size: 0.78rem;
+  }
+
+  /* Review */
+  .mr {
+    overflow: hidden;
+  }
+  .mr-file {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--l-line);
+    color: var(--l-muted);
+    font: 0.74rem var(--l-mono);
+  }
+  .mr-stat .add {
+    color: var(--l-teal);
+  }
+  .mr-stat .del {
+    color: var(--l-red);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 2.2rem 2.2rem 1fr;
+    font: 0.74rem/1.75 var(--l-mono);
+    white-space: pre;
+  }
+  .row i {
+    padding-right: 0.5rem;
+    color: var(--l-dim);
+    font-style: normal;
+    text-align: right;
+  }
+  .row code {
+    overflow: hidden;
+    padding-left: 0.5rem;
+    color: var(--l-text);
+    text-overflow: ellipsis;
+  }
+  .row.add {
+    background: var(--l-teal-soft);
+  }
+  .row.del {
+    background: color-mix(in srgb, var(--l-red) 12%, transparent);
+  }
+  .mr-note {
+    display: grid;
+    gap: 0.6rem;
+    margin: 0.6rem 0.8rem 0.8rem 2.6rem;
+    padding: 0.8rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.7rem;
+    background: var(--l-card);
+    box-shadow: 0 16px 40px -24px rgb(0 0 0 / 0.6);
+  }
+  .mr-note > p {
+    color: var(--l-text);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+  .mr-who {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    align-items: center;
+  }
+  .avatar {
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 42%, var(--l-amber-2) 0 22%, transparent 24%),
+      linear-gradient(160deg, #2a2116, #120f0b);
+    box-shadow: 0 0 0 1px var(--l-amber-line);
+  }
+  .bot {
+    padding: 0 0.35rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.3rem;
+    color: var(--l-dim);
+    font-size: 0.66rem;
+  }
+  .sev {
+    margin-left: auto;
+    color: var(--l-red);
+    font: 0.68rem var(--l-mono);
+  }
+  .mr-suggest {
+    overflow: hidden;
+    border: 1px solid var(--l-line);
+    border-radius: 0.5rem;
+  }
+  .mr-suggest .row {
+    grid-template-columns: 1fr;
+  }
+  .mr-suggest-head {
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--l-line);
+    background: var(--l-bg-2);
+    color: var(--l-muted);
+    font-size: 0.7rem;
+  }
+  .mr-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+  .mr-btn {
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+    padding: 0.32rem 0.65rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.45rem;
+    color: var(--l-text);
+    font-size: 0.72rem;
+    font-weight: 500;
+  }
+  .mr-btn.primary {
+    border-color: transparent;
+    background: var(--l-teal);
+    color: var(--l-on-teal);
+    box-shadow: 0 6px 20px -8px var(--l-teal);
+    animation: nudge 4s ease-in-out infinite;
+  }
+  .mr-btn.ghost {
+    border-color: transparent;
+    color: var(--l-dim);
+  }
+  @keyframes nudge {
+    0%,
+    86%,
+    100% {
+      transform: none;
+    }
+    90% {
+      transform: translateY(-1px) scale(1.03);
+    }
+  }
+
+  /* Risk */
+  .risk {
+    display: grid;
+    gap: 0.9rem;
+    padding: 1rem;
+  }
+  .gauge {
+    width: 100%;
+    max-width: 15rem;
+    margin-inline: auto;
+    overflow: visible;
+  }
+  .gauge path {
+    fill: none;
+    stroke-linecap: round;
+    stroke-width: 10;
+  }
+  .gauge .track {
+    stroke: var(--l-line-2);
+  }
+  .gauge .value {
+    stroke: url(#risk-grad);
+    stroke-dashoffset: var(--off);
+  }
+  :global(html[data-js] .l-reveal:not([data-shown])) .gauge .value {
+    stroke-dashoffset: var(--arc);
+  }
+  .gauge .value {
+    transition: stroke-dashoffset 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) 0.2s;
+  }
+  .knob {
+    fill: var(--l-text);
+    stroke: var(--l-bg-2);
+    stroke-width: 2;
+  }
+  .gauge .num {
+    fill: var(--l-text);
+    font: 650 30px var(--l-font);
+    letter-spacing: -0.04em;
+    text-anchor: middle;
+  }
+  .gauge .lvl {
+    fill: var(--l-amber-ink);
+    font: 9px var(--l-mono);
+    text-anchor: middle;
+  }
+  .factors {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .factors li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 3.5rem 1.8rem;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .f-label {
+    overflow: hidden;
+    color: var(--l-muted);
+    font-size: 0.72rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .f-bar {
+    height: 0.3rem;
+    overflow: hidden;
+    border-radius: 1rem;
+    background: var(--l-line);
+  }
+  .f-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--l-amber);
+  }
+  .f-pts {
+    color: var(--l-text);
+    font: 0.72rem var(--l-mono);
+    text-align: right;
+  }
+
+  /* Wave */
+  .wave {
+    padding: 0.9rem;
+  }
+  .wave-top {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-bottom: 0.8rem;
+  }
+  .wave-top code {
+    color: var(--l-text);
+  }
+  .ver {
+    color: var(--l-dim);
+    font: 0.74rem var(--l-mono);
+  }
+  .ver b {
+    color: var(--l-amber-ink);
+    font-weight: 500;
+  }
+  .wave-sum {
+    margin-left: auto;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 999px;
+    color: var(--l-muted);
+    font: 0.68rem var(--l-mono);
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .tile {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--l-line);
+    border-radius: 0.6rem;
+    background: var(--l-card);
+    transition:
+      border-color 0.5s,
+      background-color 0.5s;
+    transition-delay: calc(var(--i) * 140ms + 300ms);
+  }
+  .tile-name {
+    font: 0.72rem var(--l-mono);
+  }
+  .tile-state {
+    display: inline-flex;
+    gap: 0.3rem;
+    align-items: center;
+    color: var(--l-dim);
+    font-size: 0.7rem;
+    transition: color 0.5s;
+    transition-delay: inherit;
+  }
+  :global(.l-reveal[data-shown]) .tile.ok {
+    border-color: var(--l-teal-line);
+    background: var(--l-teal-soft);
+  }
+  :global(.l-reveal[data-shown]) .tile.ok .tile-state {
+    color: var(--l-teal);
+  }
+  :global(.l-reveal[data-shown]) .tile.fixed {
+    border-color: var(--l-amber-line);
+    background: var(--l-amber-soft);
+  }
+  :global(.l-reveal[data-shown]) .tile.fixed .tile-state {
+    color: var(--l-amber-ink);
+  }
+  .tile.draft {
+    border-style: dashed;
+  }
+  :global(.l-reveal[data-shown]) .tile.draft .tile-state {
+    color: var(--l-muted);
+  }
+
+  /* Audit chain */
+  .chain {
+    display: grid;
+    gap: 0;
+    margin: auto 0 0;
+    padding: 0.5rem 0.9rem;
+    list-style: none;
+  }
+  .chain li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr) auto;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.55rem 0 0.55rem 1.3rem;
+  }
+  .chain li::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 1px solid var(--l-amber-line);
+    border-radius: 50%;
+    background: var(--l-bg-2);
+    transform: translateY(-50%);
+  }
+  .chain li:not(.last)::after {
+    content: '';
+    position: absolute;
+    top: calc(50% + 0.35rem);
+    left: 0.27rem;
+    width: 1px;
+    height: calc(100% - 0.7rem);
+    background: linear-gradient(var(--l-amber-line), var(--l-line));
+  }
+  .chain li.last::before {
+    border-color: var(--l-teal);
+    background: var(--l-teal);
+  }
+  .c-name {
+    color: var(--l-text);
+    font: 500 0.76rem var(--l-mono);
+  }
+  .c-what {
+    overflow: hidden;
+    color: var(--l-dim);
+    font-size: 0.74rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .c-num {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+    font: 0.72rem var(--l-mono);
+  }
+  .c-num.bad {
+    color: var(--l-red);
+  }
+  .c-num.ok {
+    color: var(--l-teal);
+  }
+
+  /* Reports */
+  .reports {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 0.9rem;
+    padding: 0.9rem;
+  }
+  .r-tree {
+    position: relative;
+    min-height: 12rem;
+  }
+  .cell {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0.45rem 0.5rem;
+    overflow: hidden;
+    border: 2px solid var(--l-bg-2);
+    border-radius: 0.55rem;
+    background: color-mix(in srgb, var(--l-amber) 14%, var(--l-card));
+  }
+  .cell:nth-child(2) {
+    background: color-mix(in srgb, var(--l-amber) 24%, var(--l-card));
+  }
+  .cell:nth-child(3) {
+    background: color-mix(in srgb, var(--l-teal) 16%, var(--l-card));
+  }
+  .cell:nth-child(4) {
+    background: color-mix(in srgb, var(--l-amber) 34%, var(--l-card));
+  }
+  .cell:nth-child(5) {
+    background: var(--l-card);
+  }
+  .cell b {
+    overflow: hidden;
+    font: 500 0.7rem var(--l-mono);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cell i {
+    color: var(--l-muted);
+    font: normal 0.68rem var(--l-mono);
+  }
+  .r-side {
+    display: grid;
+    gap: 0.8rem;
+  }
+  .r-spark {
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--l-line);
+    border-radius: 0.6rem;
+    background: var(--l-card);
+  }
+  .r-spark-head {
+    display: flex;
+    justify-content: space-between;
+    color: var(--l-dim);
+    font-size: 0.7rem;
+  }
+  .r-spark-head b {
+    color: var(--l-text);
+    font: 500 0.74rem var(--l-mono);
+  }
+  .r-spark-head em {
+    color: var(--l-red);
+    font-style: normal;
+  }
+  .r-spark svg {
+    width: 100%;
+    height: 3rem;
+    margin-top: 0.3rem;
+  }
+  .r-spark .line {
+    fill: none;
+    stroke: var(--l-amber);
+    stroke-width: 1.6;
+    vector-effect: non-scaling-stroke;
+  }
+  .r-spark .area {
+    fill: var(--l-amber-soft);
+  }
+  .r-ticks {
+    display: flex;
+    justify-content: space-between;
+    color: var(--l-dim);
+    font: 0.64rem var(--l-mono);
+  }
+  .r-log {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .r-log li {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    overflow: hidden;
+    color: var(--l-muted);
+    font-size: 0.74rem;
+    white-space: nowrap;
+  }
+  .t {
+    flex: none;
+    min-width: 2.6rem;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.3rem;
+    font: 0.66rem var(--l-mono);
+    text-align: center;
+  }
+  .t.feat {
+    background: var(--l-teal-soft);
+    color: var(--l-teal);
+  }
+  .t.fix {
+    background: var(--l-amber-soft);
+    color: var(--l-amber-ink);
+  }
+  .t.perf {
+    background: var(--l-line);
+    color: var(--l-text);
+  }
+  .t.brk {
+    background: color-mix(in srgb, var(--l-red) 14%, transparent);
+    color: var(--l-red);
+  }
+  .x {
+    padding: 0 0.3rem;
+    border: 1px solid var(--l-line-2);
+    border-radius: 0.3rem;
+    color: var(--l-text);
+    font: 0.66rem var(--l-mono);
+  }
+
+  /* Code */
+  .code {
+    margin-top: auto;
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    color: var(--l-muted);
+    font: 0.74rem/1.65 var(--l-mono);
+  }
+  .code .k {
+    color: var(--l-text);
+  }
+  .code .s {
+    color: var(--l-amber-ink);
+  }
+  .code .n {
+    color: var(--l-teal);
+  }
+  .code .p {
+    color: var(--l-dim);
+  }
+
+  /* Images */
+  .img {
+    overflow: hidden;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font: 0.72rem var(--l-mono);
+  }
+  th {
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--l-line);
+    color: var(--l-dim);
+    font-weight: 400;
+    text-align: left;
+  }
+  td {
+    padding: 0.45rem 0.7rem;
+    border-bottom: 1px solid var(--l-line);
+    color: var(--l-muted);
+    white-space: nowrap;
+  }
+  td:first-child {
+    color: var(--l-text);
+  }
+  .saved {
+    color: var(--l-teal);
+  }
+  .snippet {
+    margin: 0;
+    padding: 0.75rem 0.8rem;
+    overflow-x: auto;
+    color: var(--l-muted);
+    font: 0.7rem/1.6 var(--l-mono);
+  }
+  .tg {
+    color: var(--l-teal);
+  }
+  .at {
+    color: var(--l-text);
+  }
+  .snippet .s {
+    color: var(--l-amber-ink);
+  }
+
+  /* Knowledge */
+  .kb {
+    display: grid;
+    gap: 0.45rem;
+    margin: auto 0 0;
+    padding: 0.7rem;
+    list-style: none;
+  }
+  .kb-card {
+    display: grid;
+    gap: 0.3rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--l-line);
+    border-radius: 0.6rem;
+    background: var(--l-card);
+  }
+  .kb-card.proposed {
+    border-style: dashed;
+    border-color: var(--l-amber-line);
+  }
+  .kb-top {
+    display: flex;
+    justify-content: space-between;
+  }
+  .kb-kind {
+    padding: 0 0.4rem;
+    border-radius: 0.3rem;
+    background: var(--l-line);
+    font: 0.66rem var(--l-mono);
+  }
+  .kb-kind.migration {
+    background: var(--l-amber-soft);
+    color: var(--l-amber-ink);
+  }
+  .kb-kind.decision {
+    background: var(--l-teal-soft);
+    color: var(--l-teal);
+  }
+  .kb-status {
+    color: var(--l-dim);
+    font-size: 0.68rem;
+  }
+  .proposed .kb-status {
+    color: var(--l-amber-ink);
+  }
+  .kb-title {
+    color: var(--l-text);
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .kb-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.9rem;
+    color: var(--l-dim);
+    font-size: 0.68rem;
+  }
+  .kb-meta code {
+    color: var(--l-muted);
+  }
+
+  /* Flags */
+  .flags {
+    overflow: hidden;
+  }
+  .page-bar {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--l-line);
+    color: var(--l-muted);
+    font-size: 0.72rem;
+  }
+  .page-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 0.15rem;
+    background: #3d7eff;
+  }
+  .marker {
+    margin-left: auto;
+    padding: 0 0.4rem;
+    border: 1px dashed var(--l-amber-line);
+    border-radius: 0.3rem;
+    color: var(--l-amber-ink);
+    font: 0.64rem var(--l-mono);
+  }
+  .st {
+    padding: 0 0.35rem;
+    border-radius: 0.3rem;
+  }
+  .st.on {
+    background: var(--l-teal-soft);
+    color: var(--l-teal);
+  }
+  .st.off {
+    background: var(--l-line);
+    color: var(--l-muted);
+  }
+  .find {
+    color: var(--l-amber-ink) !important;
+    font-family: var(--l-font);
+  }
+
+  /* AI usage */
+  .ai {
+    display: grid;
+    gap: 0.9rem;
+    padding: 0.9rem;
+  }
+  .ai-top {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: end;
+    justify-content: space-between;
+  }
+  .ai-top > div:first-child {
+    display: grid;
+  }
+  .ai-label {
+    color: var(--l-dim);
+    font-size: 0.7rem;
+  }
+  .ai-top b {
+    font-size: 1.5rem;
+    font-weight: 620;
+    letter-spacing: -0.03em;
+  }
+  .ai-budget {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 11rem;
+    color: var(--l-dim);
+    font: 0.68rem var(--l-mono);
+  }
+  .ai-meter {
+    height: 0.35rem;
+    overflow: hidden;
+    border-radius: 1rem;
+    background: var(--l-line);
+  }
+  .ai-meter span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--l-teal), var(--l-amber));
+  }
+  .ai-pct {
+    color: var(--l-muted);
+  }
+  .ai-bars {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .ai-bars li {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr) 3.5rem;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .ai-repo,
+  .ai-usd {
+    color: var(--l-muted);
+    font: 0.7rem var(--l-mono);
+  }
+  .ai-usd {
+    text-align: right;
+  }
+  .ai-bar {
+    height: 0.55rem;
+    overflow: hidden;
+    border-radius: 0.2rem;
+    background: var(--l-line);
+  }
+  .ai-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--l-amber);
+    transform-origin: left;
+    transition: transform 1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.3s;
+  }
+  :global(html[data-js] .l-reveal:not([data-shown])) .ai-bar span {
+    transform: scaleX(0);
+  }
+
+  @media (max-width: 64rem) {
+    .span-2,
+    .span-4 {
+      grid-column: span 3;
+    }
+    .reports {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 46rem) {
+    .bento {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .span-2,
+    .span-3,
+    .span-4 {
+      grid-column: auto;
+    }
+    .b-card {
+      padding: 1.2rem;
+    }
+    .chain li {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    .c-what {
+      display: none;
+    }
+    .mr-note {
+      margin-left: 0.8rem;
+    }
+  }
+</style>
