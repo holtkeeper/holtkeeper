@@ -7,17 +7,21 @@ import { defaultValue, editorFor } from '../../lib/schema.ts'
 import { isEmptyScope, normalizeScope } from '../../lib/scope.ts'
 import { Button, Dialog, Markdown, Notice, notify } from '../../ui/index.ts'
 import { ScopeEditor } from '../access/ScopeEditor.tsx'
+import { PresetPicker } from './PresetPicker.tsx'
 import { ValueEditor } from './ValueEditor.tsx'
 
 /** Creates or replaces one entry of a setting for a scope. */
 export function EntryDialog({
   definition,
   entry,
+  initialScope,
   groups,
   onClose,
 }: {
   definition: SettingDefinitionView
   entry?: SettingView
+  /** Scope of a new entry; defaults to everything. */
+  initialScope?: Scope
   groups: readonly string[]
   onClose: () => void
 }) {
@@ -29,8 +33,9 @@ export function EntryDialog({
     : definition.secret
       ? undefined
       : defaultValue(definition.schema)
-  const [scope, setScope] = useState<Scope>(entry?.scope ?? { all: true })
+  const [scope, setScope] = useState<Scope>(entry?.scope ?? initialScope ?? { all: true })
   const [value, setValue] = useState<unknown>(initial)
+  const [applied, setApplied] = useState(0)
   const { put } = useSettingMutations()
   const invalid = value === undefined || isEmptyScope(scope)
 
@@ -76,7 +81,18 @@ export function EntryDialog({
             </Notice>
           ) : null}
           <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+          {definition.presets && definition.presets.length > 0 && !definition.secret ? (
+            <PresetPicker
+              presets={definition.presets}
+              value={value}
+              onApply={(next) => {
+                setValue(next)
+                setApplied((count) => count + 1)
+              }}
+            />
+          ) : null}
           <ValueEditor
+            key={applied}
             editor={editor}
             schema={definition.schema}
             initial={value}

@@ -1,5 +1,6 @@
 import type { AuditRunDetail, AuditRunList, RepoList, RepoSummary } from '@holtkeeper/api'
 import { summarizeRun } from '@holtkeeper/api'
+import { staticPrefix } from '@holtkeeper/jobs'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
@@ -77,6 +78,18 @@ export function auditRoutes(deps: ServerDeps) {
         groups: target.groups,
         ...(canSee(principal, 'audits:read', target) ? { latestAudit: summarizeRun(run) } : {}),
       })
+    }
+    for (const group of Object.values(config.groups)) {
+      for (const path of group.include) {
+        if (staticPrefix(path) !== path) continue
+        const key = `${group.forge}:${path}`
+        if (latest.has(key)) continue
+        const target = repoTarget(config, { forge: group.forge, path })
+        if (!target.groups.length) continue
+        if (!canSee(principal, 'repos:read', target) && !canSee(principal, 'audits:read', target))
+          continue
+        latest.set(key, { repo: { forge: group.forge, path }, groups: target.groups })
+      }
     }
     const repos = [...latest.values()].toSorted((a, b) =>
       `${a.repo.forge}:${a.repo.path}`.localeCompare(`${b.repo.forge}:${b.repo.path}`),

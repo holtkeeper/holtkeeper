@@ -65,8 +65,13 @@ export interface KnowledgeAccess {
 export interface KnowledgeAccessOptions {
   store: Pick<Store, 'knowledge'> & Partial<Pick<Store, 'activity'>>
   now: () => Date
-  /** Kinds agent proposals are accepted for without review. Default: none. */
-  autoAccept?: readonly KnowledgeKind[]
+  /**
+   * Kinds agent proposals are accepted for without review, or a function giving them for the
+   * proposing repository (e.g. from a scoped setting). Default: none.
+   */
+  autoAccept?:
+    | readonly KnowledgeKind[]
+    | ((repo: KnowledgeRepo) => readonly KnowledgeKind[] | Promise<readonly KnowledgeKind[]>)
 }
 
 /** How many candidates a search ranks before the repository and task filters. */
@@ -100,6 +105,7 @@ export function knowledgeAccess({
         }))
     },
     async propose(input, ctx) {
+      const accepted = typeof autoAccept === 'function' ? await autoAccept(ctx.repo) : autoAccept
       const result = await proposeEntry({
         store,
         input,
@@ -110,7 +116,7 @@ export function knowledgeAccess({
           ...(ctx.packages !== undefined && { packages: ctx.packages }),
         },
         now,
-        ...(autoAccept !== undefined && { autoAccept }),
+        ...(accepted !== undefined && { autoAccept: accepted }),
       })
       return {
         id: result.entry.id,

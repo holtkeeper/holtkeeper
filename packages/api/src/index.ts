@@ -8,5 +8,17 @@ export type * from '@holtkeeper/changes'
 export type * from '@holtkeeper/report'
 export { formatBytes, percentChange } from '@holtkeeper/report'
 export type { RepoRef } from '@holtkeeper/forge'
-export type { ActivityEvent, AuditRun, AuditTrigger, RotationPolicy } from '@holtkeeper/store'
+export type {
+  ActivityEvent,
+  AuditRun,
+  AuditTrigger,
+  GroupDocumentData,
+  KnowledgeEntry,
+  KnowledgeKind,
+  KnowledgeLink,
+  KnowledgePackage,
+  KnowledgeRevision,
+  KnowledgeStatus,
+  RotationPolicy,
+} from '@holtkeeper/store'
 export type { AuditReport, Finding, FixAttempt, IgnoredFinding, Severity } from '@holtkeeper/vuln'

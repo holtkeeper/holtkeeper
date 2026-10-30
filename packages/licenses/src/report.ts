@@ -41,6 +41,10 @@ function counts(data: LicensesData) {
   }
 }
 
+/** Whether the policy asked for a repository license file and the repository has none. */
+const missingProjectLicense = (data: LicensesData) =>
+  data.policy.requireProjectLicense === true && data.project?.licenseFiles.length === 0
+
 const problem = (value: number, tone: 'warning' | 'bad'): Partial<Metric> =>
   value > 0 ? { tone } : { tone: 'good' }
 
@@ -68,7 +72,33 @@ function metrics(data: LicensesData, previous?: LicensesData): Metric[] {
       ...problem(now.unknown, 'warning'),
     },
     metric('licenses', 'Distinct licenses', now.licenses, { previous: before?.licenses }),
+    ...(data.policy.requireProjectLicense && data.project
+      ? [
+          {
+            ...metric(
+              'project-license',
+              'Repository license files',
+              data.project.licenseFiles.length,
+              {
+                hint: 'LICENSE, COPYING or similar at the repository root',
+              },
+            ),
+            ...(missingProjectLicense(data)
+              ? { tone: 'warning' as const }
+              : { tone: 'good' as const }),
+          },
+        ]
+      : []),
   ]
+}
+
+const projectLicenseIssue: Issue = {
+  id: 'project-license-missing',
+  tone: 'warning',
+  title: 'The repository has no license file',
+  detail:
+    'Add a LICENSE file at the repository root so users know the terms, or turn off requireProjectLicense for private code.',
+  tags: ['repository'],
 }
 
 const kindOf = (pkg: LicensedPackage) => pkg.groups?.join(', ')
@@ -103,14 +133,13 @@ function violationsSection(
   const before = previous
     ? new Map(previous.packages.filter(isViolation).map((pkg) => [packageKey(pkg), pkg]))
     : undefined
+  const issues = [
+    ...(missingProjectLicense(data) ? [projectLicenseIssue] : []),
+    ...violations.map((pkg) => violationIssue(pkg, before ? !before.has(packageKey(pkg)) : false)),
+  ]
   const blocks: Block[] = [
-    violations.length > 0
-      ? {
-          type: 'issues',
-          items: violations.map((pkg) =>
-            violationIssue(pkg, before ? !before.has(packageKey(pkg)) : false),
-          ),
-        }
+    issues.length > 0
+      ? { type: 'issues', items: issues }
       : { type: 'markdown', text: 'Every package has an allowed license.' },
   ]
 
@@ -157,7 +186,7 @@ function violationsSection(
   return {
     id: 'violations',
     title: 'Violations',
-    description: `Allowed: ${data.policy.allow.join(', ') || 'nothing'}. Denied: ${data.policy.deny.join(', ') || 'nothing'}.`,
+    description: `Allowed: ${data.policy.allow.join(', ') || 'nothing'}. Denied: ${data.policy.deny.join(', ') || 'nothing'}.${data.policy.unknown === 'violation' ? ' Unknown licenses are not allowed.' : ''}`,
     blocks,
   }
 }

@@ -3,6 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   describeScope,
   isEmptyScope,
+  isSharedScope,
+  namesFocus,
+  scopeOfFocus,
   normalizeScope,
   scopeOrder,
   validateRepoPattern,
@@ -36,5 +39,21 @@ describe('scopes', () => {
 
   test('order', () => {
     expect([{ repos: ['x'] }, { all: true }, { groups: ['g'] }].map(scopeOrder)).toEqual([2, 0, 1])
+  })
+
+  test('focus of a repository or group page', () => {
+    const repo = { kind: 'repo' as const, repo: { forge: 'work', path: 'games/slots' } }
+    const group = { kind: 'group' as const, group: 'games' }
+    expect(scopeOfFocus(repo)).toEqual({ repos: ['work:games/slots'] })
+    expect(scopeOfFocus(group)).toEqual({ groups: ['games'] })
+    expect(namesFocus({ repos: ['work:games/slots'] }, repo)).toBe(true)
+    expect(namesFocus({ repos: ['games/slots'] }, repo)).toBe(true)
+    expect(namesFocus({ repos: ['games/*'] }, repo)).toBe(false)
+    expect(namesFocus({ all: true }, repo)).toBe(false)
+    expect(namesFocus({ groups: ['games', 'tools'] }, group)).toBe(true)
+    expect(namesFocus({ groups: ['tools'] }, group)).toBe(false)
+    expect(isSharedScope({ groups: ['games'] })).toBe(false)
+    expect(isSharedScope({ groups: ['games'], repos: ['x/y'] })).toBe(true)
+    expect(isSharedScope({ all: true })).toBe(true)
   })
 })

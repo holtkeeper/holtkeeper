@@ -33,6 +33,15 @@ describe('server jobs', () => {
       properties: { depth: { default: 1 }, mode: { enum: ['a', 'b'], default: 'a' } },
     })
     expect(z.toJSONSchema(setting!.form!, { io: 'input' })).not.toHaveProperty('required')
+    expect(setting?.presets).toBeUndefined()
+  })
+
+  test('analyzerSettings offers analyzer presets as values that pass the setting', () => {
+    const [setting] = analyzerSettings([
+      { ...echo, presets: [{ id: 'deep', label: 'Deep', options: { depth: 9 } }] },
+    ])
+    expect(setting?.presets).toEqual([{ id: 'deep', label: 'Deep', value: { depth: 9 } }])
+    expect(setting?.schema.safeParse(setting.presets?.[0]?.value).success).toBeTrue()
   })
 
   test('scopedAnalyzerOptions picks the most specific setting for the job', async () => {

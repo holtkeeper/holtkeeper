@@ -41,7 +41,7 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { knowledgeAccess, selectForTask } from '@holtkeeper/knowledge'
 import { type Limiter, limitAgent, limitPolicySchema, resolveLimitPolicy } from '@holtkeeper/limits'
 import { resolveSetting } from '@holtkeeper/settings'
-import type { SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
+import type { KnowledgeKind, SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
 import { z } from 'zod'
 
@@ -95,6 +95,10 @@ export interface ServerDefaultsOptions {
   /** Runs `go list`/`go doc` for `docs.package`; the job's runner when there is one. */
   runner?: CommandRunner
   tools?: ServerToolSettings
+  /** `agent.instructions`: Markdown rules by task kind, `*` for every task. */
+  instructions?: Record<string, string>
+  /** Knowledge kinds the agent's proposals are accepted for without review. */
+  autoAccept?: readonly KnowledgeKind[]
   context7?: Context7Options
   /** Checked before every run; a denial throws `BudgetExceededError` (and is reported to `onRun`). */
   budgets?: Pick<BudgetGuard, 'check'>
@@ -110,9 +114,9 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
 
 /**
  * `agent` with what every server task gets: the `code`, `docs` and `knowledge` toolsets (a
- * toolset of the same name in the task wins), accepted knowledge for the repository and task kind
- * (within `tools.knowledgeTokens`, default `DEFAULT_KNOWLEDGE_TOKENS`) placed before the task's
- * own `context`, and the external MCP servers `tools` enables (Context7 only with
+ * toolset of the same name in the task wins), `instructions` for `*` and the task kind, then
+ * accepted knowledge for the repository and task kind (within `tools.knowledgeTokens`, default
+ * `DEFAULT_KNOWLEDGE_TOKENS`), placed before the task's own `context`, and the external MCP servers `tools` enables (Context7 only with
  * `context7: true`; the task's servers win). `budgets` may deny a run before it starts. `onRun`
  * hears about every run: successful, failed or denied.
  */
@@ -121,7 +125,11 @@ export function withServerDefaults(
   options: ServerDefaultsOptions,
 ): Agent {
   const { repo, store, now, tools = {} } = options
-  const access = knowledgeAccess({ store, now })
+  const access = knowledgeAccess({
+    store,
+    now,
+    ...(options.autoAccept && { autoAccept: options.autoAccept }),
+  })
   const budget = tools.maxResultLines !== undefined ? { maxResultLines: tools.maxResultLines } : {}
   const budgetTokens = tools.knowledgeTokens ?? DEFAULT_KNOWLEDGE_TOKENS
   const providerKind = 'provider' in agent ? agent.provider : agent.name
@@ -168,7 +176,8 @@ export function withServerDefaults(
                 budgetTokens,
               }).markdown.trim()
             : ''
-        const context = [knowledge, task.context?.trim() ?? ''].filter(Boolean).join('\n\n')
+        const rules = renderInstructions(options.instructions, taskKind)
+        const context = [rules, knowledge, task.context?.trim() ?? ''].filter(Boolean).join('\n\n')
         const toolsets = merge(
           [
             codeTools({ budget }),
@@ -193,6 +202,28 @@ export function withServerDefaults(
       }
     },
   }
+}
+
+const renderInstructions = (instructions: Record<string, string> | undefined, taskKind: string) => {
+  const parts = [instructions?.['*'], taskKind === '*' ? undefined : instructions?.[taskKind]]
+    .map((text) => text?.trim())
+    .filter(Boolean)
+  return parts.length ? `## Team instructions\n\n${parts.join('\n\n')}` : ''
+}
+
+const knowledgeKindSchema = z.array(
+  z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),
+)
+
+/** `knowledge.autoAccept` for a repository; empty when unset or invalid. */
+export function autoAcceptFrom(
+  entries: readonly SettingEntry[],
+  repo: RepoTarget,
+): KnowledgeKind[] {
+  const parsed = knowledgeKindSchema.safeParse(
+    resolveSetting(entries, 'knowledge.autoAccept', repo)?.value,
+  )
+  return parsed.success ? parsed.data : []
 }
 
 const stringSetting = (entries: SettingEntry[], key: string, target: RepoTarget) => {
@@ -361,6 +392,8 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     const limited = { key: credential.id, credential }
 
     const tools = resolveSetting(entries, 'agent.tools', target)?.value
+    const instructions = resolveSetting(entries, 'agent.instructions', target)?.value
+    const autoAccept = autoAcceptFrom(entries, target)
     const origin: AgentRunOrigin = {
       ...(job?.actor !== undefined && { actor: job.actor }),
       ...(job?.analyzer !== undefined && { analyzer: job.analyzer }),
@@ -376,6 +409,8 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       ...(budgets && { budgets }),
       ...(runner && { runner }),
       ...(isRecord(tools) && { tools }),
+      ...(isStringRecord(instructions) && { instructions }),
+      ...(autoAccept.length > 0 && { autoAccept }),
       ...(options.context7 && { context7: options.context7 }),
       onRunError: (error) =>
         log(

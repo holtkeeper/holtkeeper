@@ -30,14 +30,19 @@ import { liveConfig } from '@holtkeeper/managed-config'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
 import type { AnalysisKind } from '@holtkeeper/report'
 import { createReviewAnalyzer } from '@holtkeeper/review'
-import { type SettingDefinition, builtinSettings } from '@holtkeeper/settings'
+import {
+  type DefaultSetting,
+  type SettingDefinition,
+  builtinSettings,
+  seedDefaultSettings,
+} from '@holtkeeper/settings'
 import { resolveSetting } from '@holtkeeper/settings'
 import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
 import { aesVault } from '@holtkeeper/vault'
 import { mirrorStorage } from '@holtkeeper/workspace'
 
-import { settingsAgentFor } from './agent.ts'
+import { autoAcceptFrom, settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
 import { createApp } from './app.ts'
 import { startAuditRetention } from './audit.ts'
@@ -68,6 +73,11 @@ export interface ServerOptions {
   analyses?: AnalysisKind<any>[]
   /** Extra settings, e.g. from plugins. */
   settings?: SettingDefinition[]
+  /**
+   * Values a fresh install starts with (no settings in the store yet), written once per store.
+   * Default `defaultSettings` from `@holtkeeper/settings`; `false` seeds nothing.
+   */
+  defaultSettings?: readonly DefaultSetting[] | false
   /** Analyzers background jobs may run. Default: the registry from `@holtkeeper/analyzers`. */
   analyzers?: AnyAnalyzer[]
   /** The LLM agent for a repository. Default: the AI provider credential named by `llm.provider`. */
@@ -193,7 +203,11 @@ export async function startServer(
     ...(config.jobs?.botUsername ? { botUsername: config.jobs.botUsername } : {}),
     mediaReviewer: createMediaReviewer(server.publicUrl ? { publicUrl: server.publicUrl } : {}),
     knowledge: {
-      access: knowledgeAccess({ store: server.store, now: () => new Date() }),
+      access: knowledgeAccess({
+        store: server.store,
+        now: () => new Date(),
+        autoAccept: async (repo) => autoAcceptFrom(await server.store.settings.list(), repo),
+      }),
       groupsOf: (repo) => repoTarget(config, repo).groups,
     },
     async instructionsFor(repo) {
@@ -277,6 +291,16 @@ export async function startServer(
       ...(options.storage ?? []),
     ],
     now: () => new Date(),
+  }
+
+  if (options.defaultSettings !== false) {
+    const seeded = await seedDefaultSettings({
+      store: server.store,
+      definitions: deps.settings,
+      ...(options.defaultSettings ? { defaults: options.defaultSettings } : {}),
+      now: deps.now,
+    })
+    if (seeded.length > 0) log(`settings: seeded defaults for ${seeded.join(', ')}`)
   }
 
   const app = createApp(deps)

@@ -1,13 +1,14 @@
 import { Link } from '@tanstack/react-router'
-import { FolderGit2 } from 'lucide-react'
+import { FolderGit2, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { useRepos } from '../../api/queries.ts'
+import { useGroups, useRepos } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { compareCounts } from '../../lib/severity.ts'
 import {
+  Button,
   Chip,
   EmptyState,
   ErrorState,
@@ -23,6 +24,7 @@ import {
   Th,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
+import { AddRepoDialog } from './AddRepoDialog.tsx'
 
 const orders = [
   { id: 'attention', label: 'Worst first' },
@@ -37,6 +39,16 @@ export function ReposPage() {
   const repos = useRepos()
   const [query, setQuery] = useState('')
   const [order, setOrder] = useState<(typeof orders)[number]['id']>('attention')
+  const [adding, setAdding] = useState(false)
+  const configGroups = useGroups(can('settings:read'))
+  const groupIds = [
+    ...new Set([
+      ...(configGroups.data?.entries ?? []).map((entry) => entry.id),
+      ...(repos.data?.repos ?? []).flatMap((r) => r.groups),
+    ]),
+  ].toSorted()
+  const membersOf = (group: string) =>
+    (repos.data?.repos ?? []).filter((r) => r.groups.includes(group)).length
 
   const needle = query.trim().toLowerCase()
   const list = (repos.data?.repos ?? [])
@@ -71,9 +83,28 @@ export function ReposPage() {
             className="w-64"
           />
           <Segmented aria-label="Order" options={orders} value={order} onChange={setOrder} />
+          {can('settings:write') ? (
+            <Button variant="primary" onPress={() => setAdding(true)}>
+              <Plus className="size-4" />
+              Add repository
+            </Button>
+          ) : null}
         </>
       }
     >
+      {groupIds.length ? (
+        <div className="flex flex-wrap items-center gap-1.5 text-sm">
+          <span className="text-muted">Groups:</span>
+          {groupIds.map((group) => (
+            <Link key={group} to="/repos/groups/$groupId" params={{ groupId: group }}>
+              <Chip className="hover:underline">
+                {group}
+                <span className="text-muted">{membersOf(group)}</span>
+              </Chip>
+            </Link>
+          ))}
+        </div>
+      ) : null}
       <Panel contentClassName="p-0 sm:p-2">
         {repos.isPending ? (
           <div className="flex flex-col gap-2 p-4">
@@ -87,6 +118,15 @@ export function ReposPage() {
           <EmptyState
             icon={<FolderGit2 />}
             title={needle ? 'No repository matches' : 'No repositories'}
+            {...(!needle && can('settings:write')
+              ? {
+                  action: (
+                    <Button variant="primary" onPress={() => setAdding(true)}>
+                      Add repository
+                    </Button>
+                  ),
+                }
+              : {})}
           />
         ) : (
           <Table label="Repositories">
@@ -106,23 +146,21 @@ export function ReposPage() {
               {list.map(({ repo, groups, latestAudit }) => (
                 <tr key={repoKey(repo)} className="transition-colors hover:bg-default-soft">
                   <Td>
-                    {latestAudit ? (
-                      <Link
-                        to="/audits/$runId"
-                        params={{ runId: latestAudit.id }}
-                        className="font-medium hover:underline"
-                      >
-                        {repo.path}
-                      </Link>
-                    ) : (
-                      <span className="font-medium">{repo.path}</span>
-                    )}
+                    <Link
+                      to="/repos/view"
+                      search={{ repo: repoKey(repo) }}
+                      className="font-medium hover:underline"
+                    >
+                      {repo.path}
+                    </Link>
                     <div className="text-xs text-muted">{repo.forge}</div>
                   </Td>
                   <Td>
                     <div className="flex flex-wrap gap-1">
                       {groups.map((group) => (
-                        <Chip key={group}>{group}</Chip>
+                        <Link key={group} to="/repos/groups/$groupId" params={{ groupId: group }}>
+                          <Chip className="hover:underline">{group}</Chip>
+                        </Link>
                       ))}
                     </div>
                   </Td>
@@ -152,6 +190,16 @@ export function ReposPage() {
                   </Td>
                   <Td align="right">
                     <div className="flex justify-end gap-1">
+                      {latestAudit ? (
+                        <LinkButton
+                          to="/audits/$runId"
+                          params={{ runId: latestAudit.id }}
+                          variant="ghost"
+                          size="sm"
+                        >
+                          Latest
+                        </LinkButton>
+                      ) : null}
                       <LinkButton
                         to="/audits"
                         search={{ repo: repoKey(repo) }}
@@ -181,6 +229,7 @@ export function ReposPage() {
           </Table>
         )}
       </Panel>
+      {adding ? <AddRepoDialog onClose={() => setAdding(false)} /> : null}
     </Page>
   )
 }

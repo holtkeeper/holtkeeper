@@ -1,4 +1,9 @@
-import type { CredentialView, SettingDefinitionView, SettingView } from '@holtkeeper/api'
+import type {
+  ActivityPerson,
+  CredentialView,
+  SettingDefinitionView,
+  SettingView,
+} from '@holtkeeper/api'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Pencil, Plus, Settings2, Trash2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -7,9 +12,11 @@ import { useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { useCredentials, useRepos, useSettingMutations, useSettings } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
+import { personOf } from '../../lib/people.ts'
 import { editorFor, previewValue } from '../../lib/schema.ts'
 import { scopeOrder } from '../../lib/scope.ts'
 import {
+  Avatar,
   Button,
   Chip,
   ConfirmDialog,
@@ -67,7 +74,7 @@ export function SettingsPage() {
       </Page>
     )
 
-  const { definitions, settings: entries } = settings.data
+  const { definitions, settings: entries, people } = settings.data
   const sections = [...new Set(definitions.map((d) => d.section))]
   const entriesOf = (definition: SettingDefinitionView) =>
     entries
@@ -92,6 +99,7 @@ export function SettingsPage() {
               definition={definition}
               entries={entriesOf(definition)}
               credentials={credentials.data?.credentials ?? []}
+              people={people}
               writable={writable}
               onAdd={() => setEditing({ definition })}
               onEdit={(entry) => setEditing({ definition, entry })}
@@ -165,6 +173,7 @@ function SettingCard({
   definition,
   entries,
   credentials,
+  people,
   writable,
   onAdd,
   onEdit,
@@ -173,6 +182,7 @@ function SettingCard({
   definition: SettingDefinitionView
   entries: SettingView[]
   credentials: readonly CredentialView[]
+  people: Readonly<Record<string, ActivityPerson>>
   writable: boolean
   onAdd: () => void
   onEdit: (entry: SettingView) => void
@@ -227,9 +237,11 @@ function SettingCard({
                         : undefined) ?? previewValue(entry.value, entry.secret))
                     )}
                   </span>
-                  <span className="text-xs text-muted">
+                  <span className="flex items-center gap-1.5 text-xs text-muted">
                     {formatRelative(entry.updatedAt)}
-                    {entry.updatedBy ? ` by ${entry.updatedBy}` : ''}
+                    {entry.updatedBy ? (
+                      <UpdatedBy person={personOf(people, entry.updatedBy)} />
+                    ) : null}
                   </span>
                   {writable ? (
                     <span className="flex gap-1">
@@ -266,5 +278,17 @@ function SettingCard({
         ) : null}
       </div>
     </Panel>
+  )
+}
+
+function UpdatedBy({ person }: { person: ReturnType<typeof personOf> }) {
+  return (
+    <>
+      by
+      <Avatar src={person.avatarUrl} name={person.name} size="xs" />
+      <span className={person.known ? 'font-medium text-foreground' : 'font-mono'}>
+        {person.name}
+      </span>
+    </>
   )
 }

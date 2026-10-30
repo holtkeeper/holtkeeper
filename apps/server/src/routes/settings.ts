@@ -22,6 +22,7 @@ import {
   repoTarget,
 } from '../context.ts'
 import { putSettingSchema } from '../schemas.ts'
+import { peopleOf } from './avatars.ts'
 
 /** Secret values never leave the server. */
 const toView = (entry: SettingEntry): SettingView => ({
@@ -45,6 +46,7 @@ export function settingRoutes(deps: ServerDeps) {
     section: definition.section,
     secret: definition.secret ?? false,
     ...(definition.help ? { help: definition.help } : {}),
+    ...(definition.presets?.length ? { presets: definition.presets } : {}),
     schema: z.toJSONSchema(definition.form ?? definition.schema, {
       unrepresentable: 'any',
       io: 'input',
@@ -54,12 +56,16 @@ export function settingRoutes(deps: ServerDeps) {
 
   app.get('/settings', async (c) => {
     const principal = principalOf(c)
-    const entries = await store.settings.list()
+    const visible = (await store.settings.list()).filter((entry) =>
+      can(principal, 'settings:read', { kind: 'scope', scope: entry.scope }),
+    )
     return c.json<SettingList>({
       definitions: definitionViews,
-      settings: entries
-        .filter((entry) => can(principal, 'settings:read', { kind: 'scope', scope: entry.scope }))
-        .map(toView),
+      settings: visible.map(toView),
+      people: await peopleOf(
+        { store },
+        visible.flatMap((entry) => (entry.updatedBy ? [entry.updatedBy] : [])),
+      ),
     })
   })
 

@@ -1,3 +1,4 @@
+import type { KnowledgeKind } from '@holtkeeper/store'
 import { allowlistSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
@@ -21,6 +22,21 @@ export interface SettingDefinition<Schema extends z.ZodType = z.ZodType> {
    * for it and recommended values. `description` stays the one-line summary.
    */
   help?: string
+  /**
+   * Ready-made values editors can start from. Each value passes `schema`; applied to an object
+   * value, a preset sets its own fields and keeps the others.
+   */
+  presets?: SettingPreset[]
+}
+
+/** A named value of a setting, offered by editors as a starting point. */
+export interface SettingPreset {
+  /** Unique within the setting. */
+  id: string
+  label: string
+  /** One or two sentences on when to pick it. */
+  description?: string
+  value: unknown
 }
 
 export const defineSetting = <Schema extends z.ZodType>(definition: SettingDefinition<Schema>) =>
@@ -63,6 +79,55 @@ export const llmModels = defineSetting({
 - Keep cheap, frequent tasks (\`triage\`) on a small model and reserve the strongest one for \`review\`.
 - Kinds without an entry fall back to **Model**.`,
   schema: z.record(z.string().min(1), z.string().min(1)),
+  presets: [
+    {
+      id: 'balanced',
+      label: 'Balanced',
+      description:
+        'Opus for review and porting, Sonnet for generated changes and summaries, Haiku for triage.',
+      value: {
+        review: 'claude-opus@latest',
+        port: 'claude-opus@latest',
+        refactor: 'claude-opus@latest',
+        propagate: 'claude-sonnet@latest',
+        tests: 'claude-sonnet@latest',
+        quality: 'claude-sonnet@latest',
+        'release-risk': 'claude-sonnet@latest',
+        triage: 'claude-haiku@latest',
+      },
+    },
+    {
+      id: 'economy',
+      label: 'Economy',
+      description:
+        'Sonnet where judgment matters, Haiku for everything frequent. Roughly a third of the balanced cost.',
+      value: {
+        review: 'claude-sonnet@latest',
+        port: 'claude-sonnet@latest',
+        refactor: 'claude-sonnet@latest',
+        propagate: 'claude-haiku@latest',
+        tests: 'claude-haiku@latest',
+        quality: 'claude-haiku@latest',
+        'release-risk': 'claude-haiku@latest',
+        triage: 'claude-haiku@latest',
+      },
+    },
+    {
+      id: 'quality',
+      label: 'Best quality',
+      description: 'Opus for every task except triage. Use with an AI budget.',
+      value: {
+        review: 'claude-opus@latest',
+        port: 'claude-opus@latest',
+        refactor: 'claude-opus@latest',
+        propagate: 'claude-opus@latest',
+        tests: 'claude-opus@latest',
+        quality: 'claude-opus@latest',
+        'release-risk': 'claude-opus@latest',
+        triage: 'claude-haiku@latest',
+      },
+    },
+  ],
 })
 
 export const llmBudget = defineSetting({
@@ -82,6 +147,26 @@ export const llmBudget = defineSetting({
     action: z.enum(['warn', 'block']),
     perTaskKind: z.record(z.string().min(1), z.number().positive()).optional(),
   }),
+  presets: [
+    {
+      id: 'learn',
+      label: 'Learn the spend',
+      description: 'Warn above $300 a month or $30 a day without stopping anything.',
+      value: { action: 'warn', monthlyUsd: 300, dailyUsd: 30 },
+    },
+    {
+      id: 'small-team',
+      label: 'Small team cap',
+      description: 'Block new runs above $100 a month or $10 a day.',
+      value: { action: 'block', monthlyUsd: 100, dailyUsd: 10 },
+    },
+    {
+      id: 'team',
+      label: 'Team cap',
+      description: 'Block above $1000 a month or $80 a day; review alone may use $600 a month.',
+      value: { action: 'block', monthlyUsd: 1000, dailyUsd: 80, perTaskKind: { review: 600 } },
+    },
+  ],
 })
 
 export const agentTools = defineSetting({
@@ -112,6 +197,36 @@ export const reviewInstructions = defineSetting({
 - Write rules as short imperative bullets: *"Flag SQL built by string concatenation."*
 - Put organization-wide rules on **All repositories** and team conventions on their group; the repository's \`REVIEW.md\` still has the last word.`,
   schema: z.string(),
+})
+
+export const agentInstructions = defineSetting({
+  key: 'agent.instructions',
+  label: 'Agent instructions',
+  description:
+    'Extra rules for agents per task kind, in Markdown; `*` applies to every task. Put before the task’s own context.',
+  section: 'AI',
+  help: `Extra rules for agents, keyed by task kind: \`review\`, \`port\`, \`propagate\`, \`tests\`, \`quality\`, \`release-risk\`, \`triage\`, or \`*\` for every task.
+
+- Write rules as short imperative bullets: *"Never bump major versions of react."*
+- The most specific entry covering a repository wins as a whole, so a repository entry replaces its group's: repeat the group rules you still want.
+- Conventions agents should learn and cite belong in the **Knowledge** base instead; these instructions are for hard rules.`,
+  schema: z.record(z.string().min(1), z.string()),
+})
+
+export const knowledgeAutoAccept = defineSetting({
+  key: 'knowledge.autoAccept',
+  label: 'Auto-accept agent knowledge',
+  description:
+    'Kinds of knowledge entries agents may add without review; other proposals wait on the Knowledge page.',
+  section: 'Knowledge',
+  help: `Agents propose what they learn while working. Proposals of the kinds listed here are accepted at once and reach later tasks; the rest wait for review on the **Knowledge** page.
+
+- \`quirk\` and \`howto\` are low risk: facts about the code agents found the hard way.
+- Keep \`decision\` and \`convention\` under review: they change how agents judge code.
+- The scope is the repository the agent worked on, so an entry for a group lets agents learn freely in that group only.`,
+  schema: z.array(
+    z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),
+  ),
 })
 
 export const auditFix = defineSetting({
@@ -155,7 +270,9 @@ export const builtinSettings: SettingDefinition[] = [
   llmModels,
   llmBudget,
   agentTools,
+  agentInstructions,
   reviewInstructions,
+  knowledgeAutoAccept,
   auditFix,
   auditUpgrade,
   auditAllowlist,

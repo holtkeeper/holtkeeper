@@ -6,6 +6,10 @@ import type {
   AnalysisList,
   ApplyChangesInput,
   ApplyChangesResult,
+  ConfigEntryList,
+  ConfigEntryView,
+  CreateKnowledgeInput,
+  GroupDocumentData,
   AuditRunDetail,
   AuditRunList,
   CreateCredentialInput,
@@ -14,6 +18,9 @@ import type {
   CredentialTestResult,
   CredentialView,
   InviteUserInput,
+  KnowledgeEntry,
+  KnowledgeList,
+  KnowledgeStatus,
   LinkInfo,
   LinkResponse,
   MePrincipal,
@@ -27,6 +34,7 @@ import type {
   SettingList,
   SettingView,
   UpdateCredentialInput,
+  UpdateKnowledgeInput,
   UpdateUserInput,
   UserList,
   UserView,
@@ -100,6 +108,28 @@ export const api = {
   deleteSetting: (settingId: string) => request<void>('DELETE', `/api/settings/${id(settingId)}`),
   resolveSettings: (repo: RepoRef) =>
     request<ResolvedSettings>('GET', '/api/settings/resolve', { query: { repo: repoKey(repo) } }),
+
+  knowledge: (query: { status?: readonly KnowledgeStatus[]; repo?: RepoRef; q?: string }) =>
+    request<KnowledgeList>('GET', '/api/knowledge', {
+      query: {
+        status: query.status?.length ? query.status.join(',') : undefined,
+        repo: query.repo ? repoKey(query.repo) : undefined,
+        q: query.q || undefined,
+        limit: 500,
+      },
+    }),
+  createKnowledge: (input: CreateKnowledgeInput) =>
+    request<KnowledgeEntry>('POST', '/api/knowledge', { body: input }),
+  updateKnowledge: (entryId: string, input: UpdateKnowledgeInput) =>
+    request<KnowledgeEntry>('PUT', `/api/knowledge/${id(entryId)}`, { body: input }),
+  reviewKnowledge: (entryId: string, action: 'accept' | 'reject' | 'archive') =>
+    request<KnowledgeEntry>('POST', `/api/knowledge/${id(entryId)}/${action}`),
+  deleteKnowledge: (entryId: string) => request<void>('DELETE', `/api/knowledge/${id(entryId)}`),
+
+  forges: () => request<ConfigEntryList<'forge'>>('GET', '/api/config/forges'),
+  groups: () => request<ConfigEntryList<'group'>>('GET', '/api/config/groups'),
+  putGroup: (groupId: string, data: GroupDocumentData) =>
+    request<ConfigEntryView<'group'>>('PUT', `/api/config/groups/${id(groupId)}`, { body: data }),
 
   activity: (query: { before?: string; limit?: number }) =>
     request<ActivityList>('GET', '/api/activity', { query }),

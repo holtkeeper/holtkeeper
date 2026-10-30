@@ -2,10 +2,14 @@ import type {
   ApplyChangesInput,
   AuditRunSummary,
   CreateCredentialInput,
+  CreateKnowledgeInput,
+  GroupDocumentData,
   InviteUserInput,
+  KnowledgeStatus,
   PutSettingInput,
   RepoRef,
   UpdateCredentialInput,
+  UpdateKnowledgeInput,
   UpdateUserInput,
 } from '@holtkeeper/api'
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
@@ -35,6 +39,8 @@ export const keys = {
   credentials: ['credentials'] as const,
   settings: ['settings'] as const,
   resolved: (repo: RepoRef) => ['settings', 'resolve', repoKey(repo)] as const,
+  knowledge: ['knowledge'] as const,
+  config: ['config'] as const,
   activity: ['activity'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
@@ -171,6 +177,66 @@ export function useSettingMutations() {
     put: useMutation({ mutationFn: (input: PutSettingInput) => api.putSetting(input), onSuccess }),
     remove: useMutation({ mutationFn: (id: string) => api.deleteSetting(id), onSuccess }),
   }
+}
+
+/** Knowledge entries the caller may read, most recently updated first; `repo` keeps entries covering it. */
+export const useKnowledge = (
+  query: { status?: readonly KnowledgeStatus[]; repo?: RepoRef },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      ...keys.knowledge,
+      (query.status ?? []).join(','),
+      query.repo ? repoKey(query.repo) : '*',
+    ],
+    queryFn: () => api.knowledge(query),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+
+/** Create, edit, review and delete knowledge entries; each refreshes every knowledge list. */
+export function useKnowledgeMutations() {
+  const client = useQueryClient()
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.knowledge })
+  return {
+    create: useMutation({
+      mutationFn: (input: CreateKnowledgeInput) => api.createKnowledge(input),
+      onSuccess,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: UpdateKnowledgeInput }) =>
+        api.updateKnowledge(id, input),
+      onSuccess,
+    }),
+    review: useMutation({
+      mutationFn: ({ id, action }: { id: string; action: 'accept' | 'reject' | 'archive' }) =>
+        api.reviewKnowledge(id, action),
+      onSuccess,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.deleteKnowledge(id), onSuccess }),
+  }
+}
+
+/** Forges of the effective config; needs global `settings:read`. */
+export const useForges = (enabled = true) =>
+  useQuery({ queryKey: [...keys.config, 'forges'], queryFn: api.forges, enabled })
+
+/** Repository groups of the effective config; needs global `settings:read`. */
+export const useGroups = (enabled = true) =>
+  useQuery({ queryKey: [...keys.config, 'groups'], queryFn: api.groups, enabled })
+
+/** Creates or replaces a group in the panel config; refreshes groups and repositories. */
+export function usePutGroup() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: GroupDocumentData }) => api.putGroup(id, data),
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.config })
+      await client.invalidateQueries({ queryKey: keys.repos })
+      await client.invalidateQueries({ queryKey: keys.settings })
+    },
+  })
 }
 
 /** Activity events, newest first, paged by the oldest event's time. */

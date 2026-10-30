@@ -89,7 +89,7 @@ const config = parseConfig({
   forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => fakeForge } },
   groups: {
     games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
+    tools: { forge: 'work', include: ['tools/*', 'tools/cli'] },
   },
 })
 
@@ -262,6 +262,19 @@ describe('server', () => {
     ).toBe(403)
   })
 
+  test('lists repositories named exactly in groups even without audits', async () => {
+    await store.auditRuns.add({
+      ...run('games/a', '2026-10-29T10:00:00.000Z'),
+      trigger: 'cli',
+      report: report('high'),
+    })
+    const repos = (await (await setup().request('/api/repos')).json()) as RepoList
+    expect(repos.repos.map((r) => [r.repo.path, r.groups, r.latestAudit !== undefined])).toEqual([
+      ['games/a', ['games'], true],
+      ['tools/cli', ['tools'], false],
+    ])
+  })
+
   test('stores settings per scope, seals secrets and resolves for a repository', async () => {
     const app = setup()
     await send(app, 'PUT', '/api/settings', {
@@ -297,6 +310,10 @@ describe('server', () => {
     expect(list.definitions.find((d) => d.key === 'audit.upgrade')?.schema).toMatchObject({
       enum: ['major', 'minor', 'patch'],
     })
+    expect(list.definitions.find((d) => d.key === 'llm.models')?.presets?.map((p) => p.id)).toEqual(
+      ['balanced', 'economy', 'quality'],
+    )
+    expect(list.definitions.find((d) => d.key === 'audit.upgrade')?.presets).toBeUndefined()
     expect(list.settings).toHaveLength(3)
 
     const resolved = (await (
@@ -380,6 +397,33 @@ describe('server', () => {
         },
       ],
     })
+  })
+
+  test('the settings list names the users who changed entries', async () => {
+    await store.users.putUser({
+      id: 'u1',
+      name: 'Ann',
+      grants: [],
+      disabled: false,
+      sessionVersion: 0,
+      createdAt: '2026-10-30T00:00:00.000Z',
+      avatarSeed: 'fox',
+    })
+    const base = {
+      key: 'llm.model',
+      value: 'm',
+      secret: false,
+      updatedAt: '2026-10-30T00:00:00.000Z',
+    }
+    await store.settings.put({ ...base, id: 's1', scope: { all: true }, updatedBy: 'u1' })
+    await store.settings.put({
+      ...base,
+      id: 's2',
+      scope: { groups: ['games'] },
+      updatedBy: 'system',
+    })
+    const list = (await (await setup().request('/api/settings')).json()) as SettingList
+    expect(list.people).toEqual({ u1: { name: 'Ann', avatarUrl: expect.stringContaining('fox') } })
   })
 
   test('activity requires global user rights', async () => {

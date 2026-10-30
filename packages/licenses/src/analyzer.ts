@@ -1,4 +1,4 @@
-import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
 import { analyzeLicenses } from './analyze.ts'
@@ -26,9 +26,107 @@ export const licensesOptionsSchema = z.object({
   deny: list(defaultDeny),
   /** Package names (`*` wildcards allowed) to leave out of the verdict. */
   ignore: list([]),
+  /** `violation` judges packages without a recognizable license not allowed instead of warning. */
+  unknown: z.enum(['warn', 'violation']).default('warn'),
+  /** Warn when the repository itself carries no license file at its root. */
+  requireProjectLicense: z.boolean().default(false),
 })
 
 export type LicensesOptions = z.output<typeof licensesOptionsSchema>
+
+/** Permissive and public-domain licenses beyond `defaultAllow` that no common policy objects to. */
+const permissive = [
+  ...defaultAllow,
+  'MIT-0',
+  'BSD-1-Clause',
+  'Zlib',
+  'BSL-1.0',
+  'PSF-2.0',
+  'X11',
+  'Unicode-3.0',
+  'Unicode-DFS-2016',
+  'CC-BY-3.0',
+  'CC-BY-4.0',
+]
+
+/** Weak (file- or library-level) copyleft: fine to depend on unmodified in most products. */
+const weakCopyleft = ['LGPL-*', 'MPL-*', 'EPL-*', 'CDDL-*']
+
+/** Not open source: forbid use in production or as a service. */
+const sourceAvailable = [
+  'SSPL-*',
+  'BUSL-*',
+  'Elastic-*',
+  'Commons-Clause',
+  'CC-BY-NC-*',
+  'CC-BY-NC-SA-*',
+]
+
+/** License policies for typical projects; each sets `allow`, `deny` and `unknown` together. */
+export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
+  {
+    id: 'commercial',
+    label: 'Commercial product',
+    description:
+      'Shipped to customers: permissive licenses pass, strong copyleft and source-available licenses are denied, weak copyleft is flagged for review.',
+    options: {
+      allow: permissive,
+      deny: ['GPL-*', 'AGPL-*', ...sourceAvailable],
+      unknown: 'warn',
+    },
+  },
+  {
+    id: 'no-copyleft',
+    label: 'No copyleft',
+    description:
+      'Only permissive licenses pass; any copyleft is denied and packages without a recognizable license count as violations.',
+    options: {
+      allow: permissive,
+      deny: [
+        'GPL-*',
+        'AGPL-*',
+        'LGPL-*',
+        ...weakCopyleft,
+        'EUPL-*',
+        'OSL-*',
+        'CPL-*',
+        'CC-BY-SA-*',
+        ...sourceAvailable,
+      ],
+      unknown: 'violation',
+    },
+  },
+  {
+    id: 'open-source',
+    label: 'Open-source project',
+    description:
+      'Published under a free license: copyleft is fine, source-available and non-commercial licenses are denied, and the repository must carry its own license file.',
+    options: {
+      allow: [...permissive, ...weakCopyleft, 'GPL-*', 'AGPL-*', 'EUPL-*', 'CC-BY-SA-*'],
+      deny: sourceAvailable,
+      unknown: 'warn',
+      requireProjectLicense: true,
+    },
+  },
+  {
+    id: 'internal',
+    label: 'Private / internal',
+    description:
+      'Never distributed outside the company: GPL and weak copyleft pass, AGPL (network use) and source-available licenses are denied.',
+    options: {
+      allow: [...permissive, ...weakCopyleft, 'GPL-*'],
+      deny: ['AGPL-*', ...sourceAvailable],
+      unknown: 'warn',
+    },
+  },
+  {
+    id: 'flag-missing',
+    label: 'Flag missing licenses',
+    description:
+      'Keeps the allow and deny lists; packages without a recognizable license count as violations and the repository must carry a license file.',
+    options: { unknown: 'violation', requireProjectLicense: true },
+  },
+]
 
 /**
  * The `licenses` analyzer: lists third-party packages of a checkout with their licenses through
@@ -52,7 +150,19 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
       description: 'comma-separated SPDX ids or patterns to deny (default GPL-*,AGPL-*,SSPL-*)',
     },
     { flag: 'ignore', option: 'ignore', description: 'comma-separated package names to skip' },
+    {
+      flag: 'unknown',
+      option: 'unknown',
+      description: 'warn (default) or violation for packages without a recognizable license',
+    },
+    {
+      flag: 'require-project-license',
+      option: 'requireProjectLicense',
+      description: 'warn when the repository has no license file',
+      type: 'boolean',
+    },
   ],
+  presets: licensePresets,
   async run({ dir, ref, runner, options, signal }) {
     if (!dir) throw new Error('the licenses analyzer needs a checkout')
     const data = await analyzeLicenses({

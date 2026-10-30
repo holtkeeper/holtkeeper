@@ -285,6 +285,24 @@ describe('settingsAgentFor', () => {
     expect(Object.keys(calls[0]?.mcpServers ?? {}).toSorted()).toEqual(['context7', 'holtkeeper'])
     expect(appendOf(calls[0] ?? {})).not.toContain('[kb:k1]')
   })
+
+  test('agent.instructions go before knowledge; knowledge.autoAccept accepts proposals', async () => {
+    await anthropic('sk')
+    await setting('agent.instructions', {
+      '*': 'Answer in English.',
+      review: 'Flag raw SQL.',
+      port: 'Keep public APIs.',
+    })
+    await setting('knowledge.autoAccept', ['quirk'])
+    await store.knowledge.put(knowledge())
+    const agent = await agentFor()(repo)
+    await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review', context: 'Task notes' })
+    const append = appendOf(calls[0] ?? {})
+    expect(append).toContain('Answer in English.')
+    expect(append).toContain('Flag raw SQL.')
+    expect(append).not.toContain('Keep public APIs.')
+    expect(append.indexOf('Flag raw SQL.')).toBeLessThan(append.indexOf('[kb:k1]'))
+  })
 })
 
 describe('withServerDefaults', () => {
@@ -334,6 +352,28 @@ describe('withServerDefaults', () => {
       ['tests', 'fake', undefined, 'boom'],
     ])
     expect(DEFAULT_KNOWLEDGE_TOKENS).toBe(1500)
+  })
+
+  test('autoAccept passes to the knowledge tools', async () => {
+    const seen: AgentTask[] = []
+    const inner: Agent = {
+      name: 'fake',
+      async run(task) {
+        seen.push(task)
+        return { text: 'ok', turns: 1 }
+      },
+    }
+    const agent = withServerDefaults(inner, { repo: target, store, now, autoAccept: ['quirk'] })
+    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'tests' })
+    const propose = seen[0]?.toolsets
+      ?.find((toolset) => toolset.name === 'knowledge')
+      ?.tools.find((tool) => tool.name === 'knowledge.propose')
+    await propose?.run(
+      { title: 'Flaky e2e on CI', body: 'Workaround: retry once.', kind: 'quirk' },
+      { dir: '/r', signal: new AbortController().signal },
+    )
+    const [entry] = await store.knowledge.list({})
+    expect(entry?.status).toBe('accepted')
   })
 
   test('findProviderCredential prefers ids, then names, and skips other kinds and scopes', () => {

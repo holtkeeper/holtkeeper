@@ -257,6 +257,7 @@ describe('startServer roles', () => {
     try {
       expect((await fetch(`${running.url}/api/me`)).status).toBe(200)
       expect((await fetch(`${running.url}/readyz`)).status).toBe(200)
+      expect((await store.settings.get('default:llm.model'))?.value).toBe('claude-opus@latest')
       expect(await (await fetch(`${running.url}/metrics`)).text()).toContain(
         'holtkeeper_jobs_queued',
       )

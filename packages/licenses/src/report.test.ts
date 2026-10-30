@@ -117,3 +117,31 @@ test('the analysis kind validates data and builds a report with its subject', ()
   expect(report.subject).toEqual({ repo, ref: 'v2', compareTo: 'v1' })
   expect(licensesAnalysis.summarize(current).find((m) => m.id === 'violations')?.value).toBe(2)
 })
+
+const issueIds = (report: ReturnType<typeof licensesReport>) =>
+  report.sections[0]?.blocks.flatMap((block) =>
+    block.type === 'issues' ? block.items.map((item) => item.id) : [],
+  )
+
+test('warns about a missing repository license only when the policy requires one', () => {
+  const required = (licenseFiles: string[]): LicensesData => ({
+    ...data([pkg('react', 'allowed', ['MIT'])]),
+    policy: { allow: ['MIT'], deny: [], ignore: [], requireProjectLicense: true },
+    project: { licenseFiles },
+  })
+
+  const missing = licensesReport(required([]))
+  expect(missing.metrics.find((m) => m.id === 'project-license')).toMatchObject({
+    value: 0,
+    tone: 'warning',
+  })
+  expect(issueIds(missing)).toEqual(['project-license-missing'])
+
+  const present = licensesReport(required(['LICENSE']))
+  expect(present.metrics.find((m) => m.id === 'project-license')?.tone).toBe('good')
+  expect(issueIds(present)).toEqual([])
+
+  const notRequired = licensesReport({ ...data([]), project: { licenseFiles: [] } })
+  expect(notRequired.metrics.map((m) => m.id)).not.toContain('project-license')
+  expect(issueIds(notRequired)).toEqual([])
+})

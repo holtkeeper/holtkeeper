@@ -1,6 +1,7 @@
 import type { Action, AuthInfo, Principal } from '@holtkeeper/api'
 import {
   Activity,
+  BookOpen,
   Boxes,
   FileSearch,
   FolderGit2,
@@ -25,6 +26,7 @@ export interface NavItem {
     | '/bundles'
     | '/dependencies'
     | '/quality'
+    | '/knowledge'
     | '/credentials'
     | '/settings'
     | '/users'
@@ -45,6 +47,7 @@ const navItems: readonly NavItem[] = [
   { to: '/bundles', label: 'Bundles', icon: Boxes, requires: 'analyses:read' },
   { to: '/dependencies', label: 'Dependencies', icon: Network, requires: 'analyses:read' },
   { to: '/quality', label: 'Code quality', icon: Gauge, requires: 'analyses:read' },
+  { to: '/knowledge', label: 'Knowledge', icon: BookOpen, requires: 'knowledge:read' },
   { to: '/credentials', label: 'Credentials', icon: KeyRound, requires: 'credentials:read' },
   { to: '/settings', label: 'Settings', icon: Settings2, requires: 'settings:read' },
   { to: '/users', label: 'Users', icon: Users, requires: 'users:read', usersOnly: true },

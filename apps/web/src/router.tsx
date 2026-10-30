@@ -78,6 +78,12 @@ const AnalysisPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysisPage.tsx'),
   'AnalysisPage',
 )
+const RepoPage = lazyRouteComponent(() => import('./features/repos/RepoPage.tsx'), 'RepoPage')
+const GroupPage = lazyRouteComponent(() => import('./features/repos/GroupPage.tsx'), 'GroupPage')
+const KnowledgePage = lazyRouteComponent(
+  () => import('./features/knowledge/KnowledgePage.tsx'),
+  'KnowledgePage',
+)
 const ActivityPage = lazyRouteComponent(
   () => import('./features/activity/ActivityPage.tsx'),
   'ActivityPage',
@@ -101,6 +107,26 @@ const settingsRoute = createRoute({
   }),
 })
 
+const tabSearch = (search: Record<string, unknown>): { tab?: string } =>
+  typeof search.tab === 'string' && search.tab ? { tab: search.tab } : {}
+
+const repoRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'repos/view',
+  component: RepoPage,
+  validateSearch: (search: Record<string, unknown>): { repo?: string; tab?: string } => ({
+    ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
+    ...tabSearch(search),
+  }),
+})
+
+const groupRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'repos/groups/$groupId',
+  component: GroupPage,
+  validateSearch: tabSearch,
+})
+
 const repoSearch = (search: Record<string, unknown>): { repo?: string } =>
   typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}
 
@@ -122,6 +148,8 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     page('/', DashboardPage),
     page('repos', ReposPage),
+    repoRoute,
+    groupRoute,
     auditsRoute,
     page('audits/$runId', AuditRunPage),
     analysisPage('releases', ReleasesPage),
@@ -129,6 +157,7 @@ const routeTree = rootRoute.addChildren([
     analysisPage('dependencies', DependenciesPage),
     analysisPage('quality', QualityPage),
     analysisRoute,
+    page('knowledge', KnowledgePage),
     page('credentials', CredentialsPage),
     settingsRoute,
     page('users', UsersPage),

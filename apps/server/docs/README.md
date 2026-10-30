@@ -54,20 +54,20 @@ Everything a route needs comes through `ServerDeps`, so tests build the app with
 
 ## Permissions per endpoint
 
-| Endpoint                    | Needs                                                                                                                                                               |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| audit runs, repository list | `audits:read` / `repos:read` on the repository (lists are filtered)                                                                                                 |
-| `POST /api/audit-runs`      | `audits:run` on the repository                                                                                                                                      |
-| credentials                 | `credentials:read` / `credentials:write` on the credential's scope                                                                                                  |
-| settings                    | `settings:read` / `settings:write` on the entry's scope; resolve needs `settings:read` on the repository                                                            |
-| activity                    | `users:read` on everything                                                                                                                                          |
-| jobs                        | `analyses:read` on the repository (lists are filtered); queueing and canceling need `analyses:run`                                                                  |
-| knowledge                   | `knowledge:read` / `knowledge:write` on the entry's scope (lists are filtered); `?repo=` needs `knowledge:read` on the repository and lists every entry covering it |
-| AI usage                    | `ai:read` (or `ai:admin`); rows limited to repositories the grants cover, using the groups recorded on each run; `?repo=` needs `ai:read` on the repository         |
-| managed config              | global `settings:read` to view (incl. export and schedule previews), global `settings:write` to change (incl. webhook secrets)                                      |
-| audit log (`/api/audit*`)   | global `audit:read`                                                                                                                                                 |
-| own external accounts       | any signed-in principal, only for its own links                                                                                                                     |
-| avatars                     | none (`GET /api/avatars/*`); `PUT /api/me/avatar` needs a signed-in `users` account                                                                                 |
+| Endpoint                    | Needs                                                                                                                                                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| audit runs, repository list | `audits:read` / `repos:read` on the repository (lists are filtered); `GET /api/repos` lists audited repositories plus exact paths in group `include` lists, so repositories added in the panel show up before their first audit |
+| `POST /api/audit-runs`      | `audits:run` on the repository                                                                                                                                                                                                  |
+| credentials                 | `credentials:read` / `credentials:write` on the credential's scope                                                                                                                                                              |
+| settings                    | `settings:read` / `settings:write` on the entry's scope; resolve needs `settings:read` on the repository                                                                                                                        |
+| activity                    | `users:read` on everything                                                                                                                                                                                                      |
+| jobs                        | `analyses:read` on the repository (lists are filtered); queueing and canceling need `analyses:run`                                                                                                                              |
+| knowledge                   | `knowledge:read` / `knowledge:write` on the entry's scope (lists are filtered); `?repo=` needs `knowledge:read` on the repository and lists every entry covering it                                                             |
+| AI usage                    | `ai:read` (or `ai:admin`); rows limited to repositories the grants cover, using the groups recorded on each run; `?repo=` needs `ai:read` on the repository                                                                     |
+| managed config              | global `settings:read` to view (incl. export and schedule previews), global `settings:write` to change (incl. webhook secrets)                                                                                                  |
+| audit log (`/api/audit*`)   | global `audit:read`                                                                                                                                                                                                             |
+| own external accounts       | any signed-in principal, only for its own links                                                                                                                                                                                 |
+| avatars                     | none (`GET /api/avatars/*`); `PUT /api/me/avatar` needs a signed-in `users` account                                                                                                                                             |
 
 ## Agents
 
@@ -83,7 +83,8 @@ Everything a route needs comes through `ServerDeps`, so tests build the app with
 
 The agent is wrapped by `withServerDefaults(agent, options)`, so every task gets:
 
-- toolsets `code` (`codeTools`), `docs` (`docsTools`, with the job's runner when the caller passes `{ runner }` as second argument of `agentFor`, else `runner`) and `knowledge` (`knowledgeTools(knowledgeAccess({ store }))` for the repository and the task's kind); a task toolset with the same name wins;
+- toolsets `code` (`codeTools`), `docs` (`docsTools`, with the job's runner when the caller passes `{ runner }` as second argument of `agentFor`, else `runner`) and `knowledge` (`knowledgeTools(knowledgeAccess({ store, autoAccept }))` for the repository and the task's kind, `autoAccept` from the scoped `knowledge.autoAccept`; the review analyzer's own knowledge access resolves it the same way); a task toolset with the same name wins;
+- the `agent.instructions` entries for `*` and the task's kind, under `## Team instructions`, first in `context`;
 - a knowledge `context` block from `selectForTask` (accepted entries for the repository and task kind, within `agent.tools.knowledgeTokens`, default 1500 tokens; `0` disables it), placed before the task's own `context`;
 - external MCP servers from `agent.tools` (`externalServers`: Context7 only with `context7: true`);
 - a budget check (`budgetGuard` over `llm.budget`; a `block` limit throws `BudgetExceededError`) and an `onRun({ repo, taskKind, provider, providerKind, model, result | error, durationMs, at, actor?, analyzer?, jobId? })` call after every run, denied ones included. The default `onRun` is `usageRecorder(store.aiUsage)` from [@holtkeeper/ai-usage](../../../packages/ai-usage/docs/README.md); `provider` is the credential's name (or `anthropic`), `model` the provider's model name. `onRun` failures are logged and never change the run's outcome.
@@ -115,7 +116,9 @@ Agent runs recorded by [@holtkeeper/ai-usage](../../../packages/ai-usage/docs/RE
 
 With a `jobs` section in the config (see [@holtkeeper/jobs](../../../packages/jobs/docs/README.md)), `startServer` starts a scheduler and a worker (`src/jobs.ts`) and stops them with the server. Pass the analyzers jobs may run as `ServerOptions.analyzers` and an `agentFor(repo)` for analyzers that use an LLM. Finished jobs are written to the activity log (`job.succeeded`, `job.failed`). `GET /api/activity` returns `people` next to the events: name and avatar URL of every user among their actors and subjects, so clients never show bare ids.
 
-Analyzer options per scope come from the setting `analyzers.<kind>` (section `Analyzers`); `analyzerSettings(analyzers)` returns the definitions. A value is a partial options object, validated field by field and stored without defaults; it overrides schedule options and is overridden by a manual job's own options.
+Analyzer options per scope come from the setting `analyzers.<kind>` (section `Analyzers`); `analyzerSettings(analyzers)` returns the definitions, with the analyzer's `presets` as setting presets. A value is a partial options object, validated field by field and stored without defaults; it overrides schedule options and is overridden by a manual job's own options.
+
+At startup the server seeds the defaults of a fresh install (`seedDefaultSettings` from [@holtkeeper/settings](../../../packages/settings/docs/README.md#defaults-on-a-fresh-install)) against every setting it knows; `ServerOptions.defaultSettings` replaces the values, `false` turns seeding off. `GET /api/settings` returns each definition's `presets` and `people`: name and avatar of the users among the entries' `updatedBy`, like `/api/activity`.
 
 | Endpoint                    | Does                                                                                                                                                                             |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

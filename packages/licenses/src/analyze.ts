@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises'
+import { readdir, realpath } from 'node:fs/promises'
 
 import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 
@@ -18,6 +18,10 @@ export interface LicensePolicyOptions {
   deny?: readonly string[]
   /** Package names (`*` wildcards allowed) whose licenses are not judged. */
   ignore?: readonly string[]
+  /** `violation` judges packages with unknown licenses not allowed. Default `warn`. */
+  unknown?: 'warn' | 'violation'
+  /** Warn when the repository itself has no license file. Default false. */
+  requireProjectLicense?: boolean
 }
 
 /** The policy with defaults applied. */
@@ -26,7 +30,20 @@ export function resolvePolicy(options: LicensePolicyOptions = {}): LicensePolicy
     allow: [...(options.allow ?? defaultAllow)],
     deny: [...(options.deny ?? defaultDeny)],
     ignore: [...(options.ignore ?? [])],
+    ...(options.unknown === 'violation' ? { unknown: 'violation' as const } : {}),
+    ...(options.requireProjectLicense ? { requireProjectLicense: true } : {}),
   }
+}
+
+const licenseFilePattern = /^(?:licen[cs]e|copying|unlicense)(?:[-._].*)?$/i
+
+/** License files at the root of `dir`: `LICENSE`, `LICENSE.md`, `LICENSE-MIT`, `COPYING`, ... */
+export async function projectLicenseFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  return entries
+    .filter((entry) => entry.isFile() && licenseFilePattern.test(entry.name))
+    .map((entry) => entry.name)
+    .toSorted()
 }
 
 const namePattern = (pattern: string) =>
@@ -46,7 +63,15 @@ export function evaluatePackages(
   const ignored = policy.ignore.map(namePattern)
   return packages.map((pkg) => {
     if (ignored.some((pattern) => pattern.test(pkg.name))) return { ...pkg, verdict: 'ignored' }
-    const { verdict, culprits } = evaluate(pkg.licenses)
+    const result = evaluate(pkg.licenses)
+    const strict = result.verdict === 'unknown' && policy.unknown === 'violation'
+    const verdict = strict ? 'unlisted' : result.verdict
+    const culprits =
+      strict && result.culprits.length === 0
+        ? pkg.licenses.length > 0
+          ? pkg.licenses
+          : ['UNKNOWN']
+        : result.culprits
     return { ...pkg, verdict, ...(culprits.length > 0 ? { culprits } : {}) }
   })
 }
@@ -121,5 +146,6 @@ export async function analyzeLicenses({
       parseOsvLicenses(stdout.trim() ? JSON.parse(stdout) : {}, root),
       resolved,
     ),
+    project: { licenseFiles: await projectLicenseFiles(root) },
   }
 }

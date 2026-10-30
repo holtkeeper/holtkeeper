@@ -59,12 +59,22 @@ export async function withAvatar(
 }
 
 /** Names and avatars of the users among events' actors and subjects. */
-export async function activityPeople(
+export const activityPeople = (
   deps: Pick<ServerDeps, 'store'>,
   events: readonly ActivityEvent[],
+): Promise<Record<string, ActivityPerson>> =>
+  peopleOf(
+    deps,
+    events.flatMap((e) => (e.subject ? [e.actor, e.subject] : [e.actor])),
+  )
+
+/** Names and avatars of the ids that are users; other ids (services, `system`) are absent. */
+export async function peopleOf(
+  deps: Pick<ServerDeps, 'store'>,
+  ids: Iterable<string>,
 ): Promise<Record<string, ActivityPerson>> {
-  const ids = new Set(events.flatMap((e) => (e.subject ? [e.actor, e.subject] : [e.actor])))
-  const users = await Promise.all([...ids].map((id) => deps.store.users.getUser(id)))
+  const unique = new Set(ids)
+  const users = await Promise.all([...unique].map((id) => deps.store.users.getUser(id)))
   return Object.fromEntries(
     users.flatMap((user) =>
       user

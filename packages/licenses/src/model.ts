@@ -27,6 +27,10 @@ export interface LicensePolicyData {
   allow: string[]
   deny: string[]
   ignore: string[]
+  /** `violation`: unknown licenses were judged not allowed. Missing in older records: `warn`. */
+  unknown?: 'warn' | 'violation'
+  /** The repository itself had to carry a license file. */
+  requireProjectLicense?: boolean
 }
 
 /** Everything a `licenses` analysis found; serializable, stored as analysis data. */
@@ -34,6 +38,11 @@ export interface LicensesData {
   tool: { name: string; version?: string }
   policy: LicensePolicyData
   packages: LicensedPackage[]
+  /** The checked-out repository itself; missing in older records. */
+  project?: {
+    /** License files at the repository root, e.g. `LICENSE`, `COPYING.md`. */
+    licenseFiles: string[]
+  }
 }
 
 const verdict = z.enum(['allowed', 'unknown', 'unlisted', 'denied', 'ignored'])
@@ -45,7 +54,10 @@ export const licensesDataSchema: z.ZodType<LicensesData> = z.object({
     allow: z.array(z.string()),
     deny: z.array(z.string()),
     ignore: z.array(z.string()),
+    unknown: z.enum(['warn', 'violation']).optional(),
+    requireProjectLicense: z.boolean().optional(),
   }),
+  project: z.object({ licenseFiles: z.array(z.string()) }).optional(),
   packages: z.array(
     z.object({
       name: z.string(),

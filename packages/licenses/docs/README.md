@@ -8,10 +8,14 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
   - `allow: string[]` — SPDX ids, `*` patterns or whole expressions. Default `defaultAllow`: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, BlueOak-1.0.0.
   - `deny: string[]` — same forms. Default `defaultDeny`: `GPL-*`, `AGPL-*`, `SSPL-*`.
   - `ignore: string[]` — package names (`*` allowed, e.g. `@company/*`) whose licenses are not judged.
+  - `unknown: 'warn' | 'violation'` (`--unknown`) — default `warn` reports unknown licenses separately; `violation` judges them `unlisted` (not allowed), with the declared text or `UNKNOWN` as culprit.
+  - `requireProjectLicense: boolean` (`--require-project-license`) — default false; when true, a repository without a license file at its root gets a warning.
+  - `presets` — `licensePresets`, offered by the panel for the `analyzers.licenses` setting (see [Presets](#presets)).
 - `licensesAnalysis` — the `AnalysisKind` (`schema: licensesDataSchema`, `summarize`, `toReport(current, previous)`); `licensesReport(data, { previous?, ref?, compareTo?, generatedAt? })` builds the report directly.
 - `analyzeLicenses({ dir, runner, policy?, binary?, args?, signal? }): Promise<LicensesData>` — runs osv-scanner through the `CommandRunner` and evaluates.
 - `parseOsvLicenses(output, dir): ScannedPackage[]` — osv-scanner JSON to packages.
 - `evaluatePackages(packages, policy)`, `resolvePolicy(options)` — pure policy application.
+- `projectLicenseFiles(dir)` — names of license files at the root of `dir` (`LICENSE`, `LICENCE`, `COPYING`, `UNLICENSE`, with any `.`/`-`/`_` suffix such as `LICENSE.md` or `LICENSE-MIT`).
 - `parseLicense(text)`, `formatLicense(node)`, `licenseEvaluator(policy)`, `evaluateLicenses(licenses, policy)` — the SPDX expression engine.
 - Helpers: `isViolation`, `packageKey`, `licenseText`.
 
@@ -32,7 +36,13 @@ A package found in several lockfiles becomes one entry with every source (relati
 ```ts
 interface LicensesData {
   tool: { name: 'osv-scanner'; version?: string }
-  policy: { allow: string[]; deny: string[]; ignore: string[] }
+  policy: {
+    allow: string[]
+    deny: string[]
+    ignore: string[]
+    unknown?: 'warn' | 'violation' // set only for violation
+    requireProjectLicense?: boolean // set only when true
+  }
   packages: {
     name: string
     version: string
@@ -43,6 +53,7 @@ interface LicensesData {
     verdict: 'allowed' | 'unknown' | 'unlisted' | 'denied' | 'ignored'
     culprits?: string[] // licenses responsible for a verdict other than allowed
   }[]
+  project?: { licenseFiles: string[] } // license files at the repository root; missing in older records
 }
 ```
 
@@ -61,11 +72,24 @@ Every license gets one of four verdicts, ordered from best to worst: `allowed` >
 - `UNKNOWN`, `NOASSERTION`, `NONE`, `non-standard`, no license at all, and text that is not a valid expression are `unknown`.
 - Several licenses declared for one package must all be acceptable; they are combined with `AND`.
 
-`denied` and `unlisted` are violations; `unknown` is reported separately as a warning.
+`denied` and `unlisted` are violations; `unknown` is reported separately as a warning, or becomes `unlisted` with `unknown: 'violation'`.
+
+## Presets
+
+`licensePresets` set `allow`, `deny` and `unknown` together (keeping `ignore`); "permissive" below is `defaultAllow` plus MIT-0, BSD-1-Clause, Zlib, BSL-1.0, PSF-2.0, X11, Unicode-3.0, Unicode-DFS-2016, CC-BY-3.0 and CC-BY-4.0, "source-available" is SSPL, BUSL, Elastic, Commons-Clause and CC-BY-NC.
+
+| Id             | For                            | Allows                                     | Denies                                                                  | Unknown                                              |
+| -------------- | ------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| `commercial`   | products shipped to customers  | permissive                                 | GPL, AGPL, source-available (weak copyleft left for review)             | `warn`                                               |
+| `no-copyleft`  | code that must stay permissive | permissive                                 | every copyleft (GPL, LGPL, MPL, EPL, CDDL, EUPL, ...), source-available | `violation`                                          |
+| `open-source`  | projects under a free license  | permissive, weak copyleft, GPL, AGPL, EUPL | source-available                                                        | `warn`, and the repository needs a license file      |
+| `internal`     | never distributed outside      | permissive, weak copyleft, GPL             | AGPL, source-available                                                  | `warn`                                               |
+| `flag-missing` | on top of any policy           | (kept)                                     | (kept)                                                                  | `violation`, and the repository needs a license file |
 
 ## Report
 
-- **Metrics**: packages, license violations (`better: 'down'`; `bad` when something is denied, else `warning`), unknown licenses (`better: 'down'`), distinct licenses — each with a delta against the previous record.
+- **Metrics**: packages, license violations (`better: 'down'`; `bad` when something is denied, else `warning`), unknown licenses (`better: 'down'`), distinct licenses — each with a delta against the previous record — and, with `requireProjectLicense`, repository license files (`warning` at 0).
+- A missing repository license file under `requireProjectLicense` is the first issue of **Violations** (`project-license-missing`).
 - **Violations**: an `issues` block, denied first (`bad`) then not allowed (`warning`); each names package, version, license, the offending licenses, its source files and dependency kind; tags are the ecosystem, the dependency groups and `new` when the package was not a violation in the previous analysis. With a previous record, a table of new and resolved violations follows (packages are compared by ecosystem and name, so a version bump is not "new").
 - **License mix**: a donut chart of packages by license expression; the twelve largest slices, the rest as `Other`.
 - **Unknown licenses**: a table of packages whose licenses are unknown, with what was declared.

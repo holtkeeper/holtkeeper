@@ -68,6 +68,16 @@ export interface AnalyzerFlag {
   type?: 'string' | 'boolean'
 }
 
+/** A named set of options, e.g. a license policy for commercial products. */
+export interface AnalyzerPreset<Options = Record<string, unknown>> {
+  /** Unique within the analyzer. */
+  id: string
+  label: string
+  description?: string
+  /** Options the preset sets; others keep their current values. */
+  options: Partial<Options>
+}
+
 /**
  * Something that produces analysis data: the CLI runs analyzers on demand, the task engine on
  * schedules and events. Analyzers declare what they need; runners provide exactly that.
@@ -87,6 +97,8 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   /** Validates options from config or flags; numbers should use `z.coerce`. */
   options: z.ZodType<Options>
   flags?: AnalyzerFlag[]
+  /** Named option sets the panel offers for the analyzer's `analyzers.<kind>` setting. */
+  presets?: AnalyzerPreset<Options>[]
   /**
    * Other repositories the run reads besides `repo` (a shared config repository, a dependency's
    * source, ...). `repo` may be a `RepoRef` or `forge:path`; `ref` defaults to the default branch.

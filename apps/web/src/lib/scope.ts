@@ -1,4 +1,6 @@
-import type { Scope } from '@holtkeeper/api'
+import type { RepoRef, Scope } from '@holtkeeper/api'
+
+import { repoKey } from './repo.ts'
 
 /** Whether the scope covers nothing: not `all` and no groups or repository patterns. */
 export const isEmptyScope = (scope: Scope): boolean =>
@@ -41,3 +43,25 @@ export function scopeOrder(scope: Scope): number {
   if (scope.groups?.length) return 1
   return 2
 }
+
+/** What a repository or group page edits settings and knowledge for. */
+export type ScopeFocus = { kind: 'repo'; repo: RepoRef } | { kind: 'group'; group: string }
+
+/** The scope a new entry made on a focus page starts with. */
+export const scopeOfFocus = (focus: ScopeFocus): Scope =>
+  focus.kind === 'repo' ? { repos: [repoKey(focus.repo)] } : { groups: [focus.group] }
+
+/**
+ * Whether the scope names the focus itself: the group, or the repository's exact path (with or
+ * without its forge). Broader entries that merely cover a repository do not count.
+ */
+export function namesFocus(scope: Scope, focus: ScopeFocus): boolean {
+  if (focus.kind === 'group') return scope.groups?.includes(focus.group) ?? false
+  return (scope.repos ?? []).some(
+    (pattern) => pattern === repoKey(focus.repo) || pattern === focus.repo.path,
+  )
+}
+
+/** Whether the scope covers more than one group or pattern, or everything. */
+export const isSharedScope = (scope: Scope): boolean =>
+  scope.all === true || (scope.groups?.length ?? 0) + (scope.repos?.length ?? 0) > 1

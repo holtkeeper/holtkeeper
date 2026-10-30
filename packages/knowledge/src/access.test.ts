@@ -85,4 +85,29 @@ describe('knowledgeAccess', () => {
     expect(quirk.status).toBe('accepted')
     expect((await store.knowledge.get(quirk.id))?.scope).toEqual({ all: true })
   })
+
+  test('autoAccept may depend on the proposing repository', async () => {
+    const seen: string[] = []
+    const kb = knowledgeAccess({
+      store,
+      now,
+      autoAccept: (target) => {
+        seen.push(target.path)
+        return target.groups.includes('games') ? ['howto'] : []
+      },
+    })
+    const proposal = {
+      title: 'Run the asset build first',
+      body: 'How to: run assets before tests.',
+    }
+    const ctx = { actor: 'agent:tests', taskKind: 'tests' }
+    const inGames = await kb.propose(proposal, { ...ctx, repo: slots })
+    const elsewhere = await kb.propose(
+      { title: 'Regenerate the client', body: 'How to: run codegen after schema edits.' },
+      { ...ctx, repo: { forge: 'work', path: 'tools/cli', groups: [] } },
+    )
+    expect(inGames.status).toBe('accepted')
+    expect(elsewhere.status).toBe('proposed')
+    expect(seen).toEqual([slots.path, 'tools/cli'])
+  })
 })

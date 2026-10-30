@@ -275,12 +275,24 @@ export interface SettingDefinitionView {
   schema: unknown
   /** Markdown guidance for editors: what the setting changes and recommended values. */
   help?: string
+  /** Ready-made values; applied to an object value, a preset sets its fields and keeps the others. */
+  presets?: SettingPresetView[]
+}
+
+/** A named value of a setting the editor offers as a starting point. */
+export interface SettingPresetView {
+  id: string
+  label: string
+  description?: string
+  value: unknown
 }
 
 /** `GET /api/settings` */
 export interface SettingList {
   definitions: SettingDefinitionView[]
   settings: SettingView[]
+  /** Users among the entries' `updatedBy`, by id; other ids (`system`, services) are absent. */
+  people: Record<string, ActivityPerson>
 }
 
 /** `PUT /api/settings` — creates or, with `id`, replaces an entry. */

@@ -75,6 +75,14 @@ export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] 
     section: 'Analyzers',
     help: `Options for the ${analyzer.kind} analyzer in repositories this entry covers. Set only what differs from the defaults: unset options keep them. The most specific entry covering a repository wins as a whole, so repeat shared options in narrower entries.`,
     schema: partialOptions(analyzer.options),
+    ...(analyzer.presets?.length
+      ? {
+          presets: analyzer.presets.map(({ options, ...preset }) => ({
+            ...preset,
+            value: options,
+          })),
+        }
+      : {}),
     ...(analyzer.options instanceof z.ZodObject
       ? {
           form: z.object(
