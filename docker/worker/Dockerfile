@@ -10,7 +10,7 @@ ARG TARGETARCH
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git openssh-client; \
+    apt-get install -y --no-install-recommends ca-certificates curl git openssh-client libatomic1; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

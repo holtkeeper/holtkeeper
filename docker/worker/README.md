@@ -1,6 +1,6 @@
 # Worker image
 
-The sandbox `@holtkeeper/exec-container` runs job commands in. `debian:stable-slim` with `git`, `openssh-client` (git over SSH, host key scans and commit signing), `ca-certificates`, `curl`, [mise](https://mise.jdx.dev), `osv-scanner` and `gitleaks` — no language runtimes. Node, Go, Python, ... are installed by mise on demand into the cache volume and shared between jobs.
+The sandbox `@holtkeeper/exec-container` runs job commands in. `debian:stable-slim` with `git`, `openssh-client` (git over SSH, host key scans and commit signing), `ca-certificates`, `curl`, `libatomic1` (official Node builds from 26 on link it), [mise](https://mise.jdx.dev), `osv-scanner` and `gitleaks` — no language runtimes. Node, Go, Python, ... are installed by mise on demand into the cache volume and shared between jobs.
 
 | Tool        | Version      | Build argument        |
 | ----------- | ------------ | --------------------- |
@@ -16,6 +16,14 @@ Scanner versions match the repository's `mise.toml`; bump both together. Every d
 docker build -t holtkeeper-worker:latest docker/worker
 # another architecture
 docker buildx build --platform linux/amd64 -t holtkeeper-worker:latest docker/worker
+```
+
+## Smoke test
+
+[`smoke.sh`](smoke.sh) installs and starts the newest version of every runtime `@holtkeeper/toolchain` detects (Node, Bun, pnpm, Yarn, Go, Python, Java, Ruby, Rust), so a shared library a new upstream build starts to need shows up before a job hits it. The `worker smoke` workflow runs it on changes to this folder and weekly.
+
+```sh
+docker run --rm -v "$PWD/docker/worker/smoke.sh:/smoke.sh:ro" holtkeeper-worker:latest sh /smoke.sh
 ```
 
 Then set `jobs.execution: { mode: 'container' }` (the default image is `holtkeeper-worker:latest`; `image` or the scoped `toolchain` setting picks another). amd64 and arm64 are supported. The image is about 440 MB unpacked; most of it is the mise binary.

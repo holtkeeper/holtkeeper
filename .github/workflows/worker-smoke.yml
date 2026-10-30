@@ -1,0 +1,19 @@
+name: worker smoke
+
+on:
+  push:
+    branches: [main]
+    paths: [docker/worker/**]
+  pull_request:
+    paths: [docker/worker/**]
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t holtkeeper-worker:smoke docker/worker
+      - run: docker run --rm -v "$PWD/docker/worker/smoke.sh:/smoke.sh:ro" holtkeeper-worker:smoke sh /smoke.sh
