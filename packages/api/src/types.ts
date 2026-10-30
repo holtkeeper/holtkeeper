@@ -492,23 +492,24 @@ export interface CreateJobInput {
 
 /**
  * `POST /api/releases/backfill`: analyze past releases. Without `repo` or `group` it covers every
- * repository of every group. `limit` newest tags per repository (default 20, at most 100).
+ * repository of every group. `limit` newest releases per repository (default 20, at most 100); a
+ * release is a plain tag or a commit carrying monorepo package tags (`@scope/name@1.2.3`).
  */
 export interface ReleaseBackfillInput {
   repo?: string
   group?: string
   limit?: number
-  /** Also queue `release-risk` for each tag after its changelog. */
+  /** Also queue `release-risk` for each release after its changelog. */
   risk?: boolean
 }
 
 /** What a release backfill queued. */
 export interface ReleaseBackfillResult {
   repos: number
-  /** Tags found across the repositories. */
+  /** Releases found across the repositories: plain tags and commits carrying package tags. */
   tags: number
   queued: number
-  /** Tags already analyzed or with a job waiting or running. */
+  /** Releases already analyzed or with a job waiting or running. */
   skipped: number
   errors: { repo: RepoRef; error: string }[]
 }

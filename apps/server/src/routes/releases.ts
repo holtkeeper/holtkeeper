@@ -1,4 +1,5 @@
 import type { ReleaseBackfillInput, ReleaseBackfillResult } from '@holtkeeper/api'
+import { releaseTarget } from '@holtkeeper/changelog'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type JobRequest, enqueueUnique, groupRepositories } from '@holtkeeper/jobs'
 import { Hono } from 'hono'
@@ -16,6 +17,10 @@ import {
 
 const GLOBAL = { kind: 'global' } as const
 
+/** Monorepos tag every package a release publishes; enough tags to still find `limit` releases. */
+const TAGS_PER_RELEASE = 10
+const MAX_TAGS = 1000
+
 const backfillSchema = z.object({
   repo: z.string().min(1).optional(),
   group: z.string().min(1).optional(),
@@ -23,7 +28,10 @@ const backfillSchema = z.object({
   risk: z.boolean().default(false),
 })
 
-/** Analyses of past releases: queues a changelog (and a risk assessment) per existing tag. */
+/**
+ * Analyses of past releases: queues a changelog (and a risk assessment) per existing release, a
+ * plain tag or a commit carrying package tags.
+ */
 export function releaseRoutes(deps: ServerDeps) {
   const { store, config } = deps
   const app = new Hono<Env>()
@@ -73,23 +81,26 @@ export function releaseRoutes(deps: ServerDeps) {
         const forge = config.forges[target.forge]?.create()
         if (!forge?.listTags) throw new Error(`forge ${target.forge} cannot list tags`)
         // oxlint-disable-next-line no-await-in-loop -- one repository at a time keeps forge limits
-        const tags = await forge.listTags(target.path, { limit })
+        const tags = await forge.listTags(target.path, {
+          limit: Math.min(limit * TAGS_PER_RELEASE, MAX_TAGS),
+        })
+        const releases = [...new Set(tags.map(releaseTarget))].slice(0, limit)
         // oxlint-disable-next-line no-await-in-loop -- see above
         const done = await store.analyses.list({ repo: target, kind: 'changelog', limit: 500 })
         const analyzed = new Set(done.flatMap((record) => (record.ref ? [record.ref] : [])))
-        result.tags += tags.length
-        const requests: JobRequest[] = tags
+        result.tags += releases.length
+        const requests: JobRequest[] = releases
           .toReversed()
-          .filter((tag) => {
-            if (!analyzed.has(tag.name)) return true
+          .filter((release) => {
+            if (!analyzed.has(release)) return true
             result.skipped += 1
             return false
           })
-          .flatMap((tag) =>
+          .flatMap((release) =>
             analyzers.map((analyzer) => ({
               analyzer,
               repo: target,
-              ref: tag.name,
+              ref: release,
               trigger: 'manual' as const,
               actor: principal.id,
             })),

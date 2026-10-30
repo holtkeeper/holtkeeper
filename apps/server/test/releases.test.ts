@@ -18,6 +18,14 @@ const tags = [
   { name: 'v1.0.0', sha: 'a', committedAt: '2026-10-01T00:00:00Z' },
 ]
 
+const packageTags = [
+  { name: '@games/card@0.7.0', sha: 'f', committedAt: '2026-10-03T00:00:00Z' },
+  { name: '@games/common@1.4.0', sha: 'f', committedAt: '2026-10-03T00:00:00Z' },
+  { name: '@games/common@1.3.1', sha: 'e', committedAt: '2026-10-02T00:00:00Z' },
+  { name: '@games/card@0.6.0', sha: 'd', committedAt: '2026-10-01T00:00:00Z' },
+  { name: '@games/chip@1.5.0', sha: 'd', committedAt: '2026-10-01T00:00:00Z' },
+]
+
 const config = parseConfig({
   forges: {
     work: {
@@ -26,12 +34,15 @@ const config = parseConfig({
       create: () =>
         ({
           getRepository: async () => ({ archived: false }),
-          listTags: async (_repo: string, query: { limit?: number } = {}) =>
-            tags.slice(0, query.limit),
+          listTags: async (repo: string, query: { limit?: number } = {}) =>
+            (repo === 'libs/ui' ? packageTags : tags).slice(0, query.limit),
         }) as never,
     },
   },
-  groups: { games: { forge: 'work', include: ['games/a', 'games/b'] } },
+  groups: {
+    games: { forge: 'work', include: ['games/a', 'games/b'] },
+    libs: { forge: 'work', include: ['libs/ui'] },
+  },
   jobs: {},
 })
 
@@ -108,7 +119,7 @@ describe('release backfill', () => {
     const result = (await (
       await backfill({ limit: 2, risk: true })
     ).json()) as ReleaseBackfillResult
-    expect(result).toMatchObject({ repos: 2, tags: 4, queued: 8 })
+    expect(result).toMatchObject({ repos: 3, tags: 6, queued: 12 })
     const jobs = await store.jobs.list({ repo: { forge: 'work', path: 'games/b' } })
     expect(jobs.map((job) => `${job.analyzer} ${job.ref}`).toReversed()).toEqual([
       'changelog v1.1.0',
@@ -116,6 +127,15 @@ describe('release backfill', () => {
       'changelog v1.2.0',
       'release-risk v1.2.0',
     ])
+  })
+
+  test('a monorepo commit carrying package tags is one release', async () => {
+    const result = (await (
+      await backfill({ repo: 'work:libs/ui', limit: 2 })
+    ).json()) as ReleaseBackfillResult
+    expect(result).toMatchObject({ tags: 2, queued: 2, skipped: 0 })
+    const jobs = await store.jobs.list({ repo: { forge: 'work', path: 'libs/ui' } })
+    expect(jobs.map((job) => job.ref).toReversed()).toEqual(['e', 'f'])
   })
 
   test('the whole fleet needs analyses:run everywhere', async () => {

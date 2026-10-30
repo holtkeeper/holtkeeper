@@ -14,6 +14,20 @@ export interface ReleaseRef {
   date: string
   /** Message of an annotated tag; absent for lightweight tags and plain refs. */
   message?: string
+  /**
+   * Every tag on the commit when the release is a monorepo release: a commit carrying package
+   * tags (`@scope/name@1.2.3`). `name` is then the commit sha.
+   */
+  tags?: string[]
+}
+
+/** One package a monorepo release published. */
+export interface PackageRelease {
+  name: string
+  version: string
+  tag: string
+  /** The package's version before this one, when an older tag of it exists. */
+  previous?: string
 }
 
 /** Lines and files touched by a commit or a range. */
@@ -140,5 +154,7 @@ export interface ChangelogData {
   files?: ChangedFile[]
   /** Set when `files` was cut at `maxChangedFiles`. */
   filesTruncated?: boolean
+  /** Packages a monorepo release published, by name; absent for plain releases. */
+  packages?: PackageRelease[]
   links?: LinkTemplates
 }

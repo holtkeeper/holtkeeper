@@ -20,7 +20,7 @@ import {
 } from './group.ts'
 import { type ChangelogLinks, linksFromTemplates } from './links.ts'
 import { changelogDataSchema } from './schema.ts'
-import type { ChangelogCommit, ChangelogData } from './types.ts'
+import type { ChangelogCommit, ChangelogData, PackageRelease, ReleaseRef } from './types.ts'
 
 const DAY = 86_400_000
 
@@ -33,6 +33,58 @@ const sectionTones: Partial<Record<SectionId, Tone>> = {
 }
 
 const short = (sha: string) => sha.slice(0, 8)
+
+/** How a release is called in text: monorepo releases by their short commit. */
+const refLabel = (ref: ReleaseRef) => (ref.tags ? short(ref.sha) : ref.name)
+
+function releaseTitle(data: ChangelogData) {
+  const packages = data.packages ?? []
+  if (packages.length === 1) return `Release ${packages[0]!.tag}`
+  if (packages.length) return `Release of ${packages.length} packages`
+  return `Changelog ${data.to.name}`
+}
+
+const versionCore = (version: string) =>
+  /^v?(\d+)\.(\d+)\.(\d+)(-)?/u
+    .exec(version)
+    ?.slice(1)
+    .map((part) => part ?? '')
+
+/** `major`, `minor`, `patch` or `prerelease`; `new` without a previous version. */
+export function versionBump(release: Pick<PackageRelease, 'version' | 'previous'>): string {
+  if (!release.previous) return 'new'
+  const now = versionCore(release.version)
+  const before = versionCore(release.previous)
+  if (!now || !before) return 'patch'
+  if (now[0] !== before[0]) return 'major'
+  if (now[1] !== before[1]) return 'minor'
+  if (now[2] !== before[2]) return now[3] ? 'prerelease' : 'patch'
+  return 'prerelease'
+}
+
+const bumpTones: Partial<Record<string, Tone>> = { major: 'bad', minor: 'good', new: 'info' }
+
+function packagesTable(packages: PackageRelease[]): Block {
+  return {
+    type: 'table',
+    columns: [
+      { key: 'name', label: 'Package' },
+      { key: 'version', label: 'Version' },
+      { key: 'previous', label: 'Previous' },
+      { key: 'bump', label: 'Bump' },
+    ],
+    rows: packages.map((release) => {
+      const bump = versionBump(release)
+      const tone = bumpTones[bump]
+      return {
+        name: release.name,
+        version: release.version,
+        previous: release.previous ?? null,
+        bump: { text: bump, ...(tone ? { tone } : {}) },
+      }
+    }),
+  }
+}
 
 function totals(data: ChangelogData, groups: ChangelogGroups) {
   const regular = data.commits.filter((commit) => !commit.parsed.merge)
@@ -94,10 +146,19 @@ function metricsOf(data: ChangelogData, previous?: ChangelogData): Metric[] {
     list.push(
       metric('days', 'Days since previous release', now.days, {
         ...prev(before?.days),
-        hint: `since ${data.from?.name}`,
+        hint: `since ${data.from ? refLabel(data.from) : ''}`,
       }),
     )
   }
+  if (data.packages?.length)
+    list.unshift(
+      metric(
+        'packages',
+        'Packages released',
+        data.packages.length,
+        prev(previous?.packages?.length),
+      ),
+    )
   return list
 }
 
@@ -282,15 +343,17 @@ function filesTable(data: ChangelogData): Block | undefined {
 function compareText(data: ChangelogData, links?: ChangelogLinks): string {
   const { from, to } = data
   if (!from) {
-    const tag = links ? `[${to.name}](${links.tag(to.name)})` : `\`${to.name}\``
+    const href = to.tags ? links?.commit(to.sha) : links?.tag(to.name)
+    const tag = href ? `[${refLabel(to)}](${href})` : `\`${refLabel(to)}\``
     return `First release ${tag}: the whole history up to \`${short(to.sha)}\`.`
   }
-  const range = `${from.name}...${to.name}`
+  const range = `${refLabel(from)}...${refLabel(to)}`
   const lines = [
     links
       ? `[Compare ${range}](${links.compare(from.name, to.name)})`
-      : `\`git log ${from.name}..${to.name}\``,
+      : `\`git log ${refLabel(from)}..${refLabel(to)}\``,
   ]
+  if (to.tags) lines.push('', `Tags: ${to.tags.map((tag) => `\`${tag}\``).join(', ')}`)
   if (to.message) lines.push('', `> ${to.message.split('\n').join('\n> ')}`)
   return lines.join('\n')
 }
@@ -301,6 +364,15 @@ function sectionsOf(
   links?: ChangelogLinks,
 ): Section[] {
   const sections: Section[] = []
+
+  if (data.packages?.length) {
+    sections.push({
+      id: 'packages',
+      title: 'Packages',
+      description: 'Every package this commit tagged, with the version it replaces.',
+      blocks: [packagesTable(data.packages)],
+    })
+  }
 
   const issues = highlights(groups, links)
   if (issues.length) {
@@ -399,8 +471,8 @@ export const changelogAnalysis = defineAnalysis<ChangelogData>({
     const commits = data.commits.filter((commit) => !commit.parsed.merge).length
     return {
       kind: 'changelog',
-      title: `Changelog ${data.to.name}`,
-      subtitle: `${data.from ? `${data.from.name} → ` : ''}${data.to.name} · ${commits} commits`,
+      title: releaseTitle(data),
+      subtitle: `${data.from ? `${refLabel(data.from)} → ` : ''}${refLabel(data.to)} · ${commits} commits`,
       subject: {
         repo: current.repo,
         ref: data.to.name,

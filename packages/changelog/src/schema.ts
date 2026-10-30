@@ -9,6 +9,7 @@ const releaseRef = z.object({
   sha: z.string().min(1),
   date: z.string(),
   message: z.string().optional(),
+  tags: z.array(z.string()).optional(),
 })
 
 const diffStat = z.object({
@@ -68,5 +69,15 @@ export const changelogDataSchema: z.ZodType<ChangelogData> = z.object({
   diff: diffStat.optional(),
   files: z.array(changedFile).optional(),
   filesTruncated: z.boolean().optional(),
+  packages: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        version: z.string().min(1),
+        tag: z.string().min(1),
+        previous: z.string().optional(),
+      }),
+    )
+    .optional(),
   links: linkTemplates.optional(),
 })

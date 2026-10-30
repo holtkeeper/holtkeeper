@@ -17,6 +17,7 @@
     "@holtkeeper/api": "workspace:*",
     "@holtkeeper/artifacts": "workspace:*",
     "@holtkeeper/auth": "workspace:*",
+    "@holtkeeper/changelog": "workspace:*",
     "@holtkeeper/changes": "workspace:*",
     "@holtkeeper/confluence": "workspace:*",
     "@holtkeeper/core": "workspace:*",

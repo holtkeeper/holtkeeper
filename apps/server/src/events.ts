@@ -1,4 +1,5 @@
 import { groupsMatch } from '@holtkeeper/access'
+import { releaseTarget } from '@holtkeeper/changelog'
 import { resolveRepo } from '@holtkeeper/core'
 import type {
   ForgeEvent,
@@ -324,7 +325,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       }
     }
 
-    const handleTag = async ({ repo, tag }: TagPushedEvent): Promise<EventOutcome> => {
+    const handleTag = async ({ repo, tag, sha }: TagPushedEvent): Promise<EventOutcome> => {
       const onTag = config.jobs?.onTag
       if (!onTag) return ignore('jobs.onTag is not configured')
       const repoGroups = resolveRepo(config, repo).groups
@@ -336,7 +337,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       const requests = onTag.analyzers.flatMap((analyzer): JobRequest[] =>
         analyzers.get(analyzer)?.scope === 'group'
           ? groups.map((group) => ({ analyzer, repo: { forge: repo.forge, path: group }, group }))
-          : [{ analyzer, repo, ref: tag }],
+          : [{ analyzer, repo, ref: releaseTarget({ name: tag, sha }) }],
       )
       const enqueued = await enqueue(requests, trigger('tag'))
       await activity('job.tag_pushed', repo, { tag, jobs: enqueued })

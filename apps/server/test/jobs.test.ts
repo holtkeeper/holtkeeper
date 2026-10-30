@@ -302,6 +302,15 @@ describe('gitlab webhook', () => {
     expect((await store.activity.list())[0]?.action).toBe('job.tag_pushed')
   })
 
+  test('queues one job per commit for monorepo package tags', async () => {
+    const app = setup(games)
+    const sha = 'b'.repeat(40)
+    await hook(app, tagPush('games/a', '@games/card@0.7.0', sha))
+    await hook(app, tagPush('games/a', '@games/common@1.4.0', sha))
+    const jobs = await store.jobs.list({ analyzer: 'changelog' })
+    expect(jobs.map((job) => job.ref)).toEqual([sha])
+  })
+
   test('verifies the token', async () => {
     const app = setup()
     expect((await hook(app, tagPush('games/a', 'v1'), 'wrong')).status).toBe(401)
