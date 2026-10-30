@@ -64,7 +64,7 @@ export async function findGoModules(dir: string, depth = 4): Promise<string[]> {
     const entries = await readdir(join(dir, relative), { withFileTypes: true }).catch(() => [])
     if (entries.some((entry) => entry.isFile() && entry.name === 'go.mod')) found.push(relative)
     if (level >= depth) return
-    for (const entry of entries)
+    for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name)))
       if (entry.isDirectory() && !skipped.has(entry.name) && !entry.name.startsWith('.'))
         await walk(relative === '.' ? entry.name : `${relative}/${entry.name}`, level + 1)
   }
