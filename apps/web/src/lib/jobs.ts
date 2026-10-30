@@ -1,4 +1,6 @@
-import type { Job, JobAnalyzerView, JobSummary, ScheduleRun } from '@holtkeeper/api'
+import type { CreateJobInput, Job, JobAnalyzerView, JobSummary, ScheduleRun } from '@holtkeeper/api'
+
+import { repoKey } from './repo.ts'
 
 export type JobStatus = Job['status']
 export type JobTrigger = Job['trigger']
@@ -55,6 +57,16 @@ export const isActiveJob = (job: Pick<JobSummary, 'status'>): boolean =>
 
 /** Whether the job can still be cancelled. */
 export const canCancelJob = (job: Pick<JobSummary, 'status'>): boolean => isActiveJob(job)
+
+/** Input that queues the same analyzer on the same target, ref and options as `job`. */
+export const rerunJobInput = (
+  job: Pick<JobSummary, 'analyzer' | 'repo' | 'group' | 'ref' | 'options'>,
+): CreateJobInput => ({
+  analyzer: job.analyzer,
+  ...(job.group !== undefined ? { group: job.group } : { repo: repoKey(job.repo) }),
+  ...(job.ref ? { ref: job.ref } : {}),
+  ...(Object.keys(job.options).length ? { options: job.options } : {}),
+})
 
 /**
  * Milliseconds the latest attempt ran: until `finishedAt`, or until `now` while running;

@@ -1,5 +1,5 @@
-import { Link, useParams } from '@tanstack/react-router'
-import { ArrowLeft, FileText, Square } from 'lucide-react'
+import { Link, useNavigate, useParams } from '@tanstack/react-router'
+import { ArrowLeft, FileText, RotateCw, Square } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -13,6 +13,7 @@ import {
   jobStatusLabel,
   jobStatusTone,
   jobTriggerLabel,
+  rerunJobInput,
 } from '../../lib/jobs.ts'
 import { repoKey } from '../../lib/repo.ts'
 import {
@@ -47,13 +48,17 @@ function Time({ at, now }: { at: string | undefined; now: Date }) {
   )
 }
 
-/** One job: its facts, options, error, live log and a way to cancel it while it runs. */
+/**
+ * One job: its facts, options, error, live log, a way to cancel it while it runs and to queue it
+ * again once it finished.
+ */
 export function JobPage() {
   const { jobId } = useParams({ from: '/app/jobs/$jobId' })
   const job = useJob(jobId)
   const analyzers = useJobAnalyzers()
   const { can } = useSession()
-  const { cancel } = useJobMutations()
+  const { cancel, create } = useJobMutations()
+  const navigate = useNavigate()
   const [confirm, setConfirm] = useState(false)
 
   if (job.isPending) return <Placeholder className="h-96" />
@@ -108,6 +113,24 @@ export function JobPage() {
               <FileText className="size-4" />
               Open result
             </LinkButton>
+          ) : null}
+          {!isActiveJob(data) && can('analyses:run') ? (
+            <Button
+              variant="secondary"
+              isPending={create.isPending}
+              onPress={() =>
+                create.mutate(rerunJobInput(data), {
+                  onSuccess: (next) => {
+                    notify.success('Job queued', label)
+                    void navigate({ to: '/jobs/$jobId', params: { jobId: next.id } })
+                  },
+                  onError: (error) => notify.error('Job not queued', messageOf(error)),
+                })
+              }
+            >
+              <RotateCw className="size-3.5" />
+              Run again
+            </Button>
           ) : null}
           {canCancelJob(data) && can('analyses:run') ? (
             <Button variant="danger-soft" onPress={() => setConfirm(true)}>

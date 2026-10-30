@@ -15,6 +15,7 @@ import {
   jobStatusTone,
   jobStatuses,
   jobTriggerLabel,
+  rerunJobInput,
 } from './jobs.ts'
 
 const analyzer = (kind: string, scope: 'repo' | 'group'): JobAnalyzerView => ({
@@ -45,6 +46,22 @@ test('only unfinished jobs can be cancelled', () => {
   expect(canCancelJob({ status: 'running' })).toBe(true)
   expect(canCancelJob({ status: 'succeeded' })).toBe(false)
   expect(canCancelJob({ status: 'canceled' })).toBe(false)
+})
+
+test('a rerun keeps the target, ref and options', () => {
+  const repo = { forge: 'work', path: 'acme/game' }
+  expect(
+    rerunJobInput({ analyzer: 'coverage', repo, ref: 'development', options: { mode: 'full' } }),
+  ).toEqual({
+    analyzer: 'coverage',
+    repo: 'work:acme/game',
+    ref: 'development',
+    options: { mode: 'full' },
+  })
+  expect(rerunJobInput({ analyzer: 'audit', repo, group: 'web', options: {} })).toEqual({
+    analyzer: 'audit',
+    group: 'web',
+  })
 })
 
 test('duration covers the latest attempt', () => {
