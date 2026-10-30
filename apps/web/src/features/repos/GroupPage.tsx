@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useGroups, usePutGroup, useRepos } from '../../api/queries.ts'
+import { fleetView } from '../../lib/analyses.ts'
 import { formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import {
@@ -20,13 +21,14 @@ import {
   Tabs,
   notify,
 } from '../../ui/index.ts'
+import { AnalysisRecords } from '../analyses/AnalysesPage.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
 import { GroupListing } from './GroupListing.tsx'
 
-/** One group: its repositories and patterns, settings made for it and its knowledge. */
+/** One group: its repositories and patterns, fleet drift records, settings and knowledge. */
 export function GroupPage() {
   const { can } = useSession()
   const { groupId } = useParams({ from: '/app/repos/groups/$groupId' })
@@ -38,6 +40,7 @@ export function GroupPage() {
   const members = (repos.data?.repos ?? []).filter((r) => r.groups.includes(groupId))
   const allGroups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
   const focus = { kind: 'group' as const, group: groupId }
+  const forge = definition?.data.forge ?? members[0]?.repo.forge
 
   const tabs = [
     {
@@ -95,6 +98,17 @@ export function GroupPage() {
         </div>
       ),
     },
+    ...(can('analyses:read') && forge
+      ? [
+          {
+            id: 'fleet',
+            label: 'Fleet',
+            content: (
+              <AnalysisRecords page={fleetView} repo={{ forge, path: groupId }} group={groupId} />
+            ),
+          },
+        ]
+      : []),
     ...(can('settings:read')
       ? [
           {

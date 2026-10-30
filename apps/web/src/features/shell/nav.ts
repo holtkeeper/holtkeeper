@@ -13,6 +13,7 @@ import {
   ListChecks,
   type LucideIcon,
   Network,
+  Scale,
   ScrollText,
   Settings2,
   Sparkles,
@@ -33,6 +34,7 @@ export interface NavItem {
     | '/dependencies'
     | '/quality'
     | '/ci'
+    | '/licenses'
     | '/jobs'
     | '/knowledge'
     | '/credentials'
@@ -60,6 +62,7 @@ const navItems: readonly NavItem[] = [
   { to: '/dependencies', label: 'Dependencies', icon: Network, requires: 'analyses:read' },
   { to: '/quality', label: 'Code quality', icon: Gauge, requires: 'analyses:read' },
   { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
+  { to: '/licenses', label: 'Licenses', icon: Scale, requires: 'analyses:read' },
   { to: '/jobs', label: 'Jobs', icon: ListChecks, requires: 'analyses:read' },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen, requires: 'knowledge:read' },
   { to: '/credentials', label: 'Credentials', icon: KeyRound, requires: 'credentials:read' },

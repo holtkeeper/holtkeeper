@@ -60,7 +60,22 @@ export const analysisPages = [
     description: 'Job durations, slowdowns and failure rates over time',
     trend: [/pipeline time/i, /failure rate/i],
   },
+  {
+    to: '/licenses',
+    kind: 'licenses',
+    title: 'Licenses',
+    icon: 'audit',
+    description: 'Dependency licenses, policy violations and unknowns',
+    trend: [/violations/i, /unknown/i],
+  },
 ] as const
+
+/** The group-scoped `fleet` analysis, shown as a tab of each group rather than a sidebar page. */
+export const fleetView = {
+  kind: 'fleet',
+  title: 'Fleet',
+  trend: [/behind-major/i, /drifted/i],
+} as const
 
 /**
  * Metrics worth charting across records: numeric in the newest record, one per pattern in

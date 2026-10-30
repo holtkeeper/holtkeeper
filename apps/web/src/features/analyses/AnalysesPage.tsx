@@ -17,6 +17,13 @@ const allRepos = '*'
 /** One entry of `analysisPages`. */
 export type AnalysisPage = (typeof analysisPages)[number]
 
+/** What `AnalysisRecords` needs of a page: the kind, its title and preferred trend metrics. */
+export interface AnalysisView {
+  kind: string
+  title: string
+  trend: readonly RegExp[]
+}
+
 /** A repository picker for analysis pages: `*` stands for all repositories. */
 export function RepoSelect({ to }: { to: AnalysisPage['to'] }) {
   const search = useSearch({ strict: false })
@@ -40,8 +47,19 @@ export function RepoSelect({ to }: { to: AnalysisPage['to'] }) {
   )
 }
 
-/** Records of one analysis kind, newest first, with trends of its headline metrics. */
-export function AnalysisRecords({ page, repo }: { page: AnalysisPage; repo?: RepoRef }) {
+/**
+ * Records of one analysis kind, newest first, with trends of its headline metrics. `group`
+ * targets the empty state's run button at a group for group-scoped kinds.
+ */
+export function AnalysisRecords({
+  page,
+  repo,
+  group,
+}: {
+  page: AnalysisView
+  repo?: RepoRef
+  group?: string
+}) {
   const kinds = useAnalysisKinds()
   const analyses = useAnalyses(page.kind, repo, repo ? 100 : 500)
   const list = analyses.data?.analyses ?? []
@@ -109,7 +127,7 @@ export function AnalysisRecords({ page, repo }: { page: AnalysisPage; repo?: Rep
                   analyzer={page.kind}
                   label="Run now"
                   size="sm"
-                  {...(repo ? { repo } : {})}
+                  {...(group ? { group } : repo ? { repo } : {})}
                 />
               }
             />
@@ -149,9 +167,10 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
   )
 }
 
-const [releases, bundles, , quality, ciJobs] = analysisPages
+const [releases, bundles, , quality, ciJobs, licenses] = analysisPages
 
 export const ReleasesPage = () => <AnalysesPage page={releases} />
 export const BundlesPage = () => <AnalysesPage page={bundles} />
 export const QualityPage = () => <AnalysesPage page={quality} />
 export const CiJobsPage = () => <AnalysesPage page={ciJobs} />
+export const LicensesPage = () => <AnalysesPage page={licenses} />

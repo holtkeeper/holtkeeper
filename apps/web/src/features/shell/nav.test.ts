@@ -30,6 +30,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Dependencies',
     'Code quality',
     'CI jobs',
+    'Licenses',
     'Jobs',
     'Activity',
   ])
