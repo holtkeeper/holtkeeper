@@ -9,6 +9,7 @@ import { formatValue } from '../../lib/units.ts'
 import { EmptyState, ErrorState, Notice, Page, Panel, Placeholder, Select } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
+import { BackfillReleasesButton } from './BackfillReleases.tsx'
 import { RecordRows, RepoCards } from './RecordViews.tsx'
 
 const allRepos = '*'
@@ -133,6 +134,7 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
       actions={
         <div className="flex items-center gap-2">
           <RepoSelect to={page.to} />
+          {page.kind === 'changelog' ? <BackfillReleasesButton repo={repo} /> : null}
           <RunJobButton
             analyzer={page.kind}
             label="Run now"

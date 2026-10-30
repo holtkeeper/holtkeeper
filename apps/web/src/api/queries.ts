@@ -1,4 +1,5 @@
 import type {
+  ReleaseBackfillInput,
   ApplyChangesInput,
   AuditRunSummary,
   ClearStorageInput,
@@ -463,6 +464,15 @@ export const useJobs = (
     refetchInterval: (query) =>
       query.state.data?.jobs.some((job) => activeStatus(job.status)) ? 3_000 : 30_000,
   })
+
+/** Queues changelogs (and risk assessments) for past releases; refreshes job lists. */
+export function useBackfillReleases() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: ReleaseBackfillInput) => api.backfillReleases(input),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs }),
+  })
+}
 
 /** Recent runs of every schedule; refreshes every few seconds while a run is unfinished. */
 export const useScheduleRuns = () =>

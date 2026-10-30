@@ -490,6 +490,29 @@ export interface CreateJobInput {
   options?: Record<string, unknown>
 }
 
+/**
+ * `POST /api/releases/backfill`: analyze past releases. Without `repo` or `group` it covers every
+ * repository of every group. `limit` newest tags per repository (default 20, at most 100).
+ */
+export interface ReleaseBackfillInput {
+  repo?: string
+  group?: string
+  limit?: number
+  /** Also queue `release-risk` for each tag after its changelog. */
+  risk?: boolean
+}
+
+/** What a release backfill queued. */
+export interface ReleaseBackfillResult {
+  repos: number
+  /** Tags found across the repositories. */
+  tags: number
+  queued: number
+  /** Tags already analyzed or with a job waiting or running. */
+  skipped: number
+  errors: { repo: RepoRef; error: string }[]
+}
+
 /** An analyzer jobs can run. `schema` is JSON Schema of its options, for building forms. */
 export interface JobAnalyzerView {
   kind: string

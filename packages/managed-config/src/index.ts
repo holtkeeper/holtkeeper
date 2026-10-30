@@ -31,8 +31,11 @@ export { generateWebhookSecret } from './secret.ts'
 export { gitlabForgeFactory } from './factories.ts'
 export {
   type DefaultSchedule,
+  type DefaultTrigger,
   SCHEDULES_MARKER,
-  type SeedSchedulesOptions,
+  type SeedDefaultsOptions,
+  defaultMarker,
   defaultSchedules,
-  seedDefaultSchedules,
+  defaultTriggers,
+  seedDefaults,
 } from './defaults.ts'

@@ -1,19 +1,26 @@
 import type { HoltkeeperConfig } from '@holtkeeper/core'
-import type { ScheduleDocumentData, Store } from '@holtkeeper/store'
+import type { ScheduleDocumentData, Store, TriggerDocumentData } from '@holtkeeper/store'
 
-/** A schedule a fresh install starts with, as a panel document. */
+/** A schedule an install starts with, as a panel document. */
 export interface DefaultSchedule {
   id: string
   data: ScheduleDocumentData
+}
+
+/** A trigger an install starts with, as a panel document (ids as `triggerId` gives them). */
+export interface DefaultTrigger {
+  id: string
+  data: TriggerDocumentData
 }
 
 const everyDay = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 const nights = { allow: [{ days: [...everyDay], from: '01:00', to: '07:00' }] }
 
 /**
- * Schedules a fresh install starts with, every group, repository jobs spread over the night:
- * CI job history nightly, delivery metrics on Mondays, vulnerability audit and dependency graph on
- * Saturdays. Analyzers the server does not have are dropped, schedules left empty are skipped.
+ * Schedules an install starts with, every group, repository jobs spread over the night: CI job
+ * history nightly, delivery metrics on Mondays, vulnerability audit and dependency graph on
+ * Saturdays, code quality (without running tests), licenses and fleet drift on Sundays.
+ * Analyzers the server does not have are dropped, schedules left empty are skipped.
  */
 export const defaultSchedules: DefaultSchedule[] = [
   {
@@ -49,65 +56,124 @@ export const defaultSchedules: DefaultSchedule[] = [
       spread: true,
     },
   },
+  {
+    id: 'quality-weekly',
+    data: {
+      name: 'Quality, licenses and fleet, weekly',
+      enabled: true,
+      analyzers: ['quality', 'licenses', 'fleet'],
+      options: { quality: { coverage: 'skip' } },
+      cron: '0 1 * * 0',
+      windows: nights,
+      spread: true,
+    },
+  },
 ]
 
-/** Key in `Store.kv` marking that default schedules were considered; never expires. */
+/** Triggers an install starts with: every new or moved tag gets a changelog and a risk assessment. */
+export const defaultTriggers: DefaultTrigger[] = [
+  { id: 'tag', data: { on: 'tag', analyzers: ['changelog', 'release-risk'] } },
+]
+
+/** Key in `Store.kv` of the first seeding, which covered the first three default schedules. */
 export const SCHEDULES_MARKER = 'config:default-schedules-seeded'
 
-export interface SeedSchedulesOptions {
+const FIRST_SEEDED = ['ci-jobs-nightly', 'delivery-weekly', 'security-weekly']
+
+/** Key in `Store.kv` marking that one default document was considered; never expires. */
+export const defaultMarker = (type: 'schedule' | 'trigger', id: string) =>
+  `config:default-seeded:${type}:${id}`
+
+export interface SeedDefaultsOptions {
   store: Pick<Store, 'config' | 'kv' | 'activity'>
   file: HoltkeeperConfig
   /** Analyzer kinds the server can run. */
   analyzers: readonly string[]
   schedules?: readonly DefaultSchedule[]
+  triggers?: readonly DefaultTrigger[]
   now?: () => Date
 }
 
 /**
- * Writes `schedules` as panel documents once per store, when neither the config file nor the
- * panel has any schedule. The first call records a marker in `Store.kv` (atomically when it
- * supports `compareAndSet`), so removing the defaults later does not bring them back. Does
- * nothing without `config` or `kv`. Logs a `config.schedules.seeded` activity event and resolves
- * with the ids written.
+ * Writes each default schedule and trigger as a panel document the first time this store sees
+ * it, so later releases add their new defaults to existing installs. Each is considered once (a
+ * marker per document in `Store.kv`, taken atomically when the store supports `compareAndSet`):
+ * removing one later does not bring it back, and a panel document with the same id is kept as
+ * it is. Schedules are skipped while the config file has its own; the tag trigger while the file
+ * sets `jobs.onTag`. Analyzers the server lacks are dropped. Does nothing without `config` or
+ * `kv`. Logs a `config.defaults.seeded` activity event and resolves with `<type>:<id>` of what
+ * it wrote.
  */
-export async function seedDefaultSchedules({
+export async function seedDefaults({
   store,
   file,
   analyzers,
   schedules = defaultSchedules,
+  triggers = defaultTriggers,
   now = () => new Date(),
-}: SeedSchedulesOptions): Promise<string[]> {
+}: SeedDefaultsOptions): Promise<string[]> {
   const { config, kv } = store
   if (!config || !kv) return []
   const at = now().toISOString()
-  if ((await kv.get(SCHEDULES_MARKER)) !== undefined) return []
-  if (kv.compareAndSet) {
-    if (!(await kv.compareAndSet(SCHEDULES_MARKER, undefined, { at }))) return []
-  } else await kv.set(SCHEDULES_MARKER, { at })
-  if ((file.jobs?.schedules.length ?? 0) > 0) return []
-  if ((await config.list('schedule')).length > 0) return []
+  const legacy = (await kv.get(SCHEDULES_MARKER)) !== undefined
+
+  const claim = async (type: 'schedule' | 'trigger', id: string) => {
+    if (legacy && type === 'schedule' && FIRST_SEEDED.includes(id)) return false
+    const key = defaultMarker(type, id)
+    if ((await kv.get(key)) !== undefined) return false
+    if (kv.compareAndSet) return kv.compareAndSet(key, undefined, { at })
+    await kv.set(key, { at })
+    return true
+  }
 
   const known = new Set(analyzers)
   const written: string[] = []
+  const fileSchedules = (file.jobs?.schedules.length ?? 0) > 0
   for (const schedule of schedules) {
-    const kinds = schedule.data.analyzers.filter((kind) => known.has(kind))
-    if (!kinds.length) continue
     // oxlint-disable-next-line no-await-in-loop -- a handful of writes, in a stable order
+    if (fileSchedules || !(await claim('schedule', schedule.id))) continue
+    const kinds = schedule.data.analyzers.filter((kind) => known.has(kind))
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    if (!kinds.length || (await config.get('schedule', schedule.id))) continue
+    const options = Object.fromEntries(
+      Object.entries(schedule.data.options ?? {}).filter(([kind]) => known.has(kind)),
+    )
+    // oxlint-disable-next-line no-await-in-loop -- see above
     await config.put({
       type: 'schedule',
       id: schedule.id,
-      data: { ...schedule.data, analyzers: kinds },
+      data: {
+        ...schedule.data,
+        analyzers: kinds,
+        ...(Object.keys(options).length ? { options } : {}),
+      },
       updatedAt: at,
       updatedBy: 'system',
     })
-    written.push(schedule.id)
+    written.push(`schedule:${schedule.id}`)
+  }
+  for (const trigger of triggers) {
+    if (trigger.data.on === 'tag' && file.jobs?.onTag) continue
+    // oxlint-disable-next-line no-await-in-loop -- a handful of writes, in a stable order
+    if (!(await claim('trigger', trigger.id))) continue
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    if (await config.get('trigger', trigger.id)) continue
+    const data =
+      'analyzers' in trigger.data
+        ? { ...trigger.data, analyzers: trigger.data.analyzers.filter((kind) => known.has(kind)) }
+        : trigger.data
+    if ('analyzers' in data && !data.analyzers.length) continue
+    if ('analyzer' in data && !known.has(data.analyzer)) continue
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await config.put({ type: 'trigger', id: trigger.id, data, updatedAt: at, updatedBy: 'system' })
+    written.push(`trigger:${trigger.id}`)
   }
   if (written.length)
     await store.activity.append({
       at,
       actor: 'system',
-      action: 'config.schedules.seeded',
-      details: { ids: written },
+      action: 'config.defaults.seeded',
+      details: { documents: written },
     })
   return written
 }

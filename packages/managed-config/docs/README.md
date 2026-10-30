@@ -49,15 +49,20 @@ await source.preview({ put }) // the config a change would give, throws ConfigEr
 
 A rebuild that fails validation keeps the previous config (`lastError()`). Panel forge definitions are cached per document version and token, and each builds its `GitForge` client once (`memoizeForge`). `liveConfig(source)` is a config object that reads `source.current()` on every property access, for code that captures a config once.
 
-## Default schedules
+## Defaults
 
-`seedDefaultSchedules({ store, file, analyzers })` writes `defaultSchedules` as panel documents once per store (marker `config:default-schedules-seeded` in `Store.kv`, set atomically when the store supports `compareAndSet`), and only when neither the file nor the panel has a schedule. Analyzers the server lacks are dropped from them; removing a default later does not bring it back. Logged as `config.schedules.seeded`. Every default covers all groups and spreads its repository jobs over 01:00–07:00 (server time zone):
+`seedDefaults({ store, file, analyzers })` writes each of `defaultSchedules` and `defaultTriggers` as a panel document the first time a store sees it, so a release that adds defaults adds them to existing installs too. Each document is considered once (marker `config:default-seeded:<type>:<id>` in `Store.kv`, taken atomically when the store supports `compareAndSet`): removing it later does not bring it back, and a panel document with the same id stays as it is. Stores seeded by the first version (marker `config:default-schedules-seeded`) count its three schedules as considered. Schedules are skipped while the file has its own, the tag trigger while the file sets `jobs.onTag`; analyzers the server lacks are dropped. Logged as `config.defaults.seeded`.
 
-| Id                | Analyzers           | When            |
-| ----------------- | ------------------- | --------------- |
-| `ci-jobs-nightly` | `ci-jobs`           | every night     |
-| `delivery-weekly` | `delivery`          | Monday nights   |
-| `security-weekly` | `audit`, `depgraph` | Saturday nights |
+Every default schedule covers all groups and spreads its repository jobs over 01:00–07:00 (server time zone):
+
+| Id                | Analyzers                                                          | When            |
+| ----------------- | ------------------------------------------------------------------ | --------------- |
+| `ci-jobs-nightly` | `ci-jobs`                                                          | every night     |
+| `delivery-weekly` | `delivery`                                                         | Monday nights   |
+| `security-weekly` | `audit`, `depgraph`                                                | Saturday nights |
+| `quality-weekly`  | `quality` (`coverage: skip`, so no test runs), `licenses`, `fleet` | Sunday nights   |
+
+The default trigger `tag` queues `changelog` and `release-risk` for every new or moved tag, from webhooks or polling.
 
 ## Export
 

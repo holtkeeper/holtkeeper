@@ -5,6 +5,7 @@ import { useRepos } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import { Chip, EmptyState, LinkButton, Page, Tabs } from '../../ui/index.ts'
+import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { MediaButton } from '../media/MediaDialog.tsx'
@@ -98,6 +99,7 @@ export function RepoPage() {
       actions={
         <>
           <RunJobButton repo={repo} />
+          <BackfillReleasesButton repo={repo} variant="ghost" />
           <MediaButton repo={repo} />
           {can('analyses:read') ? (
             <LinkButton to="/jobs" search={{ repo: repoKey(repo) }} variant="ghost">

@@ -21,6 +21,7 @@ import { dependencyRoutes } from './routes/dependencies.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
 import { mediaRoutes } from './routes/media.ts'
+import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
@@ -82,6 +83,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', jobRoutes(deps))
   api.route('/', scheduleRoutes(deps))
   api.route('/', repoAvatarRoutes(deps))
+  api.route('/', releaseRoutes(deps))
   api.route('/', knowledgeRoutes(deps))
   const dispatch = createEventDispatcher(deps)
   const hooks = deps.store.kv ? repoHooks(deps.store.kv, deps.vault) : undefined
