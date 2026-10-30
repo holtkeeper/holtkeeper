@@ -10,6 +10,7 @@ export function Page({
   actions,
   eyebrow,
   icon,
+  media,
   children,
 }: {
   title: ReactNode
@@ -17,6 +18,8 @@ export function Page({
   actions?: ReactNode
   eyebrow?: ReactNode
   icon?: BrandIconName
+  /** Shown where `icon` would be, e.g. a repository avatar; wins over `icon`. */
+  media?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -28,7 +31,9 @@ export function Page({
     >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex min-w-0 items-center gap-4">
-          {icon ? (
+          {media ? (
+            <span className="shrink-0">{media}</span>
+          ) : icon ? (
             <span className="grid size-13 shrink-0 place-items-center rounded-2xl bg-surface shadow-surface">
               <BrandIcon name={icon} className="size-10" />
             </span>

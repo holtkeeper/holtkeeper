@@ -649,6 +649,22 @@ describe('insight reads', () => {
     expect(tagged).toMatchObject({ name: 'release', ref: 'v1.0.0', tag: true })
   })
 
+  test('reads the project avatar, else the nearest group avatar', async () => {
+    const { server, forge } = setup()
+    server.addProject('g/sub/a')
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2])
+    expect(await forge.getRepositoryAvatar?.('g/sub/a')).toBeUndefined()
+    server.setAvatar('groups', 'g', png)
+    expect(await forge.getRepositoryAvatar?.('g/sub/a')).toEqual({
+      data: png,
+      contentType: 'image/png',
+    })
+    expect(server.calls.at(-1)?.url).toContain('/groups/g/avatar')
+    server.setAvatar('projects', 'g/sub/a', png)
+    await forge.getRepositoryAvatar?.('g/sub/a')
+    expect(server.calls.at(-1)?.url).toContain('/projects/g%2Fsub%2Fa/avatar')
+  })
+
   test('lists deployments by environment, ordered by update when filtered by time', async () => {
     const { server, forge } = setup()
     const project = server.addProject('g/a')

@@ -69,34 +69,29 @@ function measured(
 
 const perWeek = (data: CiJobsData) => data.totals.computeSeconds / Math.max(data.window.days / 7, 1)
 
-const defaultGroup = (data: CiJobsData | undefined) =>
-  data?.refGroups?.find((group) => group.group === 'default')
+const mainGroup = (data: CiJobsData | undefined) =>
+  data?.refGroups?.find((group) => group.group === 'main')
 
 function headline(data: CiJobsData, previous?: CiJobsData): Metric[] {
   const { totals } = data
   const before = previous?.totals
-  const main = defaultGroup(data)
+  const main = mainGroup(data)
   return [
     ...(main
       ? [
-          measured(
-            'default-branch-time',
-            'Default branch pipeline (median)',
-            ms(main.duration.median),
-            {
-              unit: 'ms',
-              previous: ms(defaultGroup(previous)?.duration.median),
-              better: 'down',
-              hint: `${main.pipelines} pipelines on ${data.defaultBranch ?? 'the default branch'}, passing ones timed. p95 ${formatDuration(main.duration.p95 ?? 0)}.`,
-            },
-          ),
+          measured('main-branch-time', 'Main branch pipeline (median)', ms(main.duration.median), {
+            unit: 'ms',
+            previous: ms(mainGroup(previous)?.duration.median),
+            better: 'down',
+            hint: `${main.pipelines} pipelines on ${main.topRefs.map((r) => r.ref).join(', ')}, passing ones timed. p95 ${formatDuration(main.duration.p95 ?? 0)}.`,
+          }),
         ]
       : []),
     measured('wall-time', 'Pipeline time (median)', ms(totals.wallTime.median), {
       unit: 'ms',
       previous: ms(before?.wallTime.median),
       better: 'down',
-      hint: `First job start to last job end. p95 ${formatDuration(totals.wallTime.p95 ?? 0)} over ${totals.wallTime.samples} pipelines.`,
+      hint: `Time any job of the pipeline was running; waits such as a manual job started later are left out. p95 ${formatDuration(totals.wallTime.p95 ?? 0)} over ${totals.wallTime.samples} pipelines.`,
     }),
     measured('failure-rate', 'Job failure rate', totals.failureRate, {
       unit: 'percent',
@@ -213,7 +208,7 @@ function pipelinesSection(data: CiJobsData): Section {
 }
 
 const GROUP_TONE: Record<RefGroupStats['group'], Tone> = {
-  default: 'info',
+  main: 'info',
   develop: 'good',
   release: 'warning',
   feature: 'neutral',
@@ -310,7 +305,7 @@ function refGroupsSection(data: CiJobsData): Section | undefined {
     id: 'refs',
     title: 'Pipelines by branch',
     description:
-      'Pipeline time (first job start to last job end) of passing pipelines, grouped by the kind of ref they ran for. Failure rates count every pipeline.',
+      'Pipeline time (while any of its jobs ran) of passing pipelines, grouped by the kind of ref they ran for. Failure rates count every pipeline.',
     blocks,
   }
 }
@@ -592,7 +587,7 @@ function notesSection(data: CiJobsData): Section {
     `- Stored history: ${history.jobs} job attempts${history.oldest && history.newest ? ` from ${history.oldest.slice(0, 10)} to ${history.newest.slice(0, 10)}` : ''}. This run: ${SYNC_TEXT[sync.mode]}${sync.after ? ` after ${sync.after.slice(0, 10)}` : ''}, ${sync.fetched} attempts fetched, ${sync.stored} finished ones stored.`,
     `- Durations are successful attempts; failure rates count final attempts, leaving out jobs allowed to fail and canceled ones.`,
     `- A job is slower or faster when its median over the last ${options.recentDays} days moved by ${options.changePercent}% and ${formatDuration(options.minChangeSeconds)} or more, with at least 5 successful runs on each side. The change date is where daily medians shift most.`,
-    `- Pipeline time runs from the first job start to the last job end, retries included.`,
+    `- Pipeline time is how long any job of the pipeline was running, retries included; gaps, such as a manual job started days later, do not count.`,
     ...data.notes.map((note) => `- ${note}`),
   ]
   return { id: 'notes', title: 'Notes', blocks: [{ type: 'markdown', text: lines.join('\n') }] }

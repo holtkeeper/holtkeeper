@@ -4,10 +4,11 @@ import { refGroupOf } from './refs.ts'
 
 describe('refGroupOf', () => {
   test('groups refs the way teams name branches', () => {
-    expect(refGroupOf('main')).toBe('default')
-    expect(refGroupOf('master')).toBe('default')
+    expect(refGroupOf('main')).toBe('main')
+    expect(refGroupOf('master')).toBe('main')
+    expect(refGroupOf('production')).toBe('main')
     expect(refGroupOf('develop')).toBe('develop')
-    expect(refGroupOf('dev')).toBe('develop')
+    expect(refGroupOf('development')).toBe('develop')
     expect(refGroupOf('release/1.4')).toBe('release')
     expect(refGroupOf('hotfix-login')).toBe('release')
     expect(refGroupOf('feature/GTW-12-login')).toBe('feature')
@@ -16,9 +17,15 @@ describe('refGroupOf', () => {
     expect(refGroupOf(undefined)).toBe('feature')
   })
 
-  test('the known default branch wins, tags only by flag', () => {
-    expect(refGroupOf('trunk', { defaultBranch: 'develop' })).toBe('feature')
-    expect(refGroupOf('develop', { defaultBranch: 'develop' })).toBe('default')
+  test('main stays main when the default branch is development', () => {
+    const options = { defaultBranch: 'development' }
+    expect(refGroupOf('main', options)).toBe('main')
+    expect(refGroupOf('development', options)).toBe('develop')
+  })
+
+  test('an unusual default branch joins the main branches; tags only by flag', () => {
+    expect(refGroupOf('stable', { defaultBranch: 'stable' })).toBe('main')
+    expect(refGroupOf('stable')).toBe('feature')
     expect(refGroupOf('v1.2.0')).toBe('feature')
     expect(refGroupOf('v1.2.0', { tag: true })).toBe('tag')
   })

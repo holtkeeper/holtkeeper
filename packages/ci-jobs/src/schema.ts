@@ -70,8 +70,9 @@ export const ciJobsDataSchema: z.ZodType<CiJobsData> = z.object({
   ),
   refGroups: z.array(
     z.object({
-      group: z.enum(['default', 'develop', 'release', 'feature', 'merge-request', 'tag']),
+      group: z.enum(['main', 'develop', 'release', 'feature', 'merge-request', 'tag']),
       label: z.string(),
+      hasDefault: z.boolean(),
       pipelines: z.number(),
       refs: z.number(),
       failureRate: z.number().optional(),

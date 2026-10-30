@@ -10,6 +10,7 @@ import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { MediaButton } from '../media/MediaDialog.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
+import { RepoAvatarEditor } from './RepoAvatar.tsx'
 import { RepoConfig } from './RepoConfig.tsx'
 import { RepoUpdates } from './RepoUpdates.tsx'
 
@@ -81,6 +82,7 @@ export function RepoPage() {
           Repositories
         </Link>
       }
+      media={<RepoAvatarEditor repo={repo} writable={can('settings:write')} />}
       title={repo.path}
       description={
         <span className="flex flex-wrap items-center gap-1.5">

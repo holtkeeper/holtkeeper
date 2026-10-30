@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { at, attempt, quarter } from '../test/history.ts'
-import { analyzeCiJobs, changePoint } from './analyze.ts'
+import { analyzeCiJobs, busySeconds, changePoint } from './analyze.ts'
 import type { CiJobsOptions } from './types.ts'
 
 const options: CiJobsOptions = { days: 90, recentDays: 14, changePercent: 20, minChangeSeconds: 15 }
@@ -48,18 +48,31 @@ describe('analyzeCiJobs', () => {
     expect(result.totals.flakyJobs).toBe(1)
   })
 
-  test('pipeline wall time spans the first job start to the last job end', () => {
+  test('pipeline time counts when jobs ran, not the gap before a late manual job', () => {
     const records = [
       attempt('build', at(1), 100, { pipelineId: 1 }),
-      attempt('test', at(1), 50, {
+      attempt('test', at(1), 50, { pipelineId: 1 }),
+      attempt('deploy', at(1), 30, {
         pipelineId: 1,
-        startedAt: at(1, 1),
-        finishedAt: new Date(Date.parse(at(1, 1)) + 50_000).toISOString(),
+        startedAt: at(8),
+        finishedAt: new Date(Date.parse(at(8)) + 30_000).toISOString(),
       }),
     ]
     const result = analyzeCiJobs(records, window, options)
-    expect(result.totals.wallTime.median).toBe(3590)
+    expect(result.totals.wallTime.median).toBe(130)
     expect(result.totals.pipelines).toBe(1)
+  })
+
+  test('busySeconds merges overlaps and skips gaps', () => {
+    expect(
+      busySeconds([
+        [0, 10_000],
+        [5_000, 20_000],
+        [100_000, 110_000],
+        [101_000, 102_000],
+      ]),
+    ).toBe(30)
+    expect(busySeconds([])).toBe(0)
   })
 
   test('weeks cover the window, jobs are ordered by CI time', () => {
@@ -84,12 +97,13 @@ describe('analyzeCiJobs', () => {
     const result = analyzeCiJobs(quarter(), { ...window, defaultBranch: 'main' }, options)
     expect(result.defaultBranch).toBe('main')
     expect(result.refGroups.map((g) => [g.group, g.pipelines, g.refs])).toEqual([
-      ['default', 90, 1],
+      ['main', 90, 1],
       ['feature', 30, 1],
       ['tag', 3, 3],
     ])
     const main = result.refGroups[0]
-    expect(main?.label).toBe('Default branch (main)')
+    expect(main?.label).toBe('Main branches (default: main)')
+    expect(main?.hasDefault).toBe(true)
     expect(main?.failureRate).toBe(10)
     expect(main?.baselineMedian).toBe(100)
     expect(main?.recentMedian).toBe(160)

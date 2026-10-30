@@ -24,6 +24,7 @@ import type {
   MediaVariantsResult,
   RepoExplain,
   RuntimeConfigView,
+  RepoAvatarInfo,
   SchedulePreview,
   ScheduleRunList,
   ScheduleRunResult,
@@ -83,7 +84,7 @@ import type {
 } from '@simplewebauthn/browser'
 
 import { repoKey } from '../lib/repo.ts'
-import { request, requestBlob, urlOf } from './client.ts'
+import { request, requestBlob, uploadFile, urlOf } from './client.ts'
 
 const id = (value: string) => encodeURIComponent(value)
 
@@ -263,6 +264,14 @@ export const api = {
     request<ScheduleRunResult>('POST', `/api/schedules/${id(scheduleId)}/run`),
   configExportUrl: () => urlOf('/api/config/export'),
   runtimeConfig: () => request<RuntimeConfigView>('GET', '/api/config/runtime'),
+  repoAvatarUrl: (repo: RepoRef, version?: number) =>
+    urlOf('/api/repos/avatar', { repo: repoKey(repo), v: version || undefined }),
+  repoAvatarInfo: (repo: RepoRef) =>
+    request<RepoAvatarInfo>('GET', '/api/repos/avatar/info', { query: { repo: repoKey(repo) } }),
+  setRepoAvatar: (repo: RepoRef, file: Blob) =>
+    uploadFile<RepoAvatarInfo>('PUT', '/api/repos/avatar', file, { repo: repoKey(repo) }),
+  removeRepoAvatar: (repo: RepoRef) =>
+    request<undefined>('DELETE', '/api/repos/avatar', { query: { repo: repoKey(repo) } }),
   explainRepo: (repo: RepoRef) =>
     request<RepoExplain>('GET', '/api/repos/explain', { query: { repo: repoKey(repo) } }),
 

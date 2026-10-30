@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test'
 
 import {
+  auditFreshness,
   parseRepoKey,
+  repoInitials,
   repoKey,
   repoName,
   splitRepoPath,
-  auditFreshness,
   validateGroupId,
   validateRepoPath,
   withRepo,
@@ -63,4 +64,10 @@ test('auditFreshness buckets by age', () => {
   expect(auditFreshness('2026-10-25T00:00:00.000Z', now)).toBe('fresh')
   expect(auditFreshness('2026-10-10T00:00:00.000Z', now)).toBe('aging')
   expect(auditFreshness('2026-08-01T00:00:00.000Z', now)).toBe('stale')
+})
+
+test('repoInitials match the server-generated avatar', () => {
+  expect(repoInitials('acme/data-tools/dealer-frontend')).toBe('DD')
+  expect(repoInitials('game-frontend')).toBe('GF')
+  expect(repoInitials('api')).toBe('AP')
 })

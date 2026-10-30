@@ -198,8 +198,23 @@ interface PipelineSpan {
   tag: boolean
   /** A final attempt of a job not allowed to fail failed. */
   failed: boolean
-  /** First job start to last job end, seconds; absent when a job lacks times. */
+  /** Seconds at least one job ran, gaps left out; absent when a job lacks times. */
   wallSeconds?: number
+}
+
+/**
+ * Seconds covered by the union of `intervals` (milliseconds): overlapping jobs count once and
+ * idle gaps, such as a manual job started days later, not at all.
+ */
+export function busySeconds(intervals: readonly [number, number][]): number {
+  let total = 0
+  let end = Number.NEGATIVE_INFINITY
+  for (const [from, to] of intervals.toSorted((a, b) => a[0] - b[0])) {
+    if (to <= end) continue
+    total += to - Math.max(from, end)
+    end = to
+  }
+  return total / 1000
 }
 
 function pipelineSpans(
@@ -215,10 +230,12 @@ function pipelineSpans(
       tag: jobs.some((j) => j.tag),
       failed: counted(jobs.filter((j) => finals.has(j))).some((j) => j.status === 'failed'),
     }
-    const starts = jobs.map((j) => (j.startedAt ? Date.parse(j.startedAt) : Number.NaN))
-    const ends = jobs.map((j) => (j.finishedAt ? Date.parse(j.finishedAt) : Number.NaN))
-    if ([...starts, ...ends].some(Number.isNaN)) return base
-    return { ...base, wallSeconds: (Math.max(...ends) - Math.min(...starts)) / 1000 }
+    const intervals = jobs.map((j): [number, number] => [
+      j.startedAt ? Date.parse(j.startedAt) : Number.NaN,
+      j.finishedAt ? Date.parse(j.finishedAt) : Number.NaN,
+    ])
+    if (intervals.flat().some(Number.isNaN)) return base
+    return { ...base, wallSeconds: busySeconds(intervals) }
   })
 }
 
@@ -235,6 +252,9 @@ function refGroupStats(
       ...(context.defaultBranch ? { defaultBranch: context.defaultBranch } : {}),
     })
   const byGroup = groupBy(spans, groupOf)
+  const defaultGroup = context.defaultBranch
+    ? refGroupOf(context.defaultBranch, { defaultBranch: context.defaultBranch })
+    : undefined
   const passedSeconds = (list: readonly PipelineSpan[]) =>
     defined(list.filter((s) => !s.failed).map((s) => s.wallSeconds))
   return refGroups.flatMap(({ group, label }) => {
@@ -252,9 +272,10 @@ function refGroupStats(
     return [
       {
         group,
+        hasDefault: defaultGroup === group,
         label:
-          group === 'default' && context.defaultBranch
-            ? `Default branch (${context.defaultBranch})`
+          defaultGroup === group && context.defaultBranch
+            ? `${label} (default: ${context.defaultBranch})`
             : label,
         pipelines: list.length,
         refs: byRef.size,

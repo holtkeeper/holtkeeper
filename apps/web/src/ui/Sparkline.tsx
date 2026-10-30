@@ -6,11 +6,14 @@ export function Sparkline({
   label,
   color = 'var(--series-1)',
   height = 36,
+  format = (value) => `${value} active`,
 }: {
   points: readonly { at: string; value: number }[]
   label: string
   color?: string
   height?: number
+  /** Tooltip text of a value; default `<value> active`. */
+  format?: (value: number) => string
 }) {
   if (points.length < 2)
     return (
@@ -38,7 +41,7 @@ export function Sparkline({
               if (!active || !point) return null
               return (
                 <div className="rounded-lg border border-border bg-overlay px-2 py-1 text-xs shadow-overlay">
-                  <span className="tabular font-medium">{point.value}</span> active ·{' '}
+                  <span className="tabular font-medium">{format(point.value)}</span> ·{' '}
                   {new Date(point.at).toLocaleDateString()}
                 </div>
               )

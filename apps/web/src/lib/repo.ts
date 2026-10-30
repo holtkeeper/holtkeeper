@@ -59,3 +59,22 @@ export function auditFreshness(finishedAt: string | undefined, now: Date = new D
   const days = (now.getTime() - new Date(finishedAt).getTime()) / 86_400_000
   return days <= 7 ? 'fresh' : days <= 30 ? 'aging' : 'stale'
 }
+
+const firstLetter = (segment: string | undefined) =>
+  (segment?.match(/[\p{L}\p{N}]/u)?.[0] ?? '').toUpperCase()
+
+/**
+ * Two letters for a repository, the same the server draws on generated avatars: the first of its
+ * parent and of its name, or the first two words of a top-level name.
+ */
+export function repoInitials(path: string): string {
+  const segments = path.split('/').filter(Boolean)
+  const name = segments.at(-1) ?? ''
+  if (segments.length > 1) return `${firstLetter(segments.at(-2))}${firstLetter(name)}` || '?'
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  return (
+    (words.length > 1
+      ? `${firstLetter(words[0])}${firstLetter(words[1])}`
+      : name.slice(0, 2).toUpperCase()) || '?'
+  )
+}

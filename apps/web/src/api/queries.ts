@@ -399,6 +399,38 @@ export const useSchedulePreview = (scheduleId: string | undefined, count = 10) =
 export const useRuntimeConfig = (enabled = true) =>
   useQuery({ queryKey: [...keys.config, 'runtime'], queryFn: api.runtimeConfig, enabled })
 
+/**
+ * A counter bumped after the avatar of `repo` changed, so `<img>`s showing it reload; 0 until then.
+ * Lives only in the query cache.
+ */
+export const useRepoAvatarVersion = (repo: RepoRef) =>
+  useQuery({
+    queryKey: ['repo-avatar', 'version', repoKey(repo)],
+    queryFn: () => 0,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  }).data ?? 0
+
+/** Where a repository's avatar comes from: uploaded, the forge's, or generated. */
+export const useRepoAvatarInfo = (repo: RepoRef) =>
+  useQuery({
+    queryKey: ['repo-avatar', 'info', repoKey(repo)],
+    queryFn: () => api.repoAvatarInfo(repo),
+  })
+
+/** Upload or reset a repository's own avatar; reloads every image of it. */
+export function useRepoAvatarMutations(repo: RepoRef) {
+  const client = useQueryClient()
+  const onSuccess = () => {
+    client.setQueryData<number>(['repo-avatar', 'version', repoKey(repo)], (v = 0) => v + 1)
+    void client.invalidateQueries({ queryKey: ['repo-avatar', 'info', repoKey(repo)] })
+  }
+  return {
+    upload: useMutation({ mutationFn: (file: Blob) => api.setRepoAvatar(repo, file), onSuccess }),
+    reset: useMutation({ mutationFn: () => api.removeRepoAvatar(repo), onSuccess }),
+  }
+}
+
 /** What the config applies to a repository: groups, traits, plugins, schedules and triggers. */
 export const useExplainRepo = (repo: RepoRef) =>
   useQuery({ queryKey: ['explain', repoKey(repo)], queryFn: () => api.explainRepo(repo) })

@@ -94,7 +94,7 @@ export interface PipelineWeek {
   failures: number
   /** Percent of final attempts that failed. */
   failureRate?: number
-  /** Wall time of pipelines, first job start to last job end, seconds. */
+  /** Pipeline time: seconds any job of the pipeline was running, gaps left out. */
   p25?: number
   median?: number
   p75?: number
@@ -107,6 +107,8 @@ export interface PipelineWeek {
 export interface RefGroupStats {
   group: RefGroup
   label: string
+  /** The forge's default branch belongs to this group. */
+  hasDefault: boolean
   pipelines: number
   /** Distinct refs, e.g. how many feature branches ran. */
   refs: number

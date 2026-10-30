@@ -27,6 +27,7 @@ import {
   repoTarget,
 } from '../context.ts'
 import { canSee } from '../visibility.ts'
+import { peopleOf } from './avatars.ts'
 
 const applySchema = z.object({
   ids: z.array(z.string().min(1)).min(1),
@@ -96,7 +97,13 @@ export function analysisRoutes(deps: ServerDeps) {
     const visible = records.filter((r) =>
       canSee(principal, 'analyses:read', repoTarget(config, r.repo)),
     )
-    return c.json<AnalysisList>({ analyses: visible.map(summarize) })
+    return c.json<AnalysisList>({
+      analyses: visible.map(summarize),
+      people: await peopleOf(
+        deps,
+        visible.flatMap((r) => (r.actor ? [r.actor] : [])),
+      ),
+    })
   })
 
   app.get('/analyses/:id', async (c) => {

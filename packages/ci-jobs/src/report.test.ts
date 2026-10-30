@@ -79,10 +79,10 @@ describe('ciJobsReport', () => {
     const list = blocks('refs', data(quarter(), null))
     const [groups, refs] = ofType(list, 'table')
     expect(groups?.rows.map((r) => r['pipelines'])).toEqual([90, 30, 3])
-    expect(groups?.rows[0]?.['group']).toMatchObject({ text: 'Default branch (main)' })
+    expect(groups?.rows[0]?.['group']).toMatchObject({ text: 'Main branches (default: main)' })
     expect(groups?.rows[0]?.['change']).toMatchObject({ text: '+60%', tone: 'bad' })
     const [chart] = ofType(list, 'chart')
-    expect(chart?.series.map((s) => s.key)).toEqual(['default', 'feature', 'tag'])
+    expect(chart?.series.map((s) => s.key)).toEqual(['main', 'feature', 'tag'])
     expect(chart?.data).toHaveLength(14)
     expect(refs?.rows.map((r) => r['ref'])).toEqual([
       'main',
@@ -92,7 +92,7 @@ describe('ciJobsReport', () => {
       'v1.89.0',
     ])
     expect(ciJobsReport(data()).metrics[0]).toMatchObject({
-      id: 'default-branch-time',
+      id: 'main-branch-time',
       value: 100_000,
     })
   })

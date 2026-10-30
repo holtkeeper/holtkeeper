@@ -1,4 +1,5 @@
 import {
+  imageType,
   resolveSecret,
   type Commit,
   type Deployment,
@@ -605,6 +606,30 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
 
     async getRepository(repo) {
       return toRepository(await client.json('GET', project(repo), projectSchema))
+    },
+
+    async getRepositoryAvatar(repo) {
+      const segments = repo.split('/')
+      const candidates = [
+        project(repo),
+        ...segments
+          .slice(0, -1)
+          .map(
+            (_, index) =>
+              `groups/${encode(segments.slice(0, segments.length - 1 - index).join('/'))}`,
+          ),
+      ]
+      for (const path of candidates) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- the nearest avatar wins, so one after another
+          const data = await client.bytes('GET', `${path}/avatar`)
+          const contentType = imageType(data)
+          if (contentType) return { data, contentType }
+        } catch (error) {
+          if (!isNotFound(error)) throw error
+        }
+      }
+      return undefined
     },
 
     async readFile(repo, file, ref) {

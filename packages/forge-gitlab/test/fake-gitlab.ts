@@ -247,6 +247,13 @@ export class FakeGitLab {
     return project
   }
 
+  /** Avatar bytes of a project or group path, as `GET /projects|groups/:id/avatar` serves them. */
+  readonly avatars = new Map<string, Uint8Array>()
+
+  setAvatar(kind: 'projects' | 'groups', path: string, data: Uint8Array) {
+    this.avatars.set(`${kind}:${path}`, data)
+  }
+
   addPipeline(
     project: FakeProject,
     ref: string,
@@ -417,6 +424,12 @@ export class FakeGitLab {
 
   private route(method: string, s: string[], url: URL, body: Record<string, unknown>): Response {
     const q = url.searchParams
+
+    if (method === 'GET' && (s[0] === 'projects' || s[0] === 'groups') && s[2] === 'avatar') {
+      const avatar = this.avatars.get(`${s[0]}:${s[1] ?? ''}`)
+      if (!avatar) return json(404, { message: '404 Avatar Not Found' })
+      return new Response(avatar, { status: 200, headers: { 'Content-Type': 'image/png' } })
+    }
 
     if (method === 'GET' && s[0] === 'users' && s.length === 1)
       return json(

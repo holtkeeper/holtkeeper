@@ -86,6 +86,28 @@ export async function requestBlob(
 /** A same-origin URL with query parameters, for links and downloads. */
 export const urlOf = (path: string, query?: Query): string => withQuery(path, query)
 
+/** Sends `file` as the raw request body with its own content type; parses a JSON answer. */
+export async function uploadFile<T>(
+  method: 'POST' | 'PUT',
+  path: string,
+  file: Blob,
+  query?: Query,
+): Promise<T> {
+  const response = await fetch(withQuery(path, query), {
+    method,
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json',
+      'content-type': file.type || 'application/octet-stream',
+    },
+    body: file,
+  })
+  if (!response.ok) throw new ApiError(response.status, await errorMessage(response))
+  // The server is the trust boundary: its responses follow the shared `@holtkeeper/api` types.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return (await response.json()) as T
+}
+
 /** Human message for any thrown value. */
 export const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)

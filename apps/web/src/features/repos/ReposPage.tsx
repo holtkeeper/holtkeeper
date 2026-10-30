@@ -40,6 +40,7 @@ import {
 import { MetricChips } from '../analyses/MetricChips.tsx'
 import { useSession } from '../shell/session.ts'
 import { AddRepoDialog } from './AddRepoDialog.tsx'
+import { RepoAvatar } from './RepoAvatar.tsx'
 
 const orders = [
   { id: 'attention', label: 'Worst first' },
@@ -240,12 +241,7 @@ function RepoRow({ summary, showAnalyses }: { summary: RepoSummary; showAnalyses
     <tr className="group transition-colors hover:bg-default-soft">
       <Td className="min-w-64">
         <div className="flex items-center gap-3">
-          <span
-            aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-secondary text-sm font-semibold uppercase text-muted shadow-surface"
-          >
-            {name.slice(0, 2)}
-          </span>
+          <RepoAvatar repo={repo} />
           <div className="min-w-0">
             <Link
               to="/repos/view"

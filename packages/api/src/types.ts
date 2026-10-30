@@ -330,6 +330,8 @@ export interface AnalysisSummary {
 /** `GET /api/analyses?repo=&kind=&before=&limit=` */
 export interface AnalysisList {
   analyses: AnalysisSummary[]
+  /** Names and avatars of the users among the records' actors. */
+  people: Record<string, ActivityPerson>
 }
 
 /** `GET /api/analyses/kinds` — analysis kinds the server understands. */
@@ -912,6 +914,16 @@ export interface SchedulePreview {
   id: string
   timezone: string
   runs: Timestamp[]
+}
+
+/**
+ * `GET /api/repos/avatar/info?repo=`: where the avatar at `GET /api/repos/avatar?repo=` comes from:
+ * uploaded in the panel, the forge's (the project's or its group's), or generated from the path.
+ */
+export interface RepoAvatarInfo {
+  source: 'custom' | 'forge' | 'generated'
+  updatedAt?: Timestamp
+  updatedBy?: string
 }
 
 /** One run of a schedule: the jobs it queued at one moment and how they are doing. */

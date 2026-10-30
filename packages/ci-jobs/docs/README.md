@@ -32,8 +32,8 @@ Durations are seconds, rates percentages, weeks start on Monday (UTC).
 - **Failure rate** counts final attempts; jobs allowed to fail and canceled ones are left out. **Retried** is the share of pipelines where the job needed more than one attempt; **flaky** counts pipelines where an attempt failed and a later one passed.
 - **Trend**: the median of the last `recentDays` against the median of the window before them. `slower`/`faster` needs at least five successful runs on each side and a change of `changePercent` and `minChangeSeconds`; `new` has no earlier runs, `idle` no recent ones, everything else is `stable`.
 - **Change point** (slower and faster jobs): over daily medians, the day where the mean before and after differs most in the trend's direction, weighted towards balanced splits, with at least three days on each side. It names the first run of that day: time, commit, ref and link.
-- **Pipeline time**: first job start to last job end of a pipeline, retries included; quartiles per week.
-- **Pipelines by branch** (`refGroupOf`): each pipeline falls into one group — the default branch (from the forge, else `main`, `master` or `trunk`), development branches (`dev`, `develop`, `development`, `staging`, `stage`, `next`, `integration`), release and hotfix branches (`release…`, `hotfix…`, `rc…`, `support…`), merge requests (`refs/merge-requests/…`), tags (by the forge's `tag` flag, not by name) and every other branch as feature branches. Per group: pipelines, distinct refs, failure rate (pipelines with a failed job not allowed to fail), pipeline time of passing pipelines with its weekly median and p95, the recent median against the earlier one, and the five busiest refs. **CI time** sums the run time of every attempt, per job (with its share), stage and week. **Queue** is the median `queuedSeconds`.
+- **Pipeline time**: how long any job of a pipeline was running (the union of its job attempts' run times, retries included), so idle gaps such as a manual job started days later do not count; quartiles per week.
+- **Pipelines by branch** (`refGroupOf`): each pipeline falls into one group by its ref's name — main branches (`main`, `master`, `trunk`, `production`, `prod`), development branches (`dev`, `develop`, `development`, `staging`, `stage`, `next`, `integration`), release and hotfix branches (`release…`, `hotfix…`, `rc…`, `support…`), merge requests (`refs/merge-requests/…`), tags (by the forge's `tag` flag, not by name) and every other branch as feature branches. The forge's default branch keeps the group its name gives it (a `development` default stays a development branch) and joins the main branches otherwise; its group is labelled `(default: <branch>)` and has `hasDefault`. Per group: pipelines, distinct refs, failure rate (pipelines with a failed job not allowed to fail), pipeline time of passing pipelines with its weekly median and p95, the recent median against the earlier one, and the five busiest refs.
 
 ## Data
 
@@ -73,8 +73,9 @@ interface CiJobsData {
     computeSeconds
   }[]
   refGroups: {
-    group: 'default' | 'develop' | 'release' | 'feature' | 'merge-request' | 'tag'
+    group: 'main' | 'develop' | 'release' | 'feature' | 'merge-request' | 'tag'
     label
+    hasDefault
     pipelines
     refs
     failureRate?
@@ -92,7 +93,7 @@ interface CiJobsData {
 
 ## Report
 
-`kind: 'ci-jobs'`, label `CI jobs`, listed on the web UI's **CI jobs** page. Metrics (with deltas against the previous record): default branch pipeline time median, pipeline time median, job failure rate, jobs slower, jobs faster, flaky jobs, CI time per week, queue median.
+`kind: 'ci-jobs'`, label `CI jobs`, listed on the web UI's **CI jobs** page. Metrics (with deltas against the previous record): main branch pipeline time median, pipeline time median, job failure rate, jobs slower, jobs faster, flaky jobs, CI time per week, queue median.
 
 Sections:
 

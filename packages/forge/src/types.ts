@@ -175,6 +175,12 @@ export interface JobRun extends Job {
   tag?: boolean
 }
 
+/** An image read from a forge, e.g. an avatar. */
+export interface ForgeImage {
+  data: Uint8Array
+  contentType: string
+}
+
 /** Filters for `listProjectJobRuns`; omitted fields do not filter. */
 export interface JobRunQuery {
   /** Only jobs created at or after this ISO 8601 time. */
@@ -397,6 +403,11 @@ export interface GitForge {
 
   /** The account behind the token, e.g. the identity for commits signed with its SSH key. */
   getCurrentUser?(): Promise<ForgeUser>
+  /**
+   * The repository's avatar image, else the nearest parent group's; `undefined` when none of them
+   * has one. `contentType` is a raster or SVG image type.
+   */
+  getRepositoryAvatar?(repo: string): Promise<ForgeImage | undefined>
 
   // SSH keys. Optional so forges can add them one by one.
 

@@ -94,6 +94,54 @@ export function metricSeries(
     })
 }
 
+/** `metrics` with `delta` filled in from the same metric of `previous` where it is missing. */
+export function withDeltas(metrics: readonly Metric[], previous?: readonly Metric[]): Metric[] {
+  return metrics.map((metric) => {
+    if (metric.delta !== undefined || typeof metric.value !== 'number') return metric
+    const before = previous?.find((m) => m.id === metric.id)?.value
+    return typeof before === 'number' ? { ...metric, delta: metric.value - before } : metric
+  })
+}
+
+/** The newest record of one repository with what the list knows about its history. */
+export interface RepoLatest {
+  latest: AnalysisSummary
+  /** Its metrics with deltas against the repository's record before it. */
+  metrics: Metric[]
+  /** Records of the repository in the list. */
+  count: number
+  /** Values of `metricId` across the repository's records, oldest first. */
+  series: number[]
+}
+
+/**
+ * One entry per repository of `analyses` (newest first, as the API lists them): the newest
+ * record, deltas against the one before it and the series of `metricId` for a sparkline.
+ */
+export function latestPerRepo(
+  analyses: readonly AnalysisSummary[],
+  metricId: string | undefined,
+): RepoLatest[] {
+  const byRepo = new Map<string, AnalysisSummary[]>()
+  for (const analysis of analyses) {
+    const key = `${analysis.repo.forge}:${analysis.repo.path}`
+    byRepo.set(key, [...(byRepo.get(key) ?? []), analysis])
+  }
+  return [...byRepo.values()].flatMap((records) => {
+    const ordered = records.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
+    const [latest, previous] = ordered
+    if (!latest) return []
+    return [
+      {
+        latest,
+        metrics: withDeltas(latest.metrics, previous?.metrics),
+        count: ordered.length,
+        series: metricId ? metricSeries(ordered, metricId).map((point) => point.value) : [],
+      },
+    ]
+  })
+}
+
 /** Section anchor id, safe for `id` attributes and URLs. */
 export const sectionAnchor = (id: string): string =>
   `section-${id.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}`
