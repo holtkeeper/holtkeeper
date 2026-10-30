@@ -73,6 +73,7 @@ import { AnalysisRecords } from '../analyses/AnalysesPage.tsx'
 import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { useSession } from '../shell/session.ts'
+import { ImpactTab, UsedByTab } from './UsagesTabs.tsx'
 
 const page = analysisPages.find((p) => p.kind === 'api-surface') ?? analysisPages[0]
 
@@ -418,6 +419,8 @@ function PackageView({ name, version, repo }: { name: string; version?: string; 
                 label: 'Changes',
                 content: <ChangesTab data={data} />,
               },
+              { id: 'used-by', label: 'Used by', content: <UsedByTab data={data} /> },
+              { id: 'impact', label: 'Upgrade impact', content: <ImpactTab data={data} /> },
             ]}
           />
         </>

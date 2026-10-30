@@ -7,12 +7,22 @@ import {
   renderPackage,
   renderSymbol,
 } from '@holtkeeper/api-surface'
+import {
+  findSites,
+  packageUsage,
+  renderImpact,
+  renderPackageUsage,
+  renderSites,
+  repoPackages,
+  usageKinds,
+} from '@holtkeeper/usages'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { z } from 'zod'
 
 import type { ApiCatalog, RepoFilter } from './catalog.ts'
 import type { McpUsage } from './usage.ts'
+import { type UsageIndex, impactOf } from './usages.ts'
 
 /** Longest text a tool returns; agents get a hint to narrow the request instead. */
 const maxText = 80_000
@@ -24,6 +34,10 @@ const instructions = [
   'Start with search_symbols or list_packages, read get_package_api (narrow with subpath or',
   'docs: false for big packages), and use list_versions / diff_versions to see what changed',
   'between versions before upgrading.',
+  'It also indexes how every repository uses its dependencies: package_usage shows who uses a',
+  'package, at which versions and which exports, members and JSX props; find_usages returns the',
+  'code of those uses; upgrade_impact lists the uses an upgrade breaks, for planning migrations;',
+  'repo_packages lists what one repository depends on.',
 ].join(' ')
 
 const repoKey = (repo: { forge: string; path: string }) => `${repo.forge}:${repo.path}`
@@ -45,6 +59,7 @@ class ToolError extends Error {}
 /** Everything the MCP tools need for one request. */
 export interface McpRequestContext {
   catalog: ApiCatalog
+  usages: UsageIndex
   usage: McpUsage
   principal: Principal
   /** Repositories the caller may read. */
@@ -55,7 +70,7 @@ export interface McpRequestContext {
 }
 
 function buildServer(context: McpRequestContext) {
-  const { catalog, canRead } = context
+  const { catalog, usages, canRead } = context
   const server = new McpServer({ name: 'holtkeeper', version: '1.0.0' }, { instructions })
 
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the SDK's overloads infer arguments from its own zod typings; it validates them against the shape
@@ -351,6 +366,106 @@ function buildServer(context: McpRequestContext) {
         : `${name}: no export changed between ${result.from.version} and ${result.to.version}.`
     },
     ({ package: name }) => name,
+  )
+
+  tool(
+    'package_usage',
+    'Who uses a package across the organization’s repositories: versions in use per repository and every export used with how often, how (call, jsx, type, member, …), the JSX props passed and members read. Start here before changing or upgrading a package.',
+    { package: z.string().describe('Package name, e.g. @acme/ui') },
+    async ({ package: name }) => {
+      const usage = packageUsage(await usages.entries(canRead), name)
+      return renderPackageUsage(usage, { originLabel: String })
+    },
+    ({ package: name }) => name,
+  )
+
+  tool(
+    'find_usages',
+    'The code that uses a package: file, line and a snippet for each use, grouped by repository. Narrow with `export`, `member` (e.g. `reset` or `().reset` for the result of a call), `prop` (a JSX prop) or `kind`. Records keep a sample of sites per export; counts in package_usage cover all of them.',
+    {
+      package: z.string(),
+      export: z.string().optional().describe('Exported name, `default` or `*` for the module'),
+      member: z.string().optional().describe('Member path read from the export'),
+      prop: z.string().optional().describe('JSX prop passed to the export'),
+      kind: z.enum(usageKinds).optional(),
+      repo: z.string().optional().describe('Only this repository, as forge:path'),
+      limit: z.number().int().min(1).max(100).optional().describe('Default 30'),
+    },
+    async ({ package: name, export: exported, member, prop, kind, repo, limit }) => {
+      const entries = await usages.entries(canRead)
+      if (repo && !entries.some((entry) => entry.origin === repo))
+        throw new ToolError(
+          `No usage record of ${repo}; call repo_packages without arguments to see what is indexed.`,
+        )
+      return renderSites(
+        findSites(entries, {
+          package: name,
+          ...(exported ? { export: exported } : {}),
+          ...(member ? { member } : {}),
+          ...(prop ? { prop } : {}),
+          ...(kind ? { kind } : {}),
+          ...(repo ? { origins: [repo] } : {}),
+          limit: limit ?? 30,
+        }),
+      )
+    },
+    ({ package: name }) => name,
+  )
+
+  tool(
+    'upgrade_impact',
+    'What upgrading a package breaks in the repositories that use it: the API diff between two recorded versions joined with their uses. Removed exports and removed members or props of changed declarations are `breaking`, other uses of changed declarations `check`, deprecations `deprecated`; each comes with the affected code. Repositories already on `to` are left out.',
+    {
+      package: z.string(),
+      from: z.string().optional().describe('Older version; default the release before `to`'),
+      to: versionArg,
+      repo: repoArg,
+    },
+    async ({ package: name, from, to, repo }) => {
+      const result = await impactOf(catalog, usages, canRead, name, {
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(repo ? { repo } : {}),
+      })
+      if (!result) {
+        const found = await catalog.resolve(canRead, name, repo ? { repo } : {})
+        if (!found) throw await notFound(name)
+        throw new ToolError(
+          `Could not find both versions of ${name}; recorded: ${found.versions.map((v) => (v.head ? 'head' : v.version)).join(', ')}.`,
+        )
+      }
+      return [
+        `${name} ${result.from.version} → ${result.to.version} (\`${repoKey(result.repo)}\`)`,
+        renderImpact(result.impact),
+      ].join('\n\n')
+    },
+    ({ package: name }) => name,
+  )
+
+  tool(
+    'repo_packages',
+    'The packages one repository’s code imports, with resolved versions, declared ranges, number of uses and exports used. Without `repo`, lists the repositories that have a usage record.',
+    { repo: z.string().optional().describe('Repository as forge:path') },
+    async ({ repo }) => {
+      const entries = await usages.entries(canRead)
+      if (!repo)
+        return entries.length
+          ? entries
+              .map((entry) => `- \`${entry.origin}\`: ${entry.data.packages.length} packages`)
+              .join('\n')
+          : 'No repository has a usage record yet.'
+      const entry = entries.find((item) => item.origin === repo)
+      if (!entry) throw new ToolError(`No usage record of ${repo}.`)
+      const packages = repoPackages(entry.data)
+      return [
+        `# \`${repo}\`: ${packages.length} packages, ${entry.data.files} files read, type checker ${entry.data.types.status}`,
+        ...packages.map(
+          (pkg) =>
+            `- **${pkg.name}** ${pkg.versions.join(', ') || pkg.ranges.join(', ') || 'version unknown'}${pkg.local ? ' (defined here)' : ''} — ${pkg.count} uses in ${pkg.files} files, ${pkg.exports} exports`,
+        ),
+      ].join('\n')
+    },
+    ({ repo }) => repo,
   )
 
   return server

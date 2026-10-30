@@ -65,6 +65,7 @@ Every default schedule covers all groups and spreads its repository jobs over 01
 | `branches-weekly` | `branches`                                                         | Tuesday nights   |
 | `stack-weekly`    | `stack`                                                            | Monday nights    |
 | `api-weekly`      | `api-surface`                                                      | Thursday nights  |
+| `usages-weekly`   | `usages`                                                           | Thursday nights  |
 
 The default trigger `tag` queues `changelog`, `release-risk` and `api-surface` for every new or moved tag, from webhooks or polling. `defaultTriggerAdditions` bring analyzers added to a default trigger later to installs that already have it: each addition appends its missing analyzers to the existing document once (marker `config:default-seeded:trigger:<id>`, e.g. `tag+api-surface`), so taking one out again in the panel sticks.
 

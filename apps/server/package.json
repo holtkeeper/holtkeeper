@@ -42,6 +42,7 @@
     "@holtkeeper/store": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",
     "@holtkeeper/updates": "workspace:*",
+    "@holtkeeper/usages": "workspace:*",
     "@holtkeeper/vault": "workspace:*",
     "@holtkeeper/vuln": "workspace:*",
     "@holtkeeper/workspace": "workspace:*",

@@ -114,6 +114,17 @@ export const defaultSchedules: DefaultSchedule[] = [
       spread: true,
     },
   },
+  {
+    id: 'usages-weekly',
+    data: {
+      name: 'Package usage, weekly',
+      enabled: true,
+      analyzers: ['usages'],
+      cron: '0 2 * * 4',
+      windows: nights,
+      spread: true,
+    },
+  },
 ]
 
 /**

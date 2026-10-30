@@ -33,6 +33,13 @@ import type {
   Timestamp,
   TriggerDocumentData,
 } from '@holtkeeper/store'
+import type {
+  FleetExport,
+  FoundSite,
+  TypeResolution,
+  UpgradeImpact,
+  UsedExport,
+} from '@holtkeeper/usages'
 import type { Severity } from '@holtkeeper/vuln'
 
 /** Error body of every non-2xx JSON response. */
@@ -1187,6 +1194,73 @@ export interface PublicApiSearchResult {
   hits: PublicApiSymbolHit[]
   /** Matches beyond `limit`. */
   more: number
+}
+
+/** How one repository uses a package, from its newest `usages` record. */
+export interface PackageUsageRepo {
+  repo: RepoRef
+  analysisId: string
+  analyzedAt: Timestamp
+  ref?: string
+  /** Versions the lockfile resolves, highest first; empty when unknown. */
+  versions: string[]
+  ranges: string[]
+  workspaces: string[]
+  count: number
+  files: number
+  /** Exports it uses, with members and props but without sites; ask `/usages/sites` for those. */
+  exports: Omit<UsedExport, 'sites' | 'truncated'>[]
+}
+
+/** `GET /api/api-surface/usages/package?name=`: who uses a package and which parts of it. */
+export interface PackageUsageView {
+  name: string
+  /** Versions in use across repositories, highest first. */
+  versions: string[]
+  repos: PackageUsageRepo[]
+  exports: FleetExport<RepoRef>[]
+  /** When the server last read the usage records. */
+  indexedAt?: Timestamp
+}
+
+/** `GET /api/api-surface/usages/sites?package=&export=&member=&prop=&kind=&repo=&limit=`. */
+export interface UsageSitesView {
+  sites: FoundSite<RepoRef>[]
+  /** Uses matching the query, including those records keep no snippet for. */
+  total: number
+  /** Kept sites beyond `limit`. */
+  more: number
+}
+
+/** A package one repository uses, as `GET /api/api-surface/usages/repo` lists them. */
+export interface RepoPackageView {
+  name: string
+  versions: string[]
+  ranges: string[]
+  /** The repository defines the package itself. */
+  local: boolean
+  count: number
+  files: number
+  exports: number
+}
+
+/** `GET /api/api-surface/usages/repo?repo=forge:path`: what a repository uses. */
+export interface RepoUsageView {
+  repo: RepoRef
+  analysisId: string
+  analyzedAt: Timestamp
+  files: number
+  types: TypeResolution
+  packages: RepoPackageView[]
+}
+
+/** `GET /api/api-surface/usages/impact?package=&from=&to=&repo=`: what an upgrade affects. */
+export interface UpgradeImpactView {
+  /** Repository that defines the package. */
+  repo: RepoRef
+  from: PublicApiVersion
+  to: PublicApiVersion
+  impact: UpgradeImpact<RepoRef>
 }
 
 /** A personal access token for the MCP endpoint; the secret itself is shown only once. */

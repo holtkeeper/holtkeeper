@@ -27,6 +27,7 @@ import { createReviewAnalyzer } from '@holtkeeper/review'
 import { stackAnalyzer } from '@holtkeeper/stack'
 import { testIdsAnalyzer } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
+import { usagesAnalyzer } from '@holtkeeper/usages'
 import { z } from 'zod'
 
 import { auditAnalyzer } from './audit.ts'
@@ -166,6 +167,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   coverageAnalyzer,
   testIdsAnalyzer,
   apiSurfaceAnalyzer,
+  usagesAnalyzer,
   licensesAnalyzer,
   releaseRiskAnalyzer,
   fleetAnalyzer,

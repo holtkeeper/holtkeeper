@@ -18,6 +18,20 @@ export type {
   PackageDiff,
 } from '@holtkeeper/api-surface'
 export type {
+  FleetExport,
+  FoundSite,
+  ImpactItem,
+  ImpactLevel,
+  NameCount,
+  RepoImpact,
+  TypeResolution,
+  UpgradeChange,
+  UpgradeImpact,
+  UsageKind,
+  UsageSite,
+  UsedExport,
+} from '@holtkeeper/usages'
+export type {
   ActivityEvent,
   AiUsageBucket,
   AiUsageDimension,

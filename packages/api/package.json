@@ -15,6 +15,7 @@
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/usages": "workspace:*",
     "@holtkeeper/vuln": "workspace:*"
   }
 }

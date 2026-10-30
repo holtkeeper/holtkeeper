@@ -9,6 +9,7 @@ import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { MediaButton } from '../media/MediaDialog.tsx'
+import { RepoPackagesTab } from '../public-api/UsagesTabs.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
 import { RepoAvatarEditor } from './RepoAvatar.tsx'
@@ -71,6 +72,9 @@ export function RepoPage() {
             content: <ScopedKnowledge focus={focus} groups={allGroups} />,
           },
         ]
+      : []),
+    ...(can('analyses:read')
+      ? [{ id: 'packages', label: 'Packages', content: <RepoPackagesTab repo={repo} /> }]
       : []),
     { id: 'config', label: 'Config', content: <RepoConfig repo={repo} /> },
   ]

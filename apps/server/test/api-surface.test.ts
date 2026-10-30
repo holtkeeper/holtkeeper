@@ -8,6 +8,10 @@ import type {
   PublicApiPackageDetail,
   PublicApiPackageList,
   PublicApiSearchResult,
+  PackageUsageView,
+  RepoUsageView,
+  UpgradeImpactView,
+  UsageSitesView,
 } from '@holtkeeper/api'
 import type { ApiPackage, ApiSurfaceData } from '@holtkeeper/api-surface'
 import { headerAuth } from '@holtkeeper/auth-header'
@@ -16,6 +20,7 @@ import { createCredentialService } from '@holtkeeper/credentials'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
+import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
 
 import { createApp } from '../src/app.ts'
@@ -249,6 +254,10 @@ describe('MCP endpoint', () => {
       'get_symbol',
       'list_versions',
       'diff_versions',
+      'package_usage',
+      'find_usages',
+      'upgrade_impact',
+      'repo_packages',
     ])
 
     const packages = await callTool('list_packages', {}, bearer)
@@ -321,5 +330,140 @@ describe('MCP endpoint', () => {
     const own = await get<McpUsageOverview>('/api/api-surface/mcp/usage', asGames)
     expect(own.people).toEqual([])
     expect(own.recent).toEqual([])
+  })
+})
+
+const gameUsage = (version: string): UsagesData => ({
+  packages: [
+    {
+      name: '@acme/ui',
+      versions: [version],
+      ranges: [`^${version}`],
+      workspaces: ['root'],
+      count: 3,
+      files: 2,
+      exports: [
+        {
+          name: 'link',
+          subpath: '.',
+          count: 1,
+          files: 1,
+          kinds: { call: 1 },
+          members: [],
+          props: [],
+          spread: 0,
+          sites: [
+            {
+              file: 'src/menu.ts',
+              line: 4,
+              column: 3,
+              kind: 'call',
+              snippet: "link('/home')",
+              snippetLine: 4,
+            },
+          ],
+        },
+        {
+          name: 'button',
+          subpath: '.',
+          count: 2,
+          files: 1,
+          kinds: { jsx: 2 },
+          members: [],
+          props: [{ name: 'variant', count: 2 }],
+          spread: 0,
+          sites: [
+            {
+              file: 'src/hud.tsx',
+              line: 9,
+              column: 7,
+              kind: 'jsx',
+              props: ['variant'],
+              snippet: '<Button variant="ghost" />',
+              snippetLine: 9,
+            },
+          ],
+          truncated: 1,
+        },
+      ],
+    },
+  ],
+  files: 12,
+  types: { status: 'used', projects: ['tsconfig.json'], sites: 0 },
+})
+
+describe('usage routes and tools', () => {
+  beforeEach(async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: '2026-10-21T00:00:00.000Z',
+      data: gameUsage('1.0.0'),
+    })
+  })
+
+  test('shows who uses a package, the sites and what one repository uses', async () => {
+    const usage = await get<PackageUsageView>('/api/api-surface/usages/package?name=@acme/ui')
+    expect(usage.versions).toEqual(['1.0.0'])
+    expect(usage.repos.map((r) => [r.repo.path, r.count, r.exports.map((e) => e.name)])).toEqual([
+      ['games/a', 3, ['link', 'button']],
+    ])
+    expect(usage.repos[0]?.exports[0]).not.toHaveProperty('sites')
+    expect(usage.exports.find((e) => e.name === 'button')?.props).toEqual([
+      { name: 'variant', count: 2 },
+    ])
+
+    const sites = await get<UsageSitesView>(
+      '/api/api-surface/usages/sites?package=@acme/ui&prop=variant',
+    )
+    expect(sites.sites.map((s) => [s.origin.path, s.export, s.site.file])).toEqual([
+      ['games/a', 'button', 'src/hud.tsx'],
+    ])
+
+    const repo = await get<RepoUsageView>('/api/api-surface/usages/repo?repo=work:games/a', asGames)
+    expect(repo.packages).toEqual([
+      {
+        name: '@acme/ui',
+        versions: ['1.0.0'],
+        ranges: ['^1.0.0'],
+        local: false,
+        count: 3,
+        files: 2,
+        exports: 2,
+      },
+    ])
+    const hidden = await app.request('/api/api-surface/usages/repo?repo=work:games/a', {
+      headers: { 'x-forwarded-user': 'eve', 'x-forwarded-groups': 'nobody' },
+    })
+    expect(hidden.status).toBe(404)
+  })
+
+  test('joins an API diff with the uses it breaks', async () => {
+    const impact = await get<UpgradeImpactView>(
+      '/api/api-surface/usages/impact?package=@acme/ui&from=1.0.0&to=1.1.0',
+    )
+    expect([impact.from.version, impact.to.version]).toEqual(['1.0.0', '1.1.0'])
+    expect(
+      impact.impact.items.map((i) => [i.level, i.change.name, i.repos[0]?.origin.path]),
+    ).toEqual([['breaking', 'link', 'games/a']])
+
+    const text = await callTool(
+      'upgrade_impact',
+      { package: '@acme/ui', from: '1.0.0', to: '1.1.0' },
+      asAdmin,
+    )
+    expect(text.content[0]?.text).toContain('## breaking: removed `@acme/ui` → link (1 uses)')
+    expect(text.content[0]?.text).toContain("link('/home')")
+
+    const used = await callTool('package_usage', { package: '@acme/ui' }, asAdmin)
+    expect(used.content[0]?.text).toContain(
+      '- `work:games/a` — 1.0.0, 3 uses in 2 files, 2 exports',
+    )
+    const found = await callTool('find_usages', { package: '@acme/ui', export: 'button' }, asAdmin)
+    expect(found.content[0]?.text).toContain('`src/hud.tsx:9` — jsx props `variant`')
+    const packages = await callTool('repo_packages', { repo: 'work:games/a' }, asAdmin)
+    expect(packages.content[0]?.text).toContain(
+      '- **@acme/ui** 1.0.0 — 3 uses in 2 files, 2 exports',
+    )
   })
 })

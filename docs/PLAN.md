@@ -158,6 +158,7 @@ Every analysis produces its own data and renders it into the universal report fo
 - **Changelog** — commits between releases or tags, grouped by type and scope, identical messages collapsed, links to commits, merge requests and tickets.
 - **Bundle size** — per entrypoint and per package (source maps), raw/gzip/brotli, growth between releases. Any bundler.
 - **Dependencies** — workspace graph, package graph from lockfiles, module imports; cycles and libraries in several versions. JS and Go sources; more are new `GraphSource`s.
+- **Package usage** — which exports, members and JSX props of each dependency a repository uses and where, through imports and the TypeScript 7 checker; joined across repositories into "used by" and the uses an upgrade breaks, for people and for agents over MCP.
 - **Code quality** — naming conventions inferred from the project (ast-grep), test gaps from coverage with example tests written by the agent in the project's style, linters through SARIF (oxlint, ESLint, Biome, golangci-lint, ruff, Semgrep, ast-grep), duplication (jscpd).
 
 Suggested code changes from any analysis share one shape ([`@holtkeeper/changes`](../packages/changes/docs/README.md)) and can be accepted from a report as a patch or a merge request.

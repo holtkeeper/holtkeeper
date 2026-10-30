@@ -18,6 +18,7 @@ import { createApiCatalog } from '../api-surface/catalog.ts'
 import { handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { mcpUsage } from '../api-surface/usage.ts'
+import { createUsageIndex } from '../api-surface/usages.ts'
 import {
   type AppContext,
   type Env,
@@ -29,6 +30,7 @@ import {
   repoTarget,
 } from '../context.ts'
 import { canSee } from '../visibility.ts'
+import { usageRoutes } from './usages.ts'
 
 const GLOBAL = { kind: 'global' } as const
 
@@ -56,12 +58,14 @@ const resolveQuery = (c: AppContext) => {
 }
 
 /**
- * The API catalog built from `api-surface` records: routes under `/api/api-surface` for the web
- * UI, the MCP endpoint for agents, personal access tokens for both and usage statistics.
+ * The API catalog built from `api-surface` records and the usage index built from `usages`
+ * records: routes under `/api/api-surface` for the web UI, the MCP endpoint for agents, personal
+ * access tokens for both and MCP call statistics.
  */
 export function createApiSurface(deps: ServerDeps) {
   const { store, config } = deps
   const catalog = createApiCatalog({ analyses: store.analyses })
+  const usages = createUsageIndex({ analyses: store.analyses })
   const usage = mcpUsage({ ...(store.kv ? { kv: store.kv } : {}), now: deps.now })
   const tokens: McpTokens | undefined = store.kv
     ? mcpTokens({ kv: store.kv, users: store.users, now: deps.now })
@@ -75,6 +79,7 @@ export function createApiSurface(deps: ServerDeps) {
   const endpointOf = (c: AppContext) => `${publicUrlOf(deps, c)}/mcp`
 
   const routes = new Hono<Env>()
+  routes.route('/', usageRoutes({ catalog, usages, readable }))
 
   routes.get('/api-surface/packages', async (c) => {
     const principal = principalOf(c)
@@ -146,7 +151,7 @@ export function createApiSurface(deps: ServerDeps) {
 
   routes.post('/api-surface/rescan', async (c) => {
     authorize(c, 'analyses:run', GLOBAL)
-    await catalog.rescan()
+    await Promise.all([catalog.rescan(), usages.rescan()])
     return c.json({ indexedAt: catalog.indexedAt() })
   })
 
@@ -229,6 +234,7 @@ export function createApiSurface(deps: ServerDeps) {
     const client = clientOf(c.req.raw)
     return handleMcpRequest(c.req.raw, {
       catalog,
+      usages,
       usage,
       principal,
       canRead: readable(principal),

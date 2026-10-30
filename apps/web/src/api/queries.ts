@@ -773,6 +773,74 @@ export const usePublicApiSearch = (query: { q: string; package?: string; kind?: 
     staleTime: 30_000,
   })
 
+/** Who uses a package across repositories and which of its exports, members and props. */
+export const usePackageUsage = (name: string) =>
+  useQuery({
+    queryKey: ['public-api', 'usages', 'package', name],
+    queryFn: () => api.packageUsage(name),
+    staleTime: 60_000,
+  })
+
+/** Uses of a package with snippets; idle while `enabled` is false. */
+export const useUsageSites = (
+  query: {
+    package: string
+    export?: string
+    member?: string
+    prop?: string
+    kind?: string
+    repo?: string
+  },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      'public-api',
+      'usages',
+      'sites',
+      query.package,
+      query.export ?? '',
+      query.member ?? '',
+      query.prop ?? '',
+      query.kind ?? '',
+      query.repo ?? '',
+    ],
+    queryFn: () => api.usageSites({ ...query, limit: 100 }),
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    enabled,
+  })
+
+/** Packages one repository uses, from its newest usage record. */
+export const useRepoUsage = (repo: string) =>
+  useQuery({
+    queryKey: ['public-api', 'usages', 'repo', repo],
+    queryFn: () => api.repoUsage(repo),
+    staleTime: 60_000,
+    retry: false,
+  })
+
+/** The uses an upgrade between two recorded versions affects. */
+export const useUpgradeImpact = (
+  query: { package: string; from?: string; to?: string; repo?: string },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      'public-api',
+      'usages',
+      'impact',
+      query.package,
+      query.from ?? '',
+      query.to ?? '',
+      query.repo ?? '',
+    ],
+    queryFn: () => api.upgradeImpact(query),
+    staleTime: 60_000,
+    retry: false,
+    enabled,
+  })
+
 export function usePublicApiRescan() {
   const client = useQueryClient()
   return useMutation({

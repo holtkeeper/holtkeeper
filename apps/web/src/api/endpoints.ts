@@ -16,6 +16,10 @@ import type {
   PublicApiPackageDetail,
   PublicApiPackageList,
   PublicApiSearchResult,
+  PackageUsageView,
+  RepoUsageView,
+  UpgradeImpactView,
+  UsageSitesView,
   ConfigEntryDetail,
   CreateJobInput,
   ExternalAccountList,
@@ -182,6 +186,23 @@ export const api = {
     request<PublicApiDiff>('GET', '/api/api-surface/diff', { query: toQuery(query) }),
   publicApiSearch: (query: { q: string; package?: string; kind?: string; limit?: number }) =>
     request<PublicApiSearchResult>('GET', '/api/api-surface/search', { query: toQuery(query) }),
+  packageUsage: (name: string) =>
+    request<PackageUsageView>('GET', '/api/api-surface/usages/package', { query: { name } }),
+  usageSites: (query: {
+    package: string
+    export?: string
+    member?: string
+    prop?: string
+    kind?: string
+    repo?: string
+    limit?: number
+  }) => request<UsageSitesView>('GET', '/api/api-surface/usages/sites', { query: toQuery(query) }),
+  repoUsage: (repo: string) =>
+    request<RepoUsageView>('GET', '/api/api-surface/usages/repo', { query: { repo } }),
+  upgradeImpact: (query: { package: string; from?: string; to?: string; repo?: string }) =>
+    request<UpgradeImpactView>('GET', '/api/api-surface/usages/impact', {
+      query: toQuery(query),
+    }),
   publicApiRescan: () => request<{ indexedAt?: string }>('POST', '/api/api-surface/rescan'),
   mcpTokens: () => request<McpTokenList>('GET', '/api/api-surface/mcp/tokens'),
   createMcpToken: (input: CreateMcpTokenInput) =>

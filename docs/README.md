@@ -65,6 +65,7 @@
 | `@holtkeeper/coverage`            | Test coverage per source file, folder treemap and trend                | [packages/coverage/docs](../packages/coverage/docs/README.md)                       |
 | `@holtkeeper/testids`             | Test id attributes on interactive elements of frontend templates       | [packages/testids/docs](../packages/testids/docs/README.md)                         |
 | `@holtkeeper/api-surface`         | Public API of packages per version, diffs, Markdown for agents         | [packages/api-surface/docs](../packages/api-surface/docs/README.md)                 |
+| `@holtkeeper/usages`              | Which exports, members and props of packages each repository uses      | [packages/usages/docs](../packages/usages/docs/README.md)                           |
 | `@holtkeeper/licenses`            | Dependency licenses against an allowlist                               | [packages/licenses/docs](../packages/licenses/docs/README.md)                       |
 | `@holtkeeper/fleet`               | Library versions and config drift across repositories                  | [packages/fleet/docs](../packages/fleet/docs/README.md)                             |
 | `@holtkeeper/stack`               | Runtimes, package managers and images across repositories, end of life | [packages/stack/docs](../packages/stack/docs/README.md)                             |
