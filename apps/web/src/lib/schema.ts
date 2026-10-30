@@ -7,6 +7,7 @@ export type EditorKind =
   | { kind: 'enum'; options: string[] }
   | { kind: 'number'; integer: boolean }
   | { kind: 'string' }
+  | { kind: 'credential'; of: string }
   | { kind: 'json' }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -19,6 +20,9 @@ const isConstVariant = (value: unknown): value is { const: string } =>
 export function editorFor(schema: unknown, secret: boolean): EditorKind {
   if (secret) return { kind: 'secret' }
   if (!isRecord(schema)) return { kind: 'json' }
+  if (typeof schema['x-credential'] === 'string') {
+    return { kind: 'credential', of: schema['x-credential'] }
+  }
   const values = schema.enum
   if (Array.isArray(values) && values.every((v) => typeof v === 'string')) {
     return { kind: 'enum', options: values }
@@ -54,6 +58,7 @@ export function defaultValue(schema: unknown): unknown {
       case 'number':
         return 0
       case 'string':
+      case 'credential':
         return ''
       default:
         return initialValue(schema, schema)

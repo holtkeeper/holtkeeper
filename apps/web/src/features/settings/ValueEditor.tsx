@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import type { EditorKind } from '../../lib/schema.ts'
 import { Select, Switch, TextField } from '../../ui/index.ts'
+import { CredentialPicker } from './CredentialPicker.tsx'
 import { StructuredEditor } from './SchemaField.tsx'
 
 /**
@@ -41,6 +42,8 @@ export function ValueEditor({
           onChange={onChange}
         />
       )
+    case 'credential':
+      return <CredentialPicker of={editor.of} value={initial} onChange={onChange} label={label} />
     case 'secret':
       return (
         <TextField

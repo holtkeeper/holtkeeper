@@ -4,9 +4,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useRepos, useSettingMutations, useSettings } from '../../api/queries.ts'
+import { useCredentials, useRepos, useSettingMutations, useSettings } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
-import { previewValue } from '../../lib/schema.ts'
+import { editorFor, previewValue } from '../../lib/schema.ts'
 import { scopeOrder } from '../../lib/scope.ts'
 import {
   Button,
@@ -21,6 +21,7 @@ import {
 } from '../../ui/index.ts'
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
 import { useSession } from '../shell/session.ts'
+import { findCredential } from './CredentialPicker.tsx'
 import { EntryDialog } from './EntryDialog.tsx'
 import { ResolvePreview } from './ResolvePreview.tsx'
 
@@ -31,6 +32,7 @@ export function SettingsPage() {
   const { can } = useSession()
   const settings = useSettings()
   const repos = useRepos(can('repos:read'))
+  const credentials = useCredentials(can('credentials:read'))
   const { remove } = useSettingMutations()
   const [editing, setEditing] = useState<Editing | null>(null)
   const [deleting, setDeleting] = useState<{
@@ -129,7 +131,13 @@ export function SettingsPage() {
                                 {entry.secret && entry.value === null ? (
                                   <Chip tone="success">set</Chip>
                                 ) : (
-                                  previewValue(entry.value, entry.secret)
+                                  ((editorFor(definition.schema, definition.secret).kind ===
+                                  'credential'
+                                    ? findCredential(
+                                        credentials.data?.credentials ?? [],
+                                        entry.value,
+                                      )?.name
+                                    : undefined) ?? previewValue(entry.value, entry.secret))
                                 )}
                               </span>
                               <span className="text-xs text-muted">

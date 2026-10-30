@@ -18,6 +18,11 @@ describe('editorFor', () => {
     expect(editorFor({ type: 'string' }, false)).toEqual({ kind: 'string' })
     expect(editorFor({ type: 'array', items: {} }, false)).toEqual({ kind: 'json' })
     expect(editorFor(undefined, false)).toEqual({ kind: 'json' })
+    expect(editorFor({ type: 'string', 'x-credential': 'ai-provider' }, false)).toEqual({
+      kind: 'credential',
+      of: 'ai-provider',
+    })
+    expect(defaultValue({ type: 'string', 'x-credential': 'ai-provider' })).toBe('')
   })
 })
 

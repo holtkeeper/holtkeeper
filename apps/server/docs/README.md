@@ -74,7 +74,7 @@ Everything a route needs comes through `ServerDeps`, so tests build the app with
 `agent.ts` builds the LLM agent jobs get (`settingsAgentFor({ config, store, vault, now?, runner?, context7?, onRun?, budgets?, log?, models? })`, the default `agentFor` of `startServer`). For a repository it reads the scoped settings:
 
 1. `llm.provider` set to the id or name of an AI provider credential (kind `anthropic`, `anthropic-compatible`, `bedrock`, `vertex` or `openai-compatible`, scope covering the repository): the credential's secret is opened with the vault and `createAgent` from [@holtkeeper/agent](../../../packages/agent/docs/README.md#providers) builds the agent from its `kind`, `url` and `options`. A named credential that is missing, out of scope or has invalid options is logged and yields no agent.
-2. `llm.provider` unset or the legacy `anthropic`: the sealed `llm.apiKey` with the Anthropic API. No key, no agent.
+2. `llm.provider` unset: no agent. API keys live only in credentials, never in settings.
 3. `llm.model` / `llm.models` override the provider's models. A `<prefix>@latest` reference (in the settings or the credential's options) resolves to the newest model the provider lists (`resolveProviderRouting`, listings cached per credential for an hour in `models`, default `modelCatalog()`); one that matches nothing is logged and yields no agent. Runs of one credential share its `maxConcurrency`.
 
 `GET /api/credentials/:id/models` (`credentials:read`) lists an AI provider credential's models with prices (`listProviderModels`, 15 s timeout); a provider API failure comes back as `error` next to the configured models.

@@ -65,7 +65,7 @@ export interface ServerOptions {
   settings?: SettingDefinition[]
   /** Analyzers background jobs may run. Default: the registry from `@holtkeeper/analyzers`. */
   analyzers?: AnyAnalyzer[]
-  /** The LLM agent for a repository. Default: from the scoped `llm.apiKey` and `llm.model` settings. */
+  /** The LLM agent for a repository. Default: the AI provider credential named by `llm.provider`. */
   agentFor?: AgentFor
   /** Artifact store instead of the one `server.artifacts` / `server.artifactsDir` describes. */
   artifacts?: ArtifactStore

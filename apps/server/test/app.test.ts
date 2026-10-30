@@ -19,7 +19,7 @@ import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { defineAnalysis, metric } from '@holtkeeper/report'
-import { builtinSettings } from '@holtkeeper/settings'
+import { builtinSettings, defineSetting } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
@@ -122,6 +122,15 @@ const run = (path: string, finishedAt: string) => ({
 })
 
 let store: Store
+const tokenSetting = defineSetting({
+  key: 'test.token',
+  label: 'Token',
+  description: 'A secret setting',
+  section: 'Test',
+  schema: z.string().min(1),
+  secret: true,
+})
+
 const setup = (auth: AuthProvider = noAuth()) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
@@ -134,7 +143,7 @@ const setup = (auth: AuthProvider = noAuth()) => {
       activity: store.activity,
       vault,
     }),
-    settings: builtinSettings,
+    settings: [...builtinSettings, tokenSetting],
     analyses: [sizeKind],
     now: () => new Date('2026-10-30T12:00:00.000Z'),
   })
@@ -265,7 +274,7 @@ describe('server', () => {
       value: 'claude-opus-5-5',
     })
     const secret = await send(app, 'PUT', '/api/settings', {
-      key: 'llm.apiKey',
+      key: 'test.token',
       scope: { all: true },
       value: 'sk-secret',
     })
@@ -294,7 +303,7 @@ describe('server', () => {
     ).json()) as ResolvedSettings
     expect(resolved.groups).toEqual(['games'])
     expect(resolved.settings['llm.model']?.value).toBe('claude-opus-5-5')
-    expect(resolved.settings['llm.apiKey']?.value).toBeNull()
+    expect(resolved.settings['test.token']?.value).toBeNull()
   })
 
   test('limits setting writes to the caller scope', async () => {

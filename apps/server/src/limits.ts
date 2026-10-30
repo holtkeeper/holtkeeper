@@ -13,7 +13,7 @@ import {
 import { resolveSetting } from '@holtkeeper/settings'
 import type { Job, SettingEntry, Store } from '@holtkeeper/store'
 
-import { findProviderCredential, LEGACY_PROVIDER } from './agent.ts'
+import { findProviderCredential } from './agent.ts'
 import { repoTarget } from './context.ts'
 
 /** Limiter key of a file-config forge that has no stored credential. */
@@ -89,7 +89,7 @@ export function jobLimitKeys(options: JobKeysOptions) {
       target,
     )
     const reference = typeof entry?.value === 'string' ? entry.value : undefined
-    if (!reference || reference === LEGACY_PROVIDER) return [...keys, `ai:${LEGACY_PROVIDER}`]
+    if (!reference) return keys
     const credential = findProviderCredential(
       await options.store.credentials.list(),
       reference,

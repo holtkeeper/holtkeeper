@@ -101,8 +101,8 @@ export const useAnalysis = (analysisId: string, compare?: string) =>
 export const useApplyChanges = (analysisId: string) =>
   useMutation({ mutationFn: (input: ApplyChangesInput) => api.applyChanges(analysisId, input) })
 
-export const useCredentials = () =>
-  useQuery({ queryKey: keys.credentials, queryFn: api.credentials })
+export const useCredentials = (enabled = true) =>
+  useQuery({ queryKey: keys.credentials, queryFn: api.credentials, enabled })
 
 /** Models an AI provider credential offers, as its API lists them plus the configured ones. */
 export const useCredentialModels = (credentialId: string) =>

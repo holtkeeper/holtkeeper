@@ -77,7 +77,7 @@ describe('server limits', () => {
     })
     expect(await keys(job('depgraph'))).toEqual(['forge:work'])
     expect(await keys(job('depgraph', 'cloud'))).toEqual(['cred-1'])
-    expect(await keys(job('review'))).toEqual(['forge:work', 'ai:anthropic'])
+    expect(await keys(job('review'))).toEqual(['forge:work'])
     await store.credentials.put({
       id: 'ai-1',
       name: 'corp-ai',

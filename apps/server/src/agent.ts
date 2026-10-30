@@ -35,13 +35,7 @@ import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { RepoRef } from '@holtkeeper/forge'
 import { knowledgeAccess, selectForTask } from '@holtkeeper/knowledge'
-import {
-  type LimitedCredential,
-  type Limiter,
-  limitAgent,
-  limitPolicySchema,
-  resolveLimitPolicy,
-} from '@holtkeeper/limits'
+import { type Limiter, limitAgent, limitPolicySchema, resolveLimitPolicy } from '@holtkeeper/limits'
 import { resolveSetting } from '@holtkeeper/settings'
 import type { SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
@@ -54,11 +48,6 @@ export const DEFAULT_KNOWLEDGE_TOKENS = 1500
 
 /** `taskKind` used for knowledge and reporting when a task sets none. */
 const DEFAULT_TASK_KIND = 'agent'
-
-/** The legacy `llm.provider` value: the Anthropic API with the key in `llm.apiKey`. */
-export const LEGACY_PROVIDER = 'anthropic'
-
-const ANTHROPIC_API_URL = 'https://api.anthropic.com'
 
 /** `agent.tools` as the server reads it. */
 interface ServerToolSettings extends AgentToolSettings {
@@ -76,7 +65,7 @@ interface AgentRunOrigin {
 export interface AgentRunInfo extends AgentRunOrigin {
   repo: RepoTarget
   taskKind: string
-  /** The provider credential's name, or `anthropic` for `llm.apiKey`. */
+  /** The provider credential's name. */
   provider: string
   /** Provider kind, e.g. `anthropic-compatible`. */
   providerKind: string
@@ -270,9 +259,8 @@ export type ServerAgentFor = (repo: RepoRef, job?: AgentJob) => Promise<Agent | 
 /**
  * The agent for a repository from scoped settings, wrapped with `withServerDefaults` (tools,
  * knowledge, budgets, usage recording). `llm.provider` names an AI provider credential (id or
- * name, scope covering the repository), opened with the vault; unset or `anthropic`, the sealed
- * `llm.apiKey` is used with the Anthropic API. `llm.model` and `llm.models` override the
- * provider's models. No provider and no key, no agent — analyzers then run without one; a named
+ * name, scope covering the repository), opened with the vault. `llm.model` and `llm.models`
+ * override the provider's models. Unset, no agent — analyzers then run without one; a named
  * provider that is missing or invalid is logged and also yields no agent. Runs of one provider
  * credential share its `maxConcurrency`.
  */
@@ -322,57 +310,35 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       ...(runner && { runner }),
     }
 
-    let agent: ProviderAgent
-    let provider: string
-    let limited: { key: string; credential: LimitedCredential } = {
-      key: `ai:${LEGACY_PROVIDER}`,
-      credential: { id: `ai:${LEGACY_PROVIDER}`, kind: 'anthropic' },
-    }
     const reference = stringSetting(entries, 'llm.provider', target)
-    if (reference && reference !== LEGACY_PROVIDER) {
-      const credential = findProviderCredential(await store.credentials.list(), reference, target)
-      if (!credential) {
-        log(`agent: no AI provider credential "${reference}" covers ${repo.forge}:${repo.path}`)
-        return undefined
-      }
-      try {
-        parseProviderOptions(credential)
-        const limiter = limiterFor(credential)
-        const aiProvider: AiProvider = {
-          kind: credential.kind,
-          url: credential.url,
-          secret: await vault.open(credential.secret),
-          ...(credential.options && { options: credential.options }),
-        }
-        agent = createAgent(aiProvider, {
-          ...(await routingFor(`${credential.id}:${credential.updatedAt}`, aiProvider, routing)),
-          ...(limiter && { limiter }),
-        })
-        provider = credential.name
-        limited = { key: credential.id, credential }
-      } catch (error) {
-        log(
-          `agent: provider "${credential.name}": ${error instanceof Error ? error.message : String(error)}`,
-        )
-        return undefined
-      }
-    } else {
-      const key = resolveSetting(entries, 'llm.apiKey', target)
-      if (!key || typeof key.value !== 'string') return undefined
-      const apiKey: unknown = JSON.parse(await vault.open(key.value))
-      if (typeof apiKey !== 'string') return undefined
-      const legacy: AiProvider = { kind: 'anthropic', url: ANTHROPIC_API_URL, secret: apiKey }
-      try {
-        agent = createAgent(
-          legacy,
-          await routingFor(`settings:${key.id}:${key.updatedAt}`, legacy, routing),
-        )
-      } catch (error) {
-        log(`agent: ${LEGACY_PROVIDER}: ${error instanceof Error ? error.message : String(error)}`)
-        return undefined
-      }
-      provider = LEGACY_PROVIDER
+    if (!reference) return undefined
+    const credential = findProviderCredential(await store.credentials.list(), reference, target)
+    if (!credential) {
+      log(`agent: no AI provider credential "${reference}" covers ${repo.forge}:${repo.path}`)
+      return undefined
     }
+    let agent: ProviderAgent
+    try {
+      parseProviderOptions(credential)
+      const limiter = limiterFor(credential)
+      const aiProvider: AiProvider = {
+        kind: credential.kind,
+        url: credential.url,
+        secret: await vault.open(credential.secret),
+        ...(credential.options && { options: credential.options }),
+      }
+      agent = createAgent(aiProvider, {
+        ...(await routingFor(`${credential.id}:${credential.updatedAt}`, aiProvider, routing)),
+        ...(limiter && { limiter }),
+      })
+    } catch (error) {
+      log(
+        `agent: provider "${credential.name}": ${error instanceof Error ? error.message : String(error)}`,
+      )
+      return undefined
+    }
+    const provider = credential.name
+    const limited = { key: credential.id, credential }
 
     const tools = resolveSetting(entries, 'agent.tools', target)?.value
     const origin: AgentRunOrigin = {

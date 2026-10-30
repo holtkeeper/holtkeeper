@@ -25,9 +25,9 @@ export const llmProvider = defineSetting({
   key: 'llm.provider',
   label: 'LLM provider',
   description:
-    'AI provider credential (its id or name) used by agentic tasks such as code review and refactoring. `anthropic` uses llm.apiKey with the Anthropic API.',
+    'AI provider from Credentials used by agentic tasks such as code review and refactoring; its key and endpoint live in the credential.',
   section: 'AI',
-  schema: z.string().trim().min(1),
+  schema: z.string().trim().min(1).meta({ 'x-credential': 'ai-provider' }),
 })
 
 export const llmModel = defineSetting({
@@ -37,15 +37,6 @@ export const llmModel = defineSetting({
     'Model id, e.g. claude-opus-5-5, or <prefix>@latest (claude-opus@latest) for the newest version the provider lists.',
   section: 'AI',
   schema: z.string().min(1),
-})
-
-export const llmApiKey = defineSetting({
-  key: 'llm.apiKey',
-  label: 'API key',
-  description: 'Key for the LLM provider.',
-  section: 'AI',
-  schema: z.string().min(1),
-  secret: true,
 })
 
 export const llmModels = defineSetting({
@@ -120,7 +111,6 @@ export const auditAllowlist = defineSetting({
 export const builtinSettings: SettingDefinition[] = [
   llmProvider,
   llmModel,
-  llmApiKey,
   llmModels,
   llmBudget,
   agentTools,

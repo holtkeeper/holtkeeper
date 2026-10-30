@@ -15,10 +15,11 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import { builtinSettings } from '@holtkeeper/settings'
+import { builtinSettings, defineSetting } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
+import { z } from 'zod'
 
 import { createApp } from '../src/app.ts'
 import { REDACTED, appendAudit, deriveAction, diffChanges } from '../src/audit.ts'
@@ -31,6 +32,15 @@ const config = parseConfig({
 
 let store: Store
 const now = new Date('2026-10-30T12:00:00.000Z')
+const tokenSetting = defineSetting({
+  key: 'test.token',
+  label: 'Token',
+  description: 'A secret setting',
+  section: 'Test',
+  schema: z.string().min(1),
+  secret: true,
+})
+
 const setup = (auth: AuthProvider = noAuth()) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
@@ -43,7 +53,7 @@ const setup = (auth: AuthProvider = noAuth()) => {
       activity: store.activity,
       vault,
     }),
-    settings: builtinSettings,
+    settings: [...builtinSettings, tokenSetting],
     analyses: [],
     now: () => now,
   })
@@ -243,7 +253,7 @@ describe('audit middleware', () => {
   test('secret setting values never reach the audit log', async () => {
     const app = setup()
     await send(app, 'PUT', '/api/settings', {
-      key: 'llm.apiKey',
+      key: 'test.token',
       scope: { all: true },
       value: 'sk-1',
     })

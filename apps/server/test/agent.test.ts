@@ -87,6 +87,22 @@ async function setting(key: string, value: unknown, secret = false) {
   })
 }
 
+async function anthropic(secret: string) {
+  const credentials = createCredentialService({ credentials: store.credentials, vault })
+  const credential = await credentials.create(
+    {
+      name: 'Anthropic',
+      kind: 'anthropic',
+      url: 'https://api.anthropic.com',
+      scope: { all: true },
+      secret,
+    },
+    'u1',
+  )
+  await setting('llm.provider', 'Anthropic')
+  return credential
+}
+
 const appendOf = (options: Options) =>
   options.systemPrompt &&
   typeof options.systemPrompt === 'object' &&
@@ -130,10 +146,9 @@ describe('settingsAgentFor', () => {
     expect(await agentFor()(repo)).toBeUndefined()
   })
 
-  test('llm.apiKey: Anthropic API with the default toolsets, knowledge context and recorded usage', async () => {
-    await setting('llm.apiKey', 'sk-legacy', true)
+  test('Anthropic API with the default toolsets, knowledge context and recorded usage', async () => {
+    await anthropic('sk-anthropic')
     await setting('llm.model', 'claude-sonnet-5-5')
-    await setting('llm.provider', 'anthropic')
     await store.knowledge.put(knowledge())
     await store.knowledge.put(
       knowledge({ id: 'k2', title: 'Other group', scope: { groups: ['tools'] } }),
@@ -149,7 +164,7 @@ describe('settingsAgentFor', () => {
     expect(result?.text).toBe('ok')
 
     const [options] = calls
-    expect(options?.env?.['ANTHROPIC_API_KEY']).toBe('sk-legacy')
+    expect(options?.env?.['ANTHROPIC_API_KEY']).toBe('sk-anthropic')
     expect(options?.model).toBe('claude-sonnet-5-5')
     expect(Object.keys(options?.mcpServers ?? {})).toEqual(['holtkeeper'])
     expect(options?.allowedTools).toContain('mcp__holtkeeper__code_search')
@@ -162,7 +177,7 @@ describe('settingsAgentFor', () => {
 
     const [record] = await store.aiUsage.list()
     expect(record).toMatchObject({
-      provider: 'anthropic',
+      provider: 'Anthropic',
       model: 'claude-sonnet-5-5',
       taskKind: 'review',
       jobId: 'j1',
@@ -206,17 +221,21 @@ describe('settingsAgentFor', () => {
   })
 
   test('@latest model references resolve against the provider listing', async () => {
-    await setting('llm.apiKey', 'sk-test', true)
+    const credential = await anthropic('sk-test')
     await setting('llm.model', 'claude-opus@latest')
     const agent = await agentFor()(repo)
     await agent?.run({ dir: '/r', prompt: 'p' })
     expect(calls[0]?.model).toBe('claude-opus-5-5')
-    expect(listed).toEqual(['settings:llm.apiKey:2026-10-01T00:00:00.000Z'])
+    expect(listed).toEqual([`${credential.id}:${credential.updatedAt}`])
 
     const log: string[] = []
     await setting('llm.model', 'gemini@latest')
     expect(await agentFor(log)(repo)).toBeUndefined()
     expect(log[0]).toContain('no listed model matches gemini@latest')
+  })
+
+  test('no provider, no agent', async () => {
+    expect(await agentFor()(repo)).toBeUndefined()
   })
 
   test('a provider that is missing, out of scope or invalid yields no agent and is logged', async () => {
@@ -241,7 +260,7 @@ describe('settingsAgentFor', () => {
   })
 
   test('a blocked budget denies the run and records it', async () => {
-    await setting('llm.apiKey', 'sk', true)
+    await anthropic('sk')
     await setting('llm.budget', { monthlyUsd: 5, action: 'block' })
     cost = 6
     const agent = await agentFor()(repo)
@@ -258,7 +277,7 @@ describe('settingsAgentFor', () => {
   })
 
   test('agent.tools enables Context7 and sets the knowledge budget', async () => {
-    await setting('llm.apiKey', 'sk', true)
+    await anthropic('sk')
     await setting('agent.tools', { context7: true, knowledgeTokens: 0 })
     await store.knowledge.put(knowledge())
     const agent = await agentFor()(repo)
