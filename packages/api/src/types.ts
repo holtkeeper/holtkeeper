@@ -273,6 +273,8 @@ export interface SettingDefinitionView {
   section: string
   secret: boolean
   schema: unknown
+  /** Markdown guidance for editors: what the setting changes and recommended values. */
+  help?: string
 }
 
 /** `GET /api/settings` */

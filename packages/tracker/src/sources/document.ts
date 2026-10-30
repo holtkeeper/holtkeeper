@@ -6,7 +6,7 @@ import { errorMessage, type SourceProvider, type SourceResult } from './types.ts
 const schema = z.object({
   kind: z.literal('document'),
   id: z.string().min(1).optional(),
-  role: z.string().min(1),
+  role: z.string().min(1).meta({ 'x-role': 'provides' }),
   /** `DocumentSource.provider` to read with, e.g. `confluence`. */
   provider: z.string().min(1),
   /** Page id or URL, as the provider understands it. */

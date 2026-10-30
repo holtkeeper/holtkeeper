@@ -88,7 +88,7 @@ Each action is an `ActionProvider` `{ type, schema, run(action, context) → Act
 
 ## Settings
 
-`mergeRequestPoliciesSetting` is a structural `SettingDefinition` (key `mergeRequests.policies`, section `Merge requests`, schema `policiesSchema`) for the server to register so policies can be edited per scope. `combinePolicies(entries, repo, registry?)` takes setting entries (`{ key?, scope, value, updatedAt? }`, e.g. `SettingEntry`) and returns `{ policies, invalid }`:
+`mergeRequestPoliciesSetting` is a structural `SettingDefinition` (key `mergeRequests.policies`, section `Merge requests`, schema `policiesSchema`, `help` for the panel, and a `form` that lists the built-in actions as variants keyed by `type` and is marked `x-editor: merge-request-policies`, so the panel edits policies as If/Then blocks) for the server to register so policies can be edited per scope. `combinePolicies(entries, repo, registry?)` takes setting entries (`{ key?, scope, value, updatedAt? }`, e.g. `SettingEntry`) and returns `{ policies, invalid }`:
 
 - entries whose scope covers the repository, most specific first, newest first among equals;
 - a policy without `scope` takes the entry's; one with its own `scope` applies only inside the entry's (`within`);

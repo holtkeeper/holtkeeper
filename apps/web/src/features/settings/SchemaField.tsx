@@ -149,6 +149,55 @@ export function StructuredEditor({
   )
 }
 
+/**
+ * A form for one value of a larger schema (`root` resolves its refs), without the JSON toggle.
+ * `onInvalid` tells whether any field currently holds input that is not a valid value.
+ */
+export function SchemaForm({
+  schema,
+  root,
+  value,
+  onChange,
+  onInvalid,
+  label,
+}: {
+  schema: unknown
+  root: unknown
+  value: unknown
+  onChange: (value: unknown) => void
+  onInvalid: (invalid: boolean) => void
+  label: string
+}) {
+  const [invalid, setInvalid] = useState<ReadonlySet<string>>(() => new Set())
+  const report = useCallback<Report>(
+    (path, bad) =>
+      setInvalid((previous) => {
+        if (previous.has(path) === bad) return previous
+        const next = new Set(previous)
+        if (bad) next.add(path)
+        else next.delete(path)
+        return next
+      }),
+    [],
+  )
+  const broken = invalid.size > 0
+  useEffect(() => onInvalid(broken), [onInvalid, broken])
+  return (
+    <InvalidContext value={report}>
+      <SchemaField
+        schema={schema}
+        root={root}
+        value={value}
+        onChange={onChange}
+        label={label}
+        path=""
+        depth={0}
+        hideLabel
+      />
+    </InvalidContext>
+  )
+}
+
 function SchemaField(props: FieldProps) {
   const node = describeField(props.schema, props.root)
   switch (node.kind) {

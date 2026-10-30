@@ -9,10 +9,13 @@ const schema = z.object({
   /** Attribute of the reference side, e.g. `default`. */
   attr: z.string().min(1),
   /** Role of the reference side. Default `definition`. */
-  role: z.string().min(1).default('definition'),
+  role: z.string().min(1).default('definition').meta({ 'x-role': 'reads' }),
   /** The compared side; `attr` defaults to the reference attribute. */
   against: z
-    .object({ role: z.string().min(1).default('config'), attr: z.string().min(1).optional() })
+    .object({
+      role: z.string().min(1).default('config').meta({ 'x-role': 'reads' }),
+      attr: z.string().min(1).optional(),
+    })
     .default({ role: 'config' }),
   /** Only these environments; default every environment and occurrences without one. */
   environments: z.array(z.string().min(1)).optional(),

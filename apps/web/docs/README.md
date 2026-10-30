@@ -44,7 +44,9 @@ src/
     selection.ts      change selection, "select all safe", conflicts per change, MR titles
     format.ts         relative dates, durations, expiry tone
     scope.ts          scope description, normalisation, pattern validation
-    schema.ts         JSON Schema → setting editor kind
+    schema.ts         JSON Schema → setting editor kind (x-editor picks a dedicated editor)
+    policies.ts       merge request policies: normalising, cleaning, plain-words summary, checks
+    trackers.ts       trackers: part variants, roles provided and read (x-role), links, checks
     schema-form.ts    JSON Schema → form fields (objects, records, lists, variants, $ref)
     severity.ts, repo.ts, theme.ts
   ui/                 thin wrappers over HeroUI and shared visual pieces
@@ -62,7 +64,11 @@ Pages never call `fetch`. `api/endpoints.ts` maps every endpoint to a typed func
 
 ## UI wrappers
 
-Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through.
+Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog` (`size="xl"` for wide editors), `Markdown`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through.
+
+## Settings
+
+`/settings` has one tab per setting section plus **Resolve for repository**; the tab and the chosen repository live in the URL (`?tab=ai&repo=…`). Each setting shows its entries per scope next to its `help`. Adding or editing an entry opens a wide editor: scope and value on the left, the setting's guidance on the right. Values get a form built from their JSON Schema, except `x-editor: merge-request-policies`, which `PolicyEditor` edits as blocks: per policy an **If** block (conditions joined by _and_, with **Any of**, **All of** and **Not** groups) and a **Then** block (actions with their options from the action variants of the schema, _Stop here_, _Skip analyzers_), a one-line summary, and a JSON toggle. `x-editor: trackers` gets `TrackerEditor`: entity and key normalization, a read-only map (`@xyflow/react`) of sources by role → rules that read those roles → outputs, with rules that read a role no source provides and sources no rule reads called out, then Sources, Rules and Outputs blocks whose options come from the kind variants of the schema. Shared rails and remove buttons live in `features/settings/blocks.tsx`.
 
 ## Analyses and reports
 

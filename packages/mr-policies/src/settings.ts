@@ -1,13 +1,34 @@
 import { type RepoTarget, type Scope, scopeCoversRepo } from '@holtkeeper/access'
 import { z } from 'zod'
 
+import { builtinActions } from './actions/index.ts'
 import type { ActionRegistry } from './actions/provider.ts'
 import type { Policy } from './model.ts'
-import { createPoliciesSchema, policiesSchema } from './schema.ts'
+import { conditionSchema, createPoliciesSchema, policiesSchema } from './schema.ts'
 import { scopeSpecificity } from './specificity.ts'
 
 /** Settings key under which policies are stored per scope. */
 export const policiesSettingKey = 'mergeRequests.policies'
+
+const actionForms = builtinActions.map((action) => action.schema)
+
+/**
+ * Policies as editors see them: the built-in actions as variants keyed by `type`, so a form can
+ * offer each action's options. Marked `x-editor: merge-request-policies` for a dedicated editor.
+ */
+const policiesForm = z
+  .array(
+    z.object({
+      id: z.string().regex(/^[\w.-]+$/),
+      name: z.string().min(1),
+      enabled: z.boolean().default(true),
+      when: conditionSchema.default({}),
+      actions: z.array(z.union(actionForms)).default([]),
+      stop: z.boolean().optional(),
+      skipAnalyzers: z.union([z.literal('*'), z.array(z.string().min(1))]).optional(),
+    }),
+  )
+  .meta({ 'x-editor': 'merge-request-policies' })
 
 /**
  * The scoped setting that holds policies, structurally a `SettingDefinition` of
@@ -19,7 +40,15 @@ export const mergeRequestPoliciesSetting = {
   description:
     'Rules that run on merge request events before analysis: approve, merge, label, comment or skip analyzers when conditions hold. Policies from every scope covering a repository apply, most specific first.',
   section: 'Merge requests',
+  help: `Each policy reads as **if** its conditions hold, **then** run its actions.
+
+- Conditions inside one block must all hold. Use an **Any of** group for alternatives and **Not** to exclude cases, e.g. *target branch is \`main\` and author is a bot but not a draft*.
+- Policies run top to bottom; turn on **Stop** to skip later policies once this one matched.
+- **Skip analyzers** keeps noisy analyzers off merge requests the policy handles, e.g. dependency bumps.
+- Put shared policies on a group and override one in a repository by reusing its **id**; the most specific scope wins.
+- Try new policies on a single repository first: every decision shows up in Activity.`,
   schema: policiesSchema,
+  form: policiesForm,
 }
 
 /** A stored setting value, structurally a `SettingEntry` of `@holtkeeper/store`. */

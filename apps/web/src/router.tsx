@@ -95,8 +95,10 @@ const settingsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'settings',
   component: SettingsPage,
-  validateSearch: (search: Record<string, unknown>): { repo?: string } =>
-    typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {},
+  validateSearch: (search: Record<string, unknown>): { repo?: string; tab?: string } => ({
+    ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
+    ...(typeof search.tab === 'string' && search.tab ? { tab: search.tab } : {}),
+  }),
 })
 
 const repoSearch = (search: Record<string, unknown>): { repo?: string } =>

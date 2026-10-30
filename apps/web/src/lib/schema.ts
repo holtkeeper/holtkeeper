@@ -8,6 +8,7 @@ export type EditorKind =
   | { kind: 'number'; integer: boolean }
   | { kind: 'string' }
   | { kind: 'credential'; of: string }
+  | { kind: 'custom'; editor: string }
   | { kind: 'json' }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -16,13 +17,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isConstVariant = (value: unknown): value is { const: string } =>
   isRecord(value) && typeof value.const === 'string'
 
-/** Picks an editor for a JSON Schema. Unknown or compound schemas fall back to a JSON editor. */
+/**
+ * Picks an editor for a JSON Schema. `x-editor` names a dedicated editor; unknown or compound
+ * schemas fall back to a JSON editor.
+ */
 export function editorFor(schema: unknown, secret: boolean): EditorKind {
   if (secret) return { kind: 'secret' }
   if (!isRecord(schema)) return { kind: 'json' }
   if (typeof schema['x-credential'] === 'string') {
     return { kind: 'credential', of: schema['x-credential'] }
   }
+  if (typeof schema['x-editor'] === 'string') return { kind: 'custom', editor: schema['x-editor'] }
   const values = schema.enum
   if (Array.isArray(values) && values.every((v) => typeof v === 'string')) {
     return { kind: 'enum', options: values }

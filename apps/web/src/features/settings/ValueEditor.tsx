@@ -3,7 +3,9 @@ import { useState } from 'react'
 import type { EditorKind } from '../../lib/schema.ts'
 import { Select, Switch, TextField } from '../../ui/index.ts'
 import { CredentialPicker } from './CredentialPicker.tsx'
+import { PolicyEditor } from './PolicyEditor.tsx'
 import { StructuredEditor } from './SchemaField.tsx'
+import { TrackerEditor } from './TrackerEditor.tsx'
 
 /**
  * Edits one setting value with the editor its schema calls for. Reports `undefined` through
@@ -92,6 +94,14 @@ export function ValueEditor({
             onChange(value)
           }}
         />
+      )
+    case 'custom':
+      if (editor.editor === 'merge-request-policies')
+        return <PolicyEditor schema={schema} initial={initial} onChange={onChange} label={label} />
+      if (editor.editor === 'trackers')
+        return <TrackerEditor schema={schema} initial={initial} onChange={onChange} label={label} />
+      return (
+        <StructuredEditor schema={schema} initial={initial} onChange={onChange} label={label} />
       )
     default:
       return (

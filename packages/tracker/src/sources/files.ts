@@ -17,7 +17,7 @@ import {
 const schema = z.object({
   kind: z.literal('files'),
   id: z.string().min(1).optional(),
-  role: z.string().min(1),
+  role: z.string().min(1).meta({ 'x-role': 'provides' }),
   /** Repository paths or globs; literal paths are read even outside the analyzed group. */
   repos: z.array(z.string().min(1)).optional(),
   /** Config groups whose repositories are read. */

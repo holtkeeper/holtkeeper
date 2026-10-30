@@ -60,6 +60,12 @@ export const limitsCredentialsSetting = {
   description:
     'Concurrency, request and token rates, daily token and cost caps per credential id or name. Jobs sharing a credential share its limits; unset fields keep the defaults for the credential kind.',
   section: 'Runtime',
+  help: `Keeps jobs within what a credential allows. Keys are credential ids or names; an id entry wins over a name entry.
+
+- **maxConcurrent** and **requestsPerMinute** protect forge tokens from rate limiting; GitLab tokens default to 8 and 300.
+- **tokensPerMinute**, **tokensPerDay** and **costPerDayUsd** protect AI keys; take them from the provider's tier limits.
+- **backoff** retries on the listed statuses (429 by default) with growing delays.
+- Set only the fields you need; the rest keep the defaults for the credential kind.`,
   schema: z.record(z.string().min(1), limitPolicySchema),
 }
 

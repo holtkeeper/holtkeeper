@@ -23,6 +23,13 @@ describe('editorFor', () => {
       of: 'ai-provider',
     })
     expect(defaultValue({ type: 'string', 'x-credential': 'ai-provider' })).toBe('')
+    expect(editorFor({ type: 'array', 'x-editor': 'merge-request-policies' }, false)).toEqual({
+      kind: 'custom',
+      editor: 'merge-request-policies',
+    })
+    expect(
+      defaultValue({ type: 'array', items: {}, 'x-editor': 'merge-request-policies' }),
+    ).toEqual([])
   })
 })
 

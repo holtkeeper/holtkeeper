@@ -35,7 +35,10 @@ export const ruleFields = {
 }
 
 /** Roles that count as defining an entity. */
-export const definitionRoles = z.array(z.string().min(1)).default(['definition'])
+export const definitionRoles = z
+  .array(z.string().min(1))
+  .default(['definition'])
+  .meta({ 'x-role': 'reads' })
 
 /** Occurrences of `entity` with one of `roles`. */
 export const withRoles = (entity: Entity, roles: readonly string[]) =>

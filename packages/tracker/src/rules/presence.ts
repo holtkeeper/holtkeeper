@@ -28,7 +28,7 @@ const unusedSchema = z.object({
   kind: z.literal('unused'),
   ...ruleFields,
   definition: definitionRoles,
-  usage: z.array(z.string().min(1)).default(['usage']),
+  usage: z.array(z.string().min(1)).default(['usage']).meta({ 'x-role': 'reads' }),
 })
 
 /** Definitions nothing uses. */
@@ -50,7 +50,10 @@ const undefinedSchema = z.object({
   ...ruleFields,
   definition: definitionRoles,
   /** Roles that need a definition; narrow it when `stale-config` or `documented-missing` also run. */
-  roles: z.array(z.string().min(1)).default(['usage', 'config', 'documentation']),
+  roles: z
+    .array(z.string().min(1))
+    .default(['usage', 'config', 'documentation'])
+    .meta({ 'x-role': 'reads' }),
 })
 
 /** Usages, config entries or docs of keys nothing defines. */
@@ -71,7 +74,7 @@ const staleConfigSchema = z.object({
   kind: z.literal('stale-config'),
   ...ruleFields,
   definition: definitionRoles,
-  config: z.array(z.string().min(1)).default(['config']),
+  config: z.array(z.string().min(1)).default(['config']).meta({ 'x-role': 'reads' }),
 })
 
 /** Config entries (e.g. Helm values) for keys that are no longer defined. */
@@ -89,7 +92,10 @@ export const staleConfigRule = {
     ),
 } satisfies Rule<z.output<typeof staleConfigSchema>>
 
-const documentationRoles = z.array(z.string().min(1)).default(['documentation'])
+const documentationRoles = z
+  .array(z.string().min(1))
+  .default(['documentation'])
+  .meta({ 'x-role': 'reads' })
 
 const undocumentedSchema = z.object({
   kind: z.literal('undocumented'),

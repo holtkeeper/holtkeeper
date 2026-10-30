@@ -76,7 +76,13 @@ export const trackersSetting = {
   description:
     'Declarative trackers of entities such as feature flags across repositories and documents: sources, rules and outputs. The tracker analyzer runs one of them by id.',
   section: 'Tracking',
+  help: `A tracker finds one kind of entity, such as feature flags, everywhere it appears and reports what is wrong with it.
+
+- **Sources** say where entities appear (code, configs, documents); **rules** decide what is a problem (unused, expired, missing an owner); **outputs** say where the overview goes.
+- Give sources and outputs explicit ids when a tracker has several of the same kind, so rules and history stay stable.
+- Start with one source and one output, check the first run, then add rules.`,
   schema: trackersSchema,
+  form: trackersSchema.meta({ 'x-editor': 'trackers' }),
 }
 
 /** Id of the source at `index`. */

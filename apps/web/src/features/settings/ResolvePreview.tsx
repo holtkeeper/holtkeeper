@@ -40,7 +40,9 @@ export function ResolvePreview({ definitions }: { definitions: readonly SettingD
             label: repoKey(r.repo),
           }))}
           value={search.repo}
-          onChange={(id) => void navigate({ search: { repo: id }, replace: true })}
+          onChange={(id) =>
+            void navigate({ search: (previous) => ({ ...previous, repo: id }), replace: true })
+          }
         />
       }
     >

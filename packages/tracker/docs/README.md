@@ -20,7 +20,7 @@ sources ──extract──▶ hits (raw key, line, attrs) ──normalize──
 
 ## Definition
 
-`trackerDefinitionSchema` (zod) validates a definition and applies defaults; `trackersSchema` validates a list with unique ids. The list is the scoped setting `trackers` (`trackersSetting`, shaped like a `SettingDefinition` for the settings registry) and the config entry of the same name.
+`trackerDefinitionSchema` (zod) validates a definition and applies defaults; `trackersSchema` validates a list with unique ids. The list is the scoped setting `trackers` (`trackersSetting`, shaped like a `SettingDefinition` for the settings registry, with `help` and a `form` marked `x-editor: trackers` for the panel's block editor) and the config entry of the same name. Fields that name roles carry JSON Schema metadata: a source's `role` is `x-role: provides`, every rule field listing the roles it compares (`definition`, `usage`, `config`, `documentation`, `roles`, `role`, `against.role`) is `x-role: reads`, so editors can draw which sources feed which rules without knowing rule kinds.
 
 ```ts
 {

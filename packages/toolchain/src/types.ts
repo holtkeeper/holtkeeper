@@ -52,5 +52,10 @@ export const toolchainSetting = {
   description:
     'Tool versions, container image, network access and environment for jobs in this scope; tools not listed keep their detected versions.',
   section: 'Runtime',
+  help: `Overrides what jobs run with in this scope. Tools not listed keep the versions detected from the repository.
+
+- Pin a tool version only when detection picks the wrong one, e.g. a monorepo with several Node versions.
+- **image** replaces the job container; **network** limits what jobs may reach.
+- **env** adds environment variables; store secrets in Credentials, not here.`,
   schema: toolchainOverrideSchema,
 }

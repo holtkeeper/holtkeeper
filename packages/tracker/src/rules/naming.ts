@@ -11,7 +11,7 @@ const schema = z.object({
   /** Check the key as written (`raw`) or the normalized key. Default `raw`. */
   on: z.enum(['raw', 'key']).default('raw'),
   /** Roles whose spellings are checked. Default `definition`. */
-  roles: z.array(z.string().min(1)).default(['definition']),
+  roles: z.array(z.string().min(1)).default(['definition']).meta({ 'x-role': 'reads' }),
 })
 
 /** Keys whose spelling does not follow a naming convention. */

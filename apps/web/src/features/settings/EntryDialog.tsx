@@ -5,7 +5,7 @@ import { messageOf } from '../../api/client.ts'
 import { useSettingMutations } from '../../api/queries.ts'
 import { defaultValue, editorFor } from '../../lib/schema.ts'
 import { isEmptyScope, normalizeScope } from '../../lib/scope.ts'
-import { Button, Dialog, Notice, notify } from '../../ui/index.ts'
+import { Button, Dialog, Markdown, Notice, notify } from '../../ui/index.ts'
 import { ScopeEditor } from '../access/ScopeEditor.tsx'
 import { ValueEditor } from './ValueEditor.tsx'
 
@@ -54,7 +54,7 @@ export function EntryDialog({
     <Dialog
       isOpen
       onOpenChange={(open) => !open && onClose()}
-      size="lg"
+      size="xl"
       title={`${entry ? 'Edit' : 'Add'} ${definition.label}`}
       description={definition.description}
       footer={
@@ -68,20 +68,48 @@ export function EntryDialog({
         </>
       }
     >
-      {put.error ? (
-        <Notice tone="danger" title="Not saved">
-          {messageOf(put.error)}
-        </Notice>
-      ) : null}
-      <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
-      <ValueEditor
-        editor={editor}
-        schema={definition.schema}
-        initial={value}
-        onChange={setValue}
-        label="Value"
-        hasStoredSecret={entry !== undefined && definition.secret}
-      />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex min-w-0 flex-col gap-4">
+          {put.error ? (
+            <Notice tone="danger" title="Not saved">
+              {messageOf(put.error)}
+            </Notice>
+          ) : null}
+          <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+          <ValueEditor
+            editor={editor}
+            schema={definition.schema}
+            initial={value}
+            onChange={setValue}
+            label="Value"
+            hasStoredSecret={entry !== undefined && definition.secret}
+          />
+        </div>
+        <SettingHelp definition={definition} />
+      </div>
     </Dialog>
+  )
+}
+
+/** The side column of the editor: what the setting does and how to set it. */
+function SettingHelp({ definition }: { definition: SettingDefinitionView }) {
+  return (
+    <aside className="flex flex-col gap-4 rounded-2xl bg-default/60 p-4 lg:sticky lg:top-0 lg:self-start">
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+          How to set it
+        </span>
+        <span className="font-mono text-[11px] text-muted">{definition.key}</span>
+      </div>
+      <Markdown text={definition.help ?? definition.description} />
+      <div className="flex flex-col gap-1.5 border-t border-separator pt-3 text-xs text-muted">
+        <span className="font-medium text-foreground">Scopes</span>
+        <span>
+          Add one entry for all repositories, then narrower entries for groups or repository
+          patterns. Usually the most specific entry covering a repository wins; settings that
+          combine entries say so above. Check the outcome on the Resolve tab.
+        </span>
+      </div>
+    </aside>
   )
 }

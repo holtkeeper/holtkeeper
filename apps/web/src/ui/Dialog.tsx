@@ -11,7 +11,8 @@ export interface DialogProps {
   children?: ReactNode
   /** Buttons at the bottom; omit for content-only dialogs. */
   footer?: ReactNode
-  size?: 'xs' | 'sm' | 'md' | 'lg'
+  /** `xl` is a wide workspace for editors with a side column. */
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'
   isDismissable?: boolean
 }
 
@@ -33,8 +34,8 @@ export function Dialog({
       isDismissable={isDismissable}
       variant="blur"
     >
-      <Modal.Container size={size} placement="center" scroll="inside">
-        <Modal.Dialog>
+      <Modal.Container size={size === 'xl' ? 'lg' : size} placement="center" scroll="inside">
+        <Modal.Dialog {...(size === 'xl' ? { className: 'w-full max-w-6xl!' } : {})}>
           <Modal.CloseTrigger />
           <Modal.Header className="flex flex-col items-start gap-1">
             <Modal.Heading>{title}</Modal.Heading>

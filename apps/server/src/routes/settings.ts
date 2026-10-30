@@ -44,6 +44,7 @@ export function settingRoutes(deps: ServerDeps) {
     description: definition.description,
     section: definition.section,
     secret: definition.secret ?? false,
+    ...(definition.help ? { help: definition.help } : {}),
     schema: z.toJSONSchema(definition.form ?? definition.schema, {
       unrepresentable: 'any',
       io: 'input',

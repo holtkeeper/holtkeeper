@@ -14,6 +14,7 @@ export function TagInput({
   validate,
   suggestions = [],
   description,
+  hideLabel,
 }: {
   label: ReactNode
   values: readonly string[]
@@ -22,6 +23,8 @@ export function TagInput({
   validate?: (value: string) => string | undefined
   suggestions?: readonly string[]
   description?: ReactNode
+  /** Keeps the label for screen readers only, for inputs labelled by their surroundings. */
+  hideLabel?: boolean
 }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
@@ -43,7 +46,7 @@ export function TagInput({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium">
+      <label htmlFor={id} className={hideLabel ? 'sr-only' : 'text-sm font-medium'}>
         {label}
       </label>
       <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-xl border border-field-border bg-field px-2 py-1.5 shadow-field focus-within:ring-2 focus-within:ring-focus">
