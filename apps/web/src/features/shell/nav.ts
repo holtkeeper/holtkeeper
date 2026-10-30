@@ -31,7 +31,7 @@ import {
 import { can } from '../../lib/access.ts'
 
 /** Sidebar headings in display order. */
-export const navSections = ['Overview', 'Security', 'Code', 'Delivery', 'Agents', 'Admin'] as const
+const navSections = ['Overview', 'Security', 'Code', 'Delivery', 'Agents', 'Admin'] as const
 
 export type NavSection = (typeof navSections)[number]
 
