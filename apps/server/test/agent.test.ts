@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { Agent, AgentTask, ClaudeQuery } from '@holtkeeper/agent'
+import type { Agent, AgentTask, ClaudeQuery, ModelCatalog } from '@holtkeeper/agent'
 import { BudgetExceededError } from '@holtkeeper/ai-usage'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -94,6 +94,19 @@ const appendOf = (options: Options) =>
     ? (options.systemPrompt.append ?? '')
     : ''
 
+const listed: string[] = []
+const catalog: ModelCatalog = {
+  list: async (key) => {
+    listed.push(key)
+    return {
+      models: ['claude-opus-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'].map((id) => ({
+        id,
+        source: 'provider' as const,
+      })),
+    }
+  },
+}
+
 const agentFor = (log: string[] = []) =>
   settingsAgentFor({
     config,
@@ -102,10 +115,12 @@ const agentFor = (log: string[] = []) =>
     now,
     log: (line) => log.push(line),
     agentOptions: { query },
+    models: catalog,
   })
 
 beforeEach(() => {
   store = memoryStore()
+  listed.length = 0
   calls = []
   cost = 0.01
 })
@@ -188,6 +203,20 @@ describe('settingsAgentFor', () => {
     expect(await store.aiUsage.list()).toMatchObject([
       { provider: 'Corp gateway', model: 'corp-opus', taskKind: 'agent' },
     ])
+  })
+
+  test('@latest model references resolve against the provider listing', async () => {
+    await setting('llm.apiKey', 'sk-test', true)
+    await setting('llm.model', 'claude-opus@latest')
+    const agent = await agentFor()(repo)
+    await agent?.run({ dir: '/r', prompt: 'p' })
+    expect(calls[0]?.model).toBe('claude-opus-5-5')
+    expect(listed).toEqual(['settings:llm.apiKey:2026-10-01T00:00:00.000Z'])
+
+    const log: string[] = []
+    await setting('llm.model', 'gemini@latest')
+    expect(await agentFor(log)(repo)).toBeUndefined()
+    expect(log[0]).toContain('no listed model matches gemini@latest')
   })
 
   test('a provider that is missing, out of scope or invalid yields no agent and is logged', async () => {

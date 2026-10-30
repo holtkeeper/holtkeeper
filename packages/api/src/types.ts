@@ -166,6 +166,27 @@ export interface CredentialView {
   updatedAt: Timestamp
 }
 
+/** One model an AI provider offers; prices in USD per million tokens. */
+export interface ProviderModelView {
+  id: string
+  name?: string
+  createdAt?: Timestamp
+  pricing?: {
+    inputPerMTok: number
+    outputPerMTok: number
+    cacheReadPerMTok?: number
+    cacheWritePerMTok?: number
+  }
+  /** `provider`: listed by the provider's API; `config`: only named in the credential's options. */
+  source: 'provider' | 'config'
+}
+
+/** `GET /api/credentials/:id/models` — `error` when the provider's API could not be asked. */
+export interface ProviderModelList {
+  models: ProviderModelView[]
+  error?: string
+}
+
 /** `GET /api/credentials` */
 export interface CredentialList {
   credentials: CredentialView[]

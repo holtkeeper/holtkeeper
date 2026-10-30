@@ -344,6 +344,34 @@ describe('server', () => {
     expect((await send(app, 'POST', '/api/credentials', { name: 'x' })).status).toBe(400)
   })
 
+  test('lists the models of an AI provider credential', async () => {
+    const app = setup()
+    const created = await send(app, 'POST', '/api/credentials', {
+      name: 'Bedrock',
+      kind: 'bedrock',
+      url: 'https://bedrock.test',
+      scope: { all: true },
+      secret: 'unused',
+      options: {
+        region: 'eu-north-1',
+        model: 'claude-opus-5-5',
+        pricing: { 'claude-opus-5-5': { inputPerMTok: 5, outputPerMTok: 25 } },
+      },
+    })
+    const view = (await created.json()) as CredentialView
+    const response = await app.request(`/api/credentials/${view.id}/models`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      models: [
+        {
+          id: 'claude-opus-5-5',
+          source: 'config',
+          pricing: { inputPerMTok: 5, outputPerMTok: 25 },
+        },
+      ],
+    })
+  })
+
   test('activity requires global user rights', async () => {
     expect((await setup().request('/api/activity')).status).toBe(200)
     expect((await setup(games).request('/api/activity', { headers: asGames })).status).toBe(403)

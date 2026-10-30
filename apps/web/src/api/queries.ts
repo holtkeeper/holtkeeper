@@ -103,6 +103,14 @@ export const useApplyChanges = (analysisId: string) =>
 export const useCredentials = () =>
   useQuery({ queryKey: keys.credentials, queryFn: api.credentials })
 
+/** Models an AI provider credential offers, as its API lists them plus the configured ones. */
+export const useCredentialModels = (credentialId: string) =>
+  useQuery({
+    queryKey: [...keys.credentials, credentialId, 'models'],
+    queryFn: () => api.credentialModels(credentialId),
+    staleTime: 10 * 60_000,
+  })
+
 /** Create, update, rotate and delete credentials; each refreshes the list. */
 export function useCredentialMutations() {
   const client = useQueryClient()

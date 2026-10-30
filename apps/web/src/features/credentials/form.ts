@@ -8,6 +8,15 @@ import type {
 import { isEmptyScope, normalizeScope } from '../../lib/scope.ts'
 
 /** Credential kinds the UI offers; anything else is stored as `other`. */
+/** Credential kinds that are AI providers, whose models the server can list. */
+export const aiProviderKinds: readonly string[] = [
+  'anthropic',
+  'anthropic-compatible',
+  'bedrock',
+  'vertex',
+  'openai-compatible',
+]
+
 export const credentialKinds = ['gitlab', 'github', 'anthropic', 'other'] as const
 
 /** Editable state of the credential form. Numbers stay strings until submit. */

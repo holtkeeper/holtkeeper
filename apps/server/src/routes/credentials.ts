@@ -1,6 +1,7 @@
 import type { Scope } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
-import type { CredentialList, CredentialView } from '@holtkeeper/api'
+import { isAiProviderKind, listProviderModels, providerOptionsIssues } from '@holtkeeper/agent'
+import type { CredentialList, CredentialView, ProviderModelList } from '@holtkeeper/api'
 import { parseCredentialInput } from '@holtkeeper/credentials'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -21,7 +22,7 @@ const secretChange = (input: unknown) =>
  * Forge accounts and API keys. Validation and sealing happen in the credential service; routes
  * only check permissions against the credential's scope.
  */
-export function credentialRoutes({ credentials }: ServerDeps) {
+export function credentialRoutes({ credentials, store, vault }: ServerDeps) {
   const app = new Hono<Env>()
 
   const existing = async (c: AppContext, action: 'credentials:read' | 'credentials:write') => {
@@ -81,6 +82,27 @@ export function credentialRoutes({ credentials }: ServerDeps) {
       changes: diffChanges(credential, undefined, { ignore: auditIgnored }),
     })
     return c.body(null, 204)
+  })
+
+  app.get('/credentials/:id/models', async (c) => {
+    const credential = await existing(c, 'credentials:read')
+    if (!isAiProviderKind(credential.kind)) {
+      throw new HTTPException(400, { message: 'not an AI provider credential' })
+    }
+    const issues = providerOptionsIssues(credential.kind, credential.options)
+    if (issues.length) throw new HTTPException(400, { message: issues.join('; ') })
+    const stored = await store.credentials.get(credential.id)
+    if (!stored) throw new HTTPException(404, { message: 'credential not found' })
+    const listing = await listProviderModels(
+      {
+        kind: credential.kind,
+        url: credential.url,
+        secret: await vault.open(stored.secret),
+        ...(credential.options && { options: credential.options }),
+      },
+      { signal: AbortSignal.timeout(15_000) },
+    )
+    return c.json<ProviderModelList>(listing)
   })
 
   app.post('/credentials/:id/rotate', async (c) => {

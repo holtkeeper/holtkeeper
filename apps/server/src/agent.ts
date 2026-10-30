@@ -5,13 +5,17 @@ import {
   type AgentResult,
   type AgentTask,
   type ConcurrencyLimiter,
+  type AiProvider,
   type CreateAgentOptions,
+  type ModelCatalog,
   type ProviderAgent,
   type Toolset,
   createAgent,
   createLimiter,
   isAiProviderKind,
+  modelCatalog,
   parseProviderOptions,
+  resolveProviderRouting,
 } from '@holtkeeper/agent'
 import {
   type AgentToolSettings,
@@ -250,6 +254,8 @@ export interface SettingsAgentOptions {
    * same provider credential draws from one budget, so parallel jobs cannot exhaust a key together.
    */
   rateLimiter?: Limiter
+  /** Listings that `@latest` model references resolve against. Default: `modelCatalog()`. */
+  models?: ModelCatalog
 }
 
 /** What a caller may tell `settingsAgentFor` about the job an agent is for. */
@@ -275,6 +281,11 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
   const now = options.now ?? (() => new Date())
   const log = options.log ?? (() => {})
   const limiters = new Map<string, ConcurrencyLimiter>()
+  const catalog = options.models ?? modelCatalog()
+  const routingFor = async (key: string, provider: AiProvider, routing: CreateAgentOptions) => ({
+    ...routing,
+    ...(await resolveProviderRouting(provider, routing, () => catalog.list(key, provider))),
+  })
   const budgets =
     options.budgets === false
       ? undefined
@@ -327,15 +338,16 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       try {
         parseProviderOptions(credential)
         const limiter = limiterFor(credential)
-        agent = createAgent(
-          {
-            kind: credential.kind,
-            url: credential.url,
-            secret: await vault.open(credential.secret),
-            ...(credential.options && { options: credential.options }),
-          },
-          { ...routing, ...(limiter && { limiter }) },
-        )
+        const aiProvider: AiProvider = {
+          kind: credential.kind,
+          url: credential.url,
+          secret: await vault.open(credential.secret),
+          ...(credential.options && { options: credential.options }),
+        }
+        agent = createAgent(aiProvider, {
+          ...(await routingFor(`${credential.id}:${credential.updatedAt}`, aiProvider, routing)),
+          ...(limiter && { limiter }),
+        })
         provider = credential.name
         limited = { key: credential.id, credential }
       } catch (error) {
@@ -349,7 +361,16 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       if (!key || typeof key.value !== 'string') return undefined
       const apiKey: unknown = JSON.parse(await vault.open(key.value))
       if (typeof apiKey !== 'string') return undefined
-      agent = createAgent({ kind: 'anthropic', url: ANTHROPIC_API_URL, secret: apiKey }, routing)
+      const legacy: AiProvider = { kind: 'anthropic', url: ANTHROPIC_API_URL, secret: apiKey }
+      try {
+        agent = createAgent(
+          legacy,
+          await routingFor(`settings:${key.id}:${key.updatedAt}`, legacy, routing),
+        )
+      } catch (error) {
+        log(`agent: ${LEGACY_PROVIDER}: ${error instanceof Error ? error.message : String(error)}`)
+        return undefined
+      }
       provider = LEGACY_PROVIDER
     }
 

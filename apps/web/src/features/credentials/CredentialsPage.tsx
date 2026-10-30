@@ -1,5 +1,6 @@
 import type { CredentialView } from '@holtkeeper/api'
 import {
+  Boxes,
   CalendarClock,
   KeyRound,
   Pencil,
@@ -35,6 +36,8 @@ import {
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
 import { useSession } from '../shell/session.ts'
 import { CredentialDialog } from './CredentialDialog.tsx'
+import { aiProviderKinds } from './form.ts'
+import { ModelsDialog } from './ModelsDialog.tsx'
 
 function Expiry({ at }: { at: string | undefined }) {
   const tone = expiryTone(at)
@@ -63,6 +66,7 @@ export function CredentialsPage() {
   const { rotate, remove } = useCredentialMutations()
   const [editing, setEditing] = useState<CredentialView | 'new' | null>(null)
   const [deleting, setDeleting] = useState<CredentialView | null>(null)
+  const [browsing, setBrowsing] = useState<CredentialView | null>(null)
   const writable = can('credentials:write')
   const list = credentials.data?.credentials ?? []
 
@@ -150,6 +154,12 @@ export function CredentialsPage() {
                       ? `Rotated ${formatRelative(credential.lastRotatedAt)}`
                       : `Added ${formatDate(credential.createdAt)}`}
                   </span>
+                  {aiProviderKinds.includes(credential.kind) ? (
+                    <Button variant="ghost" size="sm" onPress={() => setBrowsing(credential)}>
+                      <Boxes className="size-3.5" />
+                      Models
+                    </Button>
+                  ) : null}
                   {writable ? (
                     <div className="flex items-center gap-1">
                       <Button
@@ -193,6 +203,9 @@ export function CredentialsPage() {
         </ul>
       )}
 
+      {browsing ? (
+        <ModelsDialog key={browsing.id} credential={browsing} onClose={() => setBrowsing(null)} />
+      ) : null}
       {editing ? (
         <CredentialDialog
           key={editing === 'new' ? 'new' : editing.id}

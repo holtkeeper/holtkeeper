@@ -1,10 +1,10 @@
 import type {
   ActivityList,
   AnalysisDetail,
-  ApplyChangesInput,
-  ApplyChangesResult,
   AnalysisKindList,
   AnalysisList,
+  ApplyChangesInput,
+  ApplyChangesResult,
   AuditRunDetail,
   AuditRunList,
   CreateCredentialInput,
@@ -14,6 +14,7 @@ import type {
   LinkInfo,
   LinkResponse,
   MeResponse,
+  ProviderModelList,
   PutSettingInput,
   RepoList,
   RepoRef,
@@ -78,6 +79,8 @@ export const api = {
     request<void>('DELETE', `/api/credentials/${id(credentialId)}`),
   rotateCredential: (credentialId: string) =>
     request<CredentialView>('POST', `/api/credentials/${id(credentialId)}/rotate`),
+  credentialModels: (credentialId: string) =>
+    request<ProviderModelList>('GET', `/api/credentials/${id(credentialId)}/models`),
 
   settings: () => request<SettingList>('GET', '/api/settings'),
   putSetting: (input: PutSettingInput) =>
