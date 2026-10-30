@@ -100,6 +100,15 @@ export const analysisPages = [
     description: 'Exports of every package per version, diffs and the MCP endpoint for agents',
     trend: [/documented/i, /exports/i],
   },
+  {
+    to: '/assets',
+    kind: 'assets',
+    title: 'Assets',
+    icon: 'assets',
+    description:
+      'Images, fonts and media: budgets, AVIF/WebP and responsive variants, SVG and inline SVG optimization',
+    trend: [/savings/i, /^total$/i],
+  },
 ] as const
 
 /**

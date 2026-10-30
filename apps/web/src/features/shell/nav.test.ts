@@ -35,6 +35,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Test ids',
     'Dependencies',
     'Bundles',
+    'Assets',
     'Public API',
     'Releases',
     'Branches',

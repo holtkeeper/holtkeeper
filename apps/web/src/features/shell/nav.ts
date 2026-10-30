@@ -10,6 +10,7 @@ import {
   GitBranch,
   Gauge,
   HardDrive,
+  Images,
   KeyRound,
   Layers,
   LayoutDashboard,
@@ -42,6 +43,7 @@ export interface NavItem {
     | '/audits'
     | '/releases'
     | '/bundles'
+    | '/assets'
     | '/dependencies'
     | '/quality'
     | '/coverage'
@@ -139,6 +141,7 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   { section: 'Code', to: '/bundles', label: 'Bundles', icon: Boxes, requires: 'analyses:read' },
+  { section: 'Code', to: '/assets', label: 'Assets', icon: Images, requires: 'analyses:read' },
   {
     section: 'Code',
     to: '/public-api',

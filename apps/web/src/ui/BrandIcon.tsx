@@ -1,4 +1,5 @@
 import api from '@holtkeeper/brand/api.svg'
+import assets from '@holtkeeper/brand/assets.svg'
 import audit from '@holtkeeper/brand/audit.svg'
 import branches from '@holtkeeper/brand/branches.svg'
 import browserslist from '@holtkeeper/brand/browserslist.svg'
@@ -20,6 +21,7 @@ import updates from '@holtkeeper/brand/updates.svg'
 
 const icons = {
   api,
+  assets,
   audit,
   branches,
   browserslist,

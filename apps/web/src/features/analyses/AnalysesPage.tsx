@@ -201,10 +201,12 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
   )
 }
 
-const [releases, bundles, , quality, coverage, testIds, branches, ciJobs, licenses] = analysisPages
+const [releases, bundles, , quality, coverage, testIds, branches, ciJobs, licenses, , assets] =
+  analysisPages
 
 export const ReleasesPage = () => <AnalysesPage page={releases} />
 export const BundlesPage = () => <AnalysesPage page={bundles} />
+export const AssetsPage = () => <AnalysesPage page={assets} />
 export const QualityPage = () => <AnalysesPage page={quality} />
 export const CoveragePage = () => <AnalysesPage page={coverage} />
 export const TestIdsPage = () => <AnalysesPage page={testIds} />
