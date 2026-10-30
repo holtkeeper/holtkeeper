@@ -10,6 +10,7 @@ import { builtinAnalyzers, reviewChecks } from '@holtkeeper/analyzers'
 import {
   type ArtifactStore,
   type StorageProvider,
+  artifactCache,
   artifactStorage,
   fsArtifactStore,
   s3ArtifactStore,
@@ -228,11 +229,18 @@ export async function startServer(
   })
   // Everything below reads the effective config through this live view.
   const config = liveConfig(managed.source)
+  const artifacts = options.artifacts ?? artifactStoreFor(server)
+  const mediaCache = artifactCache(artifacts, {
+    onError: (error) => log(`cache: ${error instanceof Error ? error.message : String(error)}`),
+  })
   // The review analyzer needs server state: scoped review instructions and the knowledge base.
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
     ...(config.jobs?.botUsername ? { botUsername: config.jobs.botUsername } : {}),
-    mediaReviewer: createMediaReviewer(server.publicUrl ? { publicUrl: server.publicUrl } : {}),
+    mediaReviewer: createMediaReviewer({
+      cache: mediaCache,
+      ...(server.publicUrl ? { publicUrl: server.publicUrl } : {}),
+    }),
     knowledge: {
       access: knowledgeAccess({
         store: server.store,
@@ -275,7 +283,6 @@ export async function startServer(
       aiCatalog,
       aiProviders,
     })
-  const artifacts = options.artifacts ?? artifactStoreFor(server)
   const deps: ServerDeps = {
     config,
     auth: server.auth,

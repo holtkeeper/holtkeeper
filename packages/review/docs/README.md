@@ -52,7 +52,7 @@ The record is stored with `ref` `!<iid>`.
 
 ## Images
 
-`MediaReviewer.review({ repo, mergeRequest, refs, files, usages })` gets added or changed `png/jpg/gif/webp/svg` files (SVG text via `readFile`, raster bytes via the optional `forge.readFileBytes`, left out when the forge lacks it) and the added lines that mention them. Its comments become `minor` `performance` findings that count toward `maxComments`; its Markdown summary is appended under "Images". `noopMediaReviewer` is the default.
+`MediaReviewer.review({ repo, mergeRequest, refs, files, usages, code, paths })` gets added or changed `png/jpg/gif/webp/svg` files (SVG text via `readFile`, raster bytes via the optional `forge.readFileBytes`, left out when the forge lacks it), the added lines that mention them, `code` — markup and component files (`.html/.jsx/.tsx/.vue/.svelte/.astro`) whose added lines contain `<svg`, `<path` or a `d=` attribute, with their head text and added line numbers (`inlineSvgFiles`) — and `paths`, every path the diff adds or changes. The step runs when there are images or such code files. Its comments become `minor` `performance` findings that count toward `maxComments`; its Markdown summary is appended under "Images". `noopMediaReviewer` is the default.
 
 ## REVIEW.md conventions
 

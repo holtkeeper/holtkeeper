@@ -1,4 +1,5 @@
 import type { Asset, Duplicate, Finding } from './data.ts'
+import { type ImageFamily, hasSizes } from './families.ts'
 
 /** Largest texture side most mobile GPUs accept. */
 export const MAX_TEXTURE_SIDE = 4096
@@ -8,9 +9,62 @@ const NPOT_MIN_SIDE = 64
 
 const isPowerOfTwo = (value: number) => value > 0 && (value & (value - 1)) === 0
 
+/** Images wider than this without smaller sizes are reported as `single-resolution`. */
+export const HIGH_RES_WIDTH = 1280
+
+/** Legacy raster formats that should come with AVIF/WebP versions. */
+const legacyFormats = new Set(['png', 'apng', 'jpeg', 'jpg', 'gif'])
+
+const formatNames: Record<string, string> = { avif: 'AVIF', webp: 'WebP' }
+
 export interface FindingOptions {
   /** Game engines of the project; power-of-two checks run only when there is one. */
   engines: readonly string[]
+  /** Image families from `imageFamilies`; delivery checks (`missing-modern-formats`, `single-resolution`) run only with them. */
+  families?: readonly ImageFamily[]
+  /** Rasters below this get no `missing-modern-formats` finding. Default 8 kB. */
+  minBytes?: number
+}
+
+/**
+ * PNG/JPEG/GIF originals without AVIF or WebP versions next to them, and originals wider than
+ * `HIGH_RES_WIDTH` without smaller widths or densities, so every screen downloads the largest file.
+ */
+export function deliveryIssues(
+  families: readonly ImageFamily[],
+  options: { engines: readonly string[]; minBytes?: number },
+): Finding[] {
+  const minBytes = options.minBytes ?? 8 * 1024
+  const findings: Finding[] = []
+  for (const family of families) {
+    const { original } = family
+    const missing = ['avif', 'webp'].filter((format) => !family.formats.has(format))
+    if (legacyFormats.has(original.format) && original.bytes >= minBytes && missing.length) {
+      const names = missing.map((format) => formatNames[format]).join(' and ')
+      findings.push({
+        id: `missing-modern-formats:${original.path}`,
+        rule: 'missing-modern-formats',
+        path: original.path,
+        tone: missing.length === 2 ? 'warning' : 'info',
+        title: `${original.path} has no ${names} version`,
+        detail: `Browsers that support ${names} would download a smaller file through <picture> or image-set(); generate the variants and serve the ${original.format.toUpperCase()} as the fallback.`,
+      })
+    }
+    const width = original.image?.width ?? 0
+    if (width > HIGH_RES_WIDTH && !hasSizes(family) && !original.image?.animated) {
+      findings.push({
+        id: `single-resolution:${original.path}`,
+        rule: 'single-resolution',
+        path: original.path,
+        tone: options.engines.length ? 'info' : 'warning',
+        title: `${original.path} exists only at ${width}×${original.image?.height ?? 0}`,
+        detail: options.engines.length
+          ? 'Ship lower-density textures (@1x) for small screens and pick one from devicePixelRatio.'
+          : 'Phones download the full-size file; add smaller widths with srcset/sizes (or image-set()) so each screen gets a file close to its size.',
+      })
+    }
+  }
+  return findings
 }
 
 /**
@@ -60,6 +114,7 @@ export function findIssues(assets: readonly Asset[], options: FindingOptions): F
       })
     }
   }
+  if (options.families) findings.push(...deliveryIssues(options.families, options))
   return findings
 }
 

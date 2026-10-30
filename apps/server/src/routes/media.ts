@@ -5,7 +5,13 @@ import type {
   MediaVariantsInput,
   MediaVariantsResult,
 } from '@holtkeeper/api'
-import { artifactId, isArtifactId, safeArchivePath, zipArtifacts } from '@holtkeeper/artifacts'
+import {
+  artifactCache,
+  artifactId,
+  isArtifactId,
+  safeArchivePath,
+  zipArtifacts,
+} from '@holtkeeper/artifacts'
 import { type CodeChange, type Edit, openMergeRequest } from '@holtkeeper/changes'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import { Hono } from 'hono'
@@ -105,7 +111,9 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
   const run = createLimiter(limit.concurrency, limit.maxQueued)
   const cache = new Map<string, MediaVariantsResult>()
   let engine: MediaEngine | undefined
-  const engineOf = () => (engine ??= deps.media ?? mediaEngine())
+  const engineOf = () =>
+    (engine ??=
+      deps.media ?? mediaEngine(deps.artifacts ? { cache: artifactCache(deps.artifacts) } : {}))
 
   const repoOf = (c: AppContext, value: string, action: 'analyses:read' | 'analyses:run') => {
     const repo = parseRepo(value)

@@ -17,8 +17,9 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
 | `optimizeTop` | `20`                                 | With `sharp`: images (raster and SVG together) optimized, largest first (flag `--optimize-top`)                          |
 | `svgPreset`   | `safe`                               | With `sharp`: svgo preset of SVG changes (flag `--svg-preset`)                                                           |
 | `naming`      | —                                    | With `sharp`: `{ width?, density? }` variant file templates, default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}` |
+| `inlineSvg`   | `true`                               | Check inline `<svg>`/`<path>` in markup and components (flag `--inline-svg`); off with `convert: 'off'`                  |
 
-`analyzeAssets(options)` runs the same pipeline without the analyzer wrapper; it never writes to the checkout.
+`analyzeAssets(options)` runs the same pipeline without the analyzer wrapper; it never writes to the checkout. `options.cache` (the analyzer passes `context.cache`) is handed to `encodeVariants`, so images whose bytes did not change since an earlier run — on any machine sharing the store — are not encoded again.
 
 ## Pipeline
 
@@ -30,10 +31,13 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
    - Atlases (`atlas`): TexturePacker / Pixi / Phaser JSON, libGDX/Spine `.atlas`, AngelCode `.fnt` — frame count and texture names.
 3. **References** (`collectTokens`, `isReferenced`) — tokens of every source and config file (generated folders skipped) plus atlas/glTF texts. An asset is referenced when its file name, a path suffix, or its stem (3+ chars, e.g. loader keys) appears. Favicons and similar are implicit. Build outputs are not checked.
 4. **Engines** (`detectEngines`) — pixi, phaser, three, babylon, cocos, playcanvas from `package.json` files up to two levels deep.
-5. **Checks** — `evaluateBudgets` (per-asset and per-kind total), `findIssues` (`huge-dimensions` above 4096 px, `non-power-of-two` for raster images ≥ 64 px when an engine is found, `unused`), `findDuplicates` (by hash within an origin).
-6. **Suggestions** (`candidates`, `estimateSuggestions`, `measureSuggestions`) — opaque PNG → WebP lossy, PNG with alpha → WebP lossless, JPEG → AVIF, animated GIF → animated WebP, WAV/FLAC → Ogg Vorbis, TTF/OTF → WOFF2. `estimateRatios` holds the conservative ratios with their sources. `convert: 'tools'` copies each candidate to a temp dir and runs `cwebp`, `avifenc`, `ffmpeg` or `woff2_compress` through the `CommandRunner`; a missing tool or failed conversion falls back to the estimate. Assets under 8 kB and savings under 2 kB are dropped.
+5. **Checks** — `evaluateBudgets` (per-asset and per-kind total), `findIssues` (`huge-dimensions` above 4096 px, `non-power-of-two` for raster images ≥ 64 px when an engine is found, `unused`, and with `families` the delivery checks below), `findDuplicates` (by hash within an origin).
+   - **Families** (`imageFamilies`): source rasters grouped by folder and base name, so `hero.png`, `hero.webp`, `hero-640w.avif` and `hero@2x.png` are one family; the original is the PNG/JPEG/GIF (before WebP, before AVIF; the widest when several). `variantPaths`, `hasModernFormats`, `hasSizes` answer what a family already ships.
+   - **Delivery** (`deliveryIssues`): `missing-modern-formats` for PNG/JPEG/GIF originals from `minBytes` (8 kB) without AVIF or WebP in the family (warning when both are missing), `single-resolution` for originals wider than `HIGH_RES_WIDTH` (1280 px) without width or density variants (info in game projects).
+   - **Inline SVG** (`scanInlineSvgs`, `inlineSvgFile`): `.html/.htm/.jsx/.tsx/.vue/.svelte/.astro` files (generated folders skipped, up to 2 MB) through `optimizeInlineSvgs`; one `inline-svg` finding (with `line`) and one change `assets:inline-svg:<file>` per file, with a `replace` edit per fragment — `safe` when every fragment is a static svgo rewrite, `review` when path data in JSX or bound SVGs is rewritten.
+6. **Suggestions** (`candidates`, `estimateSuggestions`, `measureSuggestions`) — family members and formats a family already has are skipped; opaque PNG → WebP lossy, PNG with alpha → WebP lossless, JPEG → AVIF, animated GIF → animated WebP, WAV/FLAC → Ogg Vorbis, TTF/OTF → WOFF2. `estimateRatios` holds the conservative ratios with their sources. `convert: 'tools'` copies each candidate to a temp dir and runs `cwebp`, `avifenc`, `ffmpeg` or `woff2_compress` through the `CommandRunner`; a missing tool or failed conversion falls back to the estimate. Assets under 8 kB and savings under 2 kB are dropped.
 
-7. **Optimization** (`convert: 'sharp'`, `optimizationCandidates`, `optimizeAssets`) — the `optimizeTop` largest source images: PNG/APNG/JPEG/GIF/WebP from `minBytes` (8 kB) and SVGs from 512 bytes. Built on `@holtkeeper/media`:
+7. **Optimization** (`convert: 'sharp'`, `optimizationCandidates`, `optimizeAssets`) — the `optimizeTop` largest source images: PNG/APNG/JPEG/GIF/WebP from `minBytes` (8 kB) and SVGs from 512 bytes, except generated family members and originals that already ship AVIF, WebP and smaller sizes. Built on `@holtkeeper/media`:
    - Usages (`usageSources`, `findReferences`, `imgReferences`, `cssReferences`, `resolveImage`): `<img src="…">` with a literal src in `.html/.htm/.jsx/.tsx/.vue` and `background`/`background-image: url(…)` in `.css/.scss/.less`. `/x.png` resolves against `public/`, `static/` and the root, relative URLs against the file, `@/`/`~/` against `src/`. Tags with `srcset`, inside `<picture>`, with dynamic src, and declarations already using `image-set()` are left alone.
    - Usage kind (`usageOf`): `fixed` when every `<img>` gives the same `width` (density ladder), `texture` in game projects (an engine found) without markup usages, otherwise `responsive`.
    - Rasters are probed, planned and encoded with sharp; a format is proposed when its full-size variant saves at least `minSaving` (2 kB) (`proposedVariants`). The change (`assets:image:<path>`) has `write-binary` edits for the proposed variants — `artifact` is the variant SHA-256, no base64; the full-size re-encode in the original format overwrites the original with `previousSha256` — plus, when usages were found, `replace` edits swapping each `<img>` for a `<picture>` snippet (React/Vue/HTML by file type, keeping other attributes such as `className`) and each CSS declaration for itself plus an `image-set()` declaration. Confidence `review` with swaps or a lossy overwrite of the original, `safe` otherwise.
@@ -52,6 +56,7 @@ Build files with the same hash as a source file are the same shipped asset: they
 
 - `optimized`: `ImageOptimization { path, format, bytes, width, height, usage, variants, skipped, best?, references, changeId?, error? }`; each `ImageVariant { id, format, width, height, density?, bytes, quality, ssim?, sha256, file, replacesOriginal?, proposed }`.
 - `svgs`: `SvgOptimizationData { path, preset, bytes, gzip, breakdown, changeId?, error? }` — the svgo breakdown without the optimized text, which lives in the change.
+- `inlineSvgs`: `InlineSvgData { file, line, endLine, kind, bytes, digits, paths, changeId }` per fragment worth rewriting.
 - `changes`: `CodeChange[]`, also returned by `assetsAnalysis.changes(data)`.
 
 ## Comparison and report
@@ -69,6 +74,7 @@ Build files with the same hash as a source file are the same shipped asset: they
 - Largest assets: size, gzip, dimensions/duration/glyphs, tags.
 - Changes since previous: per kind and per asset (only with a previous record).
 - Duplicates: copies and wasted bytes.
+- Image delivery: `missing-modern-formats`, `single-resolution` and `inline-svg` findings, a table of inline SVGs (file, lines, svgo or path-data rewrite, bytes, path digits) and an applicable `changes` block with the inline rewrites.
 
 ## Limitations
 

@@ -48,6 +48,8 @@ export const assetsOptionsSchema = z.object({
   svgPreset: z.enum(['safe', 'default', 'aggressive']).default('safe'),
   /** With `sharp`: variant file name templates. */
   naming: z.object({ width: z.string().optional(), density: z.string().optional() }).optional(),
+  /** Check inline `<svg>`/`<path>` elements of markup and components. */
+  inlineSvg: z.coerce.boolean().default(true),
 })
 
 export type AssetsOptions = z.infer<typeof assetsOptionsSchema>
@@ -77,12 +79,18 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
       description: 'images optimized with sharp, largest first (default 20)',
     },
     {
+      flag: 'inline-svg',
+      option: 'inlineSvg',
+      description: 'check inline <svg>/<path> in markup and components (default true)',
+      type: 'boolean',
+    },
+    {
       flag: 'svg-preset',
       option: 'svgPreset',
       description: 'svgo preset: safe (default), default or aggressive',
     },
   ],
-  async run({ dir, ref, runner, options, signal, log }) {
+  async run({ dir, ref, runner, cache, options, signal, log }) {
     if (!dir) throw new Error('the assets analyzer needs a checkout')
     const data = await analyzeAssets({
       dir,
@@ -95,6 +103,8 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
       optimizeTop: options.optimizeTop,
       svgPreset: options.svgPreset,
       ...(options.naming ? { naming: options.naming } : {}),
+      inlineSvg: options.inlineSvg,
+      ...(cache ? { cache } : {}),
       runner,
       ...(signal ? { signal } : {}),
       ...(log ? { log } : {}),

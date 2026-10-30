@@ -1,4 +1,10 @@
 export {
+  type ArtifactCacheOptions,
+  type BlobCache,
+  type CacheEntryOptions,
+  artifactCache,
+} from './cache.ts'
+export {
   type ArtifactBackend,
   type StoreOptions,
   artifactId,
@@ -6,6 +12,8 @@ export {
   fanout,
   isArtifactId,
   isArtifactInfo,
+  isArtifactRef,
+  isRefName,
   summarizeUsage,
 } from './core.ts'
 export { type FsArtifactStoreOptions, fsArtifactStore } from './fs.ts'

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { requireSharp } from '@holtkeeper/media'
+import type { VariantCache } from '@holtkeeper/media'
 import type { MediaReviewInput } from '@holtkeeper/review'
 
 import { createMediaReviewer, panelLink } from '../src/media/reviewer.ts'
@@ -37,6 +38,8 @@ const base = {
   repo: { forge: 'work', path: 'web/site' },
   mergeRequest: 7,
   refs: { baseSha: 'a', startSha: 'a', headSha: 'h1' },
+  code: [],
+  paths: [],
 }
 
 test('raster images get a savings table, a <picture> suggestion and a panel link', async () => {
@@ -58,6 +61,7 @@ test('raster images get a savings table, a <picture> suggestion and a panel link
   expect(replacement).toContain('<source type="image/avif" srcSet="/hero-320w.avif 320w')
   expect(replacement).toContain('alt="Hero"')
   expect(result.summary).toContain('**public/hero.png · 1200×600**')
+  expect(result.summary).toContain('`public/hero.png`: no AVIF/WebP version comes with it.')
   expect(result.summary).toContain('| 375 px @2x | 750 px |')
   expect(result.summary).toContain(
     '(https://hk.example.com/media?repo=work%3Aweb%2Fsite&file=public%2Fhero.png&ref=h1)',
@@ -98,7 +102,72 @@ test('unreadable images are mentioned, not reviewed', async () => {
   expect(result.comments).toEqual([])
   expect(result.summary).toContain('`a.png`: not readable')
   expect(result.summary).toContain('`b.png`: cannot decode')
-  expect(panelLink('https://x.test', base as MediaReviewInput, 'a b.png')).toBe(
+  expect(panelLink('https://x.test', { ...base, files: [], usages: [] }, 'a b.png')).toBe(
     'https://x.test/media?repo=work%3Aweb%2Fsite&file=a+b.png&ref=h1',
   )
+})
+
+const heavy =
+  'M12.000000 2.000000C6.4771525 2.000000 2.000000 6.4771525 2.000000 12.000000C2.000000 17.5228475 6.4771525 22.000000 12.000000 22.000000C17.5228475 22.000000 22.000000 17.5228475 22.000000 12.000000C22.000000 6.4771525 17.5228475 2.000000 12.000000 2.000000Z'
+
+test('inline SVGs on added lines get a suggestion covering exactly those lines', async () => {
+  const text = [
+    'export const Ring = () => (',
+    '  <svg viewBox="0 0 24 24">',
+    `    <path d="${heavy}" />`,
+    '  </svg>',
+    ')',
+    `export const Old = () => <svg><path d="${heavy}" /></svg>`,
+  ].join('\n')
+  const result = await createMediaReviewer().review({
+    ...base,
+    files: [],
+    usages: [],
+    code: [{ path: 'src/Ring.tsx', text, addedLines: [1, 2, 3, 4, 5] }],
+  })
+  expect(result.comments.map((comment) => [comment.startLine, comment.line])).toEqual([[2, 4]])
+  const replacement = result.comments[0]?.suggestion?.replacement ?? ''
+  expect(replacement.split('\n')).toHaveLength(3)
+  expect(replacement.startsWith('  <svg viewBox="0 0 24 24">')).toBe(true)
+  expect(replacement).not.toContain('.000000')
+  expect(result.comments[0]?.body.split('\n')[0]).toBe('Shorten the path data of this inline SVG')
+  expect(result.summary).toContain('`src/Ring.tsx`: 1 inline SVG')
+})
+
+test('a large image with its AVIF and WebP but one size is flagged, and re-reviews hit the cache', async () => {
+  const sharp = await requireSharp()
+  const wide = new Uint8Array(
+    await sharp({ create: { width: 1600, height: 400, channels: 3, background: '#88aa44' } })
+      .png()
+      .toBuffer(),
+  )
+  const entries = new Map<
+    string,
+    { data: Uint8Array; meta: Record<string, string | number | boolean> }
+  >()
+  let hits = 0
+  const cache: VariantCache = {
+    get: async (key) => {
+      const entry = entries.get(key)
+      if (entry) hits++
+      return entry
+    },
+    set: async (key, data, entry) => {
+      entries.set(key, { data, meta: entry?.meta ?? {} })
+    },
+  }
+  const input: MediaReviewInput = {
+    ...base,
+    files: [{ path: 'public/banner.png', status: 'added', bytes: wide }],
+    usages: [],
+    paths: ['public/banner.png', 'public/banner.avif', 'public/banner.webp'],
+  }
+  const reviewer = createMediaReviewer({ cache })
+  const first = await reviewer.review(input)
+  expect(first.summary).toContain('only one resolution (1600 px wide)')
+  expect(first.summary).not.toContain('no AVIF')
+  expect(entries.size).toBeGreaterThan(0)
+  const second = await reviewer.review(input)
+  expect(hits).toBe(entries.size)
+  expect(second.summary).toBe(first.summary)
 })

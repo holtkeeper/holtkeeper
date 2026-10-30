@@ -1,4 +1,4 @@
-import type { AnalyzerContext, AnyAnalyzer } from '@holtkeeper/analyzer'
+import type { AnalyzerContext, AnyAnalyzer, RunCache } from '@holtkeeper/analyzer'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 import type { ManagedRunner } from '@holtkeeper/exec-container'
@@ -99,6 +99,8 @@ export interface ContextFactoryOptions {
   createRunner?: CreateRunner
   /** Default: `detectToolchain` from `@holtkeeper/toolchain`. */
   detectToolchain?: (dir: string) => Promise<Toolchain>
+  /** Shared between runs and handed to every analyzer as `context.cache`. */
+  cache?: RunCache
 }
 
 /** `ForgeDefinition.gitCredentials?()`, read structurally so older forge definitions still work. */
@@ -143,8 +145,8 @@ export function toRepoRef(repo: RepoRef | string): RepoRef {
  * The default `ContextFor`: a checkout of the job's ref (the default branch when it has none) for
  * analyzers that need one, `context.checkout` for checking out other repositories on demand (every
  * checkout is a private worktree, so read-only and writable ones are made the same way), the
- * repository's forge client, the agent from `agentFor`, the store as history, and for group
- * analyzers the group's repositories.
+ * repository's forge client, the agent from `agentFor`, the store as history, `cache` when
+ * given, and for group analyzers the group's repositories.
  *
  * With `config.jobs.execution.mode` `mise` or `container`, `context.runner` runs commands with the
  * checkout's detected toolchain (and, for `container`, in a sandbox started before the analyzer
@@ -243,6 +245,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
       runner,
       checkout: (repo, { ref } = {}) => onDemand(repo, ref),
       ...(job.ref !== undefined && { ref: job.ref }),
+      ...(factory.cache && { cache: factory.cache }),
     }
     const cleanup = async () => {
       await Promise.allSettled([...runners].map((r) => r.stop()))

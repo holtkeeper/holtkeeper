@@ -92,6 +92,13 @@ test('inventories, checks budgets, suggests and reports', async () => {
     'unused:public/orphan.gif',
     'non-power-of-two:public/photo.jpg',
     'unused:src/game/assets/level.bin',
+    'missing-modern-formats:public/background.png',
+    'single-resolution:public/background.png',
+    'missing-modern-formats:public/copy.png',
+    'single-resolution:public/copy.png',
+    'missing-modern-formats:public/photo.jpg',
+    'single-resolution:public/photo.jpg',
+    'missing-modern-formats:public/sprites/sheet.png',
   ])
   expect(data.budgets.map((violation) => violation.id).toSorted()).toEqual([
     'bytes:public/**/*.png:public/background.png',
@@ -135,10 +142,18 @@ test('inventories, checks budgets, suggests and reports', async () => {
     'overview',
     'budgets',
     'suggestions',
+    'delivery',
     'largest',
     'changes',
     'duplicates',
   ])
+  expect(
+    report.sections
+      .find((section) => section.id === 'delivery')
+      ?.blocks.flatMap((block) =>
+        block.type === 'issues' ? block.items.map((item) => item.id) : [],
+      ),
+  ).toContain('missing-modern-formats:public/photo.jpg')
   expect(report.metrics.find((metric) => metric.id === 'over-budget')).toMatchObject({
     value: 3,
     delta: 0,

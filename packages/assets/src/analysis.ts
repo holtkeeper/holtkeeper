@@ -270,7 +270,7 @@ function budgetsSection(
     })
   }
   for (const finding of data.findings) {
-    if (finding.rule === 'unused') continue
+    if (finding.rule === 'unused' || deliveryRules.has(finding.rule)) continue
     items.push({
       id: finding.id,
       tone: finding.tone,
@@ -650,6 +650,77 @@ function svgSection(data: AssetsData, previous: AssetsData | undefined): Section
   }
 }
 
+const deliveryRules = new Set<string>(['missing-modern-formats', 'single-resolution', 'inline-svg'])
+
+function deliverySection(data: AssetsData): Section | undefined {
+  const findings = data.findings.filter((finding) => deliveryRules.has(finding.rule))
+  const inline = data.inlineSvgs ?? []
+  if (!findings.length && !inline.length) return undefined
+  const changes = (data.changes ?? []).filter((change) =>
+    change.id.startsWith('assets:inline-svg:'),
+  )
+  return {
+    id: 'delivery',
+    title: 'Image delivery',
+    description:
+      'Rasters without AVIF/WebP versions next to them, large images shipped in a single resolution, and inline SVGs in markup and components that carry editor cruft or excess path precision.',
+    blocks: [
+      ...(findings.length
+        ? [
+            {
+              type: 'issues' as const,
+              items: findings.map((finding) => ({
+                id: finding.id,
+                tone: finding.tone,
+                title: finding.title,
+                ...(finding.detail ? { detail: finding.detail } : {}),
+                tags: [finding.rule],
+              })),
+            },
+          ]
+        : []),
+      ...(inline.length
+        ? [
+            {
+              type: 'table' as const,
+              title: 'Inline SVGs',
+              columns: [
+                { key: 'file', label: 'File', format: 'code' as const },
+                { key: 'lines', label: 'Lines', align: 'end' as const },
+                { key: 'kind', label: 'Rewrite', format: 'tags' as const },
+                { key: 'before', label: 'Before', unit: 'bytes' as const, align: 'end' as const },
+                { key: 'after', label: 'After', unit: 'bytes' as const, align: 'end' as const },
+                { key: 'saving', label: 'Saving', align: 'end' as const },
+                { key: 'digits', label: 'Path digits', align: 'end' as const },
+              ],
+              rows: inline.map((svg) => ({
+                file: svg.file,
+                lines: svg.line === svg.endLine ? `${svg.line}` : `${svg.line}–${svg.endLine}`,
+                kind: svg.kind === 'svg' ? 'svgo' : 'path data',
+                before: svg.bytes.before,
+                after: svg.bytes.after,
+                saving: percentCell(svg.bytes.before, svg.bytes.after),
+                digits: pair(svg.digits.before, svg.digits.after),
+              })),
+            },
+          ]
+        : []),
+      ...(changes.length
+        ? [
+            {
+              type: 'changes' as const,
+              title: 'Optimized inline SVGs',
+              items: changes.map((change) =>
+                changeItem(change, { tags: ['svgo', change.confidence] }),
+              ),
+              applicable: true,
+            },
+          ]
+        : []),
+    ],
+  }
+}
+
 function largestSection(data: AssetsData, limit: number): Section {
   const rows: Record<string, Cell>[] = data.assets
     .toSorted((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
@@ -809,9 +880,11 @@ export function createAssetsAnalysis(
           overview(data, before, treemapFiles),
           budgetsSection(data, before, comparison),
           suggestionsSection(data),
-          ...[optimizationSection(data, before, imageCards), svgSection(data, before)].filter(
-            (section): section is Section => section !== undefined,
-          ),
+          ...[
+            optimizationSection(data, before, imageCards),
+            svgSection(data, before),
+            deliverySection(data),
+          ].filter((section): section is Section => section !== undefined),
           largestSection(data, largest),
           ...(comparison ? [changesSection(comparison)] : []),
           duplicatesSection(data),

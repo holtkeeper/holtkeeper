@@ -1,4 +1,4 @@
-import type { ArtifactStore } from '@holtkeeper/artifacts'
+import { type ArtifactStore, artifactCache } from '@holtkeeper/artifacts'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import {
@@ -33,7 +33,10 @@ export interface JobsOptions {
   /** Repositories nothing may be pushed to over git (the `repo.readOnly` setting). */
   readOnly?: ReadOnlyRepos
   now: () => Date
-  /** Where artifacts returned by analyzer runs are stored; without it they are dropped. */
+  /**
+   * Where artifacts returned by analyzer runs are stored; without it they are dropped. Also backs
+   * `context.cache`, so expensive results (encoded image variants) survive between runs.
+   */
   artifacts?: ArtifactStore
   /** Whether a claimed job may start now, e.g. `limitJobs` from `@holtkeeper/limits`. */
   admission?: (job: Job) => boolean | Promise<boolean>
@@ -205,7 +208,12 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine | undef
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),
     toolchainFor: (repo) => scopedToolchain(config, store, repo),
-    ...(options.artifacts && { persistArtifacts: persistArtifactsTo(options.artifacts) }),
+    ...(options.artifacts && {
+      persistArtifacts: persistArtifactsTo(options.artifacts),
+      cache: artifactCache(options.artifacts, {
+        onError: (error) => log(`cache: ${error instanceof Error ? error.message : String(error)}`),
+      }),
+    }),
     ...(options.admission && { admission: options.admission }),
     ...(options.worker && { worker: options.worker }),
     async onFinished(job, record) {

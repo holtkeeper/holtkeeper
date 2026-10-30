@@ -7,11 +7,15 @@ import {
   fanout,
   isArtifactId,
   isArtifactInfo,
+  isArtifactRef,
 } from './core.ts'
 import type { ArtifactInfo, ArtifactStore } from './types.ts'
 
 export interface FsArtifactStoreOptions extends StoreOptions {
-  /** Root directory; created when missing. Content lives at `<dir>/ab/cd/<id>`, metadata next to it as `<id>.json`. */
+  /**
+   * Root directory; created when missing. Content lives at `<dir>/ab/cd/<id>`, metadata next to it
+   * as `<id>.json`, refs at `<dir>/refs/<name>.json`.
+   */
   dir: string
 }
 
@@ -37,6 +41,7 @@ export function fsArtifactStore(options: FsArtifactStoreOptions): ArtifactStore 
   const { dir } = options
   const dataPath = (id: string) => join(dir, fanout(id))
   const metaPath = (id: string) => `${dataPath(id)}.json`
+  const refPath = (name: string) => join(dir, 'refs', `${name}.json`)
 
   const readMeta = async (id: string): Promise<ArtifactInfo | undefined> => {
     const file = Bun.file(metaPath(id))
@@ -80,6 +85,20 @@ export function fsArtifactStore(options: FsArtifactStoreOptions): ArtifactStore 
           }
         }
         return infos
+      },
+      async readRef(name) {
+        const file = Bun.file(refPath(name))
+        if (!(await file.exists())) return undefined
+        try {
+          const parsed: unknown = await file.json()
+          return isArtifactRef(parsed) ? parsed : undefined
+        } catch {
+          return undefined
+        }
+      },
+      writeRef: (name, ref) => writeAtomically(refPath(name), JSON.stringify(ref)),
+      async removeRef(name) {
+        await rm(refPath(name), { force: true })
       },
     },
     options,

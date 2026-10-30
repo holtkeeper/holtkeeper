@@ -6,6 +6,7 @@ import {
   fanout,
   isArtifactId,
   isArtifactInfo,
+  isArtifactRef,
 } from './core.ts'
 import type { ArtifactInfo, ArtifactStore } from './types.ts'
 
@@ -17,7 +18,10 @@ export interface S3ArtifactStoreOptions extends StoreOptions {
   accessKeyId: string
   secretAccessKey: string
   sessionToken?: string
-  /** Key prefix, e.g. `holtkeeper/artifacts`; keys are `<prefix>/ab/cd/<id>`. Default none. */
+  /**
+   * Key prefix, e.g. `holtkeeper/artifacts`; keys are `<prefix>/ab/cd/<id>`, refs
+   * `<prefix>/refs/<name>.json`. Default none.
+   */
   prefix?: string
   /** `https://<bucket>.<endpoint>` addressing instead of path style. */
   virtualHostedStyle?: boolean
@@ -63,6 +67,7 @@ export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore 
   const root = options.prefix ? `${options.prefix.replace(/\/+$/, '')}/` : ''
   const dataKey = (id: string) => `${root}${fanout(id)}`
   const metaKey = (id: string) => `${dataKey(id)}.json`
+  const refKey = (name: string) => `${root}refs/${name}.json`
   const concurrency = options.listConcurrency ?? 16
 
   const readMeta = (id: string) =>
@@ -111,6 +116,17 @@ export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore 
           for (const info of batch) if (info) infos.push(info)
         }
         return infos
+      },
+      readRef: (name) =>
+        orMissing(async () => {
+          const parsed: unknown = await client.file(refKey(name)).json()
+          return isArtifactRef(parsed) ? parsed : undefined
+        }),
+      async writeRef(name, ref) {
+        await client.write(refKey(name), JSON.stringify(ref), { type: 'application/json' })
+      },
+      async removeRef(name) {
+        await orMissing(() => client.delete(refKey(name)))
       },
       presign(info, { expiresIn = 300, filename }) {
         const name = filename ?? info.name?.split('/').at(-1)

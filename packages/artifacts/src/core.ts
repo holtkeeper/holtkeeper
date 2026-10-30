@@ -4,6 +4,7 @@ import type {
   Artifact,
   ArtifactInfo,
   ArtifactPage,
+  ArtifactRef,
   ArtifactStore,
   ArtifactUsage,
   PresignOptions,
@@ -16,6 +17,26 @@ export const artifactId = (data: Uint8Array): string =>
 
 /** Whether `id` looks like an artifact id (64 lowercase hex characters). */
 export const isArtifactId = (id: string): boolean => /^[0-9a-f]{64}$/.test(id)
+
+/** Whether `name` can name a ref: `/`-separated segments of `[A-Za-z0-9._:-]`, no `.`/`..` segments. */
+export const isRefName = (name: string): boolean =>
+  name.length > 0 &&
+  name.length <= 512 &&
+  name
+    .split('/')
+    .every((segment) => /^[A-Za-z0-9._:-]+$/.test(segment) && segment !== '.' && segment !== '..')
+
+/** Whether `value` has the shape of `ArtifactRef`, e.g. a parsed ref file. */
+export function isArtifactRef(value: unknown): value is ArtifactRef {
+  if (typeof value !== 'object' || value === null) return false
+  const ref: Partial<Record<keyof ArtifactRef, unknown>> = value
+  return (
+    typeof ref.id === 'string' &&
+    isArtifactId(ref.id) &&
+    typeof ref.updatedAt === 'string' &&
+    (ref.meta === undefined || (typeof ref.meta === 'object' && ref.meta !== null))
+  )
+}
 
 /** `ab/cd/<id>`: the two-level fan-out path stores use below their root. */
 export const fanout = (id: string): string => `${id.slice(0, 2)}/${id.slice(2, 4)}/${id}`
@@ -45,6 +66,10 @@ export interface ArtifactBackend {
   /** Metadata of every stored artifact, in any order. */
   listMeta(): Promise<ArtifactInfo[]>
   presign?(info: ArtifactInfo, options: PresignOptions): string
+  readRef(name: string): Promise<ArtifactRef | undefined>
+  writeRef(name: string, ref: ArtifactRef): Promise<void>
+  /** Missing refs are fine. */
+  removeRef(name: string): Promise<void>
 }
 
 export interface StoreOptions {
@@ -193,6 +218,27 @@ export function createArtifactStore(
         }
       }
       return result
+    },
+
+    async getRef(name) {
+      if (!isRefName(name)) return undefined
+      const ref = await backend.readRef(name)
+      if (!ref || !(await backend.readMeta(ref.id))) return undefined
+      return ref
+    },
+
+    async setRef(name, { id, meta }) {
+      if (!isRefName(name)) throw new Error(`malformed ref name "${name}"`)
+      if (!(await stat(id))) throw new Error(`artifact ${id} is not stored`)
+      const ref: ArtifactRef = { id, ...(meta ? { meta } : {}), updatedAt: now().toISOString() }
+      await backend.writeRef(name, ref)
+      return ref
+    },
+
+    async deleteRef(name) {
+      if (!isRefName(name) || !(await backend.readRef(name))) return false
+      await backend.removeRef(name)
+      return true
     },
 
     ...(backend.presign

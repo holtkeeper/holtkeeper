@@ -1,10 +1,18 @@
 import type { CommandRunner } from '@holtkeeper/exec'
-import { type Artifact, type NamingScheme, type SvgPreset, sharpAvailable } from '@holtkeeper/media'
+import {
+  type Artifact,
+  type NamingScheme,
+  type SvgPreset,
+  type VariantCache,
+  sharpAvailable,
+} from '@holtkeeper/media'
 
 import { evaluateBudgets, totalsOf } from './budgets.ts'
 import type { Asset, AssetsData, Budget, Suggestion, TotalBudgets } from './data.ts'
 import { detectEngines } from './engine.ts'
+import { hasModernFormats, hasSizes, imageFamilies, variantPaths } from './families.ts'
 import { findDuplicates, findIssues } from './findings.ts'
+import { scanInlineSvgs } from './inline.ts'
 import { defaultRoots, inventory } from './inventory.ts'
 import { optimizableFormats, optimizeAssets } from './optimize.ts'
 import { collectTokens, markReferences } from './references.ts'
@@ -41,6 +49,10 @@ export interface AnalyzeAssetsOptions {
   minSaving?: number
   /** Search source files for asset names. Default true. */
   references?: boolean
+  /** Check inline `<svg>` and `<path>` elements of markup and components. Default true unless `convert` is `off`. */
+  inlineSvg?: boolean
+  /** With `sharp`: encoded variants kept between runs (e.g. `artifactCache` on S3), so unchanged images are not encoded again. */
+  cache?: VariantCache
   signal?: AbortSignal
   log?: (line: string) => void
 }
@@ -57,15 +69,21 @@ export function collectArtifacts(data: AssetsData): Artifact[] {
   return runArtifacts.get(data) ?? []
 }
 
-/** Images worth optimizing with sharp: source rasters and SVGs above `minBytes`, largest first, at most `top`. */
+/**
+ * Images worth optimizing with sharp: source rasters and SVGs above `minBytes`, largest first, at
+ * most `top`. Paths in `skip` (generated variants, images already shipped in every format and
+ * size) are left out.
+ */
 export function optimizationCandidates(
   assets: readonly Asset[],
   minBytes: number,
   top: number,
+  skip: ReadonlySet<string> = new Set(),
 ): Asset[] {
   return assets
     .filter(
       (asset) =>
+        !skip.has(asset.path) &&
         asset.origin === 'source' &&
         asset.kind === 'image' &&
         (asset.format === 'svg'
@@ -100,7 +118,28 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
     assets = markReferences(assets, await collectTokens(options.dir, extra, options.ignore))
   }
   const engines = await detectEngines(options.dir)
-  const list = convert === 'off' ? [] : candidates(assets, options.minBytes ?? 8 * 1024)
+  const families = imageFamilies(assets)
+  const variants = variantPaths(families)
+  const covered = new Map(
+    families.flatMap((family) => [
+      [family.original.path, family.formats] as const,
+      ...family.members.map((member) => [member.path, family.formats] as const),
+    ]),
+  )
+  const done = new Set([
+    ...variants,
+    ...families
+      .filter((family) => hasModernFormats(family) && hasSizes(family))
+      .map((family) => family.original.path),
+  ])
+  const list =
+    convert === 'off'
+      ? []
+      : candidates(assets, options.minBytes ?? 8 * 1024).filter(
+          (candidate) =>
+            !variants.has(candidate.asset.path) &&
+            !covered.get(candidate.asset.path)?.has(candidate.suggested),
+        )
   const minSaving = options.minSaving ?? 2 * 1024
   let suggestions = estimateSuggestions(list, minSaving)
   let tools: string[] = []
@@ -122,6 +161,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       assets,
       options.minBytes ?? 8 * 1024,
       options.optimizeTop ?? 20,
+      done,
     )
     const sources = await usageSources(options.dir, options.ignore)
     const result = await optimizeAssets({
@@ -134,6 +174,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       minSaving,
       svgPreset: options.svgPreset ?? 'safe',
       ...(options.naming ? { naming: options.naming } : {}),
+      ...(options.cache ? { cache: options.cache } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       ...(options.log ? { log: options.log } : {}),
     })
@@ -145,6 +186,16 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       ...(result.svgs.some((svg) => !svg.error) ? ['svgo'] : []),
     ]
   }
+  const inline =
+    convert !== 'off' && options.inlineSvg !== false
+      ? await scanInlineSvgs({
+          dir: options.dir,
+          ...(options.ignore ? { ignore: options.ignore } : {}),
+        })
+      : undefined
+  if (inline?.inlineSvgs.length)
+    options.log?.(`assets: ${inline.inlineSvgs.length} inline SVGs worth optimizing`)
+  const changes = [...(optimized.changes ?? []), ...(inline?.changes ?? [])]
   const data: AssetsData = {
     roots: [...roots, ...buildRoots],
     engines,
@@ -153,10 +204,19 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
     assets,
     totals: totalsOf(assets),
     budgets: evaluateBudgets(assets, options.budgets ?? [], options.total ?? {}),
-    findings: findIssues(assets, { engines }),
+    findings: [
+      ...findIssues(assets, {
+        engines,
+        families,
+        ...(options.minBytes === undefined ? {} : { minBytes: options.minBytes }),
+      }),
+      ...(inline?.findings ?? []),
+    ],
     suggestions,
     duplicates: findDuplicates(assets),
     ...optimized,
+    ...(inline?.inlineSvgs.length ? { inlineSvgs: inline.inlineSvgs } : {}),
+    ...(changes.length ? { changes } : {}),
   }
   runArtifacts.set(data, artifacts)
   return data

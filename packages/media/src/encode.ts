@@ -4,7 +4,14 @@ import type { Sharp } from 'sharp'
 
 import { probeImage, requireSharp } from './probe.ts'
 import { ssim } from './ssim.ts'
-import type { EncodeFailure, EncodedVariant, ImageInfo, VariantSpec } from './types.ts'
+import type {
+  EncodeFailure,
+  EncodedVariant,
+  ImageInfo,
+  OutputFormat,
+  VariantCache,
+  VariantSpec,
+} from './types.ts'
 
 export interface EncodeOptions {
   /** Variants encoded at once. Default 2 (sharp already uses several threads per image). */
@@ -12,12 +19,16 @@ export interface EncodeOptions {
   signal?: AbortSignal
   /** Probe result of the input, when the caller already has it. */
   info?: ImageInfo
+  /** Reuses variants encoded before from the same bytes, spec and encoder versions. */
+  cache?: VariantCache
 }
 
 /** Encoded variants in spec order, and the specs that failed. */
 export interface EncodeResult {
   variants: EncodedVariant[]
   failures: EncodeFailure[]
+  /** Variants taken from `cache`, when one was given. */
+  cached?: number
 }
 
 const SSIM_SIDE = 256
@@ -27,6 +38,72 @@ const MAX_SEARCH_STEPS = 6
 export const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex')
 
 type SharpFactory = Awaited<ReturnType<typeof requireSharp>>
+
+const contentTypes: Record<OutputFormat, string> = {
+  avif: 'image/avif',
+  webp: 'image/webp',
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+}
+
+/** Libraries whose upgrades change encoded bytes; part of every cache key. */
+const encoderLibraries = [
+  'sharp',
+  'vips',
+  'aom',
+  'heif',
+  'webp',
+  'mozjpeg',
+  'png',
+  'imagequant',
+  'cgif',
+]
+
+/**
+ * Cache key of one variant: `media/v1/<source sha256>/<sha256 of spec and encoder versions>`.
+ * Any change to the spec (quality, SSIM target, size, effort) or to sharp's codecs is a new key.
+ */
+export function variantCacheKey(
+  sourceSha256: string,
+  spec: VariantSpec,
+  versions: Readonly<Record<string, string | undefined>>,
+): string {
+  const libraries = encoderLibraries.map((name) => `${name}=${versions[name] ?? ''}`).join(',')
+  const specKey = Object.entries(spec)
+    .filter(([key]) => key !== 'id' && key !== 'replacesOriginal')
+    .toSorted(([a], [b]) => a.localeCompare(b))
+  return `media/v1/${sourceSha256}/${sha256Hex(new TextEncoder().encode(JSON.stringify([specKey, libraries])))}`
+}
+
+const metaNumber = (meta: Record<string, unknown>, key: string) => {
+  const value = meta[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/** A cached variant, or `undefined` when the entry does not describe one for `spec`. */
+function fromCache(
+  spec: VariantSpec,
+  hit: { data: Uint8Array; meta: Record<string, unknown> },
+): EncodedVariant | undefined {
+  const width = metaNumber(hit.meta, 'width')
+  const height = metaNumber(hit.meta, 'height')
+  const quality = metaNumber(hit.meta, 'quality')
+  const score = metaNumber(hit.meta, 'ssim')
+  if (width === undefined || height === undefined || quality === undefined) return undefined
+  if (hit.meta.format !== spec.format || hit.data.byteLength === 0) return undefined
+  return {
+    spec,
+    bytes: hit.data.byteLength,
+    width,
+    height,
+    format: spec.format,
+    quality,
+    ...(score === undefined ? {} : { ssim: score }),
+    data: hit.data,
+    sha256: sha256Hex(hit.data),
+  }
+}
 
 function base(sharp: SharpFactory, input: Uint8Array, spec: VariantSpec, info: ImageInfo): Sharp {
   let image = sharp(input, spec.animated ? { animated: true } : {})
@@ -151,7 +228,8 @@ async function encodeOne(
  * Encodes every spec from one source image with sharp: EXIF orientation applied, metadata
  * stripped, ICC kept only for non-sRGB sources. Specs with `targetSsim` binary-search their
  * quality (at most six encodes) against the source at the same size. A spec that fails is
- * reported in `failures`, not thrown; an aborted signal throws.
+ * reported in `failures`, not thrown; an aborted signal throws. With `cache`, variants encoded
+ * before from the same bytes, spec and encoder versions are reused and new ones stored.
  */
 export async function encodeVariants(
   input: Uint8Array,
@@ -163,6 +241,31 @@ export async function encodeVariants(
   const results: (EncodedVariant | EncodeFailure | undefined)[] = Array.from({
     length: specs.length,
   })
+  const { cache } = options
+  const sourceSha256 = cache ? sha256Hex(input) : ''
+  let cached = 0
+  const encode = async (spec: VariantSpec): Promise<EncodedVariant> => {
+    if (!cache) return encodeOne(sharp, input, spec, info, options.signal)
+    const key = variantCacheKey(sourceSha256, spec, sharp.versions)
+    const hit = await cache.get(key)
+    const reused = hit && fromCache(spec, hit)
+    if (reused) {
+      cached++
+      return reused
+    }
+    const variant = await encodeOne(sharp, input, spec, info, options.signal)
+    await cache.set(key, variant.data, {
+      contentType: contentTypes[variant.format],
+      meta: {
+        format: variant.format,
+        width: variant.width,
+        height: variant.height,
+        quality: variant.quality,
+        ...(variant.ssim === undefined ? {} : { ssim: variant.ssim }),
+      },
+    })
+    return variant
+  }
   let next = 0
   const worker = async () => {
     while (next < specs.length) {
@@ -171,7 +274,7 @@ export async function encodeVariants(
       const spec = specs[index]
       if (!spec) continue
       try {
-        results[index] = await encodeOne(sharp, input, spec, info, options.signal)
+        results[index] = await encode(spec)
       } catch (error) {
         if (options.signal?.aborted) throw error
         results[index] = { spec, error: error instanceof Error ? error.message : String(error) }
@@ -186,5 +289,5 @@ export async function encodeVariants(
     if ('error' in result) failures.push(result)
     else variants.push(result)
   }
-  return { variants, failures }
+  return { variants, failures, ...(cache ? { cached } : {}) }
 }

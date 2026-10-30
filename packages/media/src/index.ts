@@ -10,7 +10,21 @@ export {
   rangeOf,
   replaceFile,
 } from './changes.ts'
-export { type EncodeOptions, type EncodeResult, encodeVariants, sha256Hex } from './encode.ts'
+export {
+  type EncodeOptions,
+  type EncodeResult,
+  encodeVariants,
+  sha256Hex,
+  variantCacheKey,
+} from './encode.ts'
+export {
+  type InlineSvgFinding,
+  type InlineSvgOptions,
+  type InlineSyntax,
+  inlineSyntaxOf,
+  optimizeInlineSvgs,
+  optimizePathData,
+} from './inline.ts'
 export {
   type PlanOptions,
   defaultQuality,
@@ -67,6 +81,7 @@ export {
   type ImageUsage,
   type OutputFormat,
   type SkippedFormat,
+  type VariantCache,
   type VariantPlan,
   type VariantSpec,
   outputFormats,

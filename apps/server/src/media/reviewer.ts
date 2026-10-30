@@ -1,6 +1,17 @@
 import type { ReviewComment } from '@holtkeeper/forge'
-import type { EncodedVariant, SnippetFramework, SnippetVariant } from '@holtkeeper/media'
-import type { MediaFile, MediaReviewInput, MediaReviewer, MediaUsage } from '@holtkeeper/review'
+import type {
+  EncodedVariant,
+  SnippetFramework,
+  SnippetVariant,
+  VariantCache,
+} from '@holtkeeper/media'
+import type {
+  MediaCodeFile,
+  MediaFile,
+  MediaReviewInput,
+  MediaReviewer,
+  MediaUsage,
+} from '@holtkeeper/review'
 
 import { loadMedia } from './adapter.ts'
 
@@ -15,6 +26,46 @@ export interface MediaReviewerOptions {
   minSaving?: number
   /** Added SVGs up to this many lines get a whole-file suggestion. Default 200. */
   maxSuggestionLines?: number
+  /** Encoded variants kept between reviews (e.g. `artifactCache` on S3), so re-pushes do not encode again. */
+  cache?: VariantCache
+}
+
+type Limits = Required<Omit<MediaReviewerOptions, 'publicUrl' | 'cache'>> & {
+  cache?: VariantCache
+}
+
+/** Images wider than this should come with smaller sizes. */
+const HIGH_RES_WIDTH = 1280
+
+const legacyFormats = new Set(['png', 'jpeg', 'jpg', 'gif'])
+
+const formatNames: Record<string, string> = { avif: 'AVIF', webp: 'WebP' }
+
+const stemOf = (path: string) => path.replace(/(?:-\d+w|@\d+(?:\.\d+)?x)?\.[^./]+$/, '')
+
+/** What the merge request ships next to `path`: other formats and sized variants of the same image. */
+function siblingsOf(path: string, paths: readonly string[]) {
+  const stem = stemOf(path)
+  const siblings = paths.filter((other) => other !== path && stemOf(other) === stem)
+  return {
+    formats: new Set(
+      siblings.map((other) => other.slice(other.lastIndexOf('.') + 1).toLowerCase()),
+    ),
+    sized: siblings.some((other) => /(?:-\d+w|@\d+(?:\.\d+)?x)\.[^./]+$/.test(other)),
+  }
+}
+
+/** Delivery notes for a raster: missing AVIF/WebP siblings, one large resolution only. */
+function deliveryNotes(file: MediaFile, width: number, paths: readonly string[]): string[] {
+  const format = file.path.slice(file.path.lastIndexOf('.') + 1).toLowerCase()
+  const siblings = siblingsOf(file.path, paths)
+  const notes: string[] = []
+  const missing = ['avif', 'webp'].filter((other) => !siblings.formats.has(other))
+  if (legacyFormats.has(format) && missing.length)
+    notes.push(`no ${missing.map((other) => formatNames[other]).join('/')} version comes with it`)
+  if (width > HIGH_RES_WIDTH && !siblings.sized && !/(?:-\d+w|@\d+x)\./.test(file.path))
+    notes.push(`only one resolution (${width} px wide): phones download the full-size file`)
+  return notes
 }
 
 type Media = Awaited<ReturnType<typeof loadMedia>>
@@ -61,7 +112,8 @@ async function reviewRaster(
   media: Media,
   file: MediaFile,
   usages: readonly MediaUsage[],
-  options: Required<Omit<MediaReviewerOptions, 'publicUrl'>>,
+  options: Limits,
+  paths: readonly string[],
 ): Promise<{ comments: ReviewComment[]; summary: string }> {
   const bytes = file.bytes
   if (!bytes) return { comments: [], summary: `\`${file.path}\`: not readable from the forge.` }
@@ -81,10 +133,17 @@ async function reviewRaster(
     }
   }
   const plan = media.planVariants(info)
-  const { variants } = await media.encodeVariants(bytes, plan.specs, { info })
+  const { variants } = await media.encodeVariants(bytes, plan.specs, {
+    info,
+    ...(options.cache ? { cache: options.cache } : {}),
+  })
   const original = { bytes: bytes.byteLength, width: info.width, format: info.format }
   const summary = media.savingsSummary(original, variants)
-  const table = media.savingsMarkdown(summary, `${file.path} · ${info.width}×${info.height}`)
+  const notes = info.animated ? [] : deliveryNotes(file, info.width, paths)
+  const table = [
+    media.savingsMarkdown(summary, `${file.path} · ${info.width}×${info.height}`),
+    ...(notes.length ? [`\`${file.path}\`: ${notes.join('; ')}.`] : []),
+  ].join('\n\n')
   const shipped = worthShipping(bytes.byteLength, variants, options.minSaving)
   const best = summary.best
   const comments: ReviewComment[] = []
@@ -124,10 +183,67 @@ async function reviewRaster(
   return { comments, summary: table }
 }
 
+/**
+ * Comments on inline SVGs whose lines the diff adds entirely, with a suggestion replacing exactly
+ * those lines; fragments touching untouched lines are only summarized.
+ */
+function reviewCode(
+  media: Media,
+  file: MediaCodeFile,
+): { comments: ReviewComment[]; summary?: string } {
+  const syntax = media.inlineSyntaxOf(file.path)
+  if (file.text === undefined || !syntax) return { comments: [] }
+  const added = new Set(file.addedLines)
+  const lines = file.text.split('\n')
+  const touched = media
+    .optimizeInlineSvgs(file.text, { syntax })
+    .filter((fragment) =>
+      Array.from(
+        { length: fragment.endLine - fragment.line + 1 },
+        (_, i) => fragment.line + i,
+      ).some((line) => added.has(line)),
+    )
+  if (!touched.length) return { comments: [] }
+  const comments: ReviewComment[] = []
+  for (const fragment of touched) {
+    const range = Array.from(
+      { length: fragment.endLine - fragment.line + 1 },
+      (_, i) => fragment.line + i,
+    )
+    if (!range.every((line) => added.has(line))) continue
+    const original = lines.slice(fragment.line - 1, fragment.endLine).join('\n')
+    const replacement = original.replace(fragment.oldText, fragment.newText)
+    if (replacement === original) continue
+    const saving = fragment.bytes.before - fragment.bytes.after
+    const percent = Math.round((saving / fragment.bytes.before) * 1000) / 10
+    comments.push({
+      path: file.path,
+      line: fragment.endLine,
+      ...(fragment.endLine > fragment.line ? { startLine: fragment.line } : {}),
+      body: [
+        fragment.kind === 'svg'
+          ? 'Optimize this inline SVG with svgo (safe preset)'
+          : 'Shorten the path data of this inline SVG',
+        '',
+        fragment.kind === 'svg'
+          ? `Saves ${saving} bytes (${percent}%): editor metadata, comments and excess decimals go; ids, classes and styles stay.`
+          : `Saves ${saving} bytes (${percent}%): path digits ${fragment.digits.before} → ${fragment.digits.after} at 3 decimals; nothing but the \`d\` values changes.`,
+      ].join('\n'),
+      suggestion: { replacement },
+    })
+  }
+  const before = touched.reduce((sum, fragment) => sum + fragment.bytes.before, 0)
+  const after = touched.reduce((sum, fragment) => sum + fragment.bytes.after, 0)
+  return {
+    comments,
+    summary: `\`${file.path}\`: ${touched.length} inline SVG${touched.length === 1 ? '' : 's'}, ${before} → ${after} bytes after svgo.`,
+  }
+}
+
 function reviewSvg(
   media: Media,
   file: MediaFile,
-  options: Required<Omit<MediaReviewerOptions, 'publicUrl'>>,
+  options: Limits,
 ): { comments: ReviewComment[]; summary?: string } {
   const text = file.text
   if (text === undefined)
@@ -169,16 +285,18 @@ function reviewSvg(
 
 /**
  * Reviews images of a merge request with `@holtkeeper/media`: a savings table per raster image
- * (original against AVIF/WebP/re-encoded, typical transfer at 375/768/1440 CSS px), a `<picture>`
- * suggestion on added usage lines, a whole-file svgo suggestion for added SVGs that are short
- * enough, and links to the media panel.
+ * (original against AVIF/WebP/re-encoded, typical transfer at 375/768/1440 CSS px) with a note
+ * when no AVIF/WebP or smaller sizes come along, a `<picture>` suggestion on added usage lines, a
+ * whole-file svgo suggestion for added SVGs that are short enough, suggestions for bloated inline
+ * SVGs on added code lines, and links to the media panel.
  */
 export function createMediaReviewer(options: MediaReviewerOptions = {}): MediaReviewer {
-  const limits = {
+  const limits: Limits = {
     maxBytes: options.maxBytes ?? 25 * 1024 * 1024,
     maxPixels: options.maxPixels ?? 50_000_000,
     minSaving: options.minSaving ?? 2048,
     maxSuggestionLines: options.maxSuggestionLines ?? 200,
+    ...(options.cache ? { cache: options.cache } : {}),
   }
   return {
     async review(input) {
@@ -190,13 +308,18 @@ export function createMediaReviewer(options: MediaReviewerOptions = {}): MediaRe
         const usages = input.usages.filter((usage) => usage.text.includes(name))
         const result = /\.svg$/i.test(file.path)
           ? reviewSvg(media, file, limits)
-          : await reviewRaster(media, file, usages, limits)
+          : await reviewRaster(media, file, usages, limits, input.paths)
         comments.push(...result.comments)
         if (!result.summary) continue
         const link = options.publicUrl
           ? `\n\n[Variants and snippets for \`${name}\`](${panelLink(options.publicUrl, input, file.path)})`
           : ''
         parts.push(`${result.summary}${link}`)
+      }
+      for (const file of input.code) {
+        const result = reviewCode(media, file)
+        comments.push(...result.comments)
+        if (result.summary) parts.push(result.summary)
       }
       return { comments, ...(parts.length ? { summary: parts.join('\n\n') } : {}) }
     },

@@ -39,6 +39,8 @@ export interface JobEngineOptions {
   admission?: WorkerOptions['admission']
   /** Stores the artifacts of runs; see `WorkerOptions.persistArtifacts`. */
   persistArtifacts?: WorkerOptions['persistArtifacts']
+  /** Cache shared between runs; see `ContextFactoryOptions.cache`. */
+  cache?: ContextFactoryOptions['cache']
   /** Overrides for this process's worker, e.g. from `serve --concurrency` / `--max-jobs`. */
   worker?: Pick<WorkerOptions, 'concurrency' | 'maxJobs' | 'workerId'>
   now?: () => Date
@@ -81,6 +83,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
         ...(options.toolchainFor && { toolchainFor: options.toolchainFor }),
         ...(options.gitKeyFor && { gitKeyFor: options.gitKeyFor }),
         ...(options.readOnly && { readOnly: options.readOnly }),
+        ...(options.cache && { cache: options.cache }),
       }),
     concurrency: jobs.concurrency,
     timeoutMs: jobs.timeoutMinutes * 60_000,

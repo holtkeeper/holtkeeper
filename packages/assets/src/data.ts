@@ -111,7 +111,14 @@ const budgetViolationSchema = z.object({
 /** An asset, or the total of a kind, above a configured budget. */
 export type BudgetViolation = z.infer<typeof budgetViolationSchema>
 
-const findingRules = ['huge-dimensions', 'non-power-of-two', 'unused'] as const
+const findingRules = [
+  'huge-dimensions',
+  'non-power-of-two',
+  'unused',
+  'missing-modern-formats',
+  'single-resolution',
+  'inline-svg',
+] as const
 
 export type FindingRule = (typeof findingRules)[number]
 
@@ -119,12 +126,17 @@ const findingSchema = z.object({
   id: z.string(),
   rule: z.enum(findingRules),
   path: z.string(),
+  /** 1-based line in `path`, for findings inside source files (`inline-svg`). */
+  line: z.number().optional(),
   tone: z.enum(['info', 'warning', 'bad']),
   title: z.string(),
   detail: z.string().optional(),
 })
 
-/** A problem that is not a budget: oversized textures, unused-looking files. */
+/**
+ * A problem that is not a budget: oversized textures, unused-looking files, rasters without
+ * AVIF/WebP versions, large images shipped in one resolution, bloated inline SVGs.
+ */
 export type Finding = z.infer<typeof findingSchema>
 
 const suggestionRules = [
@@ -257,6 +269,22 @@ export const svgOptimizationSchema = z.object({
 /** svgo result for one SVG, without the optimized text (that lives in the change). */
 export type SvgOptimizationData = z.infer<typeof svgOptimizationSchema>
 
+export const inlineSvgSchema = z.object({
+  /** Source file holding the fragment. */
+  file: z.string(),
+  line: z.number(),
+  endLine: z.number(),
+  /** `svg`: whole element rewritten with svgo; `paths`: only `d` values (JSX, bindings). */
+  kind: z.enum(['svg', 'paths']),
+  bytes: z.object({ before: z.number(), after: z.number() }),
+  digits: z.object({ before: z.number(), after: z.number() }),
+  paths: z.number(),
+  changeId: z.string().optional(),
+})
+
+/** One inline `<svg>` or `<path>` in a source file that svgo makes noticeably smaller. */
+export type InlineSvgData = z.infer<typeof inlineSvgSchema>
+
 export const assetsDataSchema = z.object({
   /** Globs that were scanned. */
   roots: z.array(z.string()),
@@ -275,7 +303,9 @@ export const assetsDataSchema = z.object({
   optimized: z.array(imageOptimizationSchema).optional(),
   /** SVGs optimized with svgo (`convert: 'sharp'`), largest first. */
   svgs: z.array(svgOptimizationSchema).optional(),
-  /** Proposed changes: SVG rewrites, image variants and markup swaps. */
+  /** Inline SVGs in markup and components worth optimizing, in file order. */
+  inlineSvgs: z.array(inlineSvgSchema).optional(),
+  /** Proposed changes: SVG rewrites, image variants, markup swaps and inline SVG rewrites. */
   changes: z.array(codeChangeSchema).optional(),
 })
 

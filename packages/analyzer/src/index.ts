@@ -5,6 +5,26 @@ import type { AnalysisKind } from '@holtkeeper/report'
 import type { AnalysisStore, AuditRunStore, CiJobStore } from '@holtkeeper/store'
 import type { z } from 'zod'
 
+/**
+ * Bytes kept between runs, e.g. on S3, under keys the analyzer derives from its inputs (source
+ * hash, settings, tool versions). Entries may vanish at any time, so a miss is normal; methods
+ * never throw. `artifactCache` from `@holtkeeper/artifacts` has this shape.
+ */
+export interface RunCache {
+  get(
+    key: string,
+  ): Promise<{ data: Uint8Array; meta: Record<string, string | number | boolean> } | undefined>
+  set(
+    key: string,
+    data: Uint8Array,
+    entry?: {
+      meta?: Record<string, string | number | boolean>
+      contentType?: string
+      name?: string
+    },
+  ): Promise<void>
+}
+
 /** Everything an analyzer may use; what is present depends on its `needs`. */
 export interface AnalyzerContext<Options> {
   /** Repository analyzed; for group analyzers `{ forge, path: <group name> }`. */
@@ -56,6 +76,8 @@ export interface AnalyzerContext<Options> {
     /** CI job attempts kept between runs, for analyzers that accumulate job history. */
     ciJobs?: CiJobStore
   }
+  /** Results of expensive work shared between runs (encoded image variants, ...), when the runner has a store. */
+  cache?: RunCache
   /** Release, tag or commit being analyzed, when the trigger knows it. */
   ref?: string
   options: Options

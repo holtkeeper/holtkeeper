@@ -10,6 +10,7 @@ import {
   type ImageUsage,
   type NamingScheme,
   type SvgPreset,
+  type VariantCache,
   encodeVariants,
   formatOfFile,
   imageSetValue,
@@ -43,6 +44,8 @@ export interface OptimizeOptions {
   minSaving: number
   svgPreset: SvgPreset
   naming?: NamingScheme
+  /** Encoded variants kept between runs; hits skip sharp. */
+  cache?: VariantCache
   signal?: AbortSignal
   log?: (line: string) => void
 }
@@ -163,10 +166,13 @@ async function optimizeRaster(
   }
   const { usage, displayWidth } = usageOf(references, options.engines)
   const plan = planVariants(info, { usage, ...(displayWidth ? { displayWidth } : {}) })
-  const { variants, failures } = await encodeVariants(input, plan.specs, {
+  const { variants, failures, cached } = await encodeVariants(input, plan.specs, {
     info,
+    ...(options.cache ? { cache: options.cache } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
   })
+  if (cached)
+    options.log?.(`assets: ${asset.path} ${cached}/${plan.specs.length} variants from cache`)
   const kept = proposedVariants(asset.bytes, variants, options.minSaving)
   const stored: ImageVariant[] = variants.map((variant) => ({
     id: variant.spec.id,

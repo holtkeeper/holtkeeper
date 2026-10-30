@@ -100,3 +100,23 @@ export interface EncodeFailure {
   spec: VariantSpec
   error: string
 }
+
+/**
+ * Encoded variants kept between runs, e.g. on S3, keyed by source bytes, spec and encoder
+ * versions. The shape of `BlobCache` from `@holtkeeper/artifacts`. Misses are normal; methods
+ * must not throw.
+ */
+export interface VariantCache {
+  get(
+    key: string,
+  ): Promise<{ data: Uint8Array; meta: Record<string, string | number | boolean> } | undefined>
+  set(
+    key: string,
+    data: Uint8Array,
+    entry?: {
+      meta?: Record<string, string | number | boolean>
+      contentType?: string
+      name?: string
+    },
+  ): Promise<void>
+}

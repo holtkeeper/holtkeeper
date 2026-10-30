@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   type ArtifactStore,
   type StoreOptions,
+  artifactCache,
   artifactId,
   artifactStorage,
   fsArtifactStore,
@@ -15,6 +16,12 @@ import {
 import { startFakeS3 } from './fake-s3.ts'
 
 const text = (value: string) => new TextEncoder().encode(value)
+
+const failure = (promise: Promise<unknown>) =>
+  promise.then(
+    () => 'resolved',
+    (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  )
 
 let s3: ReturnType<typeof startFakeS3>
 const dirs: string[] = []
@@ -126,6 +133,39 @@ for (const [name, create] of stores) {
       expect(await store.sweep({ maxBytes: 6 })).toEqual({ removed: 1, bytes: 6 })
       expect(await store.has(ids[1] ?? '')).toBe(false)
       expect(await store.has(ids[2] ?? '')).toBe(true)
+    })
+
+    test('points refs at stored artifacts and drops them with their target', async () => {
+      const store = await create({ now: () => new Date('2026-10-01T00:00:00Z') })
+      const { id } = await store.put(text('variant'))
+      expect(
+        await store.setRef('cache/media/abc/avif-640w', { id, meta: { width: 640, ok: true } }),
+      ).toEqual({ id, meta: { width: 640, ok: true }, updatedAt: '2026-10-01T00:00:00.000Z' })
+      expect(await store.getRef('cache/media/abc/avif-640w')).toMatchObject({ id })
+      expect(await store.getRef('cache/missing')).toBeUndefined()
+      expect(await store.getRef('../etc/passwd')).toBeUndefined()
+      expect(await failure(store.setRef('a/../b', { id }))).toContain('malformed')
+      expect(await failure(store.setRef('a', { id: 'f'.repeat(64) }))).toContain('not stored')
+      expect((await store.list()).items.map((item) => item.id)).toEqual([id])
+      await store.delete(id)
+      expect(await store.getRef('cache/media/abc/avif-640w')).toBeUndefined()
+      expect(await store.deleteRef('cache/media/abc/avif-640w')).toBe(true)
+      expect(await store.deleteRef('cache/media/abc/avif-640w')).toBe(false)
+    })
+
+    test('caches blobs by key through refs', async () => {
+      const store = await create({})
+      const cache = artifactCache(store, { namespace: 'test' })
+      expect(await cache.get('k')).toBeUndefined()
+      await cache.set('k', text('one'), { meta: { quality: 55 }, contentType: 'image/avif' })
+      await cache.set('with spaces?', text('two'))
+      const hit = await cache.get('k')
+      expect(new TextDecoder().decode(hit?.data)).toBe('one')
+      expect(hit?.meta).toEqual({ quality: 55 })
+      expect(new TextDecoder().decode((await cache.get('with spaces?'))?.data)).toBe('two')
+      expect((await store.usage()).byTag).toEqual({
+        kind: { cache: { count: 2, bytes: 6 } },
+      })
     })
 
     test('clears through the storage provider by tag', async () => {

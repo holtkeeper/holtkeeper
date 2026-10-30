@@ -99,7 +99,7 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 
 ## Context
 
-`createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, gitKeyFor?, readOnly?, workDir?, toolchainFor?, createRunner?, detectToolchain? })` gives each analyzer what its `needs` ask for:
+`createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, gitKeyFor?, readOnly?, workDir?, toolchainFor?, createRunner?, detectToolchain?, cache? })` gives each analyzer what its `needs` ask for:
 
 | Need / member         | Provided                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------- |
@@ -110,6 +110,7 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 | group scope           | `repos`: the group's repositories                                                                 |
 | `requiredCheckouts()` | `checkouts`: `forge:path` → dir for each extra repository the analyzer asks for                   |
 | always                | `checkout(repo, { ref?, writable? })` for on-demand checkouts, e.g. one per repository of a group |
+| `cache` option        | `cache`: a `RunCache` shared by all runs (`createJobEngine({ cache })`; the server's is S3/fs)    |
 
 Every checkout uses `@holtkeeper/workspace` with the forge's `gitCredentials?()` and is a private worktree (so writable and read-only checkouts are made the same way). All checkouts, including on-demand ones the analyzer did not clean up, are removed after the run.
 

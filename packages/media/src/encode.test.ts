@@ -2,10 +2,11 @@ import { expect, test } from 'bun:test'
 
 import sharp from 'sharp'
 
-import { encodeVariants } from './encode.ts'
+import { encodeVariants, variantCacheKey } from './encode.ts'
 import { planVariants } from './plan.ts'
 import { countColors, probeImage } from './probe.ts'
 import { ssim } from './ssim.ts'
+import type { VariantCache } from './types.ts'
 
 /** A photo-like image: smooth color gradients plus seeded noise. */
 async function photo(width: number, height: number, alpha = false): Promise<Uint8Array> {
@@ -195,4 +196,60 @@ test('countColors stops past the limit and ssim scores similarity', () => {
   expect(ssim(a, a, 16, 16)).toBeCloseTo(1, 6)
   const noisy = a.map((value, index) => (index % 2 ? 255 - value : value))
   expect(ssim(a, noisy, 16, 16)).toBeLessThan(0.5)
+})
+
+const mapCache = () => {
+  const entries = new Map<
+    string,
+    { data: Uint8Array; meta: Record<string, string | number | boolean> }
+  >()
+  const cache: VariantCache = {
+    get: async (key) => entries.get(key),
+    set: async (key, data, entry) => {
+      entries.set(key, { data, meta: entry?.meta ?? {} })
+    },
+  }
+  return { entries, cache }
+}
+
+test('reuses cached variants of the same bytes and spec', async () => {
+  const input = await photo(320, 200)
+  const info = await probeImage(input)
+  const plan = planVariants(info, { widths: [160], formats: ['avif', 'webp'] })
+  const { entries, cache } = mapCache()
+  const first = await encodeVariants(input, plan.specs, { info, cache })
+  expect(first.cached).toBe(0)
+  expect(entries.size).toBe(plan.specs.length)
+  const second = await encodeVariants(input, plan.specs, { info, cache })
+  expect(second.cached).toBe(plan.specs.length)
+  expect(second.variants.map((variant) => variant.sha256)).toEqual(
+    first.variants.map((variant) => variant.sha256),
+  )
+  expect(second.variants[0]).toMatchObject({
+    width: first.variants[0]?.width,
+    quality: first.variants[0]?.quality,
+  })
+
+  const lower = planVariants(info, { widths: [160], formats: ['avif'], quality: { avif: 40 } })
+  expect((await encodeVariants(input, lower.specs, { info, cache })).cached).toBe(0)
+})
+
+test('cache keys change with the spec and encoder versions, not the spec id', () => {
+  const spec = {
+    id: 'avif-640w',
+    format: 'avif',
+    width: 640,
+    height: 400,
+    quality: 55,
+    effort: 4,
+  } as const
+  const key = variantCacheKey('a'.repeat(64), spec, { sharp: '0.35.5', vips: '8.18.7' })
+  expect(key).toMatch(/^media\/v1\/a{64}\/[0-9a-f]{64}$/)
+  expect(
+    variantCacheKey('a'.repeat(64), { ...spec, id: 'other' }, { sharp: '0.35.5', vips: '8.18.7' }),
+  ).toBe(key)
+  expect(
+    variantCacheKey('a'.repeat(64), { ...spec, quality: 50 }, { sharp: '0.35.5', vips: '8.18.7' }),
+  ).not.toBe(key)
+  expect(variantCacheKey('a'.repeat(64), spec, { sharp: '0.36.0', vips: '8.18.7' })).not.toBe(key)
 })

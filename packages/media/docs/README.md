@@ -24,6 +24,7 @@ const { variants, failures } = await encodeVariants(bytes, plan.specs, {
   - `targetSsim` (e.g. `0.985`) marks lossy specs for a quality search between `quality − 30` and `quality`.
 - `encodeVariants(input, specs, options)` → `{ variants, failures }`. Every `EncodedVariant` has `spec`, `bytes`, `width`, `height`, `format`, `quality`, `ssim?`, `data` and `sha256`. EXIF orientation is applied, metadata is stripped, the ICC profile is kept only when it is not sRGB. A `targetSsim` spec binary-searches its quality with at most six encodes, scoring `ssim` (8×8-window SSIM on luma downscaled to 256 px, flattened on white) against the source resized to the same size; when no quality reaches the target the spec's own quality is used. A failing spec lands in `failures`; an aborted `signal` throws.
 - `ssim(a, b, width, height)` — the metric, on 8-bit single-channel buffers.
+- `cache` (`VariantCache`, the shape of `artifactCache` from `@holtkeeper/artifacts`): each spec is looked up under `variantCacheKey(sourceSha256, spec, sharp.versions)` = `media/v1/<source sha256>/<sha256 of the spec (without id) and the versions of sharp, libvips and the codecs>`; a hit (bytes plus `format`, `width`, `height`, `quality`, `ssim` meta) skips sharp, a miss is encoded and stored. `EncodeResult.cached` counts the hits. A different quality, SSIM target, size or a sharp upgrade is a new key; the cache never returns bytes for another spec.
 
 ## SVG
 
@@ -38,6 +39,15 @@ const { variants, failures } = await encodeVariants(bytes, plan.specs, {
 Precision defaults to 3 decimals. `viewBox` is never removed: svgo v4 keeps it, and if a plugin still drops it, it is restored and reported.
 
 `breakdown` (`SvgBreakdown`): `removedElements` and `removedAttributes` (name → count), `metadata` (metadata elements, editor-namespaced elements, `<?xml?>`, doctype), `comments`, `paths.before/after` (`PathStats`: paths, commands, coordinates, digits, three longest `d` with their ids), `styles` (inline `style` attributes and `<style>` elements before/after), `ids` (before, after, minified) and `issues` (`missing-viewbox`, `size-without-viewbox`, `aspect-mismatch`, `embedded-raster`, `viewbox-restored`). `scanTags` and `pathStats` are the underlying scanners.
+
+## Inline SVG
+
+`optimizeInlineSvgs(text, { syntax, precision?, minSaving? })` → `InlineSvgFinding[]` for `<svg>…</svg>` elements and stray `<path>` elements of a source file (`syntax`: `html`, `jsx`, `vue`, `svelte`; `inlineSyntaxOf(file)` picks it from the extension). Each finding has `kind`, offsets `start`/`end`, 1-based `line`/`endLine`, `oldText`, `newText`, `bytes`, path `digits` before/after and `paths`.
+
+- `svg`: a static element in HTML, Vue or Svelte (no `{}`, `:`/`@`/`v-`/`#` bindings) rewritten whole with the `safe` preset.
+- `paths`: JSX and elements with bindings keep every attribute as written; only literal `d` values (`d="…"`, `d={'…'}`, ``d={`…`}``) are rewritten by `optimizePathData(d, precision)` — svgo's `convertPathData` at 3 decimals, run under round stroke caps so dot segments (`h.01`, zero-length subpaths) survive.
+
+A fragment is reported when it saves at least `minSaving` (default 32) bytes and 5%. Findings are in file order and never overlap.
 
 ## Snippets
 

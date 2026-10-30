@@ -41,6 +41,7 @@ export {
   type ImageMeta,
   type ImageOptimization,
   type ImageVariant,
+  type InlineSvgData,
   type SvgOptimizationData,
   type KindTotal,
   type Suggestion,
@@ -52,11 +53,26 @@ export {
   budgetSchema,
   imageOptimizationSchema,
   imageVariantSchema,
+  inlineSvgSchema,
   svgOptimizationSchema,
   totalBudgetsSchema,
 } from './data.ts'
 export { detectEngines, enginesOf } from './engine.ts'
-export { MAX_TEXTURE_SIDE, findDuplicates, findIssues, wasted } from './findings.ts'
+export {
+  type ImageFamily,
+  hasModernFormats,
+  hasSizes,
+  imageFamilies,
+  variantPaths,
+} from './families.ts'
+export {
+  HIGH_RES_WIDTH,
+  MAX_TEXTURE_SIDE,
+  deliveryIssues,
+  findDuplicates,
+  findIssues,
+  wasted,
+} from './findings.ts'
 export { describe, extensionOf } from './formats.ts'
 export { glbJson, parseFnt, parseJsonAtlas, parseTextAtlas } from './headers/atlas.ts'
 export {
@@ -78,6 +94,7 @@ export {
   parseSvg,
   parseWebp,
 } from './headers/image.ts'
+export { type InlineSvgResult, inlineSvgFile, inlineSvgPatterns, scanInlineSvgs } from './inline.ts'
 export {
   type OptimizeOptions,
   type OptimizeResult,

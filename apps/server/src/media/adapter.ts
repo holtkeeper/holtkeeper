@@ -1,5 +1,5 @@
 import type * as Media from '@holtkeeper/media'
-import type { OutputFormat, PlanOptions, SnippetVariant } from '@holtkeeper/media'
+import type { OutputFormat, PlanOptions, SnippetVariant, VariantCache } from '@holtkeeper/media'
 
 import type { MediaEngine, MediaImageInfo, MediaSvgOutput, MediaVariantOptions } from './engine.ts'
 
@@ -74,9 +74,10 @@ const sum = (counts: Record<string, number>) =>
 
 /**
  * The real engine, `@holtkeeper/media` (sharp, svgo), loaded on first use so the server starts
- * without native image libraries until someone requests variants.
+ * without native image libraries until someone requests variants. With `cache`, variants encoded
+ * before (by the panel, a review or an assets analysis) are reused.
  */
-export function mediaEngine(): MediaEngine {
+export function mediaEngine(engine: { cache?: VariantCache } = {}): MediaEngine {
   return {
     async variants({ data, file, options, maxPixels }) {
       const media = await loadMedia()
@@ -86,7 +87,10 @@ export function mediaEngine(): MediaEngine {
         throw new Error(`more than ${maxPixels} pixels`)
       const info = await media.probeImage(data)
       const plan = media.planVariants(info, planOptionsOf(options, media.outputFormats))
-      const { variants, failures } = await media.encodeVariants(data, plan.specs, { info })
+      const { variants, failures } = await media.encodeVariants(data, plan.specs, {
+        info,
+        ...(engine.cache ? { cache: engine.cache } : {}),
+      })
       if (!variants.length && failures[0]) throw new Error(failures[0].error)
       return {
         original: {

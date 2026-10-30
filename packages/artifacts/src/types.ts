@@ -74,6 +74,21 @@ export interface PresignOptions {
   filename?: string
 }
 
+/** Scalar values a ref may carry next to the artifact id. */
+export type RefMeta = Record<string, string | number | boolean>
+
+/**
+ * A named pointer to an artifact, like a git ref: lets callers find content by a key they can
+ * compute (e.g. the inputs of an expensive encode) instead of by its hash.
+ */
+export interface ArtifactRef {
+  /** Artifact the ref points at. */
+  id: string
+  /** Small facts about the target the caller needs without reading it, e.g. image dimensions. */
+  meta?: RefMeta
+  updatedAt: string
+}
+
 /**
  * Content-addressed blob storage for generated files (image variants, optimized SVGs, archives).
  * The id is the SHA-256 of the content, so storing the same bytes twice keeps one copy and an id
@@ -100,4 +115,17 @@ export interface ArtifactStore {
    * on stores that support it (S3). Resolves `undefined` for unknown ids.
    */
   presign?(id: string, options?: PresignOptions): Promise<string | undefined>
+  /**
+   * The ref `name` points at; `undefined` when the name is unknown or malformed, or its artifact
+   * is gone (deleted or swept). Does not count as an access of the artifact.
+   */
+  getRef(name: string): Promise<ArtifactRef | undefined>
+  /**
+   * Points `name` at a stored artifact, replacing any earlier target. Names are `/`-separated
+   * segments of letters, digits, `.`, `_`, `-` and `:` (no `..`), at most 512 characters.
+   * Throws for a malformed name or an unknown artifact.
+   */
+  setRef(name: string, ref: { id: string; meta?: RefMeta }): Promise<ArtifactRef>
+  /** `false` when there was no such ref. The artifact itself stays. */
+  deleteRef(name: string): Promise<boolean>
 }
