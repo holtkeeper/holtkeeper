@@ -1,6 +1,6 @@
 import type { ReleaseBackfillInput, ReleaseBackfillResult } from '@holtkeeper/api'
 import { releaseTarget } from '@holtkeeper/changelog'
-import type { RepoRef } from '@holtkeeper/forge'
+import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import { type JobRequest, enqueueUnique, groupRepositories } from '@holtkeeper/jobs'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -20,6 +20,22 @@ const GLOBAL = { kind: 'global' } as const
 /** Monorepos tag every package a release publishes; enough tags to still find `limit` releases. */
 const TAGS_PER_RELEASE = 10
 const MAX_TAGS = 1000
+
+type ListTags = NonNullable<GitForge['listTags']>
+
+const releasesOf = (tags: { name: string; sha: string }[]) => [...new Set(tags.map(releaseTarget))]
+
+/**
+ * The newest `limit` releases. Lists `limit` tags first and lists more only when they hold fewer
+ * releases because commits carry several package tags, so plain repositories cost one call.
+ */
+async function newestReleases(listTags: ListTags, repo: string, limit: number) {
+  const first = await listTags(repo, { limit })
+  const releases = releasesOf(first)
+  if (first.length < limit || releases.length >= limit) return releases.slice(0, limit)
+  const more = await listTags(repo, { limit: Math.min(limit * TAGS_PER_RELEASE, MAX_TAGS) })
+  return releasesOf(more).slice(0, limit)
+}
 
 const backfillSchema = z.object({
   repo: z.string().min(1).optional(),
@@ -81,10 +97,7 @@ export function releaseRoutes(deps: ServerDeps) {
         const forge = config.forges[target.forge]?.create()
         if (!forge?.listTags) throw new Error(`forge ${target.forge} cannot list tags`)
         // oxlint-disable-next-line no-await-in-loop -- one repository at a time keeps forge limits
-        const tags = await forge.listTags(target.path, {
-          limit: Math.min(limit * TAGS_PER_RELEASE, MAX_TAGS),
-        })
-        const releases = [...new Set(tags.map(releaseTarget))].slice(0, limit)
+        const releases = await newestReleases(forge.listTags.bind(forge), target.path, limit)
         // oxlint-disable-next-line no-await-in-loop -- see above
         const done = await store.analyses.list({ repo: target, kind: 'changelog', limit: 500 })
         const analyzed = new Set(done.flatMap((record) => (record.ref ? [record.ref] : [])))

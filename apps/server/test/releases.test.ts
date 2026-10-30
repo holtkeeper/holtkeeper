@@ -26,6 +26,8 @@ const packageTags = [
   { name: '@games/chip@1.5.0', sha: 'd', committedAt: '2026-10-01T00:00:00Z' },
 ]
 
+const listed: { repo: string; limit?: number }[] = []
+
 const config = parseConfig({
   forges: {
     work: {
@@ -34,8 +36,10 @@ const config = parseConfig({
       create: () =>
         ({
           getRepository: async () => ({ archived: false }),
-          listTags: async (repo: string, query: { limit?: number } = {}) =>
-            (repo === 'libs/ui' ? packageTags : tags).slice(0, query.limit),
+          listTags: async (repo: string, query: { limit?: number } = {}) => {
+            listed.push({ repo, ...query })
+            return (repo === 'libs/ui' ? packageTags : tags).slice(0, query.limit)
+          },
         }) as never,
     },
   },
@@ -59,6 +63,7 @@ let store: Store
 let app: ReturnType<typeof createApp>
 
 beforeEach(() => {
+  listed.length = 0
   store = memoryStore()
   const vault = aesVault('v'.repeat(32))
   app = createApp({
@@ -136,6 +141,15 @@ describe('release backfill', () => {
     expect(result).toMatchObject({ tags: 2, queued: 2, skipped: 0 })
     const jobs = await store.jobs.list({ repo: { forge: 'work', path: 'libs/ui' } })
     expect(jobs.map((job) => job.ref).toReversed()).toEqual(['e', 'f'])
+    expect(listed).toEqual([
+      { repo: 'libs/ui', limit: 2 },
+      { repo: 'libs/ui', limit: 20 },
+    ])
+  })
+
+  test('plain repositories list their tags once', async () => {
+    await backfill({ repo: 'work:games/a', limit: 2 })
+    expect(listed).toEqual([{ repo: 'games/a', limit: 2 }])
   })
 
   test('the whole fleet needs analyses:run everywhere', async () => {
