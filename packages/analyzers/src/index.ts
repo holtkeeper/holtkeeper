@@ -1,5 +1,6 @@
 import { type AnyAnalyzer, defineAnalyzer } from '@holtkeeper/analyzer'
 import { assetsAnalyzer } from '@holtkeeper/assets'
+import { branchesAnalyzer } from '@holtkeeper/branches'
 import { analyzeBundle, bundleAnalysis } from '@holtkeeper/bundles'
 import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/changelog'
 import { ciJobsAnalyzer } from '@holtkeeper/ci-jobs'
@@ -167,6 +168,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   fleetAnalyzer,
   assetsAnalyzer,
   deliveryAnalyzer,
+  branchesAnalyzer,
   ciJobsAnalyzer,
   i18nAnalyzer,
   propagateAnalyzer,

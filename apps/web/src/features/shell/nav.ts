@@ -7,6 +7,7 @@ import {
   FileSearch,
   FlaskConical,
   FolderGit2,
+  GitBranch,
   Gauge,
   HardDrive,
   KeyRound,
@@ -37,6 +38,7 @@ export interface NavItem {
     | '/quality'
     | '/coverage'
     | '/testids'
+    | '/branches'
     | '/ci'
     | '/licenses'
     | '/jobs'
@@ -67,6 +69,7 @@ const navItems: readonly NavItem[] = [
   { to: '/quality', label: 'Code quality', icon: Gauge, requires: 'analyses:read' },
   { to: '/coverage', label: 'Test coverage', icon: FlaskConical, requires: 'analyses:read' },
   { to: '/testids', label: 'Test ids', icon: MousePointerClick, requires: 'analyses:read' },
+  { to: '/branches', label: 'Branches', icon: GitBranch, requires: 'analyses:read' },
   { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
   { to: '/licenses', label: 'Licenses', icon: Scale, requires: 'analyses:read' },
   { to: '/jobs', label: 'Jobs', icon: ListChecks, requires: 'analyses:read' },

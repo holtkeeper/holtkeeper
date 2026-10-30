@@ -3,6 +3,10 @@ import type { FetchLike } from '../src/http.ts'
 interface Branch {
   sha: string
   files: Map<string, string | Uint8Array>
+  committed_date?: string
+  author_name?: string
+  merged?: boolean
+  protected?: boolean
 }
 
 interface FakeMergeRequest {
@@ -384,6 +388,14 @@ export class FakeGitLab {
     return deployment
   }
 
+  addBranch(
+    project: FakeProject,
+    name: string,
+    input: Pick<Branch, 'committed_date' | 'author_name' | 'merged' | 'protected'> = {},
+  ) {
+    project.branches.set(name, { ...input, sha: this.sha(), files: new Map() })
+  }
+
   addTag(
     project: FakeProject,
     name: string,
@@ -474,6 +486,22 @@ export class FakeGitLab {
         project.branches.set(name, { sha: from.sha, files: new Map(from.files) })
         return json(201, { name, commit: { id: from.sha } })
       }
+      if (method === 'GET' && rest.length === 2)
+        return this.page(
+          url,
+          [...project.branches].map(([name, b]) => ({
+            name,
+            merged: b.merged ?? false,
+            protected: b.protected ?? name === project.defaultBranch,
+            default: name === project.defaultBranch,
+            web_url: this.webUrl(`${project.path}/-/tree/${name}`),
+            commit: {
+              id: b.sha,
+              committed_date: b.committed_date ?? EPOCH,
+              author_name: b.author_name ?? 'Fake User',
+            },
+          })),
+        )
       const branch = project.branches.get(rest[2] ?? '')
       if (!branch) return json(404, { message: '404 Branch Not Found' })
       if (method === 'GET') return json(200, { name: rest[2], commit: { id: branch.sha } })

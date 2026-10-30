@@ -19,6 +19,7 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `fleet`        | group | shared library versions and config drift across a group                   |
 | `assets`       | repo  | asset inventory checked against budgets, with smaller formats suggested   |
 | `delivery`     | repo  | DORA metrics, CI health and merge request flow                            |
+| `branches`     | repo  | branches to clean up: merged, closed unmerged or stale, per author        |
 | `ci-jobs`      | repo  | CI job durations and failures over time                                   |
 | `i18n`         | repo  | translation gaps per locale                                               |
 | `propagate`    | group | package updates rolled out across a group, with fixes for what breaks     |

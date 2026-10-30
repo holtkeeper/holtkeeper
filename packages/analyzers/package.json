@@ -9,6 +9,7 @@
   "dependencies": {
     "@holtkeeper/analyzer": "workspace:*",
     "@holtkeeper/assets": "workspace:*",
+    "@holtkeeper/branches": "workspace:*",
     "@holtkeeper/bundles": "workspace:*",
     "@holtkeeper/changelog": "workspace:*",
     "@holtkeeper/ci-jobs": "workspace:*",

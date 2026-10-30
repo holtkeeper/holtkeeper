@@ -14,7 +14,16 @@ import { scheduleDataSchema, triggerDataSchema } from './documents.ts'
 
 const file = parseConfig({ forges: {}, groups: {} })
 const now = () => new Date('2026-10-30T12:00:00.000Z')
-const kinds = ['ci-jobs', 'delivery', 'depgraph', 'quality', 'coverage', 'testids', 'changelog']
+const kinds = [
+  'ci-jobs',
+  'delivery',
+  'depgraph',
+  'quality',
+  'coverage',
+  'testids',
+  'branches',
+  'changelog',
+]
 
 describe('seedDefaults', () => {
   test('every default is a valid document', () => {
@@ -32,6 +41,7 @@ describe('seedDefaults', () => {
       'schedule:security-weekly',
       'schedule:quality-weekly',
       'schedule:tests-weekly',
+      'schedule:branches-weekly',
       'trigger:tag',
     ])
     expect(await store.config?.get('schedule', 'security-weekly')).toMatchObject({
@@ -59,6 +69,7 @@ describe('seedDefaults', () => {
     expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
       'schedule:quality-weekly',
       'schedule:tests-weekly',
+      'schedule:branches-weekly',
       'trigger:tag',
     ])
   })
@@ -71,6 +82,7 @@ describe('seedDefaults', () => {
     await store.kv?.set(defaultMarker('trigger', 'tag'), { at: '2026-10-29T00:00:00.000Z' })
     expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
       'schedule:tests-weekly',
+      'schedule:branches-weekly',
     ])
     expect((await store.config?.get('schedule', 'tests-weekly'))?.data).toMatchObject({
       analyzers: ['coverage', 'testids'],

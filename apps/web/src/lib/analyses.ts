@@ -69,6 +69,14 @@ export const analysisPages = [
     trend: [/with test id/i, /missing/i],
   },
   {
+    to: '/branches',
+    kind: 'branches',
+    title: 'Branches',
+    icon: 'repos',
+    description: 'Merged, abandoned and stale branches to delete',
+    trend: [/clean up/i, /stale/i],
+  },
+  {
     to: '/ci',
     kind: 'ci-jobs',
     title: 'CI jobs',

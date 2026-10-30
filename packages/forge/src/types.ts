@@ -228,6 +228,22 @@ export interface TagRecord extends Tag {
   createdAt?: string
 }
 
+/** A branch with its head commit, for branch hygiene. Times are ISO 8601. */
+export interface BranchRecord {
+  name: string
+  sha: string
+  /** Commit date of the head commit. */
+  committedAt: string
+  /** Author of the head commit, when the forge reports it. */
+  authorName?: string
+  authorEmail?: string
+  /** The head commit is reachable from the default branch (squash merges do not count). */
+  merged: boolean
+  protected: boolean
+  default: boolean
+  webUrl?: string
+}
+
 /** An entry of a repository tree, with its path from the repository root. */
 export interface TreeEntry {
   path: string
@@ -381,6 +397,8 @@ export interface GitForge {
   listDeployments?(repo: string, query?: DeploymentQuery): Promise<Deployment[]>
   /** Tags, most recently updated first. */
   listTags?(repo: string, query?: { limit?: number }): Promise<TagRecord[]>
+  /** Every branch of the repository, the default branch included, in no particular order. */
+  listBranches?(repo: string): Promise<BranchRecord[]>
 
   // Code review. Optional so forges can add them one by one.
 

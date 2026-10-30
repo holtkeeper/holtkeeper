@@ -251,6 +251,7 @@
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
         "@holtkeeper/assets": "workspace:*",
+        "@holtkeeper/branches": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/ci-jobs": "workspace:*",
@@ -361,6 +362,16 @@
         "@holtkeeper/store": "workspace:*",
         "@simplewebauthn/server": "^14.0.3",
         "openid-client": "^6.8.8",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/branches": {
+      "name": "@holtkeeper/branches",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -1150,6 +1161,8 @@
     "@holtkeeper/auth-password": ["@holtkeeper/auth-password@workspace:packages/auth-password"],
 
     "@holtkeeper/auth-users": ["@holtkeeper/auth-users@workspace:packages/auth-users"],
+
+    "@holtkeeper/branches": ["@holtkeeper/branches@workspace:packages/branches"],
 
     "@holtkeeper/brand": ["@holtkeeper/brand@workspace:packages/brand"],
 

@@ -24,15 +24,15 @@ interface ForgeDefinition {
 
 Repositories are addressed by their full path (`games/app-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
 
-| Area                 | Methods                                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                      |
-| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)               |
-| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest` |
-| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                            |
-| Tags                 | `createTag`                                                                                                  |
-| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                           |
-| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`  |
+| Area                 | Methods                                                                                                                     |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                     |
+| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                              |
+| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                |
+| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                           |
+| Tags                 | `createTag`                                                                                                                 |
+| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                          |
+| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches` |
 
 ### Listing files
 
@@ -51,6 +51,7 @@ Optional, read-only history for delivery analytics (`@holtkeeper/delivery`). Ada
 | `getRepositoryAvatar(repo)`                                                 | `ForgeImage { data, contentType }`: the project's avatar, else the nearest parent group's; `undefined` when none has one. `imageType(bytes)` tells PNG, JPEG, GIF, WebP and SVG apart by signature                            |
 | `listDeployments(repo, { environment?, after?, limit? })`                   | `Deployment`: `id`, `environment`, `status` (`pending`, `running`, `success`, `failed`, `canceled`, `skipped`, `blocked`), `sha`, `ref`, `createdAt`, `finishedAt?`; `after` filters by update time                           |
 | `listTags(repo, { limit? })`                                                | `TagRecord`: a `Tag` plus `committedAt` (date of the tagged commit) and `createdAt?` (annotated tags)                                                                                                                         |
+| `listBranches(repo)`                                                        | `BranchRecord`: every branch with `name`, head `sha`, `committedAt`, `authorName?`, `authorEmail?`, `merged` (head reachable from the default branch; squash merges do not count), `protected`, `default`, `webUrl?`          |
 
 This covers the first milestones (browserslist, audit, releases). Diffs, line threads with suggestions and webhook events are added with code review.
 

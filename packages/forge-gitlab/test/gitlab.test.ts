@@ -721,6 +721,42 @@ describe('insight reads', () => {
   })
 })
 
+describe('listBranches', () => {
+  test('lists every branch with its head commit, following pages', async () => {
+    const { server, forge } = setup({ perPage: 1 })
+    const project = server.addProject('g/a')
+    server.addBranch(project, 'feature/x', {
+      committed_date: '2026-03-01T00:00:00Z',
+      author_name: 'Ann',
+      merged: true,
+    })
+    const branches = await forge.listBranches?.('g/a')
+    expect(branches).toEqual([
+      {
+        name: 'main',
+        sha: expect.any(String),
+        committedAt: '2026-01-01T00:00:00.000Z',
+        authorName: 'Fake User',
+        merged: false,
+        protected: true,
+        default: true,
+        webUrl: expect.stringContaining('g/a/-/tree/main'),
+      },
+      {
+        name: 'feature/x',
+        sha: expect.any(String),
+        committedAt: '2026-03-01T00:00:00Z',
+        authorName: 'Ann',
+        merged: true,
+        protected: false,
+        default: false,
+        webUrl: expect.stringContaining('g/a/-/tree/feature/x'),
+      },
+    ])
+    expect(server.calls).toHaveLength(2)
+  })
+})
+
 describe('listFiles', () => {
   const files = {
     'package.json': '{}',

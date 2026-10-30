@@ -45,7 +45,7 @@ holtkeeper analyze depgraph .
 holtkeeper analyze licenses . --deny 'GPL-*,AGPL-*'
 ```
 
-`holtkeeper --help` lists every kind with its flags: `changelog`, `bundle`, `depgraph`, `quality`, `coverage`, `testids`, `licenses`, `release-risk`, `fleet`, `assets`, `delivery`, `i18n`, `propagate`, `port` and `review`. Analyzers that use an LLM take `--model` and need `ANTHROPIC_API_KEY`.
+`holtkeeper --help` lists every kind with its flags: `changelog`, `bundle`, `depgraph`, `quality`, `coverage`, `testids`, `licenses`, `release-risk`, `fleet`, `assets`, `delivery`, `branches`, `i18n`, `propagate`, `port` and `review`. Analyzers that use an LLM take `--model` and need `ANTHROPIC_API_KEY`.
 
 ## Describe your fleet
 

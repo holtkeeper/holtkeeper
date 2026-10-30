@@ -31,6 +31,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Code quality',
     'Test coverage',
     'Test ids',
+    'Branches',
     'CI jobs',
     'Licenses',
     'Jobs',

@@ -1,0 +1,15 @@
+{
+  "name": "@holtkeeper/branches",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

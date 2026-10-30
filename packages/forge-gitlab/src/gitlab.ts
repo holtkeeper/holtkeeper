@@ -139,6 +139,21 @@ const tagRecordSchema = z.object({
   created_at: time,
 })
 
+const branchRecordSchema = z.object({
+  name: z.string(),
+  merged: z.boolean().nullable().optional(),
+  protected: z.boolean().nullable().optional(),
+  default: z.boolean().nullable().optional(),
+  web_url: z.string().nullable().optional(),
+  commit: z.object({
+    id: z.string(),
+    committed_date: time,
+    created_at: time,
+    author_name: z.string().nullable().optional(),
+    author_email: z.string().nullable().optional(),
+  }),
+})
+
 const treeEntrySchema = z.object({ path: z.string(), type: z.string() })
 
 const mergeRequestDetailSchema = mergeRequestSchema.extend({
@@ -915,6 +930,23 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         sha: tag.commit.id,
         committedAt: tag.commit.committed_date ?? tag.commit.created_at ?? tag.created_at ?? '',
         createdAt: tag.created_at ?? undefined,
+      }))
+    },
+
+    async listBranches(repo) {
+      const list = client.paginate(`${project(repo)}/repository/branches`, branchRecordSchema, {
+        per_page: pageSize(undefined),
+      })
+      return (await take(list, undefined)).map((branch) => ({
+        name: branch.name,
+        sha: branch.commit.id,
+        committedAt: branch.commit.committed_date ?? branch.commit.created_at ?? '',
+        ...(branch.commit.author_name ? { authorName: branch.commit.author_name } : {}),
+        ...(branch.commit.author_email ? { authorEmail: branch.commit.author_email } : {}),
+        merged: branch.merged ?? false,
+        protected: branch.protected ?? false,
+        default: branch.default ?? false,
+        ...(branch.web_url ? { webUrl: branch.web_url } : {}),
       }))
     },
 
