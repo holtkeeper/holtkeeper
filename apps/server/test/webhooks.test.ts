@@ -12,7 +12,7 @@ import { z } from 'zod'
 
 import { createApp } from '../src/app.ts'
 import type { JobAnalyzerInfo } from '../src/context.ts'
-import { commandOptions, parseCommand } from '../src/routes/webhooks.ts'
+import { commandOptions, parseCommand } from '../src/events.ts'
 
 const HEAD = 'c'.repeat(40)
 

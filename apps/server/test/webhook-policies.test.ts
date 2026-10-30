@@ -11,7 +11,7 @@ import { aesVault } from '@holtkeeper/vault'
 import { z } from 'zod'
 
 import { createApp } from '../src/app.ts'
-import { mergeRequestAction } from '../src/routes/webhooks.ts'
+import { mergeRequestAction } from '../src/events.ts'
 
 const HEAD = 'c'.repeat(40)
 

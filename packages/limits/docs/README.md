@@ -19,6 +19,7 @@ interface LimitPolicy {
   tokensPerDay?: number // per UTC day; reaching it denies with LimitExceededError
   costPerDayUsd?: number // per UTC day; reaching it denies with LimitExceededError
   backoff?: { onStatus: number[]; baseMs: number; maxMs: number }
+  pollShare?: number // 0–1: share of requestsPerMinute polling may use; the limiter ignores it
 }
 ```
 

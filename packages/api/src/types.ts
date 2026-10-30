@@ -850,3 +850,56 @@ export interface SchedulePreview {
   timezone: string
   runs: Timestamp[]
 }
+
+/** How one repository learns about forge changes. */
+export interface RepoUpdatesView {
+  repo: RepoRef
+  polling: {
+    /** From the `polling` setting that applies to the repository. */
+    enabled: boolean
+    intervalMs: number
+    events: ('mergeRequests' | 'notes' | 'pipelines' | 'tags')[]
+    /** Interval while webhooks reach the repository; absent when polling stops then. */
+    withWebhookMs?: number
+    /** Interval in effect after the webhook fallback and the credential's polling budget. */
+    effectiveIntervalMs?: number
+    /** How much the credential's budget slowed polling down; 1 when it did not. */
+    stretch?: number
+    /** Limiter key the polls draw from. */
+    key: string
+    lastPolledAt?: Timestamp
+    nextAt?: Timestamp
+    lastError?: string
+    lastEvents?: number
+    lastRequests?: number
+  }
+  /** Last webhook delivery about the repository through any webhook URL. */
+  webhookSeenAt?: Timestamp
+  /** Whether webhooks currently stand in for regular polling. */
+  viaWebhook: boolean
+  /** The repository's own webhook; absent until one is generated. */
+  webhook?: {
+    /** Contains the secret token; shown to callers who may change settings of the repository. */
+    url?: string
+    createdAt: Timestamp
+    registered?: RegisteredWebhook[]
+    lastDelivery?: { at: Timestamp; event: string; enqueued: number; ignored?: string }
+  }
+  /** Whether the forge can register the webhook itself. */
+  canRegister: boolean
+}
+
+/** `POST /api/repos/updates/webhook`: issues (or rotates) the repository's webhook URL. */
+export interface RepoWebhookInput {
+  repo: string
+  /** Also create or update the hook on the forge. Default: when it was registered before. */
+  register?: boolean
+}
+
+/** Result of `POST /api/repos/updates/poll`. */
+export interface RepoPollResult {
+  events?: number
+  enqueued?: number
+  error?: string
+  skipped?: string
+}

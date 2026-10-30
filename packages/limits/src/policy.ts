@@ -28,6 +28,11 @@ export interface LimitPolicy {
   /** Request units that may be spent at once; default `requestsPerMinute`. */
   burst?: number
   backoff?: BackoffPolicy
+  /**
+   * Share of `requestsPerMinute` background polling may spend, 0–1. The limiter itself ignores
+   * it; pollers read it to leave room for jobs.
+   */
+  pollShare?: number
 }
 
 const positive = z.number().positive()
@@ -47,6 +52,7 @@ export const limitPolicySchema: z.ZodType<LimitPolicy> = z.strictObject({
   costPerDayUsd: positive.optional(),
   burst: z.number().int().positive().optional(),
   backoff: backoffPolicySchema.optional(),
+  pollShare: z.number().min(0).max(1).optional(),
 })
 
 /**
@@ -65,6 +71,7 @@ export const limitsCredentialsSetting = {
 - **maxConcurrent** and **requestsPerMinute** protect forge tokens from rate limiting; GitLab tokens default to 8 and 300.
 - **tokensPerMinute**, **tokensPerDay** and **costPerDayUsd** protect AI keys; take them from the provider's tier limits.
 - **backoff** retries on the listed statuses (429 by default) with growing delays.
+- **pollShare** is the share of **requestsPerMinute** polling for forge changes may use (0.2 by default); the rest stays for jobs.
 - Set only the fields you need; the rest keep the defaults for the credential kind.`,
   schema: z.record(z.string().min(1), limitPolicySchema),
 }

@@ -117,6 +117,8 @@ export interface MergeRequestRecord extends MergeRequest {
   firstCommitAt?: string
   /** Number of changed files, when the provider returns it without extra requests. */
   changesCount?: number
+  /** The commit the merge request currently points at, when the list carries it. */
+  headSha?: string
 }
 
 /** Filters for `listMergeRequests`; omitted fields do not filter. */
@@ -342,7 +344,11 @@ export interface GitForge {
   mergeMergeRequest(repo: string, id: number, options?: MergeOptions): Promise<void>
   commentOnMergeRequest(repo: string, id: number, body: string): Promise<void>
 
-  listPipelines(repo: string, query: { ref?: string; sha?: string }): Promise<Pipeline[]>
+  /** Newest first, one page; `updatedAfter` (ISO 8601) keeps pipelines changed since then. */
+  listPipelines(
+    repo: string,
+    query: { ref?: string; sha?: string; updatedAfter?: string },
+  ): Promise<Pipeline[]>
   listJobs(repo: string, pipelineId: number): Promise<Job[]>
   /** Starts a manual job. */
   playJob(repo: string, jobId: number): Promise<Job>
@@ -410,6 +416,68 @@ export interface GitForge {
   ensureWebhook?(target: WebhookTarget, hook: WebhookSpec): Promise<WebhookRegistration>
   /** Removes the hooks `ensureWebhook` reported; hooks that are already gone are ignored. */
   removeWebhook?(hooks: RegisteredHook[]): Promise<void>
+}
+
+/**
+ * Something that happened on a forge, from a webhook delivery or found by polling. Holtkeeper
+ * reacts to it the same way whatever its source.
+ */
+export type ForgeEvent =
+  | TagPushedEvent
+  | MergeRequestChangedEvent
+  | NoteAddedEvent
+  | PipelineDoneEvent
+
+/** A tag was created or moved. */
+export interface TagPushedEvent {
+  kind: 'tag'
+  repo: RepoRef
+  tag: string
+  sha: string
+}
+
+/**
+ * A merge request changed. `action` follows GitLab: `open`, `reopen`, `update`, `merge`, `close`,
+ * `approved`; `update` covers new commits, label changes, leaving draft and edits.
+ */
+export interface MergeRequestChangedEvent {
+  kind: 'mergeRequest'
+  repo: RepoRef
+  action: string
+  /** Username of whoever caused it; empty when unknown. */
+  actor: string
+  /** Commits were pushed since the previous state. */
+  newCommits: boolean
+  /** The merge request just left draft. */
+  leftDraft: boolean
+  labelsAdded: string[]
+  /** The merge request after the change, as far as the source knows it. */
+  mr: MergeRequest & { headSha?: string }
+}
+
+/** A comment on a merge request. */
+export interface NoteAddedEvent {
+  kind: 'note'
+  repo: RepoRef
+  mergeRequest: number
+  mergeRequestState: MergeRequestState
+  headSha?: string
+  author: string
+  body: string
+  discussionId?: string
+  /** The note is part of a thread (a diff or discussion note), not a standalone comment. */
+  inThread: boolean
+}
+
+/** A merge request pipeline finished. */
+export interface PipelineDoneEvent {
+  kind: 'pipeline'
+  repo: RepoRef
+  mergeRequest: number
+  pipelineId: number
+  status: PipelineStatus
+  sha: string
+  actor: string
 }
 
 /** Events a forge webhook can deliver. */

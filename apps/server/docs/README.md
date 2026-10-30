@@ -121,13 +121,14 @@ Analyzer options per scope come from the setting `analyzers.<kind>` (section `An
 
 At startup the server seeds the defaults of a fresh install (`seedDefaultSettings` from [@holtkeeper/settings](../../../packages/settings/docs/README.md#defaults-on-a-fresh-install)) against every setting it knows; `ServerOptions.defaultSettings` replaces the values, `false` turns seeding off. `GET /api/settings` returns each definition's `presets` and `people`: name and avatar of the users among the entries' `updatedBy`, like `/api/activity`.
 
-| Endpoint                    | Does                                                                                                                                                                             |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/jobs`             | `?status=&repo=forge:path&limit=&before=`, newest first, without logs (`JobList`)                                                                                                |
-| `GET /api/jobs/:id`         | one `Job` with its last 200 log lines                                                                                                                                            |
-| `POST /api/jobs`            | `CreateJobInput { analyzer, repo?, group?, ref?, options? }`: `repo` for repo-scope analyzers, `group` for group-scope ones; options are validated. 409 without a `jobs` section |
-| `POST /api/jobs/:id/cancel` | cancels a queued or running job; 409 when it already finished                                                                                                                    |
-| `POST /api/webhooks/gitlab` | GitLab webhook, see below                                                                                                                                                        |
+| Endpoint                      | Does                                                                                                                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/jobs`               | `?status=&repo=forge:path&limit=&before=`, newest first, without logs (`JobList`)                                                                                                |
+| `GET /api/jobs/:id`           | one `Job` with its last 200 log lines                                                                                                                                            |
+| `POST /api/jobs`              | `CreateJobInput { analyzer, repo?, group?, ref?, options? }`: `repo` for repo-scope analyzers, `group` for group-scope ones; options are validated. 409 without a `jobs` section |
+| `POST /api/jobs/:id/cancel`   | cancels a queued or running job; 409 when it already finished                                                                                                                    |
+| `POST /api/webhooks/gitlab`   | GitLab webhook, see below                                                                                                                                                        |
+| `POST /api/webhooks/r/:token` | one repository's webhook, see [Repository updates](#repository-updates)                                                                                                          |
 
 Group jobs are permission-checked as their group (`{ forge, path: <group>, groups: [<group>] }`).
 
@@ -168,6 +169,28 @@ Each forge can have its own webhook: `POST https://<server>/api/webhooks/<forgeI
 The forge's token needs scope `api` and the **Maintainer** role (project hooks) or **Owner** role (group hooks) on the targets.
 
 **Pipeline Hook** — for a pipeline of a merge request's head commit that ended `success` or `failed`, the merge request policies run again as an `update` event (the engine loads the latest pipeline fresh), so approvals and merges deferred while the pipeline ran happen now. Only `enqueue` intents queue jobs. Pipelines of other commits are ignored.
+
+### Repository updates
+
+Webhook deliveries are turned into `ForgeEvent`s (`routes/webhooks.ts`) and handled by `createEventDispatcher(deps)` (`events.ts`), which does everything described above. Polling (`updates.ts`) finds the same events and hands them to the same dispatcher, so a repository behaves the same whichever way it learns about a change; jobs queued from polling have trigger `poll` and activity actor `poll`. A job already queued or running for the same analyzer, ref and options is not queued twice, so a change seen both ways runs once.
+
+**Repository webhooks.** Each repository can have its own URL `https://<server>/api/webhooks/r/<token>`. The token (24 random bytes, base64url) is the secret: it is sealed with the vault in `store.kv` (`repo-hook:<forge>:<path>`) so the URL can be shown again, and found by its SHA-256 (`repo-hook-token:<hash>`). Deliveries about another project answer 403, unknown tokens 404; only GitLab payloads are understood for now. Each delivery is recorded as the hook's `lastDelivery`.
+
+**Polling.** A leader duty ticks every 15 s. Repositories are those of the config's groups (listed from the forge, cached for 30 minutes) plus exact repositories the `polling` setting names. For each with `polling` enabled ([@holtkeeper/updates](../../../packages/updates/docs/README.md)):
+
+- The interval is the setting's, or `withWebhook` while any webhook URL reported about the repository in the last 24 hours (`webhook-seen:<forge>:<path>`); `withWebhook: 'off'` stops polling then.
+- Repositories are grouped by limiter key (the forge's credential id, `forge:<id>` for file forges). Each key's polling budget is `pollShare` (default 0.2) of its `requestsPerMinute` from `limits.credentials` or the kind defaults; when the repositories of a key ask for more, all of them are slowed by the same factor (`stretch`). A never-polled repository starts at a stable point within its interval.
+- Due repositories run one at a time per key, oldest first. A key is skipped while the limiter reports it saturated (cool-down after 429, queue, no free slot) or while the requests spent on it in the last minute would pass its budget; it is tried again next tick.
+- State lives in `store.kv` (`poll:<forge>:<path>`: cursor, last poll, requests, events, error, next poll, effective interval and stretch). A lease (`poll-lock:<forge>:<path>`, 2 minutes) keeps two processes from polling one repository at once.
+
+| Endpoint                                  | Does                                                                                                                                                                                                                                          |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/repos/updates?repo=`            | `RepoUpdatesView`: effective `polling` settings and state, `webhookSeenAt`, `viaWebhook`, the repository webhook (its `url` only with `settings:write`)                                                                                       |
+| `POST /api/repos/updates/poll`            | `{ repo }`: polls now, whatever the schedule; `RepoPollResult { events?, enqueued?, error?, skipped? }`                                                                                                                                       |
+| `POST /api/repos/updates/webhook`         | `{ repo, register? }`: issues or rotates the URL; the previous one stops working. `register` (default: when it was registered) replaces the forge hook through `ensureWebhook` on the project; 502 when that fails (the new URL stays active) |
+| `DELETE /api/repos/updates/webhook?repo=` | turns the URL off and removes hooks Holtkeeper registered for it                                                                                                                                                                              |
+
+Reading needs `settings:read` on the repository, the rest `settings:write`. All answer 503 without `store.kv`. Activity: `repo.webhook_created`, `repo.webhook_rotated`, `repo.webhook_removed`.
 
 ### Merge request policies
 

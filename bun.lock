@@ -71,6 +71,7 @@
         "@holtkeeper/ssh-keys": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
+        "@holtkeeper/updates": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
         "@holtkeeper/workspace": "workspace:*",
@@ -800,6 +801,15 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/updates": {
+      "name": "@holtkeeper/updates",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/settings": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/vault": {
       "name": "@holtkeeper/vault",
       "version": "0.0.0",
@@ -1200,6 +1210,8 @@
     "@holtkeeper/toolchain": ["@holtkeeper/toolchain@workspace:packages/toolchain"],
 
     "@holtkeeper/tracker": ["@holtkeeper/tracker@workspace:packages/tracker"],
+
+    "@holtkeeper/updates": ["@holtkeeper/updates@workspace:packages/updates"],
 
     "@holtkeeper/vault": ["@holtkeeper/vault@workspace:packages/vault"],
 

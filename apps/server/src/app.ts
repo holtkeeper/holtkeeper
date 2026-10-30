@@ -5,6 +5,8 @@ import { HTTPException } from 'hono/http-exception'
 
 import { auditMiddleware } from './audit.ts'
 import { type Env, type ServerDeps, authorize, limitParam } from './context.ts'
+import { createEventDispatcher } from './events.ts'
+import { repoHooks } from './repo-hooks.ts'
 import { accountRoutes } from './routes/accounts.ts'
 import { aiCatalogRoutes } from './routes/ai-catalog.ts'
 import { aiRoutes } from './routes/ai.ts'
@@ -22,7 +24,9 @@ import { mediaRoutes } from './routes/media.ts'
 import { settingRoutes } from './routes/settings.ts'
 import { storageRoutes } from './routes/storage.ts'
 import { trackerRoutes } from './routes/trackers.ts'
+import { updateRoutes } from './routes/updates.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
+import { serverPoller } from './updates.ts'
 
 /**
  * The HTTP application: `/api/*` for the UI and clients, `/auth/<provider>/*` for the active auth
@@ -75,7 +79,14 @@ export function createApp(deps: ServerDeps) {
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))
   api.route('/', knowledgeRoutes(deps))
-  api.route('/', webhookRoutes(deps))
+  const dispatch = createEventDispatcher(deps)
+  const hooks = deps.store.kv ? repoHooks(deps.store.kv, deps.vault) : undefined
+  const poller = serverPoller(deps, dispatch)
+  api.route('/', webhookRoutes(deps, { dispatch, ...(hooks && { repoHooks: hooks }) }))
+  api.route(
+    '/',
+    updateRoutes(deps, { ...(poller && { poller }), ...(hooks && { repoHooks: hooks }) }),
+  )
   api.route('/', configRoutes(deps))
   api.route('/', aiRoutes(deps))
   api.route('/', aiCatalogRoutes(deps))

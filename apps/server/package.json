@@ -39,6 +39,7 @@
     "@holtkeeper/ssh-keys": "workspace:*",
     "@holtkeeper/store": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",
+    "@holtkeeper/updates": "workspace:*",
     "@holtkeeper/vault": "workspace:*",
     "@holtkeeper/vuln": "workspace:*",
     "@holtkeeper/workspace": "workspace:*",

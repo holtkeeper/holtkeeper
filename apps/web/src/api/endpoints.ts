@@ -32,7 +32,10 @@ import type {
   ProviderModelList,
   PutSettingInput,
   RepoList,
+  RepoPollResult,
   RepoRef,
+  RepoUpdatesView,
+  RepoWebhookInput,
   ResolvedSettings,
   SetAvatarInput,
   SettingList,
@@ -60,6 +63,14 @@ export const api = {
   me: (signal?: AbortSignal) => request<MeResponse>('GET', '/api/me', signal ? { signal } : {}),
 
   repos: () => request<RepoList>('GET', '/api/repos'),
+  repoUpdates: (repo: string) =>
+    request<RepoUpdatesView>('GET', '/api/repos/updates', { query: { repo } }),
+  pollRepo: (repo: string) =>
+    request<RepoPollResult>('POST', '/api/repos/updates/poll', { body: { repo } }),
+  issueRepoWebhook: (input: RepoWebhookInput) =>
+    request<RepoUpdatesView>('POST', '/api/repos/updates/webhook', { body: input }),
+  removeRepoWebhook: (repo: string) =>
+    request<void>('DELETE', '/api/repos/updates/webhook', { query: { repo } }),
 
   auditRuns: (query: { repo?: RepoRef; limit?: number; before?: string }) =>
     request<AuditRunList>('GET', '/api/audit-runs', {

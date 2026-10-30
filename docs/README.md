@@ -34,6 +34,7 @@
 | `@holtkeeper/exec`                | Command execution contract                                             | [packages/exec/docs](../packages/exec/docs/README.md)                               |
 | `@holtkeeper/workspace`           | Repository checkouts with a mirror cache                               | [packages/workspace/docs](../packages/workspace/docs/README.md)                     |
 | `@holtkeeper/jobs`                | Task engine: queue, scheduler, worker                                  | [packages/jobs/docs](../packages/jobs/docs/README.md)                               |
+| `@holtkeeper/updates`             | Polling forges for changes within a per-token budget                   | [packages/updates/docs](../packages/updates/docs/README.md)                         |
 | `@holtkeeper/managed-config`      | Panel-managed forges, groups, schedules, triggers over the config file | [packages/managed-config/docs](../packages/managed-config/docs/README.md)           |
 | `@holtkeeper/agent`               | LLM agent contract and Claude adapter                                  | [packages/agent/docs](../packages/agent/docs/README.md)                             |
 | `@holtkeeper/ai-usage`            | AI usage recording, costs and budgets                                  | [packages/ai-usage/docs](../packages/ai-usage/docs/README.md)                       |

@@ -40,6 +40,7 @@ import { resolveSetting } from '@holtkeeper/settings'
 import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
 import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
+import { pollingSetting } from '@holtkeeper/updates'
 import { aesVault } from '@holtkeeper/vault'
 import { mirrorStorage } from '@holtkeeper/workspace'
 
@@ -49,6 +50,7 @@ import { createApp } from './app.ts'
 import { startAuditRetention } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
+import { createEventDispatcher } from './events.ts'
 import {
   type AgentFor,
   type AnyAnalyzer,
@@ -65,6 +67,7 @@ import { startOperations } from './operations.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { databaseStorage } from './storage.ts'
+import { serverPoller } from './updates.ts'
 import { serveWeb } from './web.ts'
 
 export interface ServerOptions {
@@ -261,6 +264,7 @@ export async function startServer(
       ...builtinSettings,
       mergeRequestPoliciesSetting,
       limitsCredentialsSetting,
+      pollingSetting,
       trackersSetting,
       ...analyzerSettings(analyzers),
       ...executionSettings(),
@@ -360,6 +364,7 @@ export async function startServer(
         jobs?.scheduler.start()
         return () => jobs?.scheduler.stop()
       },
+      () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
     ],
   })
   metrics = ops.metrics

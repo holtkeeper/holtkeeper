@@ -88,6 +88,7 @@ const mergeRequestRecordSchema = mergeRequestSchema.extend({
   updated_at: z.string(),
   merged_at: time,
   closed_at: time,
+  sha: z.string().nullable().optional(),
 })
 
 const pipelineRunSchema = pipelineSchema.extend({
@@ -352,6 +353,7 @@ const toMergeRequestRecord = (
   updatedAt: mr.updated_at,
   mergedAt: mr.merged_at ?? undefined,
   closedAt: mr.state === 'closed' ? (mr.closed_at ?? undefined) : undefined,
+  ...(mr.sha && { headSha: mr.sha }),
 })
 
 const toPipelineRun = (pipeline: z.infer<typeof pipelineRunSchema>): PipelineRun => ({
@@ -764,7 +766,14 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         'GET',
         `${project(repo)}/pipelines`,
         z.array(pipelineSchema),
-        { query: { ref: query.ref, sha: query.sha, per_page: perPage } },
+        {
+          query: {
+            ref: query.ref,
+            sha: query.sha,
+            updated_after: query.updatedAfter,
+            per_page: perPage,
+          },
+        },
       )
       return pipelines.map(toPipeline)
     },

@@ -210,7 +210,7 @@ export interface ActivityStore {
   list(query?: { before?: Timestamp; limit?: number }): Promise<ActivityEvent[]>
 }
 
-export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag'
+export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag' | 'poll'
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 

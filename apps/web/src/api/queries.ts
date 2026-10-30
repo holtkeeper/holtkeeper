@@ -31,6 +31,7 @@ import { api } from './endpoints.ts'
 export const keys = {
   me: ['me'] as const,
   repos: ['repos'] as const,
+  repoUpdates: (repo: RepoRef) => ['repos', 'updates', repoKey(repo)] as const,
   auditRuns: (repo?: RepoRef, limit?: number) =>
     ['audit-runs', 'list', repo ? repoKey(repo) : '*', limit ?? 0] as const,
   auditRun: (runId: string) => ['audit-runs', 'detail', runId] as const,
@@ -169,6 +170,35 @@ export function useCredentialMutations() {
     }),
     rotate: useMutation({ mutationFn: (id: string) => api.rotateCredential(id), onSuccess }),
     remove: useMutation({ mutationFn: (id: string) => api.deleteCredential(id), onSuccess }),
+  }
+}
+
+/** How a repository learns about forge changes: polling state and its own webhook. */
+export const useRepoUpdates = (repo: RepoRef) =>
+  useQuery({
+    queryKey: keys.repoUpdates(repo),
+    queryFn: () => api.repoUpdates(repoKey(repo)),
+    refetchInterval: 30_000,
+  })
+
+/** Poll now, issue or rotate the webhook URL, turn it off; each refreshes the view. */
+export function useRepoUpdateMutations(repo: RepoRef) {
+  const client = useQueryClient()
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.repoUpdates(repo) })
+  return {
+    poll: useMutation({ mutationFn: () => api.pollRepo(repoKey(repo)), onSuccess }),
+    issueWebhook: useMutation({
+      mutationFn: (register?: boolean) =>
+        api.issueRepoWebhook({
+          repo: repoKey(repo),
+          ...(register === undefined ? {} : { register }),
+        }),
+      onSuccess,
+    }),
+    removeWebhook: useMutation({
+      mutationFn: () => api.removeRepoWebhook(repoKey(repo)),
+      onSuccess,
+    }),
   }
 }
 

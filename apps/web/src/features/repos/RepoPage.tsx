@@ -8,6 +8,7 @@ import { Chip, EmptyState, LinkButton, Page, Tabs } from '../../ui/index.ts'
 import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
+import { RepoUpdates } from './RepoUpdates.tsx'
 
 /** One repository: its groups, settings made for it and the knowledge agents read there. */
 export function RepoPage() {
@@ -35,6 +36,25 @@ export function RepoPage() {
             id: 'settings',
             label: 'Settings',
             content: <ScopedSettings focus={focus} groups={allGroups} />,
+          },
+        ]
+      : []),
+    ...(can('settings:read')
+      ? [
+          {
+            id: 'updates',
+            label: 'Updates',
+            content: (
+              <RepoUpdates
+                repo={repo}
+                onOpenSettings={() =>
+                  void navigate({
+                    search: (previous) => ({ ...previous, tab: 'settings' }),
+                    replace: true,
+                  })
+                }
+              />
+            ),
           },
         ]
       : []),
