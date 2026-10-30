@@ -20,8 +20,8 @@ const nights = { allow: [{ days: [...everyDay], from: '01:00', to: '07:00' }] }
  * Schedules an install starts with, every group, repository jobs spread over the night: CI job
  * history nightly, delivery metrics on Mondays, vulnerability audit and dependency graph on
  * Saturdays, code quality (without running tests), licenses and fleet drift on Sundays, test
- * coverage and frontend test ids on Wednesdays, branches to clean up on Tuesdays and the tech
- * stack of every group on Mondays.
+ * coverage and frontend test ids on Wednesdays, branches to clean up on Tuesdays, the tech stack of
+ * every group on Mondays and the public API of packages on Thursdays.
  * Analyzers the server does not have are dropped, schedules left empty are skipped.
  */
 export const defaultSchedules: DefaultSchedule[] = [
@@ -103,11 +103,42 @@ export const defaultSchedules: DefaultSchedule[] = [
       spread: true,
     },
   },
+  {
+    id: 'api-weekly',
+    data: {
+      name: 'Public API, weekly',
+      enabled: true,
+      analyzers: ['api-surface'],
+      cron: '0 1 * * 4',
+      windows: nights,
+      spread: true,
+    },
+  },
 ]
 
-/** Triggers an install starts with: every new or moved tag gets a changelog and a risk assessment. */
+/**
+ * Triggers an install starts with: every new or moved tag gets a changelog, a risk assessment and
+ * a snapshot of the public API of its packages.
+ */
 export const defaultTriggers: DefaultTrigger[] = [
-  { id: 'tag', data: { on: 'tag', analyzers: ['changelog', 'release-risk'] } },
+  { id: 'tag', data: { on: 'tag', analyzers: ['changelog', 'release-risk', 'api-surface'] } },
+]
+
+/**
+ * Analyzers a release adds to a default trigger that existing installs already have. Each is
+ * applied once per store, like a default document.
+ */
+interface DefaultTriggerAddition {
+  /** Unique; the marker is `defaultMarker('trigger', id)`. */
+  id: string
+  /** Id of the trigger document to extend. */
+  trigger: string
+  analyzers: string[]
+}
+
+/** Additions to the default triggers: the public API snapshot on every tag. */
+const defaultTriggerAdditions: DefaultTriggerAddition[] = [
+  { id: 'tag+api-surface', trigger: 'tag', analyzers: ['api-surface'] },
 ]
 
 /** Key in `Store.kv` of the first seeding, which covered the first three default schedules. */
@@ -126,6 +157,7 @@ export interface SeedDefaultsOptions {
   analyzers: readonly string[]
   schedules?: readonly DefaultSchedule[]
   triggers?: readonly DefaultTrigger[]
+  additions?: readonly DefaultTriggerAddition[]
   now?: () => Date
 }
 
@@ -135,7 +167,9 @@ export interface SeedDefaultsOptions {
  * marker per document in `Store.kv`, taken atomically when the store supports `compareAndSet`):
  * removing one later does not bring it back, and a panel document with the same id is kept as
  * it is. Schedules are skipped while the config file has its own; the tag trigger while the file
- * sets `jobs.onTag`. Analyzers the server lacks are dropped. Does nothing without `config` or
+ * sets `jobs.onTag`. Analyzers the server lacks are dropped. Each of `additions` then appends its
+ * analyzers to an existing trigger document once, unless they are there already (written as
+ * `trigger:<id>+<kinds>`). Does nothing without `config` or
  * `kv`. Logs a `config.defaults.seeded` activity event and resolves with `<type>:<id>` of what
  * it wrote.
  */
@@ -145,6 +179,7 @@ export async function seedDefaults({
   analyzers,
   schedules = defaultSchedules,
   triggers = defaultTriggers,
+  additions = defaultTriggerAdditions,
   now = () => new Date(),
 }: SeedDefaultsOptions): Promise<string[]> {
   const { config, kv } = store
@@ -202,6 +237,26 @@ export async function seedDefaults({
     // oxlint-disable-next-line no-await-in-loop -- see above
     await config.put({ type: 'trigger', id: trigger.id, data, updatedAt: at, updatedBy: 'system' })
     written.push(`trigger:${trigger.id}`)
+  }
+  for (const addition of additions) {
+    if (addition.trigger === 'tag' && file.jobs?.onTag) continue
+    // oxlint-disable-next-line no-await-in-loop -- a handful of writes, in a stable order
+    if (!(await claim('trigger', addition.id))) continue
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const existing = await config.get('trigger', addition.trigger)
+    if (!existing || !('analyzers' in existing.data)) continue
+    const present = existing.data.analyzers
+    const missing = addition.analyzers.filter((kind) => known.has(kind) && !present.includes(kind))
+    if (!missing.length) continue
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await config.put({
+      type: 'trigger',
+      id: addition.trigger,
+      data: { ...existing.data, analyzers: [...present, ...missing] },
+      updatedAt: at,
+      updatedBy: 'system',
+    })
+    written.push(`trigger:${addition.trigger}+${missing.join(',')}`)
   }
   if (written.length)
     await store.activity.append({

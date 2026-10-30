@@ -92,6 +92,14 @@ export const analysisPages = [
     description: 'Dependency licenses, policy violations and unknowns',
     trend: [/violations/i, /unknown/i],
   },
+  {
+    to: '/public-api',
+    kind: 'api-surface',
+    title: 'Public API',
+    icon: 'knowledge',
+    description: 'Exports of every package per version, diffs and the MCP endpoint for agents',
+    trend: [/documented/i, /exports/i],
+  },
 ] as const
 
 /** The group-scoped `fleet` analysis, shown as a tab of each group rather than a sidebar page. */

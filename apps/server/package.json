@@ -15,6 +15,7 @@
     "@holtkeeper/ai-usage": "workspace:*",
     "@holtkeeper/analyzers": "workspace:*",
     "@holtkeeper/api": "workspace:*",
+    "@holtkeeper/api-surface": "workspace:*",
     "@holtkeeper/artifacts": "workspace:*",
     "@holtkeeper/auth": "workspace:*",
     "@holtkeeper/changelog": "workspace:*",
@@ -44,6 +45,7 @@
     "@holtkeeper/vault": "workspace:*",
     "@holtkeeper/vuln": "workspace:*",
     "@holtkeeper/workspace": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "hono": "^4.13.14",
     "zod": "^4.6.7"
   },

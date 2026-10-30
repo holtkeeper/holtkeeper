@@ -1,4 +1,5 @@
 import type { Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
+import type { ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
 import type { AuthInfo } from '@holtkeeper/auth'
 import type { Conflict } from '@holtkeeper/changes'
 import type { FleetLibrary } from '@holtkeeper/depgraph'
@@ -502,6 +503,8 @@ export interface ReleaseBackfillInput {
   limit?: number
   /** Also queue `release-risk` for each release after its changelog; each analyzer skips the releases it has analyzed. */
   risk?: boolean
+  /** Also queue `api-surface` for each release, so every version's public API is kept. */
+  api?: boolean
 }
 
 /** Answer to a release backfill, which goes on in the background. */
@@ -1076,4 +1079,155 @@ export interface RepoPollResult {
   enqueued?: number
   error?: string
   skipped?: string
+}
+
+/** A package as the newest `api-surface` record of its repository describes it. */
+export interface PublicApiPackageSummary {
+  name: string
+  version?: string
+  description?: string
+  private: boolean
+  repo: RepoRef
+  /** Folder of the package in the repository. */
+  dir: string
+  /** Release the record describes; absent for a default branch run. */
+  ref?: string
+  analysisId: string
+  analyzedAt: Timestamp
+  /** Entry point subpaths, `.` first. */
+  subpaths: string[]
+  exports: number
+  documented: number
+  deprecated: number
+  /** Versions on record: one per released version, plus the default branch. */
+  versions: number
+}
+
+/** `GET /api/api-surface/packages`. */
+export interface PublicApiPackageList {
+  packages: PublicApiPackageSummary[]
+  /** When the server last read every record; versions backfilled since then may be missing. */
+  indexedAt?: Timestamp
+}
+
+/** One recorded version of a package. */
+export interface PublicApiVersion {
+  /** The package's `version`, or the ref when it has none. */
+  version: string
+  /** Release the record describes; absent for the default branch. */
+  ref?: string
+  /** The newest default branch run, which may hold unreleased changes. */
+  head: boolean
+  analysisId: string
+  analyzedAt: Timestamp
+  exports: number
+}
+
+/** `GET /api/api-surface/package?name=&version=&repo=`: one version of a package in full. */
+export interface PublicApiPackageDetail {
+  repo: RepoRef
+  ref?: string
+  analysisId: string
+  analyzedAt: Timestamp
+  package: ApiPackage
+  /** Newest first. */
+  versions: PublicApiVersion[]
+  /** Other repositories that have a package of the same name. */
+  alsoIn: RepoRef[]
+}
+
+/** `GET /api/api-surface/diff?name=&from=&to=&repo=`. */
+export interface PublicApiDiff {
+  repo: RepoRef
+  from: PublicApiVersion
+  to: PublicApiVersion
+  diff: PackageDiff
+}
+
+/** One hit of `GET /api/api-surface/search`. */
+export interface PublicApiSymbolHit {
+  package: string
+  version?: string
+  repo: RepoRef
+  subpath: string
+  /** What code imports it from, e.g. `@acme/ui/button`. */
+  importPath: string
+  symbol: ApiSymbol
+}
+
+/** `GET /api/api-surface/search?q=&package=&kind=&limit=`. */
+export interface PublicApiSearchResult {
+  hits: PublicApiSymbolHit[]
+  /** Matches beyond `limit`. */
+  more: number
+}
+
+/** A personal access token for the MCP endpoint; the secret itself is shown only once. */
+export interface McpTokenView {
+  id: string
+  name: string
+  /** First characters of the secret, to tell tokens apart. */
+  prefix: string
+  createdAt: Timestamp
+  expiresAt?: Timestamp
+  /** Updated at most once an hour. */
+  lastUsedAt?: Timestamp
+}
+
+/** `GET /api/api-surface/mcp/tokens`: the caller's tokens. */
+export interface McpTokenList {
+  tokens: McpTokenView[]
+  /** False when the store has no key-value state, so tokens cannot be issued. */
+  available: boolean
+}
+
+/** `POST /api/api-surface/mcp/tokens`. */
+export interface CreateMcpTokenInput {
+  name: string
+  /** Days until it expires; `0` for never. Default 90. */
+  expiresInDays?: number
+}
+
+/** Answer to `POST /api/api-surface/mcp/tokens`. */
+export interface CreateMcpTokenResult {
+  token: McpTokenView
+  /** Send as `Authorization: Bearer <secret>`; not retrievable later. */
+  secret: string
+}
+
+/** One MCP tool call, for the recent calls list. */
+export interface McpCallView {
+  at: Timestamp
+  tool: string
+  /** Principal id; names come from `people`. */
+  principal: string
+  /** First word of the client's User-Agent, e.g. `claude-code/2.1.0`. */
+  client?: string
+  /** Package or query the call was about. */
+  subject?: string
+  ok: boolean
+  durationMs: number
+}
+
+/** Calls per day. */
+export interface McpUsageDay {
+  date: string
+  calls: number
+  errors: number
+}
+
+/** `GET /api/api-surface/mcp/usage?days=`: how agents use the MCP endpoint. */
+export interface McpUsageOverview {
+  days: McpUsageDay[]
+  totals: { calls: number; errors: number; people: number }
+  /** Sorted by calls, most first. */
+  tools: { tool: string; calls: number; errors: number }[]
+  packages: { name: string; calls: number }[]
+  clients: { client: string; calls: number }[]
+  /** Per principal; only for callers with `users:read`, else just the caller. */
+  people: { id: string; name: string; calls: number }[]
+  /** Newest first; other people's calls only for callers with `users:read`. */
+  recent: McpCallView[]
+  /** URL to configure in MCP clients. */
+  endpoint: string
 }

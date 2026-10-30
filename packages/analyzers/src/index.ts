@@ -1,4 +1,5 @@
 import { type AnyAnalyzer, defineAnalyzer } from '@holtkeeper/analyzer'
+import { apiSurfaceAnalyzer } from '@holtkeeper/api-surface'
 import { assetsAnalyzer } from '@holtkeeper/assets'
 import { branchesAnalyzer } from '@holtkeeper/branches'
 import { analyzeBundle, bundleAnalysis } from '@holtkeeper/bundles'
@@ -164,6 +165,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   qualityAnalyzer,
   coverageAnalyzer,
   testIdsAnalyzer,
+  apiSurfaceAnalyzer,
   licensesAnalyzer,
   releaseRiskAnalyzer,
   fleetAnalyzer,

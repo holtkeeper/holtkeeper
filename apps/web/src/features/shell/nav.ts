@@ -12,6 +12,7 @@ import {
   HardDrive,
   KeyRound,
   LayoutDashboard,
+  Library,
   ListChecks,
   type LucideIcon,
   MousePointerClick,
@@ -41,6 +42,7 @@ export interface NavItem {
     | '/branches'
     | '/ci'
     | '/licenses'
+    | '/public-api'
     | '/jobs'
     | '/knowledge'
     | '/credentials'
@@ -72,6 +74,7 @@ const navItems: readonly NavItem[] = [
   { to: '/branches', label: 'Branches', icon: GitBranch, requires: 'analyses:read' },
   { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
   { to: '/licenses', label: 'Licenses', icon: Scale, requires: 'analyses:read' },
+  { to: '/public-api', label: 'Public API', icon: Library, requires: 'analyses:read' },
   { to: '/jobs', label: 'Jobs', icon: ListChecks, requires: 'analyses:read' },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen, requires: 'knowledge:read' },
   { to: '/credentials', label: 'Credentials', icon: KeyRound, requires: 'credentials:read' },

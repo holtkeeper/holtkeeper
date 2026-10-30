@@ -47,6 +47,7 @@
         "@holtkeeper/ai-usage": "workspace:*",
         "@holtkeeper/analyzers": "workspace:*",
         "@holtkeeper/api": "workspace:*",
+        "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/artifacts": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
@@ -76,6 +77,7 @@
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
         "@holtkeeper/workspace": "workspace:*",
+        "@modelcontextprotocol/sdk": "^1.32.2",
         "hono": "^4.13.14",
         "zod": "^4.6.7",
       },
@@ -250,6 +252,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/branches": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
@@ -293,6 +296,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
@@ -300,6 +304,16 @@
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
+      },
+    },
+    "packages/api-surface": {
+      "name": "@holtkeeper/api-surface",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "oxc-parser": "^0.155.0",
+        "zod": "^4.6.7",
       },
     },
     "packages/artifacts": {
@@ -1159,6 +1173,8 @@
     "@holtkeeper/analyzers": ["@holtkeeper/analyzers@workspace:packages/analyzers"],
 
     "@holtkeeper/api": ["@holtkeeper/api@workspace:packages/api"],
+
+    "@holtkeeper/api-surface": ["@holtkeeper/api-surface@workspace:packages/api-surface"],
 
     "@holtkeeper/artifacts": ["@holtkeeper/artifacts@workspace:packages/artifacts"],
 

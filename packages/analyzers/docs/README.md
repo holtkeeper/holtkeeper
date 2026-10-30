@@ -14,6 +14,7 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `quality`      | repo  | conventions, lint, duplication, dead code, secrets and test gaps          |
 | `coverage`     | repo  | line, function and branch test coverage per source file                   |
 | `testids`      | repo  | interactive elements of frontend templates with and without test ids      |
+| `api-surface`  | repo  | public API of every package per version, for agents and semver checks     |
 | `licenses`     | repo  | third-party licenses judged against allow and deny lists                  |
 | `release-risk` | repo  | how risky a release is, from the analyses already stored                  |
 | `fleet`        | group | shared library versions and config drift across a group                   |

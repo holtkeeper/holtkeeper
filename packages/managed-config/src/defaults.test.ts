@@ -113,4 +113,35 @@ describe('seedDefaults', () => {
     })
     expect(await seedDefaults({ store, file: withFile, analyzers: kinds, now })).toEqual([])
   })
+
+  test('adds later analyzers to an existing tag trigger once', async () => {
+    const store = memoryStore()
+    const analyzers = [...kinds, 'api-surface']
+    await store.kv?.set(defaultMarker('trigger', 'tag'), { at: now().toISOString() })
+    await store.config?.put({
+      type: 'trigger',
+      id: 'tag',
+      data: { on: 'tag', analyzers: ['changelog'] },
+      updatedAt: now().toISOString(),
+    })
+    expect(await seedDefaults({ store, file, analyzers, now, schedules: [] })).toEqual([
+      'trigger:tag+api-surface',
+    ])
+    expect((await store.config?.get('trigger', 'tag'))?.data).toEqual({
+      on: 'tag',
+      analyzers: ['changelog', 'api-surface'],
+    })
+    await store.config?.put({
+      type: 'trigger',
+      id: 'tag',
+      data: { on: 'tag', analyzers: ['changelog'] },
+      updatedAt: now().toISOString(),
+    })
+    expect(await seedDefaults({ store, file, analyzers, now, schedules: [] })).toEqual([])
+
+    const fresh = memoryStore()
+    expect(await seedDefaults({ store: fresh, file, analyzers, now, schedules: [] })).toEqual([
+      'trigger:tag',
+    ])
+  })
 })

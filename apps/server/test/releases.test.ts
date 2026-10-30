@@ -83,6 +83,7 @@ beforeEach(() => {
     analyzers: [
       { kind: 'changelog', scope: 'repo', options: z.object({}) },
       { kind: 'release-risk', scope: 'repo', options: z.object({}) },
+      { kind: 'api-surface', scope: 'repo', options: z.object({}) },
     ],
     now: () => new Date('2026-10-30T12:00:00.000Z'),
     onBackground: (work) => {
@@ -154,6 +155,18 @@ describe('release backfill', () => {
       'changelog v1.2.0',
       'release-risk v1.2.0',
     ])
+  })
+
+  test('snapshots the public API of each release when asked', async () => {
+    expect(await backfilled({ repo: 'work:games/a', limit: 1, api: true })).toMatchObject({
+      queued: 2,
+    })
+    const jobs = await store.jobs.list({ repo: { forge: 'work', path: 'games/a' } })
+    expect(jobs.map((job) => `${job.analyzer} ${job.ref}`).toReversed()).toEqual([
+      'changelog v1.2.0',
+      'api-surface v1.2.0',
+    ])
+    expect((await store.activity.list())[0]?.details).toMatchObject({ api: true, risk: false })
   })
 
   test('each analyzer skips only the releases it has analyzed', async () => {

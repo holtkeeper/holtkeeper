@@ -34,6 +34,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Branches',
     'CI jobs',
     'Licenses',
+    'Public API',
     'Jobs',
     'Activity',
   ])

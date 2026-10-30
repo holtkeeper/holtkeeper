@@ -14,15 +14,18 @@ const limits = ['10', '20', '50', '100'] as const
 
 /**
  * Queues a changelog for each of the newest releases of one repository (or of every repository)
- * that has none yet, optionally with a release risk assessment; the server lists tags in the
- * background. Hidden without `analyses:run` or jobs.
+ * that has none yet, optionally with a release risk assessment and a public API snapshot
+ * (preselected with `api`); the server lists tags in the background. Hidden without
+ * `analyses:run` or jobs.
  */
 export function BackfillReleasesButton({
   repo,
   variant = 'secondary',
+  api: apiByDefault = false,
 }: {
   repo?: RepoRef | undefined
   variant?: ButtonVariant
+  api?: boolean
 }) {
   const { can } = useSession()
   const analyzers = useJobAnalyzers()
@@ -31,12 +34,13 @@ export function BackfillReleasesButton({
   const [open, setOpen] = useState(false)
   const [limit, setLimit] = useState<(typeof limits)[number]>('20')
   const [risk, setRisk] = useState(false)
+  const [api, setApi] = useState(apiByDefault)
   const kinds = analyzers.data?.analyzers.map((a) => a.kind) ?? []
   if (!can('analyses:run') || !analyzers.data?.enabled || !kinds.includes('changelog')) return null
 
   const submit = () =>
     backfill.mutate(
-      { ...(repo ? { repo: repoKey(repo) } : {}), limit: Number(limit), risk },
+      { ...(repo ? { repo: repoKey(repo) } : {}), limit: Number(limit), risk, api },
       {
         onSuccess: () => {
           setOpen(false)
@@ -99,6 +103,21 @@ export function BackfillReleasesButton({
             }
             isSelected={risk}
             onChange={setRisk}
+          />
+        ) : null}
+        {kinds.includes('api-surface') ? (
+          <Checkbox
+            label={
+              <span className="flex flex-col">
+                <span>Also snapshot the public API</span>
+                <span className="text-xs text-muted">
+                  Exports of every package at each release, so agents can read any version and the
+                  API page can diff them.
+                </span>
+              </span>
+            }
+            isSelected={api}
+            onChange={setApi}
           />
         ) : null}
       </Dialog>

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/api-surface": "workspace:*",
     "@holtkeeper/assets": "workspace:*",
     "@holtkeeper/branches": "workspace:*",
     "@holtkeeper/bundles": "workspace:*",

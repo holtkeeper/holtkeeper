@@ -3,6 +3,7 @@ import type {
   ApplyChangesInput,
   AuditRunSummary,
   ClearStorageInput,
+  CreateMcpTokenInput,
   CreateJobInput,
   ForgeWebhookInput,
   LinkAccountInput,
@@ -723,3 +724,87 @@ export function useRegisterPasskey(token: string) {
     onSuccess: () => client.invalidateQueries({ queryKey: keys.me }),
   })
 }
+
+/** Packages of the API catalog, newest version each; filtered by a substring when `q` is set. */
+export const usePublicApiPackages = (q?: string) =>
+  useQuery({
+    queryKey: ['public-api', 'packages', q ?? ''],
+    queryFn: () => api.publicApiPackages(q),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+
+/** One version of a package in full, with every recorded version. */
+export const usePublicApiPackage = (query: { name: string; version?: string; repo?: string }) =>
+  useQuery({
+    queryKey: ['public-api', 'package', query.name, query.version ?? '', query.repo ?? ''],
+    queryFn: () => api.publicApiPackage(query),
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  })
+
+/** What changed between two versions; `from` defaults to the release before `to`. */
+export const usePublicApiDiff = (
+  query: { name: string; from?: string; to?: string; repo?: string },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      'public-api',
+      'diff',
+      query.name,
+      query.from ?? '',
+      query.to ?? '',
+      query.repo ?? '',
+    ],
+    queryFn: () => api.publicApiDiff(query),
+    staleTime: 60_000,
+    retry: false,
+    enabled,
+  })
+
+/** Exported names across the catalog; idle until there is a query. */
+export const usePublicApiSearch = (query: { q: string; package?: string; kind?: string }) =>
+  useQuery({
+    queryKey: ['public-api', 'search', query.q, query.package ?? '', query.kind ?? ''],
+    queryFn: () => api.publicApiSearch({ ...query, limit: 60 }),
+    placeholderData: keepPreviousData,
+    enabled: query.q.trim().length > 0,
+    staleTime: 30_000,
+  })
+
+export function usePublicApiRescan() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: api.publicApiRescan,
+    onSuccess: () => client.invalidateQueries({ queryKey: ['public-api'] }),
+  })
+}
+
+/** The caller's MCP tokens. */
+export const useMcpTokens = () => useQuery({ queryKey: ['mcp', 'tokens'], queryFn: api.mcpTokens })
+
+export function useCreateMcpToken() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateMcpTokenInput) => api.createMcpToken(input),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['mcp', 'tokens'] }),
+  })
+}
+
+export function useRevokeMcpToken() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (tokenId: string) => api.revokeMcpToken(tokenId),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['mcp', 'tokens'] }),
+  })
+}
+
+/** MCP calls of the last `days` days; refreshes every half minute. */
+export const useMcpUsage = (days: number) =>
+  useQuery({
+    queryKey: ['mcp', 'usage', days],
+    queryFn: () => api.mcpUsage(days),
+    placeholderData: keepPreviousData,
+    refetchInterval: 30_000,
+  })

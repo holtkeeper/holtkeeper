@@ -9,6 +9,15 @@ export type * from '@holtkeeper/report'
 export { formatBytes, percentChange } from '@holtkeeper/report'
 export type { RepoRef } from '@holtkeeper/forge'
 export type {
+  ApiChange,
+  ApiEntry,
+  ApiPackage,
+  ApiSymbol,
+  ApiSymbolKind,
+  Bump,
+  PackageDiff,
+} from '@holtkeeper/api-surface'
+export type {
   ActivityEvent,
   AiUsageBucket,
   AiUsageDimension,

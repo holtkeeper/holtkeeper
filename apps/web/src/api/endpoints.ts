@@ -8,6 +8,14 @@ import type {
   AuditVerifyResponse,
   ClearStorageInput,
   ClearStorageResult,
+  CreateMcpTokenInput,
+  CreateMcpTokenResult,
+  McpTokenList,
+  McpUsageOverview,
+  PublicApiDiff,
+  PublicApiPackageDetail,
+  PublicApiPackageList,
+  PublicApiSearchResult,
   ConfigEntryDetail,
   CreateJobInput,
   ExternalAccountList,
@@ -163,6 +171,25 @@ export const api = {
   auditRun: (runId: string) => request<AuditRunDetail>('GET', `/api/audit-runs/${id(runId)}`),
 
   dependencies: () => request<DependencyInventory>('GET', '/api/dependencies'),
+
+  publicApiPackages: (q?: string) =>
+    request<PublicApiPackageList>('GET', '/api/api-surface/packages', { query: { q } }),
+  publicApiPackage: (query: { name: string; version?: string; repo?: string }) =>
+    request<PublicApiPackageDetail>('GET', '/api/api-surface/package', { query: toQuery(query) }),
+  publicApiMarkdownUrl: (query: { name: string; version?: string; repo?: string }) =>
+    urlOf('/api/api-surface/package.md', toQuery(query)),
+  publicApiDiff: (query: { name: string; from?: string; to?: string; repo?: string }) =>
+    request<PublicApiDiff>('GET', '/api/api-surface/diff', { query: toQuery(query) }),
+  publicApiSearch: (query: { q: string; package?: string; kind?: string; limit?: number }) =>
+    request<PublicApiSearchResult>('GET', '/api/api-surface/search', { query: toQuery(query) }),
+  publicApiRescan: () => request<{ indexedAt?: string }>('POST', '/api/api-surface/rescan'),
+  mcpTokens: () => request<McpTokenList>('GET', '/api/api-surface/mcp/tokens'),
+  createMcpToken: (input: CreateMcpTokenInput) =>
+    request<CreateMcpTokenResult>('POST', '/api/api-surface/mcp/tokens', { body: input }),
+  revokeMcpToken: (tokenId: string) =>
+    request<void>('DELETE', `/api/api-surface/mcp/tokens/${id(tokenId)}`),
+  mcpUsage: (days: number) =>
+    request<McpUsageOverview>('GET', '/api/api-surface/mcp/usage', { query: { days } }),
 
   analysisKinds: () => request<AnalysisKindList>('GET', '/api/analyses/kinds'),
   analyses: (query: { repo?: RepoRef; kind?: string; limit?: number; before?: string }) =>

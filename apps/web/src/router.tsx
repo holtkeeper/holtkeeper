@@ -90,6 +90,10 @@ const BranchesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'BranchesPage',
 )
+const PublicApiPage = lazyRouteComponent(
+  () => import('./features/public-api/PublicApiPage.tsx'),
+  'PublicApiPage',
+)
 const LicensesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'LicensesPage',
@@ -193,6 +197,20 @@ const analysisPage = <P extends string>(
   component: ReturnType<typeof lazyRouteComponent>,
 ) => createRoute({ getParentRoute: () => appRoute, path, component, validateSearch: repoSearch })
 
+const publicApiRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'public-api',
+  component: PublicApiPage,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { package?: string; version?: string; repo?: string; tab?: string } =>
+    Object.fromEntries(
+      ['package', 'version', 'repo', 'tab'].flatMap((key) =>
+        typeof search[key] === 'string' && search[key] ? [[key, search[key]]] : [],
+      ),
+    ),
+})
+
 const analysisRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'analyses/$id',
@@ -219,6 +237,7 @@ const routeTree = rootRoute.addChildren([
     analysisPage('branches', BranchesPage),
     analysisPage('ci', CiJobsPage),
     analysisPage('licenses', LicensesPage),
+    publicApiRoute,
     analysisRoute,
     jobsRoute,
     page('jobs/$jobId', JobPage),

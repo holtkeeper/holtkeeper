@@ -11,6 +11,7 @@ import { accountRoutes } from './routes/accounts.ts'
 import { aiCatalogRoutes } from './routes/ai-catalog.ts'
 import { aiRoutes } from './routes/ai.ts'
 import { analysisRoutes } from './routes/analyses.ts'
+import { createApiSurface } from './routes/api-surface.ts'
 import { artifactRoutes } from './routes/artifacts.ts'
 import { auditLogRoutes } from './routes/audit.ts'
 import { auditRoutes } from './routes/audits.ts'
@@ -33,10 +34,11 @@ import { serverPoller } from './updates.ts'
 
 /**
  * The HTTP application: `/api/*` for the UI and clients, `/auth/<provider>/*` for the active auth
- * provider. Static UI files are added by `serveWeb`.
+ * provider, `/mcp` for agents. Static UI files are added by `serveWeb`.
  */
 export function createApp(deps: ServerDeps) {
   const app = new Hono<Env>()
+  const apiSurface = createApiSurface(deps)
 
   app.onError((error, c) => {
     if (error instanceof HTTPException)
@@ -50,7 +52,11 @@ export function createApp(deps: ServerDeps) {
   })
 
   app.use('*', async (c, next) => {
-    c.set('principal', await deps.auth.authenticate(c.req.raw))
+    c.set(
+      'principal',
+      (await deps.auth.authenticate(c.req.raw)) ??
+        (await apiSurface.tokenPrincipal(c.req.raw, c.req.path)),
+    )
     await next()
   })
   app.use('*', auditMiddleware(deps))
@@ -65,6 +71,8 @@ export function createApp(deps: ServerDeps) {
     return response ?? c.json<ApiError>({ error: 'not found' }, 404)
   })
 
+  app.all('/mcp', apiSurface.mcp)
+
   const api = new Hono<Env>()
   api.get('/me', async (c) =>
     c.json<MeResponse>({
@@ -78,6 +86,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', auditRoutes(deps))
   api.route('/', analysisRoutes(deps))
   api.route('/', dependencyRoutes(deps))
+  api.route('/', apiSurface.routes)
   api.route('/', credentialRoutes(deps))
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))
