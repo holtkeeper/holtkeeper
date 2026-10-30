@@ -39,13 +39,14 @@ import {
   type DefaultSetting,
   type SettingDefinition,
   builtinSettings,
+  defaultSettings,
   seedDefaultSettings,
 } from '@holtkeeper/settings'
 import { resolveSetting } from '@holtkeeper/settings'
 import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
 import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
-import { pollingSetting } from '@holtkeeper/updates'
+import { defaultPolling, pollingSetting } from '@holtkeeper/updates'
 import { aesVault } from '@holtkeeper/vault'
 import { mirrorStorage } from '@holtkeeper/workspace'
 
@@ -85,7 +86,8 @@ export interface ServerOptions {
   settings?: SettingDefinition[]
   /**
    * Values a fresh install starts with (no settings in the store yet), written once per store.
-   * Default `defaultSettings` from `@holtkeeper/settings`; `false` seeds nothing.
+   * Default `defaultSettings` from `@holtkeeper/settings` plus `defaultPolling` from
+   * `@holtkeeper/updates`; `false` seeds nothing.
    */
   defaultSettings?: readonly DefaultSetting[] | false
   /**
@@ -328,7 +330,7 @@ export async function startServer(
     const seeded = await seedDefaultSettings({
       store: server.store,
       definitions: deps.settings,
-      ...(options.defaultSettings ? { defaults: options.defaultSettings } : {}),
+      defaults: options.defaultSettings ?? [...defaultSettings, defaultPolling],
       now: deps.now,
     })
     if (seeded.length > 0) log(`settings: seeded defaults for ${seeded.join(', ')}`)

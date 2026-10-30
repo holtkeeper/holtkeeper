@@ -23,14 +23,15 @@ Built in: `llm.provider` (the id or name of an AI provider credential, see [@hol
 
 `seedDefaultSettings({ store, definitions, defaults?, now? })` writes `defaults` (default `defaultSettings`) for `{ all: true }` when the store holds no settings at all, and only once per store: the first call records `settings:defaults-seeded` in `Store.kv` (atomically through `compareAndSet`, so concurrent servers seed once), and later calls do nothing, even after every setting was removed. A store that already has settings is marked and left alone. Without `kv` the empty store is the only check; entry ids are stable (`default:<key>`), so concurrent seeding writes the same entries. Unknown keys, secret settings and values their schema rejects are skipped. Entries are `updatedBy: 'system'` and the run is logged as the activity `settings.seeded` with `details.keys`. The server calls it at startup.
 
-| Key                    | Default                                                                                                                                  |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `llm.model`            | `claude-opus@latest`                                                                                                                     |
-| `llm.models`           | preset `balanced`: Opus for `review`, `port`, `refactor`; Sonnet for `propagate`, `tests`, `quality`, `release-risk`; Haiku for `triage` |
-| `llm.budget`           | preset `learn`: `warn` above $300 a month or $30 a day                                                                                   |
-| `agent.tools`          | `context7: false`, `maxResultLines: 200`, `knowledgeTokens: 1500`                                                                        |
-| `knowledge.autoAccept` | `quirk`, `howto`                                                                                                                         |
-| `audit.upgrade`        | `minor`                                                                                                                                  |
+| Key                    | Default                                                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm.model`            | `claude-opus@latest`                                                                                                                                      |
+| `llm.models`           | preset `balanced`: Opus for `review`, `port`, `refactor`; Sonnet for `propagate`, `tests`, `quality`, `release-risk`; Haiku for `triage`                  |
+| `llm.budget`           | preset `learn`: `warn` above $300 a month or $30 a day                                                                                                    |
+| `agent.tools`          | `context7: false`, `maxResultLines: 200`, `knowledgeTokens: 1500`                                                                                         |
+| `knowledge.autoAccept` | `quirk`, `howto`                                                                                                                                          |
+| `audit.upgrade`        | `minor`                                                                                                                                                   |
+| `polling`              | `enabled`, every `5m`, `1h` while webhooks deliver (`defaultPolling` of [@holtkeeper/updates](../../updates/docs/README.md#setting), added by the server) |
 
 The model references assume an Anthropic provider; with another one, change `llm.model` and `llm.models` together with `llm.provider`.
 

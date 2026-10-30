@@ -18,6 +18,7 @@ export {
   type PollingConfig,
   type PollingValue,
   MIN_POLL_INTERVAL_MS,
+  defaultPolling,
   intervalMs,
   pollEventKinds,
   pollingConfig,

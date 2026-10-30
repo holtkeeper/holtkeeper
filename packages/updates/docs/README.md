@@ -39,6 +39,8 @@ The cursor is JSON and stays small: open merge requests and those closed in the 
 
 `pollingConfig(value)` applies the defaults and turns an unset or invalid value off. `intervalMs('5m')` parses intervals. Presets: webhook first, responsive, relaxed, off.
 
+`defaultPolling` is the entry a fresh install starts with for every repository: `{ enabled: true, interval: '5m', withWebhook: '1h' }`, so repositories without webhooks react to changes without setup. The server seeds it next to `defaultSettings` of [@holtkeeper/settings](../../settings/docs/README.md#defaults-on-a-fresh-install).
+
 ## Sharing a token
 
 Polls draw from the same per-credential limiter as jobs, so they can never exceed a token's limits; the budget below keeps them from crowding jobs out.

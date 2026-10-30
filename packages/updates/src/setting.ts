@@ -1,4 +1,4 @@
-import { defineSetting } from '@holtkeeper/settings'
+import { type DefaultSetting, defineSetting } from '@holtkeeper/settings'
 import { z } from 'zod'
 
 /** What polling looks for. */
@@ -113,3 +113,12 @@ export const pollingSetting = defineSetting({
     },
   ],
 })
+
+/**
+ * `polling` for every repository on a fresh install: every 5 minutes, hourly while webhooks
+ * deliver, so repositories without webhooks react to changes without any setup.
+ */
+export const defaultPolling: DefaultSetting = {
+  key: pollingSetting.key,
+  value: { enabled: true, interval: '5m', withWebhook: '1h' } satisfies PollingValue,
+}

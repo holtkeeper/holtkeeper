@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { createSpendWindow, firstDueAt, stretchFactors } from './budget.ts'
-import { pollingConfig } from './setting.ts'
+import { defaultPolling, pollingConfig, pollingSchema } from './setting.ts'
 
 describe('stretchFactors', () => {
   test('slows every repository of an over-budget key by the same factor', () => {
@@ -59,5 +59,16 @@ describe('pollingConfig', () => {
     })
     expect(pollingConfig({ enabled: true, interval: '10s' }).enabled).toBe(false)
     expect(pollingConfig({ enabled: true, withWebhook: 'off' }).withWebhookMs).toBeUndefined()
+  })
+})
+
+describe('defaultPolling', () => {
+  test('passes the schema and polls every repository every 5 minutes', () => {
+    expect(pollingSchema.safeParse(defaultPolling.value).success).toBe(true)
+    expect(pollingConfig(defaultPolling.value)).toMatchObject({
+      enabled: true,
+      intervalMs: 300_000,
+      withWebhookMs: 3_600_000,
+    })
   })
 })
