@@ -2,7 +2,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 
 import { useAnalyses, useAnalysis } from '../../api/queries.ts'
-import { analysisPages } from '../../lib/analyses.ts'
+import { analysisPages, groupAnalysisPages } from '../../lib/analyses.ts'
 import { formatDate } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { ErrorState, Page, Placeholder, Select } from '../../ui/index.ts'
@@ -38,7 +38,9 @@ export function AnalysisPage() {
     )
 
   const { report } = detail.data
-  const page = analysisPages.find((p) => p.kind === detail.data.analysis.kind)
+  const page = [...analysisPages, ...groupAnalysisPages].find(
+    (p) => p.kind === detail.data.analysis.kind,
+  )
   const others = (siblings.data?.analyses ?? []).filter((a) => a.id !== id)
   const key = repoKey(detail.data.analysis.repo)
 

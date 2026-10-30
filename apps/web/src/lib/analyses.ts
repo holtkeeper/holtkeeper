@@ -102,19 +102,30 @@ export const analysisPages = [
   },
 ] as const
 
-/** The group-scoped `fleet` analysis, shown as a tab of each group rather than a sidebar page. */
-export const fleetView = {
-  kind: 'fleet',
-  title: 'Fleet',
-  trend: [/behind-major/i, /drifted/i],
-} as const
+/**
+ * Sidebar pages for group-scoped analysis kinds, whose records are stored under
+ * `{ forge, path: <group> }`; each group page shows the same records as a tab.
+ */
+export const groupAnalysisPages = [
+  {
+    to: '/fleet',
+    kind: 'fleet',
+    title: 'Fleet',
+    icon: 'repos',
+    description: 'Shared library versions and config drift per group',
+    trend: [/behind-major/i, /drifted/i],
+  },
+  {
+    to: '/stack',
+    kind: 'stack',
+    title: 'Tech stack',
+    icon: 'updates',
+    description: 'Runtimes, package managers and images per group: versions, lag and end of life',
+    trend: [/^eol$/i, /behind-major/i],
+  },
+] as const
 
-/** The group-scoped `stack` analysis, shown as a tab of each group next to fleet drift. */
-export const stackView = {
-  kind: 'stack',
-  title: 'Tech stack',
-  trend: [/^eol$/i, /behind-major/i],
-} as const
+export const [fleetView, stackView] = groupAnalysisPages
 
 /**
  * Metrics worth charting across records: numeric in the newest record, one per pattern in

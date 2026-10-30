@@ -11,6 +11,7 @@ import {
   Gauge,
   HardDrive,
   KeyRound,
+  Layers,
   LayoutDashboard,
   Library,
   ListChecks,
@@ -20,6 +21,7 @@ import {
   Scale,
   ScrollText,
   Settings2,
+  Ship,
   Sparkles,
   Tag,
   Timer,
@@ -42,6 +44,8 @@ export interface NavItem {
     | '/branches'
     | '/ci'
     | '/licenses'
+    | '/fleet'
+    | '/stack'
     | '/public-api'
     | '/jobs'
     | '/knowledge'
@@ -74,6 +78,8 @@ const navItems: readonly NavItem[] = [
   { to: '/branches', label: 'Branches', icon: GitBranch, requires: 'analyses:read' },
   { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
   { to: '/licenses', label: 'Licenses', icon: Scale, requires: 'analyses:read' },
+  { to: '/fleet', label: 'Fleet', icon: Ship, requires: 'analyses:read' },
+  { to: '/stack', label: 'Tech stack', icon: Layers, requires: 'analyses:read' },
   { to: '/public-api', label: 'Public API', icon: Library, requires: 'analyses:read' },
   { to: '/jobs', label: 'Jobs', icon: ListChecks, requires: 'analyses:read' },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen, requires: 'knowledge:read' },

@@ -99,15 +99,18 @@ function RepoCard({
   )
 }
 
-/** The newest record of every repository as cards, sortable by name, recency or a metric. */
+/** The newest record of every repository (or group) as cards, sortable by name, recency or a metric. */
 export function RepoCards({
   analyses,
   trend,
   people,
+  noun = ['repository', 'repositories'],
 }: {
   analyses: readonly AnalysisSummary[]
   trend: Metric | undefined
   people: Record<string, ActivityPerson>
+  /** What each card stands for, singular and plural; group analyses pass `group`. */
+  noun?: readonly [string, string]
 }) {
   const [sort, setSort] = useState<Sort>('name')
   const cards = latestPerRepo(analyses, trend?.id)
@@ -126,7 +129,7 @@ export function RepoCards({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm text-muted">
-          {cards.length} {cards.length === 1 ? 'repository' : 'repositories'}, newest run of each
+          {cards.length} {cards.length === 1 ? noun[0] : noun[1]}, newest run of each
         </span>
         <Segmented
           aria-label="Sort"
