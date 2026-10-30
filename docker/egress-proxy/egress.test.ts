@@ -56,17 +56,21 @@ async function startProxy(dir: string, env: Record<string, string>, upstreamCa: 
   )
   const { promise: listening, resolve } = Promise.withResolvers<boolean>()
   let output = ''
-  void (async () => {
+  const drain = async (stream: ReadableStream<Uint8Array>) => {
     const decoder = new TextDecoder()
-    for await (const chunk of proc.stdout) {
+    for await (const chunk of stream) {
       output += decoder.decode(chunk)
       if (output.includes('listening at')) resolve(true)
     }
-    resolve(false)
-  })()
-  if (!(await listening) || output.includes('error in script')) {
+  }
+  void Promise.all([drain(proc.stdout), drain(proc.stderr)]).then(() => resolve(false))
+  const timer = setTimeout(() => resolve(false), 20_000)
+  const started = await listening
+  clearTimeout(timer)
+  if (!started || output.includes('error in script')) {
+    proc.kill()
     await proc.exited
-    throw new Error(`mitmdump did not start: ${output}${await new Response(proc.stderr).text()}`)
+    throw new Error(`mitmdump did not start (exit ${proc.exitCode}): ${output}`)
   }
   return { proc, port, output: () => output }
 }
