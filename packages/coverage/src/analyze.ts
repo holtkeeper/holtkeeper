@@ -16,6 +16,7 @@ import {
   listFiles,
 } from '@holtkeeper/quality-tests'
 
+import { type InstallOutcome, installDependencies } from './install.ts'
 import { type CoverageData, type FileCoverageData, sumCounts } from './model.ts'
 
 export interface AnalyzeCoverageOptions {
@@ -29,6 +30,14 @@ export interface AnalyzeCoverageOptions {
   exclude?: readonly string[]
   /** Count source files no test loaded as uncovered. Default true. */
   untested?: boolean
+  /**
+   * Install JavaScript dependencies from the lockfile before running tests, when `node_modules` is
+   * missing. Default true; never applies when `file` is given.
+   */
+  install?: boolean
+  /** Let that install run lifecycle scripts. Default false. */
+  installScripts?: boolean
+  log?: (line: string) => void
   signal?: AbortSignal
 }
 
@@ -77,17 +86,41 @@ async function untestedFiles(
 }
 
 /**
- * Collects line, function and branch coverage of a checkout per source file: runs the tests of
- * every detected framework with coverage (or reads `file`), leaves out tests, configs, generated
- * and excluded files, and adds source files no test loaded as fully uncovered. Throws when no
- * collector produced a report.
+ * Collects line, function and branch coverage of a checkout per source file: installs JavaScript
+ * dependencies when they are missing, runs the tests of every detected framework with coverage
+ * (or reads `file`), leaves out tests, configs, generated and excluded files, and adds source
+ * files no test loaded as fully uncovered. Throws when no collector produced a report, naming a
+ * failed install.
  */
 export async function analyzeCoverage(options: AnalyzeCoverageOptions): Promise<CoverageData> {
   const { dir, runner, signal } = options
   const collectors =
     options.collectors ??
     (await coverageCollectors(dir, options.file ? { file: options.file } : 'run'))
-  const report = await collectCoverage(collectors, { dir, runner, ...(signal ? { signal } : {}) })
+  let install: InstallOutcome | undefined
+  if (!options.file && (options.install ?? true) && collectors.length) {
+    install = await installDependencies({
+      dir,
+      runner,
+      scripts: options.installScripts ?? false,
+      ...(signal ? { signal } : {}),
+    })
+    options.log?.(
+      install.status === 'skipped'
+        ? `dependencies: not installed (${install.reason})`
+        : `dependencies: ${install.command.join(' ')} ${install.status === 'installed' ? 'ok' : `failed\n${install.error}`}`,
+    )
+  }
+  let report
+  try {
+    report = await collectCoverage(collectors, { dir, runner, ...(signal ? { signal } : {}) })
+  } catch (error) {
+    if (install?.status !== 'failed') throw error
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`${message}\n${install.command.join(' ')} failed before: ${install.error}`, {
+      cause: error,
+    })
+  }
   signal?.throwIfAborted()
 
   const excluded = (options.exclude ?? []).map((pattern) => new Bun.Glob(pattern))

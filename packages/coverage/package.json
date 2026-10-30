@@ -11,6 +11,7 @@
     "@holtkeeper/exec": "workspace:*",
     "@holtkeeper/quality-tests": "workspace:*",
     "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/vuln-js": "workspace:*",
     "zod": "^4.6.7"
   }
 }
