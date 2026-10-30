@@ -14,6 +14,9 @@ copy them from there instead of editing them here.
 | `@holtkeeper/brand/browserslist.svg` | Browserslist updates                |
 | `@holtkeeper/brand/release.svg`      | Releases and changelogs             |
 | `@holtkeeper/brand/quality.svg`      | Code quality                        |
+| `@holtkeeper/brand/bundles.svg`      | Bundle size                         |
+| `@holtkeeper/brand/knowledge.svg`    | Knowledge agents read before tasks  |
+| `@holtkeeper/brand/credentials.svg`  | Credentials                         |
 
 ```ts
 import auditIcon from '@holtkeeper/brand/audit.svg'

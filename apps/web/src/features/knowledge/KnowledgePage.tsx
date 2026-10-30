@@ -47,6 +47,7 @@ export function KnowledgePage() {
   return (
     <Page
       title="Knowledge"
+      icon="knowledge"
       description="Conventions, decisions and lessons agents read before every task"
       actions={
         <>

@@ -75,6 +75,7 @@ export function CredentialsPage() {
   return (
     <Page
       title="Credentials"
+      icon="credentials"
       description="Tokens Holtkeeper uses to reach forges and services"
       actions={
         writable ? (

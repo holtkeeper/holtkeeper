@@ -31,7 +31,7 @@ export const analysisPages = [
     to: '/bundles',
     kind: 'bundle',
     title: 'Bundles',
-    icon: 'quality',
+    icon: 'bundles',
     description: 'Build size per entrypoint and release',
     trend: [/gzip/i, /size/i],
   },
