@@ -72,6 +72,7 @@ export function ReposPage() {
   return (
     <Page
       title="Repositories"
+      icon="repos"
       description={repos.data ? `${repos.data.repos.length} known repositories` : undefined}
       actions={
         <>

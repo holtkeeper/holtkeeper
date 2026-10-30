@@ -6,6 +6,7 @@ import holtkeeper from '@holtkeeper/brand/holtkeeper.svg'
 import knowledge from '@holtkeeper/brand/knowledge.svg'
 import quality from '@holtkeeper/brand/quality.svg'
 import release from '@holtkeeper/brand/release.svg'
+import repos from '@holtkeeper/brand/repos.svg'
 import review from '@holtkeeper/brand/review.svg'
 import updates from '@holtkeeper/brand/updates.svg'
 
@@ -18,6 +19,7 @@ const icons = {
   knowledge,
   quality,
   release,
+  repos,
   review,
   updates,
 }

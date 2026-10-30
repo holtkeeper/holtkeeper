@@ -16,6 +16,7 @@ copy them from there instead of editing them here.
 | `@holtkeeper/brand/quality.svg`      | Code quality                        |
 | `@holtkeeper/brand/bundles.svg`      | Bundle size                         |
 | `@holtkeeper/brand/knowledge.svg`    | Knowledge agents read before tasks  |
+| `@holtkeeper/brand/repos.svg`        | Repositories                        |
 | `@holtkeeper/brand/credentials.svg`  | Credentials                         |
 
 ```ts
