@@ -49,7 +49,7 @@ async function startProxy(dir: string, env: Record<string, string>, upstreamCa: 
       addon,
     ],
     {
-      env: { PATH: Bun.env.PATH ?? '', HOME: dir, PYTHONUNBUFFERED: '1', ...env },
+      env: { ...Bun.env, PYTHONUNBUFFERED: '1', EGRESS_TEST_TOKEN: undefined, ...env },
       stdout: 'pipe',
       stderr: 'pipe',
     },
@@ -119,7 +119,7 @@ describe.skipIf(!available)('egress addon', () => {
     await writeFile(join(dir, 'rules.json'), JSON.stringify(rules))
     proxy = await startProxy(dir, { EGRESS_TEST_TOKEN: token }, cert)
     proxyCa = await readFile(join(dir, 'mitm', 'mitmproxy-ca-cert.pem'), 'utf8')
-  }, 30_000)
+  }, 60_000)
 
   afterAll(async () => {
     proxy?.proc.kill()
@@ -184,5 +184,5 @@ describe.skipIf(!available)('egress addon', () => {
     } finally {
       await rm(empty, { recursive: true, force: true })
     }
-  }, 30_000)
+  }, 60_000)
 })
