@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
+import { localRunner } from '@holtkeeper/exec'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 
 import { containerPath, containerRunner, detectEngine, networksFor } from './container.ts'
@@ -10,6 +11,9 @@ const failure = (promise: Promise<unknown>) =>
     () => 'resolved',
     (error: unknown) => (error instanceof Error ? error.message : String(error)),
   )
+
+const kept = (env: Record<string, string | undefined> | undefined) =>
+  Object.fromEntries(Object.entries(env ?? {}).filter(([, value]) => value !== undefined))
 
 const toolchain = {
   tools: [
@@ -310,6 +314,7 @@ describe('localMiseRunner', () => {
     const runner = localMiseRunner({
       toolchain,
       hostRunner: fake.runner,
+      hostEnv: {},
       env: { CI: '1' },
       ignoreConfigIn: ['/work/co'],
     })
@@ -328,10 +333,98 @@ describe('localMiseRunner', () => {
 
   test('passes commands through without tools', async () => {
     const fake = createFakeRunner()
-    const runner = localMiseRunner({ toolchain: { tools: [] }, hostRunner: fake.runner })
+    const runner = localMiseRunner({
+      toolchain: { tools: [] },
+      hostRunner: fake.runner,
+      hostEnv: { PATH: '/bin', HOLTKEEPER_VAULT_KEY: 'vault' },
+    })
     await runner.start()
     await runner.run(['git', 'status'], { cwd: '/x' })
     expect(fake.calls.map((call) => call.command)).toEqual([['git', 'status']])
+    expect(fake.calls[0]?.options.env).toEqual({ PATH: '/bin', HOLTKEEPER_VAULT_KEY: undefined })
+  })
+
+  test('removes every host variable outside the allowlist, also from mise install', async () => {
+    const fake = createFakeRunner()
+    const runner = localMiseRunner({
+      toolchain,
+      hostRunner: fake.runner,
+      hostEnv: {
+        PATH: '/usr/bin',
+        HOME: '/tmp',
+        LC_ALL: 'C.UTF-8',
+        MISE_DATA_DIR: '/mise',
+        MISE_GITHUB_TOKEN: 'ghp',
+        HTTPS_PROXY: 'http://proxy.test:3128',
+        GOPROXY: 'https://goproxy.test',
+        GITLAB_TOKEN: 'glpat',
+        AWS_SECRET_ACCESS_KEY: 'aws',
+        HOLTKEEPER_VAULT_KEY: 'vault',
+        HOLTKEEPER_DATABASE_URL: 'postgres://u:p@db/h',
+        HOLTKEEPER_S3_SECRET_ACCESS_KEY: 's3',
+        HOLTKEEPER_SESSION_SECRET: 'session',
+        HOLTKEEPER_ROOT_PASSWORD: 'root',
+        HOLTKEEPER_WEBHOOK_SECRET: 'hook',
+      },
+      envAllowlist: ['GOPROXY', 'HOLTKEEPER_VAULT_KEY', 'HOLTKEEPER_*'],
+      env: { CI: '1' },
+    })
+    await runner.start()
+    await runner.run(['go', 'test'], { cwd: '/work/co', env: { GOFLAGS: '-mod=mod' } })
+    expect(fake.calls.map((call) => kept(call.options.env))).toEqual([
+      {
+        PATH: '/usr/bin',
+        HOME: '/tmp',
+        LC_ALL: 'C.UTF-8',
+        MISE_DATA_DIR: '/mise',
+        HTTPS_PROXY: 'http://proxy.test:3128',
+        GOPROXY: 'https://goproxy.test',
+        CI: '1',
+      },
+      {
+        PATH: '/usr/bin',
+        HOME: '/tmp',
+        LC_ALL: 'C.UTF-8',
+        MISE_DATA_DIR: '/mise',
+        HTTPS_PROXY: 'http://proxy.test:3128',
+        GOPROXY: 'https://goproxy.test',
+        CI: '1',
+        GOFLAGS: '-mod=mod',
+      },
+    ])
+    for (const call of fake.calls)
+      expect(Object.keys(call.options.env ?? {})).toContain('HOLTKEEPER_VAULT_KEY')
+  })
+
+  test('the runner and run env still set variables the host has', async () => {
+    const fake = createFakeRunner()
+    const runner = localMiseRunner({
+      toolchain,
+      hostRunner: fake.runner,
+      hostEnv: { NPM_CONFIG_REGISTRY: 'https://internal.test' },
+      env: { NPM_CONFIG_REGISTRY: 'https://egress.test' },
+    })
+    await runner.run(['npm', 'ci'], { cwd: '/x' })
+    expect(fake.calls[0]?.options.env?.['NPM_CONFIG_REGISTRY']).toBe('https://egress.test')
+  })
+
+  test.skipIf(!Bun.which('env'))('a real command sees no Holtkeeper secrets', async () => {
+    const names = ['HOLTKEEPER_VAULT_KEY', 'HOLTKEEPER_TEST_SECRET', 'GITLAB_TOKEN']
+    const previous = names.map((name) => Bun.env[name])
+    for (const name of names) Bun.env[name] = 'leaked'
+    try {
+      const runner = localMiseRunner({ toolchain: { tools: [] }, hostRunner: localRunner })
+      const result = await runner.run(['env'], { cwd: process.cwd(), env: { JOB_VAR: 'set' } })
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).not.toContain('leaked')
+      expect(result.stdout).toContain('JOB_VAR=set')
+      expect(result.stdout).toContain('PATH=')
+    } finally {
+      names.forEach((name, index) => {
+        if (previous[index] === undefined) delete Bun.env[name]
+        else Bun.env[name] = previous[index]
+      })
+    }
   })
 
   test('applies its environment without tools too', async () => {
@@ -341,9 +434,11 @@ describe('localMiseRunner', () => {
       hostRunner: fake.runner,
       env: { HTTPS_PROXY: 'http://proxy:8080' },
       ignoreConfigIn: ['/x'],
+      hostEnv: { NODE_ENV: 'production' },
     })
     await runner.run(['npm', 'ci'], { cwd: '/x' })
     expect(fake.calls[0]?.options.env).toEqual({
+      NODE_ENV: undefined,
       MISE_IGNORED_CONFIG_PATHS: '/x',
       HTTPS_PROXY: 'http://proxy:8080',
     })

@@ -236,6 +236,14 @@ const executionSchema = z.object({
       noProxy: z.array(z.string().min(1)).optional(),
     })
     .optional(),
+  /**
+   * Extra variables of the worker's environment that job commands keep, e.g. `GOPROXY`. `mise`
+   * keeps paths, locale, `MISE_*` and proxies by default, `container` nothing; `HOLTKEEPER_*` never
+   * passes in `mise` mode.
+   */
+  envAllowlist: z
+    .array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'expected a variable name'))
+    .optional(),
 })
 
 /** Background analyses: schedules, forge webhooks and the worker that runs them. */

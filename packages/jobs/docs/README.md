@@ -131,11 +131,12 @@ execution: {
   network: 'install', // 'none' | 'install' (default) | 'full'
   user: '10001:10001', // default: the image's holtkeeper user
   egress: { url: 'http://egress-proxy:8080', caFile: '/etc/egress/ca.crt' }, // optional
+  envAllowlist: ['GOPROXY'], // extra worker variables job commands keep
 }
 ```
 
 - **`host`** (default, also when `execution` is missing): every runner is the host runner, exactly as before.
-- **`mise`**: commands run on the host as `mise exec <tools> -- <command>` (`localMiseRunner`); tools are installed when the runner starts. For development.
+- **`mise`**: commands run on the host (in Kubernetes: the worker pod) as `mise exec <tools> -- <command>` (`localMiseRunner`); tools are installed when the runner starts. Commands keep only allowlisted variables of the worker's environment (`defaultLocalEnvAllowlist` plus `envAllowlist`), never `HOLTKEEPER_*`, so they do not inherit the server's secrets; see the exec-container docs for what this does not cover.
 - **`container`**: one sandboxed container per checkout (`containerRunner` from `@holtkeeper/exec-container`): read-only root, no capabilities, non-root, resource limits, network per policy, tools installed by mise into a shared cache volume. See [docker/worker](../../../docker/worker/README.md) for the image and the security model.
 
 `egress` routes the HTTP(S) traffic of every command in `mise` and `container` mode through a forward proxy (`egressEnvironment` of `@holtkeeper/exec-container`; the CA files are mounted at `/etc/holtkeeper/egress` in containers). The scoped `toolchain` setting's `env` wins over the proxy variables. The job log names the proxy's `host:port`, never credentials in its URL.
