@@ -13,8 +13,9 @@ import { useSession } from '../shell/session.ts'
 const limits = ['10', '20', '50', '100'] as const
 
 /**
- * Queues a changelog for each of the newest tags of one repository (or of every repository) that
- * has none yet, optionally with a release risk assessment. Hidden without `analyses:run` or jobs.
+ * Queues a changelog for each of the newest releases of one repository (or of every repository)
+ * that has none yet, optionally with a release risk assessment; the server lists tags in the
+ * background. Hidden without `analyses:run` or jobs.
  */
 export function BackfillReleasesButton({
   repo,
@@ -37,14 +38,13 @@ export function BackfillReleasesButton({
     backfill.mutate(
       { ...(repo ? { repo: repoKey(repo) } : {}), limit: Number(limit), risk },
       {
-        onSuccess: (result) => {
+        onSuccess: () => {
           setOpen(false)
           notify.success(
-            result.queued ? `${result.queued} jobs queued` : 'Nothing new to analyze',
-            `${result.tags} tags in ${result.repos} ${result.repos === 1 ? 'repository' : 'repositories'}, ${result.skipped} already analyzed or queued${result.errors.length ? `, ${result.errors.length} failed` : ''}`,
+            'Looking for past releases',
+            'Jobs appear on the Jobs page as each repository is listed; the outcome goes to the activity log.',
           )
-          if (result.queued)
-            void navigate({ to: '/jobs', search: repo ? { repo: repoKey(repo) } : {} })
+          void navigate({ to: '/jobs', search: repo ? { repo: repoKey(repo) } : {} })
         },
         onError: (error) => notify.error('Not queued', messageOf(error)),
       },
@@ -73,14 +73,14 @@ export function BackfillReleasesButton({
         }
       >
         <p className="text-sm text-muted">
-          Queues a changelog for each of the newest tags that has none yet, oldest first, so the
-          Releases page fills with history. Jobs of one repository run one after another; the queue
-          is on the Jobs page.
+          Queues a changelog for each of the newest releases that has none yet, oldest first, so the
+          Releases page fills with history. A commit tagging several monorepo packages is one
+          release. Repositories are listed in the background; the queue is on the Jobs page.
         </p>
         <div className="flex items-center justify-between gap-4">
-          <span className="text-sm">Newest tags per repository</span>
+          <span className="text-sm">Newest releases per repository</span>
           <Segmented
-            aria-label="Tags per repository"
+            aria-label="Releases per repository"
             value={limit}
             onChange={setLimit}
             options={limits.map((id) => ({ id, label: id }))}
@@ -92,7 +92,8 @@ export function BackfillReleasesButton({
               <span className="flex flex-col">
                 <span>Also assess release risk</span>
                 <span className="text-xs text-muted">
-                  One more job per tag; it uses the AI for summaries when one is configured.
+                  One more job per release without one; it uses the AI for summaries when one is
+                  configured.
                 </span>
               </span>
             }

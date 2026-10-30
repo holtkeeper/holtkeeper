@@ -491,7 +491,8 @@ export interface CreateJobInput {
 }
 
 /**
- * `POST /api/releases/backfill`: analyze past releases. Without `repo` or `group` it covers every
+ * `POST /api/releases/backfill`: analyze past releases. Answers 202 at once; repositories are
+ * walked in the background and the outcome is logged as a `releases.backfill` activity entry. Without `repo` or `group` it covers every
  * repository of every group. `limit` newest releases per repository (default 20, at most 100); a
  * release is a plain tag or a commit carrying monorepo package tags (`@scope/name@1.2.3`).
  */
@@ -499,19 +500,24 @@ export interface ReleaseBackfillInput {
   repo?: string
   group?: string
   limit?: number
-  /** Also queue `release-risk` for each release after its changelog. */
+  /** Also queue `release-risk` for each release after its changelog; each analyzer skips the releases it has analyzed. */
   risk?: boolean
 }
 
-/** What a release backfill queued. */
+/** Answer to a release backfill, which goes on in the background. */
+export interface ReleaseBackfillStarted {
+  startedAt: string
+}
+
+/** What a release backfill queued; the details of its `releases.backfill` activity entry. */
 export interface ReleaseBackfillResult {
   repos: number
   /** Releases found across the repositories: plain tags and commits carrying package tags. */
   tags: number
   queued: number
-  /** Releases already analyzed or with a job waiting or running. */
+  /** Jobs not queued: that analyzer already analyzed the release, or a job is waiting or running. */
   skipped: number
-  errors: { repo: RepoRef; error: string }[]
+  errors: { repo?: RepoRef; error: string }[]
 }
 
 /** An analyzer jobs can run. `schema` is JSON Schema of its options, for building forms. */

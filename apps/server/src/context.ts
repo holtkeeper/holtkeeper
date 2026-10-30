@@ -61,6 +61,8 @@ export interface ServerDeps {
   hostRunner?: CommandRunner
   /** Areas the storage overview reports, e.g. artifacts, git mirrors, the database. */
   storage?: StorageProvider[]
+  /** Receives work routes leave running after responding, e.g. a release backfill; for tests. */
+  onBackground?: (work: Promise<unknown>) => void
   now: () => Date
 }
 

@@ -25,7 +25,7 @@ import type {
   RepoExplain,
   RuntimeConfigView,
   ReleaseBackfillInput,
-  ReleaseBackfillResult,
+  ReleaseBackfillStarted,
   RepoAvatarInfo,
   SchedulePreview,
   ScheduleRunList,
@@ -265,7 +265,7 @@ export const api = {
   runSchedule: (scheduleId: string) =>
     request<ScheduleRunResult>('POST', `/api/schedules/${id(scheduleId)}/run`),
   backfillReleases: (input: ReleaseBackfillInput) =>
-    request<ReleaseBackfillResult>('POST', '/api/releases/backfill', { body: input }),
+    request<ReleaseBackfillStarted>('POST', '/api/releases/backfill', { body: input }),
   configExportUrl: () => urlOf('/api/config/export'),
   runtimeConfig: () => request<RuntimeConfigView>('GET', '/api/config/runtime'),
   repoAvatarUrl: (repo: RepoRef, version?: number) =>

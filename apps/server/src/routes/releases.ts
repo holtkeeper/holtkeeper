@@ -1,4 +1,8 @@
-import type { ReleaseBackfillInput, ReleaseBackfillResult } from '@holtkeeper/api'
+import type {
+  ReleaseBackfillInput,
+  ReleaseBackfillResult,
+  ReleaseBackfillStarted,
+} from '@holtkeeper/api'
 import { releaseTarget } from '@holtkeeper/changelog'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import { type JobRequest, enqueueUnique, groupRepositories } from '@holtkeeper/jobs'
@@ -23,6 +27,8 @@ const MAX_TAGS = 1000
 
 type ListTags = NonNullable<GitForge['listTags']>
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
 const releasesOf = (tags: { name: string; sha: string }[]) => [...new Set(tags.map(releaseTarget))]
 
 /**
@@ -44,14 +50,98 @@ const backfillSchema = z.object({
   risk: z.boolean().default(false),
 })
 
+interface BackfillRun {
+  repo?: RepoRef | undefined
+  group?: string | undefined
+  limit: number
+  analyzers: string[]
+  actor: string
+  at: string
+}
+
 /**
  * Analyses of past releases: queues a changelog (and a risk assessment) per existing release, a
- * plain tag or a commit carrying package tags.
+ * plain tag or a commit carrying package tags. Listing tags is slow on large forges, so the
+ * request only validates and the repositories are walked in the background.
  */
 export function releaseRoutes(deps: ServerDeps) {
   const { store, config } = deps
   const app = new Hono<Env>()
   const kinds = new Set((deps.analyzers ?? []).map((analyzer) => analyzer.kind))
+
+  const repositories = async ({ repo, group }: BackfillRun) => {
+    if (repo) return [repo]
+    const resolve = groupRepositories(config)
+    const found = new Map<string, RepoRef>()
+    for (const name of group ? [group] : Object.keys(config.groups))
+      // oxlint-disable-next-line no-await-in-loop -- groups one after another keep forge limits
+      for (const member of await resolve(name)) found.set(`${member.forge}:${member.path}`, member)
+    return [...found.values()]
+  }
+
+  const backfillRepo = async (run: BackfillRun, target: RepoRef, result: ReleaseBackfillResult) => {
+    const forge = config.forges[target.forge]?.create()
+    if (!forge?.listTags) throw new Error(`forge ${target.forge} cannot list tags`)
+    const releases = await newestReleases(forge.listTags.bind(forge), target.path, run.limit)
+    result.tags += releases.length
+    const analyzed = new Map(
+      await Promise.all(
+        run.analyzers.map(async (analyzer) => {
+          const done = await store.analyses.list({ repo: target, kind: analyzer, limit: 500 })
+          return [analyzer, new Set(done.flatMap((record) => record.ref ?? []))] as const
+        }),
+      ),
+    )
+    const requests: JobRequest[] = releases.toReversed().flatMap((release) =>
+      run.analyzers.flatMap((analyzer) => {
+        if (analyzed.get(analyzer)?.has(release)) {
+          result.skipped += 1
+          return []
+        }
+        return [
+          { analyzer, repo: target, ref: release, trigger: 'manual' as const, actor: run.actor },
+        ]
+      }),
+    )
+    const { enqueued, skipped } = await enqueueUnique(store.jobs, requests, run.at)
+    result.queued += enqueued.length
+    result.skipped += skipped.length
+  }
+
+  const backfill = async (run: BackfillRun) => {
+    const result: ReleaseBackfillResult = { repos: 0, tags: 0, queued: 0, skipped: 0, errors: [] }
+    try {
+      const repos = await repositories(run)
+      result.repos = repos.length
+      for (const target of repos) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one repository at a time keeps forge limits
+          await backfillRepo(run, target, result)
+        } catch (error) {
+          result.errors.push({ repo: target, error: messageOf(error) })
+        }
+      }
+    } catch (error) {
+      result.errors.push({ ...(run.repo ? { repo: run.repo } : {}), error: messageOf(error) })
+    }
+    await store.activity.append({
+      at: deps.now().toISOString(),
+      actor: run.actor,
+      action: 'releases.backfill',
+      ...(run.repo ? { subject: `${run.repo.forge}:${run.repo.path}` } : {}),
+      details: {
+        ...(run.group ? { group: run.group } : {}),
+        limit: run.limit,
+        risk: run.analyzers.includes('release-risk'),
+        repos: result.repos,
+        releases: result.tags,
+        queued: result.queued,
+        skipped: result.skipped,
+        ...(result.errors.length ? { errors: result.errors } : {}),
+      },
+    })
+    return result
+  }
 
   app.post('/releases/backfill', async (c) => {
     if (!config.jobs)
@@ -59,91 +149,27 @@ export function releaseRoutes(deps: ServerDeps) {
     if (!kinds.has('changelog'))
       throw new HTTPException(409, { message: 'this server has no changelog analyzer' })
     const input: ReleaseBackfillInput = await readBody(c, backfillSchema)
-    const limit = input.limit ?? 20
     const repo = parseRepo(input.repo)
     const principal = repo
       ? authorize(c, 'analyses:run', { kind: 'repo', repo: repoTarget(config, repo) })
       : authorize(c, 'analyses:run', GLOBAL)
+    if (!repo && input.group && !config.groups[input.group])
+      throw new HTTPException(400, { message: `unknown group ${input.group}` })
 
-    let repos: RepoRef[]
-    if (repo) repos = [repo]
-    else {
-      const groups = input.group ? [input.group] : Object.keys(config.groups)
-      if (input.group && !config.groups[input.group])
-        throw new HTTPException(400, { message: `unknown group ${input.group}` })
-      const resolve = groupRepositories(config)
-      const found = new Map<string, RepoRef>()
-      for (const group of groups)
-        // oxlint-disable-next-line no-await-in-loop -- groups one after another keep forge limits
-        for (const member of await resolve(group))
-          found.set(`${member.forge}:${member.path}`, member)
-      repos = [...found.values()]
-    }
-
-    const analyzers = [
-      'changelog',
-      ...(input.risk && kinds.has('release-risk') ? ['release-risk'] : []),
-    ]
-    const result: ReleaseBackfillResult = {
-      repos: repos.length,
-      tags: 0,
-      queued: 0,
-      skipped: 0,
-      errors: [],
-    }
-    const at = deps.now().toISOString()
-    for (const target of repos) {
-      try {
-        const forge = config.forges[target.forge]?.create()
-        if (!forge?.listTags) throw new Error(`forge ${target.forge} cannot list tags`)
-        // oxlint-disable-next-line no-await-in-loop -- one repository at a time keeps forge limits
-        const releases = await newestReleases(forge.listTags.bind(forge), target.path, limit)
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        const done = await store.analyses.list({ repo: target, kind: 'changelog', limit: 500 })
-        const analyzed = new Set(done.flatMap((record) => (record.ref ? [record.ref] : [])))
-        result.tags += releases.length
-        const requests: JobRequest[] = releases
-          .toReversed()
-          .filter((release) => {
-            if (!analyzed.has(release)) return true
-            result.skipped += 1
-            return false
-          })
-          .flatMap((release) =>
-            analyzers.map((analyzer) => ({
-              analyzer,
-              repo: target,
-              ref: release,
-              trigger: 'manual' as const,
-              actor: principal.id,
-            })),
-          )
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        const { enqueued, skipped } = await enqueueUnique(store.jobs, requests, at)
-        result.queued += enqueued.length
-        result.skipped += skipped.filter((request) => request.analyzer === 'changelog').length
-      } catch (error) {
-        result.errors.push({
-          repo: target,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    }
-    await store.activity.append({
-      at,
+    const startedAt = deps.now().toISOString()
+    const done = backfill({
+      repo,
+      group: repo ? undefined : input.group,
+      limit: input.limit ?? 20,
+      analyzers: [
+        'changelog',
+        ...(input.risk && kinds.has('release-risk') ? ['release-risk'] : []),
+      ],
       actor: principal.id,
-      action: 'releases.backfill',
-      ...(repo ? { subject: `${repo.forge}:${repo.path}` } : {}),
-      details: {
-        ...(input.group ? { group: input.group } : {}),
-        limit,
-        risk: analyzers.includes('release-risk'),
-        repos: result.repos,
-        queued: result.queued,
-        skipped: result.skipped,
-      },
-    })
-    return c.json<ReleaseBackfillResult>(result, 201)
+      at: startedAt,
+    }).catch((error: unknown) => console.error('releases: backfill failed', error))
+    deps.onBackground?.(done)
+    return c.json<ReleaseBackfillStarted>({ startedAt }, 202)
   })
 
   return app
