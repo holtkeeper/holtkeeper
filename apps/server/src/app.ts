@@ -15,6 +15,7 @@ import { auditRoutes } from './routes/audits.ts'
 import { activityPeople, avatarRoutes, withAvatar } from './routes/avatars.ts'
 import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
+import { dependencyRoutes } from './routes/dependencies.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
 import { mediaRoutes } from './routes/media.ts'
@@ -69,6 +70,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', accountRoutes(deps))
   api.route('/', auditRoutes(deps))
   api.route('/', analysisRoutes(deps))
+  api.route('/', dependencyRoutes(deps))
   api.route('/', credentialRoutes(deps))
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))

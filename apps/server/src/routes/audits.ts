@@ -1,9 +1,16 @@
-import type { AuditRunDetail, AuditRunList, RepoList, RepoSummary } from '@holtkeeper/api'
+import type {
+  AnalysisSummary,
+  AuditRunDetail,
+  AuditRunList,
+  RepoList,
+  RepoSummary,
+} from '@holtkeeper/api'
 import { summarizeRun } from '@holtkeeper/api'
 import { staticPrefix } from '@holtkeeper/jobs'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
+import { summarizeAnalysis } from '../analyses.ts'
 import {
   type Env,
   type ServerDeps,
@@ -20,6 +27,7 @@ import { canSee } from '../visibility.ts'
 /** Audit runs and the repositories they cover. */
 export function auditRoutes(deps: ServerDeps) {
   const { config, store } = deps
+  const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
   const app = new Hono<Env>()
 
   app.get('/audit-runs', async (c) => {
@@ -91,6 +99,15 @@ export function auditRoutes(deps: ServerDeps) {
         latest.set(key, { repo: { forge: group.forge, path }, groups: target.groups })
       }
     }
+    await Promise.all(
+      [...latest.values()].map(async (summary) => {
+        if (!canSee(principal, 'analyses:read', repoTarget(config, summary.repo))) return
+        const newest = new Map<string, AnalysisSummary>()
+        for (const record of await store.analyses.list({ repo: summary.repo, limit: 100 }))
+          if (!newest.has(record.kind)) newest.set(record.kind, summarizeAnalysis(kinds, record))
+        if (newest.size) summary.latestAnalyses = [...newest.values()]
+      }),
+    )
     const repos = [...latest.values()].toSorted((a, b) =>
       `${a.repo.forge}:${a.repo.path}`.localeCompare(`${b.repo.forge}:${b.repo.path}`),
     )

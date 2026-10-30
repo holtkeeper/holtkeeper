@@ -1,3 +1,4 @@
+import type { RepoRef } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, GitBranch, LineChart } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -13,15 +14,34 @@ import { MetricChips } from './MetricChips.tsx'
 
 const allRepos = '*'
 
-type AnalysisPage = (typeof analysisPages)[number]
+/** One entry of `analysisPages`. */
+export type AnalysisPage = (typeof analysisPages)[number]
 
-/** Records of one analysis kind, newest first, with trends of its headline metrics. */
-function AnalysesPage({ page }: { page: AnalysisPage }) {
+/** A repository picker for analysis pages: `*` stands for all repositories. */
+export function RepoSelect({ to }: { to: AnalysisPage['to'] }) {
   const search = useSearch({ strict: false })
   const navigate = useNavigate()
-  const repoParam = typeof search.repo === 'string' ? search.repo : undefined
-  const repo = parseRepoKey(repoParam)
   const repos = useRepos()
+  const repoParam = typeof search.repo === 'string' ? search.repo : undefined
+  return (
+    <Select
+      aria-label="Repository"
+      className="w-72"
+      options={[
+        { id: allRepos, label: 'All repositories' },
+        ...(repos.data?.repos ?? []).map((r) => ({
+          id: repoKey(r.repo),
+          label: repoKey(r.repo),
+        })),
+      ]}
+      value={repoParam ?? allRepos}
+      onChange={(id) => void navigate({ to, search: id === allRepos ? {} : { repo: id } })}
+    />
+  )
+}
+
+/** Records of one analysis kind, newest first, with trends of its headline metrics. */
+export function AnalysisRecords({ page, repo }: { page: AnalysisPage; repo?: RepoRef }) {
   const kinds = useAnalysisKinds()
   const analyses = useAnalyses(page.kind, repo)
   const list = analyses.data?.analyses ?? []
@@ -31,28 +51,7 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
   const unknownKind = kinds.data && !kinds.data.kinds.some((k) => k.kind === page.kind)
 
   return (
-    <Page
-      title={page.title}
-      icon={page.icon}
-      description={repo ? `${page.description} · ${repoKey(repo)}` : page.description}
-      actions={
-        <Select
-          aria-label="Repository"
-          className="w-72"
-          options={[
-            { id: allRepos, label: 'All repositories' },
-            ...(repos.data?.repos ?? []).map((r) => ({
-              id: repoKey(r.repo),
-              label: repoKey(r.repo),
-            })),
-          ]}
-          value={repoParam ?? allRepos}
-          onChange={(id) =>
-            void navigate({ to: page.to, search: id === allRepos ? {} : { repo: id } })
-          }
-        />
-      }
-    >
+    <div className="flex flex-col gap-6">
       {unknownKind ? (
         <Notice tone="warning" title={`This server has no “${page.kind}” analysis`}>
           Records appear here once the server supports it and something reports them.
@@ -144,13 +143,28 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
           </ul>
         )}
       </Panel>
+    </div>
+  )
+}
+
+/** Records of one analysis kind on a page of its own. */
+function AnalysesPage({ page }: { page: AnalysisPage }) {
+  const search = useSearch({ strict: false })
+  const repo = parseRepoKey(typeof search.repo === 'string' ? search.repo : undefined)
+  return (
+    <Page
+      title={page.title}
+      icon={page.icon}
+      description={repo ? `${page.description} · ${repoKey(repo)}` : page.description}
+      actions={<RepoSelect to={page.to} />}
+    >
+      <AnalysisRecords page={page} {...(repo ? { repo } : {})} />
     </Page>
   )
 }
 
-const [releases, bundles, dependencies, quality] = analysisPages
+const [releases, bundles, , quality] = analysisPages
 
 export const ReleasesPage = () => <AnalysesPage page={releases} />
 export const BundlesPage = () => <AnalysesPage page={bundles} />
-export const DependenciesPage = () => <AnalysesPage page={dependencies} />
 export const QualityPage = () => <AnalysesPage page={quality} />

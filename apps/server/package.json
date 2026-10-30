@@ -21,6 +21,7 @@
     "@holtkeeper/confluence": "workspace:*",
     "@holtkeeper/core": "workspace:*",
     "@holtkeeper/credentials": "workspace:*",
+    "@holtkeeper/depgraph": "workspace:*",
     "@holtkeeper/exec": "workspace:*",
     "@holtkeeper/exec-container": "workspace:*",
     "@holtkeeper/forge": "workspace:*",

@@ -14,6 +14,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
+import { summarizeAnalysis } from '../analyses.ts'
 import {
   type AppContext,
   type Env,
@@ -68,19 +69,7 @@ export function analysisRoutes(deps: ServerDeps) {
     return kind
   }
 
-  const summarize = (record: AnalysisRecord): AnalysisSummary => {
-    const kind = kinds.get(record.kind)
-    return {
-      id: record.id,
-      repo: record.repo,
-      kind: record.kind,
-      label: kind?.label ?? record.kind,
-      ...(record.ref ? { ref: record.ref } : {}),
-      createdAt: record.createdAt,
-      ...(record.actor ? { actor: record.actor } : {}),
-      metrics: kind ? kind.summarize(record.data) : [],
-    }
-  }
+  const summarize = (record: AnalysisRecord) => summarizeAnalysis(kinds, record)
 
   const readable = async (c: AppContext, id: string) => {
     const record = await store.analyses.get(id)

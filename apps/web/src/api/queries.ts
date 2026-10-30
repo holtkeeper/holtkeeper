@@ -96,6 +96,15 @@ export const useAnalyses = (kind: string, repo?: RepoRef, limit = 100, enabled =
     enabled,
   })
 
+/** Direct dependencies of every readable repository, joined per library. */
+export const useDependencies = (enabled = true) =>
+  useQuery({
+    queryKey: ['dependencies'],
+    queryFn: api.dependencies,
+    staleTime: 60_000,
+    enabled,
+  })
+
 /** A rendered report, compared with `compare` or, by default, the previous record. */
 export const useAnalysis = (analysisId: string, compare?: string) =>
   useQuery({

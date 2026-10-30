@@ -1,6 +1,7 @@
 import type { Grant, Principal, Scope } from '@holtkeeper/access'
 import type { AuthInfo } from '@holtkeeper/auth'
 import type { Conflict } from '@holtkeeper/changes'
+import type { FleetLibrary } from '@holtkeeper/depgraph'
 import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
 import type { Metric, Report } from '@holtkeeper/report'
 import type {
@@ -142,6 +143,8 @@ export interface RepoSummary {
   repo: RepoRef
   groups: string[]
   latestAudit?: AuditRunSummary
+  /** The newest record of each analysis kind, when the caller may read analyses. */
+  latestAnalyses?: AnalysisSummary[]
 }
 
 /** `GET /api/repos` */
@@ -342,6 +345,25 @@ export interface AnalysisDetail {
   analysis: AnalysisSummary
   previous?: AnalysisSummary
   report: Report
+}
+
+/** A repository in the dependency inventory and the record its dependencies come from. */
+export interface DependencyRepo {
+  repo: RepoRef
+  analysisId: string
+  ref?: string
+  createdAt: Timestamp
+  /** Direct dependencies across its workspaces. */
+  dependencies: number
+}
+
+/**
+ * `GET /api/dependencies` — direct dependencies of every repository the caller may read, from the
+ * newest `depgraph` analysis of each. Usages and sources identify repositories as `forge:path`.
+ */
+export interface DependencyInventory {
+  repos: DependencyRepo[]
+  libraries: FleetLibrary<string>[]
 }
 
 /** `POST /api/analyses/:id/changes` — accepts some of a report's proposed changes. */

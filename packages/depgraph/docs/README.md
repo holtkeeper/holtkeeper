@@ -24,6 +24,15 @@ All pure and deterministic.
 - `compareVersions(a, b)` — semver-style ordering, accepts Go's `v` prefix.
 - `GraphBuilder` — helper for sources: deduplicates nodes and edges (`prod` wins over other kinds) and drops edges to unknown nodes.
 
+## Inventory across repositories
+
+All pure.
+
+- `directDependencies(data): DirectDependency[]` — edges from workspaces to packages in the `packages` layers: `{ ecosystem, name, version, workspace, kind }`, one per workspace and library (`prod` wins over `peer`, `optional`, `dev`). Where the resolver selects one version (Go), the selected version replaces the requested one.
+- `ownPackages(data): OwnPackage[]` — versioned workspaces, i.e. packages the repository defines.
+- `versionDrift(versions): 'none' | 'patch' | 'minor' | 'major'` — between the lowest and highest version; `major` when they are not semver-compatible (below 1.0 a minor bump is breaking).
+- `fleetLibraries(entries: { origin, data }[]): FleetLibrary[]` — one entry per library across repositories: `versions` in use, `latest` (highest in use, or the version in the fleet's own `source` when higher), `drift`, `usages` with their `lag` behind `latest`, and `behind` (usages with a lag). Sorted by drift, then `behind`, then usage count.
+
 ## Running sources
 
 `analyzeDependencies({ dir, sources }): Promise<DepgraphData>` runs every source whose `detect` is true. A source that throws ends up in `errors`; the other layers are kept.

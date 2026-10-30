@@ -9,6 +9,7 @@ import type {
   AuditRunList,
   CredentialList,
   CredentialView,
+  DependencyInventory,
   MeResponse,
   RepoList,
   ResolvedSettings,
@@ -19,6 +20,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
+import { analyzeLayer } from '@holtkeeper/depgraph'
 import { defineAnalysis, metric } from '@holtkeeper/report'
 import { builtinSettings, defineSetting } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
@@ -120,6 +122,29 @@ const run = (path: string, finishedAt: string) => ({
   startedAt: finishedAt,
   finishedAt,
   report: report('high'),
+})
+
+const depgraphData = (workspace: string, react: string) => ({
+  layers: [
+    analyzeLayer({
+      id: 'packages',
+      source: 'pnpm-lock.yaml',
+      graph: {
+        nodes: [
+          { id: workspace, name: workspace, ecosystem: 'npm', kind: 'workspace' },
+          {
+            id: `react@${react}`,
+            name: 'react',
+            version: react,
+            ecosystem: 'npm',
+            kind: 'package',
+          },
+        ],
+        edges: [{ from: workspace, to: `react@${react}`, kind: 'prod' }],
+      },
+    }),
+  ],
+  errors: [],
 })
 
 let store: Store
@@ -273,6 +298,65 @@ describe('server', () => {
       ['games/a', ['games'], true],
       ['tools/cli', ['tools'], false],
     ])
+  })
+
+  test('lists the newest analysis of each kind per repository', async () => {
+    await store.auditRuns.add({ ...run('games/a', '2026-10-29T10:00:00.000Z'), trigger: 'cli' })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'size',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      data: { bytes: 1 },
+    })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'size',
+      createdAt: '2026-10-02T00:00:00.000Z',
+      data: { bytes: 2 },
+    })
+    const repos = (await (await setup().request('/api/repos')).json()) as RepoList
+    const repoA = repos.repos.find((r) => r.repo.path === 'games/a')
+    expect(repoA?.latestAnalyses?.map((a) => [a.kind, a.metrics[0]?.value])).toEqual([['size', 2]])
+  })
+
+  test('builds the dependency inventory from the newest depgraph record per repository', async () => {
+    await Promise.all(
+      [
+        ['games/a', '18.2.0', '2026-10-01T00:00:00.000Z'],
+        ['games/a', '18.3.1', '2026-10-02T00:00:00.000Z'],
+        ['tools/cli', '19.1.0', '2026-10-03T00:00:00.000Z'],
+      ].map(([path = '', react = '', createdAt = '']) =>
+        store.analyses.add({
+          repo: { forge: 'work', path },
+          kind: 'depgraph',
+          createdAt,
+          data: depgraphData(path.split('/')[1] ?? path, react),
+        }),
+      ),
+    )
+
+    const inventory = (await (
+      await setup().request('/api/dependencies')
+    ).json()) as DependencyInventory
+    expect(inventory.repos.map((r) => [r.repo.path, r.dependencies])).toEqual([
+      ['games/a', 1],
+      ['tools/cli', 1],
+    ])
+    expect(inventory.libraries).toMatchObject([
+      { name: 'react', versions: ['18.3.1', '19.1.0'], drift: 'major', behind: 1 },
+    ])
+
+    const scoped = (await (
+      await setup(
+        headerAuth({
+          roles: {
+            games: [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }],
+          },
+        }),
+      ).request('/api/dependencies', { headers: asGames })
+    ).json()) as DependencyInventory
+    expect(scoped.repos.map((r) => r.repo.path)).toEqual(['games/a'])
+    expect(scoped.libraries[0]?.usages.map((u) => u.origin)).toEqual(['work:games/a'])
   })
 
   test('stores settings per scope, seals secrets and resolves for a repository', async () => {

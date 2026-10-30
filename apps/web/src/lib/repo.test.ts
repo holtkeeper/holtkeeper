@@ -4,6 +4,8 @@ import {
   parseRepoKey,
   repoKey,
   repoName,
+  splitRepoPath,
+  auditFreshness,
   validateGroupId,
   validateRepoPath,
   withRepo,
@@ -45,4 +47,20 @@ test('withRepo adds a path once and lifts its exclusion', () => {
     'games/*',
     'games/slots',
   ])
+})
+
+test('splitRepoPath separates the namespace from the name', () => {
+  expect(splitRepoPath('acme/billing/frontend-libs')).toEqual({
+    namespace: 'acme/billing/',
+    name: 'frontend-libs',
+  })
+  expect(splitRepoPath('solo')).toEqual({ namespace: '', name: 'solo' })
+})
+
+test('auditFreshness buckets by age', () => {
+  const now = new Date('2026-10-30T00:00:00.000Z')
+  expect(auditFreshness(undefined, now)).toBe('never')
+  expect(auditFreshness('2026-10-25T00:00:00.000Z', now)).toBe('fresh')
+  expect(auditFreshness('2026-10-10T00:00:00.000Z', now)).toBe('aging')
+  expect(auditFreshness('2026-08-01T00:00:00.000Z', now)).toBe('stale')
 })

@@ -13,6 +13,7 @@ The HTTP contract between the server and its clients (web UI, CLI): request and 
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `GET /api/me`                                                                                        | `MeResponse`                                                                         |
 | `GET /api/repos`                                                                                     | `RepoList`                                                                           |
+| `GET /api/dependencies`                                                                              | `DependencyInventory`                                                                |
 | `GET /api/audit-runs?repo=&before=&limit=`                                                           | `AuditRunList`                                                                       |
 | `GET /api/audit-runs/:id`                                                                            | `AuditRunDetail`                                                                     |
 | `POST /api/audit-runs`                                                                               | `IngestAuditRun` → `AuditRunDetail`                                                  |
@@ -20,5 +21,7 @@ The HTTP contract between the server and its clients (web UI, CLI): request and 
 | `GET/PUT /api/settings`, `DELETE /api/settings/:id`, `GET /api/settings/resolve?repo=`               | `SettingList`, `PutSettingInput`, `SettingView`, `ResolvedSettings`                  |
 | `GET /api/activity`                                                                                  | `ActivityList`                                                                       |
 | `/auth/users/admin/users...`                                                                         | `UserList`, `InviteUserInput`, `UpdateUserInput`, `LinkResponse`, `LinkInfo`         |
+
+`RepoSummary.latestAnalyses` holds the newest record of each analysis kind when the caller may read analyses. `DependencyInventory` joins the direct dependencies from the newest `depgraph` record of every readable repository into `FleetLibrary` entries (see `@holtkeeper/depgraph`); usages name repositories as `forge:path`.
 
 Errors are `ApiError { error }` with status 400, 401, 403, 404 or 500.

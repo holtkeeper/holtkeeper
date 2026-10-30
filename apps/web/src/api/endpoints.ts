@@ -20,6 +20,7 @@ import type {
   CredentialTestInput,
   CredentialTestResult,
   CredentialView,
+  DependencyInventory,
   InviteUserInput,
   KnowledgeEntry,
   KnowledgeList,
@@ -69,6 +70,8 @@ export const api = {
       },
     }),
   auditRun: (runId: string) => request<AuditRunDetail>('GET', `/api/audit-runs/${id(runId)}`),
+
+  dependencies: () => request<DependencyInventory>('GET', '/api/dependencies'),
 
   analysisKinds: () => request<AnalysisKindList>('GET', '/api/analyses/kinds'),
   analyses: (query: { repo?: RepoRef; kind?: string; limit?: number; before?: string }) =>

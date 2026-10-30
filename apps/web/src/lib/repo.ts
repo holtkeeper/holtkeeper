@@ -42,3 +42,20 @@ export function withRepo(
     exclude: group.exclude.filter((pattern) => pattern !== path),
   }
 }
+
+/** `team/sub/app` → namespace `team/sub/` and name `app`, for two-tone labels. */
+export function splitRepoPath(path: string): { namespace: string; name: string } {
+  const slash = path.lastIndexOf('/')
+  return slash < 0
+    ? { namespace: '', name: path }
+    : { namespace: path.slice(0, slash + 1), name: path.slice(slash + 1) }
+}
+
+/** How recent an audit is: within a week, within a month, older, or never. */
+export type Freshness = 'fresh' | 'aging' | 'stale' | 'never'
+
+export function auditFreshness(finishedAt: string | undefined, now: Date = new Date()): Freshness {
+  if (!finishedAt) return 'never'
+  const days = (now.getTime() - new Date(finishedAt).getTime()) / 86_400_000
+  return days <= 7 ? 'fresh' : days <= 30 ? 'aging' : 'stale'
+}

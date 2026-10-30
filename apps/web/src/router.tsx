@@ -67,7 +67,7 @@ const BundlesPage = lazyRouteComponent(
   'BundlesPage',
 )
 const DependenciesPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
+  () => import('./features/dependencies/DependenciesPage.tsx'),
   'DependenciesPage',
 )
 const QualityPage = lazyRouteComponent(
