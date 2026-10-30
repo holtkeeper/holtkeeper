@@ -7,6 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@holtkeeper/agent": "workspace:*",
     "@holtkeeper/auth": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/store": "workspace:*",

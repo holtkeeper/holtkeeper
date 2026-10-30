@@ -6,6 +6,7 @@ import {
   type AgentTask,
   type ConcurrencyLimiter,
   type AiCatalog,
+  type AiProviderPlugin,
   type AiProvider,
   type CreateAgentOptions,
   type ModelCatalog,
@@ -250,6 +251,8 @@ export interface SettingsAgentOptions {
   models?: ModelCatalog
   /** Models and prices of `ai-sdk` providers, for `@latest` and cost. */
   aiCatalog?: AiCatalog
+  /** Providers `ai-sdk` credentials may name by `package` besides the shipped AI SDK packages. */
+  aiProviders?: readonly AiProviderPlugin[]
 }
 
 /** Prices of the listed models that have them, by model id; `undefined` when none do. */
@@ -346,6 +349,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         ...(await routingFor(key, aiProvider, routing)),
         ...(limiter && { limiter }),
         ...(pricing && { pricing }),
+        ...(options.aiProviders && { plugins: options.aiProviders }),
       })
     } catch (error) {
       log(

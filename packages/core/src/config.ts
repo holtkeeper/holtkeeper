@@ -1,6 +1,7 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+import type { AiProviderPlugin } from '@holtkeeper/agent'
 import type { AuthProvider } from '@holtkeeper/auth'
 import type { ForgeDefinition, Secret } from '@holtkeeper/forge'
 import type { Store } from '@holtkeeper/store'
@@ -267,6 +268,20 @@ const jobsSchema = z.object({
   webhooks: z.record(id, z.object({ secret: secretSchema })).optional(),
 })
 
+const aiProviderSchema = z.custom<AiProviderPlugin>(
+  (value) =>
+    isObject(value) &&
+    typeof value.package === 'string' &&
+    typeof value.languageModel === 'function',
+  'expected an AI provider plugin, e.g. waibee()',
+)
+
+/** AI providers beyond the shipped AI SDK packages (`AiProviderPlugin` of `@holtkeeper/agent`). */
+const aiSchema = z.object({
+  /** `ai-sdk` credentials name a plugin by its `package`; its catalog joins the models.dev one. */
+  providers: z.array(aiProviderSchema).default([]),
+})
+
 /** Credential limits shared by forge clients, agents and job admission (`@holtkeeper/limits`). */
 const limitsSchema = z.object({
   /**
@@ -299,8 +314,21 @@ export const configSchema = z
     server: serverSchema.optional(),
     jobs: jobsSchema.optional(),
     limits: limitsSchema.optional(),
+    ai: aiSchema.optional(),
   })
   .superRefine((config, ctx) => {
+    const aiPackages = new Set<string>()
+    for (const [index, provider] of (config.ai?.providers ?? []).entries()) {
+      if (aiPackages.has(provider.package)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['ai', 'providers', index],
+          message: `AI provider "${provider.package}" is added twice`,
+        })
+      }
+      aiPackages.add(provider.package)
+    }
+
     for (const [name, group] of Object.entries(config.groups)) {
       if (!(group.forge in config.forges)) {
         ctx.addIssue({

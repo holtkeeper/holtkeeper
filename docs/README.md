@@ -37,6 +37,7 @@
 | `@holtkeeper/managed-config`      | Panel-managed forges, groups, schedules, triggers over the config file | [packages/managed-config/docs](../packages/managed-config/docs/README.md)           |
 | `@holtkeeper/agent`               | LLM agent contract and Claude adapter                                  | [packages/agent/docs](../packages/agent/docs/README.md)                             |
 | `@holtkeeper/ai-usage`            | AI usage recording, costs and budgets                                  | [packages/ai-usage/docs](../packages/ai-usage/docs/README.md)                       |
+| `@holtkeeper/ai-waibee`           | Waibee Router as an AI provider plugin                                 | [packages/ai-waibee/docs](../packages/ai-waibee/docs/README.md)                     |
 | `@holtkeeper/notify`              | Notifications: Slack and webhooks                                      | [packages/notify/docs](../packages/notify/docs/README.md)                           |
 | `@holtkeeper/report`              | Universal report format and analysis kinds                             | [packages/report/docs](../packages/report/docs/README.md)                           |
 | `@holtkeeper/artifacts`           | Content-addressed blob store (fs, memory, S3), ZIP, storage providers  | [packages/artifacts/docs](../packages/artifacts/docs/README.md)                     |

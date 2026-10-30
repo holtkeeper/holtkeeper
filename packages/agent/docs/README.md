@@ -62,7 +62,7 @@ An AI provider is a credential (`@holtkeeper/credentials`) whose `kind` is one o
 
 Common options: `model` and `models` (per task kind) as defaults that `createAgent`'s `model`/`models` override, `modelMap` (logical id → the provider's model name, e.g. `claude-opus-5-5` → `corp-opus`), `pricing` (`{ [model]: { inputPerMTok, outputPerMTok, cacheReadPerMTok?, cacheWritePerMTok? } }`, keyed by provider or logical name), `timeoutMs` (one model request) and `maxConcurrency` (runs at once; pass a shared `limiter` from `createLimiter` so every agent of one credential shares the slots). `{secret}` in a header value is replaced by the credential secret, so a gateway that wants the key in a custom header needs no secret in `options`. With `env` credentials the secret is unused; store any placeholder.
 
-Helpers: `listProviderModels`, `resolveLatestModel`, `resolveProviderRouting`, `modelCatalog`, `parseProviderOptions`, `providerOptionsIssues(kind, options)`, `aiProviderOptionsValidator` (plug into `createCredentialService({ validateOptions })`), `isAiProviderKind`, `mapModel`, `renderHeaders`, `costFromPricing`, `createLimiter`, `limitConcurrency(agent, max | limiter)`.
+Helpers: `listProviderModels`, `resolveLatestModel`, `resolveProviderRouting`, `modelCatalog`, `parseProviderOptions`, `providerOptionsIssues(kind, options)`, `aiProviderOptionsValidator` / `aiProviderOptionsValidatorFor(plugins)` (plug into `createCredentialService({ validateOptions })`), `isAiProviderKind`, `mapModel`, `renderHeaders`, `costFromPricing`, `createLimiter`, `limitConcurrency(agent, max | limiter)`.
 
 ### Models
 
@@ -145,11 +145,32 @@ The `ai-sdk` kind reaches any provider of the [Vercel AI SDK](https://ai-sdk.dev
 
 - `provider` is the catalog id (`openrouter`, `groq`, `moonshotai`, ...) or a name of your own; `package` picks the AI SDK provider. `settings` go to its `create...` function as they are (`{ region }` for Bedrock, `{ project, location }` for Vertex, `{ resourceName }` for Azure). The OpenAI-compatible package needs a base URL: `baseUrl`, else the credential `url`.
 - `aiSdkLanguageModel(connection, modelId)` builds the model; `createAiSdkAgent({ languageModel, model?, models?, modelMap?, pricing?, timeoutMs?, maxTurns?, runner?, limits? })` runs it with the same tools, prompt and output handling as the OpenAI-compatible adapter below, on `generateText` with `stopWhen: stepCountIs(maxTurns)` and one tool call at a time. There is no default model: `models[taskKind]`, else `model`, else the run throws.
-- `pingAiSdkProvider(provider, model)` asks the model for a one-word reply (the server's credential test).
+- `pingAiSdkProvider(provider, model, { plugins? })` asks the model for a one-word reply (the server's credential test).
+
+### Provider plugins
+
+A provider without a shipped package, typically a community AI SDK provider, is added as an `AiProviderPlugin`: its `package` is the value `ai-sdk` credentials name, `languageModel(connection, modelId)` builds the model from the credential (secret, `baseUrl`, rendered `headers`, `settings`), and the optional `catalog()` returns its catalog entries (`CatalogProvider`, prices per MTok), which `withPluginCatalogs(base, plugins, { ttlMs?, onError? })` adds to the models.dev catalog (a plugin entry replaces a models.dev one of the same id; a failing plugin catalog keeps its last good copy or is left out). Once added, the provider shows up in the credential form, its models list and resolve `@latest`, and catalog prices price its runs. A models.dev-shaped document, e.g. a package's own export, reads with `parseModelsDev({ [id]: entry })`.
+
+[@holtkeeper/ai-waibee](../../ai-waibee/docs/README.md) is one, roughly:
+
+```ts
+import { defineAiProvider, parseModelsDev } from '@holtkeeper/agent'
+import { WAIBEE_MODELS_SNAPSHOT, createWaibee, toModelsDev } from '@holtkeeper/waibee-ai-provider'
+
+export const waibee = () =>
+  defineAiProvider({
+    package: '@holtkeeper/waibee-ai-provider',
+    languageModel: (c, modelId) =>
+      createWaibee({ apiKey: c.secret, ...(c.baseUrl && { baseURL: c.baseUrl }) })(modelId),
+    catalog: () => parseModelsDev({ waibee: toModelsDev(WAIBEE_MODELS_SNAPSHOT.models) }),
+  })
+```
+
+Plugins are listed in the config's `ai.providers` (`@holtkeeper/core`). `createAgent` and `pingAiSdkProvider` take them as `plugins` and refuse any other unknown package; `aiSdkLanguageModel(connection, modelId, plugins)` and `isSupportedProvider(provider, plugins)` consult them; `aiSdkPackages(plugins)` lists every package; `aiProviderOptionsValidatorFor(plugins)` is the credential validator that accepts their packages (`aiProviderOptionsValidator` accepts shipped packages only).
 
 ### Catalog
 
-`modelsDevCatalog({ url?, ttlMs?, fetch? })` loads [models.dev](https://github.com/anomalyco/models.dev) (`MODELS_DEV_URL`) on first use, caches it for a day and keeps the last good copy when a refresh fails. `parseModelsDev(json)` reads its providers (`id`, `name`, `package`, `api?`, `doc?`, `env`) and models (`toolCall`, `reasoning`, `releaseDate`, `contextWindow`, `outputLimit`, `pricing` per MTok). `isSupportedProvider` says whether Holtkeeper can talk to one (its package ships, or it has an OpenAI-compatible `api`). With `catalog` in `listProviderModels` deps, `ai-sdk` providers list the catalog's models; providers of your own list their `/models`.
+`modelsDevCatalog({ url?, ttlMs?, fetch? })` loads [models.dev](https://github.com/anomalyco/models.dev) (`MODELS_DEV_URL`) on first use, caches it for a day and keeps the last good copy when a refresh fails. `parseModelsDev(json)` reads its providers (`id`, `name`, `package`, `api?`, `doc?`, `env`) and models (`toolCall`, `reasoning`, `releaseDate`, `contextWindow`, `outputLimit`, `pricing` per MTok). `isSupportedProvider` says whether Holtkeeper can talk to one (its package ships or is a plugin's, or it has an OpenAI-compatible `api`). With `catalog` in `listProviderModels` deps, `ai-sdk` providers list the catalog's models; providers of your own list their `/models`.
 
 ## OpenAI-compatible adapter
 

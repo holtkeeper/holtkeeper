@@ -66,6 +66,16 @@ describe('parseConfig', () => {
     expect(message).toContain('unknown group "nope"')
   })
 
+  test('accepts AI provider plugins once each', () => {
+    const acme = { package: 'acme-ai-provider', languageModel: () => ({}) }
+    expect(errorOf({ ...base, ai: { providers: [acme, acme] } })).toEqual(
+      expect.stringContaining('AI provider "acme-ai-provider" is added twice'),
+    )
+    expect(errorOf({ ...base, ai: { providers: [{}] } })).toContain(
+      'expected an AI provider plugin',
+    )
+  })
+
   test('validates plugin options and overrides', () => {
     const message = errorOf({
       ...base,

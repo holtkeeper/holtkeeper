@@ -1,6 +1,11 @@
 import { join } from 'node:path'
 
-import { type AiCatalog, aiProviderOptionsValidator, modelsDevCatalog } from '@holtkeeper/agent'
+import {
+  type AiCatalog,
+  aiProviderOptionsValidatorFor,
+  modelsDevCatalog,
+  withPluginCatalogs,
+} from '@holtkeeper/agent'
 import { builtinAnalyzers, reviewChecks } from '@holtkeeper/analyzers'
 import {
   type ArtifactStore,
@@ -71,7 +76,10 @@ export interface ServerOptions {
   artifacts?: ArtifactStore
   /** Image engine of the media routes. Default `@holtkeeper/media`. */
   media?: MediaEngine
-  /** Provider and model catalog of `ai-sdk` credentials. Default `modelsDevCatalog()`. */
+  /**
+   * Provider and model catalog of `ai-sdk` credentials. Default `modelsDevCatalog()`; the config's
+   * `ai.providers` catalogs are added to it either way.
+   */
   aiCatalog?: AiCatalog
   /**
    * More areas for the storage overview, e.g. `mirrorStorage(jobs.cacheDir)` from
@@ -156,6 +164,7 @@ export async function startServer(
   const server = fileConfig.server
   if (!server) throw new Error('the config has no `server` section')
   const log = options.log ?? ((line: string) => console.log(line))
+  const aiProviders = fileConfig.ai?.providers ?? []
 
   const vault = aesVault(server.vaultKey)
   const credentials = createCredentialService({
@@ -163,7 +172,7 @@ export async function startServer(
     activity: server.store.activity,
     vault,
     rotators: [gitlabTokenRotator(), ...(options.rotators ?? [])],
-    validateOptions: aiProviderOptionsValidator,
+    validateOptions: aiProviderOptionsValidatorFor(aiProviders),
   })
   const duties = roleDuties(options.roles ?? ['all'])
   const limiterOptions = limiterOptionsFor(fileConfig, server.store)
@@ -207,10 +216,20 @@ export async function startServer(
   const replacements: Record<string, AnyAnalyzer> = { review, tracker }
   const analyzers =
     options.analyzers ?? builtinAnalyzers.map((analyzer) => replacements[analyzer.kind] ?? analyzer)
-  const aiCatalog = options.aiCatalog ?? modelsDevCatalog()
+  const aiCatalog = withPluginCatalogs(options.aiCatalog ?? modelsDevCatalog(), aiProviders, {
+    onError: (error) =>
+      log(`ai catalog: ${error instanceof Error ? error.message : String(error)}`),
+  })
   const agentFor =
     options.agentFor ??
-    settingsAgentFor({ config, store: server.store, vault, rateLimiter: limiter, aiCatalog })
+    settingsAgentFor({
+      config,
+      store: server.store,
+      vault,
+      rateLimiter: limiter,
+      aiCatalog,
+      aiProviders,
+    })
   const artifacts = options.artifacts ?? artifactStoreFor(server)
   const deps: ServerDeps = {
     config,
@@ -234,6 +253,7 @@ export async function startServer(
     documentSinks,
     artifacts,
     aiCatalog,
+    aiProviders,
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),

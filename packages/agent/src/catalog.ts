@@ -64,8 +64,8 @@ function modelOf(id: string, value: unknown): CatalogModel | undefined {
   const limit = isRecord(value.limit) ? value.limit : {}
   const name = text(value.name)
   const releaseDate = text(value.release_date)
-  const contextWindow = amount(limit.context)
-  const outputLimit = amount(limit.output)
+  const contextWindow = amount(limit.context) || undefined
+  const outputLimit = amount(limit.output) || undefined
   const pricing = pricingOf(value.cost)
   return {
     id: text(value.id) ?? id,

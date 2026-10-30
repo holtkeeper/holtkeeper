@@ -134,8 +134,8 @@ export const providerOptionsSchema = z.discriminatedUnion('kind', [
     ...common,
     /** Catalog provider id (models.dev), or a name of your own for a provider it lacks. */
     provider: z.string().min(1),
-    /** The AI SDK package that talks to it. */
-    package: z.enum(AI_SDK_PACKAGE_NAMES).default('@ai-sdk/openai-compatible'),
+    /** The AI SDK package that talks to it: one of `AI_SDK_PACKAGE_NAMES` or an `AiProviderPlugin`'s. */
+    package: z.string().min(1).default('@ai-sdk/openai-compatible'),
     /** API root; the OpenAI-compatible package falls back to the credential URL. */
     baseUrl: httpUrl.optional(),
     /** Extra request headers; `{secret}` in a value is replaced by the credential secret. */
@@ -217,10 +217,22 @@ export function costFromPricing(
 
 /**
  * A credential options validator (`CredentialOptionsValidator` of `@holtkeeper/credentials`):
- * `providerOptionsIssues` for AI provider kinds, `undefined` for every other kind.
+ * `providerOptionsIssues` for AI provider kinds, `undefined` for every other kind. An `ai-sdk`
+ * package must be one of `AI_SDK_PACKAGE_NAMES`; `aiProviderOptionsValidatorFor(plugins)` also
+ * accepts the plugins' packages.
  */
 export const aiProviderOptionsValidator = (
   kind: string,
   options: Record<string, unknown> | undefined,
-): string[] | undefined =>
-  isAiProviderKind(kind) ? providerOptionsIssues(kind, options) : undefined
+): string[] | undefined => {
+  if (!isAiProviderKind(kind)) return undefined
+  const issues = providerOptionsIssues(kind, options)
+  const pkg = options?.['package']
+  if (
+    kind === 'ai-sdk' &&
+    typeof pkg === 'string' &&
+    !(AI_SDK_PACKAGE_NAMES as readonly string[]).includes(pkg)
+  )
+    issues.push(`options.package: ${pkg} is not an available AI SDK package`)
+  return issues
+}

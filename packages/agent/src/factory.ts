@@ -10,6 +10,7 @@ import {
   modelFor,
 } from './claude.ts'
 import { createOpenAICompatibleAgent, type OpenAICompatibleAgentDependencies } from './openai.ts'
+import { type AiProviderPlugin, aiSdkPackages } from './plugin.ts'
 import {
   type AiProvider,
   type AiProviderKind,
@@ -37,20 +38,34 @@ function aiSdkConnection(provider: AiProvider, parsed: AiSdkOptions): AiSdkConne
   }
 }
 
+/** `parseProviderOptions` that also refuses an `ai-sdk` package neither shipped nor a plugin's. */
+function parseWithPlugins(provider: AiProvider, plugins?: readonly AiProviderPlugin[]) {
+  const parsed = parseProviderOptions(provider)
+  if (parsed.kind === 'ai-sdk' && !aiSdkPackages(plugins).includes(parsed.package))
+    throw new Error(
+      `invalid AI provider: options.package: ${parsed.package} is not an available AI SDK package`,
+    )
+  return parsed
+}
+
 /** A one-word reply of an `ai-sdk` provider's `model` and how long it took; throws on failure. */
 export async function pingAiSdkProvider(
   provider: AiProvider,
   model: string,
-  options: { signal?: AbortSignal; languageModel?: (modelId: string) => LanguageModel } = {},
+  options: {
+    signal?: AbortSignal
+    plugins?: readonly AiProviderPlugin[]
+    languageModel?: (modelId: string) => LanguageModel
+  } = {},
 ): Promise<{ text: string; latencyMs: number }> {
-  const parsed = parseProviderOptions(provider)
+  const parsed = parseWithPlugins(provider, options.plugins)
   if (parsed.kind !== 'ai-sdk') throw new Error(`${parsed.kind} providers cannot be pinged`)
   const modelId = mapModel(model, parsed.modelMap)
   const started = Date.now()
   const result = await generateText({
     model:
       options.languageModel?.(modelId) ??
-      aiSdkLanguageModel(aiSdkConnection(provider, parsed), modelId),
+      aiSdkLanguageModel(aiSdkConnection(provider, parsed), modelId, options.plugins),
     prompt: 'Reply with the single word OK.',
     maxOutputTokens: 16,
     maxRetries: 0,
@@ -81,6 +96,8 @@ export interface CreateAgentOptions {
   limiter?: ConcurrencyLimiter
   /** Prices to fall back on, e.g. from the catalog; the provider's `pricing` option wins. */
   pricing?: Record<string, ModelPricing>
+  /** Providers `ai-sdk` credentials may name by `package` besides the shipped ones. */
+  plugins?: readonly AiProviderPlugin[]
   /** Test seams. */
   query?: ClaudeQuery
   fetch?: OpenAICompatibleAgentDependencies['fetch']
@@ -148,10 +165,11 @@ export function limitConcurrency<A extends Agent>(agent: A, limit: number | Conc
  * the credential `url`. Anthropic, Anthropic-compatible, Bedrock and Vertex providers run on the
  * Claude Agent SDK; OpenAI-compatible ones on the built-in tool loop; `ai-sdk` ones on the Vercel
  * AI SDK through their package (the OpenAI-compatible package falls back to the credential `url`).
- * `maxConcurrency` limits parallel runs of the returned agent.
+ * `maxConcurrency` limits parallel runs of the returned agent. An `ai-sdk` package must ship or be
+ * one of `options.plugins`.
  */
 export function createAgent(provider: AiProvider, options: CreateAgentOptions = {}): ProviderAgent {
-  const parsed = parseProviderOptions(provider)
+  const parsed = parseWithPlugins(provider, options.plugins)
   const routing = {
     ...((options.model ?? parsed.model) !== undefined && { model: options.model ?? parsed.model }),
     ...((options.models ?? parsed.models) !== undefined && {
@@ -175,7 +193,8 @@ export function createAgent(provider: AiProvider, options: CreateAgentOptions = 
     agent = createAiSdkAgent({
       ...shared,
       languageModel:
-        options.languageModel ?? ((modelId) => aiSdkLanguageModel(connection, modelId)),
+        options.languageModel ??
+        ((modelId) => aiSdkLanguageModel(connection, modelId, options.plugins)),
       ...(options.runner && { runner: options.runner }),
     })
   } else if (parsed.kind === 'openai-compatible') {

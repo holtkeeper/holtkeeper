@@ -218,6 +218,17 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/ai-waibee": {
+      "name": "@holtkeeper/ai-waibee",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/waibee-ai-provider": "^0.1.0",
+      },
+      "devDependencies": {
+        "@ai-sdk/provider": "^4.0.34",
+      },
+    },
     "packages/analyzer": {
       "name": "@holtkeeper/analyzer",
       "version": "0.0.0",
@@ -380,6 +391,7 @@
       "name": "@holtkeeper/core",
       "version": "0.0.0",
       "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/store": "workspace:*",
@@ -1052,6 +1064,8 @@
 
     "@holtkeeper/ai-usage": ["@holtkeeper/ai-usage@workspace:packages/ai-usage"],
 
+    "@holtkeeper/ai-waibee": ["@holtkeeper/ai-waibee@workspace:packages/ai-waibee"],
+
     "@holtkeeper/analyzer": ["@holtkeeper/analyzer@workspace:packages/analyzer"],
 
     "@holtkeeper/analyzers": ["@holtkeeper/analyzers@workspace:packages/analyzers"],
@@ -1179,6 +1193,8 @@
     "@holtkeeper/vuln-js": ["@holtkeeper/vuln-js@workspace:packages/vuln-js"],
 
     "@holtkeeper/vuln-osv": ["@holtkeeper/vuln-osv@workspace:packages/vuln-osv"],
+
+    "@holtkeeper/waibee-ai-provider": ["@holtkeeper/waibee-ai-provider@0.1.0", "", { "dependencies": { "@ai-sdk/anthropic": "^4.0.92", "@ai-sdk/openai-compatible": "^3.0.81", "@ai-sdk/provider": "^4.0.34", "@ai-sdk/provider-utils": "^5.0.71" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ScN/VbVS2v0Rytbp47LNVb8KUcD2ajGsU2tREiGDNvQ0mzQkQXVsnQR8tA3/DHuN3DPhTsx+ClIp51H5atoN+Q=="],
 
     "@holtkeeper/web": ["@holtkeeper/web@workspace:apps/web"],
 

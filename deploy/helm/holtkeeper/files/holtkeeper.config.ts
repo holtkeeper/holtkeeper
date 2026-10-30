@@ -1,3 +1,4 @@
+import { waibee } from '@holtkeeper/ai-waibee'
 import { passwordAuth } from '@holtkeeper/auth-password'
 import { usersAuth } from '@holtkeeper/auth-users'
 import { defineConfig } from '@holtkeeper/core'
@@ -14,6 +15,8 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
  * - `HOLTKEEPER_S3_BUCKET` set: artifacts in any S3-compatible storage (required for more than one process), else /data.
  * - `HOLTKEEPER_AUTH=users`: accounts with passkeys; the first start logs the admin's setup link.
  *   Needs `HOLTKEEPER_PUBLIC_URL`. Otherwise one `root` password (`HOLTKEEPER_ROOT_PASSWORD`).
+ * - Waibee Router is available as an AI provider; `WAIBEE_API_KEY` set lists its catalog with that
+ *   account's prices, else the bundled snapshot.
  */
 const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
 const port = Number(process.env.HOLTKEEPER_PORT ?? 7420)
@@ -51,6 +54,7 @@ export default defineConfig({
     ? { work: gitlab({ url: process.env.GITLAB_URL, token: env('GITLAB_TOKEN') }) }
     : {},
   groups: {},
+  ai: { providers: [waibee()] },
   server: {
     auth: auth(),
     store,

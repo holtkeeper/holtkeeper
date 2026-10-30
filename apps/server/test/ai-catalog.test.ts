@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import { type AiCatalog, aiProviderOptionsValidator } from '@holtkeeper/agent'
+import {
+  type AiCatalog,
+  aiProviderOptionsValidator,
+  aiProviderOptionsValidatorFor,
+} from '@holtkeeper/agent'
 import type {
   AiCatalogProviderList,
   CredentialTestResult,
@@ -108,6 +112,43 @@ const createProvider = async (app: ReturnType<typeof setup>, options: Record<str
 beforeEach(() => {
   store = memoryStore()
   prompts.length = 0
+})
+
+describe('AI provider plugins', () => {
+  test('a closed package becomes available once a plugin provides it', async () => {
+    const plugin = {
+      package: 'closed-ai-sdk',
+      languageModel: () => new MockLanguageModelV4(),
+    }
+    const app = createApp({
+      config,
+      auth: noAuth(),
+      store,
+      vault: aesVault('v'.repeat(32)),
+      credentials: createCredentialService({
+        credentials: store.credentials,
+        vault: aesVault('v'.repeat(32)),
+        validateOptions: aiProviderOptionsValidatorFor([plugin]),
+      }),
+      settings: [],
+      analyses: [],
+      aiCatalog: catalog,
+      aiProviders: [plugin],
+      now: () => new Date('2026-10-30T12:00:00.000Z'),
+    })
+    const list = (await (await app.request('/api/ai/providers')).json()) as AiCatalogProviderList
+    expect(list.packages).toContain('closed-ai-sdk')
+    expect(list.providers.find((p) => p.id === 'closed')?.package).toBe('closed-ai-sdk')
+    const created = await send(app, 'POST', '/api/credentials', {
+      name: 'Closed',
+      kind: 'ai-sdk',
+      url: 'https://closed.test',
+      secret: 'sk',
+      scope: { all: true },
+      options: { provider: 'closed', package: 'closed-ai-sdk' },
+    })
+    expect(created.status).toBe(201)
+  })
 })
 
 describe('AI catalog', () => {

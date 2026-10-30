@@ -37,12 +37,13 @@ import { z } from 'zod'
 import { DEFAULT_LOCAL_TOOL_LIMITS, type LocalToolLimits, clipOutput } from './local-tools.ts'
 import { openAISystemPrompt, openAITools } from './openai.ts'
 import { AgentOutputError, parseAgentOutput } from './output.ts'
+import type { AiProviderPlugin } from './plugin.ts'
 import { type AiSdkPackage, costFromPricing, mapModel, type ModelPricing } from './provider.ts'
 import type { Agent, AgentResult, AgentTask, AgentTool, AgentUsage, ToolContext } from './types.ts'
 
 /** How to reach a provider through its AI SDK package. */
 export interface AiSdkConnection {
-  /** AI SDK provider package, one of `AI_SDK_PACKAGES`. */
+  /** AI SDK provider package: one of `AI_SDK_PACKAGES` or an `AiProviderPlugin`'s. */
   package: string
   /** Provider label, e.g. the catalog id; names OpenAI-compatible providers in requests. */
   name: string
@@ -141,12 +142,29 @@ const factories: Record<AiSdkPackage, ModelFactory> = {
 /** AI SDK provider packages Holtkeeper ships; any other provider goes through `@ai-sdk/openai-compatible`. */
 export const AI_SDK_PACKAGES: readonly string[] = Object.keys(factories)
 
-/** Whether Holtkeeper can talk to a catalog provider: its package ships, or it has an OpenAI-compatible API. */
-export const isSupportedProvider = (provider: { package: string; api?: string }) =>
-  AI_SDK_PACKAGES.includes(provider.package) || provider.api !== undefined
+/**
+ * Whether Holtkeeper can talk to a catalog provider: its package ships or is a plugin's, or it has
+ * an OpenAI-compatible API.
+ */
+export const isSupportedProvider = (
+  provider: { package: string; api?: string },
+  plugins: readonly AiProviderPlugin[] = [],
+) =>
+  AI_SDK_PACKAGES.includes(provider.package) ||
+  plugins.some((plugin) => plugin.package === provider.package) ||
+  provider.api !== undefined
 
-/** The AI SDK language model `modelId` of a provider. Throws for a package Holtkeeper does not ship. */
-export function aiSdkLanguageModel(connection: AiSdkConnection, modelId: string): LanguageModel {
+/**
+ * The AI SDK language model `modelId` of a provider: through the plugin whose `package` matches,
+ * else the shipped package. Throws for a package neither provides.
+ */
+export function aiSdkLanguageModel(
+  connection: AiSdkConnection,
+  modelId: string,
+  plugins: readonly AiProviderPlugin[] = [],
+): LanguageModel {
+  const plugin = plugins.find((p) => p.package === connection.package)
+  if (plugin) return plugin.languageModel(connection, modelId)
   const factory = (factories as Record<string, ModelFactory | undefined>)[connection.package]
   if (!factory) throw new Error(`AI SDK package ${connection.package} is not available`)
   return factory(connection)(modelId)

@@ -1,6 +1,6 @@
 import type { Action, Principal, RepoTarget, Target } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
-import type { AiCatalog, LanguageModelFactory } from '@holtkeeper/agent'
+import type { AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@holtkeeper/agent'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
@@ -51,6 +51,8 @@ export interface ServerDeps {
   media?: MediaEngine
   /** Provider and model catalog of `ai-sdk` credentials; catalog routes answer an error without it. */
   aiCatalog?: AiCatalog
+  /** AI providers from the config's `ai.providers`, which `ai-sdk` credentials may name. */
+  aiProviders?: readonly AiProviderPlugin[]
   /** Replaces the AI SDK models of `ai-sdk` credential tests; for tests. */
   languageModel?: LanguageModelFactory
   /** Areas the storage overview reports, e.g. artifacts, git mirrors, the database. */

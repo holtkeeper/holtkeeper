@@ -34,13 +34,14 @@ export default defineConfig({
 
 (`forge-gitlab` and the plugin are shown for illustration; they arrive in later milestones.)
 
-| Field     | Description                                                                                                                                                                            |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `forges`  | Named Git hosting connections. Keys are lowercase ids.                                                                                                                                 |
-| `groups`  | Named sets of repositories on one forge, selected by `include` and `exclude` globs over the repository path.                                                                           |
-| `repos`   | Traits per repository, keyed by a path glob. Optional `forge` limits the entry to one forge. Matching entries merge in declaration order, so put specific patterns after general ones. |
-| `plugins` | Plugin uses: which groups they run on, base `options`, `exclude` globs and per-path `overrides`.                                                                                       |
-| `dryRun`  | When `true`, plugins report what they would do without changing anything. Default `false`.                                                                                             |
+| Field     | Description                                                                                                                                                                                   |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forges`  | Named Git hosting connections. Keys are lowercase ids.                                                                                                                                        |
+| `groups`  | Named sets of repositories on one forge, selected by `include` and `exclude` globs over the repository path.                                                                                  |
+| `repos`   | Traits per repository, keyed by a path glob. Optional `forge` limits the entry to one forge. Matching entries merge in declaration order, so put specific patterns after general ones.        |
+| `plugins` | Plugin uses: which groups they run on, base `options`, `exclude` globs and per-path `overrides`.                                                                                              |
+| `ai`      | `providers`: AI provider plugins (`AiProviderPlugin` of [@holtkeeper/agent](../../agent/docs/README.md#provider-plugins)) that `ai-sdk` credentials may name by `package`, each package once. |
+| `dryRun`  | When `true`, plugins report what they would do without changing anything. Default `false`.                                                                                                    |
 
 Globs follow `Bun.Glob`: `*` stays within one path segment, `**` crosses segments. `games/*` matches `games/slots-x` but not `games/web/slots-x`.
 

@@ -1,4 +1,4 @@
-import { AI_SDK_PACKAGES, isSupportedProvider } from '@holtkeeper/agent'
+import { aiSdkPackages, isSupportedProvider } from '@holtkeeper/agent'
 import type { AiCatalogProviderList, ProviderModelList } from '@holtkeeper/api'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -7,20 +7,21 @@ import { type Env, type ServerDeps, principalOf } from '../context.ts'
 
 /**
  * The AI catalog for creating `ai-sdk` credentials: `GET /ai/providers` lists the providers
- * Holtkeeper can talk to (shipped AI SDK package or an OpenAI-compatible API), `GET
+ * Holtkeeper can talk to (shipped AI SDK package, an `ai.providers` plugin or an OpenAI-compatible
+ * API), `GET
  * /ai/providers/:id/models` one provider's models. Any signed-in caller may read it.
  */
-export function aiCatalogRoutes({ aiCatalog }: ServerDeps) {
+export function aiCatalogRoutes({ aiCatalog, aiProviders = [] }: ServerDeps) {
   const app = new Hono<Env>()
 
   const providers = async () => {
     if (!aiCatalog) throw new Error('no AI catalog configured')
-    return (await aiCatalog.providers()).filter(isSupportedProvider)
+    return (await aiCatalog.providers()).filter((p) => isSupportedProvider(p, aiProviders))
   }
 
   app.get('/ai/providers', async (c) => {
     principalOf(c)
-    const packages = [...AI_SDK_PACKAGES]
+    const packages = aiSdkPackages(aiProviders)
     try {
       const list = await providers()
       return c.json<AiCatalogProviderList>({
@@ -29,7 +30,7 @@ export function aiCatalogRoutes({ aiCatalog }: ServerDeps) {
           .map((p) => ({
             id: p.id,
             name: p.name,
-            package: AI_SDK_PACKAGES.includes(p.package) ? p.package : '@ai-sdk/openai-compatible',
+            package: packages.includes(p.package) ? p.package : '@ai-sdk/openai-compatible',
             ...(p.api && { api: p.api }),
             ...(p.doc && { doc: p.doc }),
             env: p.env,

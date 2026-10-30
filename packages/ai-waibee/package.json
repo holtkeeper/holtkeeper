@@ -1,0 +1,16 @@
+{
+  "name": "@holtkeeper/ai-waibee",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/waibee-ai-provider": "^0.1.0"
+  },
+  "devDependencies": {
+    "@ai-sdk/provider": "^4.0.34"
+  }
+}

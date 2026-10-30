@@ -144,6 +144,7 @@ export function credentialRoutes(deps: ServerDeps) {
     try {
       const reply = await pingAiSdkProvider(provider, model, {
         signal: AbortSignal.timeout(30_000),
+        ...(deps.aiProviders && { plugins: deps.aiProviders }),
         ...(deps.languageModel && { languageModel: deps.languageModel }),
       })
       return c.json<CredentialTestResult>({
