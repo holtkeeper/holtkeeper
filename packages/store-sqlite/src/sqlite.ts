@@ -567,6 +567,7 @@ interface JobRow {
   analysis_id: string | null
   log: string
   actor: string | null
+  schedule: string | null
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -590,6 +591,7 @@ const toJob = (r: JobRow): Job => ({
   ...(r.analysis_id !== null && { analysisId: r.analysis_id }),
   log: JSON.parse(r.log),
   ...(r.actor !== null && { actor: r.actor }),
+  ...(r.schedule !== null && { schedule: r.schedule }),
 })
 
 function sqliteJobs(db: Database): JobStore {
@@ -609,11 +611,12 @@ function sqliteJobs(db: Database): JobStore {
         string,
         string,
         string | null,
+        string | null,
       ]
     >(
       `INSERT INTO jobs (id, analyzer, repo_forge, repo_path, group_name, ref, options, trigger, status, attempts,
-         max_attempts, run_after, created_at, log, actor)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 0, ?9, ?10, ?11, '[]', ?12)
+         max_attempts, run_after, created_at, log, actor, schedule)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 0, ?9, ?10, ?11, '[]', ?12, ?13)
        RETURNING *`,
     ),
     // One statement, so picking and taking the job is atomic even across processes.
@@ -667,13 +670,22 @@ function sqliteJobs(db: Database): JobStore {
     get: db.query<JobRow, [string]>('SELECT * FROM jobs WHERE id = ?'),
     list: db.query<
       JobRow,
-      [string | null, string | null, string | null, string | null, string | null, number]
+      [
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        number,
+        string | null,
+      ]
     >(
       `SELECT * FROM jobs
        WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
          AND (?2 IS NULL OR (repo_forge = ?2 AND repo_path = ?3))
          AND (?4 IS NULL OR analyzer = ?4)
          AND (?5 IS NULL OR created_at < ?5)
+         AND (?7 IS NULL OR schedule = ?7)
        ORDER BY created_at DESC, seq DESC LIMIT ?6`,
     ),
     log: db.query<{ log: string }, [string]>('SELECT log FROM jobs WHERE id = ?'),
@@ -706,6 +718,7 @@ function sqliteJobs(db: Database): JobStore {
         job.runAfter ?? job.createdAt,
         job.createdAt,
         orNull(job.actor),
+        orNull(job.schedule),
       )
       if (!row) throw new Error('job insert returned nothing')
       return toJob(row)
@@ -731,7 +744,7 @@ function sqliteJobs(db: Database): JobStore {
     async get(id) {
       return one(sql.get.get(id))
     },
-    async list({ status, repo, analyzer, before, limit = 50 } = {}) {
+    async list({ status, repo, analyzer, schedule, before, limit = 50 } = {}) {
       return sql.list
         .all(
           status === undefined ? null : json([status].flat()),
@@ -740,6 +753,7 @@ function sqliteJobs(db: Database): JobStore {
           orNull(analyzer),
           orNull(before),
           limit,
+          orNull(schedule),
         )
         .map(toJob)
     },

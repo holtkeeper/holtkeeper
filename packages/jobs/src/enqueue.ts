@@ -10,6 +10,8 @@ export interface JobRequest {
   options?: Record<string, unknown>
   trigger: JobTrigger
   actor?: string
+  /** Schedule that asked for the job. */
+  schedule?: string
   /** Not claimed before this time; default: at once. */
   runAfter?: Timestamp
 }

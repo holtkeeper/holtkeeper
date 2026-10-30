@@ -14,6 +14,7 @@ interface CiJobRow {
   status: CiJobRecord['status']
   ref: string | null
   sha: string | null
+  tag: boolean
   created_at: PgTimestamp
   started_at: PgTimestamp | null
   finished_at: PgTimestamp | null
@@ -32,6 +33,7 @@ const toRecord = (r: CiJobRow): CiJobRecord => ({
   status: r.status,
   ...(r.ref !== null && { ref: r.ref }),
   ...(r.sha !== null && { sha: r.sha }),
+  ...(r.tag && { tag: true }),
   createdAt: iso(r.created_at),
   ...(r.started_at !== null && { startedAt: iso(r.started_at) }),
   ...(r.finished_at !== null && { finishedAt: iso(r.finished_at) }),
@@ -51,6 +53,7 @@ const toRow = (record: CiJobRecord) => ({
   status: record.status,
   ref: record.ref ?? null,
   sha: record.sha ?? null,
+  tag: record.tag ?? false,
   created_at: record.createdAt,
   started_at: record.startedAt ?? null,
   finished_at: record.finishedAt ?? null,
@@ -80,7 +83,7 @@ export function postgresCiJobs(db: () => Promise<Db>): CiJobStore {
             INSERT INTO ${t.ciJobs} ${tx(rows.slice(i, i + BATCH))}
             ON CONFLICT (repo_forge, repo_path, job_id) DO UPDATE SET
               pipeline_id = EXCLUDED.pipeline_id, name = EXCLUDED.name, stage = EXCLUDED.stage,
-              status = EXCLUDED.status, ref = EXCLUDED.ref, sha = EXCLUDED.sha,
+              status = EXCLUDED.status, ref = EXCLUDED.ref, sha = EXCLUDED.sha, tag = EXCLUDED.tag,
               created_at = EXCLUDED.created_at, started_at = EXCLUDED.started_at,
               finished_at = EXCLUDED.finished_at, duration_seconds = EXCLUDED.duration_seconds,
               queued_seconds = EXCLUDED.queued_seconds, allow_failure = EXCLUDED.allow_failure,

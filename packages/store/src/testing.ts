@@ -370,6 +370,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
           actor: 'jane',
           group: 'games',
           maxAttempts: 5,
+          schedule: 'nightly',
         }),
       )
       expect(queued).toMatchObject({
@@ -386,6 +387,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         createdAt: t(0),
         log: [],
         actor: 'jane',
+        schedule: 'nightly',
       })
       expect(await store.jobs.get(queued.id)).toEqual(queued)
       expect(await store.jobs.get('missing')).toBeUndefined()
@@ -393,6 +395,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(plain.maxAttempts).toBe(3)
       expect(plain.options).toEqual({})
       expect(plain.ref).toBeUndefined()
+      expect(plain.schedule).toBeUndefined()
     })
 
     test('jobs: claim takes the oldest due job and skips busy repositories', async () => {
@@ -491,7 +494,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
 
     test('jobs: list newest first with filters, appendLog keeps the tail', async () => {
       const a = await store.jobs.enqueue(job('games/a', t(1)))
-      await store.jobs.enqueue(job('games/b', t(2), { analyzer: 'changelog' }))
+      await store.jobs.enqueue(job('games/b', t(2), { analyzer: 'changelog', schedule: 'weekly' }))
       const c = await store.jobs.enqueue(job('games/a', t(3)))
       await store.jobs.claim('w1', t(4))
 
@@ -502,6 +505,9 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         (await store.jobs.list({ repo: { forge: 'work', path: 'games/a' } })).map((j) => j.id),
       ).toEqual([c.id, a.id])
       expect(await store.jobs.list({ analyzer: 'changelog' })).toHaveLength(1)
+      expect((await store.jobs.list({ schedule: 'weekly' })).map((j) => j.createdAt)).toEqual([
+        t(2),
+      ])
       expect((await store.jobs.list({ before: t(3), limit: 1 })).map((j) => j.createdAt)).toEqual([
         t(2),
       ])
@@ -676,6 +682,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
           status: 'failed',
           ref: 'main',
           sha: 'abc',
+          tag: true,
           startedAt: '2026-10-02T00:01:00+00:00',
           finishedAt: '2026-10-02T00:05:00.000Z',
           durationSeconds: 240.5,
@@ -701,6 +708,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
           status: 'failed',
           ref: 'main',
           sha: 'abc',
+          tag: true,
           startedAt: '2026-10-02T00:01:00.000Z',
           finishedAt: '2026-10-02T00:05:00.000Z',
           durationSeconds: 240.5,

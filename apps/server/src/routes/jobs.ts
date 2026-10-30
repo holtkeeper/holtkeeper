@@ -71,9 +71,11 @@ export function jobRoutes(deps: ServerDeps) {
     const status = parsedStatus.data
     const repo = parseRepo(c.req.query('repo'))
     const before = c.req.query('before')
+    const schedule = c.req.query('schedule')
     const jobs = await store.jobs.list({
       ...(status ? { status } : {}),
       ...(repo ? { repo } : {}),
+      ...(schedule ? { schedule } : {}),
       ...(before ? { before } : {}),
       limit: limitParam(c.req.query('limit')),
     })

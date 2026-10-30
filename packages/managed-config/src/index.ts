@@ -29,3 +29,10 @@ export {
 } from './source.ts'
 export { generateWebhookSecret } from './secret.ts'
 export { gitlabForgeFactory } from './factories.ts'
+export {
+  type DefaultSchedule,
+  SCHEDULES_MARKER,
+  type SeedSchedulesOptions,
+  defaultSchedules,
+  seedDefaultSchedules,
+} from './defaults.ts'

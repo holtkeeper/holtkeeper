@@ -372,6 +372,14 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX ci_jobs_created ON ci_jobs (created_at);
     `,
   },
+  {
+    version: 8,
+    sql: `
+      ALTER TABLE jobs ADD COLUMN schedule text;
+      CREATE INDEX jobs_schedule ON jobs (schedule, created_at DESC) WHERE schedule IS NOT NULL;
+      ALTER TABLE ci_jobs ADD COLUMN tag boolean NOT NULL DEFAULT false;
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

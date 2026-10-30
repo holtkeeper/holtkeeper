@@ -142,6 +142,16 @@ describe('scheduler', () => {
     ])
   })
 
+  test('jobs carry their schedule, and the person who ran it by hand', async () => {
+    const jobs = await scheduler().run('weekly', { actor: 'u1' })
+    expect(jobs.map((j) => [j.schedule, j.actor, j.trigger])).toEqual([
+      ['weekly', 'u1', 'schedule'],
+      ['weekly', 'u1', 'schedule'],
+    ])
+    expect(await store.jobs.list({ schedule: 'weekly' })).toHaveLength(2)
+    expect(await store.jobs.list({ schedule: 'nightly' })).toEqual([])
+  })
+
   test('repos globs filter across every group when none are named', async () => {
     const jobs = await scheduler().run('weekly')
     expect(jobs.map((j) => j.repo.path)).toEqual(['games/a', 'tools/a'])

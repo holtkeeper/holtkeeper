@@ -59,3 +59,4 @@ export {
   createWorker,
   exponentialBackoff,
 } from './worker.ts'
+export { type ScheduleRunSummary, scheduleRuns } from './runs.ts'

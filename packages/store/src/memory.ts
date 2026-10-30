@@ -177,6 +177,7 @@ function memoryJobs(): JobStore {
         createdAt: input.createdAt,
         log: [],
         ...(input.actor !== undefined && { actor: input.actor }),
+        ...(input.schedule !== undefined && { schedule: input.schedule }),
       }
       jobs.set(job.id, job)
       order.set(job.id, seq++)
@@ -260,13 +261,14 @@ function memoryJobs(): JobStore {
       return changed
     },
     get: async (id) => clone(jobs.get(id)),
-    async list({ status, repo, analyzer, before, limit = 50 } = {}) {
+    async list({ status, repo, analyzer, schedule, before, limit = 50 } = {}) {
       const statuses = status === undefined ? undefined : [status].flat()
       const matching = [...jobs.values()].filter(
         (job) =>
           (!statuses || statuses.includes(job.status)) &&
           (!repo || sameRepo(job.repo, repo)) &&
           (!analyzer || job.analyzer === analyzer) &&
+          (!schedule || job.schedule === schedule) &&
           (!before || job.createdAt < before),
       )
       return matching

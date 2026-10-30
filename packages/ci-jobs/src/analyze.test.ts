@@ -66,7 +66,7 @@ describe('analyzeCiJobs', () => {
     const result = analyzeCiJobs(quarter(), window, options)
     expect(result.weeks).toHaveLength(14)
     expect(result.weeks.reduce((sum, w) => sum + w.runs, 0)).toBe(result.totals.runs)
-    expect(result.jobs.map((j) => j.name)).toEqual(['build', 'test', 'lint'])
+    expect(result.jobs.map((j) => j.name)).toEqual(['build', 'test', 'deploy', 'lint'])
     expect(result.jobs[0]?.weeks).toHaveLength(14)
     const share = result.jobs.reduce((sum, j) => sum + j.computeShare, 0)
     expect(Math.round(share)).toBe(100)
@@ -76,8 +76,31 @@ describe('analyzeCiJobs', () => {
   test('the branch filter drops other refs', () => {
     const all = analyzeCiJobs(quarter(), window, options)
     const main = analyzeCiJobs(quarter(), window, { ...options, branch: 'main' })
-    expect(all.totals.pipelines).toBe(120)
+    expect(all.totals.pipelines).toBe(123)
     expect(main.totals.pipelines).toBe(90)
+  })
+
+  test('pipeline time per kind of ref, durations from passing pipelines', () => {
+    const result = analyzeCiJobs(quarter(), { ...window, defaultBranch: 'main' }, options)
+    expect(result.defaultBranch).toBe('main')
+    expect(result.refGroups.map((g) => [g.group, g.pipelines, g.refs])).toEqual([
+      ['default', 90, 1],
+      ['feature', 30, 1],
+      ['tag', 3, 3],
+    ])
+    const main = result.refGroups[0]
+    expect(main?.label).toBe('Default branch (main)')
+    expect(main?.failureRate).toBe(10)
+    expect(main?.baselineMedian).toBe(100)
+    expect(main?.recentMedian).toBe(160)
+    expect(main?.change).toBe(60)
+    expect(main?.weeks).toHaveLength(14)
+    expect(result.refGroups[2]?.duration.median).toBe(600)
+    expect(result.refGroups[2]?.topRefs.map((r) => r.ref)).toEqual([
+      'v1.29.0',
+      'v1.59.0',
+      'v1.89.0',
+    ])
   })
 
   test('new and idle jobs, and small changes that stay stable', () => {

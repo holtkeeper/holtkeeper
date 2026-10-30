@@ -13,7 +13,7 @@ import type {
 
 import { ciJobsDataSchema } from './schema.ts'
 import { formatDuration, round, weekOf } from './stats.ts'
-import type { CiJobsData, JobStats, JobTrend } from './types.ts'
+import type { CiJobsData, JobStats, JobTrend, RefGroupStats } from './types.ts'
 
 /** Slowdowns that get a chart of their own. */
 const CHARTED_SLOWDOWNS = 3
@@ -69,10 +69,29 @@ function measured(
 
 const perWeek = (data: CiJobsData) => data.totals.computeSeconds / Math.max(data.window.days / 7, 1)
 
+const defaultGroup = (data: CiJobsData | undefined) =>
+  data?.refGroups?.find((group) => group.group === 'default')
+
 function headline(data: CiJobsData, previous?: CiJobsData): Metric[] {
   const { totals } = data
   const before = previous?.totals
+  const main = defaultGroup(data)
   return [
+    ...(main
+      ? [
+          measured(
+            'default-branch-time',
+            'Default branch pipeline (median)',
+            ms(main.duration.median),
+            {
+              unit: 'ms',
+              previous: ms(defaultGroup(previous)?.duration.median),
+              better: 'down',
+              hint: `${main.pipelines} pipelines on ${data.defaultBranch ?? 'the default branch'}, passing ones timed. p95 ${formatDuration(main.duration.p95 ?? 0)}.`,
+            },
+          ),
+        ]
+      : []),
     measured('wall-time', 'Pipeline time (median)', ms(totals.wallTime.median), {
       unit: 'ms',
       previous: ms(before?.wallTime.median),
@@ -189,6 +208,109 @@ function pipelinesSection(data: CiJobsData): Section {
     id: 'pipelines',
     title: 'Pipelines',
     description: `${data.totals.pipelines} pipelines and ${data.totals.runs} job attempts in the last ${data.window.days} days.`,
+    blocks,
+  }
+}
+
+const GROUP_TONE: Record<RefGroupStats['group'], Tone> = {
+  default: 'info',
+  develop: 'good',
+  release: 'warning',
+  feature: 'neutral',
+  'merge-request': 'neutral',
+  tag: 'bad',
+}
+
+function refGroupsSection(data: CiJobsData): Section | undefined {
+  const groups = data.refGroups ?? []
+  if (!groups.length) return undefined
+  const changeTone = (change: number | undefined): Tone =>
+    change === undefined
+      ? 'neutral'
+      : change >= data.options.changePercent
+        ? 'bad'
+        : change <= -data.options.changePercent
+          ? 'good'
+          : 'neutral'
+  const blocks: Block[] = [
+    {
+      type: 'table',
+      columns: [
+        { key: 'group', label: 'Refs' },
+        { key: 'pipelines', label: 'Pipelines', align: 'end' },
+        { key: 'refs', label: 'Distinct refs', align: 'end' },
+        { key: 'median', label: 'Median', unit: 'ms', format: 'sparkline' },
+        { key: 'p95', label: 'p95', unit: 'ms', align: 'end' },
+        { key: 'change', label: 'Recent change', align: 'end' },
+        { key: 'failureRate', label: 'Failed', unit: 'percent', align: 'end' },
+      ],
+      rows: groups.map((group) => ({
+        group: { text: group.label, tone: GROUP_TONE[group.group] },
+        pipelines: group.pipelines,
+        refs: group.refs,
+        median: {
+          text: formatDuration(group.duration.median ?? 0),
+          value: ms(group.duration.median) ?? 0,
+          series: group.weeks.map((w) => ms(w.median) ?? null),
+          tone: changeTone(group.change),
+        },
+        p95: ms(group.duration.p95) ?? null,
+        change:
+          group.change === undefined
+            ? null
+            : { text: signed(group.change), value: group.change, tone: changeTone(group.change) },
+        failureRate:
+          group.failureRate === undefined
+            ? null
+            : {
+                text: `${group.failureRate}%`,
+                value: group.failureRate,
+                tone: failureTone(group.failureRate),
+              },
+      })),
+    },
+    {
+      type: 'chart',
+      title: 'Median pipeline time per week',
+      chart: 'line',
+      unit: 'ms',
+      x: 'week',
+      series: groups.map((group) => ({
+        key: group.group,
+        label: group.label,
+        tone: GROUP_TONE[group.group],
+      })),
+      data: data.weeks.map((w, index) => ({
+        week: weekLabel(w.week),
+        ...Object.fromEntries(
+          groups.map((group) => [group.group, ms(group.weeks[index]?.median) ?? null]),
+        ),
+      })),
+    },
+    {
+      type: 'table',
+      title: 'Busiest refs',
+      columns: [
+        { key: 'ref', label: 'Ref', format: 'code' },
+        { key: 'group', label: 'Kind' },
+        { key: 'pipelines', label: 'Pipelines', align: 'end' },
+        { key: 'median', label: 'Median', unit: 'ms', align: 'end' },
+      ],
+      rows: groups.flatMap((group) =>
+        group.topRefs.map((ref) => ({
+          ref: ref.ref,
+          group: { text: group.label, tone: GROUP_TONE[group.group] },
+          pipelines: ref.pipelines,
+          median: ms(ref.median) ?? null,
+        })),
+      ),
+    },
+  ]
+  return {
+    id: 'refs',
+    title: 'Pipelines by branch',
+    description:
+      'Pipeline time (first job start to last job end) of passing pipelines, grouped by the kind of ref they ran for. Failure rates count every pipeline.',
     blocks,
   }
 }
@@ -481,6 +603,7 @@ export function ciJobsReport(
   data: CiJobsData,
   options: { previous?: CiJobsData; repo?: RepoRef; ref?: string; generatedAt?: string } = {},
 ): Report {
+  const refsSection = refGroupsSection(data)
   return {
     kind: 'ci-jobs',
     title: 'CI jobs',
@@ -494,6 +617,7 @@ export function ciJobsReport(
     sections: [
       shiftsSection(data),
       pipelinesSection(data),
+      ...(refsSection ? [refsSection] : []),
       jobsSection(data),
       heatmapsSection(data),
       reliabilitySection(data),

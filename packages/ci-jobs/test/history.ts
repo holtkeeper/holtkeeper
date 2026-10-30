@@ -43,7 +43,8 @@ export function attempt(
 /**
  * 90 days with one pipeline a day: `build` takes 100 s until day 75 and 160 s after, `test`
  * takes 50 s and fails every tenth day, failing once then passing on day 5, `lint` always fails
- * but may. `feature` pipelines run `build` on another branch every third day.
+ * but may. `feature` pipelines run `build` on another branch every third day, and a tag pipeline
+ * runs `deploy` on days 29, 59 and 89.
  */
 export function quarter(): CiJobRecord[] {
   const records: CiJobRecord[] = []
@@ -61,6 +62,14 @@ export function quarter(): CiJobRecord[] {
     records.push(attempt('lint', created, 10, { pipelineId, status: 'failed', allowFailure: true }))
     if (day % 3 === 0)
       records.push(attempt('build', at(day, 12), 300, { pipelineId: 5000 + day, ref: 'feature' }))
+    if (day % 30 === 29)
+      records.push(
+        attempt('deploy', at(day, 14), 600, {
+          pipelineId: 7000 + day,
+          ref: `v1.${day}.0`,
+          tag: true,
+        }),
+      )
   }
   return records
 }
@@ -107,7 +116,14 @@ export function fakeForge(
     kind: 'fake',
     calls,
     listRepositories: unsupported,
-    getRepository: unsupported,
+    getRepository: async (path) => ({
+      path,
+      name: path,
+      defaultBranch: 'main',
+      webUrl: `https://g.example/${path}`,
+      cloneUrl: `https://g.example/${path}.git`,
+      archived: false,
+    }),
     readFile: unsupported,
     createBranch: unsupported,
     deleteBranch: unsupported,

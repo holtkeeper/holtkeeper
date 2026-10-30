@@ -550,6 +550,7 @@ export class FakeGitLab {
           return {
             ...this.jobJson(project, j),
             ref: pipeline?.ref ?? null,
+            tag: pipeline?.ref.startsWith('v') ?? false,
             commit: pipeline ? { id: pipeline.sha } : null,
             pipeline: { id: j.pipelineId, ref: pipeline?.ref, sha: pipeline?.sha },
           }

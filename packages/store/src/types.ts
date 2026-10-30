@@ -249,6 +249,8 @@ export interface Job {
   log: string[]
   /** Principal id that requested the job, when a person did. */
   actor?: string
+  /** Name of the schedule that queued the job, also for its manual runs. */
+  schedule?: string
 }
 
 export interface NewJob {
@@ -264,12 +266,15 @@ export interface NewJob {
   runAfter?: Timestamp
   createdAt: Timestamp
   actor?: string
+  schedule?: string
 }
 
 export interface JobQuery {
   status?: JobStatus | JobStatus[]
   repo?: RepoRef
   analyzer?: string
+  /** Only jobs queued by this schedule. */
+  schedule?: string
   /** Only jobs created before this time; used for paging. */
   before?: Timestamp
   /** Default 50. */
@@ -558,6 +563,8 @@ export interface CiJobRecord {
   status: 'success' | 'failed' | 'canceled'
   ref?: string
   sha?: string
+  /** The pipeline ran for a tag; absent for branches and merge requests. */
+  tag?: boolean
   createdAt: Timestamp
   startedAt?: Timestamp
   finishedAt?: Timestamp

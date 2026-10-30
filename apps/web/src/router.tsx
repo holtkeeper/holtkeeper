@@ -151,9 +151,14 @@ const jobsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'jobs',
   component: JobsPage,
-  validateSearch: (search: Record<string, unknown>): { repo?: string; status?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { repo?: string; status?: string; schedule?: string } => ({
     ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
     ...(typeof search.status === 'string' && search.status ? { status: search.status } : {}),
+    ...(typeof search.schedule === 'string' && search.schedule
+      ? { schedule: search.schedule }
+      : {}),
   }),
 })
 

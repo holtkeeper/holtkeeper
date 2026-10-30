@@ -31,11 +31,11 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       const { sql, t } = await db()
       const rows: JobRow[] = await sql`
         INSERT INTO ${t.jobs} (id, analyzer, repo_forge, repo_path, group_name, ref, options, trigger,
-          status, attempts, max_attempts, run_after, created_at, log, actor)
+          status, attempts, max_attempts, run_after, created_at, log, actor, schedule)
         VALUES (${crypto.randomUUID()}, ${job.analyzer}, ${job.repo.forge}, ${job.repo.path},
           ${job.group ?? null}, ${job.ref ?? null}, ${sql.json(job.options ?? {})}, ${job.trigger},
           'queued', 0, ${job.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}, ${job.runAfter ?? job.createdAt},
-          ${job.createdAt}, '[]', ${job.actor ?? null})
+          ${job.createdAt}, '[]', ${job.actor ?? null}, ${job.schedule ?? null})
         RETURNING *`
       const stored = one(rows)
       if (!stored) throw new Error('job insert returned nothing')
@@ -127,7 +127,7 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       const { sql, t } = await db()
       return one(await sql`SELECT * FROM ${t.jobs} WHERE id = ${id}`)
     },
-    async list({ status, repo, analyzer, before, limit = 50 } = {}) {
+    async list({ status, repo, analyzer, schedule, before, limit = 50 } = {}) {
       const { sql, t } = await db()
       const statuses = statusList(status)
       const rows: JobRow[] = await sql`
@@ -137,6 +137,7 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
           AND (${repo?.forge ?? null}::text IS NULL
             OR (repo_forge = ${repo?.forge ?? null}::text AND repo_path = ${repo?.path ?? null}::text))
           AND (${analyzer ?? null}::text IS NULL OR analyzer = ${analyzer ?? null}::text)
+          AND (${schedule ?? null}::text IS NULL OR schedule = ${schedule ?? null}::text)
           AND (${before ?? null}::timestamptz IS NULL OR created_at < ${before ?? null}::timestamptz)
         ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
       return rows.map(toJob)

@@ -1,3 +1,5 @@
+import type { RefGroup } from './refs.ts'
+
 /** Tunables of the CI jobs analysis. */
 export interface CiJobsOptions {
   /** Length of the analyzed window, ending now. */
@@ -101,10 +103,32 @@ export interface PipelineWeek {
   computeSeconds: number
 }
 
+/** Pipelines of one kind of ref, e.g. every feature branch. */
+export interface RefGroupStats {
+  group: RefGroup
+  label: string
+  pipelines: number
+  /** Distinct refs, e.g. how many feature branches ran. */
+  refs: number
+  /** Percent of pipelines with a failed job (jobs allowed to fail left out). */
+  failureRate?: number
+  /** Pipeline time of pipelines without failures, seconds. */
+  duration: Spread
+  recentMedian?: number
+  baselineMedian?: number
+  /** Percent change of `recentMedian` over `baselineMedian`. */
+  change?: number
+  weeks: { week: string; pipelines: number; median?: number; p95?: number }[]
+  /** Busiest refs of the group with their median pipeline time, at most five. */
+  topRefs: { ref: string; pipelines: number; median?: number }[]
+}
+
 /** Output of the `ci-jobs` analyzer: plain JSON, validated on ingest by `ciJobsDataSchema`. */
 export interface CiJobsData {
   window: { from: string; to: string; days: number }
   options: CiJobsOptions
+  /** The repository's default branch when the forge reported it. */
+  defaultBranch?: string
   /** What the store holds for the repository after this run. */
   history: {
     oldest?: string
@@ -136,6 +160,8 @@ export interface CiJobsData {
     queue: Spread
   }
   weeks: PipelineWeek[]
+  /** Pipeline time by kind of ref, in `refGroups` order; groups without pipelines left out. */
+  refGroups: RefGroupStats[]
   /** Compute seconds per stage, largest first. */
   stages: { stage: string; computeSeconds: number }[]
   /** Every job of the window, by compute time descending. */

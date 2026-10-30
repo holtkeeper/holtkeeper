@@ -414,13 +414,16 @@ export const useJobAnalyzers = () =>
 const activeStatus = (status: string) => status === 'queued' || status === 'running'
 
 /** Jobs, newest first; refreshes every few seconds while some are queued or running. */
-export const useJobs = (filter: { status?: string; repo?: RepoRef; limit?: number } = {}) =>
+export const useJobs = (
+  filter: { status?: string; repo?: RepoRef; schedule?: string; limit?: number } = {},
+) =>
   useQuery({
     queryKey: [
       ...keys.jobs,
       'list',
       filter.status ?? '',
       filter.repo ? repoKey(filter.repo) : '*',
+      filter.schedule ?? '*',
       filter.limit ?? 100,
     ],
     queryFn: () => api.jobs({ limit: 100, ...filter }),
@@ -428,6 +431,26 @@ export const useJobs = (filter: { status?: string; repo?: RepoRef; limit?: numbe
     refetchInterval: (query) =>
       query.state.data?.jobs.some((job) => activeStatus(job.status)) ? 3_000 : 30_000,
   })
+
+/** Recent runs of every schedule; refreshes every few seconds while a run is unfinished. */
+export const useScheduleRuns = () =>
+  useQuery({
+    queryKey: [...keys.jobs, 'schedule-runs'],
+    queryFn: () => api.scheduleRuns(),
+    refetchInterval: (query) =>
+      query.state.data?.schedules.some((s) => s.runs.some((run) => run.queued + run.running > 0))
+        ? 4_000
+        : 30_000,
+  })
+
+/** Queues every job of a schedule now; refreshes job lists and schedule runs. */
+export function useRunSchedule() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (scheduleId: string) => api.runSchedule(scheduleId),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs }),
+  })
+}
 
 /** One job with its log; refreshes while it is queued or running. */
 export const useJob = (jobId: string | undefined) =>

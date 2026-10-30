@@ -21,6 +21,7 @@ const quantiles = {
 /** Validates `CiJobsData`, e.g. records uploaded from elsewhere. */
 export const ciJobsDataSchema: z.ZodType<CiJobsData> = z.object({
   window: z.object({ from: z.string(), to: z.string(), days: z.number() }),
+  defaultBranch: z.string().optional(),
   options: z.object({
     days: z.number(),
     branch: z.string().optional(),
@@ -65,6 +66,30 @@ export const ciJobsDataSchema: z.ZodType<CiJobsData> = z.object({
       ...quantiles,
       queueMedian: z.number().optional(),
       computeSeconds: z.number(),
+    }),
+  ),
+  refGroups: z.array(
+    z.object({
+      group: z.enum(['default', 'develop', 'release', 'feature', 'merge-request', 'tag']),
+      label: z.string(),
+      pipelines: z.number(),
+      refs: z.number(),
+      failureRate: z.number().optional(),
+      duration: spreadSchema,
+      recentMedian: z.number().optional(),
+      baselineMedian: z.number().optional(),
+      change: z.number().optional(),
+      weeks: z.array(
+        z.object({
+          week: z.string(),
+          pipelines: z.number(),
+          median: z.number().optional(),
+          p95: z.number().optional(),
+        }),
+      ),
+      topRefs: z.array(
+        z.object({ ref: z.string(), pipelines: z.number(), median: z.number().optional() }),
+      ),
     }),
   ),
   stages: z.array(z.object({ stage: z.string(), computeSeconds: z.number() })),

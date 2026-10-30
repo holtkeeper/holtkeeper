@@ -10,6 +10,7 @@ import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import { formatValue } from '../../lib/units.ts'
 import { EmptyState, ErrorState, Notice, Page, Panel, Placeholder, Select } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
+import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { MetricChips } from './MetricChips.tsx'
 
 const allRepos = '*'
@@ -98,7 +99,15 @@ export function AnalysisRecords({ page, repo }: { page: AnalysisPage; repo?: Rep
           <EmptyState
             icon={<GitBranch />}
             title={`No ${page.title.toLowerCase()} yet`}
-            description="Records appear once the CLI or CI reports them."
+            description="Records appear after a scheduled or manual run, or when the CLI or CI reports them."
+            action={
+              <RunJobButton
+                analyzer={page.kind}
+                label="Run now"
+                size="sm"
+                {...(repo ? { repo } : {})}
+              />
+            }
           />
         ) : (
           <ul className="divide-y divide-separator">
@@ -156,7 +165,17 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
       title={page.title}
       icon={page.icon}
       description={repo ? `${page.description} · ${repoKey(repo)}` : page.description}
-      actions={<RepoSelect to={page.to} />}
+      actions={
+        <div className="flex items-center gap-2">
+          <RepoSelect to={page.to} />
+          <RunJobButton
+            analyzer={page.kind}
+            label="Run now"
+            variant="secondary"
+            {...(repo ? { repo } : {})}
+          />
+        </div>
+      }
     >
       <AnalysisRecords page={page} {...(repo ? { repo } : {})} />
     </Page>

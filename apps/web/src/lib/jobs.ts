@@ -1,4 +1,4 @@
-import type { Job, JobAnalyzerView, JobSummary } from '@holtkeeper/api'
+import type { Job, JobAnalyzerView, JobSummary, ScheduleRun } from '@holtkeeper/api'
 
 export type JobStatus = Job['status']
 export type JobTrigger = Job['trigger']
@@ -90,3 +90,30 @@ export function analyzersFor(
 /** Label of an analyzer kind, the kind itself when it is unknown. */
 export const analyzerLabel = (analyzers: readonly JobAnalyzerView[], kind: string): string =>
   analyzers.find((a) => a.kind === kind)?.label ?? kind
+
+/** Overall state of a schedule run: unfinished, any failure, all canceled, or all done. */
+export function scheduleRunState(run: Pick<ScheduleRun, 'jobs' | JobStatus>): {
+  label: string
+  tone: 'default' | 'accent' | 'success' | 'danger' | 'warning'
+} {
+  if (run.running > 0) return { label: 'Running', tone: 'accent' }
+  if (run.queued > 0) return { label: 'Queued', tone: 'default' }
+  if (run.failed > 0)
+    return { label: run.failed === run.jobs ? 'Failed' : 'Partly failed', tone: 'danger' }
+  if (run.canceled === run.jobs) return { label: 'Canceled', tone: 'default' }
+  if (run.canceled > 0) return { label: 'Partly canceled', tone: 'warning' }
+  return { label: 'Succeeded', tone: 'success' }
+}
+
+/** Share of each status in a run, in lifecycle order, for a stacked bar; zero shares left out. */
+export function scheduleRunShares(
+  run: Pick<ScheduleRun, 'jobs' | JobStatus>,
+): { status: JobStatus; count: number; percent: number }[] {
+  return jobStatuses
+    .map((status) => ({
+      status,
+      count: run[status],
+      percent: run.jobs ? (run[status] / run.jobs) * 100 : 0,
+    }))
+    .filter((share) => share.count > 0)
+}

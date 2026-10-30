@@ -640,6 +640,13 @@ describe('insight reads', () => {
       durationSeconds: 30,
     })
     expect(await forge.listProjectJobRuns?.('g/a', { limit: 2 })).toHaveLength(2)
+    expect(jobs?.some((j) => j.tag)).toBe(false)
+
+    server.addPipeline(project, 'v1.0.0', 'success', [
+      ['release', 'deploy', 'success', { created_at: '2026-02-03T00:00:00Z' }],
+    ])
+    const [tagged] = (await forge.listProjectJobRuns?.('g/a', { limit: 1 })) ?? []
+    expect(tagged).toMatchObject({ name: 'release', ref: 'v1.0.0', tag: true })
   })
 
   test('lists deployments by environment, ordered by update when filtered by time', async () => {

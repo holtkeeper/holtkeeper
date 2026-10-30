@@ -246,6 +246,7 @@ export interface JobRow {
   analysis_id: string | null
   log: string[]
   actor: string | null
+  schedule: string | null
 }
 
 export const toJob = (r: JobRow): Job => {
@@ -273,6 +274,7 @@ export const toJob = (r: JobRow): Job => {
     ...(r.analysis_id !== null && { analysisId: r.analysis_id }),
     log: r.log,
     ...(r.actor !== null && { actor: r.actor }),
+    ...(r.schedule !== null && { schedule: r.schedule }),
   }
 }
 

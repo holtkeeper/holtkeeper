@@ -914,6 +914,39 @@ export interface SchedulePreview {
   runs: Timestamp[]
 }
 
+/** One run of a schedule: the jobs it queued at one moment and how they are doing. */
+export interface ScheduleRun {
+  /** When the run queued its jobs. */
+  at: Timestamp
+  /** Who started it by hand; absent for timed runs. */
+  actor?: string
+  jobs: number
+  queued: number
+  running: number
+  succeeded: number
+  failed: number
+  canceled: number
+  analyzers: string[]
+  /** First job start and, once nothing is queued or running, last job end. */
+  startedAt?: Timestamp
+  finishedAt?: Timestamp
+  /** Up to five failed jobs. */
+  failures: { id: string; analyzer: string; repo: RepoRef; error?: string }[]
+}
+
+/** `GET /api/schedules/runs?limit=10`: recent runs of every schedule, newest first. */
+export interface ScheduleRunList {
+  schedules: { id: string; runs: ScheduleRun[] }[]
+}
+
+/** `POST /api/schedules/:id/run`: what a manual run queued. */
+export interface ScheduleRunResult {
+  id: string
+  queued: number
+  /** Jobs left out because the same analyzer already waits or runs for that repository. */
+  skipped: number
+}
+
 /** How one repository learns about forge changes. */
 export interface RepoUpdatesView {
   repo: RepoRef

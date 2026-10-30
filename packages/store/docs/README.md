@@ -24,7 +24,8 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 - `claim(workerId, now)` — atomically takes the oldest due queued job whose repository has no running job, marks it running and counts the attempt.
 - `heartbeat(id, workerId, now)` — `false` once the job is no longer running for that worker (e.g. canceled).
 - `complete`, `fail(id, { at, error, retryAt? })` (back to the queue while attempts remain and `retryAt` is given), `cancel`, `recoverStale(heartbeatBefore, at)` for jobs of dead workers.
-- `list({ status, repo, analyzer, before, limit })` newest first; `appendLog` keeps the last `JOB_LOG_LIMIT` (200) lines.
+- A job queued by a schedule carries its `schedule` name, also when someone ran the schedule by hand (`actor` is set then).
+- `list({ status, repo, analyzer, schedule, before, limit })` newest first; `appendLog` keeps the last `JOB_LOG_LIMIT` (200) lines.
 
 ## Knowledge
 
@@ -47,7 +48,7 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 
 ## CI jobs
 
-`CiJobStore` keeps finished CI job attempts (`CiJobRecord`: repository, job and pipeline ids, name, stage, `success | failed | canceled`, ref, sha, times, duration and queue seconds, `allowFailure`, link) for [@holtkeeper/ci-jobs](../../ci-jobs/docs/README.md).
+`CiJobStore` keeps finished CI job attempts (`CiJobRecord`: repository, job and pipeline ids, name, stage, `success | failed | canceled`, ref, sha, `tag` (the pipeline ran for a tag), times, duration and queue seconds, `allowFailure`, link) for [@holtkeeper/ci-jobs](../../ci-jobs/docs/README.md).
 
 - `put(records)` inserts or replaces by repository and job id; times are stored in the contract's ISO 8601 form (`normalizeCiJob`).
 - `list(repo, { from?, to? })` — created in `[from, to)`, oldest first, ties by job id (`compareCiJobs`).

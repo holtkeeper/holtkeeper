@@ -13,6 +13,7 @@ interface CiJobRow {
   status: CiJobRecord['status']
   ref: string | null
   sha: string | null
+  tag: number
   created_at: string
   started_at: string | null
   finished_at: string | null
@@ -31,6 +32,7 @@ const toRecord = (r: CiJobRow): CiJobRecord => ({
   status: r.status,
   ...(r.ref !== null && { ref: r.ref }),
   ...(r.sha !== null && { sha: r.sha }),
+  ...(r.tag === 1 && { tag: true }),
   createdAt: r.created_at,
   ...(r.started_at !== null && { startedAt: r.started_at }),
   ...(r.finished_at !== null && { finishedAt: r.finished_at }),
@@ -45,8 +47,8 @@ export function sqliteCiJobs(db: Database): CiJobStore {
   const upsert = db.prepare(
     `INSERT OR REPLACE INTO ci_jobs (repo_forge, repo_path, job_id, pipeline_id, name, stage, status,
        ref, sha, created_at, started_at, finished_at, duration_seconds, queued_seconds,
-       allow_failure, web_url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       allow_failure, web_url, tag)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   const put = db.transaction((records: CiJobRecord[]) => {
     for (const record of records.map(normalizeCiJob))
@@ -67,6 +69,7 @@ export function sqliteCiJobs(db: Database): CiJobStore {
         record.queuedSeconds ?? null,
         record.allowFailure ? 1 : 0,
         record.webUrl,
+        record.tag ? 1 : 0,
       )
   })
   const list = db.query<CiJobRow, [string, string, string | null, string | null]>(

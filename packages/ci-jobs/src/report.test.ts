@@ -7,13 +7,13 @@ import { analyzeCiJobs } from './analyze.ts'
 import { ciJobsAnalysis, ciJobsReport } from './report.ts'
 import type { CiJobsData } from './types.ts'
 
-const data = (records = quarter()): CiJobsData => ({
+const data = (records = quarter(), branch: string | null = 'main'): CiJobsData => ({
   ...analyzeCiJobs(
     records,
-    { from: at(0), to: at(90) },
+    { from: at(0), to: at(90), defaultBranch: 'main' },
     {
       days: 90,
-      branch: 'main',
+      ...(branch ? { branch } : {}),
       recentDays: 14,
       changePercent: 20,
       minChangeSeconds: 15,
@@ -75,6 +75,28 @@ describe('ciJobsReport', () => {
     expect(failures?.scale).toEqual({ kind: 'sequential', tone: 'bad' })
   })
 
+  test('pipelines by branch: groups with weekly sparklines and a line per group', () => {
+    const list = blocks('refs', data(quarter(), null))
+    const [groups, refs] = ofType(list, 'table')
+    expect(groups?.rows.map((r) => r['pipelines'])).toEqual([90, 30, 3])
+    expect(groups?.rows[0]?.['group']).toMatchObject({ text: 'Default branch (main)' })
+    expect(groups?.rows[0]?.['change']).toMatchObject({ text: '+60%', tone: 'bad' })
+    const [chart] = ofType(list, 'chart')
+    expect(chart?.series.map((s) => s.key)).toEqual(['default', 'feature', 'tag'])
+    expect(chart?.data).toHaveLength(14)
+    expect(refs?.rows.map((r) => r['ref'])).toEqual([
+      'main',
+      'feature',
+      'v1.29.0',
+      'v1.59.0',
+      'v1.89.0',
+    ])
+    expect(ciJobsReport(data()).metrics[0]).toMatchObject({
+      id: 'default-branch-time',
+      value: 100_000,
+    })
+  })
+
   test('a quiet window says so instead of listing shifts', () => {
     const list = blocks('shifts', data([]))
     expect(ofType(list, 'markdown')[0]?.text).toContain('No job changed its median')
@@ -94,6 +116,7 @@ describe('ciJobsReport', () => {
     expect(report.sections.map((s) => s.id)).toEqual([
       'shifts',
       'pipelines',
+      'refs',
       'jobs',
       'heatmaps',
       'reliability',

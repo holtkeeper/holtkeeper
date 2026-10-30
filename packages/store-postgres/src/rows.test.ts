@@ -52,6 +52,7 @@ describe('row mapping', () => {
       analysis_id: null,
       log: ['x'],
       actor: null,
+      schedule: null,
     }
     expect(toJob(row)).toEqual({
       id: 'j1',

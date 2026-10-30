@@ -113,6 +113,7 @@ const jobRunSchema = jobSchema.extend({
 
 const projectJobRunSchema = jobRunSchema.extend({
   ref: z.string().nullable().optional(),
+  tag: z.boolean().nullable().optional(),
   commit: z.object({ id: z.string() }).nullable().optional(),
   pipeline: z.object({
     id: z.number(),
@@ -857,7 +858,12 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         const job = jobs[index]
         const ref = job?.pipeline.ref ?? job?.ref
         const sha = job?.pipeline.sha ?? job?.commit?.id
-        return { ...run, ...(ref ? { ref } : {}), ...(sha ? { sha } : {}) }
+        return {
+          ...run,
+          ...(ref ? { ref } : {}),
+          ...(sha ? { sha } : {}),
+          ...(job?.tag ? { tag: true } : {}),
+        }
       })
     },
 

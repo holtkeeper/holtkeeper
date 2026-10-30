@@ -35,6 +35,7 @@ function toRecord(repo: CiJobRecord['repo'], job: JobRun): CiJobRecord | undefin
     status: job.status,
     ...(job.ref ? { ref: job.ref } : {}),
     ...(job.sha ? { sha: job.sha } : {}),
+    ...(job.tag ? { tag: true } : {}),
     createdAt: job.createdAt,
     ...(job.startedAt ? { startedAt: job.startedAt } : {}),
     ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),

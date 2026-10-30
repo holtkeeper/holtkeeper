@@ -357,6 +357,14 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX ci_jobs_created ON ci_jobs (created_at);
     `,
   },
+  {
+    version: 10,
+    sql: `
+      ALTER TABLE jobs ADD COLUMN schedule TEXT;
+      CREATE INDEX jobs_schedule ON jobs (schedule, created_at) WHERE schedule IS NOT NULL;
+      ALTER TABLE ci_jobs ADD COLUMN tag INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 /**

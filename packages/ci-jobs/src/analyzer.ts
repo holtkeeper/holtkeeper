@@ -89,11 +89,16 @@ export function createCiJobsAnalyzer(clock: { now?: () => Date } = {}) {
         limit: maxJobs,
         ...(log ? { log } : {}),
       })
-      const [records, coverage] = await Promise.all([
+      const [records, coverage, defaultBranch] = await Promise.all([
         store.list(repo, { from }),
         store.coverage(repo),
+        (async () => (await forge.getRepository(repo.path)).defaultBranch)().catch(() => undefined),
       ])
-      const analysis = analyzeCiJobs(records, { from, to: now }, settings)
+      const analysis = analyzeCiJobs(
+        records,
+        { from, to: now, ...(defaultBranch ? { defaultBranch } : {}) },
+        settings,
+      )
       const data: CiJobsData = {
         ...analysis,
         history: {

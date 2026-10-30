@@ -3,7 +3,7 @@ import { CalendarClock, Pencil, Plus, Trash2, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useConfigEntries, useConfigMutations } from '../../api/queries.ts'
+import { useConfigEntries, useConfigMutations, useScheduleRuns } from '../../api/queries.ts'
 import { describeCadence, describeWindows } from '../../lib/automation.ts'
 import { formatGroupMatch } from '../../lib/scope.ts'
 import {
@@ -21,6 +21,7 @@ import {
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
 import { ScheduleDialog } from './ScheduleDialog.tsx'
+import { LastRun, RunHistory, RunNowButton } from './ScheduleRuns.tsx'
 import { ChipList, NextRuns, ProvenanceChip, RemoveEntryDialog, UpdatedLine } from './shared.tsx'
 
 type ScheduleEntry = ConfigEntryView<'schedule'>
@@ -29,7 +30,10 @@ type ScheduleEntry = ConfigEntryView<'schedule'>
 export function SchedulesTab() {
   const { can } = useSession()
   const writable = can('settings:write')
+  const runnable = can('analyses:run')
   const schedules = useConfigEntries('schedules')
+  const runs = useScheduleRuns()
+  const runsOf = (id: string) => runs.data?.schedules.find((s) => s.id === id)?.runs ?? []
   const { put } = useConfigMutations('schedules')
   const [editing, setEditing] = useState<ScheduleEntry | 'new' | null>(null)
   const [removing, setRemoving] = useState<ScheduleEntry | null>(null)
@@ -47,7 +51,7 @@ export function SchedulesTab() {
   return (
     <Panel
       title="Schedules"
-      description="Analyzers queued on a timetable. Panel schedules replace file schedules of the same id; switching a file schedule off keeps it in the file but stops its runs."
+      description="Analyzers queued on a timetable, with how their recent runs went. Run one now with ▶ (also when it is off). Panel schedules replace file schedules of the same id; switching a file schedule off keeps it in the file but stops its runs."
       actions={
         writable ? (
           <Button variant="secondary" size="sm" onPress={() => setEditing('new')}>
@@ -73,11 +77,12 @@ export function SchedulesTab() {
             <tr>
               <Th>Schedule</Th>
               <Th>Cadence</Th>
-              <Th>Analyzers</Th>
-              <Th>Targets</Th>
+              <Th>Runs</Th>
+              <Th>Last run</Th>
+              <Th>History</Th>
               <Th>Next runs</Th>
               <Th>On</Th>
-              {writable ? <Th /> : null}
+              {writable || runnable ? <Th /> : null}
             </tr>
           </thead>
           <tbody>
@@ -118,10 +123,8 @@ export function SchedulesTab() {
                     </div>
                   </Td>
                   <Td>
-                    <ChipList values={entry.data.analyzers} />
-                  </Td>
-                  <Td>
-                    <div className="flex flex-col gap-1 text-sm">
+                    <div className="flex flex-col gap-1.5 text-sm">
+                      <ChipList values={entry.data.analyzers} />
                       <span>
                         {entry.data.groups?.length ? (
                           entry.data.groups.map(formatGroupMatch).join(', ')
@@ -135,6 +138,12 @@ export function SchedulesTab() {
                         </span>
                       ) : null}
                     </div>
+                  </Td>
+                  <Td>
+                    <LastRun id={entry.id} run={runsOf(entry.id)[0]} />
+                  </Td>
+                  <Td>
+                    <RunHistory runs={runsOf(entry.id)} />
                   </Td>
                   <Td>
                     {entry.data.enabled ? (
@@ -151,19 +160,22 @@ export function SchedulesTab() {
                       onChange={(enabled) => toggle(entry, enabled)}
                     />
                   </Td>
-                  {writable ? (
+                  {writable || runnable ? (
                     <Td align="right">
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          isIconOnly
-                          aria-label={`Edit ${entry.id}`}
-                          onPress={() => setEditing(entry)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        {entry.provenance !== 'file' ? (
+                        {runnable ? <RunNowButton id={entry.id} name={entry.data.name} /> : null}
+                        {writable ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            aria-label={`Edit ${entry.id}`}
+                            onPress={() => setEditing(entry)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        ) : null}
+                        {writable && entry.provenance !== 'file' ? (
                           <Button
                             variant="ghost"
                             size="sm"

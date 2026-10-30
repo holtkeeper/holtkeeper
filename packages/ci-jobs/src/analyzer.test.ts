@@ -35,8 +35,8 @@ describe('ci-jobs analyzer', () => {
 
     const first = await analyzer.run({ repo, forge, runner, history, options })
     expect(ciJobsDataSchema.parse(first.data)).toEqual(first.data)
-    expect(first.data.sync).toMatchObject({ mode: 'full', after: at(0), stored: 301 })
-    expect(first.data.history).toMatchObject({ jobs: 301, syncedFrom: at(0) })
+    expect(first.data.sync).toMatchObject({ mode: 'full', after: at(0), stored: 304 })
+    expect(first.data.history).toMatchObject({ jobs: 304, syncedFrom: at(0) })
     expect(first.data.totals.slowerJobs).toBe(1)
     expect(first.data.notes).toEqual([])
     await store.analyses.add({
@@ -47,8 +47,8 @@ describe('ci-jobs analyzer', () => {
     })
 
     const second = await analyzer.run({ repo, forge, runner, history, options })
-    expect(second.data.sync).toMatchObject({ mode: 'incremental', after: at(88, 10) })
-    expect(forge.calls).toEqual([`jobs after ${at(0)}`, `jobs after ${at(88, 10)}`])
+    expect(second.data.sync).toMatchObject({ mode: 'incremental', after: at(88, 14) })
+    expect(forge.calls).toEqual([`jobs after ${at(0)}`, `jobs after ${at(88, 14)}`])
     expect(second.data.totals).toEqual(first.data.totals)
   })
 

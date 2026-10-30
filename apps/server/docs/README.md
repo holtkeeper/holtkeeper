@@ -119,11 +119,11 @@ With a `jobs` section in the config (see [@holtkeeper/jobs](../../../packages/jo
 
 Analyzer options per scope come from the setting `analyzers.<kind>` (section `Analyzers`); `analyzerSettings(analyzers)` returns the definitions, with the analyzer's `presets` as setting presets. A value is a partial options object, validated field by field and stored without defaults; it overrides schedule options and is overridden by a manual job's own options.
 
-At startup the server seeds the defaults of a fresh install (`seedDefaultSettings` from [@holtkeeper/settings](../../../packages/settings/docs/README.md#defaults-on-a-fresh-install)) against every setting it knows; `ServerOptions.defaultSettings` replaces the values, `false` turns seeding off. `GET /api/settings` returns each definition's `presets` and `people`: name and avatar of the users among the entries' `updatedBy`, like `/api/activity`.
+At startup the server seeds the defaults of a fresh install (`seedDefaultSettings` from [@holtkeeper/settings](../../../packages/settings/docs/README.md#defaults-on-a-fresh-install)) against every setting it knows; `ServerOptions.defaultSettings` replaces the values, `false` turns seeding off. Before loading the panel config it also seeds the default schedules (`seedDefaultSchedules` from [@holtkeeper/managed-config](../../../packages/managed-config/docs/README.md#default-schedules)) for the analyzers it has; `ServerOptions.defaultSchedules` replaces them, `false` turns this off. `GET /api/settings` returns each definition's `presets` and `people`: name and avatar of the users among the entries' `updatedBy`, like `/api/activity`.
 
 | Endpoint                      | Does                                                                                                                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/jobs`               | `?status=&repo=forge:path&limit=&before=`, newest first, without logs (`JobList`)                                                                                                |
+| `GET /api/jobs`               | `?status=&repo=forge:path&schedule=&limit=&before=`, newest first, without logs (`JobList`)                                                                                      |
 | `GET /api/jobs/analyzers`     | `JobAnalyzerList`: whether jobs are enabled and every analyzer with label, scope, needs, presets and its options as JSON Schema (for run forms); any signed-in caller            |
 | `GET /api/jobs/:id`           | one `Job` with its last 200 log lines                                                                                                                                            |
 | `POST /api/jobs`              | `CreateJobInput { analyzer, repo?, group?, ref?, options? }`: `repo` for repo-scope analyzers, `group` for group-scope ones; options are validated. 409 without a `jobs` section |
@@ -218,6 +218,8 @@ With `store.config`, forges, groups, repository traits, schedules and triggers c
 | `GET /api/config/runtime`                 | `RuntimeConfigView`: the parts only the file sets (`dryRun`, job execution, server storage and retention, limits, AI provider packages, plugin uses), without secrets                       |
 | `GET /api/repos/explain?repo=`            | `RepoExplain`, like `holtkeeper explain`: groups, merged traits, plugins (options only with `settings:read` on the repository), schedules and triggers that queue jobs for it; `repos:read` |
 | `GET /api/schedules/:id/preview?count=10` | `SchedulePreview`: the next run times (smart schedules: windows, zone, jitter)                                                                                                              |
+| `GET /api/schedules/runs?limit=10`        | `ScheduleRunList`: the recent runs of every schedule (`scheduleRuns`), global `analyses:read`                                                                                               |
+| `POST /api/schedules/:id/run`             | queues every job of the schedule now (also a disabled one), skipping ones already pending; `ScheduleRunResult`; global `analyses:run`, logged as `schedule.run`                             |
 
 Every change is logged: `config.<type>.created|updated|removed`, `config.forge.webhook_created|webhook_rotated`, subject `<type>:<id>`.
 

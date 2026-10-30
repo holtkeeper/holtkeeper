@@ -1,5 +1,6 @@
 import type { CiJobRecord } from '@holtkeeper/store'
 
+import { refGroupOf, refGroups } from './refs.ts'
 import { addDays, groupBy, median, percent, round, spread, weekOf, weeksOf } from './stats.ts'
 import type {
   ChangePoint,
@@ -9,6 +10,7 @@ import type {
   JobTrend,
   JobWeek,
   PipelineWeek,
+  RefGroupStats,
   Spread,
 } from './types.ts'
 
@@ -20,7 +22,7 @@ const MIN_DAYS = 3
 /** The parts of `CiJobsData` computed from stored job attempts alone. */
 export type CiJobsAnalysis = Pick<
   CiJobsData,
-  'window' | 'options' | 'totals' | 'weeks' | 'stages' | 'jobs'
+  'window' | 'options' | 'defaultBranch' | 'totals' | 'weeks' | 'refGroups' | 'stages' | 'jobs'
 >
 
 /** The p25 to p95 fields of a spread that are set. */
@@ -192,17 +194,100 @@ function jobStats(
 
 interface PipelineSpan {
   createdAt: string
+  ref?: string
+  tag: boolean
+  /** A final attempt of a job not allowed to fail failed. */
+  failed: boolean
   /** First job start to last job end, seconds; absent when a job lacks times. */
   wallSeconds?: number
 }
 
-function pipelineSpans(records: readonly CiJobRecord[]): PipelineSpan[] {
+function pipelineSpans(
+  records: readonly CiJobRecord[],
+  finals: ReadonlySet<CiJobRecord>,
+): PipelineSpan[] {
   return [...groupBy(records, (r) => String(r.pipelineId)).values()].map((jobs) => {
     const createdAt = jobs.map((j) => j.createdAt).toSorted()[0] ?? ''
+    const ref = jobs.find((j) => j.ref)?.ref
+    const base = {
+      createdAt,
+      ...(ref ? { ref } : {}),
+      tag: jobs.some((j) => j.tag),
+      failed: counted(jobs.filter((j) => finals.has(j))).some((j) => j.status === 'failed'),
+    }
     const starts = jobs.map((j) => (j.startedAt ? Date.parse(j.startedAt) : Number.NaN))
     const ends = jobs.map((j) => (j.finishedAt ? Date.parse(j.finishedAt) : Number.NaN))
-    if ([...starts, ...ends].some(Number.isNaN)) return { createdAt }
-    return { createdAt, wallSeconds: (Math.max(...ends) - Math.min(...starts)) / 1000 }
+    if ([...starts, ...ends].some(Number.isNaN)) return base
+    return { ...base, wallSeconds: (Math.max(...ends) - Math.min(...starts)) / 1000 }
+  })
+}
+
+const TOP_REFS = 5
+
+/** Pipeline time per kind of ref; durations come from pipelines without failures. */
+function refGroupStats(
+  spans: readonly PipelineSpan[],
+  context: { weeks: readonly string[]; recentFrom: string; defaultBranch?: string },
+): RefGroupStats[] {
+  const groupOf = (span: PipelineSpan) =>
+    refGroupOf(span.ref, {
+      tag: span.tag,
+      ...(context.defaultBranch ? { defaultBranch: context.defaultBranch } : {}),
+    })
+  const byGroup = groupBy(spans, groupOf)
+  const passedSeconds = (list: readonly PipelineSpan[]) =>
+    defined(list.filter((s) => !s.failed).map((s) => s.wallSeconds))
+  return refGroups.flatMap(({ group, label }) => {
+    const list = byGroup.get(group) ?? []
+    if (!list.length) return []
+    const recentMedian = median(
+      passedSeconds(list.filter((s) => s.createdAt >= context.recentFrom)),
+    )
+    const baselineMedian = median(
+      passedSeconds(list.filter((s) => s.createdAt < context.recentFrom)),
+    )
+    const failureRate = percent(list.filter((s) => s.failed).length, list.length)
+    const byWeek = groupBy(list, (s) => weekOf(s.createdAt))
+    const byRef = groupBy(list, (s) => s.ref ?? '')
+    return [
+      {
+        group,
+        label:
+          group === 'default' && context.defaultBranch
+            ? `Default branch (${context.defaultBranch})`
+            : label,
+        pipelines: list.length,
+        refs: byRef.size,
+        ...(failureRate === undefined ? {} : { failureRate }),
+        duration: spread(passedSeconds(list)),
+        ...(recentMedian === undefined ? {} : { recentMedian: round(recentMedian) }),
+        ...(baselineMedian === undefined ? {} : { baselineMedian: round(baselineMedian) }),
+        ...(recentMedian !== undefined && baselineMedian
+          ? { change: round(((recentMedian - baselineMedian) / baselineMedian) * 100) }
+          : {}),
+        weeks: context.weeks.map((week) => {
+          const inWeek = byWeek.get(week) ?? []
+          const { median: mid, p95 } = spread(passedSeconds(inWeek))
+          return {
+            week,
+            pipelines: inWeek.length,
+            ...(mid === undefined ? {} : { median: mid }),
+            ...(p95 === undefined ? {} : { p95 }),
+          }
+        }),
+        topRefs: [...byRef]
+          .toSorted(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b))
+          .slice(0, TOP_REFS)
+          .map(([ref, runs]) => {
+            const mid = median(passedSeconds(runs))
+            return {
+              ref: ref || '(unknown)',
+              pipelines: runs.length,
+              ...(mid === undefined ? {} : { median: round(mid) }),
+            }
+          }),
+      },
+    ]
   })
 }
 
@@ -234,7 +319,7 @@ function pipelineWeek(
  */
 export function analyzeCiJobs(
   records: readonly CiJobRecord[],
-  window: { from: string; to: string },
+  window: { from: string; to: string; defaultBranch?: string },
   options: CiJobsOptions,
 ): CiJobsAnalysis {
   const from = new Date(window.from).toISOString()
@@ -263,7 +348,7 @@ export function analyzeCiJobs(
     )
     .toSorted((a, b) => b.computeSeconds - a.computeSeconds || a.name.localeCompare(b.name))
 
-  const spans = pipelineSpans(runs)
+  const spans = pipelineSpans(runs, finals)
   const spansByWeek = groupBy(spans, (s) => weekOf(s.createdAt))
   const runsByWeek = groupBy(runs, (r) => weekOf(r.createdAt))
   const considered = counted([...finals])
@@ -280,6 +365,7 @@ export function analyzeCiJobs(
   return {
     window: { from, to, days: options.days },
     options,
+    ...(window.defaultBranch ? { defaultBranch: window.defaultBranch } : {}),
     totals: {
       runs: runs.length,
       pipelines: spans.length,
@@ -297,6 +383,11 @@ export function analyzeCiJobs(
     weeks: weeks.map((week) =>
       pipelineWeek(week, runsByWeek.get(week) ?? [], spansByWeek.get(week) ?? [], finals),
     ),
+    refGroups: refGroupStats(spans, {
+      weeks,
+      recentFrom: addDays(to, -options.recentDays),
+      ...(window.defaultBranch ? { defaultBranch: window.defaultBranch } : {}),
+    }),
     stages,
     jobs,
   }

@@ -41,8 +41,11 @@ export interface Scheduler {
   stop(): void
   /** Enqueues every schedule that came due since the previous tick; returns the new jobs. */
   tick(): Promise<Job[]>
-  /** Enqueues one schedule now (even a disabled one), skipping duplicates of queued or running jobs. */
-  run(name: string): Promise<Job[]>
+  /**
+   * Enqueues one schedule now (even a disabled one), skipping duplicates of queued or running
+   * jobs. `actor` is the person who asked, recorded on the jobs.
+   */
+  run(name: string, options?: { actor?: string }): Promise<Job[]>
 }
 
 /** Every problem with the schedules: bad cron, unknown analyzers, invalid options. */
@@ -82,12 +85,17 @@ export function scheduleProblems(
  * once per group with `repo` = `{ forge, path: <group> }`.
  */
 export async function planSchedule(
-  schedule: Pick<Schedule, 'analyzers' | 'groups' | 'repos' | 'options'>,
+  schedule: Pick<Schedule, 'analyzers' | 'groups' | 'repos' | 'options'> &
+    Partial<Pick<Schedule, 'name'>>,
   {
     config,
     analyzers,
     resolveRepos,
-  }: { config: HoltkeeperConfig; analyzers: AnyAnalyzer[]; resolveRepos: ResolveRepos },
+  }: {
+    config: HoltkeeperConfig
+    analyzers: readonly Pick<AnyAnalyzer, 'kind' | 'scope'>[]
+    resolveRepos: ResolveRepos
+  },
 ): Promise<JobRequest[]> {
   const byKind = new Map(analyzers.map((analyzer) => [analyzer.kind, analyzer]))
   const entries = schedule.groups ?? Object.keys(config.groups)
@@ -116,6 +124,7 @@ export async function planSchedule(
           repo,
           options: optionsOf(analyzer.kind),
           trigger: 'schedule',
+          ...(schedule.name ? { schedule: schedule.name } : {}),
         })
       }
     }
@@ -131,6 +140,7 @@ export async function planSchedule(
         group,
         options: optionsOf(analyzer.kind),
         trigger: 'schedule',
+        ...(schedule.name ? { schedule: schedule.name } : {}),
       })
     }
   }
@@ -180,8 +190,9 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   let timer: ReturnType<typeof setInterval> | undefined
   let ticking: Promise<Job[]> | undefined
 
-  const run = async (schedule: Schedule, at = now()) => {
+  const run = async (schedule: Schedule, at = now(), actor?: string) => {
     let requests = await planSchedule(schedule, { config, analyzers, resolveRepos })
+    if (actor) requests = requests.map((request) => ({ ...request, actor }))
     if (schedule.spread) requests = spreadRequests(requests, at, runWindowEnd(schedule, at, zone))
     const { enqueued, skipped } = await enqueueUnique(store.jobs, requests, now().toISOString())
     log(
@@ -237,10 +248,10 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       timer = undefined
     },
     tick,
-    async run(name) {
+    async run(name, runOptions = {}) {
       const schedule = schedules().find((s) => s.name === name)
       if (!schedule) throw new Error(`unknown schedule "${name}"`)
-      return run(schedule)
+      return run(schedule, now(), runOptions.actor)
     },
   }
 }

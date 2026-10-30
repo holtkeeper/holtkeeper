@@ -39,9 +39,11 @@ export function JobsPage() {
   const navigate = useNavigate({ from: '/jobs' })
   const status: StatusFilter = isJobStatus(search.status) ? search.status : 'all'
   const repo = parseRepoKey(search.repo)
+  const schedule = search.schedule
   const jobs = useJobs({
     ...(status === 'all' ? {} : { status }),
     ...(repo ? { repo } : {}),
+    ...(schedule ? { schedule } : {}),
   })
   const analyzers = useJobAnalyzers()
   const list = jobs.data?.jobs ?? []
@@ -51,6 +53,7 @@ export function JobsPage() {
     void navigate({
       search: (previous) => ({
         ...(previous.repo ? { repo: previous.repo } : {}),
+        ...(previous.schedule ? { schedule: previous.schedule } : {}),
         ...(next === 'all' ? {} : { status: next }),
       }),
     })
@@ -72,6 +75,22 @@ export function JobsPage() {
                   to="/jobs"
                   search={status === 'all' ? {} : { status }}
                   aria-label="Show every repository"
+                  className="ml-1 inline-flex"
+                >
+                  <X className="size-3" />
+                </Link>
+              </Chip>
+            ) : null}
+            {schedule ? (
+              <Chip tone="accent">
+                <span className="text-xs">Schedule {schedule}</span>
+                <Link
+                  to="/jobs"
+                  search={{
+                    ...(search.repo ? { repo: search.repo } : {}),
+                    ...(status === 'all' ? {} : { status }),
+                  }}
+                  aria-label="Show every schedule"
                   className="ml-1 inline-flex"
                 >
                   <X className="size-3" />
@@ -181,7 +200,16 @@ function JobRow({ job, label, now }: { job: JobSummary; label: string; now: Date
           <span className="text-muted">—</span>
         )}
       </Td>
-      <Td className="text-muted">{jobTriggerLabel(job.trigger)}</Td>
+      <Td className="text-muted">
+        {job.schedule ? (
+          <Link to="/jobs" search={{ schedule: job.schedule }} className="hover:underline">
+            {job.schedule}
+          </Link>
+        ) : (
+          jobTriggerLabel(job.trigger)
+        )}
+        {job.actor && job.trigger === 'schedule' ? ' · by hand' : ''}
+      </Td>
       <Td className="whitespace-nowrap">
         <Tooltip content={formatDateTime(job.createdAt)}>
           <time tabIndex={0} dateTime={job.createdAt}>

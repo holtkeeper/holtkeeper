@@ -171,6 +171,8 @@ export interface JobRun extends Job {
   ref?: string
   /** Commit of the job's pipeline, when the read reports it. */
   sha?: string
+  /** True when the pipeline ran for a tag rather than a branch, when the read reports it. */
+  tag?: boolean
 }
 
 /** Filters for `listProjectJobRuns`; omitted fields do not filter. */

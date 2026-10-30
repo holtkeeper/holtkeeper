@@ -25,6 +25,8 @@ import type {
   RepoExplain,
   RuntimeConfigView,
   SchedulePreview,
+  ScheduleRunList,
+  ScheduleRunResult,
   StorageOverview,
   AiCatalogProviderList,
   AnalysisDetail,
@@ -255,17 +257,28 @@ export const api = {
     }),
   issueForgeWebhook: (forgeId: string, input: ForgeWebhookInput) =>
     request<ForgeWebhookResult>('POST', `/api/forges/${id(forgeId)}/webhook`, { body: input }),
+  scheduleRuns: (limit = 10) =>
+    request<ScheduleRunList>('GET', '/api/schedules/runs', { query: { limit } }),
+  runSchedule: (scheduleId: string) =>
+    request<ScheduleRunResult>('POST', `/api/schedules/${id(scheduleId)}/run`),
   configExportUrl: () => urlOf('/api/config/export'),
   runtimeConfig: () => request<RuntimeConfigView>('GET', '/api/config/runtime'),
   explainRepo: (repo: RepoRef) =>
     request<RepoExplain>('GET', '/api/repos/explain', { query: { repo: repoKey(repo) } }),
 
   jobAnalyzers: () => request<JobAnalyzerList>('GET', '/api/jobs/analyzers'),
-  jobs: (filter: { status?: string; repo?: RepoRef; limit?: number; before?: string }) =>
+  jobs: (filter: {
+    status?: string
+    repo?: RepoRef
+    schedule?: string
+    limit?: number
+    before?: string
+  }) =>
     request<JobList>('GET', '/api/jobs', {
       query: {
         status: filter.status,
         repo: filter.repo ? repoKey(filter.repo) : undefined,
+        schedule: filter.schedule,
         limit: filter.limit,
         before: filter.before,
       },

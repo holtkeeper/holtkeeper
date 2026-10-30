@@ -26,7 +26,7 @@ import { resolveSecret } from '@holtkeeper/forge'
 import { gitlabTokenRotator } from '@holtkeeper/forge-gitlab'
 import { knowledgeAccess } from '@holtkeeper/knowledge'
 import { createLimiter, limitsCredentialsSetting } from '@holtkeeper/limits'
-import { liveConfig } from '@holtkeeper/managed-config'
+import { type DefaultSchedule, liveConfig, seedDefaultSchedules } from '@holtkeeper/managed-config'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
 import type { AnalysisKind } from '@holtkeeper/report'
 import { createReviewAnalyzer } from '@holtkeeper/review'
@@ -83,6 +83,12 @@ export interface ServerOptions {
    * Default `defaultSettings` from `@holtkeeper/settings`; `false` seeds nothing.
    */
   defaultSettings?: readonly DefaultSetting[] | false
+  /**
+   * Schedules a fresh install starts with (none in the file or the panel yet), written once per
+   * store as panel documents. Default `defaultSchedules` from `@holtkeeper/managed-config`;
+   * `false` seeds nothing.
+   */
+  defaultSchedules?: readonly DefaultSchedule[] | false
   /** Analyzers background jobs may run. Default: the registry from `@holtkeeper/analyzers`. */
   analyzers?: AnyAnalyzer[]
   /** The LLM agent for a repository. Default: the AI provider credential named by `llm.provider`. */
@@ -194,6 +200,15 @@ export async function startServer(
   const duties = roleDuties(options.roles ?? ['all'])
   const limiterOptions = limiterOptionsFor(fileConfig, server.store)
   const limiter = createLimiter(limiterOptions)
+  if (options.defaultSchedules !== false) {
+    const seeded = await seedDefaultSchedules({
+      store: server.store,
+      file: fileConfig,
+      analyzers: (options.analyzers ?? builtinAnalyzers).map((analyzer) => analyzer.kind),
+      ...(options.defaultSchedules ? { schedules: options.defaultSchedules } : {}),
+    })
+    if (seeded.length > 0) log(`schedules: seeded defaults ${seeded.join(', ')}`)
+  }
   const managed = await startManagedConfig({
     file: fileConfig,
     store: server.store,

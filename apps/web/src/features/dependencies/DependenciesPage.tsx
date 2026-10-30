@@ -41,6 +41,7 @@ import {
   stagger,
 } from '../../ui/index.ts'
 import { AnalysisRecords, RepoSelect } from '../analyses/AnalysesPage.tsx'
+import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 
 const page = analysisPages.find((p) => p.kind === 'depgraph') ?? analysisPages[2]
 const pageSize = 60
@@ -82,7 +83,17 @@ export function DependenciesPage() {
           ? `Libraries of ${repoKey(repo)} compared with the other repositories`
           : 'Which libraries every repository installs, and where versions drift apart'
       }
-      actions={<RepoSelect to={page.to} />}
+      actions={
+        <div className="flex items-center gap-2">
+          <RepoSelect to={page.to} />
+          <RunJobButton
+            analyzer="depgraph"
+            label="Run now"
+            variant="secondary"
+            {...(repo ? { repo } : {})}
+          />
+        </div>
+      }
     >
       <Tabs
         aria-label="Dependency views"

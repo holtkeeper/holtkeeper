@@ -10,6 +10,8 @@ import {
   isJobStatus,
   jobDuration,
   jobStatusLabel,
+  scheduleRunShares,
+  scheduleRunState,
   jobStatusTone,
   jobStatuses,
   jobTriggerLabel,
@@ -66,4 +68,18 @@ test('analyzers are filtered by the fixed target', () => {
   ])
   expect(analyzerLabel(all, 'changelog')).toBe('CHANGELOG')
   expect(analyzerLabel(all, 'other')).toBe('other')
+})
+
+test('a schedule run is unfinished, failed, canceled or done as a whole', () => {
+  const run = { jobs: 4, queued: 0, running: 0, succeeded: 4, failed: 0, canceled: 0 }
+  expect(scheduleRunState(run)).toEqual({ label: 'Succeeded', tone: 'success' })
+  expect(scheduleRunState({ ...run, running: 1 }).label).toBe('Running')
+  expect(scheduleRunState({ ...run, queued: 2 }).label).toBe('Queued')
+  expect(scheduleRunState({ ...run, succeeded: 3, failed: 1 }).label).toBe('Partly failed')
+  expect(scheduleRunState({ ...run, succeeded: 0, failed: 4 }).label).toBe('Failed')
+  expect(scheduleRunState({ ...run, succeeded: 0, canceled: 4 }).label).toBe('Canceled')
+  expect(scheduleRunShares({ ...run, succeeded: 3, failed: 1 })).toEqual([
+    { status: 'succeeded', count: 3, percent: 75 },
+    { status: 'failed', count: 1, percent: 25 },
+  ])
 })
