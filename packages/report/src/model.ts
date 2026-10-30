@@ -55,14 +55,24 @@ export type Cell =
   | number
   | boolean
   | null
-  | { text: string; href?: string; tone?: Tone; hint?: string }
+  | {
+      text: string
+      href?: string
+      tone?: Tone
+      hint?: string
+      /** Value the cell sorts by when `text` is formatted, e.g. `+23%` sorting as 23. */
+      value?: number
+      /** Values drawn as a sparkline in `sparkline` columns; `null` leaves a gap. */
+      series?: (number | null)[]
+    }
 
 export interface Column {
   key: string
   label: string
   unit?: Unit
   /** `delta` cells are numbers shown as signed changes colored by `better`. */
-  format?: 'text' | 'code' | 'delta' | 'date' | 'tags'
+  /** `sparkline` cells draw their `series` next to their text, in the column's unit. */
+  format?: 'text' | 'code' | 'delta' | 'date' | 'tags' | 'sparkline'
   better?: 'up' | 'down'
   align?: 'start' | 'end'
 }
@@ -123,6 +133,32 @@ export interface ChangeItem {
   tags?: string[]
 }
 
+export interface ChartSeries {
+  key: string
+  label: string
+  tone?: Tone
+  /** How a `combo` chart draws the series; default `bar`. */
+  as?: 'bar' | 'line' | 'area'
+  /** Axis of a `combo` chart; default `left`. */
+  axis?: 'left' | 'right'
+  dashed?: boolean
+}
+
+export interface ChartBand {
+  low: string
+  high: string
+  label: string
+  tone?: Tone
+}
+
+/** One heatmap row; `null` cells have no data. */
+export interface HeatmapRow {
+  label: string
+  href?: string
+  /** One per column: `value` drives the color, `text` replaces the formatted value in tooltips. */
+  cells: ({ value: number; text?: string } | null)[]
+}
+
 export type Block =
   | { type: 'metrics'; metrics: Metric[] }
   | {
@@ -135,12 +171,38 @@ export type Block =
   | {
       type: 'chart'
       title?: string
-      chart: 'bar' | 'stacked-bar' | 'line' | 'area' | 'donut'
+      /** `combo` draws each series `as` a bar, line or area, on the left or right axis. */
+      chart: 'bar' | 'stacked-bar' | 'line' | 'area' | 'donut' | 'combo'
       unit?: Unit
+      /** Unit of the right axis of a `combo` chart. */
+      rightUnit?: Unit
       /** Category key of each datum, e.g. a release name. */
       x: string
-      series: { key: string; label: string; tone?: Tone }[]
-      data: Record<string, string | number>[]
+      series: ChartSeries[]
+      /** Shaded ranges between two keys of each datum, e.g. p25–p75 around a median line. */
+      bands?: ChartBand[]
+      /** Vertical markers at category values, e.g. when a job became slower. */
+      markers?: { x: string; label: string; tone?: Tone }[]
+      /** Missing keys leave gaps in lines and bands. */
+      data: Record<string, string | number | null>[]
+    }
+  | {
+      type: 'heatmap'
+      title?: string
+      /** Column labels, e.g. weeks. */
+      xLabels: string[]
+      /** One row per subject, e.g. per job; field names differ from `table` on purpose. */
+      yRows: HeatmapRow[]
+      /** Unit of cell values, for their text and the legend. */
+      unit?: Unit
+      /**
+       * `sequential`: 0 is blank and `max` (default: largest value) is full `tone`.
+       * `diverging`: 0 is blank; values toward ±`limit` (default: largest magnitude) color by
+       * `better`, like deltas.
+       */
+      scale:
+        | { kind: 'sequential'; tone: Tone; max?: number }
+        | { kind: 'diverging'; better: 'up' | 'down'; limit?: number }
     }
   | { type: 'treemap'; title?: string; unit?: Unit; root: TreeNode }
   | { type: 'timeline'; title?: string; items: TimelineItem[] }

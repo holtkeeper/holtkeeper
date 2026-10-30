@@ -3,7 +3,7 @@ import type { HoltkeeperConfig } from '@holtkeeper/core'
 import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 import type { ManagedRunner } from '@holtkeeper/exec-container'
 import type { GitForge, RepoRef, SshKeyUsage } from '@holtkeeper/forge'
-import type { AnalysisStore, AuditRunStore, Job } from '@holtkeeper/store'
+import type { AnalysisStore, AuditRunStore, CiJobStore, Job } from '@holtkeeper/store'
 import type { Toolchain } from '@holtkeeper/toolchain'
 import {
   type Checkout,
@@ -71,7 +71,7 @@ export type ContextFor = (
 
 export interface ContextFactoryOptions {
   config: HoltkeeperConfig
-  store: { analyses: AnalysisStore; auditRuns: AuditRunStore }
+  store: { analyses: AnalysisStore; auditRuns: AuditRunStore; ciJobs?: CiJobStore }
   /** Mirror cache for checkouts. */
   cacheDir: string
   /** Default: `localRunner`. */
@@ -247,7 +247,11 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
     try {
       if (analyzer.needs.forge) context.forge = forgeClient()
       if (analyzer.needs.history)
-        context.history = { analyses: store.analyses, auditRuns: store.auditRuns }
+        context.history = {
+          analyses: store.analyses,
+          auditRuns: store.auditRuns,
+          ...(store.ciJobs ? { ciJobs: store.ciJobs } : {}),
+        }
       if (analyzer.needs.agent) {
         const agent = await factory.agentFor?.(job.repo, {
           jobId: job.id,

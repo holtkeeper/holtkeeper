@@ -16,6 +16,7 @@ export interface Tables {
   knowledgeHistory: SQL.Query<unknown>
   knowledgeFold: SQL.Query<unknown>
   aiUsage: SQL.Query<unknown>
+  ciJobs: SQL.Query<unknown>
   configDocuments: SQL.Query<unknown>
   configHistory: SQL.Query<unknown>
   kv: SQL.Query<unknown>
@@ -42,6 +43,7 @@ export function tables(sql: SQL, schema: string): Tables {
     knowledgeHistory: name('knowledge_history'),
     knowledgeFold: name('knowledge_fold'),
     aiUsage: name('ai_usage'),
+    ciJobs: name('ci_jobs'),
     configDocuments: name('config_documents'),
     configHistory: name('config_history'),
     kv: name('kv'),

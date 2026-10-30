@@ -4,6 +4,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { ChangesBlock } from './blocks/ChangesBlock.tsx'
 import { ChartBlock } from './blocks/ChartBlock.tsx'
 import { GraphBlock } from './blocks/GraphBlock.tsx'
+import { HeatmapBlock } from './blocks/HeatmapBlock.tsx'
 import { IssuesBlock } from './blocks/IssuesBlock.tsx'
 import { MarkdownBlock } from './blocks/MarkdownBlock.tsx'
 import { MetricsBlock } from './blocks/MetricsBlock.tsx'
@@ -32,4 +33,5 @@ export const renderers: { [T in Block['type']]: (block: Block) => ReactNode } = 
   issues: entry('issues', IssuesBlock),
   markdown: entry('markdown', MarkdownBlock),
   changes: entry('changes', ChangesBlock),
+  heatmap: entry('heatmap', HeatmapBlock),
 }

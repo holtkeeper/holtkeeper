@@ -1,6 +1,7 @@
 import { memoryExternalAccounts } from './accounts.ts'
 import { memoryAiUsage } from './ai-usage.ts'
 import { memoryAudit } from './audit.ts'
+import { memoryCiJobs } from './ci-jobs.ts'
 import { memoryConfig, memoryKv } from './config.ts'
 import { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from './jobs.ts'
 import { memoryKnowledge } from './knowledge.ts'
@@ -18,6 +19,8 @@ import type {
   StoredCredential,
   User,
 } from './types.ts'
+
+export { memoryCiJobs }
 
 const clone = <T>(value: T): T => structuredClone(value)
 const newestFirst = <T>(items: T[], at: (item: T) => string) =>
@@ -135,6 +138,7 @@ export function memoryStore(): Store {
     jobs,
     knowledge: memoryKnowledge(),
     aiUsage: memoryAiUsage(),
+    ciJobs: memoryCiJobs(),
     config: memoryConfig(),
     kv: memoryKv(),
     audit: memoryAudit(),

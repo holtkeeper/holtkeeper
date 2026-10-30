@@ -24,3 +24,4 @@ export {
   sealAuditEvent,
   verifyAuditEvents,
 } from './audit.ts'
+export { compareCiJobs, normalizeCiJob } from './ci-jobs.ts'

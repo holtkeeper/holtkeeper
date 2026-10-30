@@ -29,6 +29,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Bundles',
     'Dependencies',
     'Code quality',
+    'CI jobs',
     'Activity',
   ])
 })

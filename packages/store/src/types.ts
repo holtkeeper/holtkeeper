@@ -547,6 +547,48 @@ export interface AiUsageStore {
   aggregate(query?: AiUsageAggregateQuery): Promise<AiUsageBucket[]>
 }
 
+/** A finished CI job attempt kept for job analytics. Durations are seconds. */
+export interface CiJobRecord {
+  repo: RepoRef
+  /** The forge's job id; unique within the repository. */
+  jobId: number
+  pipelineId: number
+  name: string
+  stage: string
+  status: 'success' | 'failed' | 'canceled'
+  ref?: string
+  sha?: string
+  createdAt: Timestamp
+  startedAt?: Timestamp
+  finishedAt?: Timestamp
+  durationSeconds?: number
+  queuedSeconds?: number
+  allowFailure: boolean
+  webUrl: string
+}
+
+/** Stored range of a repository's CI job history. */
+export interface CiJobCoverage {
+  oldest: Timestamp
+  newest: Timestamp
+  jobs: number
+}
+
+/**
+ * CI job attempts per repository, so job analytics fetch only what is new. Times come back in
+ * the contract's ISO 8601 form whatever form they were put in.
+ */
+export interface CiJobStore {
+  /** Inserts records, replacing any with the same repository and job id. */
+  put(records: CiJobRecord[]): Promise<void>
+  /** Records of `repo` created in `[from, to)`, oldest first (ties by job id). */
+  list(repo: RepoRef, range?: { from?: Timestamp; to?: Timestamp }): Promise<CiJobRecord[]>
+  /** Creation times of the oldest and newest record of `repo`; undefined when there are none. */
+  coverage(repo: RepoRef): Promise<CiJobCoverage | undefined>
+  /** Removes records of every repository created before `before`; returns how many. */
+  prune(before: Timestamp): Promise<number>
+}
+
 /** Kinds of configuration documents the panel manages. */
 export type ConfigDocumentType = 'forge' | 'group' | 'repoTraits' | 'schedule' | 'trigger'
 
@@ -951,6 +993,7 @@ export interface Store {
   jobs: JobStore
   knowledge: KnowledgeStore
   aiUsage: AiUsageStore
+  ciJobs: CiJobStore
   /** Panel-managed configuration; servers without it use the file config only. */
   config?: ConfigStore
   /** Small expiring state; servers without it keep such state in memory. */

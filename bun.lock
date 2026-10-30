@@ -251,6 +251,7 @@
         "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
+        "@holtkeeper/ci-jobs": "workspace:*",
         "@holtkeeper/delivery": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-go": "workspace:*",
@@ -380,6 +381,17 @@
       "dependencies": {
         "@holtkeeper/forge": "workspace:*",
         "diff": "^9.0.0",
+      },
+    },
+    "packages/ci-jobs": {
+      "name": "@holtkeeper/ci-jobs",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
       },
     },
     "packages/confluence": {
@@ -1096,6 +1108,8 @@
     "@holtkeeper/changelog": ["@holtkeeper/changelog@workspace:packages/changelog"],
 
     "@holtkeeper/changes": ["@holtkeeper/changes@workspace:packages/changes"],
+
+    "@holtkeeper/ci-jobs": ["@holtkeeper/ci-jobs@workspace:packages/ci-jobs"],
 
     "@holtkeeper/cli": ["@holtkeeper/cli@workspace:apps/cli"],
 

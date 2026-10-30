@@ -2,7 +2,7 @@ import type { Agent } from '@holtkeeper/agent'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import type { AnalysisKind } from '@holtkeeper/report'
-import type { AnalysisStore, AuditRunStore } from '@holtkeeper/store'
+import type { AnalysisStore, AuditRunStore, CiJobStore } from '@holtkeeper/store'
 import type { z } from 'zod'
 
 /** Everything an analyzer may use; what is present depends on its `needs`. */
@@ -50,7 +50,12 @@ export interface AnalyzerContext<Options> {
   /** Configured LLM agent, when there is one. */
   agent?: Agent
   /** Earlier results, for analyzers that build on other analyses. */
-  history?: { analyses: AnalysisStore; auditRuns: AuditRunStore }
+  history?: {
+    analyses: AnalysisStore
+    auditRuns: AuditRunStore
+    /** CI job attempts kept between runs, for analyzers that accumulate job history. */
+    ciJobs?: CiJobStore
+  }
   /** Release, tag or commit being analyzed, when the trigger knows it. */
   ref?: string
   options: Options

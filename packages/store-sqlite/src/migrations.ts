@@ -331,6 +331,32 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX external_accounts_user ON external_accounts (user_id, seq);
     `,
   },
+  {
+    version: 9,
+    sql: `
+      CREATE TABLE ci_jobs (
+        repo_forge TEXT NOT NULL,
+        repo_path TEXT NOT NULL,
+        job_id INTEGER NOT NULL,
+        pipeline_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        status TEXT NOT NULL,
+        ref TEXT,
+        sha TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        duration_seconds REAL,
+        queued_seconds REAL,
+        allow_failure INTEGER NOT NULL,
+        web_url TEXT NOT NULL,
+        PRIMARY KEY (repo_forge, repo_path, job_id)
+      );
+      CREATE INDEX ci_jobs_repo_created ON ci_jobs (repo_forge, repo_path, created_at);
+      CREATE INDEX ci_jobs_created ON ci_jobs (created_at);
+    `,
+  },
 ]
 
 /**

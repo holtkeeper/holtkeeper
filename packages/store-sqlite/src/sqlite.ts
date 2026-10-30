@@ -19,6 +19,7 @@ import { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
 import { sqliteExternalAccounts } from './accounts.ts'
 import { sqliteAiUsage } from './ai-usage.ts'
 import { sqliteAudit } from './audit.ts'
+import { sqliteCiJobs } from './ci-jobs.ts'
 import { sqliteConfig, sqliteKv } from './config.ts'
 import { sqliteKnowledge } from './knowledge.ts'
 import { migrate } from './migrations.ts'
@@ -533,6 +534,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
     jobs: sqliteJobs(db),
     knowledge: sqliteKnowledge(db),
     aiUsage: sqliteAiUsage(db),
+    ciJobs: sqliteCiJobs(db),
     config: sqliteConfig(db),
     kv: sqliteKv(db),
     audit: sqliteAudit(db),

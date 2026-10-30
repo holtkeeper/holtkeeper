@@ -65,6 +65,7 @@
 | `@holtkeeper/fleet`               | Library versions and config drift across repositories                  | [packages/fleet/docs](../packages/fleet/docs/README.md)                             |
 | `@holtkeeper/release-risk`        | Release risk score and summary                                         | [packages/release-risk/docs](../packages/release-risk/docs/README.md)               |
 | `@holtkeeper/delivery`            | DORA metrics and CI health                                             | [packages/delivery/docs](../packages/delivery/docs/README.md)                       |
+| `@holtkeeper/ci-jobs`             | CI job durations, slowdowns and failure rates from stored history      | [packages/ci-jobs/docs](../packages/ci-jobs/docs/README.md)                         |
 | `@holtkeeper/assets`              | Asset sizes, budgets, format suggestions                               | [packages/assets/docs](../packages/assets/docs/README.md)                           |
 | `@holtkeeper/i18n`                | Translation gaps and placeholders                                      | [packages/i18n/docs](../packages/i18n/docs/README.md)                               |
 

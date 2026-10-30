@@ -11,6 +11,7 @@ export const blockTypes = [
   'issues',
   'markdown',
   'changes',
+  'heatmap',
 ] as const satisfies readonly Block['type'][]
 
 type MissingBlock = Exclude<Block['type'], (typeof blockTypes)[number]>
@@ -50,6 +51,14 @@ export const analysisPages = [
     icon: 'quality',
     description: 'Lint issues, coverage and suggested fixes',
     trend: [/issues/i, /coverage/i],
+  },
+  {
+    to: '/ci',
+    kind: 'ci-jobs',
+    title: 'CI jobs',
+    icon: 'release',
+    description: 'Job durations, slowdowns and failure rates over time',
+    trend: [/pipeline time/i, /failure rate/i],
   },
 ] as const
 

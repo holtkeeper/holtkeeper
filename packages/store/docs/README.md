@@ -12,6 +12,7 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 | `jobs`             | The task queue for background analyses (see below)                                                                             |
 | `knowledge`        | Knowledge base entries with version history and search (see below)                                                             |
 | `aiUsage`          | One record per LLM agent run: tokens, cost, outcome (see below)                                                                |
+| `ciJobs`           | Finished CI job attempts per repository, kept so job analytics fetch only what is new (see below)                              |
 | `audit`            | Optional. The append-only, hash-chained audit log (see below)                                                                  |
 | `externalAccounts` | Optional. External accounts (GitLab, GitHub, Slack ids) linked to principals (see below)                                       |
 
@@ -43,6 +44,15 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 - `append(record)`; `list({ ...filter, before, limit })` newest first.
 - `aggregate({ from, to, groupBy, filter })` — one bucket per distinct combination of `groupBy` values (`day`, `week` = its Monday, `month`, all UTC; `repo` as `forge:path`, `group`, `model`, `provider`, `taskKind`, `analyzer`), sorted by key. Each bucket sums tokens per kind and cost and counts `runs`, `errors`, `denied`, with `avgDurationMs` over runs that were not denied. A record in several groups counts once per group; records without groups (or analyzer) fall under `''`. No matching records, no buckets.
 - `AiUsageFilter`: `from` (inclusive), `to` (exclusive), `repo`, `group`, `model`, `provider`, `taskKind`, `analyzer`, `outcome`, and `scopes` — records covered by any of them (an empty list matches nothing), used for access filtering and scoped budgets.
+
+## CI jobs
+
+`CiJobStore` keeps finished CI job attempts (`CiJobRecord`: repository, job and pipeline ids, name, stage, `success | failed | canceled`, ref, sha, times, duration and queue seconds, `allowFailure`, link) for [@holtkeeper/ci-jobs](../../ci-jobs/docs/README.md).
+
+- `put(records)` inserts or replaces by repository and job id; times are stored in the contract's ISO 8601 form (`normalizeCiJob`).
+- `list(repo, { from?, to? })` — created in `[from, to)`, oldest first, ties by job id (`compareCiJobs`).
+- `coverage(repo)` — oldest and newest creation time and count; `undefined` without records.
+- `prune(before)` — removes records of every repository created before `before`, returns how many.
 
 `aggregateAiUsage`, `matchesAiUsageFilter`, `aggregateFilter`, `sortAiUsageBuckets`, `weekStart`, `aiUsageDimensions` and `emptyAiUsageTotals` are exported for implementations.
 

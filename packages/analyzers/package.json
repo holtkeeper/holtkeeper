@@ -11,6 +11,7 @@
     "@holtkeeper/assets": "workspace:*",
     "@holtkeeper/bundles": "workspace:*",
     "@holtkeeper/changelog": "workspace:*",
+    "@holtkeeper/ci-jobs": "workspace:*",
     "@holtkeeper/delivery": "workspace:*",
     "@holtkeeper/depgraph": "workspace:*",
     "@holtkeeper/depgraph-go": "workspace:*",

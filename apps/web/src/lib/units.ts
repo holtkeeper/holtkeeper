@@ -3,6 +3,27 @@ import { type Cell, type Tone, type Unit, formatBytes } from '@holtkeeper/api'
 const integer = new Intl.NumberFormat('en')
 const decimal = new Intl.NumberFormat('en', { maximumFractionDigits: 1 })
 
+/** `850 ms`, `1.5 s`, `4m 10s`, `2h 5m`, `3d 4h`: the two largest parts of a duration. */
+function formatMs(value: number): string {
+  const sign = value < 0 ? '-' : ''
+  const ms = Math.abs(value)
+  if (ms < 1000) return `${sign}${integer.format(Math.round(ms))} ms`
+  if (ms < 60_000) return `${sign}${decimal.format(ms / 1000)} s`
+  const seconds = Math.round(ms / 1000)
+  const parts: [number, string][] = [
+    [Math.floor(seconds / 86_400), 'd'],
+    [Math.floor(seconds / 3600) % 24, 'h'],
+    [Math.floor(seconds / 60) % 60, 'm'],
+    [seconds % 60, 's'],
+  ]
+  const first = parts.findIndex(([amount]) => amount > 0)
+  const shown = parts
+    .slice(first, first + 2)
+    .filter(([amount]) => amount > 0)
+    .map(([amount, suffix]) => `${amount}${suffix}`)
+  return `${sign}${shown.join(' ')}`
+}
+
 /** A report value formatted for its unit: `1.5 kB`, `12.5%`, `850 ms`, `1,204`. */
 export function formatValue(
   value: number | string | null | undefined,
@@ -17,9 +38,7 @@ export function formatValue(
     case 'percent':
       return `${decimal.format(value)}%`
     case 'ms':
-      return value >= 1000
-        ? `${decimal.format(value / 1000)} s`
-        : `${integer.format(Math.round(value))} ms`
+      return formatMs(value)
     case 'count':
       return Number.isInteger(value) ? integer.format(value) : decimal.format(value)
     default:
@@ -66,6 +85,7 @@ export function cellSortValue(cell: Cell | undefined): number | string {
   if (typeof cell === 'number') return cell
   if (typeof cell === 'boolean') return cell ? 1 : 0
   if (typeof cell === 'object') {
+    if (cell.value !== undefined) return cell.value
     const numeric = Number(cell.text)
     return cell.text !== '' && Number.isFinite(numeric) ? numeric : cell.text.toLowerCase()
   }

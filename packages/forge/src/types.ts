@@ -165,6 +165,18 @@ export interface JobRun extends Job {
   retried: boolean
   /** True when the job may fail without failing the pipeline. */
   allowFailure: boolean
+  /** Branch or tag of the job's pipeline, when the read reports it. */
+  ref?: string
+  /** Commit of the job's pipeline, when the read reports it. */
+  sha?: string
+}
+
+/** Filters for `listProjectJobRuns`; omitted fields do not filter. */
+export interface JobRunQuery {
+  /** Only jobs created at or after this ISO 8601 time. */
+  after?: string
+  /** At most this many, newest first; all matching when omitted. */
+  limit?: number
 }
 
 /** Deployment statuses normalized to one set. */
@@ -347,6 +359,11 @@ export interface GitForge {
   listPipelineRuns?(repo: string, query?: PipelineRunQuery): Promise<PipelineRun[]>
   /** Every job attempt of a pipeline, retried attempts included. */
   listJobRuns?(repo: string, pipelineId: number): Promise<JobRun[]>
+  /**
+   * Job attempts of every pipeline of the repository, retried attempts included, with `ref` and
+   * `sha` set. Cheaper than `listJobRuns` per pipeline when reading long histories.
+   */
+  listProjectJobRuns?(repo: string, query?: JobRunQuery): Promise<JobRun[]>
   listDeployments?(repo: string, query?: DeploymentQuery): Promise<Deployment[]>
   /** Tags, most recently updated first. */
   listTags?(repo: string, query?: { limit?: number }): Promise<TagRecord[]>

@@ -2,15 +2,15 @@ import type { Block, Unit } from '@holtkeeper/api'
 import type { ReactNode } from 'react'
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Cell as PieCell,
   Line,
-  LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -61,8 +61,15 @@ function Legend({ items }: { items: { label: string; color: string }[] }) {
   )
 }
 
-const numberOf = (value: string | number | undefined) =>
+const numberOf = (value: string | number | null | undefined) =>
   typeof value === 'number' ? value : Number(value ?? 0) || 0
+
+/** The number at `key`, or `null` for gaps. */
+const valueOf = (datum: ChartBlockData['data'][number], key: string) => {
+  const value = datum[key]
+  if (value === null || value === undefined || value === '') return null
+  return numberOf(value)
+}
 
 function Donut({ block, unit }: { block: ChartBlockData; unit: Unit }) {
   const key = block.series[0]?.key ?? 'value'
@@ -136,55 +143,44 @@ function Donut({ block, unit }: { block: ChartBlockData; unit: Unit }) {
   )
 }
 
-/** Bar, stacked bar, line, area or donut chart with theme-aware tone colors. */
-export function ChartBlock({ block }: { block: ChartBlockData }) {
-  const unit = block.unit ?? 'count'
-  if (block.chart === 'donut') return <Donut block={block} unit={unit} />
+const axisFor = (unit: Unit, id: string, orientation: 'left' | 'right') => (
+  <YAxis
+    yAxisId={id}
+    orientation={orientation}
+    tickLine={false}
+    axisLine={false}
+    tick={axisTick}
+    width={64}
+    tickFormatter={(v: number) => formatValue(v, unit)}
+  />
+)
 
+/** Line, area or combo chart with optional p25–p75-style bands and vertical markers. */
+function Composed({ block, unit }: { block: ChartBlockData; unit: Unit }) {
+  const rightUnit = block.rightUnit ?? unit
+  const fallback = block.chart === 'line' ? 'line' : block.chart === 'area' ? 'area' : 'bar'
   const series = block.series.map((s, index) => ({
     ...s,
+    as: block.chart === 'combo' ? (s.as ?? 'bar') : fallback,
+    axis: block.chart === 'combo' && s.axis === 'right' ? 'right' : 'left',
     color: s.tone ? toneColor[s.tone] : seriesColor(index),
   }))
-  const stacked = block.chart === 'stacked-bar'
-  const tooltip = (
-    <Tooltip
-      cursor={
-        block.chart === 'line' || block.chart === 'area'
-          ? { stroke: 'var(--border-tertiary)' }
-          : { fill: 'var(--default-soft)' }
-      }
-      content={({ active, label }) => {
-        const datum = block.data.find((d) => String(d[block.x]) === String(label))
-        if (!active || !datum) return null
-        return (
-          <TooltipBox
-            title={String(label)}
-            rows={series.map((s) => ({
-              label: s.label,
-              color: s.color,
-              value: formatValue(numberOf(datum[s.key]), unit),
-            }))}
-          />
-        )
-      }}
-    />
-  )
-  const axes = (
-    <>
-      <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-      <XAxis dataKey={block.x} tickLine={false} axisLine={false} tick={axisTick} minTickGap={16} />
-      <YAxis
-        tickLine={false}
-        axisLine={false}
-        tick={axisTick}
-        width={64}
-        tickFormatter={(v: number) => formatValue(v, unit)}
-      />
-      {tooltip}
-    </>
-  )
-  const margin = { top: 8, right: 8, bottom: 0, left: 0 }
-  const data = [...block.data]
+  const bands = (block.bands ?? []).map((band, index) => ({
+    ...band,
+    key: `__band${index}`,
+    color: band.tone ? toneColor[band.tone] : seriesColor(index),
+  }))
+  const hasRight = series.some((s) => s.axis === 'right')
+  const data = block.data.map((datum) => {
+    const row: Record<string, string | number | null | [number, number]> = { ...datum }
+    for (const band of bands) {
+      const low = valueOf(datum, band.low)
+      const high = valueOf(datum, band.high)
+      row[band.key] = low === null || high === null ? null : [low, high]
+    }
+    return row
+  })
+  const unitOf = (axis: string) => (axis === 'right' ? rightUnit : unit)
 
   return (
     <div className="flex flex-col gap-3">
@@ -194,28 +190,73 @@ export function ChartBlock({ block }: { block: ChartBlockData }) {
         aria-label={`${block.title ?? 'Chart'} of ${series.map((s) => s.label).join(', ')} over ${block.data.length} ${block.x} values`}
       >
         <ResponsiveContainer width="100%" height="100%">
-          {block.chart === 'line' ? (
-            <LineChart data={data} margin={margin}>
-              {axes}
-              {series.map((s) => (
-                <Line
+          <ComposedChart data={data} margin={{ top: 12, right: 8, bottom: 0, left: 0 }}>
+            <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+            <XAxis
+              dataKey={block.x}
+              tickLine={false}
+              axisLine={false}
+              tick={axisTick}
+              minTickGap={16}
+            />
+            {axisFor(unit, 'left', 'left')}
+            {hasRight ? axisFor(rightUnit, 'right', 'right') : null}
+            <Tooltip
+              cursor={{ stroke: 'var(--border-tertiary)' }}
+              content={({ active, label }) => {
+                const datum = block.data.find((d) => String(d[block.x]) === String(label))
+                if (!active || !datum) return null
+                const rows = series.map((s) => {
+                  const value = valueOf(datum, s.key)
+                  return {
+                    label: s.label,
+                    color: s.color,
+                    value: value === null ? '—' : formatValue(value, unitOf(s.axis)),
+                  }
+                })
+                for (const band of bands) {
+                  const low = valueOf(datum, band.low)
+                  const high = valueOf(datum, band.high)
+                  if (low !== null && high !== null)
+                    rows.push({
+                      label: band.label,
+                      color: band.color,
+                      value: `${formatValue(low, unit)} – ${formatValue(high, unit)}`,
+                    })
+                }
+                return <TooltipBox title={String(label)} rows={rows} />
+              }}
+            />
+            {bands.map((band) => (
+              <Area
+                key={band.key}
+                yAxisId="left"
+                dataKey={band.key}
+                name={band.label}
+                stroke="none"
+                fill={band.color}
+                fillOpacity={0.14}
+                type="monotone"
+                activeDot={false}
+                isAnimationActive={false}
+              />
+            ))}
+            {series.map((s) =>
+              s.as === 'bar' ? (
+                <Bar
                   key={s.key}
+                  yAxisId={s.axis}
                   dataKey={s.key}
                   name={s.label}
-                  stroke={s.color}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  type="monotone"
+                  fill={s.color}
+                  fillOpacity={block.chart === 'combo' ? 0.55 : 1}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={36}
                 />
-              ))}
-            </LineChart>
-          ) : block.chart === 'area' ? (
-            <AreaChart data={data} margin={margin}>
-              {axes}
-              {series.map((s) => (
+              ) : s.as === 'area' ? (
                 <Area
                   key={s.key}
+                  yAxisId={s.axis}
                   dataKey={s.key}
                   name={s.label}
                   stroke={s.color}
@@ -223,25 +264,113 @@ export function ChartBlock({ block }: { block: ChartBlockData }) {
                   fillOpacity={0.15}
                   strokeWidth={2}
                   type="monotone"
+                  {...(s.dashed ? { strokeDasharray: '5 4' } : {})}
                 />
-              ))}
-            </AreaChart>
-          ) : (
-            <BarChart data={data} margin={margin} barCategoryGap="24%">
-              {axes}
-              {series.map((s, index) => (
-                <Bar
+              ) : (
+                <Line
                   key={s.key}
+                  yAxisId={s.axis}
                   dataKey={s.key}
                   name={s.label}
-                  fill={s.color}
-                  {...(stacked ? { stackId: 'stack' } : {})}
-                  radius={stacked && index < series.length - 1 ? 0 : [4, 4, 0, 0]}
-                  maxBarSize={48}
+                  stroke={s.color}
+                  strokeWidth={s.dashed ? 1.5 : 2.25}
+                  dot={false}
+                  activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)' }}
+                  type="monotone"
+                  {...(s.dashed ? { strokeDasharray: '5 4', strokeOpacity: 0.8 } : {})}
                 />
-              ))}
-            </BarChart>
-          )}
+              ),
+            )}
+            {(block.markers ?? []).map((marker) => (
+              <ReferenceLine
+                key={`${marker.x}:${marker.label}`}
+                yAxisId="left"
+                x={marker.x}
+                stroke={toneColor[marker.tone ?? 'neutral']}
+                strokeDasharray="3 3"
+                label={{
+                  value: marker.label,
+                  position: 'insideTopLeft',
+                  fill: toneColor[marker.tone ?? 'neutral'],
+                  fontSize: 11,
+                }}
+              />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <Legend items={[...series, ...bands]} />
+    </div>
+  )
+}
+
+/** Bar, stacked bar, line, area, combo or donut chart with theme-aware tone colors. */
+export function ChartBlock({ block }: { block: ChartBlockData }) {
+  const unit = block.unit ?? 'count'
+  if (block.chart === 'donut') return <Donut block={block} unit={unit} />
+  if (block.chart !== 'bar' && block.chart !== 'stacked-bar')
+    return <Composed block={block} unit={unit} />
+
+  const series = block.series.map((s, index) => ({
+    ...s,
+    color: s.tone ? toneColor[s.tone] : seriesColor(index),
+  }))
+  const stacked = block.chart === 'stacked-bar'
+  const margin = { top: 8, right: 8, bottom: 0, left: 0 }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div
+        className="h-64 w-full"
+        role="img"
+        aria-label={`${block.title ?? 'Chart'} of ${series.map((s) => s.label).join(', ')} over ${block.data.length} ${block.x} values`}
+      >
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={[...block.data]} margin={margin} barCategoryGap="24%">
+            <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+            <XAxis
+              dataKey={block.x}
+              tickLine={false}
+              axisLine={false}
+              tick={axisTick}
+              minTickGap={16}
+            />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              tick={axisTick}
+              width={64}
+              tickFormatter={(v: number) => formatValue(v, unit)}
+            />
+            <Tooltip
+              cursor={{ fill: 'var(--default-soft)' }}
+              content={({ active, label }) => {
+                const datum = block.data.find((d) => String(d[block.x]) === String(label))
+                if (!active || !datum) return null
+                return (
+                  <TooltipBox
+                    title={String(label)}
+                    rows={series.map((s) => ({
+                      label: s.label,
+                      color: s.color,
+                      value: formatValue(numberOf(datum[s.key]), unit),
+                    }))}
+                  />
+                )
+              }}
+            />
+            {series.map((s, index) => (
+              <Bar
+                key={s.key}
+                dataKey={s.key}
+                name={s.label}
+                fill={s.color}
+                {...(stacked ? { stackId: 'stack' } : {})}
+                radius={stacked && index < series.length - 1 ? 0 : [4, 4, 0, 0]}
+                maxBarSize={48}
+              />
+            ))}
+          </BarChart>
         </ResponsiveContainer>
       </div>
       <Legend items={series} />

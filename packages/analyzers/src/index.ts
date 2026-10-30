@@ -2,6 +2,7 @@ import { type AnyAnalyzer, defineAnalyzer } from '@holtkeeper/analyzer'
 import { assetsAnalyzer } from '@holtkeeper/assets'
 import { analyzeBundle, bundleAnalysis } from '@holtkeeper/bundles'
 import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/changelog'
+import { ciJobsAnalyzer } from '@holtkeeper/ci-jobs'
 import { deliveryAnalyzer } from '@holtkeeper/delivery'
 import { analyzeDependencies, depgraphAnalysis } from '@holtkeeper/depgraph'
 import { goSource } from '@holtkeeper/depgraph-go'
@@ -158,6 +159,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   fleetAnalyzer,
   assetsAnalyzer,
   deliveryAnalyzer,
+  ciJobsAnalyzer,
   i18nAnalyzer,
   propagateAnalyzer,
   portAnalyzer,

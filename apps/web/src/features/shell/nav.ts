@@ -12,6 +12,7 @@ import {
   Network,
   Settings2,
   Tag,
+  Timer,
   Users,
 } from 'lucide-react'
 
@@ -26,6 +27,7 @@ export interface NavItem {
     | '/bundles'
     | '/dependencies'
     | '/quality'
+    | '/ci'
     | '/knowledge'
     | '/credentials'
     | '/settings'
@@ -47,6 +49,7 @@ const navItems: readonly NavItem[] = [
   { to: '/bundles', label: 'Bundles', icon: Boxes, requires: 'analyses:read' },
   { to: '/dependencies', label: 'Dependencies', icon: Network, requires: 'analyses:read' },
   { to: '/quality', label: 'Code quality', icon: Gauge, requires: 'analyses:read' },
+  { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen, requires: 'knowledge:read' },
   { to: '/credentials', label: 'Credentials', icon: KeyRound, requires: 'credentials:read' },
   { to: '/settings', label: 'Settings', icon: Settings2, requires: 'settings:read' },

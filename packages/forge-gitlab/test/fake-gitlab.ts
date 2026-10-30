@@ -541,6 +541,21 @@ export class FakeGitLab {
         web_url: this.webUrl(`${project.path}/-/pipelines/${p.id}`),
       })
     }
+    if (method === 'GET' && rest[0] === 'jobs' && rest.length === 1) {
+      const jobs = project.jobs.toSorted((a, b) => b.id - a.id)
+      return this.page(
+        url,
+        jobs.map((j) => {
+          const pipeline = project.pipelines.find((p) => p.id === j.pipelineId)
+          return {
+            ...this.jobJson(project, j),
+            ref: pipeline?.ref ?? null,
+            commit: pipeline ? { id: pipeline.sha } : null,
+            pipeline: { id: j.pipelineId, ref: pipeline?.ref, sha: pipeline?.sha },
+          }
+        }),
+      )
+    }
     if (method === 'GET' && rest[0] === 'pipelines' && rest[2] === 'jobs') {
       const all = project.jobs.filter((j) => j.pipelineId === Number(rest[1]))
       const jobs =

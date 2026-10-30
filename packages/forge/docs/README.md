@@ -32,7 +32,7 @@ Repositories are addressed by their full path (`games/slots-x`), merge requests 
 | Pipelines            | `listPipelines`, `listJobs`, `playJob`, `retryJob`                                                           |
 | Tags                 | `createTag`                                                                                                  |
 | Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                           |
-| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listDeployments`, `listTags`                        |
+| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`  |
 
 ### Listing files
 
@@ -47,6 +47,7 @@ Optional, read-only history for delivery analytics (`@holtkeeper/delivery`). Ada
 | `listMergeRequests(repo, { state?, updatedAfter?, targetBranch?, limit? })` | `MergeRequestRecord`: a `MergeRequest` plus `createdAt`, `updatedAt`, `mergedAt?`, `closedAt?`, `firstCommitAt?` and `changesCount?` (the last two only when cheap for the provider); `state` defaults to `all` |
 | `listPipelineRuns(repo, { ref?, after?, limit? })`                          | `PipelineRun`: a `Pipeline` plus `createdAt`, `updatedAt?`, `startedAt?`, `finishedAt?`, `durationSeconds?`, `queuedSeconds?`, `source?`; `after` filters by creation time                                      |
 | `listJobRuns(repo, pipelineId)`                                             | `JobRun`: a `Job` plus `pipelineId`, timing, `retried` (a later attempt replaced it) and `allowFailure`; retried attempts are included                                                                          |
+| `listProjectJobRuns(repo, { after?, limit? })`                              | `JobRun`s of every pipeline, newest first, retried attempts included, with `ref` and `sha` of their pipeline; much cheaper than `listJobRuns` per pipeline for long histories                                   |
 | `listDeployments(repo, { environment?, after?, limit? })`                   | `Deployment`: `id`, `environment`, `status` (`pending`, `running`, `success`, `failed`, `canceled`, `skipped`, `blocked`), `sha`, `ref`, `createdAt`, `finishedAt?`; `after` filters by update time             |
 | `listTags(repo, { limit? })`                                                | `TagRecord`: a `Tag` plus `committedAt` (date of the tagged commit) and `createdAt?` (annotated tags)                                                                                                           |
 

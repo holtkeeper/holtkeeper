@@ -110,6 +110,16 @@ const jobRunSchema = jobSchema.extend({
   retried: z.boolean().optional(),
 })
 
+const projectJobRunSchema = jobRunSchema.extend({
+  ref: z.string().nullable().optional(),
+  commit: z.object({ id: z.string() }).nullable().optional(),
+  pipeline: z.object({
+    id: z.number(),
+    ref: z.string().nullable().optional(),
+    sha: z.string().nullable().optional(),
+  }),
+})
+
 const deploymentSchema = z.object({
   id: z.number(),
   ref: z.string(),
@@ -376,18 +386,22 @@ const toDeployment = (deployment: z.infer<typeof deploymentSchema>): Deployment 
 })
 
 /** Attempts replaced by a later attempt of the same job; GitLab's `retried` flag wins when sent. */
-function toJobRuns(pipelineId: number, jobs: z.infer<typeof jobRunSchema>[]): JobRun[] {
+function toJobRuns<J extends z.infer<typeof jobRunSchema>>(
+  jobs: J[],
+  pipelineOf: (job: J) => number,
+): JobRun[] {
+  const attempt = (job: J) => `${pipelineOf(job)}\u0000${job.name}`
   const latest = new Map<string, number>()
-  for (const job of jobs) latest.set(job.name, Math.max(latest.get(job.name) ?? 0, job.id))
+  for (const job of jobs) latest.set(attempt(job), Math.max(latest.get(attempt(job)) ?? 0, job.id))
   return jobs.map((job) => ({
     ...toJob(job),
-    pipelineId,
+    pipelineId: pipelineOf(job),
     createdAt: job.created_at,
     startedAt: job.started_at ?? undefined,
     finishedAt: job.finished_at ?? undefined,
     durationSeconds: job.duration ?? undefined,
     queuedSeconds: job.queued_duration ?? undefined,
-    retried: job.retried ?? latest.get(job.name) !== job.id,
+    retried: job.retried ?? latest.get(attempt(job)) !== job.id,
     allowFailure: job.allow_failure ?? false,
   }))
 }
@@ -814,7 +828,28 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
       const list = client.paginate(`${project(repo)}/pipelines/${pipelineId}/jobs`, jobRunSchema, {
         include_retried: true,
       })
-      return toJobRuns(pipelineId, await take(list, undefined))
+      return toJobRuns(await take(list, undefined), () => pipelineId)
+    },
+
+    async listProjectJobRuns(repo, query = {}) {
+      const after = query.after === undefined ? undefined : Date.parse(query.after)
+      const jobs: z.infer<typeof projectJobRunSchema>[] = []
+      const list = client.paginate(`${project(repo)}/jobs`, projectJobRunSchema, {
+        per_page: pageSize(query.limit),
+      })
+      // The endpoint has no time filter but lists newest first, so the first older job ends the read.
+      for await (const job of list) {
+        if (after !== undefined && Date.parse(job.created_at) < after) break
+        jobs.push(job)
+        if (query.limit !== undefined && jobs.length >= query.limit) break
+      }
+      const runs = toJobRuns(jobs, (job) => job.pipeline.id)
+      return runs.map((run, index) => {
+        const job = jobs[index]
+        const ref = job?.pipeline.ref ?? job?.ref
+        const sha = job?.pipeline.sha ?? job?.commit?.id
+        return { ...run, ...(ref ? { ref } : {}), ...(sha ? { sha } : {}) }
+      })
     },
 
     async listDeployments(repo, query = {}) {

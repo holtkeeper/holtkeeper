@@ -8,6 +8,7 @@ import type {
   AiUsageRecord,
   AuditEventInput,
   AuditRun,
+  CiJobRecord,
   ExternalAccount,
   KnowledgeEntryInput,
   KnowledgeFilter,
@@ -127,6 +128,24 @@ const externalAccount = (
   verification: 'admin',
   linkedBy: 'root',
   linkedAt: '2026-10-30T09:00:00.000Z',
+  ...overrides,
+})
+
+const ciJob = (
+  path: string,
+  jobId: number,
+  createdAt: string,
+  overrides: Partial<CiJobRecord> = {},
+): CiJobRecord => ({
+  repo: { forge: 'work', path },
+  jobId,
+  pipelineId: 100 + jobId,
+  name: 'test',
+  stage: 'test',
+  status: 'success',
+  createdAt,
+  allowFailure: false,
+  webUrl: `https://git/${path}/-/jobs/${jobId}`,
   ...overrides,
 })
 
@@ -648,6 +667,62 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect((await store.knowledge.search('"quotes"')).map((h) => h.entry.id)).toEqual(['ops'])
       expect((await store.knowledge.search('title:drill')).map((h) => h.entry.id)).toEqual(['ops'])
       expect((await store.knowledge.search('NOT')).map((h) => h.entry.id)).toEqual(['ops'])
+    })
+
+    test('ci jobs: put replaces by job id, list oldest first in a range, coverage, prune', async () => {
+      const a = { forge: 'work', path: 'games/a' }
+      await store.ciJobs.put([
+        ciJob('games/a', 2, '2026-10-02T00:00:00Z', {
+          status: 'failed',
+          ref: 'main',
+          sha: 'abc',
+          startedAt: '2026-10-02T00:01:00+00:00',
+          finishedAt: '2026-10-02T00:05:00.000Z',
+          durationSeconds: 240.5,
+          queuedSeconds: 60,
+          allowFailure: true,
+        }),
+        ciJob('games/a', 1, '2026-10-01T00:00:00.000Z'),
+        ciJob('games/a', 3, '2026-10-03T00:00:00.000Z'),
+        ciJob('games/b', 1, '2026-09-01T00:00:00.000Z'),
+      ])
+      await store.ciJobs.put([
+        ciJob('games/a', 3, '2026-10-03T00:00:00.000Z', { status: 'canceled' }),
+      ])
+
+      const all = await store.ciJobs.list(a)
+      expect(all.map((r) => [r.jobId, r.status])).toEqual([
+        [1, 'success'],
+        [2, 'failed'],
+        [3, 'canceled'],
+      ])
+      expect(all[1]).toEqual(
+        ciJob('games/a', 2, '2026-10-02T00:00:00.000Z', {
+          status: 'failed',
+          ref: 'main',
+          sha: 'abc',
+          startedAt: '2026-10-02T00:01:00.000Z',
+          finishedAt: '2026-10-02T00:05:00.000Z',
+          durationSeconds: 240.5,
+          queuedSeconds: 60,
+          allowFailure: true,
+        }),
+      )
+      const ranged = await store.ciJobs.list(a, {
+        from: '2026-10-02T00:00:00.000Z',
+        to: '2026-10-03T00:00:00.000Z',
+      })
+      expect(ranged.map((r) => r.jobId)).toEqual([2])
+      expect(await store.ciJobs.coverage(a)).toEqual({
+        oldest: '2026-10-01T00:00:00.000Z',
+        newest: '2026-10-03T00:00:00.000Z',
+        jobs: 3,
+      })
+      expect(await store.ciJobs.coverage({ forge: 'work', path: 'none' })).toBeUndefined()
+
+      expect(await store.ciJobs.prune('2026-10-02T00:00:00.000Z')).toBe(2)
+      expect((await store.ciJobs.list(a)).map((r) => r.jobId)).toEqual([2, 3])
+      expect(await store.ciJobs.list({ forge: 'work', path: 'games/b' })).toEqual([])
     })
 
     test('ai usage: append, list newest first with filters, paging and scopes', async () => {

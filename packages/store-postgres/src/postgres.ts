@@ -4,6 +4,7 @@ import { SQL } from 'bun'
 import { postgresExternalAccounts } from './accounts.ts'
 import { postgresAiUsage } from './ai-usage.ts'
 import { postgresAudit } from './audit.ts'
+import { postgresCiJobs } from './ci-jobs.ts'
 import { postgresConfig, postgresKv } from './config.ts'
 import { postgresJobs } from './jobs.ts'
 import { postgresKnowledge } from './knowledge.ts'
@@ -104,6 +105,7 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
     jobs: postgresJobs(db),
     knowledge: postgresKnowledge(db, schema),
     aiUsage: postgresAiUsage(db),
+    ciJobs: postgresCiJobs(db),
     config: postgresConfig(db, schema),
     kv: postgresKv(db),
     audit: postgresAudit(db),

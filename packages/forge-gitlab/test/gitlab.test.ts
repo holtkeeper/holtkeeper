@@ -601,6 +601,47 @@ describe('insight reads', () => {
     expect(server.calls.at(-1)?.url).toContain('include_retried=true')
   })
 
+  test('lists project job runs newest first until the first job older than after', async () => {
+    const { server, forge } = setup()
+    const project = server.addProject('g/a')
+    server.addPipeline(
+      project,
+      'main',
+      'success',
+      [['old', 'test', 'success', { created_at: '2026-01-01T00:00:00Z' }]],
+      { sha: 'aaa' },
+    )
+    const pipeline = server.addPipeline(
+      project,
+      'main',
+      'success',
+      [
+        ['test', 'test', 'failed', { created_at: '2026-02-02T00:00:00Z', duration: 30 }],
+        ['build', 'build', 'success', { created_at: '2026-02-02T00:00:00Z' }],
+      ],
+      { sha: 'bbb' },
+    )
+    const first = project.jobs.find((j) => j.name === 'test')
+    if (!first) throw new Error('missing job')
+    await forge.retryJob('g/a', first.id)
+    const retry = project.jobs.at(-1)
+    if (retry) Object.assign(retry, { status: 'success', created_at: '2026-02-02T00:10:00Z' })
+
+    const jobs = await forge.listProjectJobRuns?.('g/a', { after: '2026-02-01T00:00:00Z' })
+    expect(jobs?.map((j) => [j.name, j.status, j.retried])).toEqual([
+      ['test', 'success', false],
+      ['build', 'success', false],
+      ['test', 'failed', true],
+    ])
+    expect(jobs?.[2]).toMatchObject({
+      pipelineId: pipeline.id,
+      ref: 'main',
+      sha: 'bbb',
+      durationSeconds: 30,
+    })
+    expect(await forge.listProjectJobRuns?.('g/a', { limit: 2 })).toHaveLength(2)
+  })
+
   test('lists deployments by environment, ordered by update when filtered by time', async () => {
     const { server, forge } = setup()
     const project = server.addProject('g/a')

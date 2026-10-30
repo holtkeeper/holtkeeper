@@ -346,6 +346,32 @@ export const migrations: readonly Migration[] = [
       INSERT INTO audit_state (head_seq, head_hash, swept_through) VALUES (0, NULL, 0);
     `,
   },
+  {
+    version: 7,
+    sql: `
+      CREATE TABLE ci_jobs (
+        repo_forge text NOT NULL,
+        repo_path text NOT NULL,
+        job_id bigint NOT NULL,
+        pipeline_id bigint NOT NULL,
+        name text NOT NULL,
+        stage text NOT NULL,
+        status text NOT NULL,
+        ref text,
+        sha text,
+        created_at timestamptz NOT NULL,
+        started_at timestamptz,
+        finished_at timestamptz,
+        duration_seconds double precision,
+        queued_seconds double precision,
+        allow_failure boolean NOT NULL,
+        web_url text NOT NULL,
+        PRIMARY KEY (repo_forge, repo_path, job_id)
+      );
+      CREATE INDEX ci_jobs_repo_created ON ci_jobs (repo_forge, repo_path, created_at);
+      CREATE INDEX ci_jobs_created ON ci_jobs (created_at);
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

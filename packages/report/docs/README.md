@@ -20,16 +20,17 @@ interface Report {
 
 ## Blocks
 
-| Block      | For                                                                                                          |
-| ---------- | ------------------------------------------------------------------------------------------------------------ |
-| `metrics`  | A row of metric cards inside a section                                                                       |
-| `table`    | Columns with units, delta and tag formats, sortable rows, optional `groupBy`; cells can be links with a tone |
-| `chart`    | `bar`, `stacked-bar`, `line`, `area`, `donut` over `data` with named `series`                                |
-| `treemap`  | Nested sizes, e.g. bundle composition by package                                                             |
-| `timeline` | Dated items with links and tags; `children` collapse duplicates such as identical commit messages            |
-| `graph`    | Nodes and edges; `highlight` paths emphasize problems such as dependency cycles                              |
-| `issues`   | Callouts with a tone: problems, warnings, notable changes                                                    |
-| `markdown` | Free text, rendered without raw HTML                                                                         |
+| Block      | For                                                                                                                                                                                                                                                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metrics`  | A row of metric cards inside a section                                                                                                                                                                                                                                                                               |
+| `table`    | Columns with units, delta, tag and `sparkline` formats, sortable rows, optional `groupBy`; cells can be links with a tone, a sort `value` and a `series` drawn as a sparkline                                                                                                                                        |
+| `chart`    | `bar`, `stacked-bar`, `line`, `area`, `donut` or `combo` over `data` with named `series`; `combo` draws each series as a bar, line or area on the left or right axis (`rightUnit`). Line, area and combo charts take shaded `bands` between two keys (e.g. p25–p75) and vertical `markers`; `null` values leave gaps |
+| `heatmap`  | Rows by columns of colored cells (`xLabels`, `yRows`), e.g. jobs by week; a `sequential` scale fills one tone, a `diverging` one colors by the direction `better` prefers                                                                                                                                            |
+| `treemap`  | Nested sizes, e.g. bundle composition by package                                                                                                                                                                                                                                                                     |
+| `timeline` | Dated items with links and tags; `children` collapse duplicates such as identical commit messages                                                                                                                                                                                                                    |
+| `graph`    | Nodes and edges; `highlight` paths emphasize problems such as dependency cycles                                                                                                                                                                                                                                      |
+| `issues`   | Callouts with a tone: problems, warnings, notable changes                                                                                                                                                                                                                                                            |
+| `markdown` | Free text, rendered without raw HTML                                                                                                                                                                                                                                                                                 |
 
 `Tone` (`neutral`, `info`, `good`, `warning`, `bad`) carries meaning; renderers map it to the theme. Adding a block type means adding it to the union here and one renderer in the web UI.
 
@@ -47,7 +48,7 @@ interface AnalysisKind<Data> {
 
 The server stores records (`AnalysisRecord`: repo, kind, ref, time, data), validates uploads with `schema`, and renders `toReport` on request — comparing with the previous record of the same repository and kind, or any record the client picks. Reports are rendered when requested rather than stored, so improving a report improves it for all history.
 
-Kinds: [`changelog`](../../changelog/docs/README.md), [`bundle`](../../bundles/docs/README.md), [`depgraph`](../../depgraph/docs/README.md).
+Kinds: [`changelog`](../../changelog/docs/README.md), [`bundle`](../../bundles/docs/README.md), [`depgraph`](../../depgraph/docs/README.md), [`ci-jobs`](../../ci-jobs/docs/README.md).
 
 ## Helpers
 
