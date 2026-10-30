@@ -115,7 +115,8 @@ describe('goSource', () => {
         : '',
     }))
     const layers = await goSource({ runner }).load(dir)
-    expect(calls.map((call) => [call.options.cwd, call.options.env?.GOWORK])).toEqual([
+    const byCwd = calls.toSorted((x, y) => x.options.cwd.localeCompare(y.options.cwd))
+    expect(byCwd.map((call) => [call.options.cwd, call.options.env?.GOWORK])).toEqual([
       [join(dir, 'a'), 'off'],
       [join(dir, 'b'), 'off'],
     ])

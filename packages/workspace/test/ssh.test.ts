@@ -42,7 +42,7 @@ while [ $# -gt 0 ]; do
 done
 [ "$1" = "git@example.test" ] || { echo "unexpected host $1" >&2; exit 2; }
 [ -n "$strict" ] && [ -n "$only" ] || { echo "missing options" >&2; exit 3; }
-mode=$(stat -f %Lp "$key" 2>/dev/null || stat -c %a "$key")
+mode=$(stat -c %a "$key" 2>/dev/null || stat -f %Lp "$key")
 [ "$mode" = "600" ] || { echo "key mode $mode" >&2; exit 4; }
 grep -q 'BEGIN OPENSSH PRIVATE KEY' "$key" || { echo "no key" >&2; exit 5; }
 grep -q '^example.test ' "$known" || { echo "no pinned host" >&2; exit 6; }
