@@ -10,7 +10,7 @@ import {
 } from '@holtkeeper/report'
 import type { AnalysisRecord } from '@holtkeeper/store'
 
-import { countBySeverity } from './format.ts'
+import { countBySeverity, walkthroughTable } from './format.ts'
 import {
   type ReviewData,
   type ReviewFinding,
@@ -164,7 +164,9 @@ export const reviewAnalysis = defineAnalysis<ReviewData>({
       data.mode === 'incremental' && data.previousHead
         ? `Incremental review from \`${data.previousHead.slice(0, 8)}\` to \`${data.head.slice(0, 8)}\`.`
         : `Mode: ${data.mode}, head \`${data.head.slice(0, 8)}\`.`,
+      data.effort ? `Review effort: ${data.effort}/5.` : '',
       data.approved ? 'The merge request was approved.' : '',
+      data.walkthrough?.length ? `#### Walkthrough\n\n${walkthroughTable(data.walkthrough)}` : '',
     ]
       .filter(Boolean)
       .join('\n\n')
@@ -250,7 +252,9 @@ export const reviewAnalysis = defineAnalysis<ReviewData>({
                           ? 'warning'
                           : 'neutral',
                   },
-                  reason: t.reason,
+                  reason: t.learning
+                    ? `${t.reason}; ${'error' in t.learning ? `knowledge proposal failed: ${t.learning.error}` : `knowledge entry ${t.learning.duplicateOf ?? t.learning.id}`}`
+                    : t.reason,
                 })),
               },
             ]

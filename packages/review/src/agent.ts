@@ -39,6 +39,8 @@ export interface ReviewPromptInput {
   guidelines: readonly Guideline[]
   instructions?: string
   knowledge?: readonly KnowledgeEntry[]
+  /** REVIEW.md path rules that match files in scope, with those files. */
+  pathInstructions?: readonly { glob: string; text: string; files: readonly string[] }[]
   threads: readonly OpenThread[]
   maxComments: number
   language?: string
@@ -67,6 +69,8 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       `- Categories: ${categories.join(', ')}.`,
       '- Do not repeat open threads listed in the prompt.',
       '- verdict is `needs-changes` when any major or critical problem remains, `looks-good` otherwise.',
+      '- `walkthrough`: the changes in scope grouped by logical change, most important first; each entry lists its files and says in one or two sentences what changed and why. Group related files instead of listing each one.',
+      '- `effort`: how hard this change is for a human to review, 1 (trivial) to 5 (large or subtle, needs a careful look).',
       language,
     ].join('\n'),
     `Severity:\n${severityGuide}`,
@@ -100,6 +104,10 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     .map((file) => renderNumberedDiff(file.path, file.hunks, file.lines))
     .filter(Boolean)
     .join('\n\n')
+  const pathRules = (input.pathInstructions ?? []).map((rule) => {
+    const files = rule.files.slice(0, 5).join(', ') + (rule.files.length > 5 ? ', ...' : '')
+    return `- \`${rule.glob}\` (${files}): ${rule.text}`
+  })
   const threads = input.threads.map(
     (t) => `- ${t.path}:${t.line} ${t.text.replace(/\s+/g, ' ').slice(0, 160)}`,
   )
@@ -108,6 +116,9 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     description ? `Description:\n\n${description}` : 'The merge request has no description.',
     input.mode === 'incremental'
       ? `This is an incremental review: only lines added since ${input.previousHead?.slice(0, 12)} are marked \`+\`.`
+      : '',
+    pathRules.length
+      ? `Rules for paths in this diff (from REVIEW.md), apply them to the matching files:\n${pathRules.join('\n')}`
       : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
     `Diff:\n\n${diff}`,
@@ -129,7 +140,9 @@ export interface AgentReviewOptions {
 /** Asks the agent for a structured review; comments come back as unvalidated candidates. */
 export async function runAgentReview(
   options: AgentReviewOptions,
-): Promise<{ candidates: Candidate[]; summary: string; verdict: AgentReview['verdict'] }> {
+): Promise<
+  Pick<AgentReview, 'summary' | 'verdict' | 'walkthrough' | 'effort'> & { candidates: Candidate[] }
+> {
   const context = reviewContext(options.input)
   const result = await runTracked(
     options.agent,
@@ -156,6 +169,8 @@ export async function runAgentReview(
     candidates: review.comments.map((comment) => ({ ...comment, source: 'agent' })),
     summary: review.summary,
     verdict: review.verdict,
+    ...(review.walkthrough?.length ? { walkthrough: review.walkthrough } : {}),
+    ...(review.effort ? { effort: review.effort } : {}),
   }
 }
 

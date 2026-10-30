@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { Discussion } from '@holtkeeper/forge'
@@ -137,6 +140,38 @@ describe('reviewMergeRequest', () => {
     expect(submission?.comments[0]?.body).toContain(findingMarker(data.comments[0]?.id ?? ''))
     expect(submission?.summary).toContain('| Major | 1 |')
     expect(submission?.summary).toContain('bun.lock')
+  })
+
+  test('applies REVIEW.md path rules and posts the walkthrough and effort', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'review-paths-'))
+    try {
+      await writeFile(
+        join(dir, 'REVIEW.md'),
+        '## Paths\n\n- `src/**`: money is integer cents.\n- `migrations/**`: reversible only.\n',
+      )
+      const { forge, submissions } = fakeForge({ files, discussions: [] })
+      const { agent, tasks } = fakeAgent({
+        review: [
+          {
+            ...review([], 'looks-good'),
+            walkthrough: [{ files: ['src/price.ts'], change: 'Adds price | tax helpers.' }],
+            effort: 2,
+          },
+        ],
+      })
+      const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent, dir }))
+
+      expect(tasks[0]?.prompt).toContain('- `src/**` (src/price.ts): money is integer cents.')
+      expect(tasks[0]?.prompt).not.toContain('reversible only')
+      expect(data.walkthrough).toEqual([
+        { files: ['src/price.ts'], change: 'Adds price | tax helpers.' },
+      ])
+      expect(data.effort).toBe(2)
+      expect(submissions[0]?.summary).toContain('Review effort: 2/5.')
+      expect(submissions[0]?.summary).toContain('| `src/price.ts` | Adds price \\| tax helpers. |')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   test('marks comments the forge rejected', async () => {

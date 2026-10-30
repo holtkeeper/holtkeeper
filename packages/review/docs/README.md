@@ -7,13 +7,13 @@ AI code review of merge requests: the `review` analyzer reviews one merge reques
 `reviewMergeRequest(run)` runs replaceable steps (`ReviewSteps`, override any of them with `run.steps`):
 
 1. **load** — `getMergeRequest`, `getMergeRequestDiff`, `listDiscussions`, and the previous review from history: the newest `review` record with `ref` `!<iid>` that reviewed something.
-2. **plan** — reads the repository guidelines, decides the mode and scopes the diff: added lines of reviewable files, minus `ignore` globs (plus globs from REVIEW.md, see below). Deleted, binary and forge-collapsed files are skipped. Incremental: `compareCommits(lastHead, head)` intersected with the MR diff; only lines both add are in scope.
+2. **plan** — reads the repository guidelines (and the path rules from REVIEW.md), decides the mode and scopes the diff: added lines of reviewable files, minus `ignore` globs (plus globs from REVIEW.md, see below). Deleted, binary and forge-collapsed files are skipped. Incremental: `compareCommits(lastHead, head)` intersected with the MR diff; only lines both add are in scope.
 3. **deterministic** — with `includeChecks`, runs the injected quality checks (`lint`, `secrets`, `conventions`) on the checkout and keeps issues touching lines in scope. A fix whose edits lie entirely on changed lines becomes the comment's suggestion.
-4. **agentReview** — one structured agent task (`taskKind: 'review'`): the system prompt holds the rules; `context` holds REVIEW.md, CLAUDE.md, AGENTS.md, CONTRIBUTING.md (trimmed: 6 000 characters per file, 12 000 in all), the `review.instructions` setting plus `options.instructions`, and knowledge entries; the prompt holds the MR title and description, open threads and the numbered diff per file (`+` in scope, `~` reviewed before, `-` removed). The agent reads more code with its tools instead of getting whole files.
+4. **agentReview** — one structured agent task (`taskKind: 'review'`): the system prompt holds the rules; `context` holds REVIEW.md, CLAUDE.md, AGENTS.md, CONTRIBUTING.md (trimmed: 6 000 characters per file, 12 000 in all), the `review.instructions` setting plus `options.instructions`, and knowledge entries; the prompt holds the MR title and description, the REVIEW.md path rules matching files in scope, open threads and the numbered diff per file (`+` in scope, `~` reviewed before, `-` removed). The agent reads more code with its tools instead of getting whole files. Besides comments it returns a summary, a verdict, a `walkthrough` (logical changes with their files) and `effort` (1–5, how hard the change is for a human to review).
 5. **media** — images the diff adds or changes go to the injected `MediaReviewer` (see below).
 6. **validate and rank** — every comment must target a new-side line shown by the diff; a line outside it moves to the nearest changed line (at most 5 away) or is dropped; in incremental reviews lines reviewed before are dropped. Suggestions must cover exactly `startLine..line`: copies of neighbouring lines are trimmed, no-op suggestions dropped, broken ranges lose the suggestion. Findings repeating an open thread (same path, line within ±2, similar text) or a deterministic finding are dropped. The rest is filtered by `minSeverity`, sorted by severity and capped at `maxComments`.
 7. **recheck** — our open threads whose file changed since the last review (all of them after a force push) are re-checked by the triage model (`taskKind: 'triage'`, at most 10 per run). Fixed ones are resolved with a short note, threads whose file left the diff are resolved too. A thread that is still relevant and that the agent raised again gets a "still applies" reply instead of a duplicate comment.
-8. **post** — one `submitReview` with the comments and the summary note (verdict, agent summary, findings per severity, thread outcome, what was not reviewed), `event: 'approve'` when `approve: 'when-clean'` and the review is clean (verdict `looks-good`, no major/critical finding, no thread still open). Incremental runs without anything new post nothing. Rejected comments are marked in the data.
+8. **post** — one `submitReview` with the comments and the summary note (verdict, agent summary, review effort, the walkthrough in a collapsed table, findings per severity, thread outcome, what was not reviewed), `event: 'approve'` when `approve: 'when-clean'` and the review is clean (verdict `looks-good`, no major/critical finding, no thread still open). Incremental runs without anything new post nothing. Rejected comments are marked in the data.
 
 When the in-scope diff exceeds `maxDiffLines` the review is skipped with a summary note (posted once until the MR gets small enough).
 
@@ -48,6 +48,8 @@ The record is stored with `ref` `!<iid>`.
 
 `replyToThread({ forge, repo, mr, discussion, agent, dir?, botUsername?, language? })` answers the latest reply in a thread we started: `explain`, `concede` (and resolve) or `update` with a new suggestion (GitLab ` ```suggestion:-N+0 ` markup). Threads not started by us, and threads whose last note is ours, are skipped. With `options.replyTo` the analyzer runs it and stores a `reply` record.
 
+**Learnings.** With a `learn` callback the agent may also return a `learning` when the reply states a lasting rule of the repository (a convention, a deliberate decision, something not to flag). `learn` gets it with the discussion and note ids; the result carries the outcome (`{ id, status, duplicateOf? }`, or `{ error }` — a failing `learn` never fails the reply). The analyzer wires `learn` to `knowledge.access.propose` when `knowledge` is configured (actor `agent:review`, body ending with a link to the note), so the rule becomes a `proposed` knowledge entry (or `accepted` under `knowledge.autoAccept`) and reaches later reviews once accepted. The thread entry of the record keeps it as `learning`.
+
 ## Images
 
 `MediaReviewer.review({ repo, mergeRequest, refs, files, usages })` gets added or changed `png/jpg/gif/webp/svg` files (SVG text via `readFile`, raster bytes via the optional `forge.readFileBytes`, left out when the forge lacks it) and the added lines that mention them. Its comments become `minor` `performance` findings that count toward `maxComments`; its Markdown summary is appended under "Images". `noopMediaReviewer` is the default.
@@ -63,11 +65,21 @@ Put a `REVIEW.md` at the repository root; it goes first into the agent context. 
 - legacy/*.js
 ```
 
+A section headed `## Paths` (or `## Path instructions`) gives rules for files matching a glob, one per bullet as ``- `glob`: rule``; indented lines continue the rule. Rules whose glob matches a file in scope go into the prompt with the matching files:
+
+```md
+## Paths
+
+- `migrations/**`: every migration must be reversible.
+- `src/api/**`: keep the public contract; bump the version
+  on breaking changes.
+```
+
 ## Data and report
 
-`ReviewData`: MR, `head`, `previousHead`, `mode` (`full`, `incremental`, `reply`, `skipped`), `verdict`, `summary`, `comments` (id, path, lines, severity, category, source, suggestion with the original text, posted/error, link), `threads` (resolved/replied/kept with reason), `skipped` files, `stats` (files, changed lines, dropped findings by reason), `approved`, `checks`, `usage` (turns, cost, tokens).
+`ReviewData`: MR, `head`, `previousHead`, `mode` (`full`, `incremental`, `reply`, `skipped`), `verdict`, `summary`, `walkthrough`, `effort`, `comments` (id, path, lines, severity, category, source, suggestion with the original text, posted/error, link), `threads` (resolved/replied/kept with reason and, for replies, the `learning`), `skipped` files, `stats` (files, changed lines, dropped findings by reason), `approved`, `checks`, `usage` (turns, cost, tokens).
 
-Report sections: **Summary**, **Findings** (table by severity, comments with tags `new`/`rejected`/`suggestion`, findings no longer reported compared with the previous review of the same MR), **Suggestions** (`changes` block with `applicable: false` — suggestions are applied in the forge), **Threads**, **Not reviewed**. Metrics: verdict, comments, major and critical, suggestions, threads resolved, files reviewed, cost.
+Report sections: **Summary** (with effort and the walkthrough), **Findings** (table by severity, comments with tags `new`/`rejected`/`suggestion`, findings no longer reported compared with the previous review of the same MR), **Suggestions** (`changes` block with `applicable: false` — suggestions are applied in the forge), **Threads**, **Not reviewed**. Metrics: verdict, comments, major and critical, suggestions, threads resolved, files reviewed, cost.
 
 ## Cost control
 
@@ -82,4 +94,5 @@ Report sections: **Summary**, **Findings** (table by severity, comments with tag
 - Duplicate detection is word overlap, not semantics.
 - The summary note is submitted with the comments, so it cannot mention comments the forge rejected (the stored data does).
 - Suggestions in replies use GitLab's markup.
+- `## Ignore` and `## Paths` are read from the trimmed REVIEW.md (6 000 characters); keep them near the top of a long file.
 - Threads re-checked as fixed are resolved without asking the author.

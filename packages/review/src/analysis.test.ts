@@ -201,4 +201,72 @@ describe('review analyzer', () => {
     expect(replies).toHaveLength(1)
     expect(submissions).toEqual([])
   })
+
+  test('replyTo proposes what the author taught to the knowledge base', async () => {
+    const { forge } = fakeForge({
+      files: [],
+      discussions: [
+        {
+          id: 'd1',
+          resolvable: true,
+          resolved: false,
+          notes: [
+            {
+              id: 1,
+              author: 'bot',
+              body: 'x <!-- holtkeeper:review id=f -->',
+              createdAt: '',
+              system: false,
+            },
+            { id: 2, author: 'jane', body: 'We use cents.', createdAt: '', system: false },
+          ],
+        },
+      ],
+    })
+    const { agent } = fakeAgent({
+      review: [
+        {
+          action: 'concede',
+          body: 'Right.',
+          resolve: false,
+          learning: { title: 'Prices are cents', body: 'Do not ask for rounding.' },
+        },
+      ],
+    })
+    const proposals: unknown[] = []
+    const analyzer = createReviewAnalyzer({
+      knowledge: {
+        access: {
+          search: async () => [],
+          propose: async (input, ctx) => {
+            proposals.push({ input, ctx })
+            return { id: 'k1', status: 'proposed' }
+          },
+        },
+        groupsOf: () => ['games'],
+      },
+    })
+    const result = await analyzer.run({
+      repo,
+      forge,
+      agent,
+      runner: createFakeRunner().runner,
+      options: reviewOptionsSchema.parse({ mergeRequest: 7, replyTo: 'd1' }),
+    })
+    expect(proposals).toEqual([
+      {
+        input: {
+          title: 'Prices are cents',
+          body: expect.stringContaining('#note_2'),
+        },
+        ctx: {
+          actor: 'agent:review',
+          repo: { ...repo, groups: ['games'] },
+          taskKind: 'review',
+        },
+      },
+    ])
+    expect(result.data.threads[0]?.learning).toEqual({ id: 'k1', status: 'proposed' })
+    expect(result.data.summary).toContain('Knowledge entry k1 is proposed.')
+  })
 })

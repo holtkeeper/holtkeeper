@@ -28,17 +28,24 @@ import {
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
 import { commentBody, summaryNote, threadNote } from './format.ts'
-import { type Guideline, ignoredInReviewMd, readGuidelines } from './guidelines.ts'
+import {
+  type Guideline,
+  type PathInstruction,
+  ignoredInReviewMd,
+  pathInstructionsInReviewMd,
+  readGuidelines,
+} from './guidelines.ts'
 import { type MediaReviewer, noopMediaReviewer, reviewMedia } from './media.ts'
 import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
   type ReviewUsage,
+  type ReviewWalkthrough,
   type ThreadAction,
   reviewDataSchema,
 } from './schema.ts'
-import { type FileScope, type ReviewScope, scopeDiff } from './scope.ts'
+import { type FileScope, type ReviewScope, matchesAny, scopeDiff } from './scope.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
@@ -127,12 +134,16 @@ export interface ReviewPlan {
   /** Files changed since `previousHead`, when incremental. */
   since?: DiffFile[]
   guidelines: Guideline[]
+  /** Rules for paths from REVIEW.md's `## Paths` section. */
+  pathInstructions?: PathInstruction[]
 }
 
 export interface AgentOutcome {
   candidates: Candidate[]
   summary: string
   verdict: 'looks-good' | 'needs-changes'
+  walkthrough?: ReviewWalkthrough
+  effort?: number
 }
 
 /** The replaceable steps of a review. */
@@ -237,6 +248,7 @@ const plan: ReviewSteps['plan'] = async (run, loaded) => {
     ...(since && last ? { previousHead: last, since } : {}),
     scope: scopeDiff(loaded.diff.files, { ignore, ...(since ? { since } : {}) }),
     guidelines,
+    ...(reviewMd ? { pathInstructions: pathInstructionsInReviewMd(reviewMd.text) } : {}),
   }
 }
 
@@ -271,6 +283,12 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
           return []
         })
       : run.knowledge
+  const pathRules = (planned.pathInstructions ?? []).flatMap((rule) => {
+    const files = planned.scope.files
+      .map((f) => f.path)
+      .filter((path) => matchesAny(path, [rule.glob]))
+    return files.length ? [{ ...rule, files }] : []
+  })
   return runAgentReview({
     agent: run.agent,
     dir: run.dir,
@@ -288,6 +306,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       guidelines: planned.guidelines,
       ...(instructions ? { instructions } : {}),
       ...(knowledge?.length ? { knowledge } : {}),
+      ...(pathRules.length ? { pathInstructions: pathRules } : {}),
       threads: loaded.threads,
       maxComments: run.options.maxComments,
       ...(run.options.language ? { language: run.options.language } : {}),
@@ -575,6 +594,8 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
     ]
       .filter(Boolean)
       .join('\n\n'),
+    ...(agentOutcome?.walkthrough ? { walkthrough: agentOutcome.walkthrough } : {}),
+    ...(agentOutcome?.effort ? { effort: agentOutcome.effort } : {}),
     comments,
     threads,
     skipped: scope.skipped,

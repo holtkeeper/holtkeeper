@@ -69,6 +69,72 @@ describe('replyToThread', () => {
     expect(resolved).toEqual(['d1'])
   })
 
+  test('saves a rule the author taught', async () => {
+    const thread = discussion([
+      ['bot', ours],
+      ['jane', 'We never round here: prices are integers in cents everywhere.'],
+    ])
+    const { forge } = fakeForge({ files: [], discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        {
+          action: 'concede',
+          body: 'Got it.',
+          resolve: true,
+          learning: { title: 'Prices are integer cents', body: 'Do not ask for rounding.' },
+        },
+      ],
+    })
+    const learned: unknown[] = []
+    const result = await replyToThread({
+      forge,
+      repo,
+      mr: 7,
+      discussion: thread,
+      agent,
+      learn: async (learning) => {
+        learned.push(learning)
+        return { id: 'k1', status: 'proposed' }
+      },
+    })
+    expect(tasks[0]?.system).toContain('`learning`')
+    expect(learned).toEqual([
+      {
+        title: 'Prices are integer cents',
+        body: 'Do not ask for rounding.',
+        discussionId: 'd1',
+        noteId: 1,
+      },
+    ])
+    expect(result.learning).toEqual({ id: 'k1', status: 'proposed' })
+  })
+
+  test('reports a failed learning without failing the reply', async () => {
+    const thread = discussion([
+      ['bot', ours],
+      ['jane', 'Intended.'],
+    ])
+    const { forge, replies } = fakeForge({ files: [], discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        { action: 'concede', body: 'Ok.', resolve: true, learning: { title: 't', body: 'b' } },
+      ],
+    })
+    const result = await replyToThread({
+      forge,
+      repo,
+      mr: 7,
+      discussion: thread,
+      agent,
+      learn: () => Promise.reject(new Error('store down')),
+    })
+    expect(replies).toHaveLength(1)
+    expect(result.learning).toEqual({ error: 'store down' })
+    const plain = await replyToThread({ forge, repo, mr: 7, discussion: thread, agent })
+    expect(tasks[1]?.system).not.toContain('`learning`')
+    expect(plain.learning).toBeUndefined()
+  })
+
   test('leaves foreign threads and answered threads alone', async () => {
     const { forge, replies } = fakeForge({ files: [], discussions: [] })
     const { agent, tasks } = fakeAgent({})

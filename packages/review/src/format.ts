@@ -3,6 +3,7 @@ import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
+  type ReviewWalkthrough,
   type SkippedFile,
   type ThreadAction,
   severities,
@@ -39,6 +40,17 @@ export function commentBody(
 /** The marker of the summary note; carries the reviewed head. */
 export const summaryMarker = (head: string) => `<!-- ${MARKER_PREFIX} summary head=${head} -->`
 
+const cell = (text: string) => text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
+
+/** The walkthrough as a Markdown table: files of each logical change and what changed. */
+export function walkthroughTable(walkthrough: ReviewWalkthrough): string {
+  const rows = walkthrough.map(
+    (step) =>
+      `| ${step.files.map((file) => `\`${cell(file)}\``).join('<br>')} | ${cell(step.change)} |`,
+  )
+  return `| Files | Change |\n| --- | --- |\n${rows.join('\n')}`
+}
+
 /** Counts of posted findings per severity, most severe first. */
 export function countBySeverity(findings: readonly Pick<ReviewFinding, 'severity'>[]) {
   return severities.toReversed().map((severity) => ({
@@ -59,6 +71,8 @@ export function summaryNote(
     | 'mode'
     | 'verdict'
     | 'summary'
+    | 'walkthrough'
+    | 'effort'
     | 'comments'
     | 'threads'
     | 'skipped'
@@ -80,8 +94,12 @@ export function summaryNote(
   const lines = [
     `### Holtkeeper review: ${verdict}`,
     data.summary.trim(),
-    `${scope}: ${data.stats.files} file(s), ${data.stats.changedLines} changed line(s).`,
+    `${scope}: ${data.stats.files} file(s), ${data.stats.changedLines} changed line(s).${data.effort ? ` Review effort: ${data.effort}/5.` : ''}`,
   ]
+  if (data.walkthrough?.length)
+    lines.push(
+      `<details><summary>Walkthrough</summary>\n\n${walkthroughTable(data.walkthrough)}\n\n</details>`,
+    )
   if (data.mode !== 'skipped') {
     lines.push(
       [

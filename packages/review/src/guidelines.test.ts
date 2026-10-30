@@ -3,7 +3,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { ignoredInReviewMd, readGuidelines, trimText } from './guidelines.ts'
+import {
+  ignoredInReviewMd,
+  pathInstructionsInReviewMd,
+  readGuidelines,
+  trimText,
+} from './guidelines.ts'
 
 let dir: string | undefined
 afterEach(async () => {
@@ -37,4 +42,22 @@ test('ignoredInReviewMd reads globs under an Ignore heading', () => {
     '- security',
   ].join('\n')
   expect(ignoredInReviewMd(text)).toEqual(['src/generated/**', 'legacy/*.js'])
+})
+
+test('pathInstructionsInReviewMd reads glob rules under a Paths heading', () => {
+  const text = [
+    '## Ignore',
+    '- `src/generated/**`',
+    '## Paths',
+    '- `migrations/**`: every migration must be reversible.',
+    '- src/api/**: keep the public contract;',
+    '  bump the version on breaking changes.',
+    '- `docs/**`:',
+    '## Focus',
+    '- `x`: not a path rule',
+  ].join('\n')
+  expect(pathInstructionsInReviewMd(text)).toEqual([
+    { glob: 'migrations/**', text: 'every migration must be reversible.' },
+    { glob: 'src/api/**', text: 'keep the public contract; bump the version on breaking changes.' },
+  ])
 })

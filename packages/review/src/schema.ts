@@ -50,12 +50,31 @@ const threadSchema = z.object({
   path: z.string().optional(),
   line: z.number().optional(),
   reason: z.string(),
+  /** The knowledge entry proposed from the author's reply, or why proposing it failed. */
+  learning: z
+    .union([
+      z.object({ id: z.string(), status: z.string(), duplicateOf: z.string().optional() }),
+      z.object({ error: z.string() }),
+    ])
+    .optional(),
 })
 
 const skippedSchema = z.object({
   path: z.string(),
   reason: z.enum(['ignored', 'binary', 'collapsed', 'deleted', 'unchanged', 'too-large']),
 })
+
+const walkthroughSchema = z.array(
+  z.object({
+    /** Files of one logical change, as new-side paths. */
+    files: z.array(z.string()),
+    /** What changed there and why, in one or two sentences. */
+    change: z.string(),
+  }),
+)
+
+/** How hard the change is for a human to review: 1 trivial … 5 needs a long careful look. */
+const effortSchema = z.number().int().min(1).max(5)
 
 /** What one review run did; stored as the `review` analysis with `ref` `!<iid>`. */
 export const reviewDataSchema = z.object({
@@ -75,6 +94,9 @@ export const reviewDataSchema = z.object({
   mode: z.enum(['full', 'incremental', 'reply', 'skipped']),
   verdict: z.enum(['looks-good', 'needs-changes', 'skipped']),
   summary: z.string(),
+  /** The agent's tour of the change, grouped by logical change. */
+  walkthrough: walkthroughSchema.optional(),
+  effort: effortSchema.optional(),
   comments: z.array(findingSchema),
   threads: z.array(threadSchema),
   skipped: z.array(skippedSchema),
@@ -106,6 +128,7 @@ export type ReviewFinding = z.infer<typeof findingSchema>
 export type ThreadAction = z.infer<typeof threadSchema>
 export type SkippedFile = z.infer<typeof skippedSchema>
 export type ReviewUsage = NonNullable<ReviewData['usage']>
+export type ReviewWalkthrough = NonNullable<ReviewData['walkthrough']>
 
 /** The answer the review agent must give. */
 export const agentReviewSchema = z.object({
@@ -122,6 +145,8 @@ export const agentReviewSchema = z.object({
     }),
   ),
   summary: z.string(),
+  walkthrough: walkthroughSchema.optional(),
+  effort: effortSchema.optional(),
   verdict: z.enum(['looks-good', 'needs-changes']),
 })
 

@@ -17,7 +17,7 @@ import {
 } from './pipeline.ts'
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
-import { replyToThread } from './thread.ts'
+import { type ThreadLearning, type ThreadReplyResult, replyToThread } from './thread.ts'
 
 const flag = z.preprocess(
   (value) => (value === 'true' ? true : value === 'false' ? false : value),
@@ -72,6 +72,14 @@ export interface ReviewAnalyzerDeps {
   /** Username Holtkeeper posts as; markers in note bodies identify our notes either way. */
   botUsername?: string
   steps?: Partial<ReviewSteps>
+}
+
+function learningNote(learning: ThreadReplyResult['learning']): string {
+  if (!learning) return ''
+  if ('error' in learning) return `Proposing a knowledge entry failed: ${learning.error}.`
+  if (learning.duplicateOf)
+    return `The rule is already known as knowledge entry ${learning.duplicateOf}.`
+  return `Knowledge entry ${learning.id} is ${learning.status}.`
 }
 
 async function headCheckout(context: AnalyzerContext<ReviewOptions>, headSha: string) {
@@ -158,6 +166,18 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           ...(botUsername ? { botUsername } : {}),
           ...(options.language ? { language: options.language } : {}),
           ...(toolsets ? { toolsets } : {}),
+          ...(knowledge
+            ? {
+                learn: (learning: ThreadLearning) =>
+                  knowledge.access.propose(
+                    {
+                      title: learning.title,
+                      body: `${learning.body.trim()}\n\nLearned in ${mr.webUrl}#note_${learning.noteId}`,
+                    },
+                    { actor: 'agent:review', repo: knowledgeRepo, taskKind: 'review' },
+                  ),
+              }
+            : {}),
           usage,
           ...(context.signal ? { signal: context.signal } : {}),
         })
@@ -174,7 +194,12 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           mode: 'reply',
           verdict: 'skipped',
           summary: reply.replied
-            ? `Answered thread ${reply.discussionId} (${reply.action}).`
+            ? [
+                `Answered thread ${reply.discussionId} (${reply.action}).`,
+                learningNote(reply.learning),
+              ]
+                .filter(Boolean)
+                .join(' ')
             : `Did not answer: ${reply.reason ?? 'nothing to do'}.`,
           comments: [],
           threads: reply.replied
@@ -183,6 +208,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
                   discussionId: reply.discussionId,
                   action: reply.resolved ? 'resolved' : 'replied',
                   reason: reply.action,
+                  ...(reply.learning ? { learning: reply.learning } : {}),
                 },
               ]
             : [],
