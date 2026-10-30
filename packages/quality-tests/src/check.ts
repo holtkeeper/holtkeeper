@@ -1,4 +1,4 @@
-import type { QualityCheck, QualityContext, QualityResult } from '@holtkeeper/quality'
+import type { QualityCheck, QualityResult } from '@holtkeeper/quality'
 
 import { collectChurn, collectorFor, coverageFileCollector, mergeReports } from './collect.ts'
 import { detectTestSetup } from './detect.ts'
@@ -6,6 +6,7 @@ import { writeExampleTests } from './examples.ts'
 import { rankTestTargets } from './rank.ts'
 import type {
   CoverageCollector,
+  CoverageContext,
   CoverageReport,
   TestFramework,
   TestLanguage,
@@ -34,22 +35,25 @@ function primaryFrameworks(setup: TestSetup): Partial<Record<TestLanguage, TestF
   return primary
 }
 
-async function collect(
+/**
+ * Runs `collectors` one after another and merges what they produced; `tools` names the ones that
+ * did. A failing collector is skipped; throws only when none produced a report, with every
+ * collector's error.
+ */
+export async function collectCoverage(
   collectors: readonly CoverageCollector[],
-  context: QualityContext,
-): Promise<CoverageReport> {
+  context: CoverageContext,
+): Promise<CoverageReport & { tools: string[] }> {
   const reports: CoverageReport[] = []
+  const tools: string[] = []
   const errors: string[] = []
   for (const collector of collectors) {
     try {
       // Sequential: collectors run whole test suites in the same checkout.
       // oxlint-disable-next-line no-await-in-loop
-      const report = await collector.collect({
-        dir: context.dir,
-        runner: context.runner,
-        ...(context.signal ? { signal: context.signal } : {}),
-      })
+      const report = await collector.collect(context)
       reports.push(report)
+      tools.push(collector.name)
     } catch (error) {
       context.signal?.throwIfAborted()
       errors.push(`${collector.name}: ${error instanceof Error ? error.message : String(error)}`)
@@ -57,7 +61,20 @@ async function collect(
   }
   if (!reports.length)
     throw new Error(errors.join('\n') || 'no coverage collector applies to this project')
-  return mergeReports(reports)
+  return { ...mergeReports(reports), tools }
+}
+
+/**
+ * The collectors for a project: one per language with the language's primary framework, or a
+ * reader of `coverage.file` when given.
+ */
+export async function coverageCollectors(
+  dir: string,
+  coverage: 'run' | { file: string } = 'run',
+): Promise<CoverageCollector[]> {
+  if (typeof coverage === 'object') return [coverageFileCollector(coverage.file)]
+  const frameworks = primaryFrameworks(await detectTestSetup(dir))
+  return Object.values(frameworks).map((framework) => collectorFor(framework, dir))
 }
 
 /**
@@ -81,7 +98,11 @@ export function testGapsCheck(options: TestGapsOptions = {}): QualityCheck {
         (typeof options.coverage === 'object'
           ? [coverageFileCollector(options.coverage.file)]
           : Object.values(frameworks).map((framework) => collectorFor(framework, context.dir)))
-      const coverage = await collect(collectors, context)
+      const coverage = await collectCoverage(collectors, {
+        dir: context.dir,
+        runner: context.runner,
+        ...(context.signal ? { signal: context.signal } : {}),
+      })
       context.signal?.throwIfAborted()
 
       const churnDays = options.churnDays ?? 90

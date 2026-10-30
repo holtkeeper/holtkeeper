@@ -19,7 +19,7 @@ const nights = { allow: [{ days: [...everyDay], from: '01:00', to: '07:00' }] }
 /**
  * Schedules an install starts with, every group, repository jobs spread over the night: CI job
  * history nightly, delivery metrics on Mondays, vulnerability audit and dependency graph on
- * Saturdays, code quality (without running tests), licenses and fleet drift on Sundays.
+ * Saturdays, code quality (without running tests), test ids, licenses and fleet drift on Sundays.
  * Analyzers the server does not have are dropped, schedules left empty are skipped.
  */
 export const defaultSchedules: DefaultSchedule[] = [
@@ -59,9 +59,9 @@ export const defaultSchedules: DefaultSchedule[] = [
   {
     id: 'quality-weekly',
     data: {
-      name: 'Quality, licenses and fleet, weekly',
+      name: 'Quality, test ids, licenses and fleet, weekly',
       enabled: true,
-      analyzers: ['quality', 'licenses', 'fleet'],
+      analyzers: ['quality', 'testids', 'licenses', 'fleet'],
       options: { quality: { coverage: 'skip' } },
       cron: '0 1 * * 0',
       windows: nights,

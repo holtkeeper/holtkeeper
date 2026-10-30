@@ -3,6 +3,7 @@ import { assetsAnalyzer } from '@holtkeeper/assets'
 import { analyzeBundle, bundleAnalysis } from '@holtkeeper/bundles'
 import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/changelog'
 import { ciJobsAnalyzer } from '@holtkeeper/ci-jobs'
+import { coverageAnalyzer } from '@holtkeeper/coverage'
 import { deliveryAnalyzer } from '@holtkeeper/delivery'
 import { analyzeDependencies, depgraphAnalysis } from '@holtkeeper/depgraph'
 import { goSource } from '@holtkeeper/depgraph-go'
@@ -21,6 +22,7 @@ import { secretsCheck } from '@holtkeeper/quality-secrets'
 import { testGapsCheck } from '@holtkeeper/quality-tests'
 import { releaseRiskAnalyzer } from '@holtkeeper/release-risk'
 import { createReviewAnalyzer } from '@holtkeeper/review'
+import { testIdsAnalyzer } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
 import { z } from 'zod'
 
@@ -158,6 +160,8 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   bundleAnalyzer,
   depgraphAnalyzer,
   qualityAnalyzer,
+  coverageAnalyzer,
+  testIdsAnalyzer,
   licensesAnalyzer,
   releaseRiskAnalyzer,
   fleetAnalyzer,

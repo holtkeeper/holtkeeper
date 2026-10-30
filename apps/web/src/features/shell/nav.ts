@@ -5,6 +5,7 @@ import {
   Boxes,
   CalendarClock,
   FileSearch,
+  FlaskConical,
   FolderGit2,
   Gauge,
   HardDrive,
@@ -12,6 +13,7 @@ import {
   LayoutDashboard,
   ListChecks,
   type LucideIcon,
+  MousePointerClick,
   Network,
   Scale,
   ScrollText,
@@ -33,6 +35,8 @@ export interface NavItem {
     | '/bundles'
     | '/dependencies'
     | '/quality'
+    | '/coverage'
+    | '/testids'
     | '/ci'
     | '/licenses'
     | '/jobs'
@@ -61,6 +65,8 @@ const navItems: readonly NavItem[] = [
   { to: '/bundles', label: 'Bundles', icon: Boxes, requires: 'analyses:read' },
   { to: '/dependencies', label: 'Dependencies', icon: Network, requires: 'analyses:read' },
   { to: '/quality', label: 'Code quality', icon: Gauge, requires: 'analyses:read' },
+  { to: '/coverage', label: 'Test coverage', icon: FlaskConical, requires: 'analyses:read' },
+  { to: '/testids', label: 'Test ids', icon: MousePointerClick, requires: 'analyses:read' },
   { to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
   { to: '/licenses', label: 'Licenses', icon: Scale, requires: 'analyses:read' },
   { to: '/jobs', label: 'Jobs', icon: ListChecks, requires: 'analyses:read' },

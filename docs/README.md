@@ -62,6 +62,8 @@
 | `@holtkeeper/quality-deadcode`    | Dead code: unused files, exports, dependencies (knip)                  | [packages/quality-deadcode/docs](../packages/quality-deadcode/docs/README.md)       |
 | `@holtkeeper/quality-secrets`     | Leaked secrets (gitleaks)                                              | [packages/quality-secrets/docs](../packages/quality-secrets/docs/README.md)         |
 | `@holtkeeper/review`              | AI review of merge requests, thread replies                            | [packages/review/docs](../packages/review/docs/README.md)                           |
+| `@holtkeeper/coverage`            | Test coverage per source file, folder treemap and trend                | [packages/coverage/docs](../packages/coverage/docs/README.md)                       |
+| `@holtkeeper/testids`             | Test id attributes on interactive elements of frontend templates       | [packages/testids/docs](../packages/testids/docs/README.md)                         |
 | `@holtkeeper/licenses`            | Dependency licenses against an allowlist                               | [packages/licenses/docs](../packages/licenses/docs/README.md)                       |
 | `@holtkeeper/fleet`               | Library versions and config drift across repositories                  | [packages/fleet/docs](../packages/fleet/docs/README.md)                             |
 | `@holtkeeper/release-risk`        | Release risk score and summary                                         | [packages/release-risk/docs](../packages/release-risk/docs/README.md)               |

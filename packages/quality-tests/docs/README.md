@@ -20,6 +20,8 @@ await analyzeQuality({ dir, checks: [testGapsCheck({ top: 10, examples: 3 })], a
 | `verify`     | false   | let the agent run the single new test (grants `run`)                         |
 | `churnDays`  | 90      | churn window                                                                 |
 
+`coverageCollectors(dir, coverage?)` returns the collectors `testGapsCheck` would use (one per language with its primary framework, or a reader of `{ file }`); `collectCoverage(collectors, { dir, runner, signal? })` runs them one after another, skips failing ones and merges the reports, with `tools` naming the collectors that produced one. The `coverage` analyzer (`@holtkeeper/coverage`) builds on both.
+
 `detect` is true when a test framework is found or a coverage file is given. `run` returns `tests` (`TestSuggestion[]`), `coverage` (line and function summary) and `changes`. It throws when no collector produced a report.
 
 ## Steps

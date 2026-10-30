@@ -53,6 +53,22 @@ export const analysisPages = [
     trend: [/issues/i, /coverage/i],
   },
   {
+    to: '/coverage',
+    kind: 'coverage',
+    title: 'Test coverage',
+    icon: 'quality',
+    description: 'Line, function and branch coverage per folder and file',
+    trend: [/line coverage/i, /without tests/i],
+  },
+  {
+    to: '/testids',
+    kind: 'testids',
+    title: 'Test ids',
+    icon: 'review',
+    description: 'Interactive elements of frontend templates with and without test ids',
+    trend: [/with test id/i, /missing/i],
+  },
+  {
     to: '/ci',
     kind: 'ci-jobs',
     title: 'CI jobs',

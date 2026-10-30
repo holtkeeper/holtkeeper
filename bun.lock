@@ -254,6 +254,7 @@
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/ci-jobs": "workspace:*",
+        "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/delivery": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-go": "workspace:*",
@@ -273,6 +274,7 @@
         "@holtkeeper/release-risk": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
+        "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
         "@holtkeeper/vuln-go": "workspace:*",
@@ -421,6 +423,17 @@
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/coverage": {
+      "name": "@holtkeeper/coverage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/quality-tests": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -794,6 +807,16 @@
         "@holtkeeper/store": "workspace:*",
       },
     },
+    "packages/testids": {
+      "name": "@holtkeeper/testids",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/quality-tests": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/toolchain": {
       "name": "@holtkeeper/toolchain",
       "version": "0.0.0",
@@ -1139,6 +1162,8 @@
 
     "@holtkeeper/core": ["@holtkeeper/core@workspace:packages/core"],
 
+    "@holtkeeper/coverage": ["@holtkeeper/coverage@workspace:packages/coverage"],
+
     "@holtkeeper/credentials": ["@holtkeeper/credentials@workspace:packages/credentials"],
 
     "@holtkeeper/delivery": ["@holtkeeper/delivery@workspace:packages/delivery"],
@@ -1218,6 +1243,8 @@
     "@holtkeeper/store-postgres": ["@holtkeeper/store-postgres@workspace:packages/store-postgres"],
 
     "@holtkeeper/store-sqlite": ["@holtkeeper/store-sqlite@workspace:packages/store-sqlite"],
+
+    "@holtkeeper/testids": ["@holtkeeper/testids@workspace:packages/testids"],
 
     "@holtkeeper/toolchain": ["@holtkeeper/toolchain@workspace:packages/toolchain"],
 

@@ -12,6 +12,8 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `bundle`       | repo  | what a frontend build ships, per entrypoint, asset and package            |
 | `depgraph`     | repo  | dependency graph (JavaScript, Go): cycles, duplicate versions, statistics |
 | `quality`      | repo  | conventions, lint, duplication, dead code, secrets and test gaps          |
+| `coverage`     | repo  | line, function and branch test coverage per source file                   |
+| `testids`      | repo  | interactive elements of frontend templates with and without test ids      |
 | `licenses`     | repo  | third-party licenses judged against allow and deny lists                  |
 | `release-risk` | repo  | how risky a release is, from the analyses already stored                  |
 | `fleet`        | group | shared library versions and config drift across a group                   |

@@ -1,5 +1,6 @@
 node_modules/
 coverage/
+!/packages/coverage/
 .DS_Store
 *.log
 AGENTS.local.md
