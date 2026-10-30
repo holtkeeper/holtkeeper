@@ -14,6 +14,12 @@ import {
   WandSparkles,
 } from 'lucide-react'
 
+import auditIcon from '@holtkeeper/brand/audit.svg?url'
+import qualityIcon from '@holtkeeper/brand/quality.svg?url'
+import releaseIcon from '@holtkeeper/brand/release.svg?url'
+import reviewIcon from '@holtkeeper/brand/review.svg?url'
+import updatesIcon from '@holtkeeper/brand/updates.svg?url'
+
 const games: { name: string; state: 'ok' | 'fixed' | 'draft' }[] = [
   { name: 'slots-x', state: 'ok' },
   { name: 'roulette', state: 'ok' },
@@ -120,6 +126,7 @@ const budget = 200
     <div class="bento">
       <article class="l-card b-card span-4 l-reveal">
         <header class="b-head">
+          <img class="b-icon" src={reviewIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><Sparkles size={14} /> AI review</span>
           <h3>Comments with one-click suggestions</h3>
           <p>
@@ -162,6 +169,7 @@ const budget = 200
 
       <article class="l-card b-card span-2 l-reveal">
         <header class="b-head">
+          <img class="b-icon" src={releaseIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><Gauge size={14} /> Release risk</span>
           <h3>A score QA can act on</h3>
           <p>From stored changelog, bundle, quality and audit records — no checkout needed.</p>
@@ -204,6 +212,7 @@ const budget = 200
 
       <article class="l-card b-card span-3 l-reveal">
         <header class="b-head">
+          <img class="b-icon" src={updatesIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><Waves size={14} /> Dependency waves</span>
           <h3>Update a library across the fleet</h3>
           <p>
@@ -244,6 +253,7 @@ const budget = 200
 
       <article class="l-card b-card span-3 l-reveal">
         <header class="b-head">
+          <img class="b-icon" src={auditIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><ShieldAlert size={14} /> Audit</span>
           <h3>Every ecosystem, one contract</h3>
           <p>A scanner finds, a chain of fixers repairs, a rescan decides. The allowlist has reasons and expiry dates.</p>
@@ -279,6 +289,7 @@ const budget = 200
 
       <article class="l-card b-card span-4 l-reveal">
         <header class="b-head">
+          <img class="b-icon" src={qualityIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><LayoutDashboard size={14} /> Reports</span>
           <h3>Every analysis, one report format</h3>
           <p>Bundle size per package, growth between releases, changelogs with identical messages collapsed.</p>
@@ -493,6 +504,18 @@ const budget = 200
     position: relative;
     display: grid;
     gap: 0.55rem;
+  }
+  .b-icon {
+    position: absolute;
+    top: -0.25rem;
+    right: 0;
+    width: 3rem;
+    height: 3rem;
+    filter: drop-shadow(0 6px 14px rgb(255 122 26 / 0.18));
+    pointer-events: none;
+  }
+  .b-head:has(.b-icon) {
+    padding-right: 3.5rem;
   }
   .b-tag {
     display: inline-flex;

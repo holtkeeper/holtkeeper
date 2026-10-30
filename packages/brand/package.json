@@ -1,0 +1,9 @@
+{
+  "name": "@holtkeeper/brand",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./*.svg": "./icons/*.svg"
+  }
+}

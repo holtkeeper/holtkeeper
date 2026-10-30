@@ -61,7 +61,7 @@ export default defineConfig({
       title: 'Holtkeeper',
       description:
         'Self-hosted automation engine for fleets of GitLab and GitHub repositories: AI code review, dependency waves, audits and releases.',
-      logo: { src: './src/assets/logo.svg' },
+      logo: { src: '@holtkeeper/brand/holtkeeper.svg' },
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: repoUrl }],
       editLink: { baseUrl: `${repoUrl}/edit/main/docs/` },

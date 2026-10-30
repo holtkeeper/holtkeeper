@@ -17,12 +17,13 @@ type MissingBlock = Exclude<Block['type'], (typeof blockTypes)[number]>
 const exhaustive: MissingBlock extends never ? true : never = true
 void exhaustive
 
-/** Sidebar pages for analysis kinds: route, kind, title and the metrics their trend prefers. */
+/** Sidebar pages for analysis kinds: route, kind, title, icon and the metrics their trend prefers. */
 export const analysisPages = [
   {
     to: '/releases',
     kind: 'changelog',
     title: 'Releases',
+    icon: 'release',
     description: 'Commit history and contributors per release',
     trend: [/commits/i, /contributors/i],
   },
@@ -30,6 +31,7 @@ export const analysisPages = [
     to: '/bundles',
     kind: 'bundle',
     title: 'Bundles',
+    icon: 'quality',
     description: 'Build size per entrypoint and release',
     trend: [/gzip/i, /size/i],
   },
@@ -37,6 +39,7 @@ export const analysisPages = [
     to: '/dependencies',
     kind: 'depgraph',
     title: 'Dependencies',
+    icon: 'updates',
     description: 'Workspace graph, cycles and duplicates',
     trend: [/cycle/i, /duplicate/i],
   },
@@ -44,6 +47,7 @@ export const analysisPages = [
     to: '/quality',
     kind: 'quality',
     title: 'Code quality',
+    icon: 'quality',
     description: 'Lint issues, coverage and suggested fixes',
     trend: [/issues/i, /coverage/i],
   },

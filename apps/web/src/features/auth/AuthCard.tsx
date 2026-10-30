@@ -1,7 +1,7 @@
-import { ShieldCheck } from 'lucide-react'
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
+import { BrandIcon } from '../../ui/index.ts'
 import { ThemeToggle } from '../shell/ThemeToggle.tsx'
 
 /** Centered card used by the sign-in and link pages. */
@@ -26,9 +26,7 @@ export function AuthCard({
         className="w-full max-w-sm rounded-3xl border border-border bg-surface p-8 shadow-overlay"
       >
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
-          <span className="grid size-12 place-items-center rounded-2xl bg-accent text-accent-foreground shadow-surface">
-            <ShieldCheck className="size-6" />
-          </span>
+          <BrandIcon name="holtkeeper" className="size-16" />
           <div>
             <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
             {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}

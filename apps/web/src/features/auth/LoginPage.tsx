@@ -23,7 +23,7 @@ export function LoginPage({ auth }: { auth: AuthInfo }) {
   }
 
   return (
-    <AuthCard title="Sign in to Holtkeeper" subtitle="Dependency security across your repositories">
+    <AuthCard title="Sign in to Holtkeeper" subtitle="Keeps every repository in shape">
       <div className="flex flex-col gap-4">
         {error ? (
           <Notice tone="danger" title="Sign-in failed">

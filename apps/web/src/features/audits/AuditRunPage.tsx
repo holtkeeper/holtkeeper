@@ -58,6 +58,7 @@ export function AuditRunPage() {
 
   return (
     <Page
+      icon="audit"
       eyebrow={
         <Link
           to="/audits"

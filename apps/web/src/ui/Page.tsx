@@ -1,18 +1,22 @@
 import { motion } from 'motion/react'
 import type { ReactNode } from 'react'
 
-/** A page with a title row and a fade-in on mount. */
+import { BrandIcon, type BrandIconName } from './BrandIcon.tsx'
+
+/** A page with a title row, an optional capability icon and a fade-in on mount. */
 export function Page({
   title,
   description,
   actions,
   eyebrow,
+  icon,
   children,
 }: {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
   eyebrow?: ReactNode
+  icon?: BrandIconName
   children: ReactNode
 }) {
   return (
@@ -23,10 +27,17 @@ export function Page({
       className="mx-auto flex w-full max-w-7xl flex-col gap-6"
     >
       <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="min-w-0">
-          {eyebrow ? <div className="mb-1 text-sm text-muted">{eyebrow}</div> : null}
-          <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
-          {description ? <p className="mt-1 text-sm text-muted">{description}</p> : null}
+        <div className="flex min-w-0 items-center gap-4">
+          {icon ? (
+            <span className="grid size-13 shrink-0 place-items-center rounded-2xl bg-surface shadow-surface">
+              <BrandIcon name={icon} className="size-10" />
+            </span>
+          ) : null}
+          <div className="min-w-0">
+            {eyebrow ? <div className="mb-1 text-sm text-muted">{eyebrow}</div> : null}
+            <h1 className="truncate text-[1.65rem] font-semibold leading-tight">{title}</h1>
+            {description ? <p className="mt-1 text-sm text-muted">{description}</p> : null}
+          </div>
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </header>

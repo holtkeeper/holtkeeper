@@ -1,11 +1,11 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
-import { LogOut, Menu, ShieldCheck, X } from 'lucide-react'
+import { LogOut, Menu, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useEffect, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useAuthMutations } from '../../api/queries.ts'
-import { Button, Tooltip, notify } from '../../ui/index.ts'
+import { BrandIcon, Button, Tooltip, notify } from '../../ui/index.ts'
 import { visibleNav } from './nav.ts'
 import { useSession } from './session.ts'
 import { ThemeToggle } from './ThemeToggle.tsx'
@@ -16,9 +16,7 @@ function Brand() {
       to="/"
       className="flex items-center gap-2.5 rounded-lg px-2 py-1 focus-visible:outline-2 focus-visible:outline-focus"
     >
-      <span className="grid size-8 place-items-center rounded-xl bg-accent text-accent-foreground shadow-surface">
-        <ShieldCheck className="size-4.5" />
-      </span>
+      <BrandIcon name="holtkeeper" className="size-8" />
       <span className="text-[15px] font-semibold tracking-tight">Holtkeeper</span>
     </Link>
   )
@@ -40,14 +38,14 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
             aria-current={active ? 'page' : undefined}
             className={`relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
               active
-                ? 'font-medium text-foreground'
+                ? 'font-medium text-accent-soft-foreground'
                 : 'text-muted hover:bg-default-soft hover:text-foreground'
             }`}
           >
             {active ? (
               <motion.span
                 layoutId="nav-active"
-                className="absolute inset-0 rounded-xl bg-surface shadow-surface"
+                className="absolute inset-0 rounded-xl bg-accent-soft"
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               />
             ) : null}
@@ -127,9 +125,7 @@ export function AppShell() {
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-6 border-r border-separator px-3 py-4 lg:flex">
         <Brand />
         <Nav />
-        <div className="mt-auto px-3 text-xs text-muted">
-          Dependency security for every repository.
-        </div>
+        <div className="mt-auto px-3 text-xs text-muted">Keeps every repository in shape.</div>
       </aside>
 
       <AnimatePresence>

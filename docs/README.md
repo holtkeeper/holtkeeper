@@ -19,6 +19,7 @@
 | `@holtkeeper/auth`                | Auth provider contract, sessions                                       | [packages/auth/docs](../packages/auth/docs/README.md)                               |
 | `@holtkeeper/auth-none`           | No sign-in, single root user                                           | [packages/auth-none/docs](../packages/auth-none/docs/README.md)                     |
 | `@holtkeeper/auth-header`         | Users and grants from proxy headers                                    | [packages/auth-header/docs](../packages/auth-header/docs/README.md)                 |
+| `@holtkeeper/brand`               | Mascot and capability icons (SVG) for the web UI and docs site         | [packages/brand/docs](../packages/brand/docs/README.md)                             |
 | `@holtkeeper/auth-password`       | Root behind a password                                                 | [packages/auth-password/docs](../packages/auth-password/docs/README.md)             |
 | `@holtkeeper/auth-users`          | Users with passkeys and OIDC, invites, recovery                        | [packages/auth-users/docs](../packages/auth-users/docs/README.md)                   |
 | `@holtkeeper/identities`          | External accounts linked to principals, challenges, external actors    | [packages/identities/docs](../packages/identities/docs/README.md)                   |

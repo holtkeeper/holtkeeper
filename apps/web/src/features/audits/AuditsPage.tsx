@@ -39,6 +39,7 @@ export function AuditsPage() {
   return (
     <Page
       title="Audits"
+      icon="audit"
       description={repo ? `Runs of ${repoKey(repo)}` : 'Runs across every repository you can see'}
       actions={
         <Select

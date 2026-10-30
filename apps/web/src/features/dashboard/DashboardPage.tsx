@@ -78,6 +78,7 @@ export function DashboardPage() {
   return (
     <Page
       title="Dashboard"
+      icon="holtkeeper"
       description={
         repos.data
           ? `${plural(latest.length, 'repository', 'repositories')} audited of ${repoList.length} known`

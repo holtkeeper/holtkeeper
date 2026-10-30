@@ -33,6 +33,7 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
   return (
     <Page
       title={page.title}
+      icon={page.icon}
       description={repo ? `${page.description} · ${repoKey(repo)}` : page.description}
       actions={
         <Select

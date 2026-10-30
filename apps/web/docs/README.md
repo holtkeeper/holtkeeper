@@ -89,6 +89,7 @@ Blocks that act on their report (only `changes` so far) read `ReportContext` (`f
 ## Design notes
 
 - **Themes.** HeroUI themes switch on `.dark` / `data-theme` on `<html>`. The preference (system, light, dark) is stored in `localStorage` and applied by an inline script before first paint; `ui/theme.ts` keeps it in sync with `prefers-color-scheme`.
+- **Look.** Shared with the docs site: warm near-black / paper backgrounds, amber accent, teal for success, hairline borders and Geist / Geist Mono. HeroUI tokens are overridden in `app.css` for both themes; keep them in step with `docs/src/styles/landing.css`. The mascot and capability icons come from [@holtkeeper/brand](../../../packages/brand/docs/README.md) through `ui/BrandIcon.tsx`; `Page` takes an `icon` for capability pages.
 - **Color.** Severity colors (`--sev-*`) and the categorical series (`--series-*`) have separate light and dark steps in `app.css`. Severity always comes with a text label, never color alone; languages keep a stable color slot everywhere.
 - **Audit reports.** Findings go through TanStack Table for filtering (severity, language, package manager, free-text) and sorting, then are grouped Language → package manager → source file → package with `sourceInfo`, so every ecosystem renders the same way.
 - **Motion.** Pages fade in, lists animate layout changes, headline numbers count up; Motion honours `prefers-reduced-motion`.
