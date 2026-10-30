@@ -160,3 +160,6 @@ networkPolicy:
     cidrs: ['0.0.0.0/0']
   # Where Postgres and the object store live, e.g. their pod selectors or CIDRs.
   extraEgress: []
+
+# More manifests rendered with the release, e.g. an ExternalSecret for `existingSecret` or a database.
+extraObjects: []

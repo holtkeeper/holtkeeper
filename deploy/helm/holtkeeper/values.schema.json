@@ -467,6 +467,12 @@
           }
         }
       }
+    },
+    "extraObjects": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
     }
   },
   "required": ["image", "port", "config", "web", "worker", "scheduler"]
