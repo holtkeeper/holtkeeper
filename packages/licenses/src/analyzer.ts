@@ -35,21 +35,6 @@ export const licensesOptionsSchema = z.object({
 
 export type LicensesOptions = z.output<typeof licensesOptionsSchema>
 
-/** Permissive and public-domain licenses beyond `defaultAllow` that no common policy objects to. */
-const permissive = [
-  ...defaultAllow,
-  'MIT-0',
-  'BSD-1-Clause',
-  'Zlib',
-  'BSL-1.0',
-  'PSF-2.0',
-  'X11',
-  'Unicode-3.0',
-  'Unicode-DFS-2016',
-  'CC-BY-3.0',
-  'CC-BY-4.0',
-]
-
 /** Weak (file- or library-level) copyleft: fine to depend on unmodified in most products. */
 const weakCopyleft = ['LGPL-*', 'MPL-*', 'EPL-*', 'CDDL-*']
 
@@ -71,7 +56,7 @@ export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
     description:
       'Shipped to customers: permissive licenses pass, strong copyleft and source-available licenses are denied, weak copyleft is flagged for review.',
     options: {
-      allow: permissive,
+      allow: [...defaultAllow],
       deny: ['GPL-*', 'AGPL-*', ...sourceAvailable],
       unknown: 'warn',
     },
@@ -82,7 +67,7 @@ export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
     description:
       'Only permissive licenses pass; any copyleft is denied and packages without a recognizable license count as violations.',
     options: {
-      allow: permissive,
+      allow: [...defaultAllow],
       deny: [
         'GPL-*',
         'AGPL-*',
@@ -103,7 +88,7 @@ export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
     description:
       'Published under a free license: copyleft is fine, source-available and non-commercial licenses are denied, and the repository must carry its own license file.',
     options: {
-      allow: [...permissive, ...weakCopyleft, 'GPL-*', 'AGPL-*', 'EUPL-*', 'CC-BY-SA-*'],
+      allow: [...defaultAllow, ...weakCopyleft, 'GPL-*', 'AGPL-*', 'EUPL-*', 'CC-BY-SA-*'],
       deny: sourceAvailable,
       unknown: 'warn',
       requireProjectLicense: true,
@@ -115,7 +100,7 @@ export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
     description:
       'Never distributed outside the company: GPL and weak copyleft pass, AGPL (network use) and source-available licenses are denied.',
     options: {
-      allow: [...permissive, ...weakCopyleft, 'GPL-*'],
+      allow: [...defaultAllow, ...weakCopyleft, 'GPL-*'],
       deny: ['AGPL-*', ...sourceAvailable],
       unknown: 'warn',
     },

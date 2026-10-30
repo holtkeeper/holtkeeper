@@ -5,7 +5,7 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
 ## Public API
 
 - `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout` and `history` (for [internal packages](#internal-packages)). Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
-  - `allow: string[]` — SPDX ids, `*` patterns or whole expressions. Default `defaultAllow`: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, BlueOak-1.0.0.
+  - `allow: string[]` — SPDX ids, `*` patterns or whole expressions. Default `defaultAllow`: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, BlueOak-1.0.0, MIT-0, BSD-1-Clause, Zlib, BSL-1.0, PSF-2.0, X11, Unicode-3.0, Unicode-DFS-2016, CC-BY-3.0, CC-BY-4.0. LGPL and other weak copyleft stay off it: neither allowed nor denied, they show up as not allowed for review.
   - `deny: string[]` — same forms. Default `defaultDeny`: `GPL-*`, `AGPL-*`, `SSPL-*`.
   - `ignore: string[]` — package names (`*` allowed, e.g. `@company/*`) whose licenses are not judged.
   - `unknown: 'warn' | 'violation'` (`--unknown`) — default `warn` reports unknown licenses separately; `violation` judges them `unlisted` (not allowed), with the declared text or `UNKNOWN` as culprit.
@@ -81,7 +81,7 @@ Every license gets one of four verdicts, ordered from best to worst: `allowed` >
 
 ## Presets
 
-`licensePresets` set `allow`, `deny` and `unknown` together (keeping `ignore`); "permissive" below is `defaultAllow` plus MIT-0, BSD-1-Clause, Zlib, BSL-1.0, PSF-2.0, X11, Unicode-3.0, Unicode-DFS-2016, CC-BY-3.0 and CC-BY-4.0, "source-available" is SSPL, BUSL, Elastic, Commons-Clause and CC-BY-NC.
+`licensePresets` set `allow`, `deny` and `unknown` together (keeping `ignore`); "permissive" below is `defaultAllow`, "source-available" is SSPL, BUSL, Elastic, Commons-Clause and CC-BY-NC.
 
 | Id             | For                            | Allows                                     | Denies                                                                  | Unknown                                              |
 | -------------- | ------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------- |

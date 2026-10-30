@@ -90,6 +90,16 @@ export const defaultAllow: readonly string[] = [
   'CC0-1.0',
   'Python-2.0',
   'BlueOak-1.0.0',
+  'MIT-0',
+  'BSD-1-Clause',
+  'Zlib',
+  'BSL-1.0',
+  'PSF-2.0',
+  'X11',
+  'Unicode-3.0',
+  'Unicode-DFS-2016',
+  'CC-BY-3.0',
+  'CC-BY-4.0',
 ]
 
 /** Licenses rejected when no deny list is configured: strong copyleft and source-available ones. */
