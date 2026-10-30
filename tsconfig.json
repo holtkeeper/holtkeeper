@@ -16,6 +16,6 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true
   },
-  "include": ["apps", "packages", "plugins", "examples"],
+  "include": ["apps", "packages", "plugins", "examples", "docker"],
   "exclude": ["apps/web"]
 }

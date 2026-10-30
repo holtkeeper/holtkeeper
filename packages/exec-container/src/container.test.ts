@@ -334,6 +334,21 @@ describe('localMiseRunner', () => {
     expect(fake.calls.map((call) => call.command)).toEqual([['git', 'status']])
   })
 
+  test('applies its environment without tools too', async () => {
+    const fake = createFakeRunner()
+    const runner = localMiseRunner({
+      toolchain: { tools: [] },
+      hostRunner: fake.runner,
+      env: { HTTPS_PROXY: 'http://proxy:8080' },
+      ignoreConfigIn: ['/x'],
+    })
+    await runner.run(['npm', 'ci'], { cwd: '/x' })
+    expect(fake.calls[0]?.options.env).toEqual({
+      MISE_IGNORED_CONFIG_PATHS: '/x',
+      HTTPS_PROXY: 'http://proxy:8080',
+    })
+  })
+
   test('a failed install throws', async () => {
     const fake = createFakeRunner(() => ({ exitCode: 1, stderr: 'no such version' }))
     const runner = localMiseRunner({ toolchain, hostRunner: fake.runner })

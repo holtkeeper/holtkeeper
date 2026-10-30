@@ -4,6 +4,7 @@ import {
   type ManagedRunner,
   type Mount,
   containerRunner,
+  egressEnvironment,
   localMiseRunner,
   networksFor,
 } from '@holtkeeper/exec-container'
@@ -46,26 +47,36 @@ export type CreateRunner = (spec: RunnerSpec) => ManagedRunner
 /** Image used in `container` mode when neither config nor setting names one. */
 export const defaultWorkerImage = 'holtkeeper-worker:latest'
 
+const egressDir = '/etc/holtkeeper/egress'
+
 /** The default `CreateRunner`: `localMiseRunner` for `mise`, `containerRunner` for `container`. */
 export const createRunner: CreateRunner = (spec) => {
   const { execution, toolchain, hostRunner, log } = spec
+  const egress = execution.egress
+    ? egressEnvironment(
+        execution.egress,
+        spec.mode === 'container' ? { containerDir: egressDir } : {},
+      )
+    : undefined
+  if (execution.egress) log(`egress proxy: ${new URL(execution.egress.url).host}`)
+  const env = { ...egress?.env, ...toolchain.env }
   if (spec.mode === 'mise')
     return localMiseRunner({
       toolchain,
       hostRunner,
-      env: toolchain.env,
+      env,
       ignoreConfigIn: [spec.dir, ...spec.extraMounts.map((mount) => mount.hostDir)],
     })
   return containerRunner({
     ...(execution.engine && { engine: execution.engine }),
     image: toolchain.image ?? execution.image ?? defaultWorkerImage,
     workspace: { hostDir: spec.dir },
-    extraMounts: spec.extraMounts,
+    extraMounts: [...spec.extraMounts, ...(egress?.mounts ?? [])],
     toolchain,
     ...(execution.limits && { limits: execution.limits }),
     ...networksFor(toolchain.network ?? execution.network ?? 'install'),
     ...(execution.user && { user: execution.user }),
-    env: toolchain.env,
+    env,
     hostRunner,
     log,
   })

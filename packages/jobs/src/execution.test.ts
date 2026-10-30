@@ -294,6 +294,38 @@ describe('createRunner', () => {
     expect(recorded.calls[0]?.command).toEqual(['mise', 'exec', 'go@1.23', '--', 'go', 'version'])
     expect(recorded.calls[0]?.options.env).toMatchObject({ MISE_IGNORED_CONFIG_PATHS: '/co/0' })
   })
+
+  test('routes commands through the egress proxy below the toolchain setting', async () => {
+    const recorded = createFakeRunner((command) =>
+      command.includes('--detach') ? { stdout: 'id' } : undefined,
+    )
+    const lines: string[] = []
+    const egress = (mode: 'mise' | 'container') =>
+      createRunner(
+        spec({
+          mode,
+          execution: { mode, egress: { url: 'http://user:secret@proxy:8080' } },
+          toolchain: { tools: [], notes: [], env: { NO_PROXY: 'own' } },
+          hostRunner: recorded.runner,
+          log: (line) => lines.push(line),
+        }),
+      )
+    await egress('mise').run(['npm', 'ci'], { cwd: '/co/0' })
+    expect(recorded.calls[0]?.options.env).toMatchObject({
+      HTTPS_PROXY: 'http://user:secret@proxy:8080',
+      NO_PROXY: 'own',
+    })
+    const container = egress('container')
+    await container.start()
+    await container.run(['npm', 'ci'], { cwd: '/co/0' })
+    const exec = recorded.calls.at(-1)
+    expect(exec?.command).toContain('HTTPS_PROXY')
+    expect(exec?.options.env?.HTTPS_PROXY).toBe('http://user:secret@proxy:8080')
+    expect(lines.filter((line) => line.startsWith('egress'))).toEqual([
+      'egress proxy: proxy:8080',
+      'egress proxy: proxy:8080',
+    ])
+  })
 })
 
 test('runnerFactory is off in host mode', () => {

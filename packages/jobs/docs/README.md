@@ -129,12 +129,15 @@ execution: {
   limits: { cpus: 2, memory: '4g', pids: 1024 },
   network: 'install', // 'none' | 'install' (default) | 'full'
   user: '10001:10001', // default: the image's holtkeeper user
+  egress: { url: 'http://egress-proxy:8080', caFile: '/etc/egress/ca.crt' }, // optional
 }
 ```
 
 - **`host`** (default, also when `execution` is missing): every runner is the host runner, exactly as before.
 - **`mise`**: commands run on the host as `mise exec <tools> -- <command>` (`localMiseRunner`); tools are installed when the runner starts. For development.
 - **`container`**: one sandboxed container per checkout (`containerRunner` from `@holtkeeper/exec-container`): read-only root, no capabilities, non-root, resource limits, network per policy, tools installed by mise into a shared cache volume. See [docker/worker](../../../docker/worker/README.md) for the image and the security model.
+
+`egress` routes the HTTP(S) traffic of every command in `mise` and `container` mode through a forward proxy (`egressEnvironment` of `@holtkeeper/exec-container`; the CA files are mounted at `/etc/holtkeeper/egress` in containers). The scoped `toolchain` setting's `env` wins over the proxy variables. The job log names the proxy's `host:port`, never credentials in its URL.
 
 For each checkout the factory runs `detectToolchain` (`@holtkeeper/toolchain`) on it, applies the scoped `toolchain` setting for that repository (`toolchainFor(repo)`, wired by the server; it can override tool versions, `image`, `network` and add `env`) with `mergeToolchain`, logs the tools and detection notes to the job log, and builds the runner with `createRunner`:
 

@@ -59,6 +59,14 @@ spec:
         - ipBlock:
             cidr: {{ . }}
         {{- end }}
+    {{- if .Values.egressProxy.enabled }}
+    - ports:
+        - { port: {{ .Values.egressProxy.port }}, protocol: TCP }
+      to:
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "egress-proxy") | nindent 14 }}
+    {{- end }}
     {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

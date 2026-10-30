@@ -100,6 +100,7 @@ The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 - `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB; or, with `worker.pools`, one Deployment per pool (`<release>-worker-<name>`, label `holtkeeper.dev/worker-pool`), each `worker` with the pool's own fields on top, e.g. 2 jobs per small node and 4 on a big one; `spread: true` keeps a pool's pods on different nodes;
 - optional `scheduler` Deployment (`scheduler.enabled`; the web pods then run `web` only);
 - optional ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies;
+- optional egress proxy (`egressProxy.enabled`, see below);
 - a ServiceAccount without any Role: nothing talks to the Kubernetes API and no pod-creation rights are needed. Tokens are not mounted.
 
 Every pod runs non-root (10001) with `readOnlyRootFilesystem`, no capabilities, `RuntimeDefault` seccomp; `/tmp` (also `HOME`, so bun, npm and Go caches of dependency installs; `tmpSizeLimit`, default 8Gi), `/workspace` (checkouts, mirror cache) and `/mise` (tools) are emptyDirs, `/mise` optionally a PVC (`worker.miseCache.type: pvc`, ReadWriteMany to share between workers). Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
@@ -128,6 +129,27 @@ Jobs run analyzers (and repository tooling via mise) inside the worker pod. For 
 - Without KEDA, `worker.maxJobs: 1` restarts the container after each job. The emptyDirs survive container restarts (the job removes its checkout, the tool cache is kept), and kubelet backs off repeated restarts, so this is weaker and slower than ScaledJob.
 
 Combine with `networkPolicy.enabled`: worker and scheduler pods accept only metrics scrapes (`metricsFrom`) and reach only DNS, `workerEgress` ports (443/80/22 — forge, package registries, LLM APIs) and `extraEgress` (Postgres, object store); web pods accept traffic only from `webIngressFrom` (the ingress controller).
+
+### Egress proxy
+
+`egressProxy.enabled` deploys [docker/egress-proxy](../docker/egress-proxy/README.md): a forward proxy that adds credentials to the requests its `rules` match, so jobs install private packages without ever holding a token. Workers get `HOLTKEEPER_EGRESS_PROXY`, `HOLTKEEPER_EGRESS_CA` (the CA certificate only, never its key) and `HOLTKEEPER_EGRESS_NO_PROXY`; the bundled config turns them into `jobs.execution.egress`. Holtkeeper's own traffic (forge API, database, object store) does not go through it.
+
+```yaml
+egressProxy:
+  enabled: true
+  existingSecret: holtkeeper-egress # GITLAB_PACKAGES_TOKEN=<deploy token with read_package_registry>
+  ca:
+    certManager: true # or existingSecret: a kubernetes.io/tls Secret with the CA
+  rules:
+    - host: gitlab.com
+      paths: ['^/api/v4/(projects/[^/]+/|groups/[^/]+/-/)?packages/npm/']
+      headers:
+        Authorization: 'Bearer ${GITLAB_PACKAGES_TOKEN}'
+```
+
+`${NAME}` is resolved by the proxy from `existingSecret`, not by Helm. Only `GET`/`HEAD` get credentials unless a rule lists `methods`, and only over TLS unless it sets `insecure`. TLS to hosts without rules is tunneled untouched. The pod restarts when the rules change; restart it after rotating the token or the CA. With `networkPolicy.enabled` the proxy accepts only workers, and workers may reach it.
+
+To use another proxy, leave `egressProxy` disabled and set `HOLTKEEPER_EGRESS_PROXY` (and `HOLTKEEPER_EGRESS_CA`) on the workers yourself.
 
 ### Webhooks behind an Ingress
 

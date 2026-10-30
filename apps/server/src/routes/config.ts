@@ -150,6 +150,9 @@ function runtimeView(config: HoltkeeperConfig): RuntimeConfigView {
             ...(execution.network !== undefined && { network: execution.network }),
             ...(execution.limits !== undefined && { limits: execution.limits }),
             ...(execution.user !== undefined && { user: execution.user }),
+            ...(execution.egress && {
+              egress: { proxy: new URL(execution.egress.url).host, ca: !!execution.egress.caFile },
+            }),
           },
         }),
         schedules: jobs.schedules.length,

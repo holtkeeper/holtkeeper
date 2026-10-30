@@ -529,6 +529,113 @@
         }
       }
     },
+    "egressProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string"
+            },
+            "pullPolicy": {
+              "type": "string",
+              "enum": ["Always", "IfNotPresent", "Never"]
+            }
+          }
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host", "headers"],
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "methods": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "headers": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "insecure": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "noProxy": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ca": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "certManager": {
+              "type": "boolean"
+            }
+          }
+        },
+        "resources": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        }
+      }
+    },
     "extraObjects": {
       "type": "array",
       "items": {

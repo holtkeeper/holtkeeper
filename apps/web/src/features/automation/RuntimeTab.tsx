@@ -92,6 +92,14 @@ function RuntimeView({ view }: { view: RuntimeConfigView }) {
                   .join(' · ') || '—'}
               </Fact>
             ) : null}
+            {execution?.egress ? (
+              <Fact label="Egress proxy">
+                <span className="flex flex-wrap items-center gap-1">
+                  <span className="font-mono text-xs">{execution.egress.proxy}</span>
+                  {execution.egress.ca ? <Chip>own CA</Chip> : null}
+                </span>
+              </Fact>
+            ) : null}
             {execution?.user ? (
               <Fact label="User">
                 <span className="font-mono text-xs">{execution.user}</span>

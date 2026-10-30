@@ -1,0 +1,171 @@
+{{- if .Values.egressProxy.enabled }}
+{{- $ep := .Values.egressProxy }}
+{{- $component := dict "ctx" $ "component" "egress-proxy" }}
+{{- $name := printf "%s-egress-proxy" (include "holtkeeper.fullname" .) }}
+{{- $rules := dict "rules" $ep.rules | toPrettyJson }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+data:
+  rules.json: {{ $rules | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  replicas: {{ $ep.replicas }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "holtkeeper.selectorLabels" $component | nindent 8 }}
+      annotations:
+        checksum/rules: {{ $rules | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "holtkeeper.podSpecCommon" . | nindent 6 }}
+      containers:
+        - name: proxy
+          image: {{ include "holtkeeper.egressProxyImage" . }}
+          imagePullPolicy: {{ $ep.image.pullPolicy }}
+          env:
+            - name: EGRESS_PORT
+              value: {{ $ep.port | quote }}
+            - name: EGRESS_RULES
+              value: /etc/egress/rules.json
+            - name: EGRESS_CA_DIR
+              value: /etc/egress/ca
+          {{- with $ep.existingSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ . }}
+          {{- end }}
+          ports:
+            - name: proxy
+              containerPort: {{ $ep.port }}
+          readinessProbe:
+            tcpSocket: { port: proxy }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: proxy }
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            {{- toYaml $ep.resources | nindent 12 }}
+          volumeMounts:
+            - name: rules
+              mountPath: /etc/egress/rules.json
+              subPath: rules.json
+              readOnly: true
+            - name: ca
+              mountPath: /etc/egress/ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: rules
+          configMap:
+            name: {{ $name }}
+        - name: ca
+          secret:
+            secretName: {{ include "holtkeeper.egressCaSecret" . }}
+            items:
+              - { key: tls.crt, path: tls.crt }
+              - { key: tls.key, path: tls.key }
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- include "holtkeeper.scheduling" $ep | nindent 6 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  selector:
+    {{- include "holtkeeper.selectorLabels" $component | nindent 4 }}
+  ports:
+    - name: proxy
+      port: {{ $ep.port }}
+      targetPort: proxy
+{{- if and $ep.ca.certManager (not $ep.ca.existingSecret) }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $name }}-selfsigned
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}-ca
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+spec:
+  isCA: true
+  commonName: {{ $name }} CA
+  secretName: {{ include "holtkeeper.egressCaSecret" . }}
+  duration: 87600h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 4096
+    rotationPolicy: Always
+  issuerRef:
+    kind: Issuer
+    name: {{ $name }}-selfsigned
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+# The proxy accepts only workers and reaches only DNS and the worker egress ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "holtkeeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports:
+        - port: proxy
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 14 }}
+  egress:
+    - ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - ports:
+        {{- range .Values.networkPolicy.workerEgress.ports }}
+        - { port: {{ . }}, protocol: TCP }
+        {{- end }}
+      to:
+        {{- range .Values.networkPolicy.workerEgress.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+{{- end }}
+{{- end }}

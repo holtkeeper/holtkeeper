@@ -41,6 +41,23 @@ jobs:
           labels: ${{ steps.worker.outputs.labels }}
           cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-worker:buildcache
           cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-worker:buildcache,mode=max
+      - id: egress
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}-egress-proxy
+          tags: |
+            type=sha,format=long,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker/egress-proxy
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.egress.outputs.tags }}
+          labels: ${{ steps.egress.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}-egress-proxy:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}-egress-proxy:buildcache,mode=max
       - id: meta
         uses: docker/metadata-action@v5
         with:

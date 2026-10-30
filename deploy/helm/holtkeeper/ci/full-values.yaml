@@ -59,3 +59,14 @@ networkPolicy:
       ports:
         - { port: 5432, protocol: TCP }
         - { port: 9000, protocol: TCP }
+egressProxy:
+  enabled: true
+  existingSecret: holtkeeper-egress
+  noProxy: [.svc.cluster.local]
+  rules:
+    - host: gitlab.example.com
+      paths: ['^/api/v4/(projects/[^/]+/|groups/[^/]+/-/)?packages/npm/']
+      headers:
+        Authorization: 'Bearer ${GITLAB_PACKAGES_TOKEN}'
+  ca:
+    certManager: true

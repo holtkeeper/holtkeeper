@@ -17,11 +17,17 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
  *   Needs `HOLTKEEPER_PUBLIC_URL`. Otherwise one `root` password (`HOLTKEEPER_ROOT_PASSWORD`).
  * - Waibee Router is available as an AI provider; `WAIBEE_API_KEY` set lists its catalog with that
  *   account's prices, else the bundled snapshot.
+ * - `HOLTKEEPER_EGRESS_PROXY` set: job commands reach the network through that proxy, trusting the
+ *   CA in `HOLTKEEPER_EGRESS_CA`, except for the hosts in `HOLTKEEPER_EGRESS_NO_PROXY` (the
+ *   chart's `egressProxy` sets them).
  */
 const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
 const port = Number(process.env.HOLTKEEPER_PORT ?? 7420)
 const publicUrl = process.env.HOLTKEEPER_PUBLIC_URL
 const secureCookies = process.env.HOLTKEEPER_INSECURE_COOKIES !== '1'
+const egressProxy = process.env.HOLTKEEPER_EGRESS_PROXY
+const egressCa = process.env.HOLTKEEPER_EGRESS_CA
+const egressNoProxy = process.env.HOLTKEEPER_EGRESS_NO_PROXY?.split(',').filter(Boolean)
 
 const store = multiProcess
   ? postgresStore({ url: env('HOLTKEEPER_DATABASE_URL') })
@@ -79,7 +85,18 @@ export default defineConfig({
   },
   jobs: {
     // Each worker pod is the sandbox: jobs run in it with the repository's tool versions.
-    execution: { mode: 'mise' },
+    execution: {
+      mode: 'mise',
+      ...(egressProxy
+        ? {
+            egress: {
+              url: egressProxy,
+              ...(egressCa ? { caFile: egressCa } : {}),
+              ...(egressNoProxy?.length ? { noProxy: egressNoProxy } : {}),
+            },
+          }
+        : {}),
+    },
     cacheDir: '/workspace/cache',
     concurrency: 2,
     schedules: [],

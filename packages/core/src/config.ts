@@ -218,6 +218,19 @@ const executionSchema = z.object({
     .string()
     .regex(/^\d+(:\d+)?$/, 'expected uid or uid:gid')
     .optional(),
+  /**
+   * Forward proxy for the HTTP(S) traffic of job commands, e.g. one that adds registry credentials
+   * so jobs never hold them (`EgressProxy` of `@holtkeeper/exec-container`). Not used in `host`.
+   */
+  egress: z
+    .object({
+      url: z.url({ protocol: /^https?$/ }),
+      /** PEM certificate of the CA the proxy signs intercepted connections with. */
+      caFile: z.string().min(1).optional(),
+      /** Hosts reached directly, e.g. `.svc.cluster.local`. */
+      noProxy: z.array(z.string().min(1)).optional(),
+    })
+    .optional(),
 })
 
 /** Background analyses: schedules, forge webhooks and the worker that runs them. */

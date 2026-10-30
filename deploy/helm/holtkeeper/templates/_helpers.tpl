@@ -51,6 +51,22 @@ app.kubernetes.io/component: {{ .component }}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
 {{- end -}}
 
+{{- define "holtkeeper.egressProxyImage" -}}
+{{- $image := .Values.egressProxy.image -}}
+{{- printf "%s:%s" $image.repository (default (default .Chart.AppVersion .Values.image.tag) $image.tag) -}}
+{{- end -}}
+
+{{- define "holtkeeper.egressCaSecret" -}}
+{{- $ca := .Values.egressProxy.ca -}}
+{{- if $ca.existingSecret -}}
+{{- $ca.existingSecret -}}
+{{- else if $ca.certManager -}}
+{{- printf "%s-egress-proxy-ca" (include "holtkeeper.fullname" .) -}}
+{{- else -}}
+{{- fail "egressProxy needs a CA: set egressProxy.ca.existingSecret or egressProxy.ca.certManager" -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "holtkeeper.configContent" -}}
 {{- if .Values.config.content -}}
 {{- .Values.config.content -}}
@@ -168,6 +184,18 @@ securityContext:
       containerPort: {{ .ctx.Values.port }}
   env:
     {{- include "holtkeeper.env" .ctx | nindent 4 }}
+    {{- with .ctx.Values.egressProxy }}
+    {{- if .enabled }}
+    - name: HOLTKEEPER_EGRESS_PROXY
+      value: {{ printf "http://%s-egress-proxy:%v" (include "holtkeeper.fullname" $.ctx) .port | quote }}
+    - name: HOLTKEEPER_EGRESS_CA
+      value: /etc/holtkeeper/egress-ca/tls.crt
+    {{- with .noProxy }}
+    - name: HOLTKEEPER_EGRESS_NO_PROXY
+      value: {{ join "," . | quote }}
+    {{- end }}
+    {{- end }}
+    {{- end }}
   {{- with (include "holtkeeper.envFrom" .ctx | trim) }}
   envFrom:
     {{- . | nindent 4 }}
@@ -183,6 +211,11 @@ securityContext:
       mountPath: /workspace
     - name: mise
       mountPath: /mise
+    {{- if .ctx.Values.egressProxy.enabled }}
+    - name: egress-ca
+      mountPath: /etc/holtkeeper/egress-ca
+      readOnly: true
+    {{- end }}
 {{- end -}}
 
 {{- define "holtkeeper.workerVolumes" -}}
@@ -198,6 +231,13 @@ securityContext:
   emptyDir:
     sizeLimit: {{ .Values.worker.miseCache.sizeLimit }}
   {{- end }}
+{{- if .Values.egressProxy.enabled }}
+- name: egress-ca
+  secret:
+    secretName: {{ include "holtkeeper.egressCaSecret" . }}
+    items:
+      - { key: tls.crt, path: tls.crt }
+{{- end }}
 {{- end -}}
 
 {{/*

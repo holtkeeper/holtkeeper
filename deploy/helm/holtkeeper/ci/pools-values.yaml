@@ -18,3 +18,7 @@ worker:
       resources:
         requests: { cpu: '1', memory: 2Gi }
         limits: { memory: 12Gi }
+egressProxy:
+  enabled: true
+  ca:
+    existingSecret: holtkeeper-egress-ca

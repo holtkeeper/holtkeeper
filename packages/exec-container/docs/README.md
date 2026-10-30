@@ -63,6 +63,16 @@ HOLTKEEPER_DOCKER_TESTS=1 bun test packages/exec-container/test
 
 A missing volume or directory reports `available: false`.
 
+## Egress proxy
+
+`egressEnvironment(proxy, options?)` turns an `EgressProxy` (`{ url, caFile?, noProxy? }`) into what a runner adds to its commands, so their HTTP(S) traffic goes through a forward proxy — for example one that adds registry tokens, so jobs install private packages without holding them ([docker/egress-proxy](../../../docker/egress-proxy/README.md) is one; any proxy speaking HTTP `CONNECT` works).
+
+- `env`: `HTTP_PROXY`/`HTTPS_PROXY` (both cases), `YARN_HTTP_PROXY`/`YARN_HTTPS_PROXY`, `NO_PROXY` (`localhost`, `127.0.0.1`, `::1` and `noProxy`).
+- With `caFile`: `NODE_EXTRA_CA_CERTS` (the CA alone; Node adds it to its own roots), and `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `REQUESTS_CA_BUNDLE`, `YARN_CA_FILE_PATH` pointing at the system trust store (the first of `systemBundles` that exists) with the CA appended, so tools that only read a whole store still verify every other host. Both files are written once per CA content to `holtkeeper-egress-<hash>/` in `dir` (default the temp directory). Without a system store only Node-based tools trust the CA.
+- `mounts`: with `containerDir`, that directory mounted read-only, and the variables point inside it.
+
+`localMiseRunner` and `containerRunner` take the result through their `env` (and `extraMounts`); `createRunner` of `@holtkeeper/jobs` does this for `jobs.execution.egress`. The job container must be able to reach the proxy: with `container` execution that means network `full`.
+
 ## Limitations
 
 - A command missing inside the container is a non-zero result, not a rejection as with `localRunner`.

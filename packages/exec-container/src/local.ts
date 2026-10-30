@@ -34,8 +34,8 @@ export function localMiseRunner(options: LocalMiseRunnerOptions): ManagedRunner 
         await runChecked(hostRunner, ['mise', 'install', ...specs], { cwd: tmpdir() })
     },
     run(command, runOptions) {
-      if (!toolchain.tools.length) return hostRunner.run(command, runOptions)
-      return hostRunner.run([...miseExecArgs(toolchain), ...command], {
+      const prefix = toolchain.tools.length ? miseExecArgs(toolchain) : []
+      return hostRunner.run([...prefix, ...command], {
         ...runOptions,
         env: { ...ignored, ...options.env, ...runOptions.env },
       })

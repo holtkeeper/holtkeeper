@@ -570,6 +570,8 @@ export interface RuntimeConfigView {
       network?: 'none' | 'install' | 'full'
       limits?: { cpus?: number; memory?: string; pids?: number }
       user?: string
+      /** The egress proxy's `host:port`; credentials in its URL are never shown. */
+      egress?: { proxy: string; ca: boolean }
     }
     schedules: number
   }

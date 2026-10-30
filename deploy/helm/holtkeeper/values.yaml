@@ -171,5 +171,41 @@ networkPolicy:
   # Where Postgres and the object store live, e.g. their pod selectors or CIDRs.
   extraEgress: []
 
+# A forward proxy for the network traffic of job commands that adds credentials (registry tokens,
+# ...) to matching requests, so jobs never hold them. Workers get HOLTKEEPER_EGRESS_PROXY and the
+# proxy's CA certificate; the bundled config passes both to `jobs.execution.egress`. Any proxy that
+# speaks HTTP CONNECT can replace it: set those two variables yourself and leave this disabled.
+egressProxy:
+  enabled: false
+  image:
+    repository: ghcr.io/holtkeeper/holtkeeper-egress-proxy
+    # Default: image.tag, then the chart's appVersion.
+    tag: ''
+    pullPolicy: IfNotPresent
+  replicas: 1
+  port: 8080
+  # Requests that get headers; values reference variables of `existingSecret` as ${NAME}.
+  #   - host: gitlab.com            # or *.example.com
+  #     paths: ['^/api/v4/(projects/[^/]+/|groups/[^/]+/-/)?packages/npm/']   # regex; empty: all
+  #     methods: [GET, HEAD]        # the default
+  #     headers: { Authorization: 'Bearer ${GITLAB_PACKAGES_TOKEN}' }
+  #     insecure: false             # true: also over plain HTTP
+  rules: []
+  # Secret whose keys become the proxy's environment (the tokens the rules reference).
+  existingSecret: ''
+  # Hosts job commands reach directly, past the proxy.
+  noProxy: []
+  ca:
+    # A kubernetes.io/tls Secret (tls.crt, tls.key) with the CA the proxy signs intercepted TLS with.
+    existingSecret: ''
+    # Or let cert-manager issue a self-signed CA used only by this proxy (RSA, 10 years).
+    certManager: false
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
 # More manifests rendered with the release, e.g. an ExternalSecret for `existingSecret` or a database.
 extraObjects: []
