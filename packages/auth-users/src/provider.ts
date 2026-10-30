@@ -24,6 +24,14 @@ import { type Context, activityLogger } from './context.ts'
 import { signedCookie } from './cookies.ts'
 import { HttpError, readBody } from './errors.ts'
 import { linkInfo, openLink } from './links.ts'
+import {
+  addPasskey,
+  addPasskeyOptions,
+  removeOwnPasskey,
+  renamePasskey,
+  renamePasskeySchema,
+  selfUser,
+} from './me.ts'
 import { type OidcClientFactory, openidClient } from './oidc-client.ts'
 import { finishOidcLogin, startOidcLogin } from './oidc.ts'
 import type { UsersAuthOptions } from './options.ts'
@@ -37,7 +45,7 @@ import {
 } from './passkeys.ts'
 import { type Route, createRouter } from './router.ts'
 import { principalOf, sessionUser, startSession } from './sessions.ts'
-import type { ExternalAccountList, UserList } from './views.ts'
+import { type ExternalAccountList, type UserList, toUserView } from './views.ts'
 import { type WebAuthn, simpleWebAuthn } from './webauthn.ts'
 
 /** Replaceable dependencies; tests swap in fakes. */
@@ -92,7 +100,7 @@ function buildContext(options: UsersAuthOptions, deps: UsersAuthDeps): Context {
       ttlSeconds: 300,
       schema: z.object({
         c: z.string(),
-        k: z.enum(['login', 'register']),
+        k: z.enum(['login', 'register', 'add']),
         t: z.string().optional(),
       }),
     }),
@@ -176,6 +184,48 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
       method: 'POST',
       pattern: '/logout',
       handler: async () => noContent(ctx.sessions.clear()),
+    },
+    {
+      method: 'GET',
+      pattern: '/me',
+      handler: async (_request, _params, principal) =>
+        json(await toUserView(ctx.store, await selfUser(ctx, principal))),
+    },
+    {
+      method: 'POST',
+      pattern: '/me/passkeys/options',
+      async handler(_request, _params, principal) {
+        const { options, cookie } = await addPasskeyOptions(ctx, await selfUser(ctx, principal))
+        return withCookies(json(options), [cookie])
+      },
+    },
+    {
+      method: 'POST',
+      pattern: '/me/passkeys/verify',
+      async handler(request, _params, principal) {
+        const user = await selfUser(ctx, principal)
+        await addPasskey(ctx, request, user, await readBody(request, registerBody))
+        return withCookies(json(await toUserView(ctx.store, user), { status: 201 }), [
+          ctx.challenges.clear(),
+        ])
+      },
+    },
+    {
+      method: 'PATCH',
+      pattern: '/me/passkeys/:passkeyId',
+      async handler(request, { passkeyId = '' }, principal) {
+        const user = await selfUser(ctx, principal)
+        await renamePasskey(ctx, user, passkeyId, await readBody(request, renamePasskeySchema))
+        return json(await toUserView(ctx.store, user))
+      },
+    },
+    {
+      method: 'DELETE',
+      pattern: '/me/passkeys/:passkeyId',
+      async handler(_request, { passkeyId = '' }, principal) {
+        await removeOwnPasskey(ctx, await selfUser(ctx, principal), passkeyId)
+        return noContent()
+      },
     },
     {
       method: 'GET',

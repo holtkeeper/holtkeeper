@@ -328,6 +328,7 @@ export interface ActivityList {
 
 // Users (only with the `users` auth provider), under `/auth/users`.
 
+/** A user; `GET /auth/users/me` returns the caller's own. */
 export interface UserView {
   id: string
   name: string

@@ -112,6 +112,18 @@ export const api = {
       body: { response, ...(label ? { label } : {}) },
     }),
 
+  account: () => request<UserView>('GET', '/auth/users/me'),
+  addPasskeyOptions: () =>
+    request<PublicKeyCredentialCreationOptionsJSON>('POST', '/auth/users/me/passkeys/options'),
+  addPasskeyVerify: (response: RegistrationResponseJSON, label?: string) =>
+    request<UserView>('POST', '/auth/users/me/passkeys/verify', {
+      body: { response, ...(label ? { label } : {}) },
+    }),
+  renameOwnPasskey: (passkeyId: string, label: string) =>
+    request<UserView>('PATCH', `/auth/users/me/passkeys/${id(passkeyId)}`, { body: { label } }),
+  removeOwnPasskey: (passkeyId: string) =>
+    request<void>('DELETE', `/auth/users/me/passkeys/${id(passkeyId)}`),
+
   users: () => request<UserList>('GET', '/auth/users/admin/users'),
   inviteUser: (input: InviteUserInput) =>
     request<LinkResponse>('POST', '/auth/users/admin/users', { body: input }),

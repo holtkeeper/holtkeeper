@@ -1,7 +1,7 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { LogOut, Menu, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useAuthMutations } from '../../api/queries.ts'
@@ -58,6 +58,20 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+function Identity({ linked, children }: { linked: boolean; children: ReactNode }) {
+  const className = 'flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2'
+  if (!linked) return <div className={className}>{children}</div>
+  return (
+    <Link
+      to="/account"
+      aria-label="Your account"
+      className={`${className} transition-colors hover:bg-default-soft focus-visible:outline-2 focus-visible:outline-focus`}
+    >
+      {children}
+    </Link>
+  )
+}
+
 function Account() {
   const { principal, auth } = useSession()
   const { logout } = useAuthMutations()
@@ -70,7 +84,7 @@ function Account() {
   return (
     <div className="flex items-center gap-2">
       <ThemeToggle />
-      <div className="flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2">
+      <Identity linked={auth.provider === 'users'}>
         <span
           aria-hidden
           className="grid size-8 place-items-center rounded-full bg-accent-soft text-xs font-semibold text-accent-soft-foreground"
@@ -81,7 +95,7 @@ function Account() {
           <div className="max-w-40 truncate text-sm font-medium">{principal.name}</div>
           <div className="text-xs text-muted">via {principal.provider}</div>
         </div>
-      </div>
+      </Identity>
       {auth.logoutUrl ? (
         <Tooltip content="Sign out">
           <Button

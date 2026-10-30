@@ -37,6 +37,7 @@ export const keys = {
   resolved: (repo: RepoRef) => ['settings', 'resolve', repoKey(repo)] as const,
   activity: ['activity'] as const,
   users: ['users'] as const,
+  account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
 }
 
@@ -182,6 +183,33 @@ export function useUserMutations() {
         api.deletePasskey(userId, passkeyId),
       onSuccess,
     }),
+  }
+}
+
+/** The signed-in user's own account, with the `users` provider only. */
+export const useAccount = () => useQuery({ queryKey: keys.account, queryFn: api.account })
+
+/** Adding, renaming and removing the signed-in user's own passkeys. */
+export function useAccountPasskeys() {
+  const client = useQueryClient()
+  const onSuccess = async () => {
+    await client.invalidateQueries({ queryKey: keys.account })
+    await client.invalidateQueries({ queryKey: keys.users })
+  }
+  return {
+    add: useMutation({
+      mutationFn: async (label: string) => {
+        const optionsJSON = await api.addPasskeyOptions()
+        const response = await startRegistration({ optionsJSON })
+        return api.addPasskeyVerify(response, label.trim() || undefined)
+      },
+      onSuccess,
+    }),
+    rename: useMutation({
+      mutationFn: ({ id, label }: { id: string; label: string }) => api.renameOwnPasskey(id, label),
+      onSuccess,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.removeOwnPasskey(id), onSuccess }),
   }
 }
 

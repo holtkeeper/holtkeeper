@@ -60,6 +60,12 @@ The registration challenge cookie is bound to the link's token hash. A successfu
 stores the passkey (users may hold several), marks the link used and signs the holder in. A
 recovery link also bumps the user's `sessionVersion`, which ends every other session.
 
+**Own passkeys** — a signed-in user reads their account with `GET /me` (a `UserView`) and manages
+their passkeys there: `POST /me/passkeys/options` and `POST /me/passkeys/verify { response, label? }`
+register another one (the challenge cookie is bound to the user id and excludes passkeys they already
+have), `PATCH /me/passkeys/:id { label }` renames one and `DELETE /me/passkeys/:id` removes one. The
+only passkey cannot be removed (409): that would lock the account; an admin can still delete it.
+
 **OIDC** — `GET /oidc/:id/login` redirects to the provider with authorization code + PKCE (S256),
 `state` and `nonce`; all three secrets live in `hk_oidc` (signed, 10 minutes). The provider
 redirects to `${origin}/auth/users/oidc/:id/callback`; register that URL with the provider. On
@@ -116,6 +122,11 @@ duplicate email or passkey, 410 used or expired link.
 | GET    | `/oidc/:id/login`                      | 302 to the provider                  |
 | GET    | `/oidc/:id/callback`                   | 302 to `/` + session cookie          |
 | POST   | `/logout`                              | 204, cookie cleared                  |
+| GET    | `/me`                                  | `UserView` of the caller             |
+| POST   | `/me/passkeys/options`                 | WebAuthn creation options            |
+| POST   | `/me/passkeys/verify`                  | 201 `UserView`                       |
+| PATCH  | `/me/passkeys/:passkeyId`              | `UserView`                           |
+| DELETE | `/me/passkeys/:passkeyId`              | 204                                  |
 | GET    | `/admin/users`                         | `UserList`                           |
 | POST   | `/admin/users`                         | 201 `LinkResponse` (enrollment link) |
 | PATCH  | `/admin/users/:id`                     | `UserView`                           |
@@ -139,7 +150,7 @@ A global admin holds every action on everything (`grantsWithin(root, caller.gran
 
 Activity events (when `activity` is given): `user.invited`, `user.updated`, `user.disabled`,
 `user.enabled`, `user.recovery_issued`, `user.recovered`, `user.login`, `user.signed_up`,
-`passkey.registered`, `passkey.removed`, `identity.linked`, `account.linked`, `account.unlinked`.
+`passkey.registered`, `passkey.renamed`, `passkey.removed`, `identity.linked`, `account.linked`, `account.unlinked`.
 
 ## Security notes
 

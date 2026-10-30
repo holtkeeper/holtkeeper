@@ -54,6 +54,10 @@ const SettingsPage = lazyRouteComponent(
   'SettingsPage',
 )
 const UsersPage = lazyRouteComponent(() => import('./features/users/UsersPage.tsx'), 'UsersPage')
+const AccountPage = lazyRouteComponent(
+  () => import('./features/account/AccountPage.tsx'),
+  'AccountPage',
+)
 const ReleasesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'ReleasesPage',
@@ -126,6 +130,7 @@ const routeTree = rootRoute.addChildren([
     page('credentials', CredentialsPage),
     settingsRoute,
     page('users', UsersPage),
+    page('account', AccountPage),
     page('activity', ActivityPage),
   ]),
 ])

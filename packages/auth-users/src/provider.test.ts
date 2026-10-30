@@ -135,7 +135,7 @@ async function enroll(
   auth: AuthProvider,
   link: string,
   browser = new Browser(),
-  id = crypto.randomUUID(),
+  id: string = crypto.randomUUID(),
 ) {
   const token = tokenOf(link)
   const options = await body<{
@@ -581,6 +581,86 @@ async function signIn(auth: AuthProvider) {
   const response = await browser.send(auth, 'GET', `/oidc/corp/callback?code=abc&state=${state}`)
   return { browser, response }
 }
+
+async function addPasskey(auth: AuthProvider, browser: Browser, id: string, label = 'phone') {
+  const options = await body<{ challenge: string; excludeCredentials?: { id: string }[] }>(
+    await browser.send(auth, 'POST', '/me/passkeys/options'),
+  )
+  const response = {
+    id,
+    rawId: id,
+    type: 'public-key',
+    response: { clientDataJSON: options.challenge },
+    clientExtensionResults: {},
+  }
+  const verify = await browser.send(auth, 'POST', '/me/passkeys/verify', { response, label })
+  return { options, verify }
+}
+
+describe('own account', () => {
+  test('needs a session', async () => {
+    const { auth } = setup()
+    expect((await new Browser().send(auth, 'GET', '/me')).status).toBe(401)
+    expect((await new Browser().send(auth, 'POST', '/me/passkeys/options')).status).toBe(401)
+  })
+
+  test('shows the account and adds, renames and removes passkeys', async () => {
+    const { auth, store, browser, root, passkeyId } = await rootSession()
+    const me = await body<UserView>(await browser.send(auth, 'GET', '/me'))
+    expect(me).toMatchObject({ id: root.id, name: 'Root' })
+    expect(me.passkeys.map((p) => p.id)).toEqual([passkeyId])
+
+    const { options, verify } = await addPasskey(auth, browser, 'pk-phone')
+    expect(options.excludeCredentials?.map((c) => c.id)).toEqual([passkeyId])
+    expect(verify.status).toBe(201)
+    expect((await body<UserView>(verify)).passkeys.map((p) => p.label)).toEqual(['laptop', 'phone'])
+    expect((await login(auth, 'pk-phone')).verify.status).toBe(204)
+
+    const renamed = await browser.send(auth, 'PATCH', '/me/passkeys/pk-phone', { label: ' work ' })
+    expect((await body<UserView>(renamed)).passkeys[1]?.label).toBe('work')
+    expect((await browser.send(auth, 'PATCH', '/me/passkeys/pk-phone', { label: '' })).status).toBe(
+      400,
+    )
+
+    expect((await browser.send(auth, 'DELETE', '/me/passkeys/pk-phone')).status).toBe(204)
+    expect((await store.users.listPasskeys(root.id)).map((p) => p.id)).toEqual([passkeyId])
+    const actions = (await store.activity.list()).map((e) => e.action)
+    expect(actions).toEqual(
+      expect.arrayContaining(['passkey.registered', 'passkey.renamed', 'passkey.removed']),
+    )
+  })
+
+  test('keeps the only passkey and only touches own ones', async () => {
+    const { auth, store, browser, root, passkeyId } = await rootSession()
+    const only = await browser.send(auth, 'DELETE', `/me/passkeys/${passkeyId}`)
+    expect(only.status).toBe(409)
+
+    const invited = await body<LinkResponse>(
+      await browser.send(auth, 'POST', '/admin/users', { name: 'Other', grants: [] }, root),
+    )
+    const other = await enroll(auth, invited.link, new Browser(), 'pk-other')
+    expect((await browser.send(auth, 'DELETE', '/me/passkeys/pk-other')).status).toBe(404)
+    expect(
+      (await browser.send(auth, 'PATCH', '/me/passkeys/pk-other', { label: 'mine' })).status,
+    ).toBe(404)
+    expect(await store.users.getPasskey('pk-other')).toBeDefined()
+    expect(other.verify.status).toBe(204)
+  })
+
+  test('adding needs the challenge issued to the same user', async () => {
+    const { auth, browser } = await rootSession()
+    const response = {
+      id: 'pk-x',
+      rawId: 'pk-x',
+      type: 'public-key',
+      response: { clientDataJSON: 'nope' },
+      clientExtensionResults: {},
+    }
+    expect((await browser.send(auth, 'POST', '/me/passkeys/verify', { response })).status).toBe(400)
+    await browser.send(auth, 'POST', '/passkey/login/options')
+    expect((await browser.send(auth, 'POST', '/me/passkeys/verify', { response })).status).toBe(400)
+  })
+})
 
 describe('oidc', () => {
   test('links a verified email to an existing user and signs in', async () => {

@@ -12,8 +12,8 @@ interface SessionPayload {
 
 interface ChallengePayload {
   c: string
-  k: 'login' | 'register'
-  /** Link token hash a registration challenge belongs to. */
+  k: 'login' | 'register' | 'add'
+  /** Link token hash of a registration, or user id of an added passkey. */
   t?: string
 }
 

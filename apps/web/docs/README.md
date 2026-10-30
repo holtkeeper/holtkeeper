@@ -1,6 +1,6 @@
 # @holtkeeper/web
 
-The Holtkeeper admin panel: dashboards, audit reports, credentials, settings, users and the activity log. A single-page React app that talks only to the server's JSON API (`/api/*`) and auth endpoints (`/auth/*`). The server serves the built files from `apps/web/dist`.
+The Holtkeeper admin panel: dashboards, audit reports, credentials, settings, users, your own account (passkeys, at `/account`) and the activity log. A single-page React app that talks only to the server's JSON API (`/api/*`) and auth endpoints (`/auth/*`). The server serves the built files from `apps/web/dist`.
 
 Stack: React 19, HeroUI 3 (React Aria + Tailwind CSS 4), TanStack Router (code-based routes), TanStack Query, TanStack Table, Motion, Recharts, React Flow (`@xyflow/react`) with dagre layouts, lucide icons, `@simplewebauthn/browser` for passkeys.
 
@@ -49,7 +49,7 @@ src/
     severity.ts, repo.ts, theme.ts
   ui/                 thin wrappers over HeroUI and shared visual pieces
   features/<area>/    one folder per page: shell, auth, dashboard, audits, repos, analyses,
-                      reports, credentials, settings, access (Scope/Grants editors), users, activity
+                      reports, credentials, settings, access (Scope/Grants editors), users, account, activity
 ```
 
 ## API client
