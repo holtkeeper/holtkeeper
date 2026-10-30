@@ -10,7 +10,10 @@ describe('forge form', () => {
       credentialId: 'Choose the token credential',
     })
     expect(
-      validateForgeDraft({ id: 'work', url: 'ssh://gitlab.test', credentialId: 'c1' }, ['work']),
+      validateForgeDraft(
+        { id: 'work', url: 'ssh://gitlab.test', credentialId: 'c1', packages: false },
+        ['work'],
+      ),
     ).toEqual({ id: 'A forge with this id exists', url: 'An http(s) URL' })
   })
 
@@ -27,5 +30,17 @@ describe('forge form', () => {
       url: 'https://gitlab.test',
       credentialId: 'c1',
     })
+  })
+
+  test('sends packages only when on', () => {
+    const draft = toForgeDraft({
+      type: 'forge',
+      id: 'work',
+      provenance: 'panel',
+      data: { kind: 'gitlab', url: 'https://gitlab.test', credentialId: 'c1', packages: true },
+    })
+    expect(draft.packages).toBe(true)
+    expect(toForgeInput(draft).packages).toBe(true)
+    expect(toForgeInput({ ...draft, packages: false })).not.toHaveProperty('packages')
   })
 })

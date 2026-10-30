@@ -22,3 +22,4 @@ egressProxy:
   enabled: true
   ca:
     existingSecret: holtkeeper-egress-ca
+  forgeRules: false

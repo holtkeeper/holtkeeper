@@ -26,6 +26,8 @@ export const forgeDataSchema = z.object({
   kind: z.enum(['gitlab', 'github']),
   url: z.url(),
   credentialId: z.string().min(1),
+  /** Jobs read this forge's package registries with its token, through the egress proxy. */
+  packages: z.boolean().optional(),
 })
 
 export const groupDataSchema = z.object({

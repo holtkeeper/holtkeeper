@@ -45,6 +45,20 @@ spec:
               value: /etc/egress/rules.json
             - name: EGRESS_CA_DIR
               value: /etc/egress/ca
+            {{- if $ep.forgeRules }}
+            {{- if not .Values.existingSecret }}
+            {{- fail "egressProxy.forgeRules needs existingSecret with HOLTKEEPER_EGRESS_SECRET" }}
+            {{- end }}
+            - name: EGRESS_RULES_URL
+              value: {{ printf "http://%s-web:%v/api/egress/rules" (include "holtkeeper.fullname" .) .Values.web.service.port | quote }}
+            - name: EGRESS_RULES_REFRESH
+              value: {{ $ep.refreshSeconds | quote }}
+            - name: EGRESS_RULES_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: HOLTKEEPER_EGRESS_SECRET
+            {{- end }}
           {{- with $ep.existingSecret }}
           envFrom:
             - secretRef:
@@ -135,7 +149,7 @@ spec:
 {{- end }}
 {{- if .Values.networkPolicy.enabled }}
 ---
-# The proxy accepts only workers and reaches only DNS and the worker egress ports.
+# The proxy accepts only workers and reaches only DNS, the web pods (rules) and the worker egress ports.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -158,6 +172,14 @@ spec:
     - ports:
         - { port: 53, protocol: UDP }
         - { port: 53, protocol: TCP }
+    {{- if $ep.forgeRules }}
+    - ports:
+        - port: http
+      to:
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "web") | nindent 14 }}
+    {{- end }}
     - ports:
         {{- range .Values.networkPolicy.workerEgress.ports }}
         - { port: {{ . }}, protocol: TCP }

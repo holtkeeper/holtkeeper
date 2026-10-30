@@ -106,6 +106,10 @@ Failures are `GitLabApiError` with `status` and a message like `GitLab POST /api
 
 `ensureWebhook` uses `/groups/:id/hooks` for group targets and `/projects/:id/hooks` for projects, finding an existing hook by URL (then `PUT`, else `POST`) and setting every event flag explicitly plus `enable_ssl_verification: true`; the secret goes into `token`. Group hooks need GitLab Premium: when GitLab answers 404 or 403 for them, it registers a project hook on every non-archived project of the group (subgroups included) and says so in `fallback`. `removeWebhook` deletes hooks and ignores 404. The token needs the `api` scope and Maintainer (project hooks) or Owner (group hooks). `withFetch(wrap)` returns `gitlab({ ...options, fetch: wrap(fetch) })`.
 
+### Package registries
+
+`gitlabPackageRegistry(url)` returns `{ host, paths }`: the host of the instance and a regular expression for its package registry endpoints (`/api/v4/packages/…`, `/api/v4/groups/:id/-/packages/…`, `/api/v4/projects/:id/packages/…`; npm, Maven, PyPI, generic and the rest), keeping an instance's sub-path. The server builds egress proxy rules from it for forges with "Packages for jobs" on, so a GitLab token reads packages for jobs without them seeing it. GitLab accepts personal, group and project access tokens there as `Authorization: Bearer`.
+
 ## Token rotation
 
 ```ts

@@ -19,6 +19,7 @@ import { activityPeople, avatarRoutes, withAvatar } from './routes/avatars.ts'
 import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { dependencyRoutes } from './routes/dependencies.ts'
+import { egressRoutes } from './routes/egress.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
 import { mediaRoutes } from './routes/media.ts'
@@ -103,6 +104,7 @@ export function createApp(deps: ServerDeps) {
     updateRoutes(deps, { ...(poller && { poller }), ...(hooks && { repoHooks: hooks }) }),
   )
   api.route('/', configRoutes(deps))
+  api.route('/', egressRoutes(deps))
   api.route('/', aiRoutes(deps))
   api.route('/', aiCatalogRoutes(deps))
   api.route('/', artifactRoutes(deps))

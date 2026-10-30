@@ -6,7 +6,7 @@ Forges, groups, repository traits, schedules and triggers edited in the panel, l
 
 | Type         | Id                                                                      | Data                                                                                                                             |
 | ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `forge`      | forge id (`work`)                                                       | `{ kind: 'gitlab' \| 'github', url, credentialId, webhook?: { secret (sealed), createdAt, registered? } }`                       |
+| `forge`      | forge id (`work`)                                                       | `{ kind: 'gitlab' \| 'github', url, credentialId, packages?, webhook?: { secret (sealed), createdAt, registered? } }`            |
 | `group`      | group id                                                                | `{ forge, include[], exclude[] }`                                                                                                |
 | `repoTraits` | free; merged by `pattern`                                               | `{ pattern, forge?, traits }`                                                                                                    |
 | `schedule`   | the schedule's config `name`                                            | `{ name (display), enabled, analyzers, groups?, repos?, options?, cron \| every, timezone?, windows?, jitterMinutes?, spread? }` |

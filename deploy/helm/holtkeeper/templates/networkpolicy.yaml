@@ -18,6 +18,14 @@ spec:
       from:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- if and $np.webIngressFrom .Values.egressProxy.enabled .Values.egressProxy.forgeRules }}
+    - ports:
+        - port: http
+      from:
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "egress-proxy") | nindent 14 }}
+    {{- end }}
 ---
 # Workers and schedulers accept no traffic except metrics scrapes, and reach only DNS, the
 # configured egress ports (forge, registries, LLM APIs) and `extraEgress` (database, object store).

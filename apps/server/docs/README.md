@@ -148,6 +148,7 @@ At startup the server seeds the defaults of a fresh install (`seedDefaultSetting
 | `GET /api/jobs/:id`           | one `Job` with its last 200 log lines                                                                                                                                            |
 | `POST /api/jobs`              | `CreateJobInput { analyzer, repo?, group?, ref?, options? }`: `repo` for repo-scope analyzers, `group` for group-scope ones; options are validated. 409 without a `jobs` section |
 | `POST /api/jobs/:id/cancel`   | cancels a queued or running job; 409 when it already finished                                                                                                                    |
+| `GET /api/egress/rules`       | rules for the egress proxy, see [Egress rules](#egress-rules)                                                                                                                    |
 | `POST /api/webhooks/gitlab`   | GitLab webhook, see below                                                                                                                                                        |
 | `POST /api/webhooks/r/:token` | one repository's webhook, see [Repository updates](#repository-updates)                                                                                                          |
 
@@ -252,6 +253,10 @@ Every change is logged: `config.<type>.created|updated|removed`, `config.forge.w
 A panel forge can issue an SSH key on the account behind its token (`POST /api/forges/:id/ssh-key { usage?, expiresInDays?, identity? }`, global `settings:write`; file forges answer 409). The server generates an Ed25519 key, registers it as a user key (`usage` default `auth_and_signing`, expiry default 365 days), pins the forge host's SSH keys with `ssh-keyscan` (trust on first use; a failure is a note and git stays on HTTPS), reads the commit identity from `getCurrentUser` unless `identity` is given, and stores the key as an `ssh` credential with the token credential's scope. The forge document keeps only the credential id; the forge entry of `GET /api/config/forges` shows `sshKey` (public key, fingerprint, usage, expiry, identity, whether host keys are pinned), never the private key. Calling it again rotates the key in place (`rotateSshKey`: the new key is registered and stored before the old one is removed). Deleting the key or the forge removes the registration and the credential.
 
 Jobs use the key through `gitKeyFor` (see [@holtkeeper/jobs](../../../packages/jobs/docs/README.md#context)): clone, fetch and push over SSH, signed commits for propagate and port. Running git over SSH and signing needs `ssh`, `ssh-keyscan` and `ssh-keygen` on the host (`openssh-client` in the worker image).
+
+### Egress rules
+
+`GET /api/egress/rules` serves `EgressRulesResponse` to an egress proxy (such as [docker/egress-proxy](../../../docker/egress-proxy/README.md)) that sends `Authorization: Bearer <server.egress.secret>`; without `server.egress` it answers 404, with a wrong secret 401, and no session or MCP token grants it. Every panel GitLab forge with `packages` on (the "Packages for jobs" switch) gives one rule: `GET`/`HEAD` to its package registries (`gitlabPackageRegistry`) get `Authorization: Bearer <token>` with its credential's current token, read with `reveal` on every request, so rotations reach the proxy on its next read. Forges whose credential cannot be read are left out and logged. The response is `no-store`.
 
 ### Read-only repositories
 

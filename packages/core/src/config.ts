@@ -92,6 +92,11 @@ const serverSchema = z.object({
    * from it. Default: the origin of the request that asks for the URL.
    */
   publicUrl: z.url().optional(),
+  /**
+   * Serves `GET /api/egress/rules` to an egress proxy that sends this secret as a bearer token:
+   * the rules that add forge tokens to package registry requests of jobs.
+   */
+  egress: z.object({ secret: secretSchema }).optional(),
 })
 
 const cronNicknames = new Set(['@yearly', '@annually', '@monthly', '@weekly', '@daily', '@hourly'])

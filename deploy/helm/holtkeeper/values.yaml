@@ -191,6 +191,11 @@ egressProxy:
   #     headers: { Authorization: 'Bearer ${GITLAB_PACKAGES_TOKEN}' }
   #     insecure: false             # true: also over plain HTTP
   rules: []
+  # Also read rules from Holtkeeper: panel forges with "Packages for jobs" on get their token
+  # added to package registry downloads, always the credential's current one. Web and proxy share
+  # HOLTKEEPER_EGRESS_SECRET, which must be a key of the top-level `existingSecret`.
+  forgeRules: true
+  refreshSeconds: 60
   # Secret whose keys become the proxy's environment (the tokens the rules reference).
   existingSecret: ''
   # Hosts job commands reach directly, past the proxy.

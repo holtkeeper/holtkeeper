@@ -7,6 +7,7 @@ export interface ForgeDraft {
   id: string
   url: string
   credentialId: string
+  packages: boolean
 }
 
 export type ForgeDraftErrors = Partial<Record<keyof ForgeDraft, string>>
@@ -15,6 +16,7 @@ export const toForgeDraft = (forge?: ConfigEntryView<'forge'>): ForgeDraft => ({
   id: forge?.id ?? '',
   url: forge?.data.url ?? '',
   credentialId: forge?.data.credentialId ?? '',
+  packages: forge?.data.packages ?? false,
 })
 
 /** Problems by field; `taken` are ids a new forge must not reuse. */
@@ -35,4 +37,5 @@ export const toForgeInput = (draft: ForgeDraft): PutConfigInput['forge'] => ({
   kind: 'gitlab',
   url: draft.url.trim().replace(/\/+$/, ''),
   credentialId: draft.credentialId,
+  ...(draft.packages && { packages: true }),
 })

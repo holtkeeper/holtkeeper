@@ -6,7 +6,7 @@ Holtkeeper does not depend on it: `jobs.execution.egress` (`EgressProxy` of [`@h
 
 ## Rules
 
-A JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`):
+Rules come from a JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`, used when it exists), from a URL (`EGRESS_RULES_URL`), or both, file rules first. Holtkeeper serves such a URL at `GET /api/egress/rules` for forges with "Packages for jobs" on, carrying each forge credential's current token ([server docs](../../apps/server/docs/README.md#egress-rules)). The document looks the same either way:
 
 ```json
 {
@@ -29,7 +29,9 @@ A JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`):
 | `headers`  | Set on matching requests, replacing what the client sent. `${NAME}` reads the proxy's environment.         |
 | `insecure` | Also add the headers over plain HTTP. Default `false`: credentials only travel over TLS.                   |
 
-The first matching rule wins. A `${NAME}` that is not set stops the proxy at start. Header values are never logged.
+The first matching rule wins. In the file, `${NAME}` reads the proxy's environment, and a variable that is not set stops the proxy at start. Rules from the URL are taken literally. Header values are never logged.
+
+The URL is read with `Authorization: Bearer $EGRESS_RULES_TOKEN` at start, every `EGRESS_RULES_REFRESH` seconds (default 60), and at once (at most every 5 seconds) when an upstream answers a request it added URL credentials to with 401 or 403, which is how a rotated token is picked up. A failed read is logged and keeps the previous rules.
 
 ## How it treats traffic
 
@@ -39,12 +41,15 @@ The first matching rule wins. A `${NAME}` that is not set stops the proxy at sta
 
 ## Environment
 
-| Variable         | Default                  | Meaning                                                                                                                                                                            |
-| ---------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EGRESS_PORT`    | `8080`                   | Listening port.                                                                                                                                                                    |
-| `EGRESS_RULES`   | `/etc/egress/rules.json` | Rules file.                                                                                                                                                                        |
-| `EGRESS_CA_DIR`  | —                        | Directory with `tls.crt` and `tls.key` of the CA (a `kubernetes.io/tls` Secret). Without it mitmproxy makes a CA of its own at every start, which clients cannot trust in advance. |
-| `EGRESS_CONFDIR` | `/tmp/mitmproxy`         | mitmproxy's working directory.                                                                                                                                                     |
+| Variable               | Default                  | Meaning                                                                                                                                                                            |
+| ---------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EGRESS_PORT`          | `8080`                   | Listening port.                                                                                                                                                                    |
+| `EGRESS_RULES`         | `/etc/egress/rules.json` | Rules file; skipped when missing.                                                                                                                                                  |
+| `EGRESS_RULES_URL`     | —                        | URL that serves rules.                                                                                                                                                             |
+| `EGRESS_RULES_TOKEN`   | —                        | Bearer token for `EGRESS_RULES_URL`.                                                                                                                                               |
+| `EGRESS_RULES_REFRESH` | `60`                     | Seconds between reads of `EGRESS_RULES_URL`.                                                                                                                                       |
+| `EGRESS_CA_DIR`        | —                        | Directory with `tls.crt` and `tls.key` of the CA (a `kubernetes.io/tls` Secret). Without it mitmproxy makes a CA of its own at every start, which clients cannot trust in advance. |
+| `EGRESS_CONFDIR`       | `/tmp/mitmproxy`         | mitmproxy's working directory.                                                                                                                                                     |
 
 Arguments after the image name go to `mitmdump`. Runs as the image's `mitmproxy` user and needs only `/tmp` writable.
 

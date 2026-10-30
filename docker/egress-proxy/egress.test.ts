@@ -30,7 +30,13 @@ async function freePort() {
   return port
 }
 
-function spawnProxy(dir: string, env: Record<string, string>, upstreamCa: string, port: number) {
+function spawnProxy(
+  dir: string,
+  env: Record<string, string>,
+  upstreamCa: string,
+  port: number,
+  args: string[] = [],
+) {
   const proc = Bun.spawn(
     [
       'mitmdump',
@@ -46,6 +52,7 @@ function spawnProxy(dir: string, env: Record<string, string>, upstreamCa: string
       `ssl_verify_upstream_trusted_ca=${upstreamCa}`,
       '-s',
       addon,
+      ...args,
     ],
     {
       env: { ...Bun.env, PYTHONUNBUFFERED: '1', EGRESS_TEST_TOKEN: undefined, ...env },
@@ -68,8 +75,13 @@ function spawnProxy(dir: string, env: Record<string, string>, upstreamCa: string
   return { proc, port, exited }
 }
 
-async function startProxy(dir: string, env: Record<string, string>, upstreamCa: string) {
-  const proxy = spawnProxy(dir, env, upstreamCa, await freePort())
+async function startProxy(
+  dir: string,
+  env: Record<string, string>,
+  upstreamCa: string,
+  args: string[] = [],
+) {
+  const proxy = spawnProxy(dir, env, upstreamCa, await freePort(), args)
   const deadline = Date.now() + 90_000
   while (proxy.proc.exitCode === null && Date.now() < deadline) {
     const open = await Bun.connect({
@@ -87,17 +99,38 @@ async function startProxy(dir: string, env: Record<string, string>, upstreamCa: 
   throw new Error(`mitmdump did not start: ${await proxy.exited()}`)
 }
 
-const echo = (request: Request) =>
-  Response.json({
-    authorization: request.headers.get('authorization'),
-    token: request.headers.get('x-token'),
-  })
+const rulesSecret = 'rules-secret'
+let registryToken = 'registry-first'
+
+const echo = (request: Request) => {
+  const authorization = request.headers.get('authorization')
+  if (
+    new URL(request.url).pathname.startsWith('/registry/') &&
+    authorization !== `Bearer ${registryToken}`
+  )
+    return Response.json({ authorization }, { status: 401 })
+  return Response.json({ authorization, token: request.headers.get('x-token') })
+}
+
+const servedRules = (request: Request) =>
+  request.headers.get('authorization') === `Bearer ${rulesSecret}`
+    ? Response.json({
+        rules: [
+          {
+            host: 'localhost',
+            paths: ['^/registry/'],
+            headers: { Authorization: `Bearer ${registryToken}` },
+          },
+        ],
+      })
+    : new Response('unauthorized', { status: 401 })
 
 describe.skipIf(!available)('egress addon', () => {
   let dir: string
   let proxy: Awaited<ReturnType<typeof startProxy>>
   let tls: ReturnType<typeof Bun.serve>
   let plain: ReturnType<typeof Bun.serve>
+  let rulesServer: ReturnType<typeof Bun.serve>
   let upstreamCert: string
   let proxyCa: string
 
@@ -132,8 +165,19 @@ describe.skipIf(!available)('egress addon', () => {
       fetch: echo,
     })
     plain = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: echo })
+    rulesServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: servedRules })
     await writeFile(join(dir, 'rules.json'), JSON.stringify(rules))
-    proxy = await startProxy(dir, { EGRESS_TEST_TOKEN: token }, cert)
+    proxy = await startProxy(
+      dir,
+      { EGRESS_TEST_TOKEN: token, EGRESS_RULES_TOKEN: rulesSecret },
+      cert,
+      [
+        '--set',
+        `egress_rules_url=http://127.0.0.1:${rulesServer.port}/rules`,
+        '--set',
+        'egress_rules_refresh=3600',
+      ],
+    )
     proxyCa = await readFile(join(dir, 'mitm', 'mitmproxy-ca-cert.pem'), 'utf8')
   }, 120_000)
 
@@ -142,6 +186,7 @@ describe.skipIf(!available)('egress addon', () => {
     await proxy?.proc.exited
     await tls?.stop(true)
     await plain?.stop(true)
+    await rulesServer?.stop(true)
     if (dir) await rm(dir, { recursive: true, force: true })
   })
 
@@ -184,9 +229,31 @@ describe.skipIf(!available)('egress addon', () => {
     expect((await send(`http://localhost:${plain.port}/packages/x`)).authorization).toBeNull()
   })
 
+  test('takes rules from a URL and re-reads them when the upstream refuses the token', async () => {
+    const registry = `https://localhost:${tls.port}/registry/pkg.tgz`
+    const authorization = async () => {
+      const response = await fetch(registry, {
+        proxy: `http://127.0.0.1:${proxy.port}`,
+        tls: { ca: proxyCa },
+      })
+      return ((await response.json()) as { authorization: string | null }).authorization
+    }
+    expect(await authorization()).toBe('Bearer registry-first')
+    registryToken = 'registry-rotated'
+    expect(await authorization()).toBe('Bearer registry-first')
+    let seen: string | null = null
+    for (let attempt = 0; attempt < 50 && seen !== 'Bearer registry-rotated'; attempt++) {
+      await Bun.sleep(200)
+      seen = await authorization()
+    }
+    expect(seen).toBe('Bearer registry-rotated')
+  }, 30_000)
+
   test('never logs header values', async () => {
     proxy.proc.kill()
-    expect(await proxy.exited()).not.toContain(token)
+    const output = await proxy.exited()
+    for (const secret of [token, rulesSecret, 'registry-first', 'registry-rotated'])
+      expect(output).not.toContain(secret)
   })
 
   test('refuses to start when a referenced variable is missing', async () => {

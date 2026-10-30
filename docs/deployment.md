@@ -132,22 +132,29 @@ Combine with `networkPolicy.enabled`: worker and scheduler pods accept only metr
 
 ### Egress proxy
 
-`egressProxy.enabled` deploys [docker/egress-proxy](../docker/egress-proxy/README.md): a forward proxy that adds credentials to the requests its `rules` match, so jobs install private packages without ever holding a token. Workers get `HOLTKEEPER_EGRESS_PROXY`, `HOLTKEEPER_EGRESS_CA` (the CA certificate only, never its key) and `HOLTKEEPER_EGRESS_NO_PROXY`; the bundled config turns them into `jobs.execution.egress`. Holtkeeper's own traffic (forge API, database, object store) does not go through it.
+`egressProxy.enabled` deploys [docker/egress-proxy](../docker/egress-proxy/README.md): a forward proxy that adds credentials to package registry requests of jobs, so jobs install private packages without ever holding a token. Workers get `HOLTKEEPER_EGRESS_PROXY`, `HOLTKEEPER_EGRESS_CA` (the CA certificate only, never its key) and `HOLTKEEPER_EGRESS_NO_PROXY`; the bundled config turns them into `jobs.execution.egress`. Holtkeeper's own traffic (forge API, database, object store) does not go through it.
+
+```yaml
+existingSecret: holtkeeper # with HOLTKEEPER_EGRESS_SECRET=<random string> among the other keys
+egressProxy:
+  enabled: true
+  ca:
+    certManager: true # or existingSecret: a kubernetes.io/tls Secret with the CA
+```
+
+With `forgeRules` (the default) the proxy reads its rules from the web pods (`GET /api/egress/rules`, authenticated with `HOLTKEEPER_EGRESS_SECRET` from the top-level `existingSecret`, which the bundled config also turns into `server.egress`). Turn on **Packages for jobs** on a forge in the panel, and its token, the same credential the forge uses, is added to downloads from that forge's package registries, always the current one after a rotation. Static `rules` can be added for other registries:
 
 ```yaml
 egressProxy:
-  enabled: true
-  existingSecret: holtkeeper-egress # GITLAB_PACKAGES_TOKEN=<deploy token with read_package_registry>
-  ca:
-    certManager: true # or existingSecret: a kubernetes.io/tls Secret with the CA
+  existingSecret: holtkeeper-egress # REGISTRY_TOKEN=...
   rules:
-    - host: gitlab.com
-      paths: ['^/api/v4/(projects/[^/]+/|groups/[^/]+/-/)?packages/npm/']
+    - host: registry.example.com
+      paths: ['^/npm/']
       headers:
-        Authorization: 'Bearer ${GITLAB_PACKAGES_TOKEN}'
+        Authorization: 'Bearer ${REGISTRY_TOKEN}'
 ```
 
-`${NAME}` is resolved by the proxy from `existingSecret`, not by Helm. Only `GET`/`HEAD` get credentials unless a rule lists `methods`, and only over TLS unless it sets `insecure`. TLS to hosts without rules is tunneled untouched. The pod restarts when the rules change; restart it after rotating the token or the CA. With `networkPolicy.enabled` the proxy accepts only workers, and workers may reach it.
+`${NAME}` in static rules is resolved by the proxy from `egressProxy.existingSecret`, not by Helm. Only `GET`/`HEAD` get credentials unless a rule lists `methods`, and only over TLS unless it sets `insecure`. TLS to hosts without rules is tunneled untouched. The pod restarts when static rules change; restart it after changing a static token or the CA. With `networkPolicy.enabled` the proxy accepts only workers, reaches the web pods for its rules, and workers may reach it.
 
 To use another proxy, leave `egressProxy` disabled and set `HOLTKEEPER_EGRESS_PROXY` (and `HOLTKEEPER_EGRESS_CA`) on the workers yourself.
 

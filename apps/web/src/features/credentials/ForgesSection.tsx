@@ -118,6 +118,7 @@ export function ForgesSection() {
                         {forge.id}
                         <Chip variant="secondary">{forge.data.kind}</Chip>
                         {panel ? null : <Chip>config file</Chip>}
+                        {forge.data.packages ? <Chip>packages for jobs</Chip> : null}
                       </div>
                       <div className="truncate font-mono text-xs text-muted">
                         {forge.data.url}
@@ -586,6 +587,12 @@ function ForgeDialog({
             Create a GitLab credential with the token first.
           </Notice>
         )}
+        <Switch
+          label="Packages for jobs"
+          isSelected={draft.packages}
+          onChange={(on) => set('packages', on)}
+          description="Jobs download private packages from this forge's registries with this token, through the egress proxy. They never see the token, and it is used only to read packages."
+        />
         <button type="submit" hidden />
       </form>
     </Dialog>

@@ -600,6 +600,13 @@
             }
           }
         },
+        "forgeRules": {
+          "type": "boolean"
+        },
+        "refreshSeconds": {
+          "type": "integer",
+          "minimum": 5
+        },
         "existingSecret": {
           "type": "string"
         },

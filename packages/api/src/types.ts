@@ -553,6 +553,29 @@ export interface RepoExplain {
 }
 
 /**
+ * A request an egress proxy adds headers to: to `host` (exact, or `*.example.com`), with a path
+ * matching one of `paths` (regular expressions; none: every path) and a method in `methods`
+ * (default `GET` and `HEAD`), over TLS unless `insecure`.
+ */
+export interface EgressRule {
+  host: string
+  paths?: string[]
+  methods?: string[]
+  /** Set on matching requests, replacing what the client sent. */
+  headers: Record<string, string>
+  insecure?: boolean
+}
+
+/**
+ * `GET /api/egress/rules` with `Authorization: Bearer <server.egress.secret>`: the rules for the
+ * panel forges with `packages` on, carrying their credential's current token. Never cache it longer
+ * than a minute: rotation revokes the previous token at once.
+ */
+export interface EgressRulesResponse {
+  rules: EgressRule[]
+}
+
+/**
  * `GET /api/config/runtime` — the parts of the config only the file sets, without secrets: job
  * execution, server storage, limits, AI provider plugins and plugin uses.
  */
@@ -831,6 +854,8 @@ export interface ForgeConfigView {
   url: string
   /** Panel forges only. */
   credentialId?: string
+  /** Jobs read its package registries with its token, through the egress proxy. */
+  packages?: boolean
   webhook?: {
     /** Where the forge sends events: `${publicUrl}/api/webhooks/<forgeId>`. */
     url: string
@@ -893,7 +918,7 @@ export interface ConfigEntryDetail<T extends ConfigDocumentType = ConfigDocument
 
 /** Bodies of `PUT /api/config/<collection>/:id`. */
 export interface PutConfigInput {
-  forge: { kind: 'gitlab' | 'github'; url: string; credentialId: string }
+  forge: { kind: 'gitlab' | 'github'; url: string; credentialId: string; packages?: boolean }
   group: { forge: string; include: string[]; exclude?: string[] }
   repoTraits: {
     pattern: string
