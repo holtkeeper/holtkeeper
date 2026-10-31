@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { RepoAvatarInfo } from '@holtkeeper/api'
+import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -14,6 +15,7 @@ import { createApp } from '../src/app.ts'
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
 let forgeAvatar: Uint8Array | undefined
 let forgeCalls = 0
+let forgeGate: Promise<void> | undefined
 
 const config = parseConfig({
   forges: {
@@ -24,6 +26,7 @@ const config = parseConfig({
         ({
           getRepositoryAvatar: async () => {
             forgeCalls++
+            await forgeGate
             return forgeAvatar ? { data: forgeAvatar, contentType: 'image/png' } : undefined
           },
         }) as never,
@@ -42,15 +45,11 @@ const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
 const asReader = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'reader' }
 
 let store: Store
-let app: ReturnType<typeof createApp>
-const avatar = '/api/repos/avatar?repo=work:games/data-tools'
-
-beforeEach(() => {
-  store = memoryStore()
-  forgeAvatar = undefined
-  forgeCalls = 0
+let artifacts: ArtifactStore
+let clock = new Date('2026-10-30T12:00:00.000Z')
+const build = () => {
   const vault = aesVault('v'.repeat(32))
-  app = createApp({
+  return createApp({
     config,
     auth,
     store,
@@ -62,8 +61,21 @@ beforeEach(() => {
     }),
     settings: builtinSettings,
     analyses: [],
-    now: () => new Date('2026-10-30T12:00:00.000Z'),
+    artifacts,
+    now: () => clock,
   })
+}
+let app: ReturnType<typeof createApp>
+const avatar = '/api/repos/avatar?repo=work:games/data-tools'
+
+beforeEach(() => {
+  store = memoryStore()
+  forgeAvatar = undefined
+  forgeCalls = 0
+  forgeGate = undefined
+  clock = new Date('2026-10-30T12:00:00.000Z')
+  artifacts = memoryArtifactStore()
+  app = build()
 })
 
 const info = async () =>
@@ -75,6 +87,53 @@ const put = (headers: Record<string, string>, body: Uint8Array | string) =>
   app.request(avatar, { method: 'PUT', headers, body })
 
 describe('repository avatars', () => {
+  test('a new process serves the stored forge avatar and refreshes it when stale', async () => {
+    forgeAvatar = png
+    expect((await app.request(avatar, { headers: asReader })).headers.get('content-type')).toBe(
+      'image/png',
+    )
+    expect(forgeCalls).toBe(1)
+
+    forgeAvatar = undefined
+    app = build()
+    expect((await app.request(avatar, { headers: asReader })).headers.get('content-type')).toBe(
+      'image/png',
+    )
+    expect(forgeCalls).toBe(1)
+
+    clock = new Date(Date.now() + 7 * 60 * 60 * 1000)
+    app = build()
+    expect((await app.request(avatar, { headers: asReader })).headers.get('content-type')).toBe(
+      'image/png',
+    )
+    await Bun.sleep(0)
+    expect(forgeCalls).toBe(2)
+    expect((await app.request(avatar, { headers: asReader })).headers.get('content-type')).toBe(
+      'image/svg+xml',
+    )
+  })
+
+  test('a slow forge is asked once and does not hold up the page', async () => {
+    const gate = Promise.withResolvers<void>()
+    forgeGate = gate.promise
+    forgeAvatar = png
+    const responses = await Promise.all(
+      [1, 2, 3].map(async () => app.request(avatar, { headers: asReader })),
+    )
+    expect(responses.map((response) => response.headers.get('content-type'))).toEqual([
+      'image/svg+xml',
+      'image/svg+xml',
+      'image/svg+xml',
+    ])
+    expect(forgeCalls).toBe(1)
+    gate.resolve()
+    await gate.promise
+    await Bun.sleep(0)
+    const ready = await app.request(avatar, { headers: asReader })
+    expect(ready.headers.get('content-type')).toBe('image/png')
+    expect(forgeCalls).toBe(1)
+  })
+
   test('generated, then the forge avatar, then an upload; reset falls back', async () => {
     const generated = await app.request(avatar, { headers: asReader })
     expect(generated.headers.get('content-type')).toBe('image/svg+xml')
