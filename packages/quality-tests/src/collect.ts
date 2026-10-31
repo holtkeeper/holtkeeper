@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 
 import { CommandError, type CommandRunner } from '@holtkeeper/exec'
 
@@ -39,15 +39,26 @@ export interface LcovCommand {
   timeoutMs?: number
 }
 
+/** The report under `out`, or the same folder below a tool's own root (jest `rootDir`). */
+async function findReport(dir: string, out: string, file: string): Promise<string | undefined> {
+  const expected = join(dir, out, file)
+  if (existsSync(expected)) return expected
+  const glob = new Bun.Glob(`**/${basename(out)}/${file}`)
+  for await (const path of glob.scan({ cwd: dir, dot: true })) return join(dir, path)
+  return undefined
+}
+
 /**
  * Runs the project's tests with lcov coverage and parses the report. Failing tests do not fail
- * collection as long as the report was written; a missing report throws `CommandError`.
+ * collection as long as the report was written, also when the tool resolved the relative report
+ * folder against its own root; a missing report throws `CommandError`.
  */
 export function lcovCommandCollector(spec: LcovCommand): CoverageCollector {
   return {
     name: spec.name,
     async collect({ dir, runner, signal }: CoverageContext) {
       const out = await scratchDir(dir)
+      let stray: string | undefined
       try {
         const command = spec.command(out.rel)
         const result = await runner.run(command, {
@@ -55,24 +66,34 @@ export function lcovCommandCollector(spec: LcovCommand): CoverageCollector {
           timeoutMs: spec.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           ...(signal ? { signal } : {}),
         })
+        const report = await findReport(dir, out.rel, spec.reportFile ?? 'lcov.info')
+        if (report && dirname(report) !== out.abs) stray = dirname(report)
         let text: string
         try {
-          text = await readFile(join(out.abs, spec.reportFile ?? 'lcov.info'), 'utf8')
+          if (!report) throw new Error('no report')
+          text = await readFile(report, 'utf8')
         } catch {
           throw new CommandError(command, result)
         }
         return withLanguages(parseLcov(text, dir), [spec.language])
       } finally {
         await rm(out.abs, { recursive: true, force: true })
+        if (stray) await rm(stray, { recursive: true, force: true })
       }
     },
   }
 }
 
-function packageExec(dir: string): string[] {
-  if (existsSync(join(dir, 'pnpm-lock.yaml'))) return ['pnpm', 'exec']
-  if (existsSync(join(dir, 'yarn.lock'))) return ['yarn']
-  return ['npx', '--no-install']
+/**
+ * Runs a package binary: from `node_modules/.bin` when the project has one (yarn berry only finds
+ * binaries the root workspace declares), else through the package manager.
+ */
+function packageExec(dir: string, command: readonly string[]): string[] {
+  if (existsSync(join(dir, 'node_modules', '.bin')))
+    return ['sh', '-c', 'PATH="$PWD/node_modules/.bin:$PATH" exec "$@"', 'sh', ...command]
+  if (existsSync(join(dir, 'pnpm-lock.yaml'))) return ['pnpm', 'exec', ...command]
+  if (existsSync(join(dir, 'yarn.lock'))) return ['yarn', ...command]
+  return ['npx', '--no-install', ...command]
 }
 
 /** Go modules declared by `go.mod` files at the root and one level of nesting. */
@@ -149,7 +170,7 @@ export function goCoverageCollector(options: { timeoutMs?: number } = {}): Cover
 
 /** The collector that runs `framework`'s tests with coverage in the project. */
 export function collectorFor(framework: TestFramework, dir: string): CoverageCollector {
-  const exec = () => packageExec(dir)
+  const exec = (...command: string[]) => packageExec(dir, command)
   switch (framework) {
     case 'bun:test':
       return lcovCommandCollector({
@@ -167,32 +188,27 @@ export function collectorFor(framework: TestFramework, dir: string): CoverageCol
       return lcovCommandCollector({
         name: 'vitest --coverage',
         language: 'js',
-        command: (out) => [
-          ...exec(),
-          'vitest',
-          'run',
-          '--coverage.enabled',
-          '--coverage.reporter=lcov',
-          `--coverage.reportsDirectory=${out}`,
-        ],
+        command: (out) =>
+          exec(
+            'vitest',
+            'run',
+            '--coverage.enabled',
+            '--coverage.reporter=lcov',
+            `--coverage.reportsDirectory=${out}`,
+          ),
       })
     case 'jest':
       return lcovCommandCollector({
         name: 'jest --coverage',
         language: 'js',
-        command: (out) => [
-          ...exec(),
-          'jest',
-          '--coverage',
-          '--coverageReporters=lcov',
-          `--coverageDirectory=${out}`,
-        ],
+        command: (out) =>
+          exec('jest', '--coverage', '--coverageReporters=lcov', `--coverageDirectory=${out}`),
       })
     case 'mocha':
       return lcovCommandCollector({
         name: 'c8 mocha',
         language: 'js',
-        command: (out) => [...exec(), 'c8', '--reporter=lcov', `--reports-dir=${out}`, 'mocha'],
+        command: (out) => exec('c8', '--reporter=lcov', `--reports-dir=${out}`, 'mocha'),
       })
     case 'node:test':
       return lcovCommandCollector({

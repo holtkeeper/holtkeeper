@@ -16,6 +16,7 @@ import {
   listFiles,
 } from '@holtkeeper/quality-tests'
 
+import { buildWorkspaces } from './build.ts'
 import { type InstallOutcome, installDependencies } from './install.ts'
 import { type CoverageData, type FileCoverageData, sumCounts } from './model.ts'
 
@@ -37,6 +38,11 @@ export interface AnalyzeCoverageOptions {
   install?: boolean
   /** Let that install run lifecycle scripts. Default false. */
   installScripts?: boolean
+  /**
+   * Run the `build` script of workspace packages whose entry files are missing before the tests.
+   * Default true; never applies when `file` is given.
+   */
+  build?: boolean
   log?: (line: string) => void
   signal?: AbortSignal
 }
@@ -87,7 +93,7 @@ async function untestedFiles(
 
 /**
  * Collects line, function and branch coverage of a checkout per source file: installs JavaScript
- * dependencies when they are missing, runs the tests of every detected framework with coverage
+ * dependencies when they are missing, builds workspace packages whose entry files are missing, runs the tests of every detected framework with coverage
  * (or reads `file`), leaves out tests, configs, generated and excluded files, and adds source
  * files no test loaded as fully uncovered. Throws when no collector produced a report, naming a
  * failed install.
@@ -110,6 +116,14 @@ export async function analyzeCoverage(options: AnalyzeCoverageOptions): Promise<
         ? `dependencies: not installed (${install.reason})`
         : `dependencies: ${install.command.join(' ')} ${install.status === 'installed' ? 'ok' : `failed\n${install.error}`}`,
     )
+  }
+  if (!options.file && (options.build ?? true) && collectors.length) {
+    const build = await buildWorkspaces({ dir, runner, ...(signal ? { signal } : {}) })
+    if (build.status === 'built') options.log?.(`workspaces: built ${build.workspaces.join(', ')}`)
+    if (build.status === 'failed')
+      options.log?.(
+        `workspaces: build failed${build.workspaces.length ? ` after ${build.workspaces.join(', ')}` : ''}\n${build.error}`,
+      )
   }
   let report
   try {

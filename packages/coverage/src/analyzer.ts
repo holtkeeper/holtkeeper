@@ -26,6 +26,8 @@ export const coverageOptionsSchema = z.object({
   install: z.boolean().default(true),
   /** Let that install run lifecycle scripts such as `postinstall`. */
   installScripts: z.boolean().default(false),
+  /** Build workspace packages whose entry files are missing before running the tests. */
+  build: z.boolean().default(true),
 })
 
 export type CoverageOptions = z.output<typeof coverageOptionsSchema>
@@ -63,6 +65,7 @@ export const coverageAnalyzer = defineAnalyzer<CoverageData, CoverageOptions>({
       untested: options.untested,
       install: options.install,
       installScripts: options.installScripts,
+      build: options.build,
       ...(log ? { log } : {}),
       ...(options.file ? { file: options.file } : {}),
       ...(signal ? { signal } : {}),

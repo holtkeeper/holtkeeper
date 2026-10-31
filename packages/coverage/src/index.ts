@@ -1,5 +1,6 @@
 export * from './analyze.ts'
 export * from './analyzer.ts'
+export * from './build.ts'
 export * from './install.ts'
 export * from './model.ts'
 export * from './report.ts'
