@@ -907,6 +907,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/quality": "workspace:*",
         "@holtkeeper/quality-tests": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "zod": "^4.6.7",

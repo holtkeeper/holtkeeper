@@ -65,8 +65,8 @@ export const analysisPages = [
     kind: 'testids',
     title: 'Test ids',
     icon: 'testids',
-    description: 'Interactive elements of frontend templates with and without test ids',
-    trend: [/with test id/i, /missing/i],
+    description: 'Test attributes (data-test-id, data-test-state, ...) per component',
+    trend: [/elements with test attributes/i, /components/i],
   },
   {
     to: '/branches',

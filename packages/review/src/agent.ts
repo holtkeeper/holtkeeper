@@ -41,6 +41,8 @@ export interface ReviewPromptInput {
   knowledge?: readonly KnowledgeEntry[]
   /** REVIEW.md path rules that match files in scope, with those files. */
   pathInstructions?: readonly { glob: string; text: string; files: readonly string[] }[]
+  /** Deterministic findings to turn into comments with suggestions, in the project's style. */
+  requests?: readonly { path: string; line: number; text: string; category: string }[]
   threads: readonly OpenThread[]
   maxComments: number
   language?: string
@@ -108,6 +110,9 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     const files = rule.files.slice(0, 5).join(', ') + (rule.files.length > 5 ? ', ...' : '')
     return `- \`${rule.glob}\` (${files}): ${rule.text}`
   })
+  const requests = (input.requests ?? []).map(
+    (r) => `- ${r.path}:${r.line} (${r.category}): ${r.text.replace(/\s+/g, ' ').slice(0, 400)}`,
+  )
   const threads = input.threads.map(
     (t) => `- ${t.path}:${t.line} ${t.text.replace(/\s+/g, ' ').slice(0, 160)}`,
   )
@@ -119,6 +124,9 @@ export function reviewPrompt(input: ReviewPromptInput): string {
       : '',
     pathRules.length
       ? `Rules for paths in this diff (from REVIEW.md), apply them to the matching files:\n${pathRules.join('\n')}`
+      : '',
+    requests.length
+      ? `Checks flagged these lines. Comment on each one that is right, with that category, severity \`minor\` and a \`suggestion\` that fixes it in the style the note describes (for a missing test attribute: add the project's attribute with a short value unique within the component, named like the examples). Skip the ones that are wrong; they count toward the comment limit:\n${requests.join('\n')}`
       : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
     `Diff:\n\n${diff}`,

@@ -23,7 +23,10 @@ describe('jsx', () => {
       ['S.Input', 4],
       ['button', 5],
     ])
-    expect(tags[1]?.attributes).toEqual([{ name: 'data-testid', value: 'name' }, { name: 'value' }])
+    expect(tags[1]?.attributes).toEqual([
+      { name: 'data-testid', value: 'name' },
+      { name: 'value', expression: 'name' },
+    ])
     expect(tags[1]?.spread).toBe(true)
     expect(tags[2]?.attributes).toEqual([{ name: 'type', value: 'submit' }, { name: 'disabled' }])
   })
@@ -49,7 +52,7 @@ const x = cond ? <a href="/">home</a> : null`),
 
   test('reads lit templates', () => {
     expect(scanTags('html`<button @click=${this.go}>Go</button>`', 'jsx')[0]?.attributes).toEqual([
-      { name: '@click' },
+      { name: '@click', expression: 'this.go' },
     ])
   })
 })

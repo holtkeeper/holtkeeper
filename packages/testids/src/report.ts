@@ -1,229 +1,152 @@
 import { defineAnalysis, metric } from '@holtkeeper/report'
-import type {
-  Block,
-  Cell,
-  Issue,
-  Metric,
-  Report,
-  Section,
-  Tone,
-  TreeNode,
-} from '@holtkeeper/report'
+import type { Block, Cell, Column, Metric, Report, Section } from '@holtkeeper/report'
 
 import {
-  type TestIdFile,
+  type TestAttribute,
+  type TestIdComponent,
   type TestIdsData,
-  taggedPercent,
+  attributeUsage,
   testIdsDataSchema,
-  testIdTotals,
 } from './model.ts'
 
-const limits = { files: 50, issues: 300, depth: 3, changes: 50 }
+const limits = { rows: 3000, columns: 8, examples: 6, changes: 200 }
 
-/** Share of elements with a test id from which a folder reads as good, and below which as bad. */
-const thresholds = { good: 90, bad: 50 }
-
-function tone(percent: number | undefined): Tone {
-  if (percent === undefined) return 'neutral'
-  if (percent >= thresholds.good) return 'good'
-  return percent >= thresholds.bad ? 'warning' : 'bad'
-}
+const elementCount = (components: readonly TestIdComponent[]) =>
+  components.reduce((sum, component) => sum + component.total, 0)
 
 function metrics(data: TestIdsData, previous?: TestIdsData): Metric[] {
-  const now = testIdTotals(data.files)
-  const before = previous ? testIdTotals(previous.files) : undefined
-  const share = taggedPercent(now)
-  const previousShare = before ? taggedPercent(before) : undefined
+  const used = attributeUsage(data.components)
   return [
-    ...(share === undefined
-      ? []
-      : [
-          {
-            ...metric('tagged', 'With test id', share, {
-              unit: 'percent',
-              previous: previousShare,
-              better: 'up',
-              hint: `Interactive elements with ${data.attributes.slice(0, 3).join(', ')} or another configured attribute`,
-            }),
-            tone: tone(share),
-          },
-        ]),
-    metric('elements', 'Interactive elements', now.total, { previous: before?.total }),
-    {
-      ...metric('missing', 'Missing test ids', now.missing, {
-        previous: before?.missing,
-        better: 'down',
-      }),
-      ...(now.missing > 0 ? { tone: 'warning' as const } : { tone: 'good' as const }),
-    },
-    metric('unverified', 'Unverified', now.unverified, {
-      previous: before?.unverified,
-      better: 'down',
-      hint: 'Spread props that may carry a test id at runtime',
+    metric('components', 'Components', data.components.length, {
+      previous: previous?.components.length,
+      hint: 'Template files with at least one test attribute',
+    }),
+    metric('elements', 'Elements with test attributes', elementCount(data.components), {
+      previous: previous ? elementCount(previous.components) : undefined,
+    }),
+    metric('attributes', 'Attributes in use', used.length, {
+      previous: previous ? attributeUsage(previous.components).length : undefined,
+      hint: used
+        .slice(0, 4)
+        .map((attribute) => attribute.name)
+        .join(', '),
     }),
   ]
 }
 
-interface Folder {
-  total: number
-  tagged: number
-  children: Map<string, Folder>
-}
+const shown = (attribute: TestAttribute) =>
+  attribute.dynamic ? `{${attribute.value}}` : attribute.value || '(no value)'
 
-function tree(files: readonly TestIdFile[]): TreeNode {
-  const root: Folder = { total: 0, tagged: 0, children: new Map() }
-  for (const file of files) {
-    const parts = file.file.split('/')
-    root.total += file.total
-    root.tagged += file.tagged
-    let node = root
-    for (const part of parts.slice(0, Math.min(parts.length, limits.depth))) {
-      let child = node.children.get(part)
-      if (!child) {
-        child = { total: 0, tagged: 0, children: new Map() }
-        node.children.set(part, child)
-      }
-      child.total += file.total
-      child.tagged += file.tagged
-      node = child
-    }
-  }
-  const toNode = (name: string, folder: Folder): TreeNode =>
-    folder.children.size
-      ? {
-          name,
-          tone: tone(taggedPercent(folder)),
-          children: [...folder.children].map(([n, f]) => toNode(n, f)),
-        }
-      : { name, value: folder.total, tone: tone(taggedPercent(folder)) }
-  return toNode('project', root)
-}
-
-const missingOf = (file: TestIdFile) => file.total - file.tagged - file.unverified
-
-function overviewSection(data: TestIdsData): Section {
-  const used = Object.entries(data.usage)
-    .filter(([, count]) => count > 0)
-    .toSorted((a, b) => b[1] - a[1])
-  const blocks: Block[] = data.files.length
-    ? [{ type: 'treemap', title: 'Interactive elements', unit: 'count', root: tree(data.files) }]
-    : [{ type: 'markdown', text: 'No interactive elements were found in templates.' }]
-  if (used.length > 1)
-    blocks.push(
-      {
-        type: 'chart',
-        title: 'Test id attributes in use',
-        chart: 'donut',
-        unit: 'count',
-        x: 'attribute',
-        series: [{ key: 'elements', label: 'Elements' }],
-        data: used.map(([attribute, elements]) => ({ attribute, elements })),
-      },
-      {
-        type: 'markdown',
-        text: `${used.length} different test id attributes are in use; tests are easier to write against one.`,
-      },
-    )
+function attributesSection(data: TestIdsData): Section {
+  const used = attributeUsage(data.components)
   return {
-    id: 'overview',
-    title: 'By folder',
-    description: `Size is interactive elements; green from ${thresholds.good}% with a test id, red below ${thresholds.bad}%.`,
-    blocks,
-  }
-}
-
-function filesSection(data: TestIdsData): Section {
-  const ranked = data.files
-    .filter((file) => file.tagged < file.total)
-    .toSorted((a, b) => missingOf(b) - missingOf(a) || a.file.localeCompare(b.file))
-  const rows: Record<string, Cell>[] = ranked.slice(0, limits.files).map((file) => {
-    const share = taggedPercent(file) ?? 0
-    return {
-      file: file.file,
-      source: file.source,
-      elements: file.total,
-      missing: missingOf(file),
-      unverified: file.unverified,
-      tagged: { text: `${share.toFixed(0)}%`, value: share, tone: tone(share) },
-    }
-  })
-  return {
-    id: 'files',
-    title: 'Files with untagged elements',
-    blocks: rows.length
+    id: 'attributes',
+    title: 'Attributes',
+    description: `Attributes named ${data.attributes.join(', ')} or extending one of them with \`-\`.`,
+    blocks: used.length
       ? [
           {
             type: 'table',
             columns: [
-              { key: 'file', label: 'File', format: 'code' },
-              { key: 'source', label: 'Template' },
+              { key: 'attribute', label: 'Attribute', format: 'code' },
               { key: 'elements', label: 'Elements', unit: 'count', align: 'end' },
-              { key: 'missing', label: 'Missing', unit: 'count', align: 'end' },
-              { key: 'unverified', label: 'Unverified', unit: 'count', align: 'end' },
-              { key: 'tagged', label: 'With test id', align: 'end' },
+              { key: 'components', label: 'Components', unit: 'count', align: 'end' },
+              { key: 'values', label: 'Values', unit: 'count', align: 'end' },
+              { key: 'examples', label: 'Examples', format: 'tags' },
             ],
-            rows,
+            rows: used.map((attribute) => ({
+              attribute: attribute.name,
+              elements: attribute.elements,
+              components: attribute.components,
+              values: attribute.values.length,
+              examples: attribute.values.slice(0, limits.examples).join(', '),
+            })),
           },
-          ...(ranked.length > limits.files
-            ? [
-                {
-                  type: 'markdown' as const,
-                  text: `…and ${ranked.length - limits.files} more files.`,
-                },
-              ]
-            : []),
         ]
-      : [{ type: 'markdown', text: 'Every interactive element has a test id.' }],
+      : [{ type: 'markdown', text: 'No test attributes were found in templates.' }],
   }
 }
 
-function elementsSection(data: TestIdsData): Section {
-  const issues: Issue[] = data.files.flatMap((file) =>
-    file.elements.map((element) => ({
-      id: `testid-${file.file}:${element.line}:${element.tag}`,
-      tone: element.status === 'missing' ? ('warning' as const) : ('neutral' as const),
-      title: `${file.file}:${element.line} <${element.tag}>${element.as ? ` → ${element.as}` : ''}`,
-      detail:
-        element.status === 'missing'
-          ? `Interactive (${element.reason}) without a test id.`
-          : `Interactive (${element.reason}); spreads props, so a test id may come from its caller.`,
-      tags: [element.status, file.source],
-    })),
+const groupOf = (component: TestIdComponent) => `${component.name} · ${component.file}`
+
+function componentsSection(data: TestIdsData): Section {
+  const named = attributeUsage(data.components).map((attribute) => attribute.name)
+  const own = named.slice(0, limits.columns)
+  const rest = new Set(named.slice(limits.columns))
+  const sorted = data.components.toSorted(
+    (a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file),
   )
-  const missingFirst = issues.toSorted(
-    (a, b) => Number(a.tone !== 'warning') - Number(b.tone !== 'warning'),
+  const rows: Record<string, Cell>[] = sorted.flatMap((component) =>
+    component.elements.map((element) => {
+      const row: Record<string, Cell> = {
+        component: groupOf(component),
+        element: `<${element.tag}>`,
+        location: `${component.file}:${element.line}`,
+      }
+      const other: string[] = []
+      for (const attribute of element.attributes) {
+        if (rest.has(attribute.name)) other.push(`${attribute.name}=${shown(attribute)}`)
+        else row[attribute.name] = shown(attribute)
+      }
+      if (other.length) row.other = other.join(', ')
+      return row
+    }),
   )
+  const columns: Column[] = [
+    { key: 'component', label: 'Component' },
+    { key: 'element', label: 'Element', format: 'code' },
+    ...own.map((name): Column => ({ key: name, label: name, format: 'code' })),
+    ...(rest.size ? [{ key: 'other', label: 'Other', format: 'code' } satisfies Column] : []),
+    { key: 'location', label: 'Line', format: 'code', path: true },
+  ]
+  const capped = data.components.filter((component) => component.total > component.elements.length)
+  const notes = [
+    rows.length > limits.rows ? `…and ${rows.length - limits.rows} more elements.` : '',
+    capped.length
+      ? `${capped.length} components list only their first ${capped[0]?.elements.length} elements.`
+      : '',
+  ].filter(Boolean)
+  const blocks: Block[] = rows.length
+    ? [
+        { type: 'table', columns, rows: rows.slice(0, limits.rows), groupBy: 'component' },
+        ...notes.map((text) => ({ type: 'markdown' as const, text })),
+      ]
+    : [{ type: 'markdown', text: 'No test attributes were found in templates.' }]
   return {
-    id: 'elements',
-    title: 'Elements without a test id',
-    blocks: issues.length
-      ? [
-          { type: 'issues', items: missingFirst.slice(0, limits.issues) },
-          ...(issues.length > limits.issues
-            ? [
-                {
-                  type: 'markdown' as const,
-                  text: `…and ${issues.length - limits.issues} more elements.`,
-                },
-              ]
-            : []),
-        ]
-      : [{ type: 'markdown', text: 'Every interactive element has a test id.' }],
+    id: 'components',
+    title: 'By component',
+    description: 'Every element with a test attribute; `{…}` values are set at runtime.',
+    blocks,
   }
+}
+
+/** Static `name="value"` selectors per component, for comparing two analyses. */
+function selectors(data: TestIdsData) {
+  const result = new Map<string, { component: string; selector: string }>()
+  for (const component of data.components)
+    for (const element of component.elements)
+      for (const attribute of element.attributes) {
+        if (attribute.dynamic || !attribute.value) continue
+        const selector = `[${attribute.name}="${attribute.value}"]`
+        result.set(`${component.file}\u0000${selector}`, {
+          component: groupOf(component),
+          selector,
+        })
+      }
+  return result
 }
 
 function changesSection(data: TestIdsData, previous: TestIdsData, compareTo?: string): Section {
-  const before = new Map(previous.files.map((file) => [file.file, missingOf(file)]))
-  const now = new Map(data.files.map((file) => [file.file, missingOf(file)]))
-  const rows = [...new Set([...before.keys(), ...now.keys()])]
-    .map((file) => ({
-      file,
-      before: before.get(file) ?? 0,
-      after: now.get(file) ?? 0,
-    }))
-    .filter((row) => row.before !== row.after)
-    .map((row) => ({ ...row, delta: row.after - row.before }))
-    .toSorted((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || a.file.localeCompare(b.file))
+  const now = selectors(data)
+  const before = selectors(previous)
+  const rows: Record<string, Cell>[] = [
+    ...[...now]
+      .filter(([key]) => !before.has(key))
+      .map(([, entry]) => ({ ...entry, change: { text: 'added', tone: 'good' as const } })),
+    ...[...before]
+      .filter(([key]) => !now.has(key))
+      .map(([, entry]) => ({ ...entry, change: { text: 'removed', tone: 'bad' as const } })),
+  ].toSorted((a, b) => a.component.localeCompare(b.component))
   const since = compareTo ?? 'the previous analysis'
   return {
     id: 'changes',
@@ -232,17 +155,16 @@ function changesSection(data: TestIdsData, previous: TestIdsData, compareTo?: st
       ? [
           {
             type: 'table',
-            title: `Missing test ids since ${since}`,
+            title: `Selectors added or removed since ${since}`,
             columns: [
-              { key: 'file', label: 'File', format: 'code' },
-              { key: 'before', label: 'Before', unit: 'count', align: 'end' },
-              { key: 'after', label: 'After', unit: 'count', align: 'end' },
-              { key: 'delta', label: 'Change', unit: 'count', format: 'delta', better: 'down' },
+              { key: 'component', label: 'Component' },
+              { key: 'selector', label: 'Selector', format: 'code' },
+              { key: 'change', label: 'Change' },
             ],
             rows: rows.slice(0, limits.changes),
           },
         ]
-      : [{ type: 'markdown', text: `No file gained or lost test ids since ${since}.` }],
+      : [{ type: 'markdown', text: `No selector was added or removed since ${since}.` }],
   }
 }
 
@@ -259,34 +181,38 @@ export function testIdsReport(
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     metrics: metrics(data, previous),
     sections: [
-      overviewSection(data),
-      filesSection(data),
-      elementsSection(data),
+      attributesSection(data),
+      componentsSection(data),
       ...(previous ? [changesSection(data, previous, compareTo)] : []),
     ],
   }
 }
 
+/** Analyses stored before the catalog have no `components`; they read as empty. */
+const catalogOf = (data: TestIdsData): TestIdsData =>
+  Array.isArray(data.components) ? data : { attributes: data.attributes ?? [], components: [] }
+
 /**
- * The `testids` analysis kind: interactive elements of a repository's templates and whether they
- * carry a test id attribute for end-to-end tests. `With test id` carries `better: 'up'`.
+ * The `testids` analysis kind: the test attributes a repository's templates expose, per
+ * component, for writing end-to-end tests against them.
  */
 export const testIdsAnalysis = defineAnalysis<TestIdsData>({
   kind: 'testids',
   label: 'Test ids',
   schema: testIdsDataSchema,
-  summarize: (data) => metrics(data),
+  summarize: (data) => metrics(catalogOf(data)),
   toReport(current, previous) {
+    const prior = previous && Array.isArray(previous.data.components) ? previous : undefined
     return {
-      ...testIdsReport(current.data, {
-        previous: previous?.data,
+      ...testIdsReport(catalogOf(current.data), {
+        previous: prior?.data,
         ref: current.ref,
-        compareTo: previous?.ref,
+        compareTo: prior?.ref,
       }),
       subject: {
         repo: current.repo,
         ...(current.ref ? { ref: current.ref } : {}),
-        ...(previous?.ref ? { compareTo: previous.ref } : {}),
+        ...(prior?.ref ? { compareTo: prior.ref } : {}),
       },
     }
   },

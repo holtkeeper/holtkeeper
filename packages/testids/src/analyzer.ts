@@ -1,15 +1,7 @@
 import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
-import {
-  analyzeTestIds,
-  defaultAttributes,
-  defaultEvents,
-  defaultFactories,
-  defaultMarkers,
-  defaultRoles,
-  defaultTags,
-} from './analyze.ts'
+import { analyzeTestIds, defaultAttributes } from './analyze.ts'
 import type { TestIdsData } from './model.ts'
 import { testIdsAnalysis } from './report.ts'
 import { builtinSources } from './sources.ts'
@@ -29,28 +21,12 @@ const list = (fallback: readonly string[]) =>
 
 /** Options of the `testids` analyzer. */
 export const testIdsOptionsSchema = z.object({
-  /** Attribute or prop names that count as a test id, compared case-insensitively. */
+  /** Test attribute names, compared case-insensitively; each also covers names extending it with `-`. */
   attributes: list(defaultAttributes),
   /** Template sources to read, by name: `jsx`, `vue`, `svelte`, `html`. */
   sources: list(Object.keys(builtinSources)),
-  /** Component name (or `*` pattern) → native tag it renders, e.g. `{ "Button": "button" }`. */
-  components: z.record(z.string(), z.string()).default({}),
-  /** Factories whose results are styled native tags (`styled.button`, `tw.a`, `chakra.input`). */
-  factories: list(defaultFactories),
-  /** Import prefix → folder, on top of the root `tsconfig.json` paths, e.g. `{ "@/": "src/" }`. */
-  aliases: z.record(z.string(), z.string()).default({}),
-  /** Tag or component names (`*` patterns) never reported. */
-  ignore: list([]),
   /** Glob patterns of files to leave out. */
   exclude: list([]),
-  /** Native tags that are interactive by themselves. */
-  tags: list(defaultTags),
-  /** Events whose handlers make an element interactive, lower-case without `on`. */
-  events: list(defaultEvents),
-  /** ARIA roles that make an element interactive. */
-  roles: list(defaultRoles),
-  /** Attributes that make a component interactive: `href`, `to`, `v-model`, ... */
-  markers: list(defaultMarkers),
 })
 
 export type TestIdsOptions = z.output<typeof testIdsOptionsSchema>
@@ -79,8 +55,8 @@ export const testIdPresets: AnalyzerPreset<TestIdsOptions>[] = [
 ]
 
 /**
- * The `testids` analyzer: finds interactive elements in a checkout's JSX, Vue, Svelte and HTML
- * templates, following styled components to their native tags, and records which carry a test id.
+ * The `testids` analyzer: lists the test attributes (`data-test-id`, `data-test-state`, ...) a
+ * checkout's JSX, Vue, Svelte and HTML templates expose, per component.
  */
 export const testIdsAnalyzer = defineAnalyzer<TestIdsData, TestIdsOptions>({
   kind: 'testids',
@@ -92,10 +68,10 @@ export const testIdsAnalyzer = defineAnalyzer<TestIdsData, TestIdsOptions>({
     {
       flag: 'attributes',
       option: 'attributes',
-      description: 'comma-separated test id attributes (default data-testid,data-test,data-qa,...)',
+      description:
+        'comma-separated test attributes and prefixes (default data-testid,data-test,...)',
     },
     { flag: 'sources', option: 'sources', description: 'comma-separated: jsx,vue,svelte,html' },
-    { flag: 'ignore', option: 'ignore', description: 'comma-separated component names to skip' },
     { flag: 'exclude', option: 'exclude', description: 'comma-separated globs of files to skip' },
   ],
   presets: testIdPresets,
@@ -110,15 +86,7 @@ export const testIdsAnalyzer = defineAnalyzer<TestIdsData, TestIdsOptions>({
       dir,
       sources,
       attributes: options.attributes,
-      components: options.components,
-      factories: options.factories,
-      aliases: options.aliases,
-      ignore: options.ignore,
       exclude: options.exclude,
-      tags: options.tags,
-      events: options.events,
-      roles: options.roles,
-      markers: options.markers,
       ...(signal ? { signal } : {}),
     })
     return { data, ...(ref ? { ref } : {}) }

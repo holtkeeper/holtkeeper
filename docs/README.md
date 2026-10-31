@@ -65,7 +65,7 @@
 | `@holtkeeper/quality-secrets`     | Leaked secrets (gitleaks)                                                | [packages/quality-secrets/docs](../packages/quality-secrets/docs/README.md)         |
 | `@holtkeeper/review`              | AI review of merge requests, thread replies                              | [packages/review/docs](../packages/review/docs/README.md)                           |
 | `@holtkeeper/coverage`            | Test coverage per source file, folder treemap and trend                  | [packages/coverage/docs](../packages/coverage/docs/README.md)                       |
-| `@holtkeeper/testids`             | Test id attributes on interactive elements of frontend templates         | [packages/testids/docs](../packages/testids/docs/README.md)                         |
+| `@holtkeeper/testids`             | Catalog of test attributes per component; the review's test id check     | [packages/testids/docs](../packages/testids/docs/README.md)                         |
 | `@holtkeeper/api-surface`         | Public API of packages per version, diffs, Markdown for agents           | [packages/api-surface/docs](../packages/api-surface/docs/README.md)                 |
 | `@holtkeeper/usages`              | Which exports, members and props of packages each repository uses        | [packages/usages/docs](../packages/usages/docs/README.md)                           |
 | `@holtkeeper/libraries`           | Third-party library versions, docs, API and issues for agents            | [packages/libraries/docs](../packages/libraries/docs/README.md)                     |

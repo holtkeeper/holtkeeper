@@ -3,6 +3,8 @@ export interface TagAttribute {
   name: string
   /** Literal value of a quoted or bare value; absent for expressions and valueless attributes. */
   value?: string
+  /** Source of an expression value as written, trimmed: `status`, `` `row-${id}` ``. */
+  expression?: string
 }
 
 /** An opening tag found in a template. */
@@ -151,10 +153,13 @@ function parseTag(text: string, at: number, syntax: TagSyntax, lineOf: (i: numbe
       } else if (quote === '{' || (quote === '$' && text[j + 1] === '{')) {
         const open = quote === '{' ? j : j + 1
         const end = skipBraces(text, open)
+        attribute.expression = text.slice(open + 1, end - 1).trim()
         inner.push([open + 1, end - 1])
         j = end
       } else if (quote === '`') {
-        j = skipString(text, j)
+        const end = skipString(text, j)
+        attribute.expression = text.slice(j, end)
+        j = end
       } else {
         const valueStart = j
         while (j < limit && !/[\s>]/.test(text[j] ?? '')) j++

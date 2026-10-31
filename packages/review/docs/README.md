@@ -8,7 +8,7 @@ AI code review of merge requests: the `review` analyzer reviews one merge reques
 
 1. **load** — `getMergeRequest`, `getMergeRequestDiff`, `listDiscussions`, and the previous review from history: the newest `review` record with `ref` `!<iid>` that reviewed something.
 2. **plan** — reads the repository guidelines (and the path rules from REVIEW.md), decides the mode and scopes the diff: added lines of reviewable files, minus `ignore` globs (plus globs from REVIEW.md, see below). Deleted, binary and forge-collapsed files are skipped. Incremental: `compareCommits(lastHead, head)` intersected with the MR diff; only lines both add are in scope.
-3. **deterministic** — with `includeChecks`, runs the injected quality checks (`lint`, `secrets`, `conventions`) on the checkout and keeps issues touching lines in scope. A fix whose edits lie entirely on changed lines becomes the comment's suggestion.
+3. **deterministic** — with `includeChecks`, runs the injected quality checks (`lint`, `secrets`, `conventions`, `testids`) on the checkout and keeps issues touching lines in scope. A fix whose edits lie entirely on changed lines becomes the comment's suggestion. Findings of `agentCompletedChecks` (`testids`: interactive elements added without a test attribute) go to the agent instead when there is one: the prompt lists them with the project's convention, the agent comments on the ones it agrees with and suggests the attribute in the project's style, and the rest are dropped. Without an agent they are posted as found.
 4. **agentReview** — one structured agent task (`taskKind: 'review'`): the system prompt holds the rules; `context` holds REVIEW.md, CLAUDE.md, AGENTS.md, CONTRIBUTING.md (trimmed: 6 000 characters per file, 12 000 in all), the `review.instructions` setting plus `options.instructions`, and knowledge entries; the prompt holds the MR title and description, the REVIEW.md path rules matching files in scope, open threads and the numbered diff per file (`+` in scope, `~` reviewed before, `-` removed). The agent reads more code with its tools instead of getting whole files. Besides comments it returns a summary, a verdict, a `walkthrough` (logical changes with their files) and `effort` (1–5, how hard the change is for a human to review).
 5. **media** — images the diff adds or changes go to the injected `MediaReviewer` (see below).
 6. **validate and rank** — every comment must target a new-side line shown by the diff; a line outside it moves to the nearest changed line (at most 5 away) or is dropped; in incremental reviews lines reviewed before are dropped. Suggestions must cover exactly `startLine..line`: copies of neighbouring lines are trimmed, no-op suggestions dropped, broken ranges lose the suggestion. Findings repeating an open thread (same path, line within ±2, similar text) or a deterministic finding are dropped. The rest is filtered by `minSeverity`, sorted by severity and capped at `maxComments`.
@@ -23,20 +23,20 @@ Every note carries a hidden marker (`<!-- holtkeeper:review id=<finding> -->`); 
 
 `createReviewAnalyzer(deps)` / `reviewAnalyzer` — kind and analysis `review`, scope `repo`, needs checkout, forge, history and an optional agent. Without an agent only deterministic findings are posted and threads are not re-checked.
 
-| Option          | Default                                  | Meaning                                                                       |
-| --------------- | ---------------------------------------- | ----------------------------------------------------------------------------- |
-| `mergeRequest`  | required                                 | MR number (iid)                                                               |
-| `mode`          | `auto`                                   | `auto`: incremental when a previous review exists and its head is an ancestor |
-| `maxComments`   | 15                                       | inline comments per run                                                       |
-| `minSeverity`   | `minor`                                  | `info`, `minor`, `major`, `critical`                                          |
-| `includeChecks` | `false`                                  | `true` or a list of `lint`, `secrets`, `conventions` (or `lint,secrets`)      |
-| `approve`       | `never`                                  | `when-clean` approves clean reviews                                           |
-| `ignore`        | lockfiles, generated, snapshots, dist, … | path globs (`DEFAULT_IGNORE`); globs without `/` also match base names        |
-| `maxDiffLines`  | 3000                                     | skip bigger diffs (added + removed lines in scope)                            |
-| `language`      | the MR description's language            | language of comments                                                          |
-| `instructions`  | —                                        | extra rules, appended after the `review.instructions` setting                 |
-| `media`         | `true`                                   | review images with the `MediaReviewer`                                        |
-| `replyTo`       | —                                        | discussion id: answer that thread instead of reviewing                        |
+| Option          | Default                                  | Meaning                                                                             |
+| --------------- | ---------------------------------------- | ----------------------------------------------------------------------------------- |
+| `mergeRequest`  | required                                 | MR number (iid)                                                                     |
+| `mode`          | `auto`                                   | `auto`: incremental when a previous review exists and its head is an ancestor       |
+| `maxComments`   | 15                                       | inline comments per run                                                             |
+| `minSeverity`   | `minor`                                  | `info`, `minor`, `major`, `critical`                                                |
+| `includeChecks` | `false`                                  | `true` or a list of `lint`, `secrets`, `conventions`, `testids` (or `lint,secrets`) |
+| `approve`       | `never`                                  | `when-clean` approves clean reviews                                                 |
+| `ignore`        | lockfiles, generated, snapshots, dist, … | path globs (`DEFAULT_IGNORE`); globs without `/` also match base names              |
+| `maxDiffLines`  | 3000                                     | skip bigger diffs (added + removed lines in scope)                                  |
+| `language`      | the MR description's language            | language of comments                                                                |
+| `instructions`  | —                                        | extra rules, appended after the `review.instructions` setting                       |
+| `media`         | `true`                                   | review images with the `MediaReviewer`                                              |
+| `replyTo`       | —                                        | discussion id: answer that thread instead of reviewing                              |
 
 **What the job should set:** `ref` = the MR head sha (the webhook does). The engine's mirror fetches every ref, so the head of fork MRs (`refs/merge-requests/<iid>/head`) resolves too. When the checkout is not at the head, the analyzer checks out the head itself through `context.checkout`.
 

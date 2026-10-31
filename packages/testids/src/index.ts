@@ -1,4 +1,5 @@
 export * from './analyze.ts'
+export * from './check.ts'
 export * from './analyzer.ts'
 export * from './classify.ts'
 export * from './model.ts'

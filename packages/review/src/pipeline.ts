@@ -22,6 +22,7 @@ import {
 } from './agent.ts'
 import {
   type ReviewCheckName,
+  agentCompletedChecks,
   deterministicFindings,
   findingId,
   reviewCheckNames,
@@ -159,6 +160,8 @@ export interface ReviewSteps {
     loaded: LoadedReview,
     plan: ReviewPlan,
     usage: ReviewUsage,
+    /** Deterministic findings the agent should turn into comments with suggestions. */
+    requests?: readonly Candidate[],
   ): Promise<AgentOutcome | undefined>
   media(
     run: ReviewRun,
@@ -271,7 +274,7 @@ const deterministic: ReviewSteps['deterministic'] = async (run, planned) => {
   return { candidates, checks: tools }
 }
 
-const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usage) => {
+const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usage, requests) => {
   if (!run.agent || !run.dir) return undefined
   const instructions = [run.instructions, run.options.instructions].filter(Boolean).join('\n\n')
   const knowledge =
@@ -307,6 +310,16 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       ...(instructions ? { instructions } : {}),
       ...(knowledge?.length ? { knowledge } : {}),
       ...(pathRules.length ? { pathInstructions: pathRules } : {}),
+      ...(requests?.length
+        ? {
+            requests: requests.map((r) => ({
+              path: r.path,
+              line: r.line,
+              text: r.body,
+              category: r.category,
+            })),
+          }
+        : {}),
       threads: loaded.threads,
       maxComments: run.options.maxComments,
       ...(run.options.language ? { language: run.options.language } : {}),
@@ -507,7 +520,11 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
 
   const files = filesOf(scope)
   const found = await steps.deterministic(run, planned)
-  const agentOutcome = await steps.agentReview(run, loaded, planned, usage)
+  const requests =
+    run.agent && run.dir
+      ? found.candidates.filter((c) => agentCompletedChecks.has(c.source) && !c.suggestion)
+      : []
+  const agentOutcome = await steps.agentReview(run, loaded, planned, usage, requests)
   const mediaOutcome = await steps.media(run, loaded)
 
   const validate = (candidates: readonly Candidate[]) =>
@@ -518,7 +535,9 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
       if (!valid) stats.dropped.invalid++
       return valid ? [valid] : []
     })
-  const deterministicValid = validate(found.candidates)
+  const deterministicValid = validate(
+    agentOutcome ? found.candidates.filter((c) => !requests.includes(c)) : found.candidates,
+  )
   const agentValid = validate([
     ...(mediaOutcome?.candidates ?? []),
     ...(agentOutcome?.candidates ?? []),

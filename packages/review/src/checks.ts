@@ -13,8 +13,15 @@ import type { FileScope } from './scope.ts'
 import type { Candidate } from './validate.ts'
 
 /** Quality checks a review may run, restricted to changed lines. */
-export const reviewCheckNames = ['lint', 'secrets', 'conventions'] as const
+export const reviewCheckNames = ['lint', 'secrets', 'conventions', 'testids'] as const
 export type ReviewCheckName = (typeof reviewCheckNames)[number]
+
+/**
+ * Checks whose findings go to the agent when there is one: it comments on the ones it agrees with,
+ * with a suggestion written in the project's style, and drops the rest. Without an agent they
+ * are posted as found.
+ */
+export const agentCompletedChecks: ReadonlySet<string> = new Set(['testids'])
 
 /** Last line a range touches; an exclusive end at column 1 does not touch its line. */
 const lastLine = (range: { start: { line: number }; end: { line: number; column: number } }) =>

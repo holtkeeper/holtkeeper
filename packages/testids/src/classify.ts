@@ -2,7 +2,7 @@ import type { ScannedTag, TagAttribute } from './tags.ts'
 
 /** What makes an element interactive and what counts as its test id. */
 export interface ClassifyRules {
-  /** Attribute or prop names that carry a test id; compared case-insensitively. */
+  /** Test attribute names and prefixes (see `createAttributeMatcher`). */
   attributes: readonly string[]
   /** Native tags that are interactive by themselves. */
   tags: readonly string[]
@@ -21,7 +21,7 @@ export interface Classified {
   status: 'tagged' | 'missing' | 'unverified'
   /** Why it counts as interactive: `button`, `click handler`, `role=tab`, `href`. */
   reason: string
-  /** The test id attribute found, as configured (for `tagged`). */
+  /** The configured test attribute that matched (for `tagged`). */
   attribute?: string
 }
 
@@ -47,6 +47,22 @@ export function eventOf(name: string): string | undefined {
   return html?.[1]
 }
 
+/**
+ * Matches attribute names against configured test attributes: a name counts when its bare name
+ * (binding syntax stripped) equals a configured one or extends it with `-`, case-insensitively, so
+ * `data-test` covers `data-test-id` and `data-test-state`. Returns the configured name that matched.
+ */
+export function createAttributeMatcher(attributes: readonly string[]) {
+  const exact = new Set(attributes)
+  const lower = attributes.map((name) => [name.toLowerCase(), name] as const)
+  return (name: string): string | undefined => {
+    const bare = bareName(name)
+    if (exact.has(bare)) return bare
+    const key = bare.toLowerCase()
+    return lower.find(([prefix]) => key === prefix || key.startsWith(`${prefix}-`))?.[1]
+  }
+}
+
 /** `v-bind="$attrs"` and `v-bind="props"` bind a whole object, like a JSX spread. */
 const isSpread = (attribute: TagAttribute) => attribute.name === 'v-bind'
 
@@ -69,10 +85,7 @@ const matcher = (patterns: readonly string[]) => {
  * interactive.
  */
 export function createClassifier(rules: ClassifyRules) {
-  const exact = new Set(rules.attributes)
-  const attributes = new Map<string, string>()
-  for (const name of rules.attributes)
-    if (!attributes.has(name.toLowerCase())) attributes.set(name.toLowerCase(), name)
+  const testAttribute = createAttributeMatcher(rules.attributes)
   const tags = new Set(rules.tags)
   const events = new Set(rules.events)
   const roles = new Set(rules.roles)
@@ -105,8 +118,7 @@ export function createClassifier(rules: ClassifyRules) {
     const reason = reasonOf(tag, native)
     if (!reason) return undefined
     for (const attribute of tag.attributes) {
-      const bare = bareName(attribute.name)
-      const configured = exact.has(bare) ? bare : attributes.get(bare.toLowerCase())
+      const configured = testAttribute(attribute.name)
       if (configured) return { status: 'tagged', reason, attribute: configured }
     }
     const spread = tag.spread || tag.attributes.some(isSpread)

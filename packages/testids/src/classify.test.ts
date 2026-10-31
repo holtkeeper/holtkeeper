@@ -7,7 +7,7 @@ import {
   defaultRoles,
   defaultTags,
 } from './analyze.ts'
-import { bareName, createClassifier, eventOf } from './classify.ts'
+import { bareName, createAttributeMatcher, createClassifier, eventOf } from './classify.ts'
 import { scanTags } from './tags.ts'
 
 const classify = createClassifier({
@@ -67,4 +67,11 @@ test('test ids, case-insensitively, in any binding syntax; spreads are unverifie
   })
   expect(one('<button {...props} />', 'button')?.status).toBe('unverified')
   expect(one('<button v-bind="$attrs">', 'button', 'html')?.status).toBe('unverified')
+})
+
+test('a configured attribute covers its dash-extended family', () => {
+  const match = createAttributeMatcher(['data-test', 'testID'])
+  expect(
+    ['data-test-id', ':data-test-state', 'DATA-TEST', 'testid', 'data-testid'].map(match),
+  ).toEqual(['data-test', 'data-test', 'data-test', 'testID', undefined])
 })

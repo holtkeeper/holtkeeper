@@ -58,6 +58,16 @@ const review = (
   verdict,
 })
 
+const finding = (line: number, source: string) => ({
+  path: 'src/price.ts',
+  line,
+  severity: 'minor' as const,
+  category: 'tests' as const,
+  title: `${source}: rule`,
+  body: `found on ${line}`,
+  source,
+})
+
 const runOf = (extra: Partial<ReviewRun> & Pick<ReviewRun, 'forge'>): ReviewRun => ({
   repo,
   runner: createFakeRunner().runner,
@@ -505,6 +515,43 @@ describe('reviewMergeRequest', () => {
     expect(data.comments.map((c) => c.source)).toEqual(['custom'])
     expect(data.verdict).toBe('needs-changes')
     expect(submissions).toHaveLength(1)
+  })
+
+  test('hands testids findings to the agent, which keeps the ones it comments on', async () => {
+    let requested: number[] = []
+    const { forge } = fakeForge({ files, discussions: [] })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent: {} as never,
+        steps: {
+          deterministic: async () => ({
+            candidates: [finding(1, 'testids'), finding(3, 'testids'), finding(4, 'oxlint')],
+            checks: [],
+          }),
+          agentReview: async (_run, _loaded, _plan, _usage, requests) => {
+            requested = (requests ?? []).map((r) => r.line)
+            return {
+              candidates: [
+                {
+                  ...finding(1, 'agent'),
+                  suggestion: { replacement: 'export function price(a, b) { // data-test' },
+                },
+              ],
+              summary: 's',
+              verdict: 'looks-good',
+            }
+          },
+        },
+      }),
+    )
+    expect(requested).toEqual([1, 3])
+    expect(
+      data.comments.map((c) => [c.source, c.line]).toSorted((a, b) => Number(a[1]) - Number(b[1])),
+    ).toEqual([
+      ['agent', 1],
+      ['oxlint', 4],
+    ])
   })
 
   test('requireReviewForge names missing methods', () => {

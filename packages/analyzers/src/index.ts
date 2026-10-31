@@ -26,7 +26,7 @@ import { releaseRiskAnalyzer } from '@holtkeeper/release-risk'
 import { renovateAnalyzer } from '@holtkeeper/renovate'
 import { createReviewAnalyzer } from '@holtkeeper/review'
 import { stackAnalyzer } from '@holtkeeper/stack'
-import { testIdsAnalyzer } from '@holtkeeper/testids'
+import { testIdsAnalyzer, testIdsCheck } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
 import { usagesAnalyzer } from '@holtkeeper/usages'
 import { warmupAnalyzer } from '@holtkeeper/warmup'
@@ -147,6 +147,7 @@ export const reviewChecks = () => ({
   lint: lintCheck(),
   secrets: secretsCheck(),
   conventions: conventionsCheck(),
+  testids: testIdsCheck(),
 })
 
 /** Every analyzer Holtkeeper ships, in the order help texts list them. */

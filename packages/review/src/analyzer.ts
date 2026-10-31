@@ -121,7 +121,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       {
         flag: 'checks',
         option: 'includeChecks',
-        description: 'true or a list: lint,secrets,conventions',
+        description: 'true or a list: lint,secrets,conventions,testids',
       },
       { flag: 'approve', option: 'approve', description: 'never or when-clean (default never)' },
       {
