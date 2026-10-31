@@ -21,6 +21,7 @@ export async function issueLink(
     createdBy?: string
   },
 ): Promise<IssuedLink> {
+  const path = input.purpose === 'login' ? '/auth/users/link/:token/login' : '/link/:token'
   const token = randomToken()
   const expiresAt = new Date(input.now.getTime() + input.ttlMs).toISOString()
   await store.putLinkToken({
@@ -30,21 +31,22 @@ export async function issueLink(
     expiresAt,
     createdBy: input.createdBy,
   })
-  return { link: `${input.origin}/link/${token}`, expiresAt }
+  return { link: `${input.origin}${path.replace(':token', token)}`, expiresAt }
 }
 
 /**
- * The unused, unexpired link behind `token` and its user. Throws 404 for unknown tokens, 410 for
- * used or expired ones and 403 when the user is disabled.
+ * The unused, unexpired link behind `token` and its user. Throws 404 for unknown tokens and for
+ * links of other purposes, 410 for used or expired ones and 403 when the user is disabled.
  */
 export async function openLink(
   store: UserStore,
   token: string,
   now: Date,
+  purposes: readonly LinkToken['purpose'][] = ['enroll', 'recover'],
 ): Promise<{ link: LinkToken; user: User }> {
   const link = looksLikeToken(token) ? await store.getLinkToken(hashToken(token)) : undefined
   const user = link && (await store.getUser(link.userId))
-  if (!link || !user) throw new HttpError(404, 'link not found')
+  if (!link || !user || !purposes.includes(link.purpose)) throw new HttpError(404, 'link not found')
   if (link.usedAt) throw new HttpError(410, 'link has already been used')
   if (link.expiresAt <= now.toISOString()) throw new HttpError(410, 'link has expired')
   if (user.disabled) throw new HttpError(403, 'account is disabled')
@@ -52,7 +54,7 @@ export async function openLink(
 }
 
 export const linkInfo = ({ link, user }: { link: LinkToken; user: User }): LinkInfo => ({
-  purpose: link.purpose,
+  purpose: link.purpose === 'recover' ? 'recover' : 'enroll',
   userName: user.name,
   expiresAt: link.expiresAt,
 })

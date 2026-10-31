@@ -41,6 +41,11 @@ for (const line of (await auth.start?.()) ?? []) console.log(line)
   provider. Creates a root user (`*` on everything) when there are no users and returns
   `{ link, expiresAt }`. While that bootstrap user is the only user and has no passkey, every call
   issues a fresh link, so losing the startup log does not lock the instance. Otherwise `undefined`.
+- `createUser({ store, activity?, actor, now? }, { name, email?, grants })`, `findUser(store,
+  idEmailOrName)`, `issueUserLink(manage, { user, purpose, origin, ttlMs })` and `adminGrants` —
+  account management for operators with direct store access (the CLI's `users` command), without
+  delegation checks. `issueUserLink` with purpose `login` returns a single-use sign-in link that
+  needs no passkey.
 - Types `UserView`, `UserList`, `LinkResponse`, `LinkInfo`, `ExternalAccountView`,
   `ExternalAccountList` — structurally identical to those in `@holtkeeper/api`; `ForgeIssuer` for
   `forges`.
@@ -65,6 +70,12 @@ their passkeys there: `POST /me/passkeys/options` and `POST /me/passkeys/verify 
 register another one (the challenge cookie is bound to the user id and excludes passkeys they already
 have), `PATCH /me/passkeys/:id { label }` renames one and `DELETE /me/passkeys/:id` removes one. The
 only passkey cannot be removed (409): that would lock the account; an admin can still delete it.
+
+**Login links** — `issueUserLink` with purpose `login` (CLI: `holtkeeper users login-link`)
+stores a single-use link opening `GET /link/:token/login`, which consumes it, logs `user.login`
+with method `link`, sets the session cookie and redirects to `/`. They exist so operators can hand
+an AI agent a browser session; they never register passkeys, and enrollment or recovery links never
+sign in this way (404 either way).
 
 **OIDC** — `GET /oidc/:id/login` redirects to the provider with authorization code + PKCE (S256),
 `state` and `nonce`; all three secrets live in `hk_oidc` (signed, 10 minutes). The provider
@@ -119,6 +130,7 @@ duplicate email or passkey, 410 used or expired link.
 | GET    | `/link/:token`                         | `LinkInfo`                           |
 | POST   | `/link/:token/register/options`        | WebAuthn creation options            |
 | POST   | `/link/:token/register/verify`         | 204 + session cookie                 |
+| GET    | `/link/:token/login`                   | 302 to `/` + session cookie          |
 | GET    | `/oidc/:id/login`                      | 302 to the provider                  |
 | GET    | `/oidc/:id/callback`                   | 302 to `/` + session cookie          |
 | POST   | `/logout`                              | 204, cookie cleared                  |

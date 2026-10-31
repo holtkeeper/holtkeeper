@@ -4,6 +4,7 @@ import type { Grant, Principal } from '@holtkeeper/access'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { memoryStore } from '@holtkeeper/store/memory'
 
+import { adminGrants, createUser, findUser, issueUserLink } from './manage.ts'
 import type { OidcClaims, OidcClient } from './oidc-client.ts'
 import type { OidcProviderOptions } from './options.ts'
 import { createUsersAuth } from './provider.ts'
@@ -125,6 +126,7 @@ function setup(oidc: { options: OidcProviderOptions; client: OidcClient }[] = []
   return {
     store,
     auth,
+    now: () => clock,
     advance: (hours: number) => (clock = new Date(clock.getTime() + hours * 3_600_000)),
   }
 }
@@ -874,5 +876,57 @@ describe('external accounts', () => {
     expect((await explicit.store.externalAccounts?.find('slack:T1', 'abc'))?.verification).toBe(
       'oidc',
     )
+  })
+})
+
+describe('login links', () => {
+  test('sign in once without a passkey and are no enrollment links', async () => {
+    const { store, auth, now, advance } = setup()
+    const manage = { store: store.users, activity: store.activity, actor: 'cli', now }
+    const user = await createUser(manage, { name: 'Claude', grants: adminGrants })
+    const { link } = await issueUserLink(manage, {
+      user,
+      purpose: 'login',
+      origin: `${origin}/`,
+      ttlMs: 15 * 60_000,
+    })
+    expect(link.startsWith(`${origin}/auth/users/link/`)).toBe(true)
+    const token = link.split('/link/')[1]?.replace(/\/login$/, '') ?? ''
+
+    const browser = new Browser()
+    expect((await browser.send(auth, 'GET', `/link/${token}`)).status).toBe(404)
+    expect((await browser.send(auth, 'POST', `/link/${token}/register/options`)).status).toBe(404)
+    const response = await browser.send(auth, 'GET', `/link/${token}/login`)
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe('/')
+    expect((await browser.principal(auth))?.id).toBe(user.id)
+    expect((await new Browser().send(auth, 'GET', `/link/${token}/login`)).status).toBe(410)
+
+    const late = await issueUserLink(manage, { user, purpose: 'login', origin, ttlMs: 60_000 })
+    advance(1)
+    const lateToken = late.link.split('/link/')[1]?.replace(/\/login$/, '') ?? ''
+    expect((await new Browser().send(auth, 'GET', `/link/${lateToken}/login`)).status).toBe(410)
+    expect((await store.activity.list({})).map((entry) => entry.action)).toContain(
+      'user.link_issued',
+    )
+  })
+
+  test('enrollment links do not sign in', async () => {
+    const { store, auth } = setup()
+    const manage = { store: store.users, actor: 'cli' }
+    const user = await createUser(manage, { name: 'Ann', email: 'ann@example.com', grants: [] })
+    const duplicate = await createUser(manage, {
+      name: 'Ann 2',
+      email: 'ann@example.com',
+      grants: [],
+    }).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error.message : error),
+    )
+    expect(duplicate).toBe('email ann@example.com is already in use')
+    expect(await findUser(store.users, 'ann@example.com')).toEqual(user)
+    expect((await findUser(store.users, 'Ann'))?.id).toBe(user.id)
+    const { link } = await issueUserLink(manage, { user, purpose: 'enroll', origin, ttlMs: 60_000 })
+    expect((await new Browser().send(auth, 'GET', `/link/${tokenOf(link)}/login`)).status).toBe(404)
   })
 })

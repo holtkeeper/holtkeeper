@@ -46,6 +46,17 @@ holtkeeper audit ./games/app-x --fix --allowlist allowlist.json --trait ssr=fals
 
 Needs `osv-scanner` on `PATH`; fixing needs the project's package manager or `go`.
 
+### `users <action>`
+
+Manages accounts of `users` sign-in (see [@holtkeeper/auth-users](../../../packages/auth-users/docs/README.md)) directly in the config's store, without delegation checks: whoever can read the config and its secrets is an operator. Every change is logged with actor `cli`. `<user>` is an id, an email or a name that only one user has.
+
+- `list` — one tab-separated line per user: id, name, email, `admin` or grant count, state (`--json` for the stored users).
+- `add <name> [--email <address>] [--admin]` — an enabled user without passkeys; `--admin` grants every action on everything, otherwise no grants (add them in the web UI).
+- `login-link <user> [--ttl 15m]` — a single-use `${publicUrl}/auth/users/link/<token>/login`. Opening it signs the holder in without a passkey and redirects to `/`; it is how an AI agent gets a browser session to drive the web UI. Treat it like a password until it expires.
+- `enroll-link <user>` / `recover-link <user>` (`--ttl`, default `72h`) — the web UI's passkey registration link, as an admin would issue it.
+
+Links need `server.publicUrl`. In Kubernetes run it in a web pod: `kubectl exec deploy/<release>-web -- holtkeeper users login-link Claude -c /app/config/holtkeeper.config.ts`.
+
 ### `serve`
 
 Starts the web server described by the config's `server` section (see [@holtkeeper/server](../../server/docs/README.md)) and runs until `SIGINT`/`SIGTERM`, then drains and exits 0.

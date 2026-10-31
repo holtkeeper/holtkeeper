@@ -23,7 +23,7 @@ import { bootstrapUsers } from './bootstrap.ts'
 import { type Context, activityLogger } from './context.ts'
 import { signedCookie } from './cookies.ts'
 import { HttpError, readBody } from './errors.ts'
-import { linkInfo, openLink } from './links.ts'
+import { linkInfo, markLinkUsed, openLink } from './links.ts'
 import {
   addPasskey,
   addPasskeyOptions,
@@ -162,6 +162,17 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
         const body = await readBody(request, registerBody)
         const user = await verifyRegistration(ctx, request, token, body)
         return noContent(await startSession(ctx, user), ctx.challenges.clear())
+      },
+    },
+    {
+      method: 'GET',
+      pattern: '/link/:token/login',
+      async handler(_request, { token = '' }) {
+        const now = ctx.now()
+        const { link, user } = await openLink(ctx.store, token, now, ['login'])
+        await markLinkUsed(ctx.store, link, now)
+        await ctx.log(user.id, 'user.login', user.id, { method: 'link' })
+        return redirect('/', await startSession(ctx, user))
       },
     },
     {

@@ -25,12 +25,13 @@ const positiveInt = (flag: string, value: string | undefined) => {
   return parsed
 }
 
-/** Parses `30`, `30s`, `2m` or `500ms` into milliseconds (bare numbers are seconds). */
+const durationUnits: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }
+
+/** Parses `30`, `30s`, `2m`, `1h` or `500ms` into milliseconds (bare numbers are seconds). */
 export function parseDuration(flag: string, value: string): number {
-  const match = /^(\d+)(ms|s|m)?$/.exec(value.trim())
+  const match = /^(\d+)(ms|s|m|h)?$/.exec(value.trim())
   if (!match) throw new UsageError(`--${flag} expects a duration like 30s or 2m, got "${value}"`)
-  const amount = Number(match[1])
-  return match[2] === 'ms' ? amount : match[2] === 'm' ? amount * 60_000 : amount * 1000
+  return Number(match[1]) * (durationUnits[match[2] ?? 's'] ?? 1000)
 }
 
 /**

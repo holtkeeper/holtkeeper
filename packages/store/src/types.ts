@@ -135,7 +135,7 @@ export interface Identity {
 export interface LinkToken {
   tokenHash: string
   userId: string
-  purpose: 'enroll' | 'recover'
+  purpose: 'enroll' | 'recover' | 'login'
   expiresAt: Timestamp
   usedAt?: Timestamp
   createdBy?: string

@@ -21,6 +21,7 @@ import {
   uploadReport,
 } from './audit.ts'
 import { type StartServer, serve, serveOptions } from './serve.ts'
+import { usersCommand } from './users.ts'
 
 const usage = `Usage: holtkeeper <command> [options]
 
@@ -30,6 +31,9 @@ Commands:
   audit [dir]               Scan a checkout for vulnerable dependencies (default: .)
   analyze <kind> [dir]      Run an analysis (see "Analyze options") and print its report
   serve                     Start the web server from the config's \`server\` section
+  users <action>            Manage accounts of \`users\` sign-in in the config's store:
+                            list, add <name>, login-link <user>, enroll-link <user>,
+                            recover-link <user> (user is an id, email or name)
 
 Options:
   -c, --config <file>       Config file (default: holtkeeper.config.ts)
@@ -41,6 +45,15 @@ Serve options:
   --concurrency <n>         Jobs this worker runs at once (default: jobs.concurrency)
   --max-jobs <n>            Exit 0 after running n jobs (one job per container or pod)
   --drain-timeout <time>    On SIGTERM, let running jobs finish this long, e.g. 30s (default)
+
+Users options:
+  --admin                   users add: every action on everything (default: no grants)
+  --email <address>         users add: the account's email
+  --ttl <time>              Link lifetime, e.g. 15m or 2h (login 15m, others 72h)
+  --json                    Print JSON
+
+A login link signs its holder in once, without a passkey: hand it to an AI agent that drives
+the web UI. Treat it like a password until it expires.
 
 Audit options:
   --fix                     Try to fix findings and rescan
@@ -98,6 +111,9 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
       concurrency: { type: 'string' },
       'max-jobs': { type: 'string' },
       'drain-timeout': { type: 'string' },
+      admin: { type: 'boolean', default: false },
+      email: { type: 'string' },
+      ttl: { type: 'string' },
       ...analyzerArgOptions(builtinAnalyzers),
     },
   })
@@ -235,6 +251,10 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
           (line) => io.out(line),
         )
       }
+      case 'users':
+        return await usersCommand(await loadConfig(values.config), args, values, (line) =>
+          io.out(line),
+        )
       default:
         throw new UsageError(`unknown command "${command}"\n\n${usage}`)
     }
