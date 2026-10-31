@@ -74,6 +74,15 @@ export interface IndexLibrariesOptions {
   now?: () => Date
   signal?: AbortSignal
   log?: (line: string) => void
+  /** Told before each library and once when every library is done, e.g. to show how far a run is. */
+  onProgress?: (progress: LibraryIndexProgress) => void
+}
+
+/** How far a run is: `done` of `total` libraries, and the one it works on (`<ecosystem>:<name>`). */
+export interface LibraryIndexProgress {
+  total: number
+  done: number
+  library?: string
 }
 
 /** A source that failed for one library or version. */
@@ -190,13 +199,16 @@ export async function indexLibraries(options: IndexLibrariesOptions): Promise<Li
     resolveTag,
     repositoryKb: new Map(),
   }
-  for (const key of [...groups.keys()].toSorted()) {
+  const keys = [...groups.keys()].toSorted()
+  for (const [position, key] of keys.entries()) {
     options.signal?.throwIfAborted()
     const entry = groups.get(key)
     if (!entry) continue
+    options.onProgress?.({ total: keys.length, done: position, library: libraryKey(entry.ref) })
     await indexLibrary(run, entry.ref, entry.uses)
     summary.libraries += 1
   }
+  options.onProgress?.({ total: keys.length, done: keys.length })
   await dropUnused(run, new Set(groups.keys()))
   return summary
 }

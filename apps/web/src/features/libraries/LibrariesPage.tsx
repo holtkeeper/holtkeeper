@@ -33,6 +33,7 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
+import { IndexCoverage, RunningIndex } from './IndexStatus.tsx'
 
 const shownVersions = 4
 
@@ -153,7 +154,9 @@ export function LibrariesPage() {
         <>
           <Totals libraries={data.libraries} />
           <AgentToolsNote />
+          {data.progress ? <RunningIndex progress={data.progress} /> : null}
           {data.lastRun ? <LastRun run={data.lastRun} /> : null}
+          <IndexCoverage coverage={data.coverage} />
           <Panel
             title="Indexed libraries"
             description={

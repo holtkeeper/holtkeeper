@@ -141,7 +141,10 @@ The third-party library index of [@holtkeeper/libraries](../../../packages/libra
 
 **Routes** (types in `@holtkeeper/api`):
 
-- `GET /api/libraries?q=&ecosystem=` — `LibraryList`: visible libraries by ecosystem and name, `repos` counting readable users, `versions` the ones in the matrix, `chunks` and `issues` (one `libraryStats` query), `failed` sources, `lastRun` and `enabled`.
+- `GET /api/libraries?q=&ecosystem=` — `LibraryList`: visible libraries by ecosystem and name, `repos` counting readable users, `versions` the ones in the matrix, `chunks` and `issues` (one `libraryStats` query), `failed` sources, `lastRun`, `enabled`, `progress` (the run going on now, from `Store.kv` `libraries:progress`) and `coverage` (`librarySourceCoverage`: per source, how many matrix versions, or libraries for `issues` and `site`, are `ok`, `missing`, `failed`, `skipped` or not fetched yet).
+
+**Progress** (`library-progress.ts`): an index run writes `{ startedAt, total, done, library?, waitingUntil?, updatedAt }` to `libraries:progress` from `indexLibraries`' `onProgress` and the GitHub client's waits, at most every 3 s and with a 15 minute expiry renewed on each write, and removes it when the run ends or is aborted, so any process can show it.
+
 - `GET /api/libraries/:ecosystem/:name` — `LibraryDetail` (the name may contain `/`); 404 for invisible libraries.
 - `GET /api/libraries/search?q=&ecosystem=&name=&version=&limit=20` — `LibrarySearchResult`, hits of visible libraries only, `limit` at most 100.
 - `GET /api/libraries/github?days=30` (global `settings:read`, `days` 1–90) — `GitHubTokenUsage`: every credential `libraries.github` names with its GitHub account and live limits (`githubTokenInfo`: `GET /user` and `GET /rate_limit`, which GitHub does not count, cached a minute per token), `duplicateOf` for a token of an account listed before, `error` for unreadable credentials or rejected tokens; requests per token and resource over the range, per UTC day by token, totals, and `capacity`, the live limits summed over distinct accounts.

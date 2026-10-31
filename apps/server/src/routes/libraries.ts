@@ -26,6 +26,7 @@ import {
   librariesEnabled,
   requestLibraryIndex,
 } from '../libraries.ts'
+import { libraryProgress, librarySourceCoverage } from '../library-progress.ts'
 import { canSee } from '../visibility.ts'
 
 const GLOBAL = { kind: 'global' } as const
@@ -71,7 +72,7 @@ export function libraryRoutes(deps: ServerDeps) {
     const lastRun = await lastLibraryRun(store.kv)
     const on = await enabled()
     const libraries = store.libraries
-    if (!libraries) return c.json<LibraryList>({ libraries: [], enabled: false })
+    if (!libraries) return c.json<LibraryList>({ libraries: [], enabled: false, coverage: [] })
     const ecosystem = ecosystemParam(c.req.query('ecosystem'))
     const query = c.req.query('q')?.trim()
     const records = await libraries.listLibraries({
@@ -80,11 +81,13 @@ export function libraryRoutes(deps: ServerDeps) {
     })
     const stats = await libraries.libraryStats(ecosystem ? { ecosystem } : {})
     const summaries: LibrarySummary[] = []
+    const indexed: { library: LibraryRecord; versions: LibraryVersionRecord[] }[] = []
     for (const library of records) {
       // oxlint-disable-next-line no-await-in-loop -- one library after another keeps the store calm
       const versions = await libraries.listVersions(library)
       const { visible, readable } = reader.view(versions)
       if (!visible) continue
+      indexed.push({ library, versions })
       summaries.push({
         ecosystem: library.ecosystem,
         name: library.name,
@@ -99,10 +102,13 @@ export function libraryRoutes(deps: ServerDeps) {
         updatedAt: library.updatedAt,
       })
     }
+    const progress = on ? await libraryProgress(store.kv) : undefined
     return c.json<LibraryList>({
       libraries: summaries,
       ...(lastRun ? { lastRun } : {}),
       enabled: on,
+      ...(progress ? { progress } : {}),
+      coverage: librarySourceCoverage(indexed),
     })
   })
 

@@ -1673,6 +1673,36 @@ export interface LibraryList {
   lastRun?: LibraryIndexRun
   /** Whether the server indexes libraries at all (a store with `libraries` and the setting on). */
   enabled: boolean
+  /** The run going on now, when there is one. */
+  progress?: LibraryIndexProgressView
+  /** Per source, how far the listed libraries' versions are indexed. */
+  coverage: LibrarySourceCoverage[]
+}
+
+/** A library index run going on now, as the scheduler leader last wrote it. */
+export interface LibraryIndexProgressView {
+  startedAt: Timestamp
+  /** Libraries the run goes through, and how many it finished. */
+  total: number
+  done: number
+  /** `<ecosystem>:<name>` the run works on. */
+  library?: string
+  /** Set while every GitHub token is used up and the run waits for the reset. */
+  waitingUntil?: Timestamp
+  updatedAt: Timestamp
+}
+
+/**
+ * How many versions in the matrix (libraries, for library-wide sources such as `issues`) have a
+ * source in each state; `pending` ones were not fetched yet.
+ */
+export interface LibrarySourceCoverage {
+  source: string
+  ok: number
+  missing: number
+  failed: number
+  skipped: number
+  pending: number
 }
 
 /** Outcome of one indexing run. */

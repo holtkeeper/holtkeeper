@@ -8,6 +8,7 @@ import type { ArtifactStore } from '@holtkeeper/artifacts'
 import { fleetDataSchema } from '@holtkeeper/fleet'
 import {
   type GitHubClient,
+  type GitHubEvent,
   type LibraryDocs,
   type LibraryIndexSettings,
   type LibraryRegistry,
@@ -43,6 +44,7 @@ import { z } from 'zod'
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
 import { githubReferences, githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
+import { libraryProgressWriter } from './library-progress.ts'
 
 const intervalPattern = /^([1-9]\d*)(m|h|d)$/
 const MIN_INTERVAL_MS = 3_600_000
@@ -210,6 +212,8 @@ export async function githubClientFor(
     kv?: Pick<KvStore, 'get' | 'set' | 'compareAndSet'>
     wait?: GitHubWait
     signal?: AbortSignal
+    /** Hears the client's answers and waits besides the usage counters. */
+    onEvent?: (event: GitHubEvent) => void
   } = {},
 ): Promise<GitHubClient> {
   const log = options.log ?? (() => {})
@@ -231,13 +235,15 @@ export async function githubClientFor(
     ...(options.kv ? { cache: options.kv } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     log,
-    onEvent: (event) =>
+    onEvent: (event) => {
       usage.record(
         event,
         event.kind === 'request' && event.token !== undefined
           ? readable[event.token]?.id
           : undefined,
-      ),
+      )
+      options.onEvent?.(event)
+    },
   })
 }
 
@@ -399,6 +405,7 @@ export async function runLibraryIndex(
     failures: [],
   }
   let run: LibraryIndexRun
+  const progress = libraryProgressWriter({ kv: store.kv, now: deps.now })
   try {
     const { uses, internal } = await fleetLibraryUses(store.analyses)
     const github =
@@ -408,6 +415,9 @@ export async function runLibraryIndex(
         wait: 'index',
         ...(store.kv ? { kv: store.kv } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        onEvent: (event) => {
+          if (event.kind === 'wait') progress.waiting(new Date(deps.now().getTime() + event.ms))
+        },
       }))
     const summary = await indexLibraries({
       store: libraries,
@@ -421,6 +431,7 @@ export async function runLibraryIndex(
       now: deps.now,
       ...(options.signal ? { signal: options.signal } : {}),
       log,
+      onProgress: (state) => progress.update(state),
     })
     run = {
       ...base,
@@ -432,13 +443,17 @@ export async function runLibraryIndex(
       failures: summary.failures.slice(0, MAX_STORED_FAILURES),
     }
   } catch (error) {
-    if (options.signal?.aborted) throw error
+    if (options.signal?.aborted) {
+      await progress.clear()
+      throw error
+    }
     run = {
       ...base,
       finishedAt: deps.now().toISOString(),
       error: error instanceof Error ? error.message : String(error),
     }
   }
+  await progress.clear()
   await store.kv?.set(LAST_RUN_KEY, run)
   log(
     run.error

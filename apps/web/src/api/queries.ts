@@ -680,6 +680,7 @@ export const useLibraries = (query: { q?: string; ecosystem?: string }) =>
     queryFn: () => api.libraries(query),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+    refetchInterval: (state) => (state.state.data?.progress ? 10_000 : false),
   })
 
 /** One library with its indexed versions and documents. */

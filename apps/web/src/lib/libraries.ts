@@ -1,7 +1,9 @@
 import type {
   LibraryDetail,
+  LibraryIndexProgressView,
   LibraryIndexRun,
   LibrarySearchResult,
+  LibrarySourceCoverage,
   LibrarySummary,
 } from '@holtkeeper/api'
 
@@ -178,4 +180,37 @@ export function runSummary(run: LibraryIndexRun): string {
   if (run.failures.length) parts.push(plural(run.failures.length, 'failure'))
   if (run.finishedAt) parts.push(`took ${durationBetween(run.startedAt, run.finishedAt)}`)
   return parts.join(' · ')
+}
+
+/** Where a running index run stands: share done, time spent and a rough estimate of the rest. */
+export function runProgress(
+  progress: Pick<LibraryIndexProgressView, 'startedAt' | 'total' | 'done'>,
+  now: Date = new Date(),
+): { percent: number; elapsedMs: number; remainingMs?: number } {
+  const elapsedMs = Math.max(0, now.getTime() - Date.parse(progress.startedAt))
+  const percent = progress.total ? Math.floor((progress.done / progress.total) * 100) : 0
+  const left = progress.total - progress.done
+  return {
+    percent,
+    elapsedMs,
+    ...(progress.done > 0 && left > 0
+      ? { remainingMs: Math.round((elapsedMs / progress.done) * left) }
+      : {}),
+  }
+}
+
+/** Rows of a source's coverage in display order: done, nothing there, failed, skipped, waiting. */
+export const coverageParts = (row: LibrarySourceCoverage) =>
+  [
+    { key: 'ok', label: 'indexed', count: row.ok, tone: 'success' },
+    { key: 'missing', label: 'nothing to index', count: row.missing, tone: 'default' },
+    { key: 'failed', label: 'failed, retried next run', count: row.failed, tone: 'danger' },
+    { key: 'skipped', label: 'skipped', count: row.skipped, tone: 'default' },
+    { key: 'pending', label: 'not fetched yet', count: row.pending, tone: 'warning' },
+  ] as const
+
+/** Share of a source that is settled (indexed or found to have nothing), in whole percent. */
+export const coverageDone = (row: LibrarySourceCoverage): number => {
+  const total = row.ok + row.missing + row.failed + row.skipped + row.pending
+  return total ? Math.floor(((row.ok + row.missing) / total) * 100) : 100
 }

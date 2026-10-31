@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  coverageDone,
+  coverageParts,
   excerpt,
   formatRoles,
   groupDocuments,
@@ -9,6 +11,7 @@ import {
   libraryListQuery,
   librarySearchQuery,
   parseEcosystem,
+  runProgress,
   runSummary,
   sortedSources,
   sourceLabel,
@@ -119,4 +122,31 @@ test('summarizes a run', () => {
       failures: [{ library: 'npm:x', source: 'archive', message: 'boom' }],
     }),
   ).toBe('12 libraries · 5 versions added · 1 removed · 1 failure · took 2 min')
+})
+
+describe('runProgress', () => {
+  test('estimates the rest from the pace so far', () => {
+    const now = new Date('2026-10-31T12:10:00Z')
+    expect(runProgress({ startedAt: '2026-10-31T12:00:00Z', total: 100, done: 25 }, now)).toEqual({
+      percent: 25,
+      elapsedMs: 600_000,
+      remainingMs: 1_800_000,
+    })
+    expect(runProgress({ startedAt: '2026-10-31T12:00:00Z', total: 100, done: 0 }, now)).toEqual({
+      percent: 0,
+      elapsedMs: 600_000,
+    })
+    expect(runProgress({ startedAt: '2026-10-31T12:00:00Z', total: 0, done: 0 }, now).percent).toBe(
+      0,
+    )
+  })
+})
+
+describe('coverage', () => {
+  test('counts indexed and empty sources as done', () => {
+    const row = { source: 'repository', ok: 40, missing: 10, failed: 43, skipped: 2, pending: 5 }
+    expect(coverageDone(row)).toBe(50)
+    expect(coverageParts(row).map((part) => part.count)).toEqual([40, 10, 43, 2, 5])
+    expect(coverageDone({ ...row, ok: 0, missing: 0, failed: 0, skipped: 0, pending: 0 })).toBe(100)
+  })
 })

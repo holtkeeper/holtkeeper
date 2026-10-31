@@ -420,6 +420,24 @@ describe('library routes', () => {
     expect((await get<LibrarySearchResult>('/api/libraries/search?q=')).hits).toEqual([])
   })
 
+  test('the list carries coverage per source and the running index run', async () => {
+    const before = await get<LibraryList>('/api/libraries')
+    expect(before.progress).toBeUndefined()
+    expect(before.coverage.map((row) => row.source)).toContain('archive')
+    await store.kv?.set('libraries:progress', {
+      startedAt: at,
+      total: 4,
+      done: 1,
+      library: 'npm:zod',
+      updatedAt: at,
+    })
+    expect((await get<LibraryList>('/api/libraries')).progress).toMatchObject({
+      total: 4,
+      done: 1,
+      library: 'npm:zod',
+    })
+  })
+
   test('the index is on without a libraries setting', async () => {
     expect((await get<LibraryList>('/api/libraries')).enabled).toBe(true)
     expect((await post(asAdmin)).status).toBe(200)

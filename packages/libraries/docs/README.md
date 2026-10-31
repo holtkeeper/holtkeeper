@@ -19,6 +19,7 @@ Everything lives in a `LibraryStore` (`@holtkeeper/store`) and an `ArtifactStore
   - `isInternal?(ref)` — libraries the fleet defines itself, left to `api-surface`;
   - `apiExtractors?` — per-ecosystem API readers, default `defaultApiExtractors` (`npmApiExtractor`, `goApiExtractor`);
   - `issueIndexer?: LibraryHook` — default `indexIssues` from `src/issues` when `github` is given; runs with `sources.issues`;
+  - `onProgress?(progress)` — `{ total, done, library? }` before each library (`<ecosystem>:<name>`) and once with `done = total` at the end;
   - `siteSource?: SiteSource` — runs with `sources.site`;
   - `maxRepositoryKb?` (default 500 000), `now?`, `signal?`, `log?`.
   - The summary is `{ libraries, versionsAdded, versionsRemoved, librariesRemoved, failures: { library, version?, source, message }[] }`.

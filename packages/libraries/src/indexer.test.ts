@@ -300,6 +300,24 @@ describe('indexLibraries', () => {
     expect(await store.getLibrary({ ecosystem: 'npm', name: '@acme/gone' })).toBeUndefined()
   })
 
+  test('reports progress before each library and at the end', async () => {
+    const progress: unknown[] = []
+    await indexLibraries({
+      store: librariesOf(),
+      artifacts: memoryArtifactStore(),
+      settings: { ...settings, exclude: [] },
+      registries: { npm: fakeRegistry().registry },
+      uses: uses(['lib', '1.0.0'], ['@types/lib', '1.0.0']),
+      now: at(0),
+      onProgress: (state) => progress.push(state),
+    })
+    expect(progress).toEqual([
+      { total: 2, done: 0, library: 'npm:@types/lib' },
+      { total: 2, done: 1, library: 'npm:lib' },
+      { total: 2, done: 2 },
+    ])
+  })
+
   test('artifacts dropped by retention are fetched again', async () => {
     const store = librariesOf()
     const artifacts = memoryArtifactStore()
