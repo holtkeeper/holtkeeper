@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { declaredMembers, findSites, packageUsage, upgradeImpact } from './fleet.ts'
+import { declaredMembers, findSites, packageUsage, upgradeImpact, usedByCounts } from './fleet.ts'
 import type { UsageSite, UsagesData, UsedExport } from './model.ts'
 import { renderImpact, renderPackageUsage, renderSites } from './render.ts'
 
@@ -156,5 +156,18 @@ describe('declaredMembers', () => {
         'interface A {\n  a: string\n  readonly b?: number\n  c(): void\n  d: { e: 1 }\n}',
       ),
     ]).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
+describe('usedByCounts', () => {
+  test('sums repositories, uses and files per name and keeps unused names at zero', () => {
+    const counts = usedByCounts(entries, ['@acme/ui', '@acme/unused'])
+    const usage = packageUsage(entries, '@acme/ui')
+    expect(counts.get('@acme/ui')).toEqual({
+      repos: usage.repos.length,
+      count: usage.repos.reduce((sum, repo) => sum + repo.count, 0),
+      files: usage.repos.reduce((sum, repo) => sum + repo.files, 0),
+    })
+    expect(counts.get('@acme/unused')).toEqual({ repos: 0, count: 0, files: 0 })
   })
 })

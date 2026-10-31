@@ -377,3 +377,30 @@ export function repoPackages(data: UsagesData) {
     exports: pkg.exports.length,
   }))
 }
+
+/** How many repositories use a package and how often, summed over every record. */
+export interface UsedByCount {
+  repos: number
+  count: number
+  files: number
+}
+
+/**
+ * Repositories, uses and files of each of `names` over every record; a name nothing uses maps to
+ * zeros. Cheaper than `packageUsage` per name when only the totals are wanted.
+ */
+export function usedByCounts<Origin>(
+  entries: readonly UsageEntry<Origin>[],
+  names: readonly string[],
+): Map<string, UsedByCount> {
+  const counts = new Map(names.map((name) => [name, { repos: 0, count: 0, files: 0 }]))
+  for (const { data } of entries)
+    for (const pkg of data.packages) {
+      const current = counts.get(pkg.name)
+      if (!current) continue
+      current.repos += 1
+      current.count += pkg.count
+      current.files += pkg.files
+    }
+  return counts
+}

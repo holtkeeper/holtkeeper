@@ -1,10 +1,10 @@
 import type { DependencyInventory } from '@holtkeeper/api'
 import { Link, useSearch } from '@tanstack/react-router'
-import { ArrowUpCircle, Boxes, ChevronRight, GitFork, Layers, Package } from 'lucide-react'
+import { ArrowUpCircle, Boxes, ChevronRight, Code2, GitFork, Layers, Package } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useState } from 'react'
 
-import { useDependencies } from '../../api/queries.ts'
+import { useDependencies, usePublicApiPackages } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
 import {
   type Lag,
@@ -119,6 +119,7 @@ export function DependenciesPage() {
 
 function Inventory({ repo }: { repo?: string }) {
   const inventory = useDependencies()
+  const catalog = usePublicApiPackages()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LibraryFilter>('all')
   const [view, setView] = useState<(typeof views)[number]['id']>('libraries')
@@ -160,6 +161,8 @@ function Inventory({ repo }: { repo?: string }) {
   const totals = inventoryTotals(scoped)
   const repoCount = repo ? 1 : data.repos.length
   const visible = libraries.slice(0, limit)
+  const indexed = new Set((catalog.data?.packages ?? []).map((pkg) => pkg.name))
+  const usedBy = (library: Library) => library.ecosystem === 'npm' && indexed.has(library.name)
   const resetLimit =
     <T,>(set: (value: T) => void) =>
     (value: T) => {
@@ -247,9 +250,15 @@ function Inventory({ repo }: { repo?: string }) {
             description="Try another filter or include dev dependencies."
           />
         ) : view === 'libraries' ? (
-          <LibraryList libraries={visible} repos={data.repos} more={more} />
+          <LibraryList libraries={visible} repos={data.repos} usedBy={usedBy} more={more} />
         ) : (
-          <Matrix libraries={visible} repos={data.repos} more={more} {...(repo ? { repo } : {})} />
+          <Matrix
+            libraries={visible}
+            repos={data.repos}
+            usedBy={usedBy}
+            more={more}
+            {...(repo ? { repo } : {})}
+          />
         )}
       </Panel>
 
@@ -312,13 +321,28 @@ function VersionBar({ library }: { library: Library }) {
   )
 }
 
+function UsedByLink({ name }: { name: string }) {
+  return (
+    <Link
+      to="/public-api"
+      search={{ package: name, tab: 'used-by' }}
+      className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+    >
+      <Code2 className="size-3.5" />
+      Where and how the code uses it
+    </Link>
+  )
+}
+
 function LibraryList({
   libraries,
   repos,
+  usedBy,
   more,
 }: {
   libraries: readonly Library[]
   repos: DependencyInventory['repos']
+  usedBy: (library: Library) => boolean
   more: ReactNode
 }) {
   const [open, setOpen] = useState<string>()
@@ -376,6 +400,11 @@ function LibraryList({
                   className="overflow-hidden"
                 >
                   <div className="bg-surface-secondary px-4 pb-3 pt-1">
+                    {usedBy(library) ? (
+                      <div className="py-2">
+                        <UsedByLink name={library.name} />
+                      </div>
+                    ) : null}
                     <Table label={`Usages of ${library.name}`}>
                       <thead>
                         <tr>
@@ -445,11 +474,13 @@ function LibraryList({
 function Matrix({
   libraries,
   repos,
+  usedBy,
   repo,
   more,
 }: {
   libraries: readonly Library[]
   repos: DependencyInventory['repos']
+  usedBy: (library: Library) => boolean
   repo?: string
   more: ReactNode
 }) {
@@ -504,7 +535,18 @@ function Matrix({
                   scope="row"
                   className="sticky left-0 z-10 max-w-64 truncate border-b border-separator bg-surface px-4 py-1.5 text-left font-mono text-xs font-medium group-hover:bg-surface-secondary"
                 >
-                  {library.name}
+                  {usedBy(library) ? (
+                    <Link
+                      to="/public-api"
+                      search={{ package: library.name, tab: 'used-by' }}
+                      title="Where and how the code uses it"
+                      className="hover:underline"
+                    >
+                      {library.name}
+                    </Link>
+                  ) : (
+                    library.name
+                  )}
                 </th>
                 <td className="border-b border-separator px-3 py-1.5 font-mono text-xs text-muted group-hover:bg-surface-secondary">
                   {library.latest}

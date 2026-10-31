@@ -1,6 +1,7 @@
 import type { Principal } from '@holtkeeper/access'
 import type {
   PackageUsageView,
+  PublishedPackagesView,
   RepoUsageView,
   UpgradeImpactView,
   UsageSitesView,
@@ -12,6 +13,7 @@ import {
   packageUsage,
   repoPackages,
   usageKinds,
+  usedByCounts,
 } from '@holtkeeper/usages'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -42,7 +44,8 @@ const withoutSites = (item: UsedExport): Omit<UsedExport, 'sites' | 'truncated'>
 /**
  * Routes under `/api/api-surface/usages` over the newest `usages` record of every readable
  * repository: who uses a package and which parts, the sites with snippets, what one repository
- * uses, and what upgrading a package affects.
+ * uses, how much the packages one repository defines are used, and what upgrading a package
+ * affects.
  */
 export function usageRoutes(options: {
   catalog: ApiCatalog
@@ -130,6 +133,32 @@ export function usageRoutes(options: {
       files: record.data.files,
       types: record.data.types,
       packages: repoPackages(record.data),
+    })
+  })
+
+  routes.get('/api-surface/usages/published', async (c) => {
+    const filter = readable(principalOf(c))
+    const origin = required(c, 'repo')
+    const defined = await catalog.packages(
+      (repo) => `${repo.forge}:${repo.path}` === origin && filter(repo),
+    )
+    const records = await usages.records(filter)
+    const counts = usedByCounts(
+      records.map((record) => ({ origin: record.repo, data: record.data })),
+      defined.map((pkg) => pkg.name),
+    )
+    return c.json<PublishedPackagesView>({
+      packages: defined
+        .map((pkg) => ({
+          name: pkg.name,
+          ...(pkg.version ? { version: pkg.version } : {}),
+          ...(pkg.description ? { description: pkg.description } : {}),
+          private: pkg.private,
+          dir: pkg.dir,
+          exports: pkg.exports,
+          ...(counts.get(pkg.name) ?? { repos: 0, count: 0, files: 0 }),
+        }))
+        .toSorted((a, b) => b.repos - a.repos || b.count - a.count || a.name.localeCompare(b.name)),
     })
   })
 

@@ -939,6 +939,14 @@ export const useRepoUsage = (repo: string) =>
     retry: false,
   })
 
+/** Packages one repository defines, with how many repositories use each. */
+export const usePublishedPackages = (repo: string) =>
+  useQuery({
+    queryKey: ['public-api', 'usages', 'published', repo],
+    queryFn: () => api.publishedPackages(repo),
+    staleTime: 60_000,
+  })
+
 /** The uses an upgrade between two recorded versions affects. */
 export const useUpgradeImpact = (
   query: { package: string; from?: string; to?: string; repo?: string },

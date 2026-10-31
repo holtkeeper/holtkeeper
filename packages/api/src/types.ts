@@ -1437,6 +1437,30 @@ export interface RepoUsageView {
   packages: RepoPackageView[]
 }
 
+/** A package one repository defines, with how much the readable repositories use it. */
+export interface PublishedPackageView {
+  name: string
+  version?: string
+  description?: string
+  private: boolean
+  /** Folder of the package in the repository. */
+  dir: string
+  exports: number
+  /** Repositories whose newest `usages` record imports the package. */
+  repos: number
+  /** Uses summed over those repositories. */
+  count: number
+  files: number
+}
+
+/**
+ * `GET /api/api-surface/usages/published?repo=`: the packages the newest API records of one
+ * repository describe, most used first.
+ */
+export interface PublishedPackagesView {
+  packages: PublishedPackageView[]
+}
+
 /** `GET /api/api-surface/usages/impact?package=&from=&to=&repo=`: what an upgrade affects. */
 export interface UpgradeImpactView {
   /** Repository that defines the package. */

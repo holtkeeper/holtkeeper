@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import {
   usePackageUsage,
+  usePublishedPackages,
   useRepoUsage,
   useUpgradeImpact,
   useUsageSites,
@@ -535,8 +536,80 @@ export function ImpactTab({ data }: { data: PublicApiPackageDetail }) {
   )
 }
 
-/** The packages one repository's code imports, with versions and how much of each it uses. */
+/** What one repository publishes and imports: who uses its packages, and which packages it uses. */
 export function RepoPackagesTab({ repo }: { repo: RepoRef }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <PublishedPackages repo={repo} />
+      <UsedPackages repo={repo} />
+    </div>
+  )
+}
+
+function PublishedPackages({ repo }: { repo: RepoRef }) {
+  const published = usePublishedPackages(repoKey(repo))
+  if (published.isPending) return <Placeholder className="h-64" />
+  if (published.isError) return <ErrorState error={published.error} />
+  const list = published.data.packages
+  if (!list.length) return null
+  const used = list.filter((pkg) => pkg.repos > 0).length
+  return (
+    <Panel
+      title="Published here"
+      description={`${plural(list.length, 'package')} defined in this repository, ${used} used by analyzed repositories. Open one to see where and how.`}
+    >
+      <Table label="Published here">
+        <thead>
+          <tr>
+            <Th>Package</Th>
+            <Th>Version</Th>
+            <Th>Folder</Th>
+            <Th align="right">Exports</Th>
+            <Th align="right">Used by</Th>
+            <Th align="right">Uses</Th>
+            <Th align="right">Files</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((pkg) => (
+            <tr key={pkg.name} className="hover:bg-default/40">
+              <Td>
+                <Link
+                  to="/public-api"
+                  search={{ package: pkg.name, repo: repoKey(repo), tab: 'used-by' }}
+                  className="font-mono text-[13px] font-medium hover:underline"
+                >
+                  {pkg.name}
+                </Link>
+                {pkg.private ? (
+                  <Chip className="ml-2" size="sm">
+                    private
+                  </Chip>
+                ) : null}
+              </Td>
+              <Td className="tabular">{pkg.version ?? '—'}</Td>
+              <Td className="font-mono text-xs text-muted">{pkg.dir}</Td>
+              <Td align="right" className="tabular">
+                {pkg.exports}
+              </Td>
+              <Td align="right" className="tabular">
+                {pkg.repos ? plural(pkg.repos, 'repo') : <span className="text-muted">—</span>}
+              </Td>
+              <Td align="right" className="tabular">
+                {pkg.count}
+              </Td>
+              <Td align="right" className="tabular">
+                {pkg.files}
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </Panel>
+  )
+}
+
+function UsedPackages({ repo }: { repo: RepoRef }) {
   const usage = useRepoUsage(repoKey(repo))
   if (usage.isPending) return <Placeholder className="h-64" />
   if (usage.isError)

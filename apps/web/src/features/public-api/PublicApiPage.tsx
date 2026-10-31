@@ -94,6 +94,7 @@ export function PublicApiPage() {
         name={search.package}
         {...(search.version ? { version: search.version } : {})}
         {...(search.repo ? { repo: search.repo } : {})}
+        {...(search.tab ? { tab: search.tab } : {})}
       />
     )
   return <CatalogView tab={search.tab ?? 'packages'} />
@@ -336,24 +337,40 @@ function SymbolCard({ symbol, importFrom }: { symbol: ApiSymbol; importFrom: str
 
 const symbolPage = 150
 
-function PackageView({ name, version, repo }: { name: string; version?: string; repo?: string }) {
+const packageTabs = ['api', 'changes', 'used-by', 'impact']
+
+function PackageView({
+  name,
+  version,
+  repo,
+  tab: requested,
+}: {
+  name: string
+  version?: string
+  repo?: string
+  tab?: string
+}) {
   const navigate = useNavigate()
   const detail = usePublicApiPackage({
     name,
     ...(version ? { version } : {}),
     ...(repo ? { repo } : {}),
   })
-  const [tab, setTab] = useState('api')
+  const tab = requested && packageTabs.includes(requested) ? requested : 'api'
 
-  const go = (next: { version?: string; repo?: string }) =>
+  const go = (next: { version?: string; repo?: string; tab?: string }, replace = false) => {
+    const nextTab = next.tab ?? tab
     void navigate({
       to: '/public-api',
       search: {
         package: name,
         ...(next.version ? { version: next.version } : {}),
         ...((next.repo ?? repo) ? { repo: next.repo ?? repo } : {}),
+        ...(nextTab !== 'api' ? { tab: nextTab } : {}),
       },
+      replace,
     })
+  }
 
   const data = detail.data
   return (
@@ -416,7 +433,7 @@ function PackageView({ name, version, repo }: { name: string; version?: string; 
           <Tabs
             aria-label="Package views"
             selected={tab}
-            onSelect={setTab}
+            onSelect={(next) => go({ ...(version ? { version } : {}), tab: next }, true)}
             items={[
               { id: 'api', label: 'API', content: <ApiTab data={data} /> },
               {

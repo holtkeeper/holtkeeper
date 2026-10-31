@@ -24,6 +24,7 @@ import type {
   PublicApiPackageList,
   PublicApiSearchResult,
   PackageUsageView,
+  PublishedPackagesView,
   RepoUsageView,
   UpgradeImpactView,
   UsageSitesView,
@@ -211,6 +212,10 @@ export const api = {
   }) => request<UsageSitesView>('GET', '/api/api-surface/usages/sites', { query: toQuery(query) }),
   repoUsage: (repo: string) =>
     request<RepoUsageView>('GET', '/api/api-surface/usages/repo', { query: { repo } }),
+  publishedPackages: (repo: string) =>
+    request<PublishedPackagesView>('GET', '/api/api-surface/usages/published', {
+      query: { repo },
+    }),
   upgradeImpact: (query: { package: string; from?: string; to?: string; repo?: string }) =>
     request<UpgradeImpactView>('GET', '/api/api-surface/usages/impact', {
       query: toQuery(query),
