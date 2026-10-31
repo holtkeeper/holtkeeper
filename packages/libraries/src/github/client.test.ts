@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
-import { type GitHubCache, GitHubRateLimitError, createGitHubClient } from './client.ts'
+import {
+  type GitHubCache,
+  type GitHubEvent,
+  GitHubRateLimitError,
+  createGitHubClient,
+  githubTokenInfo,
+} from './client.ts'
 
 interface Call {
   url: string
@@ -219,5 +225,95 @@ describe('createGitHubClient conditional requests', () => {
     version = 2
     expect((await client.rest('/repos/x/y')).data).toEqual({ version: 2 })
     expect((await client.rest('/repos/x/y')).data).toEqual({ version: 2 })
+  })
+})
+
+describe('createGitHubClient events', () => {
+  test('reports every answer with its token index and every wait', async () => {
+    let clock = 1_000_000
+    const events: GitHubEvent[] = []
+    let limitedOnce = false
+    const cache = memoryCache()
+    const { fetchFn } = fakeFetch((call) => {
+      if (call.url.endsWith('/user')) return json({ login: call.token })
+      if (call.ifNoneMatch) return new Response(null, { status: 304 })
+      if (!limitedOnce) {
+        limitedOnce = true
+        return limited(clock / 1000 + 5)
+      }
+      return json({ ok: 1 }, { etag: '"e"' })
+    })
+    const client = createGitHubClient({
+      tokens: ['a'],
+      fetch: fetchFn,
+      cache,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms
+      },
+      onEvent: (event) => events.push(event),
+    })
+    await client.rest('/repos/x/y')
+    await client.rest('/repos/x/y')
+    expect(events).toEqual([
+      {
+        kind: 'request',
+        token: 0,
+        resource: 'core',
+        status: 403,
+        notModified: false,
+        limited: true,
+      },
+      { kind: 'wait', resource: 'core', ms: 5000 },
+      {
+        kind: 'request',
+        token: 0,
+        resource: 'core',
+        status: 200,
+        notModified: false,
+        limited: false,
+      },
+      {
+        kind: 'request',
+        token: 0,
+        resource: 'core',
+        status: 304,
+        notModified: true,
+        limited: false,
+      },
+    ])
+  })
+})
+
+describe('githubTokenInfo', () => {
+  test('reads the account and the live limits by resource', async () => {
+    const { fetchFn } = fakeFetch((call) =>
+      call.url.endsWith('/user')
+        ? json({ login: 'bot-a' })
+        : json({
+            resources: {
+              core: { limit: 5000, used: 120, remaining: 4880, reset: 1_800_000_000 },
+              search: { limit: 30, used: 0, remaining: 30, reset: 1_800_000_000 },
+            },
+          }),
+    )
+    expect(await githubTokenInfo('t', { fetch: fetchFn })).toEqual({
+      login: 'bot-a',
+      limits: {
+        core: { limit: 5000, used: 120, remaining: 4880, resetAt: '2027-01-15T08:00:00.000Z' },
+        search: { limit: 30, used: 0, remaining: 30, resetAt: '2027-01-15T08:00:00.000Z' },
+      },
+    })
+  })
+
+  test('reports a rejected token and network failures instead of throwing', async () => {
+    const rejected = fakeFetch(() => new Response('{}', { status: 401 }))
+    expect(await githubTokenInfo('t', { fetch: rejected.fetchFn })).toEqual({
+      error: 'GitHub rejected the token',
+    })
+    const down = (async () => {
+      throw new Error('ECONNREFUSED')
+    }) as unknown as typeof fetch
+    expect(await githubTokenInfo('t', { fetch: down })).toEqual({ error: 'ECONNREFUSED' })
   })
 })

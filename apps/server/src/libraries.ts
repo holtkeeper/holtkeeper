@@ -42,6 +42,7 @@ import { z } from 'zod'
 
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
+import { githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
 
 const intervalPattern = /^([1-9]\d*)(m|h|d)$/
 const MIN_INTERVAL_MS = 3_600_000
@@ -193,39 +194,37 @@ export async function githubClientFor(
   references: readonly string[] | undefined,
   options: {
     log?: (line: string) => void
-    kv?: Pick<KvStore, 'get' | 'set'>
+    kv?: Pick<KvStore, 'get' | 'set' | 'compareAndSet'>
     wait?: GitHubWait
     signal?: AbortSignal
   } = {},
 ): Promise<GitHubClient> {
   const log = options.log ?? (() => {})
-  const tokens: string[] = []
-  if (references?.length) {
-    const all = await credentials.list()
-    for (const reference of references) {
-      const credential =
-        all.find((item) => item.id === reference) ?? all.find((item) => item.name === reference)
-      if (!credential) {
-        log(`libraries: no credential "${reference}"; left out of the GitHub tokens`)
-        continue
-      }
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- a handful of credentials, read in order
-        tokens.push(await credentials.reveal(credential.id))
-      } catch (error) {
-        log(
-          `libraries: credential "${credential.name}": ${error instanceof Error ? error.message : String(error)}`,
-        )
-      }
-    }
-    if (!tokens.length) log('libraries: no GitHub token could be read; reading GitHub anonymously')
-  }
+  const resolved = await resolveGitHubTokens(credentials, references ?? [])
+  for (const credential of resolved)
+    if (credential.error)
+      log(
+        credential.token === undefined && credential.id === credential.name
+          ? `libraries: ${credential.error}; left out of the GitHub tokens`
+          : `libraries: credential "${credential.name}": ${credential.error}`,
+      )
+  const readable = resolved.filter((credential) => credential.token !== undefined)
+  if (references?.length && !readable.length)
+    log('libraries: no GitHub token could be read; reading GitHub anonymously')
+  const usage = githubUsageFor(options.kv)
   return createGitHubClient({
-    tokens,
+    tokens: readable.map((credential) => credential.token!),
     maxWaitMs: options.wait === 'index' ? 65 * 60_000 : 10_000,
     ...(options.kv ? { cache: options.kv } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     log,
+    onEvent: (event) =>
+      usage.record(
+        event,
+        event.kind === 'request' && event.token !== undefined
+          ? readable[event.token]?.id
+          : undefined,
+      ),
   })
 }
 

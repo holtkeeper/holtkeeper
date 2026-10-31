@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type {
   CreateMcpTokenResult,
+  GitHubTokenUsage,
   LibraryDetail,
   LibraryList,
   LibraryReindexResult,
@@ -21,6 +22,7 @@ import { aesVault } from '@holtkeeper/vault'
 
 import { builtinAnalyses } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
+import { githubUsageFor } from '../src/github-usage.ts'
 import {
   fleetLibraryUses,
   githubClientFor,
@@ -381,6 +383,32 @@ describe('library routes', () => {
     expect(response.status).toBe(200)
     expect(((await response.json()) as LibraryReindexResult).started).toBe(true)
     expect(await store.kv?.get('libraries:reindex')).toBe(true)
+  })
+
+  test('GitHub token usage needs global settings:read and counts what the clients sent', async () => {
+    expect((await app.request('/api/libraries/github', { headers: asGames })).status).toBe(403)
+    const counter = githubUsageFor(store.kv, () => now)
+    counter.record({
+      kind: 'request',
+      resource: 'core',
+      status: 200,
+      notModified: false,
+      limited: false,
+    })
+    counter.record({
+      kind: 'request',
+      resource: 'core',
+      status: 304,
+      notModified: true,
+      limited: false,
+    })
+    counter.record({ kind: 'wait', resource: 'search', ms: 1500 })
+    const body = await get<GitHubTokenUsage>('/api/libraries/github?days=7', asAdmin)
+    expect(body.tokens).toEqual([])
+    expect(body.days).toHaveLength(7)
+    expect(body.anonymous['core']).toMatchObject({ requests: 2, notModified: 1 })
+    expect(body.totals).toMatchObject({ requests: 2, notModified: 1, waits: 1, waitMs: 1500 })
+    expect(body.days.at(-1)?.byToken).toEqual({ anonymous: 2 })
   })
 
   test('MCP tokens read the library routes', async () => {

@@ -61,6 +61,7 @@ import type {
   CreateKnowledgeInput,
   ForgeSshKeyInput,
   ForgeSshKeyResult,
+  GitHubTokenUsage,
   GroupDocumentData,
   GroupListingView,
   PutConfigInput,
@@ -398,6 +399,8 @@ export const api = {
     limit?: number
   }) => request<LibrarySearchResult>('GET', '/api/libraries/search', { query }),
   reindexLibraries: () => request<LibraryReindexResult>('POST', '/api/libraries/reindex'),
+  githubTokens: (days: number) =>
+    request<GitHubTokenUsage>('GET', '/api/libraries/github', { query: { days } }),
 
   egressCache: () => request<EgressCacheView>('GET', '/api/egress/cache'),
   deleteEgressCache: (input: DeleteEgressCacheInput = {}) =>

@@ -1572,3 +1572,50 @@ export interface LibrarySearchResult {
 export interface LibraryReindexResult {
   started: boolean
 }
+
+/** A GitHub rate limit of one token and resource, as `GET /rate_limit` reports it. */
+export interface GitHubLimitView {
+  limit: number
+  used: number
+  remaining: number
+  resetAt: Timestamp
+}
+
+/** Requests sent to GitHub. `notModified` answered from the `ETag` cache cost nothing. */
+export interface GitHubRequestCounts {
+  requests: number
+  notModified: number
+  /** Answers that were a rate limit (primary or secondary). */
+  limited: number
+  /** Times every token was exhausted and the client waited, and for how long in all. */
+  waits: number
+  waitMs: number
+}
+
+/** One GitHub token credential named by the `libraries.github` setting. */
+export interface GitHubTokenView {
+  credentialId: string
+  name: string
+  /** GitHub account of the token, when it could be asked. */
+  login?: string
+  /** Credential id of an earlier token of the same account; requests skip this one. */
+  duplicateOf?: string
+  /** Live limits by resource (`core`, `search`, `graphql`, ...). */
+  limits?: Record<string, GitHubLimitView>
+  /** Why `login`/`limits` are missing: unreadable credential, rejected token, GitHub unreachable. */
+  error?: string
+  /** Requests over the asked days, by resource. */
+  usage: Record<string, GitHubRequestCounts>
+}
+
+/** `GET /api/libraries/github?days=30` (global `settings:read`) — use and limits of the GitHub tokens. */
+export interface GitHubTokenUsage {
+  tokens: GitHubTokenView[]
+  /** Requests sent without a token, by resource. */
+  anonymous: Record<string, GitHubRequestCounts>
+  /** One entry per UTC day of the range, oldest first; `byToken` keyed by credential id, `anonymous` for none. */
+  days: { day: string; total: GitHubRequestCounts; byToken: Record<string, number> }[]
+  totals: GitHubRequestCounts
+  /** Live limits summed over the distinct accounts, by resource: what the pool can spend per window. */
+  capacity: Record<string, GitHubLimitView>
+}

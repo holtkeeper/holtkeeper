@@ -105,7 +105,29 @@ export interface GitHubClientOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   now?: () => number
   log?: (line: string) => void
+  /** Told about every answer and every wait, e.g. to count use per token. */
+  onEvent?: (event: GitHubEvent) => void
 }
+
+/** The API resources GitHub counts rate limits for separately. */
+export type GitHubResource = 'core' | 'search' | 'graphql'
+
+/**
+ * What the client did. `token` is the index of the token in `tokens` (after `token`), absent for
+ * anonymous requests.
+ */
+export type GitHubEvent =
+  | {
+      kind: 'request'
+      token?: number
+      resource: GitHubResource
+      status: number
+      /** Answered `304` from the cache. */
+      notModified: boolean
+      /** The answer was a rate limit. */
+      limited: boolean
+    }
+  | { kind: 'wait'; resource: GitHubResource; ms: number }
 
 const nextLink = (header: string | null) =>
   header
@@ -127,7 +149,7 @@ const abortableSleep = (ms: number, signal?: AbortSignal) =>
     )
   })
 
-type Resource = 'core' | 'search' | 'graphql'
+type Resource = GitHubResource
 
 interface Bucket {
   remaining?: number
@@ -138,6 +160,7 @@ interface Bucket {
 
 interface PoolToken {
   token: string | undefined
+  index?: number
   buckets: Map<Resource, Bucket>
 }
 
@@ -172,10 +195,9 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
   const now = options.now ?? Date.now
   const ttl = options.cacheTtlSeconds ?? 30 * 86_400
   const given = [...new Set([...(options.tokens ?? []), ...(options.token ? [options.token] : [])])]
-  let pool: PoolToken[] = (given.length ? given : [undefined]).map((token) => ({
-    token,
-    buckets: new Map(),
-  }))
+  let pool: PoolToken[] = given.length
+    ? given.map((token, index) => ({ token, index, buckets: new Map() }))
+    : [{ token: undefined, buckets: new Map() }]
   const urlOf = (path: string) => (path.startsWith('http') ? path : `${apiUrl}${path}`)
 
   let identified: Promise<void> | undefined
@@ -266,6 +288,7 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
         options.log?.(
           `github: ${resource} rate limit exhausted; waiting ${Math.ceil(waitMs / 1000)} s until ${new Date(next).toISOString()}`,
         )
+        options.onEvent?.({ kind: 'wait', resource, ms: Math.max(0, waitMs) })
         // oxlint-disable-next-line no-await-in-loop -- waiting for the limit to reset is the point
         await sleep(Math.max(0, waitMs), options.signal)
         continue
@@ -284,6 +307,14 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
         !primary &&
         (response.status === 429 ||
           (response.status === 403 && Number.isFinite(retryAfter) && retryAfter > 0))
+      options.onEvent?.({
+        kind: 'request',
+        ...(entry.index === undefined ? {} : { token: entry.index }),
+        resource,
+        status: response.status,
+        notModified: response.status === 304,
+        limited: primary || secondary,
+      })
       if (!primary && !secondary) return response
       void response.body?.cancel()
       const state = bucket(entry, resource)
@@ -347,5 +378,61 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
       if (body.data === undefined) throw new Error('GitHub GraphQL returned no data')
       return body.data
     },
+  }
+}
+
+/** What GitHub says about one token: its account and live limits by resource. */
+export interface GitHubTokenInfo {
+  login?: string
+  limits?: Record<string, { limit: number; used: number; remaining: number; resetAt: string }>
+  error?: string
+}
+
+/**
+ * The account (`GET /user`) and the live limits (`GET /rate_limit`, which GitHub does not count)
+ * of `token`; anonymous without one. Never throws: problems come back as `error`.
+ */
+export async function githubTokenInfo(
+  token: string | undefined,
+  options: { fetch?: typeof fetch; apiUrl?: string; signal?: AbortSignal } = {},
+): Promise<GitHubTokenInfo> {
+  const doFetch = options.fetch ?? fetch
+  const apiUrl = (options.apiUrl ?? 'https://api.github.com').replace(/\/$/, '')
+  const get = (path: string) =>
+    doFetch(`${apiUrl}${path}`, {
+      headers: headers(token, 'application/vnd.github+json'),
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+  try {
+    const [user, limits] = await Promise.all([token ? get('/user') : undefined, get('/rate_limit')])
+    if (limits.status === 401 || user?.status === 401) return { error: 'GitHub rejected the token' }
+    if (!limits.ok) return { error: `GitHub ${limits.status} for /rate_limit` }
+    const body: unknown = await limits.json()
+    const resources =
+      typeof body === 'object' && body !== null && 'resources' in body ? body.resources : undefined
+    const info: GitHubTokenInfo = { limits: {} }
+    if (typeof resources === 'object' && resources !== null)
+      for (const [name, value] of Object.entries(resources)) {
+        if (typeof value !== 'object' || value === null) continue
+        const limit: unknown = 'limit' in value ? value.limit : undefined
+        const used: unknown = 'used' in value ? value.used : undefined
+        const remaining: unknown = 'remaining' in value ? value.remaining : undefined
+        const reset: unknown = 'reset' in value ? value.reset : undefined
+        if (typeof limit !== 'number' || typeof remaining !== 'number') continue
+        info.limits![name] = {
+          limit,
+          used: typeof used === 'number' ? used : limit - remaining,
+          remaining,
+          resetAt: new Date((typeof reset === 'number' ? reset : 0) * 1000).toISOString(),
+        }
+      }
+    if (user?.ok) {
+      const account: unknown = await user.json()
+      if (typeof account === 'object' && account !== null && 'login' in account)
+        if (typeof account.login === 'string') info.login = account.login
+    }
+    return info
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
   }
 }

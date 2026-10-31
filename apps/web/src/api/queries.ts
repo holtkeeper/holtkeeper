@@ -676,6 +676,17 @@ export const useLibrarySearch = (query: {
     staleTime: 30_000,
   })
 
+/** Use and live limits of the GitHub tokens over the last `days`; refreshed every minute. */
+export const useGitHubTokens = (days: number, enabled = true) =>
+  useQuery({
+    queryKey: [...keys.libraries, 'github', days],
+    queryFn: () => api.githubTokens(days),
+    placeholderData: keepPreviousData,
+    enabled,
+    retry: false,
+    refetchInterval: 60_000,
+  })
+
 /** Starts an indexing run unless one is going; refreshes the library views. */
 export function useReindexLibraries() {
   const client = useQueryClient()

@@ -1,11 +1,13 @@
 import { type Principal, can } from '@holtkeeper/access'
 import type {
+  GitHubTokenUsage,
   LibraryDetail,
   LibraryList,
   LibraryReindexResult,
   LibrarySearchResult,
   LibrarySummary,
 } from '@holtkeeper/api'
+import { githubTokenInfo } from '@holtkeeper/libraries'
 import type {
   LibraryChunk,
   LibraryEcosystem,
@@ -16,6 +18,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import { type Env, type ServerDeps, authorize, principalOf, repoTarget } from '../context.ts'
+import { githubTokenUsage, githubUsageFor, resolveGitHubTokens } from '../github-usage.ts'
 import {
   lastLibraryRun,
   libraryReader,
@@ -27,6 +30,7 @@ import { canSee } from '../visibility.ts'
 
 const GLOBAL = { kind: 'global' } as const
 const DOCUMENT_CHUNKS = 100_000
+const TOKEN_INFO_MS = 60_000
 
 const ecosystemParam = (value: string | undefined): LibraryEcosystem | undefined => {
   if (!value) return undefined
@@ -133,6 +137,32 @@ export function libraryRoutes(deps: ServerDeps) {
       if (shown) result.push(hit)
     }
     return c.json<LibrarySearchResult>({ hits: result })
+  })
+
+  const tokenInfo = new Map<string, { at: number; info: ReturnType<typeof githubTokenInfo> }>()
+  const cachedInfo = (token: string | undefined) => {
+    const key = token ?? ''
+    const hit = tokenInfo.get(key)
+    const at = deps.now().getTime()
+    if (hit && at - hit.at < TOKEN_INFO_MS) return hit.info
+    const info = githubTokenInfo(token)
+    tokenInfo.set(key, { at, info })
+    return info
+  }
+
+  routes.get('/libraries/github', async (c) => {
+    authorize(c, 'settings:read', GLOBAL)
+    const days = Math.min(90, Math.max(1, Math.trunc(Number(c.req.query('days') ?? 30)) || 30))
+    const settings = await librariesConfigOf(store.settings)
+    return c.json<GitHubTokenUsage>(
+      await githubTokenUsage({
+        credentials: await resolveGitHubTokens(deps.credentials, settings?.github ?? []),
+        usage: githubUsageFor(store.kv),
+        days,
+        now: deps.now,
+        info: cachedInfo,
+      }),
+    )
   })
 
   routes.post('/libraries/reindex', async (c) => {
