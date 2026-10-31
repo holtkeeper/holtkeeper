@@ -1,12 +1,27 @@
 import type { ReactNode } from 'react'
 
-/** Scrollable data table frame; use `Th` and `Td` inside. */
-export function Table({ children, label }: { children: ReactNode; label: string }) {
+/** Height cap of every data table; rows scroll inside under a sticky header. */
+export const tableScrollClass = 'max-h-[min(70vh,48rem)] overflow-auto overscroll-contain'
+
+/**
+ * Data table frame with a capped height and a sticky header; use `Th` and `Td` inside.
+ * `footer` sits inside the scroll area after the rows, the place for a `LoadMore`.
+ */
+export function Table({
+  children,
+  label,
+  footer,
+}: {
+  children: ReactNode
+  label: string
+  footer?: ReactNode
+}) {
   return (
-    <div className="-mx-1 overflow-x-auto px-1">
+    <div className={tableScrollClass}>
       <table aria-label={label} className="w-full border-separate border-spacing-0 text-sm">
         {children}
       </table>
+      {footer ? <div className="py-3">{footer}</div> : null}
     </div>
   )
 }
@@ -23,7 +38,7 @@ export function Th({
   return (
     <th
       scope="col"
-      className={`whitespace-nowrap border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted text-${align} ${className ?? ''}`}
+      className={`sticky top-0 z-[2] whitespace-nowrap border-b border-border bg-[var(--table-bg,var(--surface))] px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted text-${align} ${className ?? ''}`}
     >
       {children}
     </th>

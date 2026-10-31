@@ -75,7 +75,7 @@ Scope editors (grants, settings, knowledge) and the schedule and trigger dialogs
 
 ## UI wrappers
 
-Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog` (`size="xl"` for wide editors), `Markdown`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through.
+Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog` (`size="xl"` for wide editors), `Markdown`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through. Tables (`Table`, report tables, heatmaps, diffs, the dependency matrix) cap their height with `tableScrollClass` and scroll inside under a sticky header; paged lists end in `LoadMore`, a show-more button that also presses itself when scrolled into view, placed inside the table's scroll area when there is one.
 
 ## Build warm-up
 

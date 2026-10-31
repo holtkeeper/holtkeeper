@@ -16,6 +16,7 @@ import {
   Button,
   EmptyState,
   ErrorState,
+  LoadMore,
   Notice,
   Page,
   Panel,
@@ -220,18 +221,19 @@ export function AuditLogPage() {
             {...(filtered ? { description: 'Loosen the filters to see more.' } : {})}
           />
         ) : (
-          <div className="flex flex-col gap-3">
-            <AuditEventsTable events={events} />
-            {log.hasNextPage ? (
-              <Button
-                variant="secondary"
-                onPress={() => void log.fetchNextPage()}
-                isPending={log.isFetchingNextPage}
-              >
-                Load older
-              </Button>
-            ) : null}
-          </div>
+          <AuditEventsTable
+            events={events}
+            footer={
+              log.hasNextPage ? (
+                <LoadMore
+                  onLoad={() => void log.fetchNextPage()}
+                  isPending={log.isFetchingNextPage}
+                >
+                  Load older
+                </LoadMore>
+              ) : null
+            }
+          />
         )}
       </Panel>
     </Page>

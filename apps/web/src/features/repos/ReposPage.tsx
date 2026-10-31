@@ -320,7 +320,12 @@ function RepoRow({ summary, showAnalyses }: { summary: RepoSummary; showAnalyses
       </Td>
       {showAnalyses ? (
         <Td>
-          <div className="flex items-center gap-1">
+          <div
+            className="grid w-max gap-1"
+            style={{
+              gridTemplateColumns: `repeat(${Math.ceil(analysisPages.length / 2)}, auto)`,
+            }}
+          >
             {analysisPages.map((page) => {
               const latest = latestAnalyses?.find((a) => a.kind === page.kind)
               return <AnalysisPill key={page.kind} page={page} repoKey={key} latest={latest} />

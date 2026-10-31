@@ -7,9 +7,9 @@ import { formatDate, formatRelative, isoDay } from '../../lib/format.ts'
 import { personOf } from '../../lib/people.ts'
 import {
   Avatar,
-  Button,
   EmptyState,
   ErrorState,
+  LoadMore,
   Page,
   Panel,
   Placeholder,
@@ -123,13 +123,12 @@ export function ActivityPage() {
             </Panel>
           ))}
           {activity.hasNextPage ? (
-            <Button
-              variant="secondary"
-              onPress={() => void activity.fetchNextPage()}
+            <LoadMore
+              onLoad={() => void activity.fetchNextPage()}
               isPending={activity.isFetchingNextPage}
             >
               Load older
-            </Button>
+            </LoadMore>
           ) : null}
         </div>
       )}

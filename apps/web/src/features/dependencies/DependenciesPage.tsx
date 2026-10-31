@@ -2,7 +2,7 @@ import type { DependencyInventory } from '@holtkeeper/api'
 import { Link, useSearch } from '@tanstack/react-router'
 import { ArrowUpCircle, Boxes, ChevronRight, GitFork, Layers, Package } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { useDependencies } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
@@ -21,10 +21,10 @@ import {
 import { formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import { parseRepoKey, repoKey, repoName } from '../../lib/repo.ts'
 import {
-  Button,
   Chip,
   EmptyState,
   ErrorState,
+  LoadMore,
   Page,
   Panel,
   Placeholder,
@@ -39,6 +39,7 @@ import {
   Th,
   Tooltip,
   stagger,
+  tableScrollClass,
 } from '../../ui/index.ts'
 import { AnalysisRecords, RepoSelect } from '../analyses/AnalysesPage.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
@@ -165,6 +166,13 @@ function Inventory({ repo }: { repo?: string }) {
       set(value)
       setLimit(pageSize)
     }
+  const more =
+    libraries.length > visible.length ? (
+      <LoadMore variant="ghost" onLoad={() => setLimit(limit + pageSize)}>
+        Show {Math.min(pageSize, libraries.length - visible.length)} more of{' '}
+        {libraries.length - visible.length}
+      </LoadMore>
+    ) : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -239,20 +247,11 @@ function Inventory({ repo }: { repo?: string }) {
             description="Try another filter or include dev dependencies."
           />
         ) : view === 'libraries' ? (
-          <LibraryList libraries={visible} repos={data.repos} />
+          <LibraryList libraries={visible} repos={data.repos} more={more} />
         ) : (
-          <Matrix libraries={visible} repos={data.repos} {...(repo ? { repo } : {})} />
+          <Matrix libraries={visible} repos={data.repos} more={more} {...(repo ? { repo } : {})} />
         )}
       </Panel>
-
-      {libraries.length > visible.length ? (
-        <div className="flex justify-center">
-          <Button variant="ghost" onPress={() => setLimit(limit + pageSize)}>
-            Show {Math.min(pageSize, libraries.length - visible.length)} more of{' '}
-            {libraries.length - visible.length}
-          </Button>
-        </div>
-      ) : null}
 
       <p className="text-xs text-muted">
         Direct dependencies from the newest Dependencies record of each repository.{' '}
@@ -316,9 +315,11 @@ function VersionBar({ library }: { library: Library }) {
 function LibraryList({
   libraries,
   repos,
+  more,
 }: {
   libraries: readonly Library[]
   repos: DependencyInventory['repos']
+  more: ReactNode
 }) {
   const [open, setOpen] = useState<string>()
   const analysisOf = new Map(repos.map((r) => [repoKey(r.repo), r]))
@@ -436,6 +437,7 @@ function LibraryList({
           </li>
         )
       })}
+      {more ? <li className="py-3">{more}</li> : null}
     </ul>
   )
 }
@@ -444,17 +446,19 @@ function Matrix({
   libraries,
   repos,
   repo,
+  more,
 }: {
   libraries: readonly Library[]
   repos: DependencyInventory['repos']
   repo?: string
+  more: ReactNode
 }) {
   const used = new Set(libraries.flatMap((library) => library.usages.map((u) => u.origin)))
   const columns = repos.filter(
     (r) => used.has(repoKey(r.repo)) && (!repo || repoKey(r.repo) === repo),
   )
   return (
-    <div className="max-h-[70vh] overflow-auto">
+    <div className={tableScrollClass}>
       <table
         aria-label="Versions per repository"
         className="border-separate border-spacing-0 text-sm"
@@ -550,6 +554,7 @@ function Matrix({
           })}
         </tbody>
       </table>
+      {more ? <div className="sticky left-0 py-3">{more}</div> : null}
       <Legend />
     </div>
   )

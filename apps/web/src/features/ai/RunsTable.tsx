@@ -7,10 +7,10 @@ import { formatTokens, formatUsd, totalTokens } from '../../lib/ai-usage.ts'
 import { formatDateTime, formatDuration, formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import {
-  Button,
   Chip,
   EmptyState,
   ErrorState,
+  LoadMore,
   Placeholder,
   Table,
   Td,
@@ -56,7 +56,16 @@ export function RunsTable() {
 
   return (
     <div className="flex flex-col gap-3">
-      <Table label="AI runs">
+      <Table
+        label="AI runs"
+        footer={
+          runs.hasNextPage ? (
+            <LoadMore onLoad={() => void runs.fetchNextPage()} isPending={runs.isFetchingNextPage}>
+              Load older
+            </LoadMore>
+          ) : null
+        }
+      >
         <thead>
           <tr>
             <Th>When</Th>
@@ -145,15 +154,6 @@ export function RunsTable() {
           ))}
         </tbody>
       </Table>
-      {runs.hasNextPage ? (
-        <Button
-          variant="secondary"
-          onPress={() => void runs.fetchNextPage()}
-          isPending={runs.isFetchingNextPage}
-        >
-          Load older
-        </Button>
-      ) : null}
     </div>
   )
 }

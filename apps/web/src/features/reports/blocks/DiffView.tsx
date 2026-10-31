@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
 import { type SplitCell, diffStats, hunkHeader, splitRows, unifiedRows } from '../../../lib/diff.ts'
-import { Chip } from '../../../ui/index.ts'
+import { Chip, tableScrollClass } from '../../../ui/index.ts'
 
 /** How diffs are laid out: one column with both sides, or old and new side by side. */
 export type DiffMode = 'unified' | 'split'
@@ -93,7 +93,7 @@ export function FileDiffView({
             transition={{ duration: 0.18 }}
             className="overflow-hidden"
           >
-            <div className="overflow-x-auto">
+            <div className={tableScrollClass}>
               <table className="w-full border-collapse font-mono text-[12px] leading-5">
                 {file.hunks.map((hunk, index) => (
                   <tbody key={index}>

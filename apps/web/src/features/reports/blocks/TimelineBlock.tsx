@@ -5,7 +5,7 @@ import { useState } from 'react'
 
 import { formatDateTime, formatRelative } from '../../../lib/format.ts'
 import { toneColor } from '../../../lib/units.ts'
-import { Button } from '../../../ui/index.ts'
+import { LoadMore } from '../../../ui/index.ts'
 
 const initialLimit = 60
 
@@ -98,9 +98,9 @@ export function TimelineBlock({ block }: { block: Extract<Block, { type: 'timeli
         ))}
       </ol>
       {block.items.length > limit ? (
-        <Button variant="secondary" size="sm" onPress={() => setLimit((l) => l + initialLimit * 3)}>
+        <LoadMore size="sm" onLoad={() => setLimit((l) => l + initialLimit * 3)}>
           Show {Math.min(block.items.length - limit, initialLimit * 3)} more
-        </Button>
+        </LoadMore>
       ) : null}
     </div>
   )

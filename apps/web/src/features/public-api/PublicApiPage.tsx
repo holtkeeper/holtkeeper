@@ -53,6 +53,7 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  LoadMore,
   Markdown,
   Notice,
   Page,
@@ -566,9 +567,7 @@ function ApiTab({ data }: { data: PublicApiPackageDetail }) {
             )
           })}
           {groups.reduce((sum, group) => sum + group.symbols.length, 0) > limit ? (
-            <Button variant="secondary" onPress={() => setLimit(limit + symbolPage)}>
-              Show more
-            </Button>
+            <LoadMore onLoad={() => setLimit(limit + symbolPage)}>Show more</LoadMore>
           ) : null}
         </div>
       ) : (

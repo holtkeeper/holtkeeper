@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { heatLimit, heatOf, labelStep } from '../../../lib/heatmap.ts'
 import { formatValue, toneColor } from '../../../lib/units.ts'
+import { tableScrollClass } from '../../../ui/index.ts'
 
 type HeatmapBlockData = Extract<Block, { type: 'heatmap' }>
 
@@ -52,7 +53,7 @@ export function HeatmapBlock({ block }: { block: HeatmapBlockData }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-x-auto">
+      <div className={tableScrollClass}>
         <table className="border-separate border-spacing-[3px] text-xs" aria-label={block.title}>
           <thead>
             <tr>
@@ -63,7 +64,7 @@ export function HeatmapBlock({ block }: { block: HeatmapBlockData }) {
                 <th
                   key={`${label}:${index}`}
                   scope="col"
-                  className="h-5 min-w-5 px-0 text-left align-bottom font-normal whitespace-nowrap text-muted"
+                  className="sticky top-0 z-20 h-5 min-w-5 bg-surface px-0 text-left align-bottom font-normal whitespace-nowrap text-muted"
                 >
                   <span className={index % step === 0 ? '' : 'sr-only'}>{label}</span>
                 </th>

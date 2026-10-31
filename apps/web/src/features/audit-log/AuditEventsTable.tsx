@@ -1,6 +1,6 @@
 import type { AuditEvent } from '@holtkeeper/api'
 import { ChevronRight } from 'lucide-react'
-import { Fragment, useState } from 'react'
+import { Fragment, type ReactNode, useState } from 'react'
 
 import {
   changeValue,
@@ -95,7 +95,7 @@ function EventDetails({ event }: { event: AuditEvent }) {
 }
 
 /** Audit events with an expandable row for request, changes and details. */
-export function AuditEventsTable({ events }: { events: AuditEvent[] }) {
+export function AuditEventsTable({ events, footer }: { events: AuditEvent[]; footer?: ReactNode }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const toggle = (id: string) =>
     setOpen((current) => {
@@ -105,7 +105,7 @@ export function AuditEventsTable({ events }: { events: AuditEvent[] }) {
     })
 
   return (
-    <Table label="Audit events">
+    <Table label="Audit events" footer={footer}>
       <thead>
         <tr>
           <Th className="w-8" />

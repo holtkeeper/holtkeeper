@@ -41,7 +41,9 @@ export function Dialog({
             <Modal.Heading>{title}</Modal.Heading>
             {description ? <p className="text-sm text-muted">{description}</p> : null}
           </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">{children}</Modal.Body>
+          <Modal.Body className="flex flex-col gap-4 [--table-bg:var(--overlay)]">
+            {children}
+          </Modal.Body>
           {footer ? <Modal.Footer>{footer}</Modal.Footer> : null}
         </Modal.Dialog>
       </Modal.Container>

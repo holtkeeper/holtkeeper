@@ -16,7 +16,7 @@ import { use, useMemo, useState } from 'react'
 
 import { plural } from '../../../lib/format.ts'
 import { cellSortValue, cellText, compareSortValues } from '../../../lib/units.ts'
-import { Button, SearchInput } from '../../../ui/index.ts'
+import { LoadMore, SearchInput, tableScrollClass } from '../../../ui/index.ts'
 import { ReportContext } from '../context.ts'
 import { ExcludeDialog } from '../ExcludeDialog.tsx'
 import { CellView } from './CellView.tsx'
@@ -44,7 +44,7 @@ const numericUnit = (column: Column) =>
   column.format === 'delta'
 
 const stickyFirst = (index: number, base: string) =>
-  index === 0 ? `sticky left-0 z-[1] ${base} shadow-[1px_0_0_var(--separator)]` : ''
+  index === 0 ? `sticky left-0 ${base} shadow-[1px_0_0_var(--separator)]` : ''
 
 const isEnd = (column: Column, rows: readonly Row[]) =>
   column.align
@@ -117,7 +117,7 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
           </span>
         </div>
       ) : null}
-      <div className="-mx-1 overflow-x-auto px-1">
+      <div className={tableScrollClass}>
         <table
           aria-label={block.title ?? 'Table'}
           className="w-full border-separate border-spacing-0 text-sm"
@@ -135,7 +135,7 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
                       sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none'
                     }
                     title={column.hint}
-                    className={`whitespace-nowrap border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted ${end ? 'text-right' : 'text-left'} ${stickyFirst(index, 'bg-surface')}`}
+                    className={`sticky top-0 whitespace-nowrap border-b border-border bg-surface px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted ${end ? 'text-right' : 'text-left'} ${index === 0 ? 'z-[3]' : 'z-[2]'} ${stickyFirst(index, '')}`}
                   >
                     <button
                       type="button"
@@ -175,7 +175,7 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
                   {visibleColumns.map((column, index) => (
                     <td
                       key={column.key}
-                      className={`border-b border-separator px-3 py-2 align-middle ${isEnd(column, block.rows) ? 'text-right tabular' : ''} ${stickyFirst(index, 'bg-surface group-hover/row:bg-[linear-gradient(var(--default-soft),var(--default-soft))]')}`}
+                      className={`border-b border-separator px-3 py-2 align-middle ${isEnd(column, block.rows) ? 'text-right tabular' : ''} ${stickyFirst(index, 'z-[1] bg-surface group-hover/row:bg-[linear-gradient(var(--default-soft),var(--default-soft))]')}`}
                     >
                       {column.path && exclude && cellText(row.original[column.key]) ? (
                         <span className="flex items-start gap-1">
@@ -200,6 +200,15 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
             </tbody>
           ))}
         </table>
+        {rows.length > limit ? (
+          <LoadMore
+            size="sm"
+            className="sticky left-0 flex justify-center py-3"
+            onLoad={() => setLimit((l) => l + pageSize * 4)}
+          >
+            Show more ({rows.length - limit} hidden)
+          </LoadMore>
+        ) : null}
       </div>
       {excluding && exclude ? (
         <ExcludeDialog
@@ -211,11 +220,6 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
       ) : null}
       {rows.length === 0 ? (
         <p className="py-4 text-center text-sm text-muted">No rows match.</p>
-      ) : null}
-      {rows.length > limit ? (
-        <Button variant="secondary" size="sm" onPress={() => setLimit((l) => l + pageSize * 4)}>
-          Show more ({rows.length - limit} hidden)
-        </Button>
       ) : null}
     </div>
   )
