@@ -5,7 +5,7 @@ import { branchesAnalyzer } from '@holtkeeper/branches'
 import { browserslistAnalyzer } from '@holtkeeper/browserslist'
 import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/changelog'
 import { ciJobsAnalyzer } from '@holtkeeper/ci-jobs'
-import { coverageAnalyzer } from '@holtkeeper/coverage'
+import { coverageAnalyzer, installDependencies } from '@holtkeeper/coverage'
 import { deliveryAnalyzer } from '@holtkeeper/delivery'
 import { analyzeDependencies, depgraphAnalysis } from '@holtkeeper/depgraph'
 import { goSource } from '@holtkeeper/depgraph-go'
@@ -96,6 +96,8 @@ export const qualityAnalyzer = defineAnalyzer({
   options: z.object({
     examples: z.coerce.number().int().nonnegative().default(3),
     coverage: z.enum(['run', 'skip']).default('run'),
+    /** Install dependencies from the lockfile first, so the project's linters and knip can run. */
+    install: z.boolean().default(true),
   }),
   flags: [
     {
@@ -109,7 +111,19 @@ export const qualityAnalyzer = defineAnalyzer({
       description: 'run tests for coverage: run (default) or skip',
     },
   ],
-  async run({ dir, ref, runner, agent, options, signal }) {
+  async run({ dir, ref, runner, agent, options, log, signal }) {
+    if (options.install) {
+      const installed = await installDependencies({
+        dir: checkoutOf(dir),
+        runner,
+        ...(signal ? { signal } : {}),
+      })
+      log?.(
+        installed.status === 'failed'
+          ? `quality: install failed: ${installed.error}`
+          : `quality: install ${installed.status}${installed.status === 'skipped' ? ` (${installed.reason})` : ''}`,
+      )
+    }
     const data = await analyzeQuality({
       dir: checkoutOf(dir),
       runner,

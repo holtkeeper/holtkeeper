@@ -23,8 +23,8 @@ const data = await analyzeQuality({
 })
 ```
 
-Checks that do not detect themselves are skipped; a failing check is recorded in `tools` and the others continue. Changes are de-duplicated by id. `qualityDataSchema` validates uploads; `stableId(...parts)` gives issues and changes ids that survive re-runs.
+Checks that do not detect themselves are skipped; a failing check is recorded in `tools` and the others continue. A check that applies but had nothing to run (its tool or the project's dependencies are not installed) returns `skipped: reason`, kept in `tools` and shown as `skipped: …` rather than `ok`. Changes are de-duplicated by id. `qualityDataSchema` validates uploads; `stableId(...parts)` gives issues and changes ids that survive re-runs.
 
 ## Report
 
-Metrics: issues, errors, line coverage, places worth testing, naming consistency, duplicated lines, suggested changes — with deltas against the previous run. Sections: naming conventions (table, outliers, renames), tests (ranked targets, suggested tests), one section per finding category with fixes, and the tools that ran. Suggested changes appear as `changes` blocks that can be accepted.
+Metrics: issues, errors, line coverage, places worth testing (only when the `tests` check ran), naming consistency (over established conventions only), duplicated lines, suggested changes — with deltas against the previous run. Kinds of names without an established convention are listed as `none (mostly <style>)` without outliers. Sections: naming conventions (table, outliers, renames), tests (ranked targets, suggested tests), one section per finding category with fixes, and the tools that ran. Suggested changes appear as `changes` blocks that can be accepted.

@@ -42,6 +42,8 @@ async function probeVersion(
  * Runs every linter the project configures and has installed, one after another, and merges
  * their findings. Its `version` lists each tool that ran (`oxlint 1.90.0, ruff 0.9.1`). A linter
  * that fails is noted there and skipped; the check throws only when every linter that ran failed.
+ * A configured linter that is not installed is listed as `eslint (not installed)`; when none of
+ * them is installed the result is `skipped`.
  */
 export function lintCheck({
   adapters = defaultAdapters(),
@@ -65,13 +67,17 @@ export function lintCheck({
       const findings: LintFindings = { issues: [], changes: [] }
       const versions: string[] = []
       const failures: string[] = []
+      const missing: string[] = []
 
       for (const adapter of await detected(dir)) {
         signal?.throwIfAborted()
         // Linters run one at a time: each already uses every core.
         // oxlint-disable-next-line no-await-in-loop
         const version = await probeVersion(runner, adapter, dir, signal)
-        if (!version) continue
+        if (!version) {
+          missing.push(adapter.name)
+          continue
+        }
         try {
           const command = adapter.command(dir)
           // oxlint-disable-next-line no-await-in-loop
@@ -98,7 +104,10 @@ export function lintCheck({
 
       if (failures.length > 0 && failures.length === versions.length)
         throw new Error(failures.join('\n'))
-      return { ...findings, ...(versions.length > 0 ? { version: versions.join(', ') } : {}) }
+      if (versions.length === 0 && missing.length > 0)
+        return { ...findings, skipped: `${missing.join(', ')} not installed` }
+      const tools = [...versions, ...missing.map((name) => `${name} (not installed)`)]
+      return { ...findings, ...(tools.length > 0 ? { version: tools.join(', ') } : {}) }
     },
   }
 }

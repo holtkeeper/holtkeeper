@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -27,6 +27,7 @@ test('detects package.json and runs knip in the project directory', async () => 
     await Bun.write(join(dir, 'package.json'), '{\n  "dependencies": {\n    "a": "1"\n  }\n}\n')
     expect(await check.detect(dir)).toBe(true)
     expect(knipCommand(dir)[0]).toBe(process.execPath)
+    await mkdir(join(dir, 'node_modules'))
 
     const { runner, calls } = createFakeRunner((command) =>
       command.includes('--version')
@@ -42,6 +43,22 @@ test('detects package.json and runs knip in the project directory', async () => 
     expect(calls.every((call) => call.options.cwd === dir)).toBe(true)
     expect(result.issues?.map((issue) => issue.rule)).toEqual(['deadcode/unused-dependency'])
     expect(result.changes?.[0]?.edits[0]).toMatchObject({ kind: 'replace', newText: '' })
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('is skipped when declared dependencies are not installed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'quality-deadcode-check-'))
+  try {
+    await Bun.write(join(dir, 'package.json'), '{ "devDependencies": { "a": "1" } }')
+    const { runner, calls } = createFakeRunner(() => ({ stdout: '' }))
+    expect(await deadCodeCheck().run({ dir, runner })).toEqual({
+      issues: [],
+      changes: [],
+      skipped: 'dependencies are not installed',
+    })
+    expect(calls).toHaveLength(0)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

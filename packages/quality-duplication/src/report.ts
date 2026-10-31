@@ -55,7 +55,8 @@ const clean = (name: string) => name.replace(/\\/g, '/').replace(/^\.\//, '')
 /**
  * Turns a jscpd JSON report into the duplication summary and one issue per clone. The issue sits
  * on the first copy; `message` names both locations and `help` points at the other copy. The id
- * depends on both files and the duplicated text, not on line numbers. Throws on another shape.
+ * depends on both files and the duplicated text, not on line numbers; the same text repeated
+ * between the same two files gets one id per occurrence, in report order. Throws on another shape.
  */
 export function parseJscpdReport(report: unknown, large: LargeClone = {}): ParsedDuplication {
   const { duplicates, statistics } = jscpdReportSchema.parse(
@@ -64,6 +65,7 @@ export function parseJscpdReport(report: unknown, large: LargeClone = {}): Parse
   const largeLines = large.lines ?? 50
   const largeTokens = large.tokens ?? 400
 
+  const occurrences = new Map<string, number>()
   const issues = duplicates.map((clone): QualityIssue => {
     const first = clean(clone.firstFile.name)
     const second = clean(clone.secondFile.name)
@@ -71,14 +73,17 @@ export function parseJscpdReport(report: unknown, large: LargeClone = {}): Parse
       `${file}:${part.start}-${part.end}`
     const size = `${clone.lines} lines${clone.tokens === undefined ? '' : ` (${clone.tokens} tokens)`}`
     const isLarge = clone.lines >= largeLines || (clone.tokens ?? 0) >= largeTokens
+    const key = stableId(
+      'jscpd',
+      'clone',
+      first,
+      second,
+      clone.fragment ?? `${clone.lines}:${clone.tokens}`,
+    )
+    const seen = occurrences.get(key) ?? 0
+    occurrences.set(key, seen + 1)
     return {
-      id: stableId(
-        'jscpd',
-        'clone',
-        first,
-        second,
-        clone.fragment ?? `${clone.lines}:${clone.tokens}`,
-      ),
+      id: seen === 0 ? key : stableId(key, seen),
       tool: 'jscpd',
       rule: clone.kind ? `clone/${clone.kind}` : 'clone',
       category: 'duplication',

@@ -59,17 +59,34 @@ async function knipVersion(
   }
 }
 
+async function declaresDependencies(dir: string): Promise<boolean> {
+  try {
+    const manifest: unknown = await Bun.file(join(dir, 'package.json')).json()
+    if (typeof manifest !== 'object' || manifest === null) return false
+    return ['dependencies', 'devDependencies', 'optionalDependencies'].some((field) => {
+      const deps: unknown = Reflect.get(manifest, field)
+      return typeof deps === 'object' && deps !== null && Object.keys(deps).length > 0
+    })
+  } catch {
+    return false
+  }
+}
+
 /**
  * Dead code and dependency hygiene with knip, check name `deadcode`. Applies to projects with a
  * `package.json`. knip runs in the project directory with the project's knip configuration (its
  * defaults when there is none). Contributes `lint` issues with `deadcode/*` rules and `review`
  * changes; throws when knip exits non-zero (a configuration error) or prints no JSON report.
+ * `skipped` when the project declares dependencies but has no `node_modules`: without them knip
+ * cannot load plugin configs or see which binaries and packages they provide.
  */
 export function deadCodeCheck(options: DeadCodeCheckOptions = {}): QualityCheck {
   return {
     name: 'deadcode',
     detect: async (dir) => Bun.file(join(dir, 'package.json')).exists(),
     async run({ dir, runner, signal }) {
+      if (!existsSync(join(dir, 'node_modules')) && (await declaresDependencies(dir)))
+        return { issues: [], changes: [], skipped: 'dependencies are not installed' }
       const command = options.command?.(dir) ?? knipCommand(dir)
       const version = await knipVersion(runner, command, dir, signal)
       const result = await runner.run([...command, ...knipArgs(options)], {

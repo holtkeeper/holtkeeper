@@ -134,8 +134,31 @@ describe('typescript', () => {
     const dir = await project({
       'a.ts': `${constants(twelve.slice(0, 5))}const maxSize = 1\nexport {}\n`,
     })
-    expect((await analyze(dir)).issues).toEqual([])
+    const result = await analyze(dir)
+    expect(result.issues).toEqual([])
+    expect(result.conventions?.find((c) => c.kind === 'module constant')?.established).toBe(false)
     expect((await analyze(dir, { minNames: 5, minShare: 0.8 })).issues).toHaveLength(1)
+  })
+
+  test('files named after what they declare are not file name outliers', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [
+        `src/roadUtil${String.fromCodePoint(65 + i)}.ts`,
+        `export const x${i} = ${i}\n`,
+      ]),
+    )
+    const dir = await project({
+      ...files,
+      'src/BaseRoadLogic.ts': 'export class BaseRoadLogic {}\n',
+      'src/app-info.ts': 'export const info = 1\n',
+    })
+    const result = await analyze(dir)
+    expect(result.conventions?.find((c) => c.kind === 'file name')).toMatchObject({
+      dominant: 'camelCase',
+      total: 11,
+    })
+    expect(result.issues?.map((i) => i.file)).toEqual(['src/app-info.ts'])
+    expect(result.issues?.[0]?.message).toContain('of 11 file names)')
   })
 
   test('components, locals and skipped directories', async () => {

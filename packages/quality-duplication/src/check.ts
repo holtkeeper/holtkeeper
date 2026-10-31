@@ -7,7 +7,10 @@ import type { QualityCheck } from '@holtkeeper/quality'
 
 import { type LargeClone, parseJscpdReport } from './report.ts'
 
-/** Paths skipped on top of `.gitignore`: dependencies, build output and lockfiles. */
+/**
+ * Paths skipped on top of `.gitignore`: dependencies, build output, lockfiles, and data and asset
+ * files (JSON, SVG, source maps, snapshots) whose repetition is not copy-pasted code.
+ */
 export const defaultIgnore: readonly string[] = [
   '**/node_modules/**',
   '**/dist/**',
@@ -24,6 +27,11 @@ export const defaultIgnore: readonly string[] = [
   '**/go.sum',
   '**/Cargo.lock',
   '**/poetry.lock',
+  '**/*.json',
+  '**/*.svg',
+  '**/*.map',
+  '**/*.snap',
+  '**/__snapshots__/**',
 ]
 
 export interface DuplicationCheckOptions {

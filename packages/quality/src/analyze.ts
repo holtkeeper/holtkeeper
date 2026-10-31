@@ -56,6 +56,7 @@ export async function analyzeQuality({
         name: check.name,
         ...(result.version ? { version: result.version } : {}),
         ok: true,
+        ...(result.skipped ? { skipped: result.skipped } : {}),
         durationMs: Math.round(performance.now() - started),
       })
     } catch (error) {

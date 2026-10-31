@@ -67,6 +67,7 @@ function toRange({
 
 const capitalize = (text: string) => (text[0]?.toUpperCase() ?? '') + text.slice(1)
 const kebab = (label: string) => label.replaceAll(/\s+/g, '-')
+const plural = (label: string) => (label.endsWith(' name') ? `${label}s` : `${label} names`)
 
 async function readSource(
   dir: string,
@@ -88,7 +89,9 @@ async function readSource(
 /**
  * The `conventions` quality check: infers how each kind of name (module constants, local
  * variables, components, types, file names, ... per language) is written in the project and
- * reports names that break an established convention. Outliers that are not visible outside
+ * reports names that break an established convention. A file named after a name it declares
+ * (`UserCard.tsx` declaring `UserCard`) follows that name's convention and is left out of file
+ * names. Outliers that are not visible outside
  * their file get a rename suggestion (`confidence: review`) covering every reference in scope.
  */
 export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck {
@@ -138,7 +141,8 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
         // oxlint-disable-next-line no-await-in-loop
         const file = await readSource(dir, path, spec, maxFileBytes)
         if (!file) continue
-        collectNames(spec, file).forEach((declared, index) => {
+        const declaredNames = collectNames(spec, file)
+        declaredNames.forEach((declared, index) => {
           groupOf(spec.id, declared.kind.id, declared.kind.label, spec).samples.push({
             path,
             name: declared.name,
@@ -149,7 +153,8 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
         })
         const fileKind = fileNames ? (spec.fileNameKind?.(path) ?? 'file name') : undefined
         const stem = /(?:^|\/)([^./][^./]*)[^/]*$/.exec(path)?.[1]
-        if (fileKind && stem)
+        const namedAfterDeclaration = declaredNames.some((declared) => declared.name === stem)
+        if (fileKind && stem && !namedAfterDeclaration)
           groupOf(spec.id, kebab(fileKind), fileKind).samples.push({
             path,
             name: stem,
@@ -175,6 +180,7 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
           share,
           total,
           outliers: outliers.length,
+          established,
         })
         if (!established) continue
 
@@ -195,7 +201,7 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
             rule,
             category: 'convention',
             severity: share >= warningShare ? 'warning' : 'info',
-            message: `${capitalize(group.label)} \`${sample.name}\` does not follow the project's ${dominant} (${fitting} of ${total} ${group.label} names)`,
+            message: `${capitalize(group.label)} \`${sample.name}\` does not follow the project's ${dominant} (${fitting} of ${total} ${plural(group.label)})`,
             file: sample.path,
             ...(sample.range ? { range: sample.range } : {}),
             ...(fits ? { help: `Rename to \`${suggestion}\`` } : {}),

@@ -135,6 +135,7 @@ test.skipIf(!(await Bun.file(knip).exists()))(
         // oxlint-disable-next-line no-await-in-loop
         await Bun.write(join(dir, file), content)
       }
+      await mkdir(join(dir, 'node_modules'))
       const check = deadCodeCheck()
       expect(await check.detect(dir)).toBe(true)
       const result = await check.run({ dir, runner: localRunner })

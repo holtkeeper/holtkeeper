@@ -28,15 +28,21 @@ const categoryLabel: Record<QualityIssue['category'], string> = {
 const percent = (part: { covered: number; total: number } | undefined) =>
   part && part.total > 0 ? (part.covered / part.total) * 100 : undefined
 
-/** Share of names that follow their kind's dominant style, across all conventions, 0..100. */
+const established = (data: QualityData) => data.conventions.filter((c) => c.established !== false)
+
+/** Share of names that follow their kind's convention, across established conventions, 0..100. */
 function consistency(data: QualityData): number | undefined {
-  const total = data.conventions.reduce((sum, c) => sum + c.total, 0)
+  const conventions = established(data)
+  const total = conventions.reduce((sum, c) => sum + c.total, 0)
   if (total === 0) return undefined
-  const outliers = data.conventions.reduce((sum, c) => sum + c.outliers, 0)
+  const outliers = conventions.reduce((sum, c) => sum + c.outliers, 0)
   return ((total - outliers) / total) * 100
 }
 
 const errors = (d: QualityData) => d.issues.filter((i) => i.severity === 'error').length
+
+const testsLookedAt = (d: QualityData) =>
+  d.tests.length > 0 || d.coverage !== undefined || d.tools.some((t) => t.name === 'tests')
 
 function headline(data: QualityData, previous?: QualityData): Metric[] {
   const linePercent = percent(data.coverage?.lines)
@@ -61,10 +67,14 @@ function headline(data: QualityData, previous?: QualityData): Metric[] {
             better: 'up',
           }),
         ]),
-    metric('untested', 'Worth testing', data.tests.length, {
-      previous: previous?.tests.length,
-      better: 'down',
-    }),
+    ...(testsLookedAt(data)
+      ? [
+          metric('untested', 'Worth testing', data.tests.length, {
+            previous: previous && testsLookedAt(previous) ? previous.tests.length : undefined,
+            better: 'down',
+          }),
+        ]
+      : []),
     ...(naming === undefined
       ? []
       : [
@@ -143,16 +153,26 @@ export const qualityAnalysis = defineAnalysis<QualityData>({
               { key: 'share', label: 'Follow it', unit: 'percent' as const, align: 'end' as const },
               { key: 'outliers', label: 'Outliers', align: 'end' as const },
             ],
-            rows: data.conventions.map((c) => ({
-              language: c.language,
-              kind: c.kind,
-              dominant: c.dominant,
-              share: {
-                text: `${(c.share * 100).toFixed(0)}%`,
-                tone: c.share >= 0.95 ? 'good' : c.share >= 0.8 ? 'warning' : 'bad',
-              },
-              outliers: c.outliers,
-            })),
+            rows: data.conventions.map((c) =>
+              c.established === false
+                ? {
+                    language: c.language,
+                    kind: c.kind,
+                    dominant: `none (mostly ${c.dominant})`,
+                    share: { text: `${(c.share * 100).toFixed(0)}%`, tone: 'neutral' },
+                    outliers: null,
+                  }
+                : {
+                    language: c.language,
+                    kind: c.kind,
+                    dominant: c.dominant,
+                    share: {
+                      text: `${(c.share * 100).toFixed(0)}%`,
+                      tone: c.share >= 0.95 ? 'good' : c.share >= 0.8 ? 'warning' : 'bad',
+                    },
+                    outliers: c.outliers,
+                  },
+            ),
           },
           ...(conventionIssues.length
             ? [{ type: 'issues' as const, items: issueItems(conventionIssues) }]
@@ -270,9 +290,11 @@ export const qualityAnalysis = defineAnalysis<QualityData>({
           rows: data.tools.map((tool) => ({
             name: tool.name,
             version: tool.version ?? null,
-            status: tool.ok
-              ? { text: 'ok', tone: 'good' }
-              : { text: tool.error ?? 'failed', tone: 'bad' },
+            status: !tool.ok
+              ? { text: tool.error ?? 'failed', tone: 'bad' }
+              : tool.skipped
+                ? { text: `skipped: ${tool.skipped}`, tone: 'warning' }
+                : { text: 'ok', tone: 'good' },
             duration: tool.durationMs ?? null,
           })),
         },
@@ -282,7 +304,11 @@ export const qualityAnalysis = defineAnalysis<QualityData>({
     return {
       kind: 'quality',
       title: `Code quality${current.ref ? ` of ${formatRef(current.ref)}` : ''}`,
-      subtitle: `${data.issues.length} issues, ${data.tests.length} places worth testing, ${data.changes.length} suggested changes`,
+      subtitle: [
+        `${data.issues.length} issues`,
+        ...(testsLookedAt(data) ? [`${data.tests.length} places worth testing`] : []),
+        `${data.changes.length} suggested changes`,
+      ].join(', '),
       subject: {
         repo: current.repo,
         ...(current.ref ? { ref: current.ref } : {}),

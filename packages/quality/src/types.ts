@@ -61,6 +61,11 @@ export interface ConventionStat {
   share: number
   total: number
   outliers: number
+  /**
+   * Whether enough names follow `dominant` for it to count as the convention, so its outliers
+   * are reported. Absent in older data, read as true.
+   */
+  established?: boolean
 }
 
 export interface CoverageSummary {
@@ -80,6 +85,8 @@ export interface ToolRun {
   version?: string
   ok: boolean
   error?: string
+  /** Why a check that applies to the project found nothing to run, e.g. its tool is not installed. */
+  skipped?: string
   durationMs?: number
 }
 
@@ -102,8 +109,14 @@ export interface QualityContext {
   signal?: AbortSignal
 }
 
-/** What one check contributes; `analyzeQuality` merges contributions. */
-export type QualityResult = Partial<Omit<QualityData, 'tools'>> & { version?: string }
+/**
+ * What one check contributes; `analyzeQuality` merges contributions. `skipped` says why the check
+ * looked at nothing, so an empty result is not mistaken for a clean project.
+ */
+export type QualityResult = Partial<Omit<QualityData, 'tools'>> & {
+  version?: string
+  skipped?: string
+}
 
 /**
  * One source of findings: a linter through SARIF, the conventions engine, coverage and test

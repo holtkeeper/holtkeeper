@@ -36,6 +36,17 @@ describe('parseJscpdReport', () => {
     expect(parseJscpdReport(report).issues[0]?.id).toBe(before)
   })
 
+  test('repeats of one clone between the same files get distinct ids', () => {
+    const report = JSON.parse(captured)
+    const again = structuredClone(report.duplicates[0])
+    again.secondFile.start += 40
+    again.secondFile.end += 40
+    report.duplicates.push(again)
+    const [first, second] = parseJscpdReport(report).issues
+    expect(first?.id).toBe(parseJscpdReport(captured).issues[0]?.id)
+    expect(second?.id).not.toBe(first?.id)
+  })
+
   test('rejects other shapes', () => {
     expect(() => parseJscpdReport({ clones: [] })).toThrow()
   })

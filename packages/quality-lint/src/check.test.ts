@@ -42,7 +42,7 @@ describe('lintCheck', () => {
     expect(await check.detect('/p')).toBe(true)
 
     const result = await check.run({ dir: '/p', runner })
-    expect(result.version).toBe('one 1.2.3, three 1.2.5')
+    expect(result.version).toBe('one 1.2.3, three 1.2.5, missing (not installed)')
     expect(result.issues?.map((issue) => issue.message)).toEqual([
       'one found something',
       'three found something',
@@ -57,14 +57,17 @@ describe('lintCheck', () => {
     expect(calls.every((call) => call.options.cwd === '/p')).toBe(true)
   })
 
-  test('skips linters whose binary cannot start', async () => {
+  test('is skipped when no configured linter can start', async () => {
     const runner = {
       run: async () => {
         throw new Error('command not found')
       },
     }
-    const result = await lintCheck({ adapters: [adapter('one')] }).run({ dir: '/p', runner })
-    expect(result).toEqual({ issues: [], changes: [] })
+    const result = await lintCheck({ adapters: [adapter('one'), adapter('two')] }).run({
+      dir: '/p',
+      runner,
+    })
+    expect(result).toEqual({ issues: [], changes: [], skipped: 'one, two not installed' })
   })
 
   test('only selects named adapters', async () => {
