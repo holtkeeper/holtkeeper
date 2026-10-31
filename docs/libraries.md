@@ -53,9 +53,11 @@ The token is only used to read public repositories. It never reaches agents or j
 
 **Watching the tokens.** The **Libraries** page has a **GitHub tokens** card (global `settings:read`): for the pool, how much of each limit (`core` for REST, `search`, `graphql` for issues) is used right now across the distinct accounts and when it resets; for each token its account, live limits, requests, how many were answered `304` from the cache and how many hit a limit; waits; and requests per day by token over 7, 30 or 90 days. A token of an account that is already in the pool is marked as a duplicate there.
 
-### 2. Turn the index on
+### 2. Give the index the token
 
-Open **Settings → Libraries → Library docs**, add an entry for **All repositories** (entries for groups or repositories are ignored) and pick the **On** preset, then add the credential from step 1 under **github** (one or more). As a value:
+The index is on by default: without a `libraries` setting it runs with the defaults below, reading GitHub anonymously. Anonymous runs do not wait for GitHub's limit to reset; sources that hit it are retried on the next run.
+
+To add the token, open **Settings → Libraries → Library docs**, add an entry for **All repositories** (entries for groups or repositories are ignored) and add the credential from step 1 under **github** (one or more). Saving a new token list starts a run at once (a running one is restarted with the new tokens). As a value:
 
 ```json
 {
@@ -81,7 +83,7 @@ Everything else has defaults:
 
 ### 3. Watch the first run
 
-The server rereads the setting every 30 seconds, so the first run starts within a minute; there is no restart. Later runs come every `interval`, about ten minutes after new `usages` or `fleet` records arrive, and on **Libraries → Reindex now** (needs global `analyses:run`).
+The first run starts about two minutes after the server starts; the server rereads the setting every 30 seconds, so changes need no restart. Later runs come every `interval`, about ten minutes after new `usages` or `fleet` records arrive, and on **Libraries → Reindex now** (needs global `analyses:run`).
 
 The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it on the **Libraries** page (sidebar **Code → Libraries**), which shows the last run with its counts and failures, or in the server log:
 
@@ -148,7 +150,7 @@ The model is the `library-digest` entry of **Settings → AI → Models per task
 
 | Symptom                                                                           | Cause and fix                                                                                                                                        |
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The Libraries page says indexing is off                                           | No `libraries` entry for **All repositories**, or `enabled: false`                                                                                   |
+| The Libraries page says indexing is off                                           | The `libraries` entry for **All repositories** has `enabled: false`, or its value does not parse (an `interval` under `1h`, for example)             |
 | The page is empty after a run                                                     | No `usages` or `fleet` records yet: run those analyses first                                                                                         |
 | `libraries: no GitHub token could be read; reading GitHub anonymously` in the log | None of the `github` credentials exists or can be read: check their names or ids. A single missing one is logged as `no credential "…"` and left out |
 | Runs take long and the log shows `github: core rate limit exhausted; waiting …`   | Every token is used up; the run waits for the reset and goes on. Add a token of another account to share the load                                    |

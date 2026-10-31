@@ -27,6 +27,7 @@ import {
   fleetLibraryUses,
   githubClientFor,
   librariesConfig,
+  librariesConfigFrom,
   librariesSetting,
   lastLibraryRun,
   noteLibraryUses,
@@ -269,6 +270,22 @@ describe('libraries setting', () => {
     expect(librariesConfig({ interval: '30m' })).toBeUndefined()
   })
 
+  test('indexes with the defaults without a stored value, and not with a broken one', () => {
+    expect(librariesConfigFrom([])?.index.enabled).toBe(true)
+    expect(
+      librariesConfigFrom([
+        {
+          id: 'x',
+          key: 'libraries',
+          scope: { all: true },
+          value: { interval: '1m' },
+          secret: false,
+          updatedAt: at,
+        },
+      ]),
+    ).toBeUndefined()
+  })
+
   test('reads github as a list of credential references, one string included', () => {
     expect(librariesConfig({})?.github).toEqual([])
     expect(librariesConfig({ github: 'gh-a' })?.github).toEqual(['gh-a'])
@@ -330,6 +347,7 @@ const post = (headers: Record<string, string>) =>
 
 describe('library routes', () => {
   test('lists libraries used by readable repositories', async () => {
+    await enable({ enabled: false })
     const list = await get<LibraryList>('/api/libraries')
     expect(list.enabled).toBe(false)
     expect(
@@ -375,8 +393,14 @@ describe('library routes', () => {
     expect((await get<LibrarySearchResult>('/api/libraries/search?q=')).hits).toEqual([])
   })
 
+  test('the index is on without a libraries setting', async () => {
+    expect((await get<LibraryList>('/api/libraries')).enabled).toBe(true)
+    expect((await post(asAdmin)).status).toBe(200)
+  })
+
   test('reindex needs global analyses:run and the setting on', async () => {
     expect((await post(asGames)).status).toBe(403)
+    await enable({ enabled: false })
     expect((await post(asAdmin)).status).toBe(409)
     await enable()
     const response = await post(asAdmin)
@@ -682,6 +706,7 @@ describe('library index duty', () => {
   })
 
   test('indexes nothing while the setting is off, then runs and records the run', async () => {
+    await enable({ enabled: false })
     expect(await runLibraryIndex(indexDeps(), { registries: { npm: registry() } })).toBeUndefined()
     await enable({ enabled: true, sources: { repository: false, releases: false, issues: false } })
     const run = await runLibraryIndex(indexDeps(), { registries: { npm: registry() } })
@@ -726,5 +751,32 @@ describe('library index duty', () => {
     await stop()
     expect(calls).toBe(3)
     expect(await store.kv?.get('libraries:running')).toBeUndefined()
+  })
+
+  test('starts a run at once when the GitHub tokens change', async () => {
+    const sources = { repository: false, releases: false, issues: false }
+    await enable({ enabled: true, sources })
+    const lines: string[] = []
+    let calls = 0
+    const counting: LibraryRegistry = {
+      ...registry(),
+      async library(ref) {
+        calls += 1
+        return registry().library(ref)
+      },
+    }
+    const stop = startLibraryIndex(indexDeps(), (line) => lines.push(line), {
+      registries: { npm: counting },
+      startDelayMs: 0,
+      pollMs: 5,
+    })
+    await wait(() => calls === 1 && lines.some((line) => line.includes('1 indexed')))
+    await Bun.sleep(30)
+    expect(calls).toBe(1)
+    await enable({ enabled: true, sources, github: ['org-a'] })
+    await wait(() => calls === 2)
+    await Bun.sleep(30)
+    await stop()
+    expect(calls).toBe(2)
   })
 })

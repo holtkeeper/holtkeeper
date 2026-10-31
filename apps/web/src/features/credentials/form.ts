@@ -261,6 +261,22 @@ function aiOptions(ai: AiDraft): Record<string, unknown> {
   }
 }
 
+/** Kinds the server issues replacement tokens for; GitHub has no API to issue a personal token. */
+const rotatableKinds: readonly string[] = ['gitlab']
+
+/**
+ * Whether the server can rotate a credential of `kind`: what it reports for a stored credential
+ * of that kind, else whether the kind is one it rotates.
+ */
+export const canRotate = (kind: string, credential?: Pick<CredentialView, 'kind' | 'rotatable'>) =>
+  credential?.kind === kind ? credential.rotatable : rotatableKinds.includes(kind)
+
+/** The draft as it is saved: rotation is off for kinds the server cannot rotate. */
+export const savedDraft = (
+  draft: CredentialDraft,
+  credential?: Pick<CredentialView, 'kind' | 'rotatable'>,
+): CredentialDraft => (canRotate(draft.kind, credential) ? draft : { ...draft, rotation: false })
+
 /** Request body for `POST /api/credentials`. */
 export function toCreateInput(draft: CredentialDraft): CreateCredentialInput {
   const ai = draft.kind === 'ai-sdk'

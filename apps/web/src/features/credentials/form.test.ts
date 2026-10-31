@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   OPENAI_COMPATIBLE,
   agentModels,
+  canRotate,
   filterProviders,
+  savedDraft,
   toCreateInput,
   toDraft,
   toUpdateInput,
@@ -185,5 +187,19 @@ describe('AI provider credentials', () => {
         { id: 'c', createdAt: '2026-06-01' },
       ]).map((m) => m.id),
     ).toEqual(['c', 'a'])
+  })
+})
+
+describe('rotation by kind', () => {
+  test('only kinds the server rotates offer rotation, and the others save it off', () => {
+    expect(canRotate('gitlab')).toBe(true)
+    expect(canRotate('github')).toBe(false)
+    expect(canRotate('other', { kind: 'other', rotatable: true })).toBe(true)
+    expect(canRotate('github', { kind: 'gitlab', rotatable: true })).toBe(false)
+    const draft = { ...toDraft(), kind: 'github', rotation: true, daysBefore: '0' }
+    const saved = savedDraft(draft)
+    expect(saved.rotation).toBe(false)
+    expect(validateDraft(saved, false).daysBefore).toBeUndefined()
+    expect(toCreateInput(saved).rotation?.enabled).toBe(false)
   })
 })

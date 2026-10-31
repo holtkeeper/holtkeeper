@@ -50,6 +50,9 @@ const DEFAULT_INTERVAL = '1d'
 const LAST_RUN_KEY = 'libraries:last-run'
 const REQUEST_KEY = 'libraries:reindex'
 const RUNNING_KEY = 'libraries:running'
+const TOKENS_KEY = 'libraries:tokens'
+
+const tokensOf = (config: LibrariesConfig) => JSON.stringify(config.github)
 const RUNNING_TTL_S = 900
 const MAX_STORED_FAILURES = 200
 const CHANGE_DEBOUNCE_MS = 600_000
@@ -103,7 +106,7 @@ export const librariesSetting = defineSetting({
   description:
     'Index version-exact docs, release notes, API and issues of the third-party libraries the fleet uses, for agents and the MCP endpoint.',
   section: 'Libraries',
-  help: `Holtkeeper reads the newest \`usages\` and \`fleet\` records, keeps a few versions of every npm and Go library they name (the ones in use and the ones an upgrade would land on) and indexes their docs. Only the value for **All repositories** counts; without one nothing is indexed.
+  help: `Holtkeeper reads the newest \`usages\` and \`fleet\` records, keeps a few versions of every npm and Go library they name (the ones in use and the ones an upgrade would land on) and indexes their docs. Only the value for **All repositories** counts; without one the index runs with the defaults below (anonymous GitHub), and \`enabled: false\` turns it off. Changing the GitHub tokens starts a new run at once.
 
 - **interval** (default \`1d\`, at least \`1h\`): how often to look for new releases; a run also starts about two minutes after the server starts.
 - **github**: credentials of kind \`github\` whose secrets are GitHub tokens, for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
@@ -158,12 +161,15 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
   }
 }
 
-/** The global `libraries` value of the stored entries, with defaults applied. */
+/**
+ * The global `libraries` value of the stored entries with defaults applied; the defaults (indexing
+ * on) without an entry, `undefined` for a stored value that does not parse.
+ */
 export function librariesConfigFrom(entries: readonly SettingEntry[]): LibrariesConfig | undefined {
   const entry = entries
     .filter((item) => item.key === librariesSetting.key && item.scope.all === true && !item.secret)
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
-  return entry ? librariesConfig(entry.value) : undefined
+  return librariesConfig(entry ? entry.value : {})
 }
 
 /** `librariesConfigFrom` over the setting store. */
@@ -214,7 +220,7 @@ export async function githubClientFor(
   const usage = githubUsageFor(options.kv)
   return createGitHubClient({
     tokens: readable.map((credential) => credential.token!),
-    maxWaitMs: options.wait === 'index' ? 65 * 60_000 : 10_000,
+    maxWaitMs: options.wait === 'index' && readable.length ? 65 * 60_000 : 10_000,
     ...(options.kv ? { cache: options.kv } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     log,
@@ -450,11 +456,16 @@ export function startLibraryIndex(
   if (!deps.store.libraries || !deps.artifacts) return async () => {}
   const controller = new AbortController()
   let running: Promise<unknown> | undefined
+  let run: AbortController | undefined
+  let runTokens: string | undefined
   let started = false
   let lastStartedAt = 0
 
-  const due = async (everyMs: number) => {
+  const due = async (config: LibrariesConfig) => {
+    const everyMs = config.intervalMs
     if (!started || requestDue(await kv?.get(REQUEST_KEY), deps.now())) return true
+    const used = await kv?.get(TOKENS_KEY)
+    if (used !== undefined && used !== tokensOf(config)) return true
     const last = await lastLibraryRun(kv)
     const lastAt = Math.max(lastStartedAt, last ? Date.parse(last.startedAt) : 0)
     return deps.now().getTime() - lastAt >= everyMs
@@ -463,6 +474,13 @@ export function startLibraryIndex(
   const tick = () => {
     if (running) {
       void kv?.set(RUNNING_KEY, true, RUNNING_TTL_S)
+      void (async () => {
+        const config = await librariesConfigOf(deps.store.settings)
+        if (run && config && runTokens !== undefined && tokensOf(config) !== runTokens) {
+          log('libraries: GitHub tokens changed; restarting the index run with them')
+          run.abort()
+        }
+      })().catch(() => {})
       return
     }
     running = (async () => {
@@ -471,19 +489,26 @@ export function startLibraryIndex(
         await kv?.delete(REQUEST_KEY)
         return
       }
-      if (!(await due(config.intervalMs))) return
+      if (!(await due(config))) return
       started = true
       lastStartedAt = deps.now().getTime()
+      runTokens = tokensOf(config)
+      run = new AbortController()
       await kv?.delete(REQUEST_KEY)
+      await kv?.set(TOKENS_KEY, runTokens)
       await kv?.set(RUNNING_KEY, true, RUNNING_TTL_S)
       try {
-        await runLibraryIndex(deps, { ...options, signal: controller.signal }, log)
+        await runLibraryIndex(
+          deps,
+          { ...options, signal: AbortSignal.any([controller.signal, run.signal]) },
+          log,
+        )
       } finally {
         await kv?.delete(RUNNING_KEY)
       }
     })()
       .catch((error: unknown) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted && !run?.signal.aborted)
           log(`libraries: ${error instanceof Error ? error.message : String(error)}`)
       })
       .finally(() => {

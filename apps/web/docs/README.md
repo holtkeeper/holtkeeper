@@ -88,6 +88,8 @@ Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button
 
 A forge's dialog has **Packages for jobs** (on by default) and **Cache packages** (off by default, needs the first): with it the egress proxy keeps the package files jobs download from the forge, and the forge card shows a "packages cached" chip.
 
+The credential dialog offers **Rotation** only for kinds the server can rotate (`canRotate` in `features/credentials/form.ts`: the stored credential's `rotatable`, else `gitlab`); GitHub has no API to issue a personal token, so `github` credentials are renewed by hand and saved with rotation off.
+
 Credentials of kind `egress-secret` ("Proxy secret") hold a secret the egress proxy puts into job requests in place of a placeholder (`EgressSecretFields.tsx`): a generated UUID with copy and regenerate buttons, more hosts, paths, methods and where to replace (headers, URL, body). The URL is where the secret goes, e.g. a Turborepo remote cache. The form keeps them as `options`, see the server docs on egress rules.
 
 ## Forges

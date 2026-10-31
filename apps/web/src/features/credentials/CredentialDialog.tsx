@@ -12,8 +12,10 @@ import {
   type CredentialDraft,
   type DraftErrors,
   type EgressDraft,
+  canRotate,
   credentialKinds,
   defaultUrl,
+  savedDraft,
   toCreateInput,
   toDraft,
   toUpdateInput,
@@ -37,7 +39,9 @@ export function CredentialDialog({
   const repos = useRepos()
   const groups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
   const [keyHint, setKeyHint] = useState<string>()
-  const errors: DraftErrors = submitted ? validateDraft(draft, isNew) : {}
+  const rotatable = canRotate(draft.kind, credential)
+  const saved = savedDraft(draft, credential)
+  const errors: DraftErrors = submitted ? validateDraft(saved, isNew) : {}
   const ai = draft.kind === 'ai-sdk'
   const setAi = (patch: Partial<AiDraft>) => setDraft((d) => ({ ...d, ai: { ...d.ai, ...patch } }))
   const egress = draft.kind === 'egress-secret'
@@ -60,15 +64,15 @@ export function CredentialDialog({
 
   const submit = () => {
     setSubmitted(true)
-    if (Object.keys(validateDraft(draft, isNew)).length) return
+    if (Object.keys(validateDraft(saved, isNew)).length) return
     const done = {
       onSuccess: () => {
         notify.success(isNew ? 'Credential created' : 'Credential saved', draft.name)
         onOpenChange(false)
       },
     }
-    if (isNew) create.mutate(toCreateInput(draft), done)
-    else update.mutate({ id: credential.id, input: toUpdateInput(draft) }, done)
+    if (isNew) create.mutate(toCreateInput(saved), done)
+    else update.mutate({ id: credential.id, input: toUpdateInput(saved) }, done)
   }
 
   return (
@@ -178,7 +182,11 @@ export function CredentialDialog({
           type="date"
           value={draft.expires}
           onChange={(v) => set('expires', v)}
-          description="Optional. Used for countdowns and rotation."
+          description={
+            rotatable
+              ? 'Optional. Used for countdowns and rotation.'
+              : 'Optional. Used for countdowns; renew the token by hand before it expires.'
+          }
         />
         <div className="flex flex-col gap-1">
           <ScopeEditor
@@ -189,7 +197,7 @@ export function CredentialDialog({
           />
           {errors.scope ? <span className="text-xs text-danger">{errors.scope}</span> : null}
         </div>
-        {ai || egress ? null : (
+        {ai || egress || !rotatable ? null : (
           <fieldset className="flex flex-col gap-3 rounded-xl border border-separator p-3">
             <legend className="px-1 text-sm font-medium">Rotation</legend>
             <Switch
