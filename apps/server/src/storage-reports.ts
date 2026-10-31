@@ -125,7 +125,8 @@ export interface StorageReportsOptions {
  * Publishes what `providers` use on this worker every `intervalMs` (and at once), so web
  * processes, which cannot see worker disks, can show them; reports expire after three intervals
  * without an update. Carries out clear requests made after it started through
- * `requestStorageClear`, then publishes again. Returns a stop function.
+ * `requestStorageClear`, then publishes again. Returns a stop function, which also drops this
+ * worker's report, so a stopped pod disappears from the overview at once.
  */
 export function startStorageReports(options: StorageReportsOptions): () => Promise<void> {
   const { kv, providers } = options
@@ -211,6 +212,11 @@ export function startStorageReports(options: StorageReportsOptions): () => Promi
     clearInterval(reportTimer)
     clearInterval(pollTimer)
     await running
+    await update(kv, REPORTS_KEY, reportsSchema, (current) => ({
+      reports: Object.fromEntries(
+        Object.entries(current?.reports ?? {}).filter(([name]) => name !== worker),
+      ),
+    })).catch((error: unknown) => log(`storage: dropping the report failed: ${message(error)}`))
   }
 }
 

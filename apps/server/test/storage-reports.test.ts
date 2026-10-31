@@ -117,6 +117,16 @@ describe('worker storage reports', () => {
     }
   })
 
+  test('drop the report of a worker that stops', async () => {
+    const { kv } = memoryStore()
+    if (!kv) throw new Error('memory store without kv')
+    stops.push(startStorageReports({ kv, providers: [mirrors(1)], worker: 'stays' }))
+    const stop = startStorageReports({ kv, providers: [mirrors(1)], worker: 'leaves' })
+    await waitFor(async () => (await workerStorageReports(kv)).length === 2)
+    await stop()
+    expect((await workerStorageReports(kv)).map((report) => report.worker)).toEqual(['stays'])
+  })
+
   test('drop workers that stopped reporting', async () => {
     const { kv } = memoryStore()
     if (!kv) throw new Error('memory store without kv')
