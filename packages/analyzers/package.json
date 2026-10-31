@@ -33,6 +33,7 @@
     "@holtkeeper/quality-secrets": "workspace:*",
     "@holtkeeper/quality-tests": "workspace:*",
     "@holtkeeper/release-risk": "workspace:*",
+    "@holtkeeper/renovate": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",
     "@holtkeeper/stack": "workspace:*",

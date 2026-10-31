@@ -23,6 +23,7 @@ import {
   type LucideIcon,
   MousePointerClick,
   Network,
+  PackageCheck,
   Scale,
   ScrollText,
   Settings2,
@@ -51,6 +52,7 @@ export interface NavItem {
     | '/bundles'
     | '/assets'
     | '/dependencies'
+    | '/updates'
     | '/quality'
     | '/coverage'
     | '/testids'
@@ -171,6 +173,14 @@ const navItems: readonly NavItem[] = [
     brand: 'updates',
     label: 'Dependencies',
     icon: Network,
+    requires: 'analyses:read',
+  },
+  {
+    section: 'Code',
+    to: '/updates',
+    brand: 'updates',
+    label: 'Dependency updates',
+    icon: PackageCheck,
     requires: 'analyses:read',
   },
   {

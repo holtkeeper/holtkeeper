@@ -106,6 +106,7 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | `checkout` (repo)     | `dir`: a worktree of the job's ref, or the default branch                                         |
 | `forge`               | the repository's `GitForge`                                                                       |
+| `forgeAccess`         | `{ kind, url, token, signing?, readOnly }` from the forge definition, `gitKeyFor` and `readOnly`  |
 | `agent`               | `agentFor(repo)`; a missing `required` agent fails the job                                        |
 | `history`             | `{ analyses, auditRuns }` from the store                                                          |
 | group scope           | `repos`: the group's repositories                                                                 |

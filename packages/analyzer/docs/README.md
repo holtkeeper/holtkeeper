@@ -22,3 +22,11 @@ defineAnalyzer({
   // ...
 })
 ```
+
+## Forge access
+
+`needs.forgeAccess` gives `context.forgeAccess` (`ForgeAccess`): the forge's `kind`, base `url` and API `token`, the forge's SSH signing key with its identity when it has one, and `readOnly` for repositories Holtkeeper must not change. It is for analyzers that hand the forge to an external tool, such as [@holtkeeper/renovate](../../renovate/docs/README.md); everything else uses `context.forge`. Pass the token to the tool through its environment, never in files or logs, and push nothing when `readOnly` is set.
+
+## Panel editor
+
+`editor` names a dedicated panel editor for the analyzer's `analyzers.<kind>` setting (`renovate`), instead of the form generated from `options`.

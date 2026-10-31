@@ -55,6 +55,7 @@
         "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/artifacts": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
+        "@holtkeeper/browserslist": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/confluence": "workspace:*",
@@ -74,6 +75,8 @@
         "@holtkeeper/managed-config": "workspace:*",
         "@holtkeeper/media": "workspace:*",
         "@holtkeeper/mr-policies": "workspace:*",
+        "@holtkeeper/propagate": "workspace:*",
+        "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
         "@holtkeeper/settings": "workspace:*",
@@ -285,6 +288,7 @@
         "@holtkeeper/quality-secrets": "workspace:*",
         "@holtkeeper/quality-tests": "workspace:*",
         "@holtkeeper/release-risk": "workspace:*",
+        "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
         "@holtkeeper/stack": "workspace:*",
@@ -800,6 +804,17 @@
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/renovate": {
+      "name": "@holtkeeper/renovate",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -1336,6 +1351,8 @@
     "@holtkeeper/quality-tests": ["@holtkeeper/quality-tests@workspace:packages/quality-tests"],
 
     "@holtkeeper/release-risk": ["@holtkeeper/release-risk@workspace:packages/release-risk"],
+
+    "@holtkeeper/renovate": ["@holtkeeper/renovate@workspace:packages/renovate"],
 
     "@holtkeeper/report": ["@holtkeeper/report@workspace:packages/report"],
 

@@ -125,6 +125,15 @@ export const useDependencies = (enabled = true) =>
     enabled,
   })
 
+/** Update state of every readable repository from its newest Renovate, browserslist and propagation records. */
+export const useDependencyUpdates = (enabled = true) =>
+  useQuery({
+    queryKey: ['dependency-updates'],
+    queryFn: api.dependencyUpdates,
+    staleTime: 60_000,
+    enabled,
+  })
+
 /** A rendered report, compared with `compare` or, by default, the previous record. */
 export const useAnalysis = (analysisId: string, compare?: string, enabled = true) =>
   useQuery({

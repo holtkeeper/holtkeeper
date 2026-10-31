@@ -77,6 +77,10 @@ const DependenciesPage = lazyRouteComponent(
   () => import('./features/dependencies/DependenciesPage.tsx'),
   'DependenciesPage',
 )
+const UpdatesPage = lazyRouteComponent(
+  () => import('./features/updates/UpdatesPage.tsx'),
+  'UpdatesPage',
+)
 const QualityPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'QualityPage',
@@ -300,6 +304,7 @@ const routeTree = rootRoute.addChildren([
     analysisPage('bundles', BundlesPage),
     analysisPage('assets', AssetsPage),
     analysisPage('dependencies', DependenciesPage),
+    analysisPage('updates', UpdatesPage),
     analysisPage('quality', QualityPage),
     analysisPage('coverage', CoveragePage),
     analysisPage('testids', TestIdsPage),

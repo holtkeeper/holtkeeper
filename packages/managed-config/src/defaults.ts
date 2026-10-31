@@ -22,7 +22,8 @@ const nights = { allow: [{ days: [...everyDay], from: '01:00', to: '07:00' }] }
  * Saturdays, code quality (without running tests), licenses and fleet drift on Sundays, test
  * coverage and frontend test ids on Wednesdays, branches to clean up on Tuesdays, the tech stack of
  * every group on Mondays, the public API of packages and its usage on Thursdays, images, fonts
- * and media on Fridays and the browserslist database on Tuesdays, in repositories that use it.
+ * and media on Fridays, the browserslist database on Tuesdays in repositories that use it, and
+ * outdated dependencies (Renovate, report only) on weekday nights.
  * Analyzers the server does not have are dropped, schedules left empty are skipped.
  */
 export const defaultSchedules: DefaultSchedule[] = [
@@ -144,6 +145,17 @@ export const defaultSchedules: DefaultSchedule[] = [
       enabled: true,
       analyzers: ['browserslist'],
       cron: '0 3 * * 2',
+      windows: nights,
+      spread: true,
+    },
+  },
+  {
+    id: 'renovate-nightly',
+    data: {
+      name: 'Dependency updates, weekday nights',
+      enabled: true,
+      analyzers: ['renovate'],
+      cron: '0 2 * * 1-5',
       windows: nights,
       spread: true,
     },

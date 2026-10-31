@@ -34,6 +34,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Test coverage',
     'Test ids',
     'Dependencies',
+    'Dependency updates',
     'Bundles',
     'Assets',
     'Public API',
@@ -65,6 +66,7 @@ test('finds the entry of a page, its sub-pages and analysis records by kind', ()
   expect(activeNav('/analyses/a1', 'testids')?.label).toBe('Test ids')
   expect(activeNav('/analyses/a1', 'depgraph')?.label).toBe('Dependencies')
   expect(activeNav('/analyses/a1', 'stack')?.label).toBe('Tech stack')
+  expect(activeNav('/analyses/a1', 'renovate')?.label).toBe('Dependency updates')
   expect(activeNav('/analyses/a1')).toBeUndefined()
   expect(activeNav('/account')).toBeUndefined()
 })

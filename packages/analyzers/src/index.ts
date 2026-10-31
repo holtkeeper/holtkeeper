@@ -24,6 +24,7 @@ import { lintCheck } from '@holtkeeper/quality-lint'
 import { secretsCheck } from '@holtkeeper/quality-secrets'
 import { testGapsCheck } from '@holtkeeper/quality-tests'
 import { releaseRiskAnalyzer } from '@holtkeeper/release-risk'
+import { renovateAnalyzer } from '@holtkeeper/renovate'
 import { createReviewAnalyzer } from '@holtkeeper/review'
 import { stackAnalyzer } from '@holtkeeper/stack'
 import { testIdsAnalyzer } from '@holtkeeper/testids'
@@ -185,5 +186,6 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   trackerAnalyzer,
   warmupAnalyzer,
   browserslistAnalyzer,
+  renovateAnalyzer,
   auditAnalyzer,
 ]

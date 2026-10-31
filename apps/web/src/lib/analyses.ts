@@ -117,6 +117,14 @@ export const analysisPages = [
     description: 'Commands run on branch pushes to fill build caches: status, duration and output',
     trend: [/duration/i],
   },
+  {
+    to: '/updates',
+    kind: 'renovate',
+    title: 'Dependency updates',
+    icon: 'updates',
+    description: 'Outdated dependencies and update merge requests across repositories',
+    trend: [/outdated/i, /libyears/i],
+  },
 ] as const
 
 /**

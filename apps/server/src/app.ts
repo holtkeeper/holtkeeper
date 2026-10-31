@@ -20,6 +20,7 @@ import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { databaseRoutes } from './routes/database.ts'
 import { dependencyRoutes } from './routes/dependencies.ts'
+import { dependencyUpdateRoutes } from './routes/dependency-updates.ts'
 import { egressRoutes } from './routes/egress.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
@@ -89,6 +90,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', auditRoutes(deps))
   api.route('/', analysisRoutes(deps))
   api.route('/', dependencyRoutes(deps))
+  api.route('/', dependencyUpdateRoutes(deps))
   api.route('/', apiSurface.routes)
   api.route('/', libraryRoutes(deps))
   api.route('/', credentialRoutes(deps))

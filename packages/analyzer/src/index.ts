@@ -29,6 +29,21 @@ export interface RunCache {
   ): Promise<void>
 }
 
+/**
+ * What an external tool needs to act on a forge as Holtkeeper does: the API token and, when the
+ * forge has a signing key, the key and identity commits must carry. Never log or store it.
+ */
+export interface ForgeAccess {
+  /** Adapter kind, e.g. `gitlab` or `github`. */
+  kind: string
+  /** Base web URL of the forge, e.g. `https://gitlab.example.com`. */
+  url: string
+  token: string
+  signing?: { privateKey: string; name: string; email: string }
+  /** The repository is read-only for Holtkeeper: the tool must not push or open merge requests. */
+  readOnly: boolean
+}
+
 /** Everything an analyzer may use; what is present depends on its `needs`. */
 export interface AnalyzerContext<Options> {
   /** Repository analyzed; for group analyzers `{ forge, path: <group name> }`. */
@@ -70,6 +85,8 @@ export interface AnalyzerContext<Options> {
   repos?: RepoRef[]
   /** Forge client of `repo`'s forge. */
   forge?: GitForge
+  /** Raw access to `repo`'s forge, for analyzers that hand it to an external tool. */
+  forgeAccess?: ForgeAccess
   runner: CommandRunner
   /** Configured LLM agent, when there is one. */
   agent?: Agent
@@ -130,6 +147,8 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   needs: {
     checkout?: boolean
     forge?: boolean
+    /** `context.forgeAccess`: the forge token for tools that call the forge themselves. */
+    forgeAccess?: boolean
     agent?: 'required' | 'optional'
     history?: boolean
   }
@@ -149,6 +168,8 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   flags?: AnalyzerFlag[]
   /** Named option sets the panel offers for the analyzer's `analyzers.<kind>` setting. */
   presets?: AnalyzerPreset<Options>[]
+  /** Names a dedicated panel editor for the `analyzers.<kind>` setting instead of the generated form. */
+  editor?: string
   /**
    * Other repositories the run reads besides `repo` (a shared config repository, a dependency's
    * source, ...). `repo` may be a `RepoRef` or `forge:path`; `ref` defaults to the default branch.

@@ -4,6 +4,7 @@ import type { EditorKind } from '../../lib/schema.ts'
 import { Select, Switch, TextField } from '../../ui/index.ts'
 import { CredentialPicker } from './CredentialPicker.tsx'
 import { PolicyEditor } from './PolicyEditor.tsx'
+import { RenovateEditor } from './RenovateEditor.tsx'
 import { StructuredEditor } from './SchemaField.tsx'
 import { TrackerEditor } from './TrackerEditor.tsx'
 
@@ -100,6 +101,10 @@ export function ValueEditor({
         return <PolicyEditor schema={schema} initial={initial} onChange={onChange} label={label} />
       if (editor.editor === 'trackers')
         return <TrackerEditor schema={schema} initial={initial} onChange={onChange} label={label} />
+      if (editor.editor === 'renovate')
+        return (
+          <RenovateEditor schema={schema} initial={initial} onChange={onChange} label={label} />
+        )
       return (
         <StructuredEditor schema={schema} initial={initial} onChange={onChange} label={label} />
       )

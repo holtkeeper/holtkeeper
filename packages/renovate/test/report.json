@@ -1,0 +1,99 @@
+{
+  "problems": [{ "level": 40, "msg": "Found renovate config warnings" }],
+  "repositories": {
+    "games/app": {
+      "problems": [
+        { "level": 50, "msg": "Failed to look up npm package left-pad" },
+        { "level": 30, "msg": "Info is not a problem" }
+      ],
+      "branches": [
+        {
+          "branchName": "renovate/react-monorepo",
+          "prNo": 12,
+          "prTitle": "Update react monorepo to v19",
+          "result": "done",
+          "upgrades": [
+            { "depName": "react", "updateType": "major", "packageFile": "package.json" },
+            { "depName": "react-dom", "updateType": "major", "packageFile": "package.json" }
+          ]
+        },
+        {
+          "branchName": "renovate/lock-file-maintenance",
+          "prNo": null,
+          "prTitle": "Lock file maintenance",
+          "result": "pr-limit-reached",
+          "upgrades": [{ "updateType": "lockFileMaintenance" }]
+        }
+      ],
+      "packageFiles": {
+        "npm": [
+          {
+            "packageFile": "package.json",
+            "deps": [
+              {
+                "depName": "react",
+                "depType": "dependencies",
+                "sourceUrl": "https://github.com/facebook/react",
+                "currentValue": "^18.3.1",
+                "currentVersion": "18.3.1",
+                "updates": [
+                  {
+                    "newValue": "^19.2.0",
+                    "newVersion": "19.2.0",
+                    "updateType": "major",
+                    "branchName": "renovate/react-monorepo"
+                  }
+                ]
+              },
+              {
+                "depName": "lodash",
+                "depType": "dependencies",
+                "currentValue": "4.17.20",
+                "updates": [
+                  {
+                    "newValue": "4.17.21",
+                    "updateType": "patch",
+                    "branchName": "renovate/npm-lodash-vulnerability",
+                    "releaseTimestamp": "2021-02-20T15:42:16.891Z"
+                  },
+                  { "newValue": "5.0.0", "updateType": "unknown-kind" }
+                ]
+              },
+              {
+                "depName": "request",
+                "currentValue": "2.88.2",
+                "deprecationMessage": "request has been deprecated",
+                "updates": []
+              },
+              { "depName": "local-thing", "currentValue": "file:../x", "skipReason": "file" }
+            ]
+          }
+        ],
+        "dockerfile": [
+          {
+            "packageFile": "Dockerfile",
+            "deps": [
+              {
+                "depName": "node",
+                "currentValue": "22-slim",
+                "isAbandoned": false,
+                "updates": [
+                  {
+                    "newValue": "24-slim",
+                    "updateType": "major",
+                    "pendingChecks": true,
+                    "branchName": "renovate/node-24.x"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "libYearsWithStatus": {
+        "libYears": { "total": 3.456, "managers": { "npm": 2.1 } },
+        "dependencyStatus": { "outdated": 3, "total": 5 }
+      }
+    }
+  }
+}

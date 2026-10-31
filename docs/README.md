@@ -75,6 +75,7 @@
 | `@holtkeeper/release-risk`        | Release risk score and summary                                           | [packages/release-risk/docs](../packages/release-risk/docs/README.md)               |
 | `@holtkeeper/branches`            | Branches to clean up: merged, closed unmerged or stale                   | [packages/branches/docs](../packages/branches/docs/README.md)                       |
 | `@holtkeeper/browserslist`        | Browserslist database updates as merge requests                          | [packages/browserslist/docs](../packages/browserslist/docs/README.md)               |
+| `@holtkeeper/renovate`            | Renovate run per repository: outdated dependencies and update MRs        | [packages/renovate/docs](../packages/renovate/docs/README.md)                       |
 | `@holtkeeper/delivery`            | DORA metrics and CI health                                               | [packages/delivery/docs](../packages/delivery/docs/README.md)                       |
 | `@holtkeeper/ci-jobs`             | CI job durations, slowdowns and failure rates from stored history        | [packages/ci-jobs/docs](../packages/ci-jobs/docs/README.md)                         |
 | `@holtkeeper/assets`              | Asset sizes, budgets, format suggestions                                 | [packages/assets/docs](../packages/assets/docs/README.md)                           |

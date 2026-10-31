@@ -214,7 +214,7 @@ const setup = (gitKey: ForgeGitKey | undefined, readOnly = false) => {
     const checkout = await prepared.context.checkout?.({ forge: 'work', path: 'games/a' })
     return { checkout, options: seen.at(-1) }
   }
-  return { open }
+  return { open, contextFor }
 }
 
 describe('forge SSH keys in checkouts', () => {
@@ -240,6 +240,29 @@ describe('forge SSH keys in checkouts', () => {
       credentials: { username: 'oauth2', password: 'tok' },
     })
     expect(checkout?.publisher).toEqual({ commit, push })
+  })
+
+  test('forgeAccess hands the token, the signing key and read-only to external tools', async () => {
+    const { contextFor } = setup(key, true)
+    const { context } = await contextFor(job(), analyzer({ forgeAccess: true }), io)
+    expect(context.forgeAccess).toEqual({
+      kind: 'fake',
+      url: 'https://forge.test',
+      token: 'tok',
+      signing: { privateKey: 'PRIVATE', name: 'Bot', email: 'bot@forge.test' },
+      readOnly: true,
+    })
+    const plain = await setup({ ...key, usage: 'auth' }).contextFor(
+      job(),
+      analyzer({ forgeAccess: true }),
+      io,
+    )
+    expect(plain.context.forgeAccess).toEqual({
+      kind: 'fake',
+      url: 'https://forge.test',
+      token: 'tok',
+      readOnly: false,
+    })
   })
 
   test('offers no publisher for read-only repositories', async () => {

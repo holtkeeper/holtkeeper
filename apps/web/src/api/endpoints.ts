@@ -74,6 +74,7 @@ import type {
   CredentialTestResult,
   CredentialView,
   DependencyInventory,
+  DependencyUpdatesOverview,
   InviteUserInput,
   KnowledgeEntry,
   KnowledgeList,
@@ -188,6 +189,7 @@ export const api = {
   auditRun: (runId: string) => request<AuditRunDetail>('GET', `/api/audit-runs/${id(runId)}`),
 
   dependencies: () => request<DependencyInventory>('GET', '/api/dependencies'),
+  dependencyUpdates: () => request<DependencyUpdatesOverview>('GET', '/api/dependency-updates'),
 
   publicApiPackages: (q?: string) =>
     request<PublicApiPackageList>('GET', '/api/api-surface/packages', { query: { q } }),

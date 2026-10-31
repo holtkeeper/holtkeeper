@@ -130,8 +130,10 @@ Status: done as the `browserslist` analyzer ([packages/browserslist](../packages
 
 ### 3. Package update propagation
 
+Status: our own packages roll out through [packages/propagate](../packages/propagate/docs/README.md) (own bump, checks and agent fixes before the MR opens); third-party updates run on Renovate inside Holtkeeper ([packages/renovate](../packages/renovate/docs/README.md)), report-only by default; the summary across repositories is the **Dependency updates** page. Not done: the agent fixing failed Renovate MRs, and Renovate's API calls counting against the per-token limiter.
+
 - Sources: releases in our own monorepos/package repositories (webhook on a tag or registry publish) and third-party packages.
-- The update mechanics are Renovate: holtkeeper generates its config (which packages, which repositories, grouping) and runs the CLI.
+- The update mechanics for third-party packages are Renovate: holtkeeper generates its config from the `analyzers.renovate` setting (which repositories, grouping, release age, limits) and runs the CLI per repository.
 - Holtkeeper on top: watches the pipeline of Renovate MRs; if typecheck/tests/build fail, the agent gets the package changelog and migration guide, fixes the code in the same branch and pushes. If it fails, it posts a comment with an analysis and mentions the owner.
 - Summary across all repositories: what is updated, what awaits review, what is broken.
 

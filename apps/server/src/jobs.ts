@@ -95,11 +95,16 @@ export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] 
       : {}),
     ...(analyzer.options instanceof z.ZodObject
       ? {
-          form: z.object(
-            Object.fromEntries(
-              Object.entries(analyzer.options.shape).map(([key, field]) => [key, field.optional()]),
-            ),
-          ),
+          form: z
+            .object(
+              Object.fromEntries(
+                Object.entries(analyzer.options.shape).map(([key, field]) => [
+                  key,
+                  field.optional(),
+                ]),
+              ),
+            )
+            .meta(analyzer.editor ? { 'x-editor': analyzer.editor } : {}),
         }
       : {}),
   }))

@@ -386,6 +386,88 @@ export interface DependencyInventory {
   libraries: FleetLibrary<string>[]
 }
 
+/**
+ * Where a repository's dependency updates stand, worst first: `broken` (a failed update run or a
+ * merge request with a failed pipeline), `review` (update merge requests are open), `outdated`
+ * (updates exist, nothing proposes them), `current`, `unknown` (Renovate has not run).
+ */
+export type UpdateState = 'broken' | 'review' | 'outdated' | 'current' | 'unknown'
+
+/** Which automation an update merge request comes from. */
+export type UpdateSource = 'renovate' | 'browserslist' | 'propagate'
+
+/** An update merge request as its newest record saw it. */
+export interface UpdateMergeRequest {
+  source: UpdateSource
+  id: number
+  url?: string
+  title: string
+  status: 'broken' | 'review' | 'draft' | 'checking' | 'merged' | 'closed'
+  mergedAt?: Timestamp
+}
+
+/** One repository in `DependencyUpdatesOverview`; each part comes from that kind's newest record. */
+export interface RepoUpdates {
+  repo: RepoRef
+  state: UpdateState
+  renovate?: {
+    analysisId: string
+    createdAt: Timestamp
+    status: 'ok' | 'failed'
+    mode: 'report' | 'merge-requests'
+    dependencies: number
+    outdated: number
+    majors: number
+    security: number
+    /** Updates held back until their release is old enough. */
+    pending: number
+    libYears?: number
+  }
+  browserslist?: {
+    analysisId: string
+    createdAt: Timestamp
+    status: 'not-applicable' | 'up-to-date' | 'updated' | 'failed'
+    version?: string
+  }
+  propagation?: {
+    analysisId: string
+    createdAt: Timestamp
+    packages: string[]
+    status: 'unchanged' | 'skipped' | 'updated' | 'fixed' | 'failed' | 'error'
+  }
+  mergeRequests: UpdateMergeRequest[]
+}
+
+/** A dependency outdated in several repositories, from their newest Renovate records. */
+export interface FleetUpdate {
+  dependency: string
+  manager: string
+  /** Repositories that have an update for it, as `forge:path`. */
+  repos: string[]
+  /** How many of them are a major version behind. */
+  majors: number
+  security: boolean
+  /** Newest version any of them is offered. */
+  latest?: string
+}
+
+/**
+ * `GET /api/dependency-updates` — every repository the caller may read with its update state,
+ * worst first, and the dependencies most repositories lag behind on. Built from stored records of
+ * `renovate`, `browserslist` and `propagation`; nothing is asked of the forge.
+ */
+export interface DependencyUpdatesOverview {
+  totals: Record<UpdateState, number> & {
+    repos: number
+    openMergeRequests: number
+    /** Update merge requests merged in the last 30 days. */
+    merged: number
+    security: number
+  }
+  repos: RepoUpdates[]
+  dependencies: FleetUpdate[]
+}
+
 /** `POST /api/analyses/:id/changes` — accepts some of a report's proposed changes. */
 export interface ApplyChangesInput {
   /** `CodeChange` ids from the report's `changes` blocks. */
