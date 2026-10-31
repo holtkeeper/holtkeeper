@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -40,6 +41,8 @@ LOOKUP_TIMEOUT = 2.0
 FLUSH_INTERVAL = 60.0
 REDIRECT_TTL = 300.0
 SPOOL_MAX_AGE = 86400.0
+SYNC_MAX_AGE = 30.0
+SYNC_WORKERS = 16
 
 # Archives whose content never changes once published. Indexes (packuments, `@v/list`, version
 # lists) are deliberately absent: they change, and a stale one is how caches break installs.
@@ -172,21 +175,26 @@ class DirStore:
         except FileNotFoundError:
             return None
 
-    def write_meta(self, path: str, meta: dict) -> None:
+    def token(self, target: str) -> str:
+        stat = os.stat(target)
+        return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+    def write_meta(self, path: str, meta: dict) -> str | None:
         target = self.file(path, "=meta.json")
         temp = f"{target}.{uuid.uuid4().hex}.tmp"
         with open(temp, "w", encoding="utf-8") as handle:
             json.dump(meta, handle)
         os.replace(temp, target)
+        return self.token(target)
 
     def exists(self, path: str) -> bool:
         return os.path.isfile(self.file(path, "=body"))
 
-    def commit(self, path: str, spooled: str, meta: dict) -> None:
+    def commit(self, path: str, spooled: str, meta: dict) -> str | None:
         body = self.file(path, "=body")
         os.makedirs(os.path.dirname(body), exist_ok=True)
         os.replace(spooled, body)
-        self.write_meta(path, meta)
+        return self.write_meta(path, meta)
 
     def delete(self, path: str) -> None:
         for name in ("=meta.json", "=body"):
@@ -207,8 +215,7 @@ class DirStore:
         for kind in KINDS:
             for current, _, files in os.walk(os.path.join(self.root, kind)):
                 if "=meta.json" in files:
-                    stat = os.stat(os.path.join(current, "=meta.json"))
-                    found[os.path.relpath(current, self.root)] = f"{stat.st_mtime_ns}:{stat.st_size}"
+                    found[os.path.relpath(current, self.root)] = self.token(os.path.join(current, "=meta.json"))
         return found
 
     def hit_url(self, path: str) -> str:
@@ -294,29 +301,36 @@ class S3Store:
             time.time(),
         )
 
-    def call(self, method: str, key: str | None, query=None, data=None, headers=None) -> bytes | None:
-        """The body of the answer; `None` for 404."""
+    def send(self, method: str, key: str | None, query=None, data=None, headers=None):
+        """The body and headers of the answer; `None` for 404."""
         request = urllib.request.Request(self.presign(method, key, query), data=data, method=method, headers=headers or {})
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
-                return response.read()
+                return response.read(), response.headers
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 return None
             raise
 
+    def call(self, method: str, key: str | None, query=None, data=None, headers=None) -> bytes | None:
+        """The body of the answer; `None` for 404."""
+        answer = self.send(method, key, query, data, headers)
+        return None if answer is None else answer[0]
+
     def read_meta(self, path: str) -> dict | None:
         body = self.call("GET", f"{self.prefix}{path}/=meta.json")
         return None if body is None else json.loads(body)
 
-    def write_meta(self, path: str, meta: dict) -> None:
+    def write_meta(self, path: str, meta: dict) -> str | None:
         data = json.dumps(meta).encode()
-        self.call("PUT", f"{self.prefix}{path}/=meta.json", data=data, headers={"Content-Type": "application/json"})
+        answer = self.send("PUT", f"{self.prefix}{path}/=meta.json", data=data, headers={"Content-Type": "application/json"})
+        etag = answer[1].get("ETag") if answer else None
+        return f"etag:{etag}" if etag else None
 
     def exists(self, path: str) -> bool:
         return self.call("HEAD", f"{self.prefix}{path}/=body") is not None
 
-    def commit(self, path: str, spooled: str, meta: dict) -> None:
+    def commit(self, path: str, spooled: str, meta: dict) -> str | None:
         try:
             with open(spooled, "rb") as handle:
                 size = os.fstat(handle.fileno()).st_size
@@ -326,7 +340,7 @@ class S3Store:
                     data=handle,
                     headers={"Content-Length": str(size), "Content-Type": "application/octet-stream"},
                 )
-            self.write_meta(path, meta)
+            return self.write_meta(path, meta)
         finally:
             os.remove(spooled)
 
@@ -347,8 +361,13 @@ class S3Store:
             for item in root.findall("s3:Contents", ns) if ns else root.findall("Contents"):
                 key = find(item, "Key").text or ""
                 if key.endswith("/=meta.json"):
-                    stamp = find(item, "LastModified").text or ""
-                    found[key[len(self.prefix) : -len("/=meta.json")]] = f"{stamp}:{find(item, 'Size').text}"
+                    etag = find(item, "ETag")
+                    token = (
+                        f"etag:{etag.text}"
+                        if etag is not None and etag.text
+                        else f"{find(item, 'LastModified').text}:{find(item, 'Size').text}"
+                    )
+                    found[key[len(self.prefix) : -len("/=meta.json")]] = token
             truncated = find(root, "IsTruncated")
             next_token = find(root, "NextContinuationToken")
             if truncated is None or truncated.text != "true" or next_token is None:
@@ -434,6 +453,8 @@ class Cache:
         self.dirty: set[str] = set()
         self.redirects: dict[str, tuple[str, str, str, float]] = {}
         self.lock = threading.Lock()
+        self.sync_lock = threading.Lock()
+        self.refreshing: asyncio.Future | None = None
         self.stats = Stats()
         self.synced_at = 0.0
         self.tasks: set[asyncio.Task] = set()
@@ -517,30 +538,39 @@ class Cache:
             self.dirty.clear()
         for path, meta in pending:
             try:
-                self.store.write_meta(path, meta)
+                token = self.store.write_meta(path, meta)
             except Exception as error:
                 self.stats.errors += 1
                 logging.warning(f"egress: recording use of {path} failed: {error}")
+                continue
+            self.remember(path, token)
+
+    def remember(self, path: str, token: str | None) -> None:
+        """Notes the token of a meta file this replica wrote, so the next sync does not read it back."""
+        if token:
+            with self.lock:
+                self.tokens[path] = token
 
     def sync(self) -> None:
         """Brings the index up to the store, which other replicas may write too."""
-        tokens = self.store.list_meta()
-        fresh = {}
-        for path, token in tokens.items():
-            if self.tokens.get(path) == token and path in self.index:
-                continue
-            meta = self.store.read_meta(path)
-            if meta:
-                fresh[path] = meta
-        with self.lock:
-            for path in list(self.index):
-                if path not in tokens and path not in self.dirty:
-                    del self.index[path]
-            for path, meta in fresh.items():
-                if path not in self.dirty:
-                    self.index[path] = meta
-            self.tokens = tokens
-            self.synced_at = time.time()
+        with self.sync_lock:
+            with self.lock:
+                seen = dict(self.tokens)
+            tokens = self.store.list_meta()
+            with self.lock:
+                changed = [p for p, token in tokens.items() if seen.get(p) != token or p not in self.index]
+            with ThreadPoolExecutor(SYNC_WORKERS) as pool:
+                fresh = {p: meta for p, meta in zip(changed, pool.map(self.store.read_meta, changed)) if meta}
+            with self.lock:
+                written = {p: token for p, token in self.tokens.items() if seen.get(p) != token}
+                for path in list(self.index):
+                    if path not in tokens and path not in self.dirty and path not in written:
+                        del self.index[path]
+                for path, meta in fresh.items():
+                    if path not in self.dirty and path not in written:
+                        self.index[path] = meta
+                self.tokens = {**tokens, **written}
+                self.synced_at = time.time()
 
     def sweep(self) -> None:
         self.flush()
@@ -741,7 +771,7 @@ class Cache:
             "hits": 0,
         }
         try:
-            self.store.commit(spool.entry, spool.path, meta)
+            token = self.store.commit(spool.entry, spool.path, meta)
         except Exception as error:
             self.stats.errors += 1
             logging.warning(f"egress: storing {spool.url} in the cache failed: {error}")
@@ -752,12 +782,29 @@ class Cache:
             return
         with self.lock:
             self.index[spool.entry] = meta
+        self.remember(spool.entry, token)
         self.stats.stored += 1
 
     def error(self, flow: http.HTTPFlow) -> None:
         spool = flow.metadata.get("cache_spool")
         if spool and not spool.failed:
             self.discard(spool)
+
+    def refresh(self) -> asyncio.Future:
+        """Flushes and syncs off the request path; callers that come while one runs share it."""
+        if self.refreshing is None or self.refreshing.done():
+            self.refreshing = asyncio.ensure_future(self.run_refresh())
+            self.refreshing.add_done_callback(self.refreshed)
+        return self.refreshing
+
+    async def run_refresh(self) -> None:
+        await asyncio.to_thread(self.flush)
+        await asyncio.to_thread(self.sync)
+
+    def refreshed(self, task: asyncio.Future) -> None:
+        if not task.cancelled() and task.exception():
+            self.stats.errors += 1
+            logging.warning(f"egress: cache sync failed: {task.exception()}")
 
     def snapshot(self, limit: int) -> dict:
         now = time.time()
@@ -809,9 +856,10 @@ class Cache:
         route = (flow.request.method, flow.request.path.split("?")[0])
         try:
             if route == ("GET", "/v1/cache"):
-                if time.time() - self.synced_at > 30:
-                    await asyncio.to_thread(self.flush)
-                    await asyncio.to_thread(self.sync)
+                if not self.synced_at:
+                    await asyncio.shield(self.refresh())
+                elif time.time() - self.synced_at > SYNC_MAX_AGE:
+                    self.refresh()
                 limit = int(flow.request.query.get("limit", "5000"))
                 body = self.snapshot(limit)
             elif route == ("POST", "/v1/cache/delete"):

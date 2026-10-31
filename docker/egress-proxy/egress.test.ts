@@ -361,6 +361,8 @@ const signed = (url: URL, method: string, host: string) => {
   return signature === hmac(key, toSign).toString('hex')
 }
 
+const etag = (body: Uint8Array) => `"${createHash('md5').update(body).digest('hex')}"`
+
 /** An S3 lookalike that keeps objects in memory and refuses requests whose SigV4 query signature is wrong. */
 function fakeS3() {
   const objects = new Map<string, { body: Uint8Array; modified: Date }>()
@@ -379,7 +381,7 @@ function fakeS3() {
           .filter(([key]) => key.startsWith(prefix))
           .map(
             ([key, object]) =>
-              `<Contents><Key>${Bun.escapeHTML(key)}</Key><LastModified>${object.modified.toISOString()}</LastModified><Size>${object.body.length}</Size></Contents>`,
+              `<Contents><Key>${Bun.escapeHTML(key)}</Key><LastModified>${object.modified.toISOString()}</LastModified><ETag>${Bun.escapeHTML(etag(object.body))}</ETag><Size>${object.body.length}</Size></Contents>`,
           )
           .join('')
         return new Response(
@@ -389,11 +391,9 @@ function fakeS3() {
       }
       const key = decodeURIComponent(url.pathname.replace(/^\/bucket\//, ''))
       if (request.method === 'PUT') {
-        objects.set(key, {
-          body: new Uint8Array(await request.arrayBuffer()),
-          modified: new Date(),
-        })
-        return new Response(null, { status: 200 })
+        const body = new Uint8Array(await request.arrayBuffer())
+        objects.set(key, { body, modified: new Date() })
+        return new Response(null, { status: 200, headers: { etag: etag(body) } })
       }
       if (request.method === 'DELETE') {
         objects.delete(key)
@@ -512,6 +512,11 @@ for (const backend of ['dir', 's3'] as const)
       throw new Error(`${path} was never stored`)
     }
 
+    const metaReads = () =>
+      (s3?.requests ?? []).filter(
+        (r) => r.startsWith('GET ') && decodeURIComponent(r).endsWith('/=meta.json'),
+      ).length
+
     test('stores a complete download and serves the next one from the cache', async () => {
       const first = await get('/files/a.tgz')
       expect(first.headers.get('x-egress-cache')).toBe('miss')
@@ -571,6 +576,16 @@ for (const backend of ['dir', 's3'] as const)
       await expired.arrayBuffer()
       expect(served.get('/redirect/tool.tar.gz')).toBe(2)
     }, 15_000)
+
+    test('syncs without reading back the meta files it wrote', async () => {
+      const before = metaReads()
+      const synced = await admin('/v1/cache/delete', {
+        method: 'POST',
+        body: JSON.stringify({ paths: [] }),
+      })
+      expect(await synced.json()).toEqual({ removed: 0, bytes: 0 })
+      expect(metaReads()).toBe(before)
+    })
 
     test('reports and deletes entries behind the admin token', async () => {
       expect((await admin('/v1/cache', {}, 'wrong')).status).toBe(401)
