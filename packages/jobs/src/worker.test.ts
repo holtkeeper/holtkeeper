@@ -369,3 +369,31 @@ describe('worker', () => {
     expect([1, 2, 3, 10].map(exponentialBackoff)).toEqual([60_000, 120_000, 240_000, 3_600_000])
   })
 })
+
+test('a running job whose worker died is recovered while the worker runs, not only on start', async () => {
+  const done = Promise.withResolvers<void>()
+  const size = analyzer('size', async () => {
+    done.resolve()
+    return { data: {} }
+  })
+  const queued = await enqueue('size')
+  expect(await store.jobs.claim('dead-worker', clock.toISOString())).toMatchObject({
+    id: queued.id,
+  })
+  const lines: string[] = []
+  const worker = createWorker({
+    store,
+    analyzers: [size],
+    contextFor,
+    now: () => clock,
+    staleMs: 20,
+    pollMs: 60_000,
+    log: (line) => lines.push(line),
+  })
+  await worker.start()
+  expect((await store.jobs.get(queued.id))?.status).toBe('running')
+  clock = new Date(clock.getTime() + 60_000)
+  await done.promise
+  await worker.stop()
+  expect(lines).toContain(`recovered job ${queued.id} (queued)`)
+})

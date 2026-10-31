@@ -26,7 +26,11 @@ export interface WorkerOptions {
   pollMs?: number
   /** Default 15 seconds. */
   heartbeatMs?: number
-  /** Running jobs without a heartbeat for this long are recovered on `start`. Default 2 minutes. */
+  /**
+   * Running jobs without a heartbeat for this long are recovered on `start` and then every
+   * `staleMs`, so a job whose worker died (killed for memory, a lost node) runs again even when
+   * that worker restarted before the job went stale. Default 2 minutes.
+   */
   staleMs?: number
   /** Delay before retry number `attempt` (1-based). Default: 1 minute, doubling, at most 1 hour. */
   retryDelayMs?: (attempt: number) => number
@@ -178,6 +182,7 @@ export function createWorker(options: WorkerOptions): Worker {
   let stopped = false
   let filling = false
   let poll: ReturnType<typeof setInterval> | undefined
+  let sweep: ReturnType<typeof setInterval> | undefined
 
   const finished = async (job: Job, record?: AnalysisRecord) => {
     try {
@@ -392,6 +397,19 @@ export function createWorker(options: WorkerOptions): Worker {
     return run
   }
 
+  async function recover() {
+    const recovered = await store.jobs.recoverStale(
+      new Date(now().getTime() - staleMs).toISOString(),
+      at(),
+    )
+    for (const job of recovered) say(`recovered job ${job.id} (${job.status})`)
+  }
+
+  const sweepStale = () =>
+    recover().then(fill, (error: unknown) =>
+      say(`recovering stale jobs failed: ${messageOf(error)}`),
+    )
+
   async function fill() {
     if (filling || stopped) return
     filling = true
@@ -414,18 +432,17 @@ export function createWorker(options: WorkerOptions): Worker {
   return {
     async start() {
       stopped = false
-      const recovered = await store.jobs.recoverStale(
-        new Date(now().getTime() - staleMs).toISOString(),
-        at(),
-      )
-      for (const job of recovered) say(`recovered job ${job.id} (${job.status})`)
+      await recover()
       poll ??= setInterval(() => void fill(), options.pollMs ?? 5_000)
+      sweep ??= setInterval(() => void sweepStale(), staleMs)
       await fill()
     },
     async stop() {
       stopped = true
       clearInterval(poll)
+      clearInterval(sweep)
       poll = undefined
+      sweep = undefined
       for (const controller of controllers.keys())
         controller.abort(new JobAbort('stopped', 'worker stopped'))
       await Promise.allSettled(active)
