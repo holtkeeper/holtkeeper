@@ -5,6 +5,7 @@
 - [Plan](PLAN.md) — goals, architecture and milestones
 - [Development](development.md) — tooling, conventions, why there is no build step
 - [Deployment](deployment.md) — Docker, compose, Kubernetes (Helm), roles, scaling, backups
+- [Agent access](agent-access.md) — let an AI agent sign in to the web UI with its own account and a login link
 
 ## Modules
 

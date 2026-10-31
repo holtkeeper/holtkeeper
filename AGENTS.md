@@ -2,6 +2,8 @@
 
 Instructions for AI agents and humans working in this repository. Read [docs/PLAN.md](docs/PLAN.md) for the product picture and [docs/development.md](docs/development.md) for tooling.
 
+To drive a running instance's web UI, sign in with your own account and a single-use login link: [docs/agent-access.md](docs/agent-access.md).
+
 ## Commands
 
 - `bun install` — install dependencies (also installs git hooks)
