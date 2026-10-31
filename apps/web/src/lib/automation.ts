@@ -133,7 +133,7 @@ export interface ScheduleDraft {
   holidays: string[]
   jitterMinutes: string
   spread: boolean
-  /** Analyzer options of the entry, kept as they are. */
+  /** Options per analyzer kind; only those of picked analyzers are saved. */
   options?: ScheduleDocumentData['options']
 }
 
@@ -248,6 +248,7 @@ export function toScheduleInput(draft: ScheduleDraft): PutConfigInput['schedule'
     ...(draft.holidays.length ? { holidays: draft.holidays.toSorted() } : {}),
   }
   const jitter = Number(draft.jitterMinutes.trim() || '0')
+  const options = pickedOptions(draft)
   return {
     name: draft.name.trim() || draft.id.trim(),
     enabled: draft.enabled,
@@ -259,8 +260,15 @@ export function toScheduleInput(draft: ScheduleDraft): PutConfigInput['schedule'
     ...(Object.keys(windows).length ? { windows } : {}),
     ...(jitter > 0 ? { jitterMinutes: jitter } : {}),
     ...(draft.spread ? { spread: true } : {}),
-    ...(draft.options && Object.keys(draft.options).length ? { options: draft.options } : {}),
+    ...(options ? { options } : {}),
   }
+}
+
+const pickedOptions = (draft: ScheduleDraft): ScheduleDocumentData['options'] => {
+  const entries = Object.entries(draft.options ?? {}).filter(
+    ([kind, value]) => draft.analyzers.includes(kind) && Object.keys(value).length > 0,
+  )
+  return entries.length ? Object.fromEntries(entries) : undefined
 }
 
 /** Kinds of event triggers. */

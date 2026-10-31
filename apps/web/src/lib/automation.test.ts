@@ -141,6 +141,20 @@ describe('schedule form', () => {
     })
   })
 
+  test('saves options only of picked analyzers that set something', () => {
+    const draft = {
+      ...toScheduleDraft(),
+      id: 'nightly',
+      every: '1d',
+      analyzers: ['browserslist', 'deps'],
+      options: { browserslist: { branch: 'chore/browserslist' }, deps: {}, quality: { depth: 2 } },
+    }
+    expect(toScheduleInput(draft).options).toEqual({
+      browserslist: { branch: 'chore/browserslist' },
+    })
+    expect(toScheduleInput({ ...draft, analyzers: ['deps'] }).options).toBeUndefined()
+  })
+
   test('leaves empty parts out and names the schedule by its id', () => {
     const draft = {
       ...toScheduleDraft(),

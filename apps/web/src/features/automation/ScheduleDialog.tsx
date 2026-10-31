@@ -1,9 +1,9 @@
-import type { ConfigEntryView, Weekday } from '@holtkeeper/api'
+import type { ConfigEntryView, JobAnalyzerView, Weekday } from '@holtkeeper/api'
 import { Plus, X } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useConfigEntry, useConfigMutations } from '../../api/queries.ts'
+import { useConfigEntry, useConfigMutations, useJobAnalyzers } from '../../api/queries.ts'
 import {
   type ScheduleDraft,
   type WindowDraft,
@@ -27,6 +27,7 @@ import {
   TextField,
   notify,
 } from '../../ui/index.ts'
+import { StructuredEditor } from '../settings/SchemaField.tsx'
 import { AnalyzerPicker, EntryHistory, FormSection, GroupPicker, NextRuns } from './shared.tsx'
 
 const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -44,15 +45,29 @@ export function ScheduleDialog({
   const isNew = entry === undefined
   const [draft, setDraft] = useState<ScheduleDraft>(() => toScheduleDraft(entry))
   const [submitted, setSubmitted] = useState(false)
+  const [restored, setRestored] = useState(0)
+  const [brokenOptions, setBrokenOptions] = useState<ReadonlySet<string>>(() => new Set())
   const { put } = useConfigMutations('schedules')
   const detail = useConfigEntry('schedules', entry?.version === undefined ? undefined : entry.id)
   const errors = submitted ? validateScheduleDraft(draft, isNew ? taken : []) : {}
   const set = <K extends keyof ScheduleDraft>(key: K, value: ScheduleDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }))
+  const setOptions = useCallback((kind: string, value: Record<string, unknown> | undefined) => {
+    setBrokenOptions((previous) => {
+      if (previous.has(kind) === (value === undefined)) return previous
+      const next = new Set(previous)
+      if (value === undefined) next.add(kind)
+      else next.delete(kind)
+      return next
+    })
+    if (value !== undefined) setDraft((d) => ({ ...d, options: { ...d.options, [kind]: value } }))
+  }, [])
+  const optionsBroken = draft.analyzers.some((kind) => brokenOptions.has(kind))
 
   const submit = () => {
     setSubmitted(true)
     if (Object.keys(validateScheduleDraft(draft, isNew ? taken : [])).length) return
+    if (optionsBroken) return
     put.mutate(
       { id: draft.id.trim(), data: toScheduleInput(draft) },
       {
@@ -199,12 +214,15 @@ export function ScheduleDialog({
             />
             {errors.repos ? <span className="text-xs text-danger">{errors.repos}</span> : null}
           </div>
-          {draft.options && Object.keys(draft.options).length ? (
-            <p className="text-xs text-muted">
-              Analyzer options for {Object.keys(draft.options).join(', ')} are kept as they are.
-            </p>
-          ) : null}
         </FormSection>
+
+        <AnalyzerOptions
+          key={restored}
+          kinds={draft.analyzers}
+          options={draft.options}
+          onChange={setOptions}
+          error={submitted && optionsBroken ? 'Fix the analyzer options to save.' : undefined}
+        />
 
         <FormSection
           title="Windows"
@@ -297,6 +315,8 @@ export function ScheduleDialog({
           onRestore={(data, version) => {
             if (!entry) return
             setDraft(toScheduleDraft({ ...entry, data }))
+            setBrokenOptions(new Set())
+            setRestored((count) => count + 1)
             notify.info(`Version ${version} loaded`, 'Save to apply it.')
           }}
         />
@@ -305,6 +325,68 @@ export function ScheduleDialog({
     </Dialog>
   )
 }
+
+function AnalyzerOptions({
+  kinds,
+  options,
+  onChange,
+  error,
+}: {
+  kinds: readonly string[]
+  options: ScheduleDraft['options']
+  onChange: (kind: string, value: Record<string, unknown> | undefined) => void
+  error?: string | undefined
+}) {
+  const analyzers = useJobAnalyzers()
+  const picked = kinds.flatMap((kind) => {
+    const analyzer = analyzers.data?.analyzers.find((a) => a.kind === kind)
+    return analyzer ? [analyzer] : []
+  })
+  if (!picked.length) return null
+  return (
+    <FormSection
+      title="Analyzer options"
+      description="Apply to every job this schedule queues; options that are not set keep the analyzer's defaults."
+    >
+      {picked.map((analyzer) => (
+        <AnalyzerOptionsEditor
+          key={analyzer.kind}
+          analyzer={analyzer}
+          initial={options?.[analyzer.kind] ?? {}}
+          onChange={onChange}
+        />
+      ))}
+      {error ? <span className="text-xs text-danger">{error}</span> : null}
+    </FormSection>
+  )
+}
+
+function AnalyzerOptionsEditor({
+  analyzer,
+  initial,
+  onChange,
+}: {
+  analyzer: JobAnalyzerView
+  initial: Record<string, unknown>
+  onChange: (kind: string, value: Record<string, unknown> | undefined) => void
+}) {
+  const { kind } = analyzer
+  const change = useCallback(
+    (value: unknown) => onChange(kind, isRecord(value) ? value : undefined),
+    [kind, onChange],
+  )
+  return (
+    <StructuredEditor
+      schema={analyzer.schema}
+      initial={initial}
+      onChange={change}
+      label={analyzer.label}
+    />
+  )
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
 
 function WindowList({
   title,
