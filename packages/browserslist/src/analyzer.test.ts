@@ -132,6 +132,14 @@ describe('browserslist analyzer', () => {
     expect(browserslistReport(data).metrics.find((m) => m.id === 'browsers')?.value).toBe(2)
   })
 
+  test('takes the commit message from a template', async () => {
+    const root = await repository({ 'package.json': '{}', 'bun.lock': lockfile('1.0.30001600') })
+    const { forge, created } = fakeForge()
+    await run(root, forge, { commitMessage: 'chore: [GTW-1] caniuse-lite {version}', dirs: [] })
+
+    expect(created[0]?.title).toBe('chore: [GTW-1] caniuse-lite 1.0.30001700')
+  })
+
   test('sets auto-merge on the merge request, retrying while the forge refuses', async () => {
     const root = await repository({ 'package.json': '{}', 'bun.lock': lockfile('1.0.30001600') })
     const { forge, merges } = fakeForge(1)

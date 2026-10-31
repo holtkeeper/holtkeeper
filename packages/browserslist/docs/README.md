@@ -13,16 +13,17 @@ Keeps the browserslist database (`caniuse-lite`) current: runs `update-browsersl
 
 Lifecycle scripts stay off (`--ignore-scripts`, `npm_config_ignore_scripts`, `YARN_ENABLE_SCRIPTS=false`) unless `allowInstallScripts`. A failing update is a result (`failed`, with the output tail), not a job failure; a failing install only leaves the browser lists unknown.
 
-| Option                | Default                          | Meaning                                                          |
-| --------------------- | -------------------------------- | ---------------------------------------------------------------- |
-| `command`             | by package manager               | Shell command that updates the database                          |
-| `dirs`                | `['.']`                          | Directories whose browsers are compared; `[]` skips the installs |
-| `allowInstallScripts` | `false`                          | Run dependency lifecycle scripts                                 |
-| `timeoutMinutes`      | `15`                             | Per command                                                      |
-| `branch`              | `holtkeeper/browserslist`        | Branch of the merge request                                      |
-| `labels`              | `['holtkeeper', 'dependencies']` |                                                                  |
-| `autoMerge`           | `false`                          | Merge the merge request once its checks pass                     |
-| `dryRun`              | `false`                          | Update and report, publish nothing                               |
+| Option                | Default                                                               | Meaning                                                                               |
+| --------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `command`             | by package manager                                                    | Shell command that updates the database                                               |
+| `dirs`                | `['.']`                                                               | Directories whose browsers are compared; `[]` skips the installs                      |
+| `allowInstallScripts` | `false`                                                               | Run dependency lifecycle scripts                                                      |
+| `timeoutMinutes`      | `15`                                                                  | Per command                                                                           |
+| `branch`              | `holtkeeper/browserslist`                                             | Branch of the merge request                                                           |
+| `commitMessage`       | `chore(deps): update browserslist database to caniuse-lite {version}` | Commit message and merge request title; `{version}` is the new `caniuse-lite` version |
+| `labels`              | `['holtkeeper', 'dependencies']`                                      |                                                                                       |
+| `autoMerge`           | `false`                                                               | Merge the merge request once its checks pass                                          |
+| `dryRun`              | `false`                                                               | Update and report, publish nothing                                                    |
 
 ## Data and report
 

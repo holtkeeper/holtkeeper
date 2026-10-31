@@ -27,6 +27,12 @@ export const browserslistOptionsSchema = z.object({
   /** Per command. */
   timeoutMinutes: z.coerce.number().positive().default(15),
   branch: z.string().min(1).default('holtkeeper/browserslist'),
+  /** Commit message and merge request title; `{version}` becomes the new `caniuse-lite` version. */
+  commitMessage: z
+    .string()
+    .trim()
+    .min(1)
+    .default('chore(deps): update browserslist database to caniuse-lite {version}'),
   labels: z.array(z.string()).default(['holtkeeper', 'dependencies']),
   /**
    * Have the forge merge the merge request once its checks pass: right away when nothing blocks
@@ -274,8 +280,7 @@ export function createBrowserslistAnalyzer(
         dir: tree.dir,
         files,
         branch: options.branch,
-        title:
-          `chore(deps): update browserslist database to caniuse-lite ${after.at(-1) ?? ''}`.trim(),
+        title: options.commitMessage.replaceAll('{version}', after.at(-1) ?? '').trim(),
         description: browserslistDescription(data),
         labels: options.labels,
         ...(tree.publisher ? { mode: 'git' as const, git: tree.publisher } : {}),
