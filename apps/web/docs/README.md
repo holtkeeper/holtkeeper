@@ -1,6 +1,6 @@
 # @holtkeeper/web
 
-The Holtkeeper admin panel: dashboards, audit reports, background jobs, automation (schedules, triggers, repository traits), credentials, settings, AI usage, storage, caches, users, your own account (passkeys and linked external accounts, at `/account`), the audit log and the activity log. A single-page React app that talks only to the server's JSON API (`/api/*`) and auth endpoints (`/auth/*`). The server serves the built files from `apps/web/dist`.
+The Holtkeeper admin panel: dashboards, audit reports, background jobs, automation (schedules, triggers, repository traits), credentials, settings, AI usage, storage, database, caches, users, your own account (passkeys and linked external accounts, at `/account`), the audit log and the activity log. A single-page React app that talks only to the server's JSON API (`/api/*`) and auth endpoints (`/auth/*`). The server serves the built files from `apps/web/dist`.
 
 Stack: React 19, HeroUI 3 (React Aria + Tailwind CSS 4), TanStack Router (code-based routes), TanStack Query, TanStack Table, Motion, Recharts, React Flow (`@xyflow/react`) with dagre layouts, lucide icons, `@simplewebauthn/browser` for passkeys.
 
@@ -52,6 +52,7 @@ src/
     ai-usage.ts       USD and token formatting, month deltas, daily series, budget tone
     audit-log.ts      audit log filter form → query, outcome tones, change values
     storage.ts        provider ordering and shares, clear results
+    database.ts       table domains and sorting, dead row share, statement times, session ages, growth
     caches.ts         egress cache totals, per host sizes, entry filter, hit rate, TTL text
     libraries.ts      library list and docs search queries, version roles, source statuses, plain-text excerpts
     media.ts          image variant form validation, savings tone, snippet labels
@@ -61,7 +62,7 @@ src/
   ui/                 thin wrappers over HeroUI and shared visual pieces
   features/<area>/    one folder per page: shell, auth, dashboard, audits, repos, analyses,
                       reports, credentials, settings, access (Scope/Grants editors), users, account, activity,
-                      jobs, automation, ai, audit-log, storage, caches, media, libraries
+                      jobs, automation, ai, audit-log, storage, database, caches, media, libraries
 ```
 
 ## API client
@@ -106,9 +107,9 @@ The Credentials page also lists forges (global `settings:read`). With global `se
 
 A repository's **Config** tab shows what the config applies to it (`GET /api/repos/explain`, like `holtkeeper explain`): groups, traits, plugins with options, and the schedules and triggers that queue jobs for it. **Optimize image** (`analyses:run`) generates image variants of a file (`POST /api/media/variants`), compares sizes, previews variants, shows markup snippets and puts the chosen files into a merge request or a ZIP (`POST /api/media/apply`).
 
-## AI usage, storage and audit log
+## AI usage, storage, database and audit log
 
-`/ai` (`ai:read`): this month against the previous one, budgets with month-end projections, daily cost for 30 days, top repositories, models and task kinds, and every run with links to its job and analysis. `/storage` (`settings:read`): space per storage area with breakdowns and **Clear** where the area allows it (`settings:write`); git mirrors and the tool cache are broken down by worker as the workers report them, and clearing them asks every worker. `/caches` (`settings:read`): the egress proxy's download cache (`GET /api/egress/cache`) — stored size, bytes saved by hits, hit rate and bytes served since the answering replica started, packages and tools with their TTL and largest hosts, every entry with size, hits, last use and expiry (filter by kind and URL), the store and cached URL patterns, a warning that cached copies outlive upstream and access changes, and removing one entry, a kind or everything (`settings:write`). `/audit-log` (global `audit:read`): filters, count, events with expandable request details and changes, hash chain verification and CSV or NDJSON export of the filtered events. `/account` also lists linked external accounts, links new ones and issues verification codes.
+`/ai` (`ai:read`): this month against the previous one, budgets with month-end projections, daily cost for 30 days, top repositories, models and task kinds, and every run with links to its job and analysis. `/storage` (`settings:read`): space per storage area with breakdowns and **Clear** where the area allows it (`settings:write`); git mirrors and the tool cache are broken down by worker as the workers report them, and clearing them asks every worker. `/database` (`settings:read`): the store's database — size with 7-day growth, cache hit ratio, connections and uptime (or table, row and migration counts on SQLite), findings worth a look, and tabs: **Tables** (rows, data, index and TOAST bytes, dead rows, last vacuum and analyze; filter and sort), **Growth** (daily size chart and size per domain with its 7-day change), **Statements** (top `pg_stat_statements` entries by total time, mean time or calls, refreshed every 30 seconds, **Reset** with `settings:write` when the database allows it, or how to turn them on), **Sessions** (replicas and client connections, busy or all, every 5 seconds, with what they wait for and who blocks them), **Indexes** (size, scans, unused and duplicate flags) and **Migrations**; Statements and Sessions are Postgres only. `/caches` (`settings:read`): the egress proxy's download cache (`GET /api/egress/cache`) — stored size, bytes saved by hits, hit rate and bytes served since the answering replica started, packages and tools with their TTL and largest hosts, every entry with size, hits, last use and expiry (filter by kind and URL), the store and cached URL patterns, a warning that cached copies outlive upstream and access changes, and removing one entry, a kind or everything (`settings:write`). `/audit-log` (global `audit:read`): filters, count, events with expandable request details and changes, hash chain verification and CSV or NDJSON export of the filtered events. `/account` also lists linked external accounts, links new ones and issues verification codes.
 
 ## Knowledge
 

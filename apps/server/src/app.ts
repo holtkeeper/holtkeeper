@@ -18,6 +18,7 @@ import { auditRoutes } from './routes/audits.ts'
 import { activityPeople, avatarRoutes, withAvatar } from './routes/avatars.ts'
 import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
+import { databaseRoutes } from './routes/database.ts'
 import { dependencyRoutes } from './routes/dependencies.ts'
 import { egressRoutes } from './routes/egress.ts'
 import { jobRoutes } from './routes/jobs.ts'
@@ -112,6 +113,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', artifactRoutes(deps))
   api.route('/', mediaRoutes(deps))
   api.route('/', storageRoutes(deps))
+  api.route('/', databaseRoutes(deps))
   api.route('/', trackerRoutes(deps))
   api.get('/activity', async (c) => {
     authorize(c, 'users:read', { kind: 'global' })

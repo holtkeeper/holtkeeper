@@ -27,6 +27,12 @@ import type {
   KnowledgeRevision,
   KnowledgeStatus,
   LibraryChunk,
+  DatabaseDomain,
+  DatabaseIndex,
+  DatabaseMigration,
+  DatabaseOverview,
+  DatabaseSession,
+  DatabaseTable,
   LibraryEcosystem,
   LibraryRecord,
   LibraryVersionRecord,
@@ -876,6 +882,76 @@ export interface ClearStorageResult {
   removed?: number
   bytes?: number
   requested?: number
+}
+
+/** Bytes and rows of one `DatabaseDomain`, now and as recorded about a week ago. */
+export interface DatabaseDomainView {
+  domain: DatabaseDomain
+  tables: number
+  rows: number
+  bytes: number
+  /** From the daily snapshot closest to seven days ago; missing without one. */
+  weekAgoBytes?: number
+}
+
+/** One day of `DatabaseView.history`: the database and each domain at the snapshot. */
+export interface DatabaseHistoryPoint {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string
+  bytes: number
+  domains: Partial<Record<DatabaseDomain, number>>
+}
+
+/** What a `DatabaseAdvice` is about. */
+export type DatabaseAdviceKind =
+  | 'unused-index'
+  | 'duplicate-index'
+  | 'dead-rows'
+  | 'stale-analyze'
+  | 'seq-scans'
+  | 'connections'
+  | 'idle-in-transaction'
+  | 'cache'
+  | 'replication'
+  | 'free-space'
+  | 'statements'
+
+/** A finding about the database worth a look, with the object it is about. */
+export interface DatabaseAdvice {
+  kind: DatabaseAdviceKind
+  severity: 'info' | 'warning'
+  /** Table, index, replica or `database`. */
+  subject: string
+  message: string
+}
+
+/** Annotations of an index in `DatabaseView.indexes`. */
+export interface DatabaseIndexView extends DatabaseIndex {
+  /** Never scanned since statistics were reset, and not backing a constraint. */
+  unused: boolean
+  /** Name of an earlier index on the same columns, when this one repeats it. */
+  duplicateOf?: string
+}
+
+/** `GET /api/database`: everything but statements and sessions, which have their own routes. */
+export type DatabaseView =
+  | { available: false; reason: string }
+  | {
+      available: true
+      overview: DatabaseOverview
+      tables: (DatabaseTable & { domain: DatabaseDomain })[]
+      indexes: DatabaseIndexView[]
+      domains: DatabaseDomainView[]
+      history: DatabaseHistoryPoint[]
+      advice: DatabaseAdvice[]
+      migrations: DatabaseMigration[]
+      /** Whether `POST /api/database/queries/reset` is offered. */
+      resettable: boolean
+    }
+
+/** `GET /api/database/sessions` */
+export interface DatabaseSessionsView {
+  sessions: DatabaseSession[]
 }
 
 /** `GET /api/ai/usage`: aggregate buckets and their totals over the same records. */

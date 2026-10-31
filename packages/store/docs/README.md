@@ -16,6 +16,7 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 | `audit`            | Optional. The append-only, hash-chained audit log (see below)                                                                  |
 | `externalAccounts` | Optional. External accounts (GitLab, GitHub, Slack ids) linked to principals (see below)                                       |
 | `libraries`        | Optional. Third-party library docs: libraries, indexed versions, document chunks and issues (see below)                        |
+| `database`         | Optional. Read-only introspection of the underlying database for the admin UI (see below)                                      |
 
 ## Jobs
 
@@ -109,10 +110,25 @@ Search text is plain words: every word is a prefix (`useEff` finds `useEffect`),
 
 `compareLibraryVersions`, `newestVersionsFirst`, `libraryQueryTerms`, `libraryIssueDigestText`, `libraryIssueBodyText` and `plainChunk` are exported for implementations.
 
+## Database inspector
+
+`DatabaseInspector` (`store.database`) describes the database a store lives in; it reads catalog and statistics views only, never the store's rows. SQLite and Postgres implement it, the memory store leaves it out.
+
+- `engine` — `postgres | sqlite`.
+- `overview()` — `DatabaseOverview`: version, size, SQLite free pages, start time, cache hit ratio, commits, rollbacks, deadlocks, statistics reset time, connections by state against `max_connections`, whether it is a standby, and streaming replicas with lag. Fields an engine cannot report are left out.
+- `tables()` / `indexes()` — the store schema's tables (rows, data, index and TOAST bytes, dead rows, last vacuum and analyze, sequential and index scans) and indexes (size, scans, definition, unique, primary), largest first.
+- `queries({ sort: total | mean | calls, limit = 50 })` — `DatabaseQueries`: the top normalized statements of this database with calls, total, mean and max time, rows and cache hit ratio, plus whether `resetQueries()` is permitted; or `{ available: false, reason }` (SQLite, or no `pg_stat_statements`).
+- `resetQueries?()` — clears statement statistics; throws without the right.
+- `sessions()` — other client connections with state, statement, start times, wait event and the pids blocking them.
+- `migrations()` — applied schema versions with their time, oldest first.
+
+`tableDomain(name)` puts a table into one of `databaseDomains` (`jobs`, `analyses`, `audit`, `ai`, `knowledge`, `libraries`, `config`, `accounts`, `other`) for size reports; search side tables count with the table they index.
+
 ## Implementations
 
 - `memoryStore()` from `@holtkeeper/store/memory` — in process memory, for tests and throwaway runs.
 - [`sqliteStore({ path })`](../../store-sqlite/docs/README.md) from `@holtkeeper/store-sqlite` — the default for real use.
+- [`postgresStore({ url })`](../../store-postgres/docs/README.md) from `@holtkeeper/store-postgres` — for several processes.
 
 ## Contract tests
 

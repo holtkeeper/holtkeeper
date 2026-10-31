@@ -56,6 +56,10 @@ Migration 4 adds `knowledge`, `knowledge_history` (cascades on delete) and `know
 
 Migration 11 adds the library tables and two FTS5 external-content tables kept in sync by triggers like `knowledge_fts`: `library_chunks_fts` (`heading_text`, `text`; weights 3 : 1) and `library_issues_fts` (`title`, `digest_text`, `body_text`; weights 5 : 3 : 1). `libraryFtsQuery` turns the text into a query that cannot fail to parse: words become quoted prefix terms, quoted phrases of several words quoted phrases, OR-ed (`use "cannot read"` becomes `"use"* OR "cannot read"`). Versions are sorted in JavaScript (`compareLibraryVersions`), since SQLite cannot order semantic versions. `replaceChunks`, `removeVersion` and `removeLibrary` each run in one `BEGIN IMMEDIATE` transaction. `libraryStats` is one query with correlated `count(*)` subqueries over the `(ecosystem, name)` keys.
 
+## Database inspector
+
+`store.database` reports the file size from `page_count` × `page_size` and the free pages, exact row counts per table, table and index sizes from the `dbstat` virtual table (zero when SQLite was built without it; constraint indexes are listed as `sqlite_autoindex_*`), and applied migrations. SQLite keeps no statement statistics or sessions, so `queries()` is unavailable and `sessions()` is empty.
+
 ## Migrations
 
 `src/migrations.ts` holds an ordered list of `{ version, sql }` steps. On open, every step whose version is not recorded in `schema_migrations` runs, in version order, inside one `BEGIN IMMEDIATE` transaction (so a lower version merged after a higher one was applied still runs), so concurrent openers serialize and a failed step leaves the database untouched. Opening an up-to-date database changes nothing.

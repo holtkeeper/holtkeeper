@@ -1235,7 +1235,160 @@ export interface LibraryStore {
   libraryStats(filter?: { ecosystem?: LibraryEcosystem }): Promise<Map<string, LibraryStats>>
 }
 
-/** Everything Holtkeeper persists. Implementations: in-memory, SQLite; Postgres later. */
+/** Database engine behind a `DatabaseInspector`. */
+export type DatabaseEngine = 'postgres' | 'sqlite'
+
+/** Client connections to the database, by state. */
+export interface DatabaseConnections {
+  active: number
+  idle: number
+  idleInTransaction: number
+  /** Connections waiting for a lock. */
+  waiting: number
+  total: number
+  max: number
+}
+
+/** One streaming replica as the primary sees it. */
+export interface DatabaseReplica {
+  name: string
+  state: string
+  /** `async`, `sync`, `quorum` or `potential`. */
+  sync: string
+  /** WAL bytes the replica has not replayed yet; missing without the right to see it. */
+  lagBytes?: number
+  replayLagSeconds?: number
+}
+
+/** The database as a whole. Fields an engine cannot report are left out. */
+export interface DatabaseOverview {
+  engine: DatabaseEngine
+  version: string
+  /** Size of the whole database (all schemas for Postgres, the main file for SQLite). */
+  bytes: number
+  /** Allocated but unused space a vacuum would return (SQLite freelist). */
+  freeBytes?: number
+  startedAt?: Timestamp
+  /** Share of block reads served from the buffer cache since `statsResetAt`, 0..1. */
+  cacheHitRatio?: number
+  commits?: number
+  rollbacks?: number
+  deadlocks?: number
+  statsResetAt?: Timestamp
+  connections?: DatabaseConnections
+  /** Whether this connection reached a read-only standby. */
+  standby?: boolean
+  /** Streaming replicas; missing when the engine has none or they cannot be listed. */
+  replicas?: DatabaseReplica[]
+}
+
+/** One table of the store's schema. Counters missing when the engine keeps no statistics. */
+export interface DatabaseTable {
+  name: string
+  /** Row count; an estimate on Postgres. */
+  rows: number
+  /** Heap (main fork) bytes. */
+  dataBytes: number
+  indexBytes: number
+  /** Out-of-line storage of large values (Postgres TOAST). */
+  toastBytes: number
+  totalBytes: number
+  deadRows?: number
+  lastVacuumAt?: Timestamp
+  lastAnalyzeAt?: Timestamp
+  seqScans?: number
+  indexScans?: number
+}
+
+/** One index of the store's schema. */
+export interface DatabaseIndex {
+  name: string
+  table: string
+  bytes: number
+  /** Scans since statistics were reset; missing when the engine keeps none. */
+  scans?: number
+  /** The `CREATE INDEX` statement. */
+  definition: string
+  unique: boolean
+  primary: boolean
+}
+
+/** Execution statistics of one normalized statement. */
+export interface DatabaseQueryStat {
+  id: string
+  /** Normalized text: literals replaced by `$1`, `$2`, … */
+  query: string
+  calls: number
+  totalMs: number
+  meanMs: number
+  maxMs: number
+  rows: number
+  /** Share of shared blocks found in the cache, 0..1. */
+  cacheHitRatio?: number
+}
+
+/** Order of `DatabaseInspector.queries`: total time, mean time or call count, highest first. */
+export type DatabaseQuerySort = 'total' | 'mean' | 'calls'
+
+/** Statement statistics, or why the engine has none. */
+export type DatabaseQueries =
+  | {
+      available: true
+      queries: DatabaseQueryStat[]
+      resetAt?: Timestamp
+      /** Whether `resetQueries` is allowed for the store's user. */
+      resettable: boolean
+    }
+  | { available: false; reason: string }
+
+/** One client connection other than the inspector's own. */
+export interface DatabaseSession {
+  pid: number
+  user?: string
+  application?: string
+  client?: string
+  /** `active`, `idle`, `idle in transaction`, … */
+  state: string
+  /** The running or last statement, cut to 1000 characters. */
+  query?: string
+  connectedAt?: Timestamp
+  transactionStartedAt?: Timestamp
+  queryStartedAt?: Timestamp
+  /** `Lock:transactionid` and the like while waiting. */
+  waitingFor?: string
+  /** Sessions holding the locks this one waits for. */
+  blockedBy: number[]
+}
+
+/** One applied schema migration. */
+export interface DatabaseMigration {
+  version: number
+  appliedAt: Timestamp
+}
+
+/**
+ * Read-only introspection of the database a store lives in, for the admin UI. Every method is
+ * safe to call at any time and touches only catalog and statistics views, never the store's rows.
+ * Tables and indexes are those of the store's own schema.
+ */
+export interface DatabaseInspector {
+  readonly engine: DatabaseEngine
+  overview(): Promise<DatabaseOverview>
+  /** Largest first. */
+  tables(): Promise<DatabaseTable[]>
+  /** Largest first. */
+  indexes(): Promise<DatabaseIndex[]>
+  /** The top `limit` (default 50) statements by `sort` (default `total`) of this database. */
+  queries(options?: { sort?: DatabaseQuerySort; limit?: number }): Promise<DatabaseQueries>
+  /** Clears statement statistics; missing when the engine has none. Throws without the right. */
+  resetQueries?(): Promise<void>
+  /** Client connections to this database, longest-running statement first. */
+  sessions(): Promise<DatabaseSession[]>
+  /** Applied schema migrations, oldest first. */
+  migrations(): Promise<DatabaseMigration[]>
+}
+
+/** Everything Holtkeeper persists. Implementations: in-memory, SQLite, Postgres. */
 export interface Store {
   auditRuns: AuditRunStore
   analyses: AnalysisStore
@@ -1257,5 +1410,7 @@ export interface Store {
   externalAccounts?: ExternalAccountStore
   /** Third-party library docs; servers without it index no libraries. */
   libraries?: LibraryStore
+  /** Introspection of the underlying database; stores without one (memory) leave it out. */
+  database?: DatabaseInspector
   close(): Promise<void>
 }

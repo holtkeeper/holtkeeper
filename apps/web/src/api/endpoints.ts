@@ -8,6 +8,10 @@ import type {
   AuditVerifyResponse,
   ClearStorageInput,
   ClearStorageResult,
+  DatabaseQueries,
+  DatabaseQuerySort,
+  DatabaseSessionsView,
+  DatabaseView,
   DeleteEgressCacheInput,
   DeleteEgressCacheResult,
   EgressCacheView,
@@ -373,6 +377,12 @@ export const api = {
     urlOf('/api/audit/export', { ...toQuery(filter), format }),
 
   storage: () => request<StorageOverview>('GET', '/api/storage'),
+  database: () => request<DatabaseView>('GET', '/api/database'),
+  databaseQueries: (query: { sort: DatabaseQuerySort; limit?: number }) =>
+    request<DatabaseQueries>('GET', '/api/database/queries', { query: toQuery(query) }),
+  resetDatabaseQueries: () =>
+    request<{ ok: true }>('POST', '/api/database/queries/reset', { body: {} }),
+  databaseSessions: () => request<DatabaseSessionsView>('GET', '/api/database/sessions'),
   clearStorage: (providerId: string, input: ClearStorageInput = {}) =>
     request<ClearStorageResult>('POST', `/api/storage/${id(providerId)}/clear`, { body: input }),
 

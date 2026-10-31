@@ -57,6 +57,7 @@ import { builtinAnalyses } from './analyses.ts'
 import { createApp } from './app.ts'
 import { startAuditRetention } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
+import { startDatabaseSnapshots } from './database.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
@@ -336,7 +337,7 @@ export async function startServer(
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),
-      databaseStorage(server.databasePath),
+      databaseStorage(server.databasePath, server.store.database),
       ...workerStorage,
       ...(options.storage ?? []),
     ],
@@ -413,6 +414,7 @@ export async function startServer(
       () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
       () => startWebhookSync(deps, log),
       () => startLibraryIndex(deps, log),
+      () => startDatabaseSnapshots(server.store, { log }),
     ],
   })
   metrics = ops.metrics

@@ -33,3 +33,5 @@ export {
   newestVersionsFirst,
   plainChunk,
 } from './libraries.ts'
+export { databaseDomains, tableDomain } from './database.ts'
+export type { DatabaseDomain } from './database.ts'

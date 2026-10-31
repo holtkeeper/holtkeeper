@@ -6,6 +6,7 @@ import { postgresAiUsage } from './ai-usage.ts'
 import { postgresAudit } from './audit.ts'
 import { postgresCiJobs } from './ci-jobs.ts'
 import { postgresConfig, postgresKv } from './config.ts'
+import { postgresDatabase } from './database.ts'
 import { postgresJobs } from './jobs.ts'
 import { postgresKnowledge } from './knowledge.ts'
 import { postgresLibraries } from './libraries.ts'
@@ -112,6 +113,7 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
     audit: postgresAudit(db),
     externalAccounts: postgresExternalAccounts(db),
     libraries: postgresLibraries(db),
+    database: postgresDatabase(db, schema),
     async ready() {
       await db()
     },

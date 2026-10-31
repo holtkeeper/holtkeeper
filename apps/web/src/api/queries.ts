@@ -3,6 +3,7 @@ import type {
   ApplyChangesInput,
   AuditRunSummary,
   ClearStorageInput,
+  DatabaseQuerySort,
   DeleteEgressCacheInput,
   CreateMcpTokenInput,
   CreateJobInput,
@@ -59,6 +60,7 @@ export const keys = {
   ai: ['ai'] as const,
   auditLog: ['audit-log'] as const,
   storage: ['storage'] as const,
+  database: ['database'] as const,
   egressCache: ['egress-cache'] as const,
   libraries: ['libraries'] as const,
   accounts: ['accounts'] as const,
@@ -585,6 +587,37 @@ export function useClearStorage() {
     mutationFn: ({ id, input }: { id: string; input?: ClearStorageInput }) =>
       api.clearStorage(id, input),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.storage }),
+  })
+}
+
+/** Size, tables, indexes, growth and advice of the store's database; needs global `settings:read`. */
+export const useDatabase = () =>
+  useQuery({ queryKey: keys.database, queryFn: api.database, refetchInterval: 60_000 })
+
+/** Statement statistics of the database, top `limit` by `sort`; off until `enabled`. */
+export const useDatabaseQueries = (sort: DatabaseQuerySort, enabled: boolean, limit = 100) =>
+  useQuery({
+    queryKey: [...keys.database, 'queries', sort, limit],
+    queryFn: () => api.databaseQueries({ sort, limit }),
+    enabled,
+    refetchInterval: 30_000,
+  })
+
+/** Live client connections, refreshed every 5 seconds while `enabled`. */
+export const useDatabaseSessions = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...keys.database, 'sessions'],
+    queryFn: api.databaseSessions,
+    enabled,
+    refetchInterval: 5_000,
+  })
+
+/** Clears statement statistics; refreshes the page. */
+export function useResetDatabaseQueries() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: api.resetDatabaseQueries,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.database }),
   })
 }
 

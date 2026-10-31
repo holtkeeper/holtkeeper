@@ -50,7 +50,7 @@ Store-backed series are reported only by processes with the API (web, all); ever
 
 ## Requirements for more than one process
 
-- **Postgres** (`@holtkeeper/store-postgres`). SQLite is a local file; it works for one process (or several in one container sharing the file), not for pods on different nodes.
+- **Postgres** (`@holtkeeper/store-postgres`). SQLite is a local file; it works for one process (or several in one container sharing the file), not for pods on different nodes. For the Database page's statements, sessions and replica lag, load `pg_stat_statements` and grant the Holtkeeper role `pg_read_all_stats` ([rights](../packages/store-postgres/docs/README.md#rights)); on CloudNativePG a `pg_stat_statements.*` parameter and a managed role with `inRoles: [pg_read_all_stats]` do it.
 - **S3-compatible artifacts** (`server.artifacts: { kind: 's3', ... }`: any S3-compatible storage — AWS S3, Cloudflare R2, Garage, Ceph, MinIO, Versity S3 Gateway — including one you already run). Workers write artifacts, web pods serve them.
 - **Distributed limits**: `limits: { distributed: true }` keeps credential limiter counters in the store's `kv` (compare-and-set), so several workers share one token's rate and concurrency limits. Slots held by a process that dies are returned after 2 minutes without its heartbeat.
 - The same `server.vaultKey` everywhere.
