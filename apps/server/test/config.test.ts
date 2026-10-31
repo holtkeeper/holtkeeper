@@ -9,7 +9,12 @@ import type {
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { GitForge, WebhookSpec, WebhookTarget } from '@holtkeeper/forge'
+import {
+  type GitForge,
+  type WebhookSpec,
+  type WebhookTarget,
+  webhookEvents,
+} from '@holtkeeper/forge'
 import { type ConfigSource, createConfigSource, liveConfig } from '@holtkeeper/managed-config'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
@@ -240,13 +245,7 @@ describe('config routes', () => {
       { group: 'studio' },
       { project: 'tools/cli' },
     ])
-    expect(registrations[0]?.hook.events).toEqual([
-      'push',
-      'tag_push',
-      'merge_request',
-      'note',
-      'pipeline',
-    ])
+    expect(registrations[0]?.hook.events).toEqual([...webhookEvents])
     expect(result.registered.map((h) => h.target)).toEqual(['studio/a', 'studio/b', 'tools/cli'])
     expect(result.notes).toEqual(['project hooks for studio'])
 

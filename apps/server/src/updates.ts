@@ -33,6 +33,23 @@ const REPO_LIST_TTL_MS = 30 * 60_000
 /** Attempts kept per repository and per group. */
 const MAX_ATTEMPTS = 20
 
+/**
+ * Repositories the poller last listed for the config's groups, plus exact include paths; read
+ * from the store only, so it never calls a forge.
+ */
+export async function listedRepos(kv: KvStore, config: HoltkeeperConfig): Promise<RepoRef[]> {
+  const found = new Map<string, RepoRef>()
+  for (const [name, group] of Object.entries(config.groups)) {
+    // oxlint-disable-next-line no-await-in-loop -- one store read per group
+    const listing = await kv.get(groupKey(name))
+    if (isGroupListing(listing)) for (const repo of listing.repos) found.set(repoId(repo), repo)
+    for (const path of group.include)
+      if (staticPrefix(path) === path)
+        found.set(`${group.forge}:${path}`, { forge: group.forge, path })
+  }
+  return [...found.values()]
+}
+
 /** Records that a webhook delivered an event about `repo`. */
 export async function markWebhookSeen(kv: KvStore, repo: RepoRef, now: Date) {
   await kv.set(seenKey(repo), now.toISOString(), 7 * 86_400)

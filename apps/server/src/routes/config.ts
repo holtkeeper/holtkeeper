@@ -15,7 +15,7 @@ import type {
 import { ConfigError, type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
-import type { WebhookEvent, WebhookTarget } from '@holtkeeper/forge'
+import { type WebhookTarget, webhookEvents } from '@holtkeeper/forge'
 import { nextRuns, staticPrefix, systemTimeZone } from '@holtkeeper/jobs'
 import {
   type ConfigSource,
@@ -64,9 +64,6 @@ const configCollections: Record<string, ConfigDocumentType> = {
   schedules: 'schedule',
   triggers: 'trigger',
 }
-
-/** Events a registered forge webhook delivers. */
-const WEBHOOK_EVENTS: WebhookEvent[] = ['push', 'tag_push', 'merge_request', 'note', 'pipeline']
 
 const GLOBAL = { kind: 'global' } as const
 
@@ -542,13 +539,14 @@ export function configRoutes(deps: ServerDeps) {
           const registration = await forge.ensureWebhook(target, {
             url,
             secret,
-            events: WEBHOOK_EVENTS,
+            events: [...webhookEvents],
           })
           const hooks = registration.hooks.map((hook) => ({
             hookId: hook.id,
             scope: hook.scope,
             target: hook.target,
             url,
+            events: [...webhookEvents],
           }))
           registered = [
             ...registered.filter((old) => !hooks.some((hook) => sameHook(old, hook))),

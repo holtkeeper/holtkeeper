@@ -4,7 +4,7 @@ import type {
   RepoUpdatesView,
   RepoWebhookInput,
 } from '@holtkeeper/api'
-import type { RepoRef, WebhookEvent } from '@holtkeeper/forge'
+import { type RepoRef, webhookEvents } from '@holtkeeper/forge'
 import type { RegisteredWebhook } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -22,9 +22,6 @@ import {
 } from '../context.ts'
 import { type RepoHook, type RepoHooks, repoHookPath } from '../repo-hooks.ts'
 import type { Poller } from '../updates.ts'
-
-/** Events a repository webhook registered by Holtkeeper delivers. */
-const WEBHOOK_EVENTS: WebhookEvent[] = ['push', 'tag_push', 'merge_request', 'note', 'pipeline']
 
 const webhookInputSchema = z.object({ repo: z.string().min(1), register: z.boolean().optional() })
 const pollInputSchema = z.object({ repo: z.string().min(1) })
@@ -210,13 +207,14 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
       try {
         const registration = await forge.ensureWebhook(
           { project: repo.path },
-          { url, secret: token, events: WEBHOOK_EVENTS },
+          { url, secret: token, events: [...webhookEvents] },
         )
         registered = registration.hooks.map((h) => ({
           hookId: h.id,
           scope: h.scope,
           target: h.target,
           url,
+          events: [...webhookEvents],
         }))
       } catch (error) {
         details.error = messageOf(error)

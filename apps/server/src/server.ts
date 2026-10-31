@@ -77,6 +77,7 @@ import { forgeGitKeys } from './ssh-keys.ts'
 import { databaseStorage } from './storage.ts'
 import { serverPoller } from './updates.ts'
 import { serveWeb } from './web.ts'
+import { startWebhookSync } from './webhook-sync.ts'
 
 export interface ServerOptions {
   /** Extra token rotators besides GitLab's. */
@@ -400,6 +401,7 @@ export async function startServer(
         return () => jobs?.scheduler.stop()
       },
       () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
+      () => startWebhookSync(deps, log),
     ],
   })
   metrics = ops.metrics

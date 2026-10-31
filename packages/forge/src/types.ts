@@ -1,3 +1,5 @@
+import type { WebhookEvent } from './webhooks.ts'
+
 /** Identifies a repository: the config's forge id plus the repository's full path. */
 export interface RepoRef {
   forge: string
@@ -552,9 +554,6 @@ export interface PipelineDoneEvent {
   sha: string
   actor: string
 }
-
-/** Events a forge webhook can deliver. */
-export type WebhookEvent = 'push' | 'tag_push' | 'merge_request' | 'note' | 'pipeline'
 
 /** Where a webhook goes: a group (all its projects) or one project, by full path. */
 export interface WebhookTarget {

@@ -15,13 +15,25 @@ const projectSchema = z.object({
   archived: z.boolean().optional(),
 })
 
-const EVENT_FIELDS: [WebhookEvent, string][] = [
-  ['push', 'push_events'],
-  ['tag_push', 'tag_push_events'],
-  ['merge_request', 'merge_requests_events'],
-  ['note', 'note_events'],
-  ['pipeline', 'pipeline_events'],
-]
+const EVENT_FIELDS: Record<WebhookEvent, string> = {
+  push: 'push_events',
+  tag_push: 'tag_push_events',
+  merge_request: 'merge_requests_events',
+  note: 'note_events',
+  confidential_note: 'confidential_note_events',
+  issues: 'issues_events',
+  confidential_issues: 'confidential_issues_events',
+  pipeline: 'pipeline_events',
+  job: 'job_events',
+  deployment: 'deployment_events',
+  releases: 'releases_events',
+  wiki_page: 'wiki_page_events',
+  milestone: 'milestone_events',
+  member: 'member_events',
+  emoji: 'emoji_events',
+  feature_flag: 'feature_flag_events',
+  resource_access_token: 'resource_access_token_events',
+}
 
 /** GitLab's hook body: every known event switched on or off explicitly. */
 export function hookBody(hook: WebhookSpec): Record<string, unknown> {
@@ -30,7 +42,8 @@ export function hookBody(hook: WebhookSpec): Record<string, unknown> {
     token: hook.secret,
     enable_ssl_verification: true,
   }
-  for (const [event, field] of EVENT_FIELDS) body[field] = hook.events.includes(event)
+  for (const [event, field] of Object.entries(EVENT_FIELDS))
+    body[field] = hook.events.some((wanted) => wanted === event)
   return body
 }
 

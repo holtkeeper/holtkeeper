@@ -72,7 +72,19 @@ describe('gitlab webhooks', () => {
       tag_push_events: true,
       merge_requests_events: false,
       note_events: false,
+      confidential_note_events: false,
+      issues_events: false,
+      confidential_issues_events: false,
       pipeline_events: false,
+      job_events: false,
+      deployment_events: false,
+      releases_events: false,
+      wiki_page_events: false,
+      milestone_events: false,
+      member_events: false,
+      emoji_events: false,
+      feature_flag_events: false,
+      resource_access_token_events: false,
     })
   })
 

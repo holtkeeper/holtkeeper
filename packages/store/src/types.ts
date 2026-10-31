@@ -623,6 +623,8 @@ export interface RegisteredWebhook {
   /** Group or project path the hook belongs to. */
   target: string
   url: string
+  /** Events the hook was registered for; missing on hooks registered before this was recorded. */
+  events?: string[]
 }
 
 /** The webhook of a managed forge: a generated secret and where it is registered. */

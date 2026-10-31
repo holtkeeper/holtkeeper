@@ -59,7 +59,7 @@ This covers the first milestones (browserslist, audit, releases). Diffs, line th
 
 ### Webhooks
 
-Optional: `ensureWebhook(target, { url, secret, events })` makes sure a hook with that URL exists on a group (`{ group }`) or project (`{ project }`) and carries this secret and these events (`push`, `tag_push`, `merge_request`, `note`, `pipeline`); an existing hook with the same URL is updated, never duplicated. It returns `{ id, hooks, fallback? }`: `hooks` are the hooks set up (`{ id, scope, target }`), and `fallback` explains when a group target got one hook per project instead. `removeWebhook(hooks)` removes them, ignoring hooks that are already gone.
+Optional: `ensureWebhook(target, { url, secret, events })` makes sure a hook with that URL exists on a group (`{ group }`) or project (`{ project }`) and carries this secret and these events (`WebhookEvent`, every one listed in `webhookEvents`: pushes, tags, merge requests, comments, issues, pipelines, jobs, deployments, releases, wiki pages, milestones, members, emoji, feature flags, access tokens); an existing hook with the same URL is updated, never duplicated. It returns `{ id, hooks, fallback? }`: `hooks` are the hooks set up (`{ id, scope, target }`), and `fallback` explains when a group target got one hook per project instead. `removeWebhook(hooks)` removes them, ignoring hooks that are already gone.
 
 ### Events
 
