@@ -72,6 +72,12 @@ describe('helpers', () => {
     expect(cleanBody('x'.repeat(3000)).length).toBe(2000)
   })
 
+  test('cleanBody never splits a surrogate pair', () => {
+    const trimmed = cleanBody(`${'x'.repeat(1998)}🎨${'y'.repeat(100)}`)
+    expect(trimmed).toBe(`${'x'.repeat(1998)}…`)
+    expect(trimmed.isWellFormed()).toBe(true)
+  })
+
   test('versions from milestones and comments', () => {
     expect(versionOfMilestone('v1.2.3')).toBe('1.2.3')
     expect(versionOfMilestone('@babel/core@7.4.0')).toBe('7.4.0')

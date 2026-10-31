@@ -19,8 +19,13 @@ const FIXED_IN = new RegExp(
 export const issueId = (repo: LibraryRepository, number: number) =>
   `${repo.host}/${repo.path}#${number}`
 
-export const trimText = (text: string, max: number) =>
-  text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
+export function trimText(text: string, max: number): string {
+  if (text.length <= max) return text
+  let end = max - 1
+  const last = text.charCodeAt(end - 1)
+  if (last >= 0xd800 && last <= 0xdbff) end--
+  return `${text.slice(0, end).trimEnd()}…`
+}
 
 /** Drops HTML comments, unticked or ticked checklist lines and blank runs that issue templates leave. */
 export function cleanBody(body: string | null | undefined, max = BODY_CHARS): string {
