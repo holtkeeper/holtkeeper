@@ -95,7 +95,15 @@ export function AnalysisPage() {
           detail.isPlaceholderData ? 'opacity-60 transition-opacity' : 'transition-opacity'
         }
       >
-        <ReportContext value={{ analysisId: id, canApply: can('analyses:run') }}>
+        <ReportContext
+          value={{
+            analysisId: id,
+            canApply: can('analyses:run'),
+            ...(report.exclude && report.subject?.repo && can('settings:write')
+              ? { exclude: { ...report.exclude, repo: report.subject.repo } }
+              : {}),
+          }}
+        >
           <ReportView report={report} />
         </ReportContext>
       </div>

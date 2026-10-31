@@ -11,12 +11,14 @@ import {
   tableFeatures,
   useTable,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, ChevronsUpDown, EyeOff } from 'lucide-react'
+import { use, useMemo, useState } from 'react'
 
 import { plural } from '../../../lib/format.ts'
 import { cellSortValue, cellText, compareSortValues } from '../../../lib/units.ts'
 import { Button, SearchInput } from '../../../ui/index.ts'
+import { ReportContext } from '../context.ts'
+import { ExcludeDialog } from '../ExcludeDialog.tsx'
 import { CellView } from './CellView.tsx'
 
 type Row = Record<string, Cell>
@@ -54,6 +56,8 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
   const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [limit, setLimit] = useState(pageSize)
+  const [excluding, setExcluding] = useState<string | null>(null)
+  const exclude = use(ReportContext)?.exclude
   const visibleColumns = useMemo(
     () => block.columns.filter((c) => c.key !== block.groupBy),
     [block],
@@ -173,7 +177,22 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
                       key={column.key}
                       className={`border-b border-separator px-3 py-2 align-middle ${isEnd(column, block.rows) ? 'text-right tabular' : ''} ${stickyFirst(index, 'bg-surface group-hover/row:bg-[linear-gradient(var(--default-soft),var(--default-soft))]')}`}
                     >
-                      <CellView cell={row.original[column.key]} column={column} />
+                      {column.path && exclude && cellText(row.original[column.key]) ? (
+                        <span className="flex items-start gap-1">
+                          <CellView cell={row.original[column.key]} column={column} />
+                          <button
+                            type="button"
+                            aria-label={`Exclude ${cellText(row.original[column.key])}`}
+                            title="Exclude from later runs"
+                            onClick={() => setExcluding(cellText(row.original[column.key]))}
+                            className="shrink-0 rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-focus group-hover/row:opacity-100"
+                          >
+                            <EyeOff className="size-3.5" />
+                          </button>
+                        </span>
+                      ) : (
+                        <CellView cell={row.original[column.key]} column={column} />
+                      )}
                     </td>
                   ))}
                 </tr>
@@ -182,6 +201,14 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
           ))}
         </table>
       </div>
+      {excluding && exclude ? (
+        <ExcludeDialog
+          path={excluding}
+          repo={exclude.repo}
+          exclude={exclude}
+          onClose={() => setExcluding(null)}
+        />
+      ) : null}
       {rows.length === 0 ? (
         <p className="py-4 text-center text-sm text-muted">No rows match.</p>
       ) : null}

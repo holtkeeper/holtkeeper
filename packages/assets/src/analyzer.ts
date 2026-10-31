@@ -36,7 +36,10 @@ export const assetsOptionsSchema = z.object({
   roots: z.array(z.string()).optional(),
   /** Build output folder to scan as well, e.g. `dist`. */
   dist: z.string().optional(),
+  /** Globs of files left out entirely. */
   ignore: z.array(z.string()).default([]),
+  /** Globs of files still counted in totals and budgets but never flagged or optimized. */
+  optimizeIgnore: z.array(z.string()).default([]),
   budgets: z.array(budgetSchema).default([]),
   /** Maximum total bytes per kind, e.g. `{ audio: 5000000 }`. */
   total: totalBudgetsSchema.default({}),
@@ -97,6 +100,7 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
       ...(options.roots ? { roots: options.roots } : {}),
       ...(options.dist ? { dist: options.dist } : {}),
       ignore: options.ignore,
+      optimizeIgnore: options.optimizeIgnore,
       budgets: options.budgets,
       total: options.total,
       ...(options.convert ? { convert: options.convert } : {}),

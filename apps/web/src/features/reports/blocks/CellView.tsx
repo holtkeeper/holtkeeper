@@ -66,6 +66,29 @@ function SparklineCell({
   )
 }
 
+/** A file path that wraps after its slashes, folder muted and file name in full. */
+function PathText({ path }: { path: string }) {
+  const cut = path.lastIndexOf('/') + 1
+  const folders = path
+    .slice(0, cut)
+    .split(/(?<=\/)/)
+    .filter(Boolean)
+  return (
+    <span
+      title={path}
+      className="inline-block max-w-[min(32rem,50vw)] font-mono text-[12px] [overflow-wrap:anywhere]"
+    >
+      {folders.map((folder, index) => (
+        <span key={index} className="text-muted">
+          {folder}
+          <wbr />
+        </span>
+      ))}
+      <span>{path.slice(cut)}</span>
+    </span>
+  )
+}
+
 /** One table cell rendered by its column's unit and format. */
 export function CellView({ cell, column }: { cell: Cell | undefined; column: Column }) {
   if (cell === null || cell === undefined || cell === '')
@@ -114,7 +137,9 @@ export function CellView({ cell, column }: { cell: Cell | undefined; column: Col
   const display =
     column.format === 'date' && !Number.isNaN(Date.parse(text)) ? formatDate(text) : text
   const mono = column.format === 'code' || unit === 'version'
-  const content = (
+  const content = column.path ? (
+    <PathText path={display} />
+  ) : (
     <span className={mono ? 'whitespace-nowrap font-mono text-[12px]' : undefined}>{display}</span>
   )
 

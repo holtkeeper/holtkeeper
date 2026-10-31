@@ -27,6 +27,8 @@ export interface AnalyzeAssetsOptions {
   /** Build output folder relative to `dir`; its files are inventoried as `origin: 'build'`. */
   dist?: string
   ignore?: string[]
+  /** Globs of files kept in the inventory, totals and budgets but left out of findings, suggestions and optimization. */
+  optimizeIgnore?: string[]
   budgets?: Budget[]
   total?: TotalBudgets
   /**
@@ -118,6 +120,8 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
     assets = markReferences(assets, await collectTokens(options.dir, extra, options.ignore))
   }
   const engines = await detectEngines(options.dir)
+  const skipGlobs = (options.optimizeIgnore ?? []).map((pattern) => new Bun.Glob(pattern))
+  const skipped = (path: string) => skipGlobs.some((glob) => glob.match(path))
   const families = imageFamilies(assets)
   const variants = variantPaths(families)
   const covered = new Map(
@@ -128,6 +132,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
   )
   const done = new Set([
     ...variants,
+    ...assets.filter((asset) => skipped(asset.path)).map((asset) => asset.path),
     ...families
       .filter((family) => hasModernFormats(family) && hasSizes(family))
       .map((family) => family.original.path),
@@ -137,6 +142,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       ? []
       : candidates(assets, options.minBytes ?? 8 * 1024).filter(
           (candidate) =>
+            !skipped(candidate.asset.path) &&
             !variants.has(candidate.asset.path) &&
             !covered.get(candidate.asset.path)?.has(candidate.suggested),
         )
@@ -190,7 +196,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
     convert !== 'off' && options.inlineSvg !== false
       ? await scanInlineSvgs({
           dir: options.dir,
-          ...(options.ignore ? { ignore: options.ignore } : {}),
+          ignore: [...(options.ignore ?? []), ...(options.optimizeIgnore ?? [])],
         })
       : undefined
   if (inline?.inlineSvgs.length)
@@ -211,7 +217,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
         ...(options.minBytes === undefined ? {} : { minBytes: options.minBytes }),
       }),
       ...(inline?.findings ?? []),
-    ],
+    ].filter((finding) => !skipped(finding.path)),
     suggestions,
     duplicates: findDuplicates(assets),
     ...optimized,

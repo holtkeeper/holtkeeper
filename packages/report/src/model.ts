@@ -21,6 +21,19 @@ export interface Report {
   /** Headline numbers shown on top and in lists. */
   metrics: Metric[]
   sections: Section[]
+  /**
+   * Files of the report can be left out of later runs by adding globs to a list option of an
+   * analyzer setting; renderers offer it on cells of `path` columns.
+   */
+  exclude?: ReportExclude
+}
+
+/** Where globs that leave a report's files out of later runs go. */
+export interface ReportExclude {
+  /** Setting key holding the analyzer options, e.g. `analyzers.assets`. */
+  setting: string
+  /** List options of that setting to choose from, the first being the usual one. */
+  options: { option: string; label: string; description?: string }[]
 }
 
 export interface Section {
@@ -77,6 +90,8 @@ export interface Column {
   format?: 'text' | 'code' | 'delta' | 'date' | 'tags' | 'sparkline'
   better?: 'up' | 'down'
   align?: 'start' | 'end'
+  /** Cells are repository-relative file paths, which renderers may shorten or offer to exclude. */
+  path?: boolean
 }
 
 export interface TreeNode {

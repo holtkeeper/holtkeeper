@@ -168,6 +168,36 @@ test('inventories, checks budgets, suggests and reports', async () => {
   expect(first.sections.map((section) => section.id)).not.toContain('changes')
 })
 
+const skipped = (path: string) =>
+  path === 'public/background.png' || path.startsWith('public/sprites/')
+
+test('optimizeIgnore keeps files in totals and budgets but out of checks and suggestions', async () => {
+  const data = await analyzeAssets({
+    dir,
+    convert: 'estimate',
+    budgets: [{ pattern: 'public/**/*.png', maxBytes: 30_000 }],
+    optimizeIgnore: ['public/background.png', 'public/sprites/**'],
+  })
+  expect(data.assets.map((asset) => asset.path)).toContain('public/background.png')
+  expect(data.budgets.map((violation) => violation.id)).toContain(
+    'bytes:public/**/*.png:public/background.png',
+  )
+  expect(data.findings.filter((finding) => skipped(finding.path))).toEqual([])
+  expect(data.suggestions.filter((suggestion) => skipped(suggestion.path))).toEqual([])
+  expect(data.suggestions.map((suggestion) => suggestion.path)).toContain('public/copy.png')
+  expect(
+    assetsAnalysis
+      .toReport({
+        id: '1',
+        repo: { forge: 'w', path: 'game' },
+        kind: 'assets',
+        createdAt: '2026-10-31T00:00:00.000Z',
+        data,
+      })
+      .exclude?.options.map((option) => option.option),
+  ).toEqual(['optimizeIgnore', 'ignore'])
+})
+
 test('the analyzer validates options and passes the runner for tool measurements', async () => {
   const { runner, calls } = createFakeRunner(() => ({ exitCode: 127 }))
   const options = assetsAnalyzer.options.parse({ convert: 'tools', roots: ['public/**'] })

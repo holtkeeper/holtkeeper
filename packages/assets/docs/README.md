@@ -6,18 +6,19 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
 
 `assetsAnalyzer` — kind `assets`, scope `repo`, needs a checkout; the default `assets-weekly` schedule of `@holtkeeper/managed-config` runs it on Friday nights. Options (`assetsOptionsSchema`):
 
-| Option        | Default                              | Meaning                                                                                                                  |
-| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `roots`       | `defaultRoots`                       | Globs to scan: `public/**`, `assets/**`, `static/**`, `src/**/assets/**`, `res/**`                                       |
-| `dist`        | —                                    | Build output folder, scanned as well with `origin: 'build'` (flag `--dist`)                                              |
-| `ignore`      | `[]`                                 | Extra globs to skip; `node_modules`, `.git` and dot folders are always skipped                                           |
-| `budgets`     | `[]`                                 | `{ pattern, maxBytes?, maxWidth?, maxHeight?, kind? }` per-asset limits                                                  |
-| `total`       | `{}`                                 | Maximum bytes per kind, e.g. `{ audio: 5000000 }`                                                                        |
-| `convert`     | `sharp` if it loads, else `estimate` | `sharp` (real variants and changes), `estimate` (ratios), `tools` (measure with converters), `off` (flag `--convert`)    |
-| `optimizeTop` | `20`                                 | With `sharp`: images (raster and SVG together) optimized, largest first (flag `--optimize-top`)                          |
-| `svgPreset`   | `safe`                               | With `sharp`: svgo preset of SVG changes (flag `--svg-preset`)                                                           |
-| `naming`      | —                                    | With `sharp`: `{ width?, density? }` variant file templates, default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}` |
-| `inlineSvg`   | `true`                               | Check inline `<svg>`/`<path>` in markup and components (flag `--inline-svg`); off with `convert: 'off'`                  |
+| Option           | Default                              | Meaning                                                                                                                                                           |
+| ---------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roots`          | `defaultRoots`                       | Globs to scan: `public/**`, `assets/**`, `static/**`, `src/**/assets/**`, `res/**`                                                                                |
+| `dist`           | —                                    | Build output folder, scanned as well with `origin: 'build'` (flag `--dist`)                                                                                       |
+| `ignore`         | `[]`                                 | Extra globs to skip; `node_modules`, `.git` and dot folders are always skipped                                                                                    |
+| `optimizeIgnore` | `[]`                                 | Globs of files still inventoried and checked against totals and budgets but never flagged, suggested or optimized (inline SVGs of matching files are not scanned) |
+| `budgets`        | `[]`                                 | `{ pattern, maxBytes?, maxWidth?, maxHeight?, kind? }` per-asset limits                                                                                           |
+| `total`          | `{}`                                 | Maximum bytes per kind, e.g. `{ audio: 5000000 }`                                                                                                                 |
+| `convert`        | `sharp` if it loads, else `estimate` | `sharp` (real variants and changes), `estimate` (ratios), `tools` (measure with converters), `off` (flag `--convert`)                                             |
+| `optimizeTop`    | `20`                                 | With `sharp`: images (raster and SVG together) optimized, largest first (flag `--optimize-top`)                                                                   |
+| `svgPreset`      | `safe`                               | With `sharp`: svgo preset of SVG changes (flag `--svg-preset`)                                                                                                    |
+| `naming`         | —                                    | With `sharp`: `{ width?, density? }` variant file templates, default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}`                                          |
+| `inlineSvg`      | `true`                               | Check inline `<svg>`/`<path>` in markup and components (flag `--inline-svg`); off with `convert: 'off'`                                                           |
 
 `analyzeAssets(options)` runs the same pipeline without the analyzer wrapper; it never writes to the checkout. `options.cache` (the analyzer passes `context.cache`) is handed to `encodeVariants`, so images whose bytes did not change since an earlier run — on any machine sharing the store — are not encoded again.
 
@@ -75,6 +76,8 @@ Build files with the same hash as a source file are the same shipped asset: they
 - Changes since previous: per kind and per asset (only with a previous record).
 - Duplicates: copies and wasted bytes.
 - Image delivery: `missing-modern-formats`, `single-resolution` and `inline-svg` findings, a table of inline SVGs (file, lines, svgo or path-data rewrite, bytes, path digits) and an applicable `changes` block with the inline rewrites.
+
+File columns are `path` columns and the report sets `exclude` to `analyzers.assets` with `optimizeIgnore` (skip optimization) and `ignore` (ignore entirely), so the panel can add a glob for a file or folder from any row.
 
 ## Limitations
 

@@ -5,6 +5,7 @@ import {
   type Issue,
   type Metric,
   type Report,
+  type ReportExclude,
   type Section,
   type TreeNode,
   defineAnalysis,
@@ -309,7 +310,7 @@ function suggestionsSection(data: AssetsData): Section {
         ? {
             type: 'table',
             columns: [
-              { key: 'path', label: 'Asset', format: 'code' },
+              { key: 'path', label: 'Asset', format: 'code', path: true },
               { key: 'current', label: 'Current', unit: 'bytes', align: 'end' },
               { key: 'suggested', label: 'Suggested', format: 'code' },
               { key: 'how', label: 'How' },
@@ -443,7 +444,7 @@ function optimizationSection(
       {
         type: 'table',
         columns: [
-          { key: 'path', label: 'Image', format: 'code' },
+          { key: 'path', label: 'Image', format: 'code', path: true },
           { key: 'original', label: 'Original', unit: 'bytes', align: 'end' },
           { key: 'avif', label: 'AVIF', unit: 'bytes', align: 'end' },
           { key: 'webp', label: 'WebP', unit: 'bytes', align: 'end' },
@@ -571,7 +572,7 @@ function svgSection(data: AssetsData, previous: AssetsData | undefined): Section
       {
         type: 'table',
         columns: [
-          { key: 'path', label: 'SVG', format: 'code' },
+          { key: 'path', label: 'SVG', format: 'code', path: true },
           { key: 'preset', label: 'Preset', format: 'tags' },
           { key: 'before', label: 'Before', unit: 'bytes', align: 'end' },
           { key: 'after', label: 'After', unit: 'bytes', align: 'end' },
@@ -607,7 +608,7 @@ function svgSection(data: AssetsData, previous: AssetsData | undefined): Section
         type: 'table',
         title: 'Path data',
         columns: [
-          { key: 'path', label: 'SVG', format: 'code' },
+          { key: 'path', label: 'SVG', format: 'code', path: true },
           { key: 'paths', label: 'Paths', align: 'end' },
           { key: 'commands', label: 'Commands', align: 'end' },
           { key: 'coordinates', label: 'Coordinates', align: 'end' },
@@ -685,7 +686,7 @@ function deliverySection(data: AssetsData): Section | undefined {
               type: 'table' as const,
               title: 'Inline SVGs',
               columns: [
-                { key: 'file', label: 'File', format: 'code' as const },
+                { key: 'file', label: 'File', format: 'code' as const, path: true },
                 { key: 'lines', label: 'Lines', align: 'end' as const },
                 { key: 'kind', label: 'Rewrite', format: 'tags' as const },
                 { key: 'before', label: 'Before', unit: 'bytes' as const, align: 'end' as const },
@@ -743,7 +744,7 @@ function largestSection(data: AssetsData, limit: number): Section {
         : {
             type: 'table',
             columns: [
-              { key: 'path', label: 'Asset', format: 'code' },
+              { key: 'path', label: 'Asset', format: 'code', path: true },
               { key: 'kind', label: 'Kind' },
               { key: 'format', label: 'Format', format: 'code' },
               { key: 'bytes', label: 'Size', unit: 'bytes', align: 'end' },
@@ -795,7 +796,7 @@ function changesSection(comparison: AssetComparison): Section {
             type: 'table',
             title: 'Assets',
             columns: [
-              { key: 'path', label: 'Asset', format: 'code' },
+              { key: 'path', label: 'Asset', format: 'code', path: true },
               { key: 'status', label: 'Status', format: 'tags' },
               { key: 'previous', label: 'Previous', unit: 'bytes', align: 'end' },
               { key: 'current', label: 'Current', unit: 'bytes', align: 'end' },
@@ -848,6 +849,22 @@ function duplicatesSection(data: AssetsData): Section {
   }
 }
 
+const assetsExclude: ReportExclude = {
+  setting: 'analyzers.assets',
+  options: [
+    {
+      option: 'optimizeIgnore',
+      label: 'Skip optimization',
+      description: 'Still counted in totals and budgets, never flagged, converted or optimized',
+    },
+    {
+      option: 'ignore',
+      label: 'Ignore entirely',
+      description: 'Left out of the inventory, totals, budgets and every check',
+    },
+  ],
+}
+
 /** The `assets` analysis kind with custom display settings. */
 export function createAssetsAnalysis(
   options: AssetsAnalysisOptions = {},
@@ -876,6 +893,7 @@ export function createAssetsAnalysis(
         },
         generatedAt: new Date().toISOString(),
         metrics: metricsOf(data, before),
+        exclude: assetsExclude,
         sections: [
           overview(data, before, treemapFiles),
           budgetsSection(data, before, comparison),
