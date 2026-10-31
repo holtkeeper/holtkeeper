@@ -640,6 +640,125 @@
         },
         "affinity": {
           "type": "object"
+        },
+        "cache": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "ttl": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "packages": {
+                  "type": "string",
+                  "pattern": "^\\d+[smhdw]?$"
+                },
+                "tools": {
+                  "type": "string",
+                  "pattern": "^\\d+[smhdw]?$"
+                }
+              }
+            },
+            "maxSize": {
+              "type": ["string", "integer"]
+            },
+            "maxEntrySize": {
+              "type": ["string", "integer"]
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "host"],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["packages", "tools"]
+                  },
+                  "host": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "paths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "private": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "backend": {
+              "type": "string",
+              "enum": ["dir", "s3"]
+            },
+            "dir": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["emptyDir", "pvc"]
+                },
+                "sizeLimit": {
+                  "type": ["string", "integer"]
+                },
+                "size": {
+                  "type": ["string", "integer"]
+                },
+                "storageClassName": {
+                  "type": "string"
+                },
+                "accessModes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "existingClaim": {
+                  "type": "string"
+                }
+              }
+            },
+            "s3": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "bucket": {
+                  "type": "string"
+                },
+                "endpoint": {
+                  "type": "string"
+                },
+                "region": {
+                  "type": "string"
+                },
+                "prefix": {
+                  "type": "string"
+                },
+                "existingSecret": {
+                  "type": "string"
+                },
+                "accessKeyIdKey": {
+                  "type": "string"
+                },
+                "secretAccessKeyKey": {
+                  "type": "string"
+                },
+                "spoolSizeLimit": {
+                  "type": ["string", "integer"]
+                }
+              }
+            }
+          }
         }
       }
     },

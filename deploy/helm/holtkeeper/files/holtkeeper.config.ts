@@ -20,7 +20,8 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
  * - `HOLTKEEPER_EGRESS_PROXY` set: job commands reach the network through that proxy, trusting the
  *   CA in `HOLTKEEPER_EGRESS_CA`, except for the hosts in `HOLTKEEPER_EGRESS_NO_PROXY` (the
  *   chart's `egressProxy` sets them). `HOLTKEEPER_EGRESS_SECRET` set: web serves the proxy the
- *   rules for panel GitLab forges ("Packages for jobs", on unless switched off).
+ *   rules for panel GitLab forges ("Packages for jobs", on unless switched off), and with
+ *   `HOLTKEEPER_EGRESS_CACHE` (the proxy's URL) shows its download cache under Caches.
  */
 const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
 const port = Number(process.env.HOLTKEEPER_PORT ?? 7420)
@@ -71,7 +72,14 @@ export default defineConfig({
     port,
     ...(publicUrl ? { publicUrl } : {}),
     ...(process.env.HOLTKEEPER_EGRESS_SECRET
-      ? { egress: { secret: env('HOLTKEEPER_EGRESS_SECRET') } }
+      ? {
+          egress: {
+            secret: env('HOLTKEEPER_EGRESS_SECRET'),
+            ...(process.env.HOLTKEEPER_EGRESS_CACHE
+              ? { proxy: process.env.HOLTKEEPER_EGRESS_CACHE }
+              : {}),
+          },
+        }
       : {}),
     artifacts: process.env.HOLTKEEPER_S3_BUCKET
       ? {

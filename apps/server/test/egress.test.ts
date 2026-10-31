@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 
-import type { EgressRule, EgressRulesResponse } from '@holtkeeper/api'
+import type { EgressCacheView, EgressRule, EgressRulesResponse } from '@holtkeeper/api'
 import { noAuth } from '@holtkeeper/auth-none'
 import { type HoltkeeperConfig, parseConfig } from '@holtkeeper/core'
 import { type CredentialService, createCredentialService } from '@holtkeeper/credentials'
@@ -144,5 +144,94 @@ describe('egress rules', () => {
         (error: unknown) => error,
       )
     expect(String(refused)).toContain('placeholder')
+  })
+})
+
+describe('egress cache', () => {
+  const seen: { method: string; url: string; authorization: string | null; body: string }[] = []
+  const snapshot = {
+    backend: { kind: 'dir', location: '/cache' },
+    ttlSeconds: { packages: 2_419_200, tools: 1_814_400 },
+    maxBytes: null,
+    maxEntryBytes: 4_294_967_296,
+    since: '2026-10-30T11:00:00Z',
+    syncedAt: null,
+    stats: { hits: 1, misses: 2, stored: 2, servedBytes: 10, errors: 0 },
+    rules: [{ kind: 'packages', host: 'registry.npmjs.org', paths: ['\\.tgz$'], private: false }],
+    total: { count: 1, bytes: 10 },
+    entries: [
+      {
+        path: 'packages/registry.npmjs.org/a/-/a-1.0.0.tgz',
+        url: 'https://registry.npmjs.org/a/-/a-1.0.0.tgz',
+        kind: 'packages',
+        size: 10,
+        hits: 1,
+        storedAt: '2026-10-30T11:00:00Z',
+        lastUsedAt: '2026-10-30T11:30:00Z',
+        expiresAt: '2026-11-27T11:30:00Z',
+        expired: false,
+      },
+    ],
+  }
+  const proxy = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      seen.push({
+        method: request.method,
+        url: request.url,
+        authorization: request.headers.get('authorization'),
+        body: await request.text(),
+      })
+      if (request.headers.get('authorization') !== `Bearer ${secret}`)
+        return Response.json({ error: 'unauthorized' }, { status: 401 })
+      return new URL(request.url).pathname === '/v1/cache/delete'
+        ? Response.json({ removed: 2, bytes: 10 })
+        : Response.json(snapshot)
+    },
+  })
+  const proxyUrl = `http://127.0.0.1:${proxy.port}`
+  afterAll(() => proxy.stop(true))
+
+  test('says when no proxy is configured', async () => {
+    const response = await appWith({ egress: { secret } }).request('/api/egress/cache')
+    expect((await response.json()) as EgressCacheView).toEqual({ configured: false })
+  })
+
+  test('reads the cache through the proxy with the egress secret', async () => {
+    const response = await appWith({ egress: { secret, proxy: proxyUrl } }).request(
+      '/api/egress/cache',
+    )
+    expect(await response.json()).toEqual({ configured: true, ...snapshot })
+    expect(seen.at(-1)).toMatchObject({
+      method: 'GET',
+      url: 'http://egress-cache.invalid/v1/cache',
+      authorization: `Bearer ${secret}`,
+    })
+  })
+
+  test('reports a proxy that refuses the secret instead of failing', async () => {
+    const response = await appWith({ egress: { secret: 'other', proxy: proxyUrl } }).request(
+      '/api/egress/cache',
+    )
+    expect(await response.json()).toEqual({
+      configured: true,
+      error: 'the proxy refused the egress secret',
+    })
+  })
+
+  test('deletes entries and records who did', async () => {
+    const response = await appWith({ egress: { secret, proxy: proxyUrl } }).request(
+      '/api/egress/cache/delete',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'tools' }),
+      },
+    )
+    expect(await response.json()).toEqual({ removed: 2, bytes: 10 })
+    expect(JSON.parse(seen.at(-1)?.body ?? '{}')).toEqual({ kind: 'tools' })
+    const [entry] = await store.activity.list({ limit: 1 })
+    expect(entry).toMatchObject({ action: 'egress-cache.cleared', subject: 'tools' })
   })
 })

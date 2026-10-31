@@ -200,6 +200,44 @@ egressProxy:
   existingSecret: ''
   # Hosts job commands reach directly, past the proxy.
   noProxy: []
+  # Download cache of immutable archives: npm/yarn tarballs, Go modules, PyPI files, crates
+  # ("packages"), Node.js, Go and GitHub release downloads ("tools"). A cached copy is served to
+  # every job, also after upstream removed it or a forge lost access: see docs/deployment.md.
+  cache:
+    enabled: true
+    # How long an entry survives without being used (s, m, h, d, w).
+    ttl:
+      packages: 28d
+      tools: 21d
+    # Above this, least recently used entries go first; keep it below the volume size.
+    maxSize: 18Gi
+    # Larger downloads pass through uncached.
+    maxEntrySize: 4Gi
+    # More cacheable URLs: { kind: packages|tools, host, paths: [regex], private: false }.
+    # `private: true` also caches downloads the proxy added credentials to.
+    rules: []
+    # dir: a volume of the proxy pod (one per replica unless a ReadWriteMany pvc); s3: a bucket
+    # every replica shares.
+    backend: dir
+    dir:
+      type: emptyDir
+      sizeLimit: 20Gi
+      size: 20Gi
+      storageClassName: ''
+      accessModes: [ReadWriteOnce]
+      existingClaim: ''
+    s3:
+      bucket: ''
+      # Default: AWS for `region`. Path-style URLs, e.g. https://s3.example.com.
+      endpoint: ''
+      region: ''
+      prefix: egress-cache
+      # Secret with the access keys.
+      existingSecret: ''
+      accessKeyIdKey: AWS_ACCESS_KEY_ID
+      secretAccessKeyKey: AWS_SECRET_ACCESS_KEY
+      # Downloads are spooled to an emptyDir of this size until complete, then uploaded.
+      spoolSizeLimit: 8Gi
   ca:
     # A kubernetes.io/tls Secret (tls.crt, tls.key) with the CA the proxy signs intercepted TLS with.
     existingSecret: ''

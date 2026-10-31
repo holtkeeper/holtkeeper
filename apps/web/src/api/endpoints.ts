@@ -8,6 +8,9 @@ import type {
   AuditVerifyResponse,
   ClearStorageInput,
   ClearStorageResult,
+  DeleteEgressCacheInput,
+  DeleteEgressCacheResult,
+  EgressCacheView,
   CreateMcpTokenInput,
   CreateMcpTokenResult,
   McpTokenList,
@@ -368,6 +371,10 @@ export const api = {
   storage: () => request<StorageOverview>('GET', '/api/storage'),
   clearStorage: (providerId: string, input: ClearStorageInput = {}) =>
     request<ClearStorageResult>('POST', `/api/storage/${id(providerId)}/clear`, { body: input }),
+
+  egressCache: () => request<EgressCacheView>('GET', '/api/egress/cache'),
+  deleteEgressCache: (input: DeleteEgressCacheInput = {}) =>
+    request<DeleteEgressCacheResult>('POST', '/api/egress/cache/delete', { body: input }),
 
   accounts: () => request<ExternalAccountList>('GET', '/api/accounts'),
   linkAccount: (input: LinkAccountInput) =>

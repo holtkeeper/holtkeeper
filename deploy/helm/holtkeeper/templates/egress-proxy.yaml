@@ -2,7 +2,11 @@
 {{- $ep := .Values.egressProxy }}
 {{- $component := dict "ctx" $ "component" "egress-proxy" }}
 {{- $name := printf "%s-egress-proxy" (include "holtkeeper.fullname" .) }}
-{{- $rules := dict "rules" $ep.rules | toPrettyJson }}
+{{- $cache := $ep.cache }}
+{{- $rules := dict "rules" $ep.rules "cache" ($cache.enabled | ternary $cache.rules list) | toPrettyJson }}
+{{- if and $cache.enabled (eq $cache.backend "s3") (not $cache.s3.bucket) }}
+{{- fail "egressProxy.cache.backend s3 needs egressProxy.cache.s3.bucket" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -45,6 +49,56 @@ spec:
               value: /etc/egress/rules.json
             - name: EGRESS_CA_DIR
               value: /etc/egress/ca
+            {{- if $cache.enabled }}
+            - name: EGRESS_CACHE_TTL_PACKAGES
+              value: {{ $cache.ttl.packages | quote }}
+            - name: EGRESS_CACHE_TTL_TOOLS
+              value: {{ $cache.ttl.tools | quote }}
+            {{- with $cache.maxSize }}
+            - name: EGRESS_CACHE_MAX_SIZE
+              value: {{ . | quote }}
+            {{- end }}
+            - name: EGRESS_CACHE_MAX_ENTRY
+              value: {{ $cache.maxEntrySize | quote }}
+            {{- if eq $cache.backend "s3" }}
+            - name: EGRESS_CACHE_S3_BUCKET
+              value: {{ $cache.s3.bucket | quote }}
+            {{- with $cache.s3.endpoint }}
+            - name: EGRESS_CACHE_S3_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $cache.s3.region }}
+            - name: EGRESS_CACHE_S3_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            - name: EGRESS_CACHE_S3_PREFIX
+              value: {{ $cache.s3.prefix | quote }}
+            - name: EGRESS_CACHE_SPOOL
+              value: /spool
+            {{- with $cache.s3.existingSecret }}
+            - name: EGRESS_CACHE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: { name: {{ . }}, key: {{ $cache.s3.accessKeyIdKey }} }
+            - name: EGRESS_CACHE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ . }}, key: {{ $cache.s3.secretAccessKeyKey }} }
+            {{- end }}
+            {{- else }}
+            - name: EGRESS_CACHE_DIR
+              value: /cache
+            {{- end }}
+            {{- with .Values.existingSecret }}
+            - name: EGRESS_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: HOLTKEEPER_EGRESS_SECRET
+                  optional: true
+            {{- end }}
+            {{- else }}
+            - name: EGRESS_CACHE
+              value: "off"
+            {{- end }}
             {{- if $ep.forgeRules }}
             {{- if not .Values.existingSecret }}
             {{- fail "egressProxy.forgeRules needs existingSecret with HOLTKEEPER_EGRESS_SECRET" }}
@@ -88,6 +142,15 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if $cache.enabled }}
+            {{- if eq $cache.backend "s3" }}
+            - name: spool
+              mountPath: /spool
+            {{- else }}
+            - name: cache
+              mountPath: /cache
+            {{- end }}
+            {{- end }}
       volumes:
         - name: rules
           configMap:
@@ -101,6 +164,21 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- if $cache.enabled }}
+        {{- if eq $cache.backend "s3" }}
+        - name: spool
+          emptyDir:
+            sizeLimit: {{ $cache.s3.spoolSizeLimit }}
+        {{- else if eq $cache.dir.type "pvc" }}
+        - name: cache
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-cache" $name) $cache.dir.existingClaim }}
+        {{- else }}
+        - name: cache
+          emptyDir:
+            sizeLimit: {{ $cache.dir.sizeLimit }}
+        {{- end }}
+        {{- end }}
       {{- include "holtkeeper.scheduling" $ep | nindent 6 }}
 ---
 apiVersion: v1
@@ -116,6 +194,26 @@ spec:
     - name: proxy
       port: {{ $ep.port }}
       targetPort: proxy
+{{- if and $cache.enabled (eq $cache.backend "dir") (eq $cache.dir.type "pvc") (not $cache.dir.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-cache
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml $cache.dir.accessModes | nindent 4 }}
+  {{- with $cache.dir.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $cache.dir.size }}
+{{- end }}
 {{- if and $ep.ca.certManager (not $ep.ca.existingSecret) }}
 ---
 apiVersion: cert-manager.io/v1
@@ -149,7 +247,8 @@ spec:
 {{- end }}
 {{- if .Values.networkPolicy.enabled }}
 ---
-# The proxy accepts only workers and reaches only DNS, the web pods (rules) and the worker egress ports.
+# The proxy accepts only workers (and web pods, for the cache overview) and reaches only DNS, the
+# web pods (rules) and the worker egress ports.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -168,6 +267,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 14 }}
+        {{- if $cache.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "web") | nindent 14 }}
+        {{- end }}
   egress:
     - ports:
         - { port: 53, protocol: UDP }

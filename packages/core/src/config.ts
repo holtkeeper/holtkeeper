@@ -94,9 +94,19 @@ const serverSchema = z.object({
   publicUrl: z.url().optional(),
   /**
    * Serves `GET /api/egress/rules` to an egress proxy that sends this secret as a bearer token:
-   * the rules that add forge tokens to package registry requests of jobs.
+   * the rules that add forge tokens to package registry requests of jobs. With `proxy`, also shows
+   * that proxy's download cache.
    */
-  egress: z.object({ secret: secretSchema }).optional(),
+  egress: z
+    .object({
+      secret: secretSchema,
+      /**
+       * The egress proxy, e.g. `http://holtkeeper-egress-proxy:8080`: `GET /api/egress/cache`
+       * reads its download cache through it, authenticated with `secret`.
+       */
+      proxy: z.url({ protocol: /^https?$/ }).optional(),
+    })
+    .optional(),
 })
 
 const cronNicknames = new Set(['@yearly', '@annually', '@monthly', '@weekly', '@daily', '@hourly'])

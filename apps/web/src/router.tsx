@@ -145,6 +145,10 @@ const StoragePage = lazyRouteComponent(
   () => import('./features/storage/StoragePage.tsx'),
   'StoragePage',
 )
+const CachesPage = lazyRouteComponent(
+  () => import('./features/caches/CachesPage.tsx'),
+  'CachesPage',
+)
 
 const auditsRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -273,6 +277,7 @@ const routeTree = rootRoute.addChildren([
     page('ai', AiUsagePage),
     page('audit-log', AuditLogPage),
     page('storage', StoragePage),
+    page('caches', CachesPage),
     page('credentials', CredentialsPage),
     settingsRoute,
     page('users', UsersPage),

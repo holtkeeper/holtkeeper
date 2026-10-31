@@ -4,6 +4,7 @@ import {
   BookOpen,
   Boxes,
   CalendarClock,
+  DatabaseZap,
   FileSearch,
   Flame,
   FlaskConical,
@@ -63,6 +64,7 @@ export interface NavItem {
     | '/settings'
     | '/ai'
     | '/storage'
+    | '/caches'
     | '/users'
     | '/audit-log'
     | '/activity'
@@ -202,6 +204,13 @@ const navItems: readonly NavItem[] = [
     to: '/storage',
     label: 'Storage',
     icon: HardDrive,
+    requires: 'settings:read',
+  },
+  {
+    section: 'Admin',
+    to: '/caches',
+    label: 'Caches',
+    icon: DatabaseZap,
     requires: 'settings:read',
   },
   {

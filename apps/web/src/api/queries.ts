@@ -3,6 +3,7 @@ import type {
   ApplyChangesInput,
   AuditRunSummary,
   ClearStorageInput,
+  DeleteEgressCacheInput,
   CreateMcpTokenInput,
   CreateJobInput,
   ForgeWebhookInput,
@@ -58,6 +59,7 @@ export const keys = {
   ai: ['ai'] as const,
   auditLog: ['audit-log'] as const,
   storage: ['storage'] as const,
+  egressCache: ['egress-cache'] as const,
   accounts: ['accounts'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
@@ -581,6 +583,19 @@ export function useClearStorage() {
     mutationFn: ({ id, input }: { id: string; input?: ClearStorageInput }) =>
       api.clearStorage(id, input),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.storage }),
+  })
+}
+
+/** The egress proxy's download cache; needs global `settings:read`. */
+export const useEgressCache = () =>
+  useQuery({ queryKey: keys.egressCache, queryFn: api.egressCache, refetchInterval: 30_000 })
+
+/** Deletes cache entries, a whole kind or everything; refreshes the cache view. */
+export function useDeleteEgressCache() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: DeleteEgressCacheInput) => api.deleteEgressCache(input),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.egressCache }),
   })
 }
 

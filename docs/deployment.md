@@ -100,7 +100,7 @@ The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 - `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB; or, with `worker.pools`, one Deployment per pool (`<release>-worker-<name>`, label `holtkeeper.dev/worker-pool`), each `worker` with the pool's own fields on top, e.g. 2 jobs per small node and 4 on a big one; `spread: true` keeps a pool's pods on different nodes;
 - optional `scheduler` Deployment (`scheduler.enabled`; the web pods then run `web` only);
 - optional ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies;
-- optional egress proxy (`egressProxy.enabled`, see below);
+- optional egress proxy (`egressProxy.enabled`, see below) with a download cache;
 - a ServiceAccount without any Role: nothing talks to the Kubernetes API and no pod-creation rights are needed. Tokens are not mounted.
 
 Every pod runs non-root (10001) with `readOnlyRootFilesystem`, no capabilities, `RuntimeDefault` seccomp; `/tmp` (also `HOME`, so bun, npm and Go caches of dependency installs; `tmpSizeLimit`, default 8Gi), `/workspace` (checkouts, mirror cache) and `/mise` (tools) are emptyDirs, `/mise` optionally a PVC (`worker.miseCache.type: pvc`, ReadWriteMany to share between workers). Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
@@ -165,6 +165,28 @@ egressProxy:
 `${NAME}` in static rules is resolved by the proxy from `egressProxy.existingSecret`, not by Helm. Only `GET`/`HEAD` get credentials unless a rule lists `methods`, and only over TLS unless it sets `insecure`. TLS to hosts without rules is tunneled untouched. The pod restarts when static rules change; restart it after changing a static token or the CA. With `networkPolicy.enabled` the proxy accepts only workers, reaches the web pods for its rules, and workers may reach it.
 
 To use another proxy, leave `egressProxy` disabled and set `HOLTKEEPER_EGRESS_PROXY` (and `HOLTKEEPER_EGRESS_CA`) on the workers yourself.
+
+#### Download cache
+
+`egressProxy.cache` (on by default) keeps package archives (npm and yarn tarballs, Go modules, PyPI files, crates) and tool downloads (Node.js, Go, GitHub release assets, which mise uses for most tools) that jobs fetch through the proxy. They then come from the cache instead of the internet, and pods that start empty, such as `emptyDir` worker caches, do not slow down. Only immutable archives are cached; indexes and version lists always go upstream. A broken store never breaks an install: the request then goes upstream. What is cached and how is in [docker/egress-proxy](../docker/egress-proxy/README.md#download-cache).
+
+```yaml
+egressProxy:
+  cache:
+    ttl: { packages: 28d, tools: 21d } # since the last use
+    maxSize: 18Gi # least recently used first above this; keep it below the volume
+    backend: dir # an emptyDir (dir.sizeLimit, default 20Gi) or dir.type: pvc
+    # backend: s3 — one bucket for every replica:
+    # s3: { bucket: holtkeeper, endpoint: https://s3.example.com, region: eu-north-1,
+    #       prefix: egress-cache, existingSecret: holtkeeper-s3 } # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+```
+
+A `dir` store on an `emptyDir` is lost when the proxy pod is replaced, and each replica has its own. For `replicas` above 1 use `s3` or a ReadWriteMany `pvc`. S3 downloads are spooled to an `emptyDir` (`s3.spoolSizeLimit`) until complete. `cache.rules` adds cacheable URLs (`{ kind, host, paths, private }`); `enabled: false` sets `EGRESS_CACHE=off`.
+
+The **Caches** page of the panel (Admin → Caches, `settings:read`) shows what is cached, its size, hits and expiry, and removes entries (`settings:write`). The web pods reach the proxy for it (`HOLTKEEPER_EGRESS_CACHE`, turned into `server.egress.proxy`) with `HOLTKEEPER_EGRESS_SECRET`, so the page needs the top-level `existingSecret` with that key. With `networkPolicy.enabled` the proxy then also accepts the web pods.
+
+> [!WARNING]
+> A cached download is served to every job until it expires, whoever fetched it and whatever changed since. A version unpublished or yanked upstream (for example a malicious one taken down), or a GitHub asset replaced under the same tag, is still served. With `private` cache rules, packages fetched with a forge token stay available after the token is revoked, the forge's **Packages for jobs** is switched off, or the project's access changes, and every job can read what another job's credentials fetched. Keep `private` rules off unless every job may see every such package. Remove entries on the Caches page when something has to go at once. Give only the proxy write access to the cache volume or bucket: whoever can write it can serve any file under a cached URL.
 
 ### Webhooks behind an Ingress
 

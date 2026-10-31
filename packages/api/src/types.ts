@@ -593,6 +593,70 @@ export interface EgressRulesResponse {
   rules: EgressRule[]
 }
 
+/** What an egress proxy caches: package archives or tool downloads, each with its own TTL. */
+export type EgressCacheKind = 'packages' | 'tools'
+
+/** One cached download. `expiresAt` moves forward with every use. */
+export interface EgressCacheEntry {
+  /** Stable id of the entry inside the cache, used to delete it. */
+  path: string
+  url: string
+  kind: EgressCacheKind
+  size: number
+  /** Served from the cache, counted approximately when several proxy replicas share it. */
+  hits: number
+  storedAt: Timestamp
+  lastUsedAt: Timestamp
+  expiresAt: Timestamp
+  /** Past its TTL and waiting for the next sweep; requests already go upstream. */
+  expired: boolean
+}
+
+/** A URL pattern the proxy caches. `private` entries may hold downloads that needed credentials. */
+export interface EgressCacheRule {
+  kind: EgressCacheKind
+  host: string
+  paths: string[]
+  private: boolean
+}
+
+/**
+ * `GET /api/egress/cache` — the download cache of the egress proxy, as one replica reports it.
+ * `configured: false` when the config names no proxy (`server.egress.proxy`); `error` when it
+ * could not be reached or has caching off.
+ */
+export type EgressCacheView =
+  | { configured: false }
+  | { configured: true; error: string }
+  | {
+      configured: true
+      backend: { kind: 'dir' | 's3'; location: string }
+      ttlSeconds: Record<EgressCacheKind, number>
+      /** Least recently used entries go first above it; `null`: only TTLs limit the cache. */
+      maxBytes: number | null
+      maxEntryBytes: number
+      /** When the replica that answered started counting `stats`. */
+      since: Timestamp
+      syncedAt: Timestamp | null
+      stats: { hits: number; misses: number; stored: number; servedBytes: number; errors: number }
+      rules: EgressCacheRule[]
+      total: { count: number; bytes: number }
+      /** Most recently used first, at most 5000. */
+      entries: EgressCacheEntry[]
+    }
+
+/** `POST /api/egress/cache/delete` — given `paths`, a whole `kind`, or neither for everything. */
+export interface DeleteEgressCacheInput {
+  paths?: string[]
+  kind?: EgressCacheKind
+}
+
+/** Result of `POST /api/egress/cache/delete`. */
+export interface DeleteEgressCacheResult {
+  removed: number
+  bytes: number
+}
+
 /**
  * `GET /api/config/runtime` — the parts of the config only the file sets, without secrets: job
  * execution, server storage, limits, AI provider plugins and plugin uses.

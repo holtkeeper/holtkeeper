@@ -38,6 +38,10 @@ spec:
               containerPort: {{ .Values.port }}
           env:
             {{- include "holtkeeper.env" . | nindent 12 }}
+            {{- if and .Values.egressProxy.enabled .Values.egressProxy.cache.enabled }}
+            - name: HOLTKEEPER_EGRESS_CACHE
+              value: {{ printf "http://%s-egress-proxy:%v" (include "holtkeeper.fullname" .) .Values.egressProxy.port | quote }}
+            {{- end }}
           {{- with (include "holtkeeper.envFrom" . | trim) }}
           envFrom:
             {{- . | nindent 12 }}
