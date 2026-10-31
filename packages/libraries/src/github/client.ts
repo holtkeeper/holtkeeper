@@ -358,7 +358,7 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
     },
     async download(path, { maxBytes }) {
       const response = await send(urlOf(path), (token) => ({
-        headers: headers(token, 'application/octet-stream'),
+        headers: headers(token, 'application/vnd.github+json'),
       }))
       if (response.status === 404) return undefined
       if (!response.ok) throw new Error(`GitHub ${response.status} for ${path}`)

@@ -317,3 +317,22 @@ describe('githubTokenInfo', () => {
     expect(await githubTokenInfo('t', { fetch: down })).toEqual({ error: 'ECONNREFUSED' })
   })
 })
+
+describe('createGitHubClient downloads', () => {
+  test('asks for archives with the API media type, which /tarball redirects from', async () => {
+    const accepts: string[] = []
+    const fetchFn = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const accept = new Headers(init?.headers).get('accept') ?? ''
+      accepts.push(accept)
+      return accept === 'application/vnd.github+json'
+        ? new Response(new Uint8Array([1, 2, 3]))
+        : new Response('{"message":"Unsupported Media Type"}', { status: 415 })
+    }) as typeof fetch
+    const client = createGitHubClient({ token: 'a', fetch: fetchFn })
+    const stream = await client.download('/repos/x/y/tarball/v1', { maxBytes: 10 })
+    expect(new Uint8Array(await new Response(stream).arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3]),
+    )
+    expect(accepts).toEqual(['application/vnd.github+json'])
+  })
+})
