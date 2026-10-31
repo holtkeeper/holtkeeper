@@ -67,8 +67,16 @@ const librariesSchema = z.object({
       'indexing more often than hourly is not allowed',
     )
     .optional(),
-  /** Id or name of a credential whose secret is a GitHub token. */
-  github: z.string().trim().min(1).meta({ 'x-credential': 'github' }).optional(),
+  /**
+   * Ids or names of credentials whose secrets are GitHub tokens, shared by every request; a
+   * single string is read as a list of one.
+   */
+  github: z
+    .preprocess(
+      (value) => (typeof value === 'string' ? [value] : value),
+      z.array(z.string().trim().min(1).meta({ 'x-credential': 'github' })),
+    )
+    .optional(),
   /** LLM digests of issue threads agents hit, charged to the AI budget. */
   digests: z.boolean().optional(),
   exclude: globSchema.optional(),
@@ -96,7 +104,7 @@ export const librariesSetting = defineSetting({
   help: `Holtkeeper reads the newest \`usages\` and \`fleet\` records, keeps a few versions of every npm and Go library they name (the ones in use and the ones an upgrade would land on) and indexes their docs. Only the value for **All repositories** counts; without one nothing is indexed.
 
 - **interval** (default \`1d\`, at least \`1h\`): how often to look for new releases; a run also starts about two minutes after the server starts.
-- **github**: a credential whose secret is a GitHub token, for repository docs, release notes, issues and source snapshots. Without it GitHub is read anonymously (60 requests an hour), which is rarely enough.
+- **github**: credentials of kind \`github\` whose secrets are GitHub tokens, for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
 - **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
@@ -121,7 +129,8 @@ export const librariesSetting = defineSetting({
 export interface LibrariesConfig {
   index: LibraryIndexSettings
   intervalMs: number
-  github?: string
+  /** Credential references of the GitHub tokens, without duplicates. */
+  github: string[]
   digests: boolean
 }
 
@@ -142,7 +151,7 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
       graceDays: data.graceDays ?? defaults.graceDays,
     },
     intervalMs: intervalMs(data.interval ?? DEFAULT_INTERVAL) ?? 86_400_000,
-    ...(data.github ? { github: data.github } : {}),
+    github: [...new Set(data.github ?? [])],
     digests: data.digests ?? false,
   }
 }
@@ -169,31 +178,54 @@ export interface CredentialSource {
   reveal(id: string): Promise<string>
 }
 
+/** How long a GitHub client waits for a rate limit to reset: an index run outlasts the hourly reset. */
+export type GitHubWait = 'index' | 'request'
+
 /**
- * The GitHub client the `github` reference (credential id, else name) authenticates; anonymous
- * without a reference, and anonymous with a log line when the credential is missing or unreadable.
+ * The GitHub client over the tokens the `github` references (credential id, else name) reveal,
+ * with `ETag`s cached in `kv`; anonymous without references. References that match no credential
+ * or cannot be read are left out with a log line. `wait: 'index'` waits out a rate limit reset
+ * (up to 65 minutes, abortable by `signal`); `'request'` waits at most 10 seconds.
  */
 export async function githubClientFor(
   credentials: CredentialSource,
-  reference: string | undefined,
-  log: (line: string) => void = () => {},
+  references: readonly string[] | undefined,
+  options: {
+    log?: (line: string) => void
+    kv?: Pick<KvStore, 'get' | 'set'>
+    wait?: GitHubWait
+    signal?: AbortSignal
+  } = {},
 ): Promise<GitHubClient> {
-  if (!reference) return createGitHubClient()
-  const all = await credentials.list()
-  const credential =
-    all.find((item) => item.id === reference) ?? all.find((item) => item.name === reference)
-  if (!credential) {
-    log(`libraries: no credential "${reference}"; reading GitHub anonymously`)
-    return createGitHubClient()
+  const log = options.log ?? (() => {})
+  const tokens: string[] = []
+  if (references?.length) {
+    const all = await credentials.list()
+    for (const reference of references) {
+      const credential =
+        all.find((item) => item.id === reference) ?? all.find((item) => item.name === reference)
+      if (!credential) {
+        log(`libraries: no credential "${reference}"; left out of the GitHub tokens`)
+        continue
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a handful of credentials, read in order
+        tokens.push(await credentials.reveal(credential.id))
+      } catch (error) {
+        log(
+          `libraries: credential "${credential.name}": ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    if (!tokens.length) log('libraries: no GitHub token could be read; reading GitHub anonymously')
   }
-  try {
-    return createGitHubClient({ token: await credentials.reveal(credential.id) })
-  } catch (error) {
-    log(
-      `libraries: credential "${credential.name}": ${error instanceof Error ? error.message : String(error)}`,
-    )
-    return createGitHubClient()
-  }
+  return createGitHubClient({
+    tokens,
+    maxWaitMs: options.wait === 'index' ? 65 * 60_000 : 10_000,
+    ...(options.kv ? { cache: options.kv } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+    log,
+  })
 }
 
 const PAGE = 50
@@ -367,7 +399,14 @@ export async function runLibraryIndex(
   let run: LibraryIndexRun
   try {
     const { uses, internal } = await fleetLibraryUses(store.analyses)
-    const github = options.github ?? (await githubClientFor(deps.credentials, config.github, log))
+    const github =
+      options.github ??
+      (await githubClientFor(deps.credentials, config.github, {
+        log,
+        wait: 'index',
+        ...(store.kv ? { kv: store.kv } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
+      }))
     const summary = await indexLibraries({
       store: libraries,
       artifacts,

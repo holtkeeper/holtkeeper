@@ -7,8 +7,9 @@ export interface GitHubResponse<T> {
 }
 
 /**
- * GitHub REST and GraphQL access. Implementations wait out rate limits (`Retry-After`,
- * `X-RateLimit-Reset`) up to `maxWaitMs` and then throw `GitHubRateLimitError`.
+ * GitHub REST and GraphQL access. When a rate limit runs out, implementations move to another
+ * token or wait for the reset (`X-RateLimit-Reset`, a secondary limit's `Retry-After`) up to
+ * `maxWaitMs`, then throw `GitHubRateLimitError`.
  */
 export interface GitHubClient {
   /** `path` starts with `/` or is a full `https://api.github.com/...` URL (for `next`). */
@@ -72,14 +73,38 @@ export class GitHubRateLimitError extends Error {
   }
 }
 
+/** Where `ETag`s and the bodies they validate are kept between runs; `Store.kv` fits. */
+export interface GitHubCache {
+  get(key: string): Promise<unknown>
+  set(key: string, value: unknown, ttlSeconds?: number): Promise<void>
+}
+
 export interface GitHubClientOptions {
+  /** One token; shorthand for `tokens: [token]`. */
   token?: string
+  /**
+   * Tokens shared by every request: each goes to the token with the most of that request's rate
+   * limit left (`core`, `search` and `graphql` are counted apart). Tokens of the same account
+   * share one limit on GitHub's side, so duplicates are found once (`GET /user`) and dropped.
+   */
+  tokens?: string[]
   fetch?: typeof fetch
   /** Default `https://api.github.com`. */
   apiUrl?: string
-  /** Longest wait for a rate limit reset before giving up. Default 60 s. */
+  /**
+   * Longest wait for a rate limit to reset when every token is exhausted, before throwing
+   * `GitHubRateLimitError`. Default 60 s; the primary limit resets within an hour.
+   */
   maxWaitMs?: number
-  sleep?: (ms: number) => Promise<void>
+  /** Conditional requests: `GET`s send `If-None-Match`, and a `304` (free on GitHub's side) answers from here. */
+  cache?: GitHubCache
+  /** How long a cached body is kept. Default 30 days. */
+  cacheTtlSeconds?: number
+  /** Aborts requests and waits. */
+  signal?: AbortSignal
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  now?: () => number
+  log?: (line: string) => void
 }
 
 const nextLink = (header: string | null) =>
@@ -88,68 +113,233 @@ const nextLink = (header: string | null) =>
     .find((part) => part.includes('rel="next"'))
     ?.match(/<([^>]+)>/)?.[1]
 
+const abortableSleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        reject(signal.reason)
+      },
+      { once: true },
+    )
+  })
+
+type Resource = 'core' | 'search' | 'graphql'
+
+interface Bucket {
+  remaining?: number
+  /** Epoch ms when `remaining` resets, or a secondary limit's `Retry-After` ends. */
+  resetAt?: number
+  blockedUntil?: number
+}
+
+interface PoolToken {
+  token: string | undefined
+  buckets: Map<Resource, Bucket>
+}
+
+interface CachedBody {
+  etag: string
+  data: unknown
+  next?: string
+}
+
+const isCachedBody = (value: unknown): value is CachedBody =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as { etag?: unknown }).etag === 'string' &&
+  'data' in value
+
+const headers = (token: string | undefined, accept: string): Record<string, string> => ({
+  accept,
+  'user-agent': 'holtkeeper',
+  'x-github-api-version': '2022-11-28',
+  ...(token ? { authorization: `Bearer ${token}` } : {}),
+})
+
+const resourceOf = (url: string): Resource =>
+  url.includes('/graphql') ? 'graphql' : url.includes('/search/') ? 'search' : 'core'
+
 /** A `GitHubClient` over `fetch`. */
 export function createGitHubClient(options: GitHubClientOptions = {}): GitHubClient {
   const doFetch = options.fetch ?? fetch
   const apiUrl = (options.apiUrl ?? 'https://api.github.com').replace(/\/$/, '')
   const maxWaitMs = options.maxWaitMs ?? 60_000
-  const sleep = options.sleep ?? ((ms: number) => Bun.sleep(ms))
-  const headers = (accept: string): Record<string, string> => ({
-    accept,
-    'user-agent': 'holtkeeper',
-    'x-github-api-version': '2022-11-28',
-    ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
-  })
+  const sleep = options.sleep ?? abortableSleep
+  const now = options.now ?? Date.now
+  const ttl = options.cacheTtlSeconds ?? 30 * 86_400
+  const given = [...new Set([...(options.tokens ?? []), ...(options.token ? [options.token] : [])])]
+  let pool: PoolToken[] = (given.length ? given : [undefined]).map((token) => ({
+    token,
+    buckets: new Map(),
+  }))
   const urlOf = (path: string) => (path.startsWith('http') ? path : `${apiUrl}${path}`)
 
-  const send = async (url: string, init: RequestInit): Promise<Response> => {
-    for (let attempt = 0; ; attempt++) {
+  let identified: Promise<void> | undefined
+  const identify = () =>
+    (identified ??= (async () => {
+      if (pool.length < 2) return
+      const accounts = await Promise.all(
+        pool.map(async ({ token }) => {
+          try {
+            const response = await doFetch(`${apiUrl}/user`, {
+              headers: headers(token, 'application/vnd.github+json'),
+              ...(options.signal ? { signal: options.signal } : {}),
+            })
+            if (!response.ok) return undefined
+            const body: unknown = await response.json()
+            if (typeof body !== 'object' || body === null || !('login' in body)) return undefined
+            return typeof body.login === 'string' ? body.login : undefined
+          } catch {
+            return undefined
+          }
+        }),
+      )
+      const seen = new Set<string>()
+      const kept: PoolToken[] = []
+      pool.forEach((entry, index) => {
+        const account = accounts[index]
+        if (account && seen.has(account)) {
+          options.log?.(
+            `github: two tokens belong to ${account}; they share one rate limit, so one is dropped`,
+          )
+          return
+        }
+        if (account) seen.add(account)
+        kept.push(entry)
+      })
+      pool = kept
+    })())
+
+  const bucket = (entry: PoolToken, resource: Resource) => {
+    let found = entry.buckets.get(resource)
+    if (!found) entry.buckets.set(resource, (found = {}))
+    return found
+  }
+
+  /** When this token can next serve the resource; `0` for now. */
+  const readyAt = (entry: PoolToken, resource: Resource) => {
+    const state = bucket(entry, resource)
+    const at = now()
+    if (state.blockedUntil && state.blockedUntil > at) return state.blockedUntil
+    if (state.remaining === 0 && state.resetAt && state.resetAt > at) return state.resetAt
+    return 0
+  }
+
+  const pick = (resource: Resource) => {
+    const ready = pool.filter((entry) => readyAt(entry, resource) === 0)
+    if (ready.length)
+      return ready.reduce((best, entry) =>
+        (bucket(entry, resource).remaining ?? Infinity) >
+        (bucket(best, resource).remaining ?? Infinity)
+          ? entry
+          : best,
+      )
+    return undefined
+  }
+
+  const record = (entry: PoolToken, resource: Resource, response: Response) => {
+    const state = bucket(entry, resource)
+    const remaining = Number(response.headers.get('x-ratelimit-remaining'))
+    const reset = Number(response.headers.get('x-ratelimit-reset'))
+    if (response.headers.has('x-ratelimit-remaining') && Number.isFinite(remaining))
+      state.remaining = remaining
+    if (Number.isFinite(reset) && reset > 0) state.resetAt = reset * 1000
+  }
+
+  const send = async (
+    url: string,
+    init: (token: string | undefined) => RequestInit,
+  ): Promise<Response> => {
+    await identify()
+    const resource = resourceOf(url)
+    for (let attempt = 0; attempt < pool.length * 3 + 3; attempt++) {
+      options.signal?.throwIfAborted()
+      const entry = pick(resource)
+      if (!entry) {
+        const next = Math.min(...pool.map((candidate) => readyAt(candidate, resource)))
+        const waitMs = next - now()
+        if (waitMs > maxWaitMs) throw new GitHubRateLimitError(new Date(next))
+        options.log?.(
+          `github: ${resource} rate limit exhausted; waiting ${Math.ceil(waitMs / 1000)} s until ${new Date(next).toISOString()}`,
+        )
+        // oxlint-disable-next-line no-await-in-loop -- waiting for the limit to reset is the point
+        await sleep(Math.max(0, waitMs), options.signal)
+        continue
+      }
       // oxlint-disable-next-line no-await-in-loop -- retries are sequential by nature
-      const response = await doFetch(url, init)
-      const limited =
-        response.status === 429 ||
-        (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
-      if (!limited) return response
+      const response = await doFetch(url, {
+        ...init(entry.token),
+        ...(options.signal ? { signal: options.signal } : {}),
+      })
+      record(entry, resource, response)
+      const primary =
+        (response.status === 403 || response.status === 429) &&
+        response.headers.get('x-ratelimit-remaining') === '0'
       const retryAfter = Number(response.headers.get('retry-after'))
-      const reset = Number(response.headers.get('x-ratelimit-reset'))
-      const resetAt = Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000) : undefined
-      const waitMs =
-        Number.isFinite(retryAfter) && retryAfter > 0
-          ? retryAfter * 1000
-          : resetAt
-            ? resetAt.getTime() - Date.now()
-            : 60_000
-      if (attempt > 0 || waitMs > maxWaitMs) throw new GitHubRateLimitError(resetAt)
-      // oxlint-disable-next-line no-await-in-loop -- see above
-      await sleep(Math.max(0, waitMs))
+      const secondary =
+        !primary &&
+        (response.status === 429 ||
+          (response.status === 403 && Number.isFinite(retryAfter) && retryAfter > 0))
+      if (!primary && !secondary) return response
+      void response.body?.cancel()
+      const state = bucket(entry, resource)
+      if (primary) state.remaining = 0
+      else state.blockedUntil = now() + (retryAfter > 0 ? retryAfter * 1000 : 60_000)
     }
+    const next = Math.min(...pool.map((candidate) => readyAt(candidate, resource)))
+    throw new GitHubRateLimitError(next > 0 ? new Date(next) : undefined)
   }
 
   return {
-    authenticated: options.token !== undefined,
+    authenticated: given.length > 0,
     // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- implements the generic interface method
     async rest<T>(path: string) {
-      const response = await send(urlOf(path), { headers: headers('application/vnd.github+json') })
+      const url = urlOf(path)
+      const key = `github:etag:${url}`
+      const stored = options.cache ? await options.cache.get(key) : undefined
+      const cached = isCachedBody(stored) ? stored : undefined
+      const response = await send(url, (token) => ({
+        headers: {
+          ...headers(token, 'application/vnd.github+json'),
+          ...(cached ? { 'if-none-match': cached.etag } : {}),
+        },
+      }))
+      if (response.status === 304 && cached)
+        return {
+          status: 200,
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the cached body is the one the same path returned before
+          data: cached.data as T,
+          ...(cached.next ? { next: cached.next } : {}),
+        }
       if (response.status === 404) return { status: 404, data: undefined }
       if (!response.ok) throw new Error(`GitHub ${response.status} for ${path}`)
       const next = nextLink(response.headers.get('link'))
+      const data: unknown = await response.json()
+      const etag = response.headers.get('etag')
+      if (options.cache && etag)
+        await options.cache.set(key, { etag, data, ...(next ? { next } : {}) }, ttl)
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- callers name the shape of the endpoint they call
-      const data = (await response.json()) as T
-      return { status: response.status, data, ...(next ? { next } : {}) }
+      return { status: response.status, data: data as T, ...(next ? { next } : {}) }
     },
     async download(path, { maxBytes }) {
-      const response = await send(urlOf(path), { headers: headers('application/octet-stream') })
+      const response = await send(urlOf(path), (token) => ({
+        headers: headers(token, 'application/octet-stream'),
+      }))
       if (response.status === 404) return undefined
       if (!response.ok) throw new Error(`GitHub ${response.status} for ${path}`)
       return limitStream(response, maxBytes, path)
     },
     async graphql<T>(query: string, variables: Record<string, unknown> = {}) {
-      if (!options.token) throw new Error('GitHub GraphQL needs a token')
-      const response = await send(`${apiUrl}/graphql`, {
+      if (!given.length) throw new Error('GitHub GraphQL needs a token')
+      const response = await send(`${apiUrl}/graphql`, (token) => ({
         method: 'POST',
-        headers: { ...headers('application/json'), 'content-type': 'application/json' },
+        headers: { ...headers(token, 'application/json'), 'content-type': 'application/json' },
         body: JSON.stringify({ query, variables }),
-      })
+      }))
       if (!response.ok) throw new Error(`GitHub GraphQL ${response.status}`)
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the query decides the shape
       const body = (await response.json()) as { data?: T; errors?: { message: string }[] }

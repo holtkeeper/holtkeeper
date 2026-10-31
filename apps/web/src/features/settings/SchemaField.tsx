@@ -27,6 +27,7 @@ import {
   TextField,
   Tooltip,
 } from '../../ui/index.ts'
+import { CredentialPicker, CredentialsPicker } from './CredentialPicker.tsx'
 
 type Report = (path: string, invalid: boolean) => void
 
@@ -226,6 +227,17 @@ function SchemaField(props: FieldProps) {
       return <StringField {...props} node={node} />
     case 'number':
       return <NumberField {...props} node={node} />
+    case 'credential':
+      return <CredentialField {...props} of={node.of} />
+    case 'credentials':
+      return (
+        <CredentialsPicker
+          of={node.of}
+          value={props.value}
+          onChange={props.onChange}
+          label={props.label}
+        />
+      )
     case 'tags':
       return <TagsField {...props} node={node} />
     case 'multi':
@@ -305,6 +317,16 @@ function StringField({
       description={describedAs(props.schema, props.root)}
       onChange={props.onChange}
     />
+  )
+}
+
+function CredentialField({ of, ...props }: FieldProps & { of: string }) {
+  useInvalid(
+    props.path,
+    typeof props.value === 'string' && props.value !== '' ? undefined : 'Required',
+  )
+  return (
+    <CredentialPicker of={of} value={props.value} onChange={props.onChange} label={props.label} />
   )
 }
 

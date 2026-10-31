@@ -34,6 +34,8 @@ export type FieldNode =
   | { kind: 'enum'; options: string[] }
   | ({ kind: 'string' } & StringRules)
   | ({ kind: 'number' } & NumberRules)
+  | { kind: 'credential'; of: string }
+  | { kind: 'credentials'; of: string }
   | { kind: 'tags'; item: FieldNode }
   | { kind: 'multi'; options: string[] }
   | { kind: 'list'; item: JsonSchema }
@@ -127,6 +129,10 @@ const stringRules = (schema: JsonSchema): StringRules => ({
 })
 
 const leafOf = (schema: JsonSchema): FieldNode | undefined => {
+  const credential = schema['x-credential']
+  if (typeof credential === 'string' && (schema.type ?? 'string') === 'string') {
+    return { kind: 'credential', of: credential }
+  }
   const values = schema.enum
   if (Array.isArray(values) && values.length > 0 && values.every((v) => typeof v === 'string')) {
     return values.length === 1
@@ -179,6 +185,7 @@ export function describeField(schema: unknown, root: unknown): FieldNode {
     const item = resolve(resolved.items, root)
     const itemNode = describeField(item, root)
     if (itemNode.kind === 'enum') return { kind: 'multi', options: itemNode.options }
+    if (itemNode.kind === 'credential') return { kind: 'credentials', of: itemNode.of }
     if (itemNode.kind === 'string' || itemNode.kind === 'number') {
       return { kind: 'tags', item: itemNode }
     }
@@ -262,6 +269,7 @@ export function initialValue(schema: unknown, root: unknown): unknown {
     case 'enum':
       return node.options[0] ?? ''
     case 'string':
+    case 'credential':
       return ''
     case 'number':
       return node.exclusiveMinimum !== undefined
@@ -271,6 +279,7 @@ export function initialValue(schema: unknown, root: unknown): unknown {
         : (node.minimum ?? 0)
     case 'tags':
     case 'multi':
+    case 'credentials':
     case 'list':
       return []
     case 'record':

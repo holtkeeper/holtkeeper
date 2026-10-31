@@ -190,6 +190,33 @@ describe('describeField', () => {
     expect(describeField({}, null)).toEqual({ kind: 'any' })
   })
 
+  test('credential references', () => {
+    const libraries = {
+      type: 'object',
+      properties: {
+        token: { type: 'string', minLength: 1, 'x-credential': 'github' },
+        github: {
+          type: 'array',
+          items: { type: 'string', minLength: 1, 'x-credential': 'github' },
+        },
+        plain: { type: 'array', items: { type: 'string' } },
+      },
+    }
+    const { token, github, plain } = libraries.properties
+    expect(describeField(token, libraries)).toEqual({ kind: 'credential', of: 'github' })
+    expect(describeField(github, libraries)).toEqual({ kind: 'credentials', of: 'github' })
+    expect(describeField(plain, libraries)).toMatchObject({ kind: 'tags' })
+    expect(describeField({ 'x-credential': 'ai-provider' }, null)).toEqual({
+      kind: 'credential',
+      of: 'ai-provider',
+    })
+    expect(describeField({ type: 'object', 'x-credential': 'github' }, null)).toMatchObject({
+      kind: 'object',
+    })
+    expect(initialValue(token, libraries)).toBe('')
+    expect(initialValue(github, libraries)).toEqual([])
+  })
+
   test('hasForm', () => {
     expect(hasForm(quality)).toBeTrue()
     expect(hasForm({})).toBeFalse()

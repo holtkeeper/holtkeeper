@@ -101,7 +101,11 @@ export function createApiSurface(deps: ServerDeps) {
       artifacts,
       ...(store.kv ? { kv: store.kv } : {}),
       github: async () =>
-        githubClientFor(deps.credentials, (await librariesConfigOf(store.settings))?.github),
+        githubClientFor(
+          deps.credentials,
+          (await librariesConfigOf(store.settings))?.github,
+          store.kv ? { kv: store.kv } : {},
+        ),
       summarize: async (repo) => {
         const target = repo ? parseRepo(repo) : undefined
         if (!target || !deps.agentFor || !canRead(target)) return undefined

@@ -23,6 +23,7 @@ import { builtinAnalyses } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
 import {
   fleetLibraryUses,
+  githubClientFor,
   librariesConfig,
   librariesSetting,
   lastLibraryRun,
@@ -264,6 +265,61 @@ describe('libraries setting', () => {
     expect(parsed?.intervalMs).toBe(43_200_000)
     expect(parsed?.digests).toBe(false)
     expect(librariesConfig({ interval: '30m' })).toBeUndefined()
+  })
+
+  test('reads github as a list of credential references, one string included', () => {
+    expect(librariesConfig({})?.github).toEqual([])
+    expect(librariesConfig({ github: 'gh-a' })?.github).toEqual(['gh-a'])
+    expect(librariesConfig({ github: ['gh-a', 'gh-b', 'gh-a'] })?.github).toEqual(['gh-a', 'gh-b'])
+    expect(librariesConfig({ github: [''] })).toBeUndefined()
+  })
+})
+
+describe('githubClientFor', () => {
+  const credentials = {
+    list: async () => [
+      { id: 'c1', name: 'org-a' },
+      { id: 'c2', name: 'org-b' },
+      { id: 'c3', name: 'broken' },
+    ],
+    reveal: async (id: string) => {
+      if (id === 'c3') throw new Error('sealed with another key')
+      return `token-${id}`
+    },
+  }
+
+  test('pools the tokens of every readable reference and logs the rest', async () => {
+    const lines: string[] = []
+    const seen: string[] = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('authorization') ?? ''
+      if ((input instanceof Request ? input.url : input.toString()).endsWith('/user'))
+        return new Response(
+          JSON.stringify({ login: authorization.endsWith('c1') ? 'bot-a' : 'bot-b' }),
+        )
+      seen.push(authorization)
+      return new Response('{}', {
+        headers: { 'x-ratelimit-remaining': authorization.endsWith('c1') ? '1' : '100' },
+      })
+    }) as typeof fetch
+    try {
+      const client = await githubClientFor(credentials, ['org-a', 'c2', 'broken', 'missing'], {
+        log: (line) => lines.push(line),
+      })
+      expect(client.authenticated).toBe(true)
+      await client.rest('/repos/x/y')
+      await client.rest('/repos/x/y')
+      expect(seen).toEqual(['Bearer token-c1', 'Bearer token-c2'])
+    } finally {
+      globalThis.fetch = realFetch
+    }
+    expect(lines.join('\n')).toContain('"broken"')
+    expect(lines.join('\n')).toContain('no credential "missing"')
+  })
+
+  test('is anonymous without references', async () => {
+    expect((await githubClientFor(credentials, [])).authenticated).toBe(false)
   })
 })
 

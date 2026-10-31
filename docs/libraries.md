@@ -47,14 +47,18 @@ Without a token GitHub allows 60 requests an hour, which runs out on the first f
 
 The token is only used to read public repositories. It never reaches agents or jobs.
 
+**More than one token.** You can add several `github` credentials and list them all in the setting; every request goes to the token with the most of its limit left, and when one runs out the next takes over. GitHub counts the limit per account, not per token: two tokens of the same person (even made for two organizations) share one 5000 an hour, so Holtkeeper checks whose each token is on the first request and drops duplicates with a log line `github: two tokens belong to …`. Capacity only grows with tokens of different accounts, such as a bot account per organization that owns it.
+
+**What a run costs.** Requests are conditional: Holtkeeper keeps each answer's `ETag` and asks again with `If-None-Match`, and GitHub does not count the `304 Not Modified` it answers when nothing changed, so later runs spend requests only on what is new. When every token is used up, the run pauses until GitHub resets the limit (at most an hour), then continues where it stopped; it does not fail its sources. The first run of a few hundred libraries takes roughly 30–40 requests per library.
+
 ### 2. Turn the index on
 
-Open **Settings → Libraries → Library docs**, add an entry for **All repositories** (entries for groups or repositories are ignored) and pick the **On** preset, then set **github** to the credential from step 1. As a value:
+Open **Settings → Libraries → Library docs**, add an entry for **All repositories** (entries for groups or repositories are ignored) and pick the **On** preset, then add the credential from step 1 under **github** (one or more). As a value:
 
 ```json
 {
   "enabled": true,
-  "github": "github-libraries"
+  "github": ["github-libraries"]
 }
 ```
 
@@ -64,7 +68,7 @@ Everything else has defaults:
 | -------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `enabled`      | `true`                                            | `false` stops indexing; what is indexed stays readable                                           |
 | `interval`     | `1d`                                              | How often to look for new releases and uses, `<n>m`, `<n>h` or `<n>d`, at least `1h`             |
-| `github`       | none                                              | Id or name of the GitHub token credential                                                        |
+| `github`       | `[]`                                              | Ids or names of GitHub token credentials, shared by every request; a single string also works    |
 | `digests`      | `false`                                           | Summarize issue threads agents hit with the configured LLM (see [Issue digests](#issue-digests)) |
 | `exclude`      | `["@types/*"]`                                    | Globs of library names never indexed; `Go:` limits a glob to Go, e.g. `Go:github.com/acme/**`    |
 | `include`      | `[]`                                              | Globs indexed even when no repository uses them                                                  |
@@ -138,13 +142,14 @@ With `"digests": true`, the first time an issue thread comes up in a search it i
 
 ## Troubleshooting
 
-| Symptom                                                         | Cause and fix                                                                                                                       |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| The Libraries page says indexing is off                         | No `libraries` entry for **All repositories**, or `enabled: false`                                                                  |
-| The page is empty after a run                                   | No `usages` or `fleet` records yet: run those analyses first                                                                        |
-| `libraries: … reading GitHub anonymously` in the log            | The `github` credential is missing or cannot be read: check its name or id                                                          |
-| Many `repository`/`releases`/`issues` failures with rate limits | Anonymous GitHub, or a token shared with heavy other use; add or replace the token. Failed sources are retried on the next run      |
-| `api` is `missing` for an npm package                           | The package ships no `.d.ts`; types published separately as `@types/…` are not used for it                                          |
-| An agent gets "not indexed" for a library you can see           | The token's owner cannot read any repository that uses it, the library is excluded, or the run has not reached it yet               |
-| `repository`, `releases`, `issues` are `skipped`                | The library is not hosted on GitHub; only the package archive and API are indexed                                                   |
-| `repository` is `missing`: "larger than … bytes"                | The repository tarball at that tag is over 100 MB compressed, so its docs are not downloaded; the package archive and API still are |
+| Symptom                                                                           | Cause and fix                                                                                                                                        |
+| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Libraries page says indexing is off                                           | No `libraries` entry for **All repositories**, or `enabled: false`                                                                                   |
+| The page is empty after a run                                                     | No `usages` or `fleet` records yet: run those analyses first                                                                                         |
+| `libraries: no GitHub token could be read; reading GitHub anonymously` in the log | None of the `github` credentials exists or can be read: check their names or ids. A single missing one is logged as `no credential "…"` and left out |
+| Runs take long and the log shows `github: core rate limit exhausted; waiting …`   | Every token is used up; the run waits for the reset and goes on. Add a token of another account to share the load                                    |
+| `github: two tokens belong to …` in the log                                       | Both tokens are of one GitHub account and share its limit; one of them is not used                                                                   |
+| `api` is `missing` for an npm package                                             | The package ships no `.d.ts`; types published separately as `@types/…` are not used for it                                                           |
+| An agent gets "not indexed" for a library you can see                             | The token's owner cannot read any repository that uses it, the library is excluded, or the run has not reached it yet                                |
+| `repository`, `releases`, `issues` are `skipped`                                  | The library is not hosted on GitHub; only the package archive and API are indexed                                                                    |
+| `repository` is `missing`: "larger than … bytes"                                  | The repository tarball at that tag is over 100 MB compressed, so its docs are not downloaded; the package archive and API still are                  |

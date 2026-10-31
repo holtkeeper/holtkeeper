@@ -1,7 +1,8 @@
 import type { CredentialView } from '@holtkeeper/api'
+import { X } from 'lucide-react'
 
 import { useCredentials } from '../../api/queries.ts'
-import { LinkButton, Notice, Placeholder, Select, TextField } from '../../ui/index.ts'
+import { LinkButton, Notice, Placeholder, Select, TagInput, TextField } from '../../ui/index.ts'
 import { aiProviderKinds } from '../credentials/form.ts'
 import { useSession } from '../shell/session.ts'
 
@@ -28,6 +29,35 @@ const credentialsOf = (credentials: readonly CredentialView[], of: string) =>
 /** The credential a stored reference (id or name) points at. */
 export const findCredential = (credentials: readonly CredentialView[], reference: unknown) =>
   credentials.find((c) => c.id === reference) ?? credentials.find((c) => c.name === reference)
+
+function MissingNotice({ of }: { of: string }) {
+  const notice = missing[of] ?? {
+    title: 'No credential yet',
+    text: 'Add a credential first, then pick it here.',
+  }
+  return (
+    <Notice tone="warning" title={notice.title}>
+      <span className="flex flex-col items-start gap-2">
+        {notice.text}
+        <LinkButton to="/credentials" size="sm">
+          Open Credentials
+        </LinkButton>
+      </span>
+    </Notice>
+  )
+}
+
+const optionsOf = (credentials: readonly CredentialView[]) =>
+  credentials.map((c) => ({
+    id: c.id,
+    text: c.name,
+    label: (
+      <span className="flex items-center gap-2">
+        {c.name}
+        <span className="font-mono text-xs text-muted">{c.kind}</span>
+      </span>
+    ),
+  }))
 
 /** Picks a credential for a setting that references one; stores its id. */
 export function CredentialPicker({
@@ -58,38 +88,101 @@ export function CredentialPicker({
   if (credentials.isPending) return <Placeholder className="h-16" />
 
   const options = credentialsOf(credentials.data?.credentials ?? [], of)
-  if (options.length === 0) {
-    const notice = missing[of] ?? {
-      title: 'No credential yet',
-      text: 'Add a credential first, then pick it here.',
-    }
-    return (
-      <Notice tone="warning" title={notice.title}>
-        <span className="flex flex-col items-start gap-2">
-          {notice.text}
-          <LinkButton to="/credentials" size="sm">
-            Open Credentials
-          </LinkButton>
-        </span>
-      </Notice>
-    )
-  }
+  if (options.length === 0) return <MissingNotice of={of} />
   return (
     <Select
       label={label}
-      options={options.map((c) => ({
-        id: c.id,
-        text: c.name,
-        label: (
-          <span className="flex items-center gap-2">
-            {c.name}
-            <span className="font-mono text-xs text-muted">{c.kind}</span>
-          </span>
-        ),
-      }))}
+      options={optionsOf(options)}
       value={findCredential(options, value)?.id}
       onChange={onChange}
       placeholder="Choose a credential…"
     />
+  )
+}
+
+/**
+ * Picks any number of credentials of one family; stores their ids in order. References that match
+ * no credential (an old name, a deleted id) stay listed as typed until removed.
+ */
+export function CredentialsPicker({
+  of,
+  value,
+  onChange,
+  label,
+}: {
+  of: string
+  value: unknown
+  onChange: (value: string[]) => void
+  label: string
+}) {
+  const { can } = useSession()
+  const readable = can('credentials:read')
+  const credentials = useCredentials(readable)
+  const references = Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === 'string')
+    : []
+
+  if (!readable) {
+    return (
+      <TagInput
+        label={label}
+        values={references}
+        onChange={onChange}
+        placeholder="Type and press Enter"
+        description="Ids or names of credentials. You cannot list credentials, so type them in."
+      />
+    )
+  }
+  if (credentials.isPending) return <Placeholder className="h-16" />
+
+  const all = credentials.data?.credentials ?? []
+  const options = credentialsOf(all, of)
+  const chosen = new Set(references.map((r) => findCredential(all, r)?.id ?? r))
+  const rest = options.filter((c) => !chosen.has(c.id))
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium">{label}</span>
+      {references.length ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {references.map((reference) => {
+            const credential = findCredential(all, reference)
+            const name = credential?.name ?? reference
+            return (
+              <li
+                key={reference}
+                className="inline-flex items-center gap-1 rounded-lg bg-default px-2 py-0.5 text-sm"
+              >
+                {name}
+                {credential ? (
+                  <span className="font-mono text-xs text-muted">{credential.kind}</span>
+                ) : (
+                  <span className="text-xs text-warning">not found</span>
+                )}
+                <button
+                  type="button"
+                  aria-label={`Remove ${name}`}
+                  className="rounded p-0.5 text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
+                  onClick={() => onChange(references.filter((r) => r !== reference))}
+                >
+                  <X className="size-3" />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
+      {options.length === 0 ? (
+        <MissingNotice of={of} />
+      ) : rest.length ? (
+        <Select
+          aria-label={`Add to ${label}`}
+          options={optionsOf(rest)}
+          value={undefined}
+          onChange={(id) => onChange([...references, id])}
+          placeholder="Add a credential…"
+        />
+      ) : null}
+    </div>
   )
 }

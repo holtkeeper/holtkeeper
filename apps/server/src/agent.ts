@@ -434,7 +434,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
                   },
                 },
                 librariesConfig?.github,
-                log,
+                { log, ...(store.kv ? { kv: store.kv } : {}) },
               ),
             summarize: async () =>
               librariesConfig?.digests && self ? agentSummarize(self) : undefined,
