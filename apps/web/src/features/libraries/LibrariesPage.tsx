@@ -6,7 +6,6 @@ import { useDeferredValue, useEffect, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { useLibraries, useReindexLibraries } from '../../api/queries.ts'
 import { formatDateTime, formatRelative, plural } from '../../lib/format.ts'
-import { type GitHubRange, defaultGitHubRange, parseGitHubRange } from '../../lib/github-usage.ts'
 import {
   type LibraryEcosystem,
   libraryEcosystems,
@@ -34,7 +33,6 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
-import { GitHubTokensPanel } from './GitHubTokensPanel.tsx'
 
 const shownVersions = 4
 
@@ -74,7 +72,7 @@ export function AgentToolsNote() {
 
 /** Third-party libraries indexed for agents: what is indexed, failures and the last run. */
 export function LibrariesPage() {
-  const search: { q?: string; ecosystem?: string; days?: number } = useSearch({ strict: false })
+  const search: { q?: string; ecosystem?: string } = useSearch({ strict: false })
   const navigate = useNavigate()
   const { can } = useSession()
   const [query, setQuery] = useState(search.q ?? '')
@@ -92,11 +90,10 @@ export function LibrariesPage() {
         search: {
           ...(q ? { q } : {}),
           ...(search.ecosystem ? { ecosystem: search.ecosystem } : {}),
-          ...(search.days ? { days: search.days } : {}),
         },
         replace: true,
       })
-  }, [deferred, navigate, search.q, search.ecosystem, search.days])
+  }, [deferred, navigate, search.q, search.ecosystem])
 
   const setEcosystem = (next: LibraryEcosystem | 'all') =>
     void navigate({
@@ -104,19 +101,6 @@ export function LibrariesPage() {
       search: {
         ...(search.q ? { q: search.q } : {}),
         ...(next !== 'all' ? { ecosystem: next } : {}),
-        ...(search.days ? { days: search.days } : {}),
-      },
-      replace: true,
-    })
-
-  const days = parseGitHubRange(search.days) ?? defaultGitHubRange
-  const setDays = (next: GitHubRange) =>
-    void navigate({
-      to: '/libraries',
-      search: {
-        ...(search.q ? { q: search.q } : {}),
-        ...(search.ecosystem ? { ecosystem: search.ecosystem } : {}),
-        ...(next !== defaultGitHubRange ? { days: next } : {}),
       },
       replace: true,
     })
@@ -227,7 +211,6 @@ export function LibrariesPage() {
               />
             )}
           </Panel>
-          {can('settings:read') ? <GitHubTokensPanel days={days} onDaysChange={setDays} /> : null}
         </>
       )}
     </Page>

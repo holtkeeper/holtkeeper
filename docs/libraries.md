@@ -51,7 +51,7 @@ The token is only used to read public repositories. It never reaches agents or j
 
 **What a run costs.** Requests are conditional: Holtkeeper keeps each answer's `ETag` and asks again with `If-None-Match`, and GitHub does not count the `304 Not Modified` it answers when nothing changed, so later runs spend requests only on what is new. When every token is used up, the run pauses until GitHub resets the limit (at most an hour), then continues where it stopped; it does not fail its sources. The first run of a few hundred libraries takes roughly 30–40 requests per library.
 
-**Watching the tokens.** The **Libraries** page has a **GitHub tokens** card (global `settings:read`): for the pool, how much of each limit (`core` for REST, `search`, `graphql` for issues) is used right now across the distinct accounts and when it resets; for each token its account, live limits, requests, how many were answered `304` from the cache and how many hit a limit; waits; and requests per day by token over 7, 30 or 90 days. A token of an account that is already in the pool is marked as a duplicate there.
+**Watching the tokens.** The **Credentials** page (global `settings:read`) shows, in the card of every `github` credential, its GitHub account, requests, how many were answered `304` from the cache and how many hit a limit, and the live `core` limit; **Usage details** opens the other limits (`search`, `graphql` for issues) and the counts per resource. A token of an account that is already in the pool is marked as a duplicate. Below the cards, **GitHub API usage** sums the pool: how much of each limit is used across the distinct accounts and when it resets, waits for a reset, and requests per day by token over 7, 30 or 90 days.
 
 ### 2. Nothing else to set
 

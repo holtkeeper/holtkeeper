@@ -10,7 +10,6 @@ import { type AuditsSearch, isTrigger } from './features/audits/labels.ts'
 import { LinkPage } from './features/auth/LinkPage.tsx'
 import { AuthGate } from './features/shell/AuthGate.tsx'
 import { NotFound } from './features/shell/NotFound.tsx'
-import { parseGitHubRange } from './lib/github-usage.ts'
 import { parseEcosystem } from './lib/libraries.ts'
 import { ToastHost } from './ui/index.ts'
 
@@ -260,12 +259,9 @@ const librariesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'libraries',
   component: LibrariesPage,
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { q?: string; ecosystem?: string; days?: number } => ({
+  validateSearch: (search: Record<string, unknown>): { q?: string; ecosystem?: string } => ({
     ...(typeof search.q === 'string' && search.q ? { q: search.q } : {}),
     ...(parseEcosystem(search.ecosystem) ? { ecosystem: parseEcosystem(search.ecosystem) } : {}),
-    ...(parseGitHubRange(search.days) ? { days: parseGitHubRange(search.days) } : {}),
   }),
 })
 

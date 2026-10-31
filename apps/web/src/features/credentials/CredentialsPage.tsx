@@ -14,7 +14,12 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentialMutations, useCredentials, useTestCredential } from '../../api/queries.ts'
+import {
+  useCredentialMutations,
+  useCredentials,
+  useGitHubTokens,
+  useTestCredential,
+} from '../../api/queries.ts'
 import {
   daysUntil,
   expiryTone,
@@ -23,6 +28,7 @@ import {
   formatRelative,
   plural,
 } from '../../lib/format.ts'
+import { type GitHubRange, defaultGitHubRange } from '../../lib/github-usage.ts'
 import {
   Button,
   Chip,
@@ -39,6 +45,7 @@ import { useSession } from '../shell/session.ts'
 import { CredentialDialog } from './CredentialDialog.tsx'
 import { ForgesSection } from './ForgesSection.tsx'
 import { aiProviderKinds } from './form.ts'
+import { GitHubCredentialUsage, GitHubUsageSection, usageHidden } from './GitHubUsage.tsx'
 import { ModelsDialog } from './ModelsDialog.tsx'
 
 function Expiry({ at }: { at: string | undefined }) {
@@ -72,6 +79,14 @@ export function CredentialsPage() {
   const [browsing, setBrowsing] = useState<CredentialView | null>(null)
   const writable = can('credentials:write')
   const list = credentials.data?.credentials ?? []
+  const [days, setDays] = useState<GitHubRange>(defaultGitHubRange)
+  const github = useGitHubTokens(days, can('settings:read'))
+  const githubUsage = usageHidden(github.error) ? undefined : github
+  const githubTokens = githubUsage?.data?.tokens ?? []
+  const showGitHub =
+    githubUsage !== undefined &&
+    (list.some((credential) => credential.kind === 'github') ||
+      (githubUsage.data?.totals.requests ?? 0) > 0)
 
   return (
     <Page
@@ -144,6 +159,13 @@ export function CredentialsPage() {
                     <Chip>Manual rotation</Chip>
                   ) : null}
                 </div>
+                {credential.kind === 'github' && githubUsage?.data ? (
+                  <GitHubCredentialUsage
+                    token={githubTokens.find((token) => token.credentialId === credential.id)}
+                    tokens={githubTokens}
+                    days={days}
+                  />
+                ) : null}
                 {credential.lastError ? (
                   <div className="flex items-start gap-2 rounded-xl bg-danger-soft p-2.5 text-xs text-danger-soft-foreground">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
@@ -236,6 +258,12 @@ export function CredentialsPage() {
           </AnimatePresence>
         </ul>
       )}
+
+      {showGitHub && githubUsage ? (
+        <div className="mt-6">
+          <GitHubUsageSection days={days} onDaysChange={setDays} usage={githubUsage} />
+        </div>
+      ) : null}
 
       <div className="mt-6">
         <ForgesSection />

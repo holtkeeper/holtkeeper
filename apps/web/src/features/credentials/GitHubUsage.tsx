@@ -6,11 +6,10 @@ import type {
   GitHubTokenView,
 } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
-import { AlertTriangle, Copy } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { AlertTriangle, ChevronDown, Copy } from 'lucide-react'
+import { useState } from 'react'
 
 import { ApiError } from '../../api/client.ts'
-import { useGitHubTokens } from '../../api/queries.ts'
 import { formatDateTime, formatDuration, formatRelative, plural } from '../../lib/format.ts'
 import {
   type GitHubRange,
@@ -34,32 +33,30 @@ import {
   Placeholder,
   Segmented,
   StatCard,
-  Table,
-  Td,
-  Th,
   Tooltip,
 } from '../../ui/index.ts'
 import { ChartBlock } from '../reports/blocks/ChartBlock.tsx'
 
 type ChartBlockData = Extract<Block, { type: 'chart' }>
 
-const hidden = (error: unknown) =>
+/** Whether a usage request failed because the caller may not see it or the server has none. */
+export const usageHidden = (error: unknown) =>
   error instanceof ApiError && (error.status === 403 || error.status === 404)
 
-/** Use and live limits of the GitHub tokens the library indexer shares; hidden without access. */
-export function GitHubTokensPanel({
+/** What the GitHub tokens did together: pool capacity, totals and requests per day. */
+export function GitHubUsageSection({
   days,
   onDaysChange,
+  usage,
 }: {
   days: GitHubRange
   onDaysChange: (days: GitHubRange) => void
+  usage: { data?: GitHubTokenUsage; isPending: boolean; error: unknown }
 }) {
-  const usage = useGitHubTokens(days)
-  if (hidden(usage.error)) return null
   return (
     <Panel
-      title="GitHub tokens"
-      description={`Requests the indexer sent to GitHub over the last ${days} days and what each token has left`}
+      title="GitHub API usage"
+      description={`Requests sent to GitHub over the last ${days} days by every github token, and what the pool has left`}
       actions={
         <Segmented
           aria-label="Range"
@@ -70,17 +67,17 @@ export function GitHubTokensPanel({
       }
     >
       {usage.isPending ? (
-        <Placeholder className="h-64" />
-      ) : usage.isError ? (
-        <ErrorState error={usage.error} />
+        <Placeholder className="h-48" />
+      ) : usage.data ? (
+        <PoolUsage usage={usage.data} />
       ) : (
-        <Usage usage={usage.data} />
+        <ErrorState error={usage.error} />
       )}
     </Panel>
   )
 }
 
-function Usage({ usage }: { usage: GitHubTokenUsage }) {
+function PoolUsage({ usage }: { usage: GitHubTokenUsage }) {
   const capacity = byResource(usage.capacity)
   const chart = dailyChart(usage)
   const anonymous = sumCounts(usage.anonymous)
@@ -138,42 +135,11 @@ function Usage({ usage }: { usage: GitHubTokenUsage }) {
         />
       </div>
       {chart.series.length ? <ChartBlock block={block} /> : null}
-      {usage.tokens.length ? (
-        <Table label="GitHub tokens">
-          <thead>
-            <tr>
-              <Th>Token</Th>
-              <Th>Live limits</Th>
-              <Th align="right">Requests</Th>
-              <Th align="right">Saved (304)</Th>
-              <Th align="right">Limited</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {usage.tokens.map((token) => (
-              <TokenRow key={token.credentialId} token={token} tokens={usage.tokens} />
-            ))}
-            {anonymous.requests ? (
-              <tr className="hover:bg-default/40">
-                <Td>
-                  <div className="font-medium">Anonymous</div>
-                  <div className="text-xs text-muted">sent without a token, 60 an hour</div>
-                </Td>
-                <Td className="text-muted">—</Td>
-                <CountCells usage={usage.anonymous} />
-              </tr>
-            ) : null}
-          </tbody>
-        </Table>
-      ) : (
-        <Notice tone="warning" title="No GitHub token configured">
-          GitHub allows 60 anonymous requests an hour, which runs out on the first few libraries.
-          Add a credential of kind github on the{' '}
-          <Link to="/credentials" className="font-medium hover:underline">
-            Credentials
-          </Link>{' '}
-          page: every one is used, and a new run starts with it. The{' '}
-          <code className="font-mono text-xs">github</code> field of the{' '}
+      {usage.tokens.length === 0 ? (
+        <Notice tone="warning" title="No GitHub token">
+          GitHub allows 60 anonymous requests an hour, which the library index spends on its first
+          few libraries. Add a credential of kind github: every one is used, and a new index run
+          starts with it. The <code className="font-mono text-xs">github</code> field of the{' '}
           <Link
             to="/settings"
             search={{ tab: 'libraries' }}
@@ -186,7 +152,12 @@ function Usage({ usage }: { usage: GitHubTokenUsage }) {
             ? ` ${plural(anonymous.requests, 'anonymous request')} in the range.`
             : null}
         </Notice>
-      )}
+      ) : anonymous.requests ? (
+        <p className="text-xs text-muted">
+          {plural(anonymous.requests, 'request')} went without a token (60 an hour), e.g. before the
+          first token was added.
+        </p>
+      ) : null}
     </div>
   )
 }
@@ -222,79 +193,92 @@ function LimitBar({ resource, limit }: { resource: string; limit: GitHubLimitVie
   )
 }
 
-function TokenRow({ token, tokens }: { token: GitHubTokenView; tokens: GitHubTokenView[] }) {
-  const limits = byResource(token.limits)
-  return (
-    <tr className="align-top hover:bg-default/40">
-      <Td className="max-w-[22rem]">
-        <Link to="/credentials" className="font-medium hover:underline">
-          {token.name}
-        </Link>
-        <div className="text-xs text-muted">
-          {token.login ? `@${token.login}` : 'account unknown'}
-        </div>
-        {token.duplicateOf || token.error ? (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {token.duplicateOf ? (
-              <Chip tone="warning">
-                <Copy className="size-3" />
-                duplicate of {tokenName(tokens, token.duplicateOf)} — shares its limit, not used
-              </Chip>
-            ) : null}
-            {token.error ? (
-              <Tooltip content={token.error}>
-                <span tabIndex={0} className="inline-flex max-w-full">
-                  <Chip tone="danger">
-                    <AlertTriangle className="size-3" />
-                    <span className="truncate">{token.error}</span>
-                  </Chip>
-                </span>
-              </Tooltip>
-            ) : null}
-          </div>
-        ) : null}
-      </Td>
-      <Td className="min-w-56">
-        {limits.length ? (
-          <div className="flex flex-col gap-2">
-            {limits.map(([resource, limit]) => (
-              <LimitBar key={resource} resource={resource} limit={limit} />
-            ))}
-          </div>
-        ) : (
-          <span className="text-muted">—</span>
-        )}
-      </Td>
-      <CountCells usage={token.usage} />
-    </tr>
-  )
-}
-
-function CountCells({ usage }: { usage: Record<string, GitHubRequestCounts> }) {
-  const total = sumCounts(usage)
-  const resources = byResource(usage)
-  const share = savedShare(total)
-  const withBreakdown = (value: ReactNode) =>
-    resources.length ? (
-      <Tooltip content={<Breakdown resources={resources} />}>
-        <span tabIndex={0} className="tabular underline decoration-dotted underline-offset-4">
-          {value}
-        </span>
-      </Tooltip>
-    ) : (
-      <span className="tabular">{value}</span>
+/**
+ * The usage of one github credential inside its card: account, the `core` limit and counts at a
+ * glance, every limit and the per-resource counts when expanded. `token` is absent when the
+ * library index does not use the credential.
+ */
+export function GitHubCredentialUsage({
+  token,
+  tokens,
+  days,
+}: {
+  token: GitHubTokenView | undefined
+  tokens: readonly GitHubTokenView[]
+  days: number
+}) {
+  const [open, setOpen] = useState(false)
+  if (!token)
+    return (
+      <p className="text-xs text-muted">
+        Not used by the library index: the <code className="font-mono">github</code> field of the
+        libraries setting lists other credentials.
+      </p>
     )
+  const limits = byResource(token.limits)
+  const core = limits.find(([resource]) => resource === 'core')
+  const total = sumCounts(token.usage)
+  const share = savedShare(total)
+  const resources = byResource(token.usage)
   return (
-    <>
-      <Td align="right">{withBreakdown(formatCount(total.requests))}</Td>
-      <Td align="right" className="tabular">
-        {formatCount(total.notModified)}
-        {share === undefined ? null : <span className="ml-1 text-xs text-muted">{share}%</span>}
-      </Td>
-      <Td align="right" className={total.limited ? 'tabular text-warning' : 'tabular'}>
-        {formatCount(total.limited)}
-      </Td>
-    </>
+    <section className="flex flex-col gap-2 rounded-xl border border-separator p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span className="font-medium text-foreground">
+          {token.login ? `@${token.login}` : 'GitHub account unknown'}
+        </span>
+        <span className="tabular text-muted">
+          {formatCount(total.requests)} requests in {days} days
+          {share === undefined ? '' : ` · ${share}% from the cache`}
+          {total.limited ? ` · ${formatCount(total.limited)} limited` : ''}
+        </span>
+      </div>
+      {token.duplicateOf || token.error ? (
+        <div className="flex flex-wrap gap-1">
+          {token.duplicateOf ? (
+            <Chip tone="warning">
+              <Copy className="size-3" />
+              same account as {tokenName(tokens, token.duplicateOf)}: shares its limit, not used
+            </Chip>
+          ) : null}
+          {token.error ? (
+            <Tooltip content={token.error}>
+              <span tabIndex={0} className="inline-flex max-w-full">
+                <Chip tone="danger">
+                  <AlertTriangle className="size-3" />
+                  <span className="truncate">{token.error}</span>
+                </Chip>
+              </span>
+            </Tooltip>
+          ) : null}
+        </div>
+      ) : null}
+      {core ? <LimitBar resource={core[0]} limit={core[1]} /> : null}
+      {limits.length || resources.length ? (
+        <button
+          type="button"
+          className="flex items-center gap-1 self-start text-xs font-medium text-muted hover:text-foreground"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+        >
+          <ChevronDown className={`size-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+          {open ? 'Hide details' : 'Usage details'}
+        </button>
+      ) : null}
+      {open ? (
+        <div className="flex flex-col gap-3">
+          {limits.filter(([resource]) => resource !== 'core').length ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {limits
+                .filter(([resource]) => resource !== 'core')
+                .map(([resource, limit]) => (
+                  <LimitBar key={resource} resource={resource} limit={limit} />
+                ))}
+            </div>
+          ) : null}
+          {resources.length ? <Breakdown resources={resources} /> : null}
+        </div>
+      ) : null}
+    </section>
   )
 }
 
@@ -305,7 +289,7 @@ function Breakdown({ resources }: { resources: [string, GitHubRequestCounts][] }
         <tr className="text-muted">
           <th className="pr-3 text-left font-normal">Resource</th>
           <th className="px-2 text-right font-normal">Requests</th>
-          <th className="px-2 text-right font-normal">304</th>
+          <th className="px-2 text-right font-normal">From cache (304)</th>
           <th className="pl-2 text-right font-normal">Limited</th>
         </tr>
       </thead>
