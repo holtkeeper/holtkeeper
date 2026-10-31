@@ -176,6 +176,9 @@ export interface AnalysisRecord<Data = unknown> {
   data: Data
 }
 
+/** An analysis record without its data. */
+export type AnalysisHead = Omit<AnalysisRecord, 'data'>
+
 export interface AnalysisQuery {
   repo?: RepoRef
   kind?: string
@@ -190,6 +193,8 @@ export interface AnalysisStore {
   add(record: Omit<AnalysisRecord, 'id'>): Promise<AnalysisRecord>
   get(id: string): Promise<AnalysisRecord | undefined>
   list(query?: AnalysisQuery): Promise<AnalysisRecord[]>
+  /** What `list` returns for the same query, without reading the records' data. */
+  heads(query?: AnalysisQuery): Promise<AnalysisHead[]>
   /**
    * The newest record of every (repository, kind) pair, newest first; only pairs of `repo` and
    * of `kind` when given. Among records created at the same time the last added wins.

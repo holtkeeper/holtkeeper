@@ -263,6 +263,15 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
          AND (?4 IS NULL OR created_at < ?4)
        ORDER BY created_at DESC, seq DESC LIMIT ?5`,
     ),
+    analysisHeads: db.query<
+      AnalysisRow,
+      [string | null, string | null, string | null, string | null, number]
+    >(
+      `SELECT seq, id, repo_forge, repo_path, kind, ref, created_at, actor, 'null' AS data FROM analyses
+       WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR kind = ?3)
+         AND (?4 IS NULL OR created_at < ?4)
+       ORDER BY created_at DESC, seq DESC LIMIT ?5`,
+    ),
     analysisLatest: db.query<AnalysisRow, [string | null, string | null, string | null]>(
       `SELECT * FROM analyses WHERE seq IN (
          SELECT seq FROM (
@@ -393,6 +402,14 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
         return sql.analysisList
           .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind), orNull(before), limit)
           .map(toAnalysis)
+      },
+      async heads({ repo, kind, before, limit = 50 } = {}) {
+        return sql.analysisHeads
+          .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind), orNull(before), limit)
+          .map((row) => {
+            const { data: _, ...head } = toAnalysis(row)
+            return head
+          })
       },
       async latest({ repo, kind } = {}) {
         return sql.analysisLatest

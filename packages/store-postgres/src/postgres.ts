@@ -199,6 +199,21 @@ function coreStores(db: () => Promise<Db>): CoreStores {
           ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
         return rows.map(toAnalysis)
       },
+      async heads({ repo, kind, before, limit = 50 } = {}) {
+        const { sql, t } = await db()
+        const rows: AnalysisRow[] = await sql`
+          SELECT seq, id, repo_forge, repo_path, kind, ref, created_at, actor, NULL::jsonb AS data
+          FROM ${t.analyses}
+          WHERE (${orNull(repo?.forge)}::text IS NULL
+              OR (repo_forge = ${orNull(repo?.forge)}::text AND repo_path = ${orNull(repo?.path)}::text))
+            AND (${orNull(kind)}::text IS NULL OR kind = ${orNull(kind)}::text)
+            AND (${orNull(before)}::timestamptz IS NULL OR created_at < ${orNull(before)}::timestamptz)
+          ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
+        return rows.map((row) => {
+          const { data: _, ...head } = toAnalysis(row)
+          return head
+        })
+      },
       async latest({ repo, kind } = {}) {
         const { sql, t } = await db()
         const rows: AnalysisRow[] = await sql`

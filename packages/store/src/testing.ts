@@ -303,6 +303,15 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       })
       expect(previous.map((r) => r.ref)).toEqual(['v1.0.0'])
       expect(previous[0]?.data).toEqual({ kind: 'bundle', nested: { list: [1, 2] } })
+
+      const heads = await store.analyses.heads({ kind: 'bundle', limit: 2 })
+      expect(heads).toEqual(
+        (await store.analyses.list({ kind: 'bundle', limit: 2 })).map((full) => {
+          const { data: _, ...head } = full
+          return head
+        }),
+      )
+      expect(heads[0]).not.toHaveProperty('data')
     })
 
     test('analyses: latest keeps the newest record per repository and kind', async () => {

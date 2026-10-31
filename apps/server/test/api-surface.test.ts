@@ -9,6 +9,7 @@ import type {
   PublicApiPackageList,
   PublicApiSearchResult,
   PackageUsageView,
+  PublishedPackagesView,
   RepoUsageView,
   UpgradeImpactView,
   UsageSitesView,
@@ -23,6 +24,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
 
+import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { createApp } from '../src/app.ts'
 
 const config = parseConfig({
@@ -438,6 +440,34 @@ describe('usage routes and tools', () => {
     expect(hidden.status).toBe(404)
   })
 
+  test('counts the uses of the packages one repository defines', async () => {
+    const published = await get<PublishedPackagesView>(
+      '/api/api-surface/usages/published?repo=work:libs/ui',
+    )
+    expect(published.packages).toEqual([
+      {
+        name: '@acme/ui',
+        version: '1.1.0',
+        description: 'Buttons and links',
+        private: false,
+        dir: 'packages/ui',
+        exports: 3,
+        repos: 1,
+        count: 3,
+        files: 2,
+      },
+    ])
+    const games = await get<PublishedPackagesView>(
+      '/api/api-surface/usages/published?repo=work:games/a',
+    )
+    expect(games.packages.map((p) => [p.name, p.repos])).toEqual([['@games/engine', 0]])
+    const hidden = await get<PublishedPackagesView>(
+      '/api/api-surface/usages/published?repo=work:libs/ui',
+      asGames,
+    )
+    expect(hidden.packages).toEqual([])
+  })
+
   test('joins an API diff with the uses it breaks', async () => {
     const impact = await get<UpgradeImpactView>(
       '/api/api-surface/usages/impact?package=@acme/ui&from=1.0.0&to=1.1.0',
@@ -465,5 +495,36 @@ describe('usage routes and tools', () => {
     expect(packages.content[0]?.text).toContain(
       '- **@acme/ui** 1.0.0 — 3 uses in 2 files, 2 exports',
     )
+  })
+})
+
+describe('API catalog index', () => {
+  test('rescans read the data of new records only', async () => {
+    const reads: string[] = []
+    const analyses = {
+      ...store.analyses,
+      get: async (id: string) => {
+        reads.push(id)
+        return store.analyses.get(id)
+      },
+      list: async () => {
+        throw new Error('the catalog must not list records with their data')
+      },
+    }
+    const catalog = createApiCatalog({ analyses, now: () => now.getTime() })
+    expect((await catalog.packages(() => true)).map((pkg) => pkg.name)).toEqual([
+      '@acme/ui',
+      '@games/engine',
+    ])
+    expect(reads).toHaveLength(4)
+
+    const added = await add(
+      'games/b',
+      { packages: [ui('2.0.0', ['tab'])] },
+      '2026-10-02T00:00:00.000Z',
+    )
+    reads.length = 0
+    await catalog.rescan()
+    expect(reads).toEqual([added.id])
   })
 })

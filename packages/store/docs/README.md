@@ -2,22 +2,22 @@
 
 The persistence contract. Everything Holtkeeper stores goes through `Store`; implementations are interchangeable.
 
-| Part               | Holds                                                                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `auditRuns`        | Finished audit runs with full reports, newest first, filterable by repository                                                  |
-| `credentials`      | Forge accounts, API keys and AI providers; `secret` is always sealed by a `Vault`, kind-specific `options` are stored as given |
-| `settings`         | Scoped setting entries (see [@holtkeeper/settings](../../settings/docs/README.md))                                             |
-| `users`            | Users, passkeys, OIDC identities and one-time link tokens (only hashes)                                                        |
-| `activity`         | Who did what: logins, credential and setting changes, ingested audits                                                          |
-| `analyses`         | Analysis records: `list` newest first by repository, kind and time; `latest` the newest record of every (repository, kind)     |
-| `jobs`             | The task queue for background analyses (see below)                                                                             |
-| `knowledge`        | Knowledge base entries with version history and search (see below)                                                             |
-| `aiUsage`          | One record per LLM agent run: tokens, cost, outcome (see below)                                                                |
-| `ciJobs`           | Finished CI job attempts per repository, kept so job analytics fetch only what is new (see below)                              |
-| `audit`            | Optional. The append-only, hash-chained audit log (see below)                                                                  |
-| `externalAccounts` | Optional. External accounts (GitLab, GitHub, Slack ids) linked to principals (see below)                                       |
-| `libraries`        | Optional. Third-party library docs: libraries, indexed versions, document chunks and issues (see below)                        |
-| `database`         | Optional. Read-only introspection of the underlying database for the admin UI (see below)                                      |
+| Part               | Holds                                                                                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auditRuns`        | Finished audit runs with full reports, newest first, filterable by repository                                                                             |
+| `credentials`      | Forge accounts, API keys and AI providers; `secret` is always sealed by a `Vault`, kind-specific `options` are stored as given                            |
+| `settings`         | Scoped setting entries (see [@holtkeeper/settings](../../settings/docs/README.md))                                                                        |
+| `users`            | Users, passkeys, OIDC identities and one-time link tokens (only hashes)                                                                                   |
+| `activity`         | Who did what: logins, credential and setting changes, ingested audits                                                                                     |
+| `analyses`         | Analysis records: `list` newest first by repository, kind and time, `heads` the same without data; `latest` the newest record of every (repository, kind) |
+| `jobs`             | The task queue for background analyses (see below)                                                                                                        |
+| `knowledge`        | Knowledge base entries with version history and search (see below)                                                                                        |
+| `aiUsage`          | One record per LLM agent run: tokens, cost, outcome (see below)                                                                                           |
+| `ciJobs`           | Finished CI job attempts per repository, kept so job analytics fetch only what is new (see below)                                                         |
+| `audit`            | Optional. The append-only, hash-chained audit log (see below)                                                                                             |
+| `externalAccounts` | Optional. External accounts (GitLab, GitHub, Slack ids) linked to principals (see below)                                                                  |
+| `libraries`        | Optional. Third-party library docs: libraries, indexed versions, document chunks and issues (see below)                                                   |
+| `database`         | Optional. Read-only introspection of the underlying database for the admin UI (see below)                                                                 |
 
 ## Jobs
 

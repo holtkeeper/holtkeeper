@@ -18,6 +18,8 @@ import type { AnalysisStore } from '@holtkeeper/store'
 
 const kind = 'api-surface'
 const pageSize = 20
+const headPageSize = 500
+const readConcurrency = 4
 
 interface IndexedPackage {
   name: string
@@ -115,39 +117,51 @@ export function createApiCatalog(options: ApiCatalogOptions) {
   let pending: Promise<void> | undefined
   const cache = new Map<string, ApiSurfaceData>()
 
+  /** Indexes the records of `ids` not indexed yet, reading their data a few at a time. */
+  const indexMissing = async (ids: string[], into: Map<string, IndexedRecord>) => {
+    for (let start = 0; start < ids.length; start += readConcurrency) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded parallel reads
+      const batch = await Promise.all(
+        ids.slice(start, start + readConcurrency).map((id) => options.analyses.get(id)),
+      )
+      for (const record of batch) {
+        const indexed = record && indexRecord(record)
+        if (indexed) into.set(indexed.id, indexed)
+      }
+    }
+  }
+
   const scan = async () => {
     const next = new Map<string, IndexedRecord>()
+    const missing: string[] = []
     let before: string | undefined
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- pages depend on the previous one
-      const page = await options.analyses.list({
+      const page = await options.analyses.heads({
         kind,
-        limit: pageSize,
+        limit: headPageSize,
         ...(before ? { before } : {}),
       })
-      for (const record of page) {
-        const indexed = records.get(record.id) ?? indexRecord(record)
-        if (indexed) next.set(record.id, indexed)
+      for (const head of page) {
+        const known = records.get(head.id)
+        if (known) next.set(head.id, known)
+        else missing.push(head.id)
       }
-      if (page.length < pageSize) break
+      if (page.length < headPageSize) break
       before = page.at(-1)?.createdAt
     }
+    await indexMissing(missing, next)
     records = next
     scannedAt = now()
     checkedAt = scannedAt
   }
 
   const check = async () => {
-    const page = await options.analyses.list({ kind, limit: pageSize })
-    let fresh = 0
-    for (const record of page) {
-      if (records.has(record.id)) continue
-      const indexed = indexRecord(record)
-      if (indexed) records.set(record.id, indexed)
-      fresh += 1
-    }
+    const page = await options.analyses.heads({ kind, limit: pageSize })
+    const fresh = page.filter((head) => !records.has(head.id)).map((head) => head.id)
+    await indexMissing(fresh, records)
     checkedAt = now()
-    if (fresh === page.length && page.length === pageSize) await scan()
+    if (fresh.length === page.length && page.length === pageSize) await scan()
   }
 
   const refresh = (force = false) => {

@@ -8,6 +8,7 @@ import { memoryKnowledge } from './knowledge.ts'
 import { memoryLibraries } from './libraries.ts'
 import type {
   ActivityEvent,
+  AnalysisQuery,
   AnalysisRecord,
   AuditRun,
   Identity,
@@ -41,6 +42,17 @@ export function memoryStore(): Store {
   const jobs = memoryJobs()
   const externalAccounts = memoryExternalAccounts()
 
+  const listAnalyses = ({ repo, kind, before, limit = 50 }: AnalysisQuery = {}) =>
+    newestFirst(
+      [...analyses.values()].filter(
+        (record) =>
+          (!repo || (record.repo.forge === repo.forge && record.repo.path === repo.path)) &&
+          (!kind || record.kind === kind) &&
+          (!before || record.createdAt < before),
+      ),
+      (record) => record.createdAt,
+    ).slice(0, limit)
+
   return {
     auditRuns: {
       async add(run) {
@@ -67,17 +79,12 @@ export function memoryStore(): Store {
         return clone(stored)
       },
       get: async (id) => clone(analyses.get(id)),
-      async list({ repo, kind, before, limit = 50 } = {}) {
-        const matching = [...analyses.values()].filter(
-          (record) =>
-            (!repo || (record.repo.forge === repo.forge && record.repo.path === repo.path)) &&
-            (!kind || record.kind === kind) &&
-            (!before || record.createdAt < before),
-        )
-        return newestFirst(matching, (record) => record.createdAt)
-          .slice(0, limit)
-          .map(clone)
-      },
+      list: async (query) => listAnalyses(query).map(clone),
+      heads: async (query) =>
+        listAnalyses(query).map((record) => {
+          const { data: _, ...head } = clone(record)
+          return head
+        }),
       async latest({ repo, kind } = {}) {
         const newest = new Map<string, AnalysisRecord>()
         for (const record of analyses.values()) {
