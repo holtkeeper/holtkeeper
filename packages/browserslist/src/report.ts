@@ -49,12 +49,18 @@ function metrics(data: BrowserslistData): Metric[] {
   ]
 }
 
+const autoMergeNote = {
+  off: '',
+  set: ', merges once its checks pass',
+  failed: ', auto-merge could not be set',
+}
+
 function blocks(data: BrowserslistData): Block[] {
   const result: Block[] = []
   if (data.mergeRequest)
     result.push({
       type: 'markdown',
-      text: `[Merge request !${data.mergeRequest.id}](${data.mergeRequest.url})${data.mergeRequest.draft ? ' (draft)' : ''}`,
+      text: `[Merge request !${data.mergeRequest.id}](${data.mergeRequest.url})${data.mergeRequest.draft ? ' (draft)' : ''}${autoMergeNote[data.mergeRequest.autoMerge ?? 'off']}`,
     })
   if (data.lockfile)
     result.push({

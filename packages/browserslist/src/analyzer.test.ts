@@ -33,8 +33,9 @@ async function repository(files: Record<string, string>) {
   return dir
 }
 
-function fakeForge() {
+function fakeForge(refusals = 0) {
   const commits: unknown[] = []
+  const merges: unknown[] = []
   const created: { title: string; description?: string; sourceBranch: string }[] = []
   const forge = {
     getRepository: async () => ({ defaultBranch: 'main' }),
@@ -48,8 +49,12 @@ function fakeForge() {
       created.push(input)
       return { id: 7, webUrl: 'https://forge.test/mr/7', draft: false }
     },
+    mergeMergeRequest: async (_repo: string, id: number, options: unknown) => {
+      merges.push({ id, options })
+      if (merges.length <= refusals) throw new Error('405 Method Not Allowed')
+    },
   } as unknown as GitForge
-  return { forge, commits, created }
+  return { forge, commits, created, merges }
 }
 
 const run = async (root: string, forge: GitForge, options: Record<string, unknown> = {}) => {
@@ -70,7 +75,10 @@ const run = async (root: string, forge: GitForge, options: Record<string, unknow
     }
     return undefined
   })
-  const analyzer = createBrowserslistAnalyzer({ now: () => new Date('2026-10-31T00:00:00Z') })
+  const analyzer = createBrowserslistAnalyzer({
+    now: () => new Date('2026-10-31T00:00:00Z'),
+    sleep: async () => {},
+  })
   const result = await analyzer.run({
     repo: { forge: 'work', path: 'games/app' },
     forge,
@@ -122,6 +130,28 @@ describe('browserslist analyzer', () => {
     expect(created[0]?.description).toContain('`chrome 129`')
     expect(data.mergeRequest).toEqual({ id: 7, url: 'https://forge.test/mr/7', draft: false })
     expect(browserslistReport(data).metrics.find((m) => m.id === 'browsers')?.value).toBe(2)
+  })
+
+  test('sets auto-merge on the merge request, retrying while the forge refuses', async () => {
+    const root = await repository({ 'package.json': '{}', 'bun.lock': lockfile('1.0.30001600') })
+    const { forge, merges } = fakeForge(1)
+    const { data } = await run(root, forge, { autoMerge: true, dirs: [] })
+
+    expect(merges).toEqual([
+      { id: 7, options: { whenPipelineSucceeds: true, removeSourceBranch: true } },
+      { id: 7, options: { whenPipelineSucceeds: true, removeSourceBranch: true } },
+    ])
+    expect(data.mergeRequest?.autoMerge).toBe('set')
+  })
+
+  test('records auto-merge as failed when the forge keeps refusing', async () => {
+    const root = await repository({ 'package.json': '{}', 'bun.lock': lockfile('1.0.30001600') })
+    const { forge, merges } = fakeForge(3)
+    const { data } = await run(root, forge, { autoMerge: true, dirs: [] })
+
+    expect(merges).toHaveLength(3)
+    expect(data.status).toBe('updated')
+    expect(data.mergeRequest?.autoMerge).toBe('failed')
   })
 
   test('dry runs and repositories without caniuse-lite publish nothing', async () => {

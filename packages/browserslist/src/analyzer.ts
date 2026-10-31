@@ -28,6 +28,11 @@ export const browserslistOptionsSchema = z.object({
   timeoutMinutes: z.coerce.number().positive().default(15),
   branch: z.string().min(1).default('holtkeeper/browserslist'),
   labels: z.array(z.string()).default(['holtkeeper', 'dependencies']),
+  /**
+   * Have the forge merge the merge request once its checks pass: right away when nothing blocks
+   * it, otherwise after the pipeline and the approvals it needs.
+   */
+  autoMerge: z.coerce.boolean().default(false),
   /** Update and report, but open no merge request. */
   dryRun: z.coerce.boolean().default(false),
 })
@@ -140,8 +145,11 @@ async function findLockfile(dir: string) {
  * versions and the browsers each of `dirs` gained or lost. Applies to repositories whose root
  * lockfile resolves `caniuse-lite`. `now` exists for tests.
  */
-export function createBrowserslistAnalyzer(settings: { now?: () => Date } = {}) {
+export function createBrowserslistAnalyzer(
+  settings: { now?: () => Date; sleep?: (ms: number) => Promise<void> } = {},
+) {
   const now = settings.now ?? (() => new Date())
+  const sleep = settings.sleep ?? ((ms: number) => Bun.sleep(ms))
   return defineAnalyzer<BrowserslistData, BrowserslistOptions>({
     kind: 'browserslist',
     analysis: browserslistAnalysis,
@@ -275,10 +283,42 @@ export function createBrowserslistAnalyzer(settings: { now?: () => Date } = {}) 
       if (mergeRequest) {
         data.mergeRequest = mergeRequest
         log?.(`browserslist: ${mergeRequest.url}`)
+        if (options.autoMerge && !mergeRequest.draft) {
+          const error = await setAutoMerge(
+            () =>
+              forge.mergeMergeRequest(repo.path, mergeRequest.id, {
+                whenPipelineSucceeds: true,
+                removeSourceBranch: true,
+              }),
+            sleep,
+          )
+          data.mergeRequest.autoMerge = error ? 'failed' : 'set'
+          log?.(`browserslist: auto-merge ${error ? `not set: ${error}` : 'set'}`)
+        }
       }
       return { data, ref: tree.sha }
     },
   })
+}
+
+// GitLab refuses to merge while it still computes a new merge request's mergeability.
+async function setAutoMerge(
+  merge: () => Promise<void>,
+  sleep: (ms: number) => Promise<void>,
+): Promise<string | undefined> {
+  let error = ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // oxlint-disable-next-line no-await-in-loop -- retries
+    if (attempt) await sleep(10_000)
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- retries
+      await merge()
+      return undefined
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause)
+    }
+  }
+  return error
 }
 
 /** The `browserslist` analyzer with the real clock. */

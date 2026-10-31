@@ -33,7 +33,15 @@ export const browserslistDataSchema = z.object({
   targets: z.array(browserTargetsSchema),
   /** Files the update changed. */
   files: z.array(z.string()),
-  mergeRequest: z.object({ id: z.number(), url: z.string(), draft: z.boolean() }).optional(),
+  mergeRequest: z
+    .object({
+      id: z.number(),
+      url: z.string(),
+      draft: z.boolean(),
+      /** With `autoMerge`: `set` once the forge accepted it, `failed` when it refused. */
+      autoMerge: z.enum(['set', 'failed']).optional(),
+    })
+    .optional(),
   dryRun: z.boolean(),
   /** The last lines of the update command's output. */
   output: z.string(),
