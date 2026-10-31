@@ -25,7 +25,7 @@ export function fakeGitHub(options: {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- tests script the shape
       return { status: 200, data: answer.data as T, ...(answer.next ? { next: answer.next } : {}) }
     },
-    async bytes() {
+    async download() {
       return undefined
     },
     async graphql<T>(query: string, variables: Record<string, unknown> = {}) {

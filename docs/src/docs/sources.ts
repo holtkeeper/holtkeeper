@@ -29,6 +29,7 @@ const guideOrder = [
   'development.md',
   'deployment.md',
   'agent-access.md',
+  'libraries.md',
   'library-docs.md',
 ]
 const guideLabels: Record<string, string> = {
@@ -36,6 +37,7 @@ const guideLabels: Record<string, string> = {
   'development.md': 'Development',
   'deployment.md': 'Deployment',
   'agent-access.md': 'Agent access',
+  'libraries.md': 'Library docs',
   'library-docs.md': 'Library docs (design)',
 }
 

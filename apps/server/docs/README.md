@@ -124,7 +124,7 @@ Connect Claude Code with `claude mcp add --transport http holtkeeper <publicUrl>
 
 ## Libraries
 
-The third-party library index of [@holtkeeper/libraries](../../../packages/libraries/docs/README.md) (design: [docs/library-docs.md](../../../docs/library-docs.md)) runs when the store has `libraries` and an artifact store is configured.
+The third-party library index of [@holtkeeper/libraries](../../../packages/libraries/docs/README.md) (setup and use: [docs/libraries.md](../../../docs/libraries.md); design: [docs/library-docs.md](../../../docs/library-docs.md)) runs when the store has `libraries` and an artifact store is configured.
 
 **Setting** `libraries` (section `Libraries`, `librariesSetting`): only the entry for **All repositories** counts; without one nothing is indexed (no default is seeded). Every field is optional: `enabled` (default `true` once the setting exists), `interval` (`1d`; `<n>m|h|d`, at least `1h`), `github` (id or name of a credential whose secret is a GitHub token; anonymous otherwise), `digests` (`false`), and the indexer's `exclude`, `include`, `maxVersions`, `firstOfMajor`, `sources { repository, releases, issues, site }` and `graceDays`, defaulting to `defaultLibraryIndexSettings`.
 

@@ -1,5 +1,7 @@
 # Library docs for agents — design
 
+How to set it up and use it: [libraries.md](libraries.md).
+
 Status: implemented in [@holtkeeper/libraries](../packages/libraries/docs/README.md), wired into the server as described in [Libraries](../apps/server/docs/README.md#libraries). The rest of this page is the design; deviations are listed under [Implementation notes](#implementation-notes).
 
 Agents working in a repository should answer "how do I use X", "what changed between the version we have and the next one" and "has anyone hit this error" from version-exact sources served by Holtkeeper's MCP endpoint, instead of searching the web or relying on training data. This covers every third-party library the fleet depends on, not only the packages we publish ourselves.
@@ -159,7 +161,8 @@ Where the server differs from the design above:
 
 - Indexing runs on an interval (setting `libraries.interval`, default daily, instead of weekly), about two minutes after the server starts, 10 minutes after the last new `usages` or `fleet` record, and on `POST /api/libraries/reindex`.
 - The setting is read at global scope only, and nothing is indexed until it is set.
-- The GitHub token is any credential named by `libraries.github`; there is no dedicated credential kind.
+- The GitHub token is the credential named by `libraries.github`; the panel offers credentials of kind `github` for it.
+- Tarballs are streamed: npm and GitHub downloads stop at a size limit (50 MB npm, 100 MB repository docs, 200 MB source snapshots) and tar entries that are not kept are skipped without being held in memory.
 - Request budgets are the GitHub client's own rate-limit handling, not the distributed limiter.
 - Issue digests run through the agent of the caller's repository, so an MCP call without `repo` gets no digests. Knowledge proposals from digests are not wired.
 - `upgrade_impact` for third-party packages covers npm only (the usage index reads TypeScript and JavaScript).

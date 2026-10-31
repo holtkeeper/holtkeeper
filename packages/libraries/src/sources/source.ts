@@ -2,7 +2,7 @@ import { type ArtifactStore, zipArtifacts } from '@holtkeeper/artifacts'
 import type { LibraryRef, LibraryStore } from '@holtkeeper/store'
 
 import { readTarball } from '../archive.ts'
-import type { GitHubClient } from '../github/client.ts'
+import { DownloadTooLargeError, type GitHubClient } from '../github/client.ts'
 import { encodeRef, githubPath, tagResolver } from '../tags.ts'
 import { artifactName, artifactTags, errorText, refOf, sourceStatus } from './shared.ts'
 
@@ -23,6 +23,8 @@ export interface SourceSnapshotOptions {
   maxRepositoryKb?: number
   /** Files kept up to this total. Default 100 MB. */
   maxBytes?: number
+  /** Compressed tarballs larger than this are not downloaded. Default 200 MB. */
+  maxDownloadBytes?: number
   /** Files larger than this are left out. Default 1 MB. */
   maxFileBytes?: number
   now?: () => Date
@@ -75,10 +77,12 @@ export function sourceSnapshots(options: SourceSnapshotOptions): SourceSnapshot 
         record.tag ?? record.commit ?? (await resolve({ repository, name: ref.name, version })).ref
       if (!gitRef)
         return save({ message: `no tag or commit for ${ref.name}@${version}` }, 'missing')
-      const bytes = await options.github.bytes(`/repos/${path}/tarball/${encodeRef(gitRef)}`)
-      if (!bytes) return save({ message: `no tarball at ${gitRef}` }, 'missing')
+      const stream = await options.github.download(`/repos/${path}/tarball/${encodeRef(gitRef)}`, {
+        maxBytes: options.maxDownloadBytes ?? 200_000_000,
+      })
+      if (!stream) return save({ message: `no tarball at ${gitRef}` }, 'missing')
       const directory = repository.directory
-      const files = await readTarball(bytes, {
+      const files = await readTarball(stream, {
         stripTop: true,
         maxFileBytes: options.maxFileBytes ?? 1_000_000,
         maxTotalBytes: options.maxBytes ?? 100_000_000,
@@ -95,6 +99,8 @@ export function sourceSnapshots(options: SourceSnapshotOptions): SourceSnapshot 
       })
       return save({ id }, 'ok')
     } catch (error) {
+      if (error instanceof DownloadTooLargeError)
+        return save({ message: `snapshot skipped: ${error.message}` }, 'skipped')
       return save({ message: `snapshot failed: ${errorText(error)}` }, 'failed')
     }
   }

@@ -1,7 +1,7 @@
 import type { LibraryChunk, LibraryStore } from '@holtkeeper/store'
 
 import { readTarball } from '../archive.ts'
-import type { GitHubClient } from '../github/client.ts'
+import { DownloadTooLargeError, type GitHubClient } from '../github/client.ts'
 import { documentChunks } from '../markdown.ts'
 import { encodeRef, githubPath } from '../tags.ts'
 import type { ArchiveFiles } from '../types.ts'
@@ -62,19 +62,31 @@ export async function repositorySource(
   github: GitHubClient,
   target: SourceTarget,
   gitRef: string | undefined,
+  maxDownloadBytes = 100_000_000,
 ): Promise<SourceOutcome> {
   const repository = target.library.repository
   const path = githubPath(repository)
   if (!path) return { status: sourceStatus('skipped', target.now, 'not a GitHub repository') }
   if (!gitRef)
     return { status: sourceStatus('missing', target.now, 'no tag or commit for this version') }
-  const bytes = await github.bytes(`/repos/${path}/tarball/${encodeRef(gitRef)}`)
-  if (!bytes) return { status: sourceStatus('missing', target.now, `no tarball at ${gitRef}`) }
-  const files = await readTarball(bytes, {
-    stripTop: true,
-    keep: (file) => keepRepositoryFile(file, repository?.directory),
-    maxTotalBytes: 20_000_000,
-  })
+  let files: ArchiveFiles
+  try {
+    const stream = await github.download(`/repos/${path}/tarball/${encodeRef(gitRef)}`, {
+      maxBytes: maxDownloadBytes,
+    })
+    if (!stream) return { status: sourceStatus('missing', target.now, `no tarball at ${gitRef}`) }
+    files = await readTarball(stream, {
+      stripTop: true,
+      keep: (file) => keepRepositoryFile(file, repository?.directory),
+      maxTotalBytes: 20_000_000,
+    })
+  } catch (error) {
+    if (error instanceof DownloadTooLargeError)
+      return {
+        status: sourceStatus('missing', target.now, `tarball at ${gitRef}: ${error.message}`),
+      }
+    throw error
+  }
   const chunks = repositoryChunks(
     target,
     files,

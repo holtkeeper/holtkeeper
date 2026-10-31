@@ -13,11 +13,54 @@ export interface GitHubResponse<T> {
 export interface GitHubClient {
   /** `path` starts with `/` or is a full `https://api.github.com/...` URL (for `next`). */
   rest<T = unknown>(path: string): Promise<GitHubResponse<T | undefined>>
-  /** Raw bytes of a `GET`, e.g. a tarball; `undefined` for 404. */
-  bytes(path: string): Promise<Uint8Array | undefined>
+  /**
+   * The body of a `GET`, e.g. a tarball, as a stream; `undefined` for 404. The stream errors with
+   * `DownloadTooLargeError` once more than `maxBytes` arrived (or up front, from `Content-Length`).
+   */
+  download(
+    path: string,
+    options: { maxBytes: number },
+  ): Promise<ReadableStream<Uint8Array> | undefined>
   graphql<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T>
   /** Whether requests carry a token; GraphQL needs one. */
   readonly authenticated: boolean
+}
+
+/** A download that went past its size limit. */
+export class DownloadTooLargeError extends Error {
+  readonly maxBytes: number
+  constructor(what: string, maxBytes: number) {
+    super(`${what} is larger than ${maxBytes} bytes`)
+    this.name = 'DownloadTooLargeError'
+    this.maxBytes = maxBytes
+  }
+}
+
+/**
+ * The body of `response`, failing with `DownloadTooLargeError` when `Content-Length` or the bytes
+ * that arrive exceed `maxBytes`; the connection is cancelled then, so nothing more is read.
+ */
+export function limitStream(
+  response: Response,
+  maxBytes: number,
+  what: string,
+): ReadableStream<Uint8Array> {
+  const declared = Number(response.headers.get('content-length'))
+  if (declared > maxBytes) {
+    void response.body?.cancel()
+    throw new DownloadTooLargeError(what, maxBytes)
+  }
+  if (!response.body) return new Blob([]).stream()
+  let received = 0
+  return response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        received += chunk.length
+        if (received > maxBytes) controller.error(new DownloadTooLargeError(what, maxBytes))
+        else controller.enqueue(chunk)
+      },
+    }),
+  )
 }
 
 export class GitHubRateLimitError extends Error {
@@ -94,11 +137,11 @@ export function createGitHubClient(options: GitHubClientOptions = {}): GitHubCli
       const data = (await response.json()) as T
       return { status: response.status, data, ...(next ? { next } : {}) }
     },
-    async bytes(path) {
+    async download(path, { maxBytes }) {
       const response = await send(urlOf(path), { headers: headers('application/octet-stream') })
       if (response.status === 404) return undefined
       if (!response.ok) throw new Error(`GitHub ${response.status} for ${path}`)
-      return new Uint8Array(await response.arrayBuffer())
+      return limitStream(response, maxBytes, path)
     },
     async graphql<T>(query: string, variables: Record<string, unknown> = {}) {
       if (!options.token) throw new Error('GitHub GraphQL needs a token')

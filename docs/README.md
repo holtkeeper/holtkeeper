@@ -6,7 +6,7 @@
 - [Development](development.md) — tooling, conventions, why there is no build step
 - [Deployment](deployment.md) — Docker, compose, Kubernetes (Helm), roles, scaling, backups
 - [Agent access](agent-access.md) — let an AI agent sign in to the web UI with its own account and a login link
-- [Library docs for agents](library-docs.md) — design: version-exact docs, API and issues of third-party libraries over MCP
+- [Library docs for agents](libraries.md) — set up and use version-exact docs, API and issues of third-party libraries over MCP ([design](library-docs.md))
 
 ## Modules
 

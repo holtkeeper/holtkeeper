@@ -25,9 +25,10 @@ export function fakeGitHub(
       const following = next[path]
       return { status: 200, data: rest[path] as T, ...(following ? { next: following } : {}) }
     },
-    async bytes(path) {
+    async download(path) {
       calls.push(path)
-      return bytes[path]
+      const data = bytes[path]
+      return data ? new Blob([data]).stream() : undefined
     },
     async graphql() {
       throw new Error('no GraphQL in tests')

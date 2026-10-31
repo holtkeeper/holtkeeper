@@ -1,6 +1,7 @@
 import type { LibraryRepository } from '@holtkeeper/store'
 
 import { readTarball } from '../archive.ts'
+import { limitStream } from '../github/client.ts'
 import type {
   ArchiveFiles,
   LibraryRef,
@@ -168,13 +169,13 @@ export function npmRegistry(options: NpmRegistryOptions = {}): LibraryRegistry {
       const response = await doFetch(tarball)
       if (response.status === 404) return undefined
       if (!response.ok) throw new Error(`npm tarball ${response.status} for ${ref.name}@${version}`)
-      const size = Number(response.headers.get('content-length'))
-      if (size > maxTarball)
-        throw new Error(`npm tarball of ${ref.name}@${version} is ${size} bytes`)
-      const bytes = new Uint8Array(await response.arrayBuffer())
-      if (bytes.length > maxTarball)
-        throw new Error(`npm tarball of ${ref.name}@${version} is ${bytes.length} bytes`)
-      return readTarball(bytes, { stripTop: true, keep: keepNpmFile })
+      return readTarball(
+        limitStream(response, maxTarball, `npm tarball of ${ref.name}@${version}`),
+        {
+          stripTop: true,
+          keep: keepNpmFile,
+        },
+      )
     },
   }
 }

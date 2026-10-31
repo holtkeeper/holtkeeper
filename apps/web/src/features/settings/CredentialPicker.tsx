@@ -5,7 +5,21 @@ import { LinkButton, Notice, Placeholder, Select, TextField } from '../../ui/ind
 import { aiProviderKinds } from '../credentials/form.ts'
 import { useSession } from '../shell/session.ts'
 
-const kindsOf: Record<string, readonly string[]> = { 'ai-provider': aiProviderKinds }
+const kindsOf: Record<string, readonly string[]> = {
+  'ai-provider': aiProviderKinds,
+  github: ['github'],
+}
+
+const missing: Record<string, { title: string; text: string }> = {
+  'ai-provider': {
+    title: 'No AI provider yet',
+    text: 'Add an AI provider credential with its API key first, then pick it here.',
+  },
+  github: {
+    title: 'No GitHub token yet',
+    text: 'Add a credential of kind github with a token that reads public repositories, then pick it here.',
+  },
+}
 
 /** Credentials a `x-credential` setting may name, by the kind family in its schema. */
 const credentialsOf = (credentials: readonly CredentialView[], of: string) =>
@@ -45,10 +59,14 @@ export function CredentialPicker({
 
   const options = credentialsOf(credentials.data?.credentials ?? [], of)
   if (options.length === 0) {
+    const notice = missing[of] ?? {
+      title: 'No credential yet',
+      text: 'Add a credential first, then pick it here.',
+    }
     return (
-      <Notice tone="warning" title="No AI provider yet">
+      <Notice tone="warning" title={notice.title}>
         <span className="flex flex-col items-start gap-2">
-          Add an AI provider credential with its API key first, then pick it here.
+          {notice.text}
           <LinkButton to="/credentials" size="sm">
             Open Credentials
           </LinkButton>
