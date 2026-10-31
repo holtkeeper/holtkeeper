@@ -53,6 +53,8 @@ import type {
   StorageOverview,
   AiCatalogProviderList,
   AnalysisDetail,
+  BundleTargetReportView,
+  BundleTargetsView,
   AnalysisKindList,
   AnalysisList,
   ApplyChangesInput,
@@ -243,6 +245,16 @@ export const api = {
     }),
   analysis: (analysisId: string, compare?: string) =>
     request<AnalysisDetail>('GET', `/api/analyses/${id(analysisId)}`, { query: { compare } }),
+
+  bundleTargets: (repo: RepoRef) =>
+    request<BundleTargetsView>('GET', '/api/bundles/targets', { query: { repo: repoKey(repo) } }),
+  bundleReport: (
+    repo: RepoRef,
+    query: { target: string; version?: string | undefined; analysis?: string | undefined },
+  ) =>
+    request<BundleTargetReportView>('GET', '/api/bundles/report', {
+      query: { repo: repoKey(repo), ...query },
+    }),
 
   applyChanges: (analysisId: string, input: ApplyChangesInput) =>
     request<ApplyChangesResult>('POST', `/api/analyses/${id(analysisId)}/changes`, { body: input }),

@@ -25,15 +25,15 @@ interface ForgeDefinition {
 
 Repositories are addressed by their full path (`games/app-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
 
-| Area                 | Methods                                                                                                                                                         |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                         |
-| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                  |
-| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                    |
-| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                               |
-| Tags                 | `createTag`                                                                                                                                                     |
-| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                              |
-| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags` |
+| Area                 | Methods                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                                        |
+| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                                 |
+| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                                   |
+| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                                              |
+| Tags                 | `createTag`                                                                                                                                                                    |
+| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                                             |
+| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `npmRegistry` |
 
 ### Listing files
 
@@ -55,6 +55,7 @@ Optional, read-only history for delivery analytics (`@holtkeeper/delivery`). Ada
 | `listBranches(repo)`                                                        | `BranchRecord`: every branch with `name`, head `sha`, `committedAt`, `authorName?`, `authorEmail?`, `merged` (head reachable from the default branch; squash merges do not count), `protected`, `default`, `webUrl?`                  |
 | `listCiVariables({ kind, path })`                                           | `CiVariable { key, value, environmentScope }` defined directly on a repository or group (no inherited ones); masked, hidden and file variables are left out. `undefined` when the token may not read them or the scope does not exist |
 | `listImageTags(image)`                                                      | Tags of an image (`registry/path`, no tag) in the forge's own container registry; `undefined` when the forge does not serve it or the token may not read it                                                                           |
+| `npmRegistry(repo)`                                                         | Base URL of the npm registry the forge runs for the repository (packages it publishes are read there with the forge token); `undefined` when there is none                                                                            |
 
 This covers the first milestones (browserslist, audit, releases). Diffs, line threads with suggestions and webhook events are added with code review.
 

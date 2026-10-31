@@ -52,7 +52,7 @@
 | `@holtkeeper/vuln-js`             | npm/bun/pnpm/yarn fixer                                                  | [packages/vuln-js/docs](../packages/vuln-js/docs/README.md)                         |
 | `@holtkeeper/vuln-go`             | Go modules fixer                                                         | [packages/vuln-go/docs](../packages/vuln-go/docs/README.md)                         |
 | `@holtkeeper/changelog`           | Release analysis: commit history, grouping, links                        | [packages/changelog/docs](../packages/changelog/docs/README.md)                     |
-| `@holtkeeper/bundles`             | Build size per entrypoint and package                                    | [packages/bundles/docs](../packages/bundles/docs/README.md)                         |
+| `@holtkeeper/bundles`             | Size of app builds and published packages per entrypoint and release     | [packages/bundles/docs](../packages/bundles/docs/README.md)                         |
 | `@holtkeeper/depgraph`            | Dependency graphs, cycles, duplicate versions                            | [packages/depgraph/docs](../packages/depgraph/docs/README.md)                       |
 | `@holtkeeper/depgraph-js`         | JS workspaces, lockfiles, module imports                                 | [packages/depgraph-js/docs](../packages/depgraph-js/docs/README.md)                 |
 | `@holtkeeper/depgraph-go`         | Go workspaces and module graph                                           | [packages/depgraph-go/docs](../packages/depgraph-go/docs/README.md)                 |

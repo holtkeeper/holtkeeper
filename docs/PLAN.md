@@ -160,7 +160,7 @@ Status: scanner, fixers, allowlist and `holtkeeper audit` exist (see [packages/v
 Every analysis produces its own data and renders it into the universal report format of [`@holtkeeper/report`](../packages/report/docs/README.md), so one UI shows all of them and compares any two runs (by default the previous release):
 
 - **Changelog** — commits between releases or tags, grouped by type and scope, identical messages collapsed, links to commits, merge requests and tickets.
-- **Bundle size** — per entrypoint and per package (source maps), raw/gzip/brotli, growth between releases. Any bundler.
+- **Bundle size** — app builds (one or many targets, each with its entrypoints) and published packages (archives from their registry), per entrypoint and per package (source maps), raw/gzip/brotli, history across releases and versions. Any bundler.
 - **Dependencies** — workspace graph, package graph from lockfiles, module imports; cycles and libraries in several versions. JS and Go sources; more are new `GraphSource`s.
 - **Package usage** — which exports, members and JSX props of each dependency a repository uses and where, through imports and the TypeScript 7 checker; joined across repositories into "used by" and the uses an upgrade breaks, for people and for agents over MCP.
 - **Code quality** — naming conventions inferred from the project (ast-grep), test gaps from coverage with example tests written by the agent in the project's style, linters through SARIF (oxlint, ESLint, Biome, golangci-lint, ruff, Semgrep, ast-grep), duplication (jscpd).

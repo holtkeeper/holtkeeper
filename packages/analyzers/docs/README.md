@@ -9,7 +9,7 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | Kind           | Scope | What it produces                                                          |
 | -------------- | ----- | ------------------------------------------------------------------------- |
 | `changelog`    | repo  | what changed between two releases, grouped by type and scope              |
-| `bundle`       | repo  | what a frontend build ships, per entrypoint, asset and package            |
+| `bundle`       | repo  | app builds and published packages: size per entrypoint, asset, release    |
 | `depgraph`     | repo  | dependency graph (JavaScript, Go): cycles, duplicate versions, statistics |
 | `quality`      | repo  | conventions, lint, duplication, dead code, secrets and test gaps          |
 | `coverage`     | repo  | line, function and branch test coverage per source file                   |
@@ -32,6 +32,15 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `audit`        | repo  | vulnerability audit with osv-scanner (data is an `AuditReport`)           |
 
 `reviewChecks()` returns the quality checks the review analyzer runs on changed lines.
+
+## bundle
+
+Measures what a repository ships as targets of one record ([@holtkeeper/bundles](../../bundles/docs/README.md#targets)): app builds and the versions of packages it publishes. It needs a checkout, the forge (`npmRegistry`), forge access (its token for the forge's own registry) and history.
+
+- **Builds.** `targets: [{ name, dir = '.', build?, dist?, entries? }]`, or the `dist`/`build` shorthand for one `app` target at the root. Without either, every package of the checkout that is the root or `private`, has a `build` script and a Vite, webpack, Rspack, Rsbuild or Rollup config is a target (`app` at the root, else the package name). One build with several entries (desktop, mobile, replay, ...) is one target whose entrypoints come from the bundler's manifest; set `entries` to name them by output globs instead. Dependencies are installed once from the root lockfile (`install`, `installScripts`, as in [@holtkeeper/coverage](../../coverage/docs/README.md)), then each target runs `build` (default `<package manager> run build`, `CI=true`, `NODE_ENV=production`, 20 minutes) through the job's runner and measures `dist` (default the first of `dist`, `build`, `out`). A failed install is logged; a failed build or a missing output becomes a `failed` target with the error, so releases that no longer build are gaps, not failed jobs. Builds need network for the install: set the `toolchain` setting's `network` to `full` in `container` execution.
+- **Packages.** Every workspace package that is not `private` and has a version (`packages` / `excludePackages` globs narrow it) is measured at the version its `package.json` has at the ref, plus up to `history` earlier published versions (prereleases only with `includePrereleases`). Archives come from the first registry that has the version, in this order: `registries` (`{ '@scope': url, '*': url }`), the package's `publishConfig.registry`, `@scope:registry=` / `registry=` of the package's and the root's `.npmrc`, the forge's own registry for the repository (GitLab: the project's npm endpoint), npmjs. Requests to the forge's host carry the forge token as a bearer token; other registries are read anonymously (or through the egress proxy). Versions earlier records measured are skipped, so a record holds only new versions; each measured version is also kept in the run cache.
+- `source`: `auto` (default: both), `build` or `packages`. Flags: `--source`, `--dist`, `--build`, `--history`.
+- **Applies** when the root `package.json` names workspaces, `publishConfig`, `exports` or a bundler dependency, or a `pnpm-workspace.yaml` exists.
 
 ## audit
 

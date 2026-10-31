@@ -33,7 +33,7 @@ export const analysisPages = [
     kind: 'bundle',
     title: 'Bundles',
     icon: 'bundles',
-    description: 'Build size per entrypoint and release',
+    description: 'App builds and published packages: size per entrypoint and release',
     trend: [/gzip/i, /size/i],
   },
   {

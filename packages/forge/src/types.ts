@@ -458,6 +458,12 @@ export interface GitForge {
    * serve the image or the token may not read it.
    */
   listImageTags?(image: string): Promise<string[] | undefined>
+  /**
+   * Base URL of the npm registry this forge runs for one repository (packages it publishes are
+   * read there with the forge token), e.g. GitLab's project-level npm endpoint. `undefined` when
+   * the forge has none.
+   */
+  npmRegistry?(repo: string): string | undefined
 
   // SSH keys. Optional so forges can add them one by one.
 

@@ -1,6 +1,6 @@
 # @holtkeeper/bundles
 
-Measures what a frontend build ships and compares it between releases: total and initial-load bytes (raw, gzip, brotli) per entrypoint, per asset, and which npm packages and app modules make up the size. It reads the build output, so it works with any bundler: Vite, Rollup, webpack, esbuild, Bun.
+Measures what a frontend build or a published package ships and compares it between releases: total and initial-load bytes (raw, gzip, brotli) per entrypoint, per asset, and which npm packages and app modules make up the size. It reads the build output, so it works with any bundler: Vite, Rollup, webpack, esbuild, Bun.
 
 ## Pipeline
 
@@ -49,9 +49,20 @@ Configure entrypoints explicitly with `entries: [{ name: 'admin', globs: ['asset
 - `packages[]` — every package over all assets with `bytes`, `gzip`, `versions` (from pnpm/bun store paths or the installed `package.json`), `instances` (install paths; more than one means it is bundled twice), `modules` and `entrypoints`.
 - `modules[]`, `unmapped`, `tool` (`vite`, `webpack`, `bun`, ... when recognised), `build` (command and duration when it ran).
 
+## Targets
+
+A `bundle` record holds `BundleRecordData { targets }`: every thing one run measured. A `BundleTarget` has a `name`, a `source` (`build` or `package`), for packages a `version` and its publish time `at`, a `status` and either `data` (`BundleData`) or, when `failed`, the `error`. Package targets add `package: PackageInfo` (`unpacked` bytes and `files` of the whole archive, `dependencies`, `peerDependencies`). Records from before targets hold a bare `BundleData`; `bundleTargets(data)` reads both (the old shape is one `app` build) and `bundleAnalysisSchema` validates both.
+
+- `analyzeBuildTarget({ name, dir, dist, command?, runner?, env?, entries?, ignore?, root?, signal?, timeoutMs? })` builds (when `command` is set) and measures one target. `dist` may list candidates; the first that exists after the build is measured. It never throws for a failed build or a missing output: the target comes back `failed` with the end of the error, so a release that no longer builds is a gap in history. Aborts still reject.
+- `analyzePackage({ name, version, files, publishedAt? })` measures one published version from its unpacked archive (paths without the top folder). Assets are the shipped files without declarations, Markdown, licenses, changelogs and `package.json` (`packageIgnore`); entrypoints are its export subpaths (`packageEntries`: the `browser`, `import`, `module`, `default`, `require` or `node` target of each `exports` subpath, never `types`, `*` patterns expanded over the archive up to 100; without `exports` the `module`, a string `browser` or `main` field), completed by following ES module imports inside the package; source maps the package ships attribute bytes. Imports of dependencies are not followed: sizes are the package's own code. Failures become a `failed` target.
+- `bundleSeries(records)` turns `bundle` records (`{ id, createdAt, ref?, data }`) into one `BundleSeries { name, source, points }` per target name, sorted by name. Builds get one point per record; a package version counts once, from the newest record measuring it. Points (`BundlePoint`) carry the record id, ref, version, `at` (publish time, else the record's), status and error, total sizes, JS and CSS gzip, initial and lazy sizes per entrypoint and `PackageInfo`, ordered by `at`.
+- `findTargetPoint(records, { name, version?, analysisId? })` locates one point (newest without either) and the closest earlier point that measured fine; `targetReport(current, previous?)` renders it like a single build, plus a **Package** section with archive size, files and dependencies (new ones tagged) for package targets.
+
 ## Report
 
-`bundleAnalysis` (kind `bundle`, or `createBundleAnalysis({ growthPercent, growthBytes, heavyPackageBytes, treemapModules })` for other thresholds) produces:
+A record with one target is reported like that target (`targetReport`, compared with the target of the same name in the previous record). A record with several shows metrics over all of them (total gzip of measured targets, targets, not measured) and a **Targets** table with each one's sizes, change against the same target in the previous record, largest initial load and status; failed targets and changes over the thresholds are listed above it. The details of one target are on the Bundles page of the web app.
+
+For a single target, `bundleAnalysis` (kind `bundle`, or `createBundleAnalysis({ growthPercent, growthBytes, heavyPackageBytes, treemapModules })` for other thresholds) produces:
 
 - **Metrics** — JS gzip, CSS gzip, initial load of the largest entrypoint, number of entrypoints, number of packages; deltas against the previous record, `better: 'down'` for sizes.
 - **Overview** — bar chart of initial gzip per entrypoint (previous vs current) and issues: entrypoints that grew or shrank by more than 5 % or 10 kB gzip, new packages over 5 kB gzip, packages that grew by more than 10 kB, packages newly bundled in several versions (or all duplicates when there is no previous record).

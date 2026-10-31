@@ -144,6 +144,36 @@ export const useAnalysis = (analysisId: string, compare?: string, enabled = true
     staleTime: 5 * 60_000,
   })
 
+/** Every bundle target of a repository with its size history. */
+export const useBundleTargets = (repo: RepoRef) =>
+  useQuery({
+    queryKey: ['analyses', 'bundles', 'targets', repoKey(repo)],
+    queryFn: () => api.bundleTargets(repo),
+    staleTime: 60_000,
+  })
+
+/** The report of one point of a bundle target's history; the newest without version or analysis. */
+export const useBundleReport = (
+  repo: RepoRef,
+  query: { target: string; version?: string | undefined; analysis?: string | undefined },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      'analyses',
+      'bundles',
+      'report',
+      repoKey(repo),
+      query.target,
+      query.version ?? '',
+      query.analysis ?? '',
+    ],
+    queryFn: () => api.bundleReport(repo, query),
+    enabled: enabled && Boolean(query.target),
+    placeholderData: keepPreviousData,
+    staleTime: 5 * 60_000,
+  })
+
 /** Accepts proposed changes of an analysis as a patch or a merge request. */
 export const useApplyChanges = (analysisId: string) =>
   useMutation({ mutationFn: (input: ApplyChangesInput) => api.applyChanges(analysisId, input) })

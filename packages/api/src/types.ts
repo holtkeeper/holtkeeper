@@ -1,6 +1,7 @@
 import type { Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
 import type { ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
 import type { AuthInfo } from '@holtkeeper/auth'
+import type { BundlePoint, BundleSeries } from '@holtkeeper/bundles'
 import type { Conflict } from '@holtkeeper/changes'
 import type { FleetLibrary } from '@holtkeeper/depgraph'
 import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
@@ -607,6 +608,31 @@ export interface ReleaseBackfillInput {
   risk?: boolean
   /** Also queue `api-surface` for each release, so every version's public API is kept. */
   api?: boolean
+  /** Also queue `bundle` for each release, so build and package sizes have history. */
+  bundle?: boolean
+}
+
+export type { BundlePoint, BundleSeries }
+
+/**
+ * `GET /api/bundles/targets?repo=`: every target the newest `bundle` records of one repository
+ * measured (app builds, published package versions), each with its history, oldest point first.
+ */
+export interface BundleTargetsView {
+  series: BundleSeries[]
+  /** Records read; history older than them is not shown. */
+  records: number
+}
+
+/**
+ * `GET /api/bundles/report?repo=&target=&version=&analysis=`: the full report of one point of a
+ * target's history (a package `version` or a build's `analysis` id; the newest without either),
+ * compared with the closest earlier point that measured fine.
+ */
+export interface BundleTargetReportView {
+  report: Report
+  analysisId: string
+  previousAnalysisId?: string
 }
 
 /** Answer to a release backfill, which goes on in the background. */

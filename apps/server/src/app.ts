@@ -16,6 +16,7 @@ import { artifactRoutes } from './routes/artifacts.ts'
 import { auditLogRoutes } from './routes/audit.ts'
 import { auditRoutes } from './routes/audits.ts'
 import { activityPeople, avatarRoutes, withAvatar } from './routes/avatars.ts'
+import { bundleRoutes } from './routes/bundles.ts'
 import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { databaseRoutes } from './routes/database.ts'
@@ -99,6 +100,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', scheduleRoutes(deps))
   api.route('/', repoAvatarRoutes(deps))
   api.route('/', releaseRoutes(deps))
+  api.route('/', bundleRoutes(deps))
   api.route('/', knowledgeRoutes(deps))
   const dispatch = createEventDispatcher(deps)
   const hooks = deps.store.kv ? repoHooks(deps.store.kv, deps.vault) : undefined

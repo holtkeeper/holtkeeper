@@ -13,7 +13,14 @@ import {
 } from '@holtkeeper/report'
 
 import { type BundleComparison, compareBundles } from './compare.ts'
-import { APP, type BundleData, type BundleEntrypoint, UNMAPPED, bundleDataSchema } from './data.ts'
+import { APP, type BundleData, type BundleEntrypoint, UNMAPPED } from './data.ts'
+import {
+  type BundleAnalysisData,
+  type BundleTarget,
+  bundleAnalysisSchema,
+  bundleTargets,
+  totalSizes,
+} from './targets.ts'
 
 /** Thresholds that decide which changes the overview calls out. */
 export interface BundleAnalysisOptions {
@@ -461,25 +468,282 @@ function assetsSection(data: BundleData, comparison: BundleComparison | undefine
   }
 }
 
+type Settings = Required<BundleAnalysisOptions>
+
+const settingsOf = (options: BundleAnalysisOptions): Settings => ({
+  growthPercent: options.growthPercent ?? 5,
+  growthBytes: options.growthBytes ?? 10 * 1024,
+  heavyPackageBytes: options.heavyPackageBytes ?? 5 * 1024,
+  treemapModules: options.treemapModules ?? 30,
+})
+
+const label = (target: Pick<BundleTarget, 'name' | 'version'>) =>
+  target.version ? `${target.name}@${target.version}` : target.name
+
+/** One side of a target report: the target and the release it belongs to. */
+export interface TargetSide {
+  target: BundleTarget
+  ref?: string
+  repo?: NonNullable<Report['subject']>['repo']
+}
+
+function failedReport(current: TargetSide): Report {
+  return {
+    kind: 'bundle',
+    title: `Bundle size · ${label(current.target)}`,
+    ...(current.ref ? { subtitle: current.ref } : {}),
+    subject: {
+      ...(current.repo ? { repo: current.repo } : {}),
+      ...(current.ref ? { ref: current.ref } : {}),
+    },
+    generatedAt: new Date().toISOString(),
+    metrics: [],
+    sections: [
+      {
+        id: 'overview',
+        title: 'Overview',
+        blocks: [
+          {
+            type: 'issues',
+            title: 'Not measured',
+            items: [
+              {
+                id: `failed:${label(current.target)}`,
+                tone: 'bad',
+                title: `${label(current.target)} could not be measured`,
+                ...(current.target.error ? { detail: current.target.error } : {}),
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+}
+
+function packageSection(target: BundleTarget, previous: BundleTarget | undefined): Section[] {
+  const info = target.package
+  if (!info) return []
+  const before = previous?.package
+  return [
+    {
+      id: 'package',
+      title: 'Package',
+      description: 'The whole archive, declarations, docs and source maps included.',
+      blocks: [
+        {
+          type: 'metrics',
+          metrics: [
+            metric('unpacked', 'Unpacked size', info.unpacked, {
+              unit: 'bytes',
+              better: 'down',
+              ...(before ? { previous: before.unpacked } : {}),
+            }),
+            metric('files', 'Files', info.files, {
+              better: 'down',
+              ...(before ? { previous: before.files } : {}),
+            }),
+            metric('dependencies', 'Dependencies', info.dependencies.length, {
+              better: 'down',
+              ...(before ? { previous: before.dependencies.length } : {}),
+            }),
+          ],
+        },
+        ...(info.dependencies.length || info.peerDependencies.length
+          ? [
+              {
+                type: 'table' as const,
+                columns: [
+                  { key: 'name', label: 'Dependency', format: 'code' as const },
+                  { key: 'kind', label: 'Kind' },
+                  { key: 'tags', label: 'Status', format: 'tags' as const },
+                ],
+                rows: [
+                  ...info.dependencies.map((name) => ({ name, kind: 'dependency' })),
+                  ...info.peerDependencies.map((name) => ({ name, kind: 'peer' })),
+                ].map((row) => ({
+                  ...row,
+                  tags:
+                    before &&
+                    !(row.kind === 'peer' ? before.peerDependencies : before.dependencies).includes(
+                      row.name,
+                    )
+                      ? 'added'
+                      : '',
+                })),
+              },
+            ]
+          : []),
+      ],
+    },
+  ]
+}
+
+/**
+ * The full report of one target, compared with an earlier measurement of it: metrics, overview,
+ * entrypoints, composition, packages and assets, and for published packages what the archive
+ * weighs. A failed target reports its error.
+ */
+export function targetReport(
+  current: TargetSide,
+  previous?: TargetSide,
+  options: BundleAnalysisOptions = {},
+): Report {
+  const data = current.target.data
+  if (current.target.status !== 'ok' || !data) return failedReport(current)
+  const settings = settingsOf(options)
+  const before = previous?.target.status === 'ok' ? previous.target.data : undefined
+  const comparison = before ? compareBundles(before, data) : undefined
+  const compareTo = before && previous ? (previous.target.version ?? previous.ref) : undefined
+  const subtitle = current.target.version ?? current.ref
+  return {
+    kind: 'bundle',
+    title:
+      current.target.source === 'package' || current.target.name !== 'app'
+        ? `Bundle size · ${current.target.name}`
+        : 'Bundle size',
+    ...(subtitle ? { subtitle } : {}),
+    subject: {
+      ...(current.repo ? { repo: current.repo } : {}),
+      ...(current.ref ? { ref: current.ref } : {}),
+      ...(compareTo ? { compareTo } : {}),
+    },
+    generatedAt: new Date().toISOString(),
+    metrics: metricsOf(data, before),
+    sections: [
+      overview(data, before, comparison, settings),
+      ...packageSection(current.target, before ? previous?.target : undefined),
+      entrypointsSection(data, comparison),
+      compositionSection(data, settings.treemapModules),
+      packagesSection(data, comparison),
+      assetsSection(data, comparison),
+    ],
+  }
+}
+
+const okGzip = (targets: BundleTarget[]) =>
+  targets.reduce((sum, target) => sum + (target.data ? totalSizes(target.data).gzip : 0), 0)
+
+const failedCount = (list: BundleTarget[]) => list.filter((target) => target.status !== 'ok').length
+
+function targetsMetrics(targets: BundleTarget[], previous?: BundleTarget[]): Metric[] {
+  return [
+    metric('total-gzip', 'Total (gzip)', okGzip(targets), {
+      unit: 'bytes',
+      better: 'down',
+      ...(previous ? { previous: okGzip(previous) } : {}),
+    }),
+    metric('targets', 'Targets', targets.length, previous ? { previous: previous.length } : {}),
+    metric('failed', 'Not measured', failedCount(targets), {
+      better: 'down',
+      ...(previous ? { previous: failedCount(previous) } : {}),
+    }),
+  ]
+}
+
+function targetsSection(
+  targets: BundleTarget[],
+  previous: BundleTarget[] | undefined,
+  settings: Settings,
+): Section {
+  const before = new Map(
+    (previous ?? []).filter((target) => target.data).map((target) => [target.name, target]),
+  )
+  const issues: Issue[] = []
+  const rows = targets.map((target) => {
+    const total = target.data ? totalSizes(target.data) : undefined
+    const was = before.get(target.name)?.data
+    const wasTotal = was ? totalSizes(was) : undefined
+    const delta = total && wasTotal ? total.gzip - wasTotal.gzip : undefined
+    const main = target.data ? mainEntrypoint(target.data) : undefined
+    if (target.status !== 'ok')
+      issues.push({
+        id: `failed:${label(target)}`,
+        tone: 'bad',
+        title: `${label(target)} could not be measured`,
+        ...(target.error ? { detail: target.error } : {}),
+      })
+    else if (total && wasTotal && delta !== undefined) {
+      const percent = percentChange(wasTotal.gzip, total.gzip) ?? 0
+      if (Math.abs(percent) > settings.growthPercent && Math.abs(delta) > settings.growthBytes)
+        issues.push({
+          id: `target:${target.name}`,
+          tone: delta > 0 ? 'warning' : 'good',
+          title: `${label(target)} ${delta > 0 ? 'grew' : 'shrank'} by ${formatBytes(Math.abs(delta))} gzip${signedPercent(percent)}`,
+        })
+    }
+    return {
+      name: target.name,
+      version: target.version ?? '',
+      source: target.source,
+      raw: total?.raw ?? null,
+      gzip: total?.gzip ?? null,
+      brotli: total?.brotli ?? null,
+      delta: deltaCell(delta),
+      initial: main?.initialSize.gzip ?? null,
+      entrypoints: target.data?.entrypoints.length ?? null,
+      tags: target.status === 'ok' ? '' : 'failed',
+    }
+  })
+  return {
+    id: 'targets',
+    title: 'Targets',
+    description: 'Every build and published package version this run measured.',
+    blocks: [
+      ...(issues.length ? [{ type: 'issues' as const, title: 'Notable', items: issues }] : []),
+      {
+        type: 'table',
+        columns: [
+          { key: 'name', label: 'Target', format: 'code' },
+          { key: 'version', label: 'Version' },
+          { key: 'source', label: 'Source' },
+          { key: 'raw', label: 'Raw', unit: 'bytes', align: 'end' },
+          { key: 'gzip', label: 'Gzip', unit: 'bytes', align: 'end' },
+          { key: 'brotli', label: 'Brotli', unit: 'bytes', align: 'end' },
+          {
+            key: 'delta',
+            label: 'Δ gzip',
+            unit: 'bytes',
+            format: 'delta',
+            better: 'down',
+            align: 'end',
+          },
+          { key: 'initial', label: 'Largest initial (gzip)', unit: 'bytes', align: 'end' },
+          { key: 'entrypoints', label: 'Entrypoints', unit: 'count', align: 'end' },
+          { key: 'tags', label: 'Status', format: 'tags' },
+        ],
+        rows,
+      },
+    ],
+  }
+}
+
 /** The `bundle` analysis kind with custom thresholds. */
 export function createBundleAnalysis(
   options: BundleAnalysisOptions = {},
-): AnalysisKind<BundleData> {
-  const settings: Required<BundleAnalysisOptions> = {
-    growthPercent: options.growthPercent ?? 5,
-    growthBytes: options.growthBytes ?? 10 * 1024,
-    heavyPackageBytes: options.heavyPackageBytes ?? 5 * 1024,
-    treemapModules: options.treemapModules ?? 30,
-  }
-  return defineAnalysis<BundleData>({
+): AnalysisKind<BundleAnalysisData> {
+  const settings = settingsOf(options)
+  return defineAnalysis<BundleAnalysisData>({
     kind: 'bundle',
     label: 'Bundle size',
-    schema: bundleDataSchema,
-    summarize: (data) => metricsOf(data),
+    schema: bundleAnalysisSchema,
+    summarize(data) {
+      const targets = bundleTargets(data)
+      const only = targets.length === 1 ? targets[0] : undefined
+      return only?.data ? metricsOf(only.data) : targetsMetrics(targets)
+    },
     toReport(current, previous): Report {
-      const data = current.data
-      const before = previous?.data
-      const comparison = before ? compareBundles(before, data) : undefined
+      const targets = bundleTargets(current.data)
+      const before = previous ? bundleTargets(previous.data) : undefined
+      const only = targets.length === 1 ? targets[0] : undefined
+      if (only) {
+        const match = before?.find((target) => target.name === only.name)
+        return targetReport(
+          { target: only, repo: current.repo, ...(current.ref ? { ref: current.ref } : {}) },
+          match && { target: match, ...(previous?.ref ? { ref: previous.ref } : {}) },
+          settings,
+        )
+      }
       return {
         kind: 'bundle',
         title: 'Bundle size',
@@ -490,18 +754,25 @@ export function createBundleAnalysis(
           ...(previous?.ref ? { compareTo: previous.ref } : {}),
         },
         generatedAt: new Date().toISOString(),
-        metrics: metricsOf(data, before),
+        metrics: targetsMetrics(targets, before),
         sections: [
-          overview(data, before, comparison, settings),
-          entrypointsSection(data, comparison),
-          compositionSection(data, settings.treemapModules),
-          packagesSection(data, comparison),
-          assetsSection(data, comparison),
+          targets.length
+            ? targetsSection(targets, before, settings)
+            : {
+                id: 'targets',
+                title: 'Targets',
+                blocks: [
+                  {
+                    type: 'markdown',
+                    text: 'Nothing new to measure: every published version was measured before.',
+                  },
+                ],
+              },
         ],
       }
     },
   })
 }
 
-/** Bundle sizes per entrypoint, asset and package, compared with the previous release. */
-export const bundleAnalysis: AnalysisKind<BundleData> = createBundleAnalysis()
+/** Bundle sizes per target, entrypoint, asset and package, compared with the previous release. */
+export const bundleAnalysis: AnalysisKind<BundleAnalysisData> = createBundleAnalysis()

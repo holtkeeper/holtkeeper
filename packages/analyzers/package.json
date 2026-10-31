@@ -22,6 +22,7 @@
     "@holtkeeper/depgraph-js": "workspace:*",
     "@holtkeeper/fleet": "workspace:*",
     "@holtkeeper/i18n": "workspace:*",
+    "@holtkeeper/libraries": "workspace:*",
     "@holtkeeper/licenses": "workspace:*",
     "@holtkeeper/port": "workspace:*",
     "@holtkeeper/propagate": "workspace:*",

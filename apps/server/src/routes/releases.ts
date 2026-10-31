@@ -49,6 +49,7 @@ const backfillSchema = z.object({
   limit: z.number().int().min(1).max(100).default(20),
   risk: z.boolean().default(false),
   api: z.boolean().default(false),
+  bundle: z.boolean().default(false),
 })
 
 interface BackfillRun {
@@ -61,8 +62,8 @@ interface BackfillRun {
 }
 
 /**
- * Analyses of past releases: queues a changelog (and a risk assessment, a public API snapshot) per existing release, a
- * plain tag or a commit carrying package tags. Listing tags is slow on large forges, so the
+ * Analyses of past releases: queues a changelog (and a risk assessment, a public API snapshot,
+ * bundle sizes) per existing release, a plain tag or a commit carrying package tags. Listing tags is slow on large forges, so the
  * request only validates and the repositories are walked in the background.
  */
 export function releaseRoutes(deps: ServerDeps) {
@@ -135,6 +136,7 @@ export function releaseRoutes(deps: ServerDeps) {
         limit: run.limit,
         risk: run.analyzers.includes('release-risk'),
         api: run.analyzers.includes('api-surface'),
+        bundle: run.analyzers.includes('bundle'),
         repos: result.repos,
         releases: result.tags,
         queued: result.queued,
@@ -167,6 +169,7 @@ export function releaseRoutes(deps: ServerDeps) {
         'changelog',
         ...(input.risk && kinds.has('release-risk') ? ['release-risk'] : []),
         ...(input.api && kinds.has('api-surface') ? ['api-surface'] : []),
+        ...(input.bundle && kinds.has('bundle') ? ['bundle'] : []),
       ],
       actor: principal.id,
       at: startedAt,

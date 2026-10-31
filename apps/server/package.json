@@ -19,6 +19,7 @@
     "@holtkeeper/artifacts": "workspace:*",
     "@holtkeeper/auth": "workspace:*",
     "@holtkeeper/browserslist": "workspace:*",
+    "@holtkeeper/bundles": "workspace:*",
     "@holtkeeper/changelog": "workspace:*",
     "@holtkeeper/changes": "workspace:*",
     "@holtkeeper/confluence": "workspace:*",

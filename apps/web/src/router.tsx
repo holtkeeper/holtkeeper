@@ -65,7 +65,7 @@ const ReleasesPage = lazyRouteComponent(
   'ReleasesPage',
 )
 const BundlesPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
+  () => import('./features/bundles/BundlesPage.tsx'),
   'BundlesPage',
 )
 const AssetsPage = lazyRouteComponent(
@@ -241,6 +241,20 @@ const analysisPage = <P extends string>(
   component: ReturnType<typeof lazyRouteComponent>,
 ) => createRoute({ getParentRoute: () => appRoute, path, component, validateSearch: repoSearch })
 
+const bundlesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'bundles',
+  component: BundlesPage,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { repo?: string; target?: string; version?: string; analysis?: string } =>
+    Object.fromEntries(
+      ['repo', 'target', 'version', 'analysis'].flatMap((key) =>
+        typeof search[key] === 'string' && search[key] ? [[key, search[key]]] : [],
+      ),
+    ),
+})
+
 const publicApiRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'public-api',
@@ -297,7 +311,7 @@ const routeTree = rootRoute.addChildren([
     auditsRoute,
     page('audits/$runId', AuditRunPage),
     analysisPage('releases', ReleasesPage),
-    analysisPage('bundles', BundlesPage),
+    bundlesRoute,
     analysisPage('assets', AssetsPage),
     analysisPage('dependencies', DependenciesPage),
     analysisPage('updates', UpdatesPage),

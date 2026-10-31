@@ -1,6 +1,6 @@
 import type { LibraryRepository } from '@holtkeeper/store'
 
-import { readTarball } from '../archive.ts'
+import { type TarballOptions, readTarball } from '../archive.ts'
 import { limitStream } from '../github/client.ts'
 import type {
   ArchiveFiles,
@@ -16,6 +16,13 @@ export interface NpmRegistryOptions {
   url?: string
   /** Largest tarball downloaded. Default 50 MB. */
   maxTarballBytes?: number
+  /** Extra request headers per URL, e.g. a token for a private registry's host. */
+  headers?: (url: string) => Record<string, string> | undefined
+  /**
+   * What `archive` keeps. Default: Markdown, text, `package.json` and declaration files up to
+   * 2 MB each (`keepNpmFile`, text only).
+   */
+  archive?: Pick<TarballOptions, 'keep' | 'textOnly' | 'maxFileBytes' | 'maxTotalBytes'>
 }
 
 const docFile = /\.(md|mdx|markdown|txt)$/i
@@ -88,10 +95,11 @@ const packumentPath = (name: string) =>
   name.startsWith('@') ? `@${encodeURIComponent(name.slice(1))}` : encodeURIComponent(name)
 
 /**
- * `LibraryRegistry` for npm. `library` reads the full packument (the abbreviated one lacks `time`,
+ * `LibraryRegistry` for npm or any registry speaking its protocol (GitLab, GitHub Packages,
+ * Verdaccio, Nexus) at `url`. `library` reads the full packument (the abbreviated one lacks `time`,
  * `repository` and `gitHead`); `archive` downloads the version's tarball and keeps Markdown, text,
- * `package.json` and declaration files up to 2 MB each, without the `package/` folder. Packuments
- * are cached for the lifetime of the instance, so create one per indexing run.
+ * `package.json` and declaration files up to 2 MB each (see `archive`), without the `package/`
+ * folder. Packuments are cached for the lifetime of the instance, so create one per run.
  */
 export function npmRegistry(options: NpmRegistryOptions = {}): LibraryRegistry {
   const doFetch = options.fetch ?? fetch
@@ -103,8 +111,9 @@ export function npmRegistry(options: NpmRegistryOptions = {}): LibraryRegistry {
     let pending = packuments.get(name)
     if (!pending) {
       pending = (async () => {
-        const response = await doFetch(`${base}/${packumentPath(name)}`, {
-          headers: { accept: 'application/json' },
+        const url = `${base}/${packumentPath(name)}`
+        const response = await doFetch(url, {
+          headers: { accept: 'application/json', ...options.headers?.(url) },
         })
         if (response.status === 404) return undefined
         if (!response.ok) throw new Error(`npm registry ${response.status} for ${name}`)
@@ -166,15 +175,13 @@ export function npmRegistry(options: NpmRegistryOptions = {}): LibraryRegistry {
       const dist = isRecord(manifest['dist']) ? manifest['dist'] : {}
       const basename = ref.name.split('/').at(-1) ?? ref.name
       const tarball = text(dist['tarball']) ?? `${base}/${ref.name}/-/${basename}-${version}.tgz`
-      const response = await doFetch(tarball)
+      const headers = options.headers?.(tarball)
+      const response = await doFetch(tarball, headers ? { headers } : undefined)
       if (response.status === 404) return undefined
       if (!response.ok) throw new Error(`npm tarball ${response.status} for ${ref.name}@${version}`)
       return readTarball(
         limitStream(response, maxTarball, `npm tarball of ${ref.name}@${version}`),
-        {
-          stripTop: true,
-          keep: keepNpmFile,
-        },
+        { keep: keepNpmFile, ...options.archive, stripTop: true },
       )
     },
   }

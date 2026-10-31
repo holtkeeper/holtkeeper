@@ -994,6 +994,9 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
       }
     },
 
+    npmRegistry: (repo) =>
+      `${options.url.replace(/\/+$/, '')}/api/v4/${project(repo)}/packages/npm/`,
+
     async listImageTags(image) {
       const segments = image.split('/').slice(1)
       // The project is some prefix of the image path; the longest one that has the image wins.

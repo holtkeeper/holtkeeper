@@ -14,18 +14,20 @@ const limits = ['10', '20', '50', '100'] as const
 
 /**
  * Queues a changelog for each of the newest releases of one repository (or of every repository)
- * that has none yet, optionally with a release risk assessment and a public API snapshot
- * (preselected with `api`); the server lists tags in the background. Hidden without
- * `analyses:run` or jobs.
+ * that has none yet, optionally with a release risk assessment, a public API snapshot
+ * (preselected with `api`) and bundle sizes (preselected with `bundle`); the server lists tags in
+ * the background. Hidden without `analyses:run` or jobs.
  */
 export function BackfillReleasesButton({
   repo,
   variant = 'secondary',
   api: apiByDefault = false,
+  bundle: bundleByDefault = false,
 }: {
   repo?: RepoRef | undefined
   variant?: ButtonVariant
   api?: boolean
+  bundle?: boolean
 }) {
   const { can } = useSession()
   const analyzers = useJobAnalyzers()
@@ -35,12 +37,13 @@ export function BackfillReleasesButton({
   const [limit, setLimit] = useState<(typeof limits)[number]>('20')
   const [risk, setRisk] = useState(false)
   const [api, setApi] = useState(apiByDefault)
+  const [bundle, setBundle] = useState(bundleByDefault)
   const kinds = analyzers.data?.analyzers.map((a) => a.kind) ?? []
   if (!can('analyses:run') || !analyzers.data?.enabled || !kinds.includes('changelog')) return null
 
   const submit = () =>
     backfill.mutate(
-      { ...(repo ? { repo: repoKey(repo) } : {}), limit: Number(limit), risk, api },
+      { ...(repo ? { repo: repoKey(repo) } : {}), limit: Number(limit), risk, api, bundle },
       {
         onSuccess: () => {
           setOpen(false)
@@ -118,6 +121,22 @@ export function BackfillReleasesButton({
             }
             isSelected={api}
             onChange={setApi}
+          />
+        ) : null}
+        {kinds.includes('bundle') ? (
+          <Checkbox
+            label={
+              <span className="flex flex-col">
+                <span>Also measure bundles</span>
+                <span className="text-xs text-muted">
+                  Builds each release and downloads the package versions it published, so the
+                  Bundles page shows how sizes changed. Old releases that no longer build show as
+                  gaps.
+                </span>
+              </span>
+            }
+            isSelected={bundle}
+            onChange={setBundle}
           />
         ) : null}
       </Dialog>

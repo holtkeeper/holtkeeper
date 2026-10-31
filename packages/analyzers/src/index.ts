@@ -3,7 +3,6 @@ import { apiSurfaceAnalyzer } from '@holtkeeper/api-surface'
 import { assetsAnalyzer } from '@holtkeeper/assets'
 import { branchesAnalyzer } from '@holtkeeper/branches'
 import { browserslistAnalyzer } from '@holtkeeper/browserslist'
-import { analyzeBundle, bundleAnalysis } from '@holtkeeper/bundles'
 import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/changelog'
 import { ciJobsAnalyzer } from '@holtkeeper/ci-jobs'
 import { coverageAnalyzer } from '@holtkeeper/coverage'
@@ -34,8 +33,10 @@ import { warmupAnalyzer } from '@holtkeeper/warmup'
 import { z } from 'zod'
 
 import { auditAnalyzer } from './audit.ts'
+import { bundleAnalyzer } from './bundle.ts'
 
 export { auditAnalysis, auditAnalyzer } from './audit.ts'
+export { bundleAnalyzer } from './bundle.ts'
 
 const checkoutOf = (dir: string | undefined) => {
   if (!dir) throw new Error('this analyzer needs a checkout')
@@ -69,33 +70,6 @@ export const changelogAnalyzer = defineAnalyzer({
         : {}),
     })
     return { data, ref: data.to.name, ...(data.releasedAt ? { at: data.releasedAt } : {}) }
-  },
-})
-
-export const bundleAnalyzer = defineAnalyzer({
-  kind: 'bundle',
-  analysis: bundleAnalysis,
-  scope: 'repo',
-  needs: { checkout: true },
-  options: z.object({ dist: z.string().default('dist'), build: z.string().optional() }),
-  flags: [
-    { flag: 'dist', option: 'dist', description: 'build output directory (default dist)' },
-    {
-      flag: 'build',
-      option: 'build',
-      description: 'shell command that builds first, e.g. "bun run build"',
-    },
-  ],
-  async run({ dir, ref, options, runner }) {
-    const root = checkoutOf(dir)
-    const data = await analyzeBundle({
-      dist: `${root}/${options.dist}`,
-      root,
-      ...(options.build
-        ? { build: { dir: root, command: ['sh', '-c', options.build], runner } }
-        : {}),
-    })
-    return { data, ...(ref ? { ref } : {}) }
   },
 })
 
