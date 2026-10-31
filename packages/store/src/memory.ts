@@ -78,6 +78,17 @@ export function memoryStore(): Store {
           .slice(0, limit)
           .map(clone)
       },
+      async latest({ repo, kind } = {}) {
+        const newest = new Map<string, AnalysisRecord>()
+        for (const record of analyses.values()) {
+          if (repo && (record.repo.forge !== repo.forge || record.repo.path !== repo.path)) continue
+          if (kind && record.kind !== kind) continue
+          const key = `${record.repo.forge}\n${record.repo.path}\n${record.kind}`
+          const current = newest.get(key)
+          if (!current || record.createdAt >= current.createdAt) newest.set(key, record)
+        }
+        return newestFirst([...newest.values()], (record) => record.createdAt).map(clone)
+      },
     },
     credentials: {
       list: async () => [...credentials.values()].map(clone),

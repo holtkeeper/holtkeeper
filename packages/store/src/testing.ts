@@ -50,6 +50,8 @@ const record = (kind: string, path: string, createdAt: string, ref?: string) => 
   data: { kind, nested: { list: [1, 2] } },
 })
 
+const refs = (records: { ref?: string }[]) => records.map((r) => r.ref)
+
 const user = (id: string, overrides: Partial<User> = {}): User => ({
   id,
   name: id,
@@ -301,6 +303,28 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       })
       expect(previous.map((r) => r.ref)).toEqual(['v1.0.0'])
       expect(previous[0]?.data).toEqual({ kind: 'bundle', nested: { list: [1, 2] } })
+    })
+
+    test('analyses: latest keeps the newest record per repository and kind', async () => {
+      await store.analyses.add(record('bundle', 'games/a', '2026-10-01T00:00:00.000Z', 'v1.0.0'))
+      await store.analyses.add(record('bundle', 'games/a', '2026-10-03T00:00:00.000Z', 'v1.1.0'))
+      await store.analyses.add(record('changelog', 'games/a', '2026-10-02T00:00:00.000Z', 'c1'))
+      await store.analyses.add(record('bundle', 'games/b', '2026-10-04T00:00:00.000Z', 'b1'))
+      await store.analyses.add(record('bundle', 'games/c', '2026-10-05T00:00:00.000Z', 'c-old'))
+      await store.analyses.add(record('bundle', 'games/c', '2026-10-05T00:00:00.000Z', 'c-new'))
+
+      expect(refs(await store.analyses.latest())).toEqual(['c-new', 'b1', 'v1.1.0', 'c1'])
+      expect(refs(await store.analyses.latest({ kind: 'bundle' }))).toEqual([
+        'c-new',
+        'b1',
+        'v1.1.0',
+      ])
+      const ofA = await store.analyses.latest({ repo: { forge: 'work', path: 'games/a' } })
+      expect(refs(ofA)).toEqual(['v1.1.0', 'c1'])
+      expect(ofA[0]?.data).toEqual({ kind: 'bundle', nested: { list: [1, 2] } })
+      expect(
+        await store.analyses.latest({ repo: { forge: 'work', path: 'games/a' }, kind: 'review' }),
+      ).toEqual([])
     })
 
     test('credentials: put replaces, remove deletes', async () => {

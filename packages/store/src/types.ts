@@ -190,6 +190,11 @@ export interface AnalysisStore {
   add(record: Omit<AnalysisRecord, 'id'>): Promise<AnalysisRecord>
   get(id: string): Promise<AnalysisRecord | undefined>
   list(query?: AnalysisQuery): Promise<AnalysisRecord[]>
+  /**
+   * The newest record of every (repository, kind) pair, newest first; only pairs of `repo` and
+   * of `kind` when given. Among records created at the same time the last added wins.
+   */
+  latest(query?: Pick<AnalysisQuery, 'repo' | 'kind'>): Promise<AnalysisRecord[]>
 }
 
 /** Something a person or the system did, for the activity log. */

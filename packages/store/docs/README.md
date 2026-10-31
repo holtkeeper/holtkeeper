@@ -9,6 +9,7 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 | `settings`         | Scoped setting entries (see [@holtkeeper/settings](../../settings/docs/README.md))                                             |
 | `users`            | Users, passkeys, OIDC identities and one-time link tokens (only hashes)                                                        |
 | `activity`         | Who did what: logins, credential and setting changes, ingested audits                                                          |
+| `analyses`         | Analysis records: `list` newest first by repository, kind and time; `latest` the newest record of every (repository, kind)     |
 | `jobs`             | The task queue for background analyses (see below)                                                                             |
 | `knowledge`        | Knowledge base entries with version history and search (see below)                                                             |
 | `aiUsage`          | One record per LLM agent run: tokens, cost, outcome (see below)                                                                |
@@ -109,6 +110,10 @@ What the chain does and does not prove: anyone who edits the database without al
 Search text is plain words: every word is a prefix (`useEff` finds `useEffect`), any word may match, operators and punctuation are plain text, and blank text returns nothing. A quoted phrase of several words (`"cannot read property"`) matches only those words in that order; an unclosed quote is plain text. Scores are only comparable within one result.
 
 `compareLibraryVersions`, `newestVersionsFirst`, `libraryQueryTerms`, `libraryIssueDigestText`, `libraryIssueBodyText` and `plainChunk` are exported for implementations.
+
+## Analyses
+
+`AnalysisStore.latest({ repo?, kind? })` returns the newest record of every (repository, kind) pair, newest first; among records created at the same time the last added wins. `newestRecords(analyses, kind, read, accept?)` builds on `latest`: the newest record of `kind` of every repository that `read` turns into a value, trying up to 20 older records of a repository only when `read` rejects its newest; `accept` leaves repositories out by their newest record.
 
 ## Database inspector
 

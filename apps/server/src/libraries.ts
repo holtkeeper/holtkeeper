@@ -36,6 +36,7 @@ import type {
   SettingEntry,
   SettingStore,
 } from '@holtkeeper/store'
+import { newestRecords } from '@holtkeeper/store'
 import { intervalMs } from '@holtkeeper/updates'
 import { z } from 'zod'
 
@@ -228,9 +229,6 @@ export async function githubClientFor(
   })
 }
 
-const PAGE = 50
-const MAX_FLEET_RECORDS = 1000
-
 /** Third-party libraries the fleet uses, and the ones it defines itself. */
 export interface FleetLibraryUses {
   uses: LibraryUse[]
@@ -266,31 +264,23 @@ export async function fleetLibraryUses(analyses: AnalysisStore): Promise<FleetLi
     }
   }
 
-  const groups = new Set<string>()
-  let before: string | undefined
-  for (let seen = 0; seen < MAX_FLEET_RECORDS; seen += PAGE) {
-    // oxlint-disable-next-line no-await-in-loop -- pages depend on the previous one
-    const page = await analyses.list({ kind: 'fleet', limit: PAGE, ...(before ? { before } : {}) })
-    for (const record of page) {
-      const group = `${record.repo.forge}:${record.repo.path}`
-      if (groups.has(group)) continue
-      const parsed = fleetDataSchema.safeParse(record.data)
-      if (!parsed.success) continue
-      groups.add(group)
-      for (const library of parsed.data.libraries) {
-        if (library.definedIn) {
-          internal.add(`${library.ecosystem}:${library.name}`)
-          continue
-        }
-        for (const usage of library.usages) {
-          const version = usage.resolved ?? usage.version
-          if (version)
-            add(library.ecosystem, library.name, version, `${record.repo.forge}:${usage.repo}`)
-        }
+  const fleets = await newestRecords(
+    analyses,
+    'fleet',
+    (record) => fleetDataSchema.safeParse(record.data).data,
+  )
+  for (const { record, value } of fleets.values()) {
+    for (const library of value.libraries) {
+      if (library.definedIn) {
+        internal.add(`${library.ecosystem}:${library.name}`)
+        continue
+      }
+      for (const usage of library.usages) {
+        const version = usage.resolved ?? usage.version
+        if (version)
+          add(library.ecosystem, library.name, version, `${record.repo.forge}:${usage.repo}`)
       }
     }
-    if (page.length < PAGE) break
-    before = page.at(-1)?.createdAt
   }
 
   for (const pkg of await createApiCatalog({ analyses }).packages(() => true))

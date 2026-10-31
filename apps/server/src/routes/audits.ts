@@ -1,10 +1,4 @@
-import type {
-  AnalysisSummary,
-  AuditRunDetail,
-  AuditRunList,
-  RepoList,
-  RepoSummary,
-} from '@holtkeeper/api'
+import type { AuditRunDetail, AuditRunList, RepoList, RepoSummary } from '@holtkeeper/api'
 import { summarizeRun } from '@holtkeeper/api'
 import { staticPrefix } from '@holtkeeper/jobs'
 import { Hono } from 'hono'
@@ -102,10 +96,9 @@ export function auditRoutes(deps: ServerDeps) {
     await Promise.all(
       [...latest.values()].map(async (summary) => {
         if (!canSee(principal, 'analyses:read', repoTarget(config, summary.repo))) return
-        const newest = new Map<string, AnalysisSummary>()
-        for (const record of await store.analyses.list({ repo: summary.repo, limit: 100 }))
-          if (!newest.has(record.kind)) newest.set(record.kind, summarizeAnalysis(kinds, record))
-        if (newest.size) summary.latestAnalyses = [...newest.values()]
+        const newest = await store.analyses.latest({ repo: summary.repo })
+        if (newest.length)
+          summary.latestAnalyses = newest.map((record) => summarizeAnalysis(kinds, record))
       }),
     )
     const repos = [...latest.values()].toSorted((a, b) =>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { AnalysisRecord } from '@holtkeeper/store'
+import { memoryStore } from '@holtkeeper/store/memory'
 
 import type { DepgraphData } from './analyze.ts'
 import { latestDepgraphs, loadPackageCatalog, packageCatalog } from './catalog.ts'
@@ -66,16 +67,21 @@ describe('packageCatalog', () => {
 
 describe('loadPackageCatalog', () => {
   test('reads the newest valid depgraph record per repository', async () => {
-    const records = [
-      record('libs/a', '2026-10-30T02:00:00Z', defining(['@co/ui', '2.0.0'])),
+    const { analyses } = memoryStore()
+    for (const { id: _, ...entry } of [
       record('libs/a', '2026-10-30T01:00:00Z', defining(['@co/old', '1.0.0'])),
+      record('libs/a', '2026-10-30T02:00:00Z', defining(['@co/ui', '2.0.0'])),
+      record('libs/b', '2026-10-29T00:00:00Z', defining(['@co/kit', '1.2.0'])),
       record('libs/b', '2026-10-30T00:00:00Z', { not: 'a graph' }),
-    ]
-    const analyses = { list: async () => records }
+      record('libs/c', '2026-10-30T00:00:00Z', { not: 'a graph' }),
+    ])
+      // oxlint-disable-next-line no-await-in-loop -- records keep their order
+      await analyses.add(entry)
     const catalog = await loadPackageCatalog(analyses)
     expect(catalog.find('npm', '@co/ui')?.version).toBe('2.0.0')
     expect(catalog.find('npm', '@co/old')).toBeUndefined()
+    expect(catalog.find('npm', '@co/kit')?.version).toBe('1.2.0')
     const latest = await latestDepgraphs(analyses, { accept: (r) => r.repo.path !== 'libs/a' })
-    expect([...latest.keys()]).toEqual([])
+    expect([...latest.keys()]).toEqual(['work:libs/b'])
   })
 })

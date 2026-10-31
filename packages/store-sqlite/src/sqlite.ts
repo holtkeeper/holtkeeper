@@ -263,6 +263,16 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
          AND (?4 IS NULL OR created_at < ?4)
        ORDER BY created_at DESC, seq DESC LIMIT ?5`,
     ),
+    analysisLatest: db.query<AnalysisRow, [string | null, string | null, string | null]>(
+      `SELECT * FROM analyses WHERE seq IN (
+         SELECT seq FROM (
+           SELECT seq, ROW_NUMBER() OVER (
+             PARTITION BY repo_forge, repo_path, kind ORDER BY created_at DESC, seq DESC) AS n
+           FROM analyses
+           WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR kind = ?3))
+         WHERE n = 1)
+       ORDER BY created_at DESC, seq DESC`,
+    ),
     credList: db.query<CredentialRow, []>('SELECT * FROM credentials ORDER BY seq'),
     credGet: db.query<CredentialRow, [string]>('SELECT * FROM credentials WHERE id = ?'),
     credPut: db.prepare(
@@ -382,6 +392,11 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
       async list({ repo, kind, before, limit = 50 } = {}) {
         return sql.analysisList
           .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind), orNull(before), limit)
+          .map(toAnalysis)
+      },
+      async latest({ repo, kind } = {}) {
+        return sql.analysisLatest
+          .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind))
           .map(toAnalysis)
       },
     },

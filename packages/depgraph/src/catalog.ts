@@ -1,5 +1,6 @@
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AnalysisRecord, AnalysisStore } from '@holtkeeper/store'
+import { newestRecords } from '@holtkeeper/store'
 
 import { type DepgraphData, depgraphDataSchema } from './analyze.ts'
 import { ownPackages } from './inventory.ts'
@@ -47,42 +48,27 @@ export function packageCatalog(
 }
 
 export interface LatestDepgraphsOptions {
-  /** Records to accept, e.g. only those the caller may see. Default: all. */
+  /** Repositories to include, judged by their newest record, e.g. those the caller may see. Default: all. */
   accept?: (record: AnalysisRecord) => boolean
-  /** Records read at most, newest first. Default 2000. */
-  maxRecords?: number
 }
 
 /** The newest valid `depgraph` record of every repository, by `forge:path`. */
 export async function latestDepgraphs(
-  analyses: Pick<AnalysisStore, 'list'>,
+  analyses: Pick<AnalysisStore, 'latest' | 'list'>,
   options: LatestDepgraphsOptions = {},
 ): Promise<Map<string, { record: AnalysisRecord; data: DepgraphData }>> {
-  const { accept = () => true, maxRecords = 2000 } = options
-  const pageSize = 100
-  const latest = new Map<string, { record: AnalysisRecord; data: DepgraphData }>()
-  let before: string | undefined
-  for (let seen = 0; seen < maxRecords; seen += pageSize) {
-    const page = await analyses.list({
-      kind: 'depgraph',
-      limit: pageSize,
-      ...(before && { before }),
-    })
-    for (const record of page) {
-      const key = `${record.repo.forge}:${record.repo.path}`
-      if (latest.has(key) || !accept(record)) continue
-      const parsed = depgraphDataSchema.safeParse(record.data)
-      if (parsed.success) latest.set(key, { record, data: parsed.data })
-    }
-    if (page.length < pageSize) break
-    before = page.at(-1)?.createdAt
-  }
-  return latest
+  const found = await newestRecords(
+    analyses,
+    'depgraph',
+    (record) => depgraphDataSchema.safeParse(record.data).data,
+    options.accept,
+  )
+  return new Map([...found].map(([key, { record, value }]) => [key, { record, data: value }]))
 }
 
 /** The catalog of every repository's newest `depgraph` record in `analyses`. */
 export async function loadPackageCatalog(
-  analyses: Pick<AnalysisStore, 'list'>,
+  analyses: Pick<AnalysisStore, 'latest' | 'list'>,
   options: LatestDepgraphsOptions = {},
 ): Promise<PackageCatalog> {
   const latest = await latestDepgraphs(analyses, options)

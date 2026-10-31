@@ -93,7 +93,13 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
       client ??= new SQL(resolveUrl(options.url), {
         max: options.max ?? 10,
         ...(options.ssl !== undefined && { tls: options.ssl }),
-        connection: { application_name: 'holtkeeper', TimeZone: 'UTC' },
+        // Prepared statements with `($1 IS NULL OR col = $2)` filters get a generic plan after five
+        // runs, which cannot use an index for the filter; plan each run for its values instead.
+        connection: {
+          application_name: 'holtkeeper',
+          TimeZone: 'UTC',
+          plan_cache_mode: 'force_custom_plan',
+        },
       })
       await migrate(client, schema)
       return { sql: client, t: tables(client, schema) }
@@ -191,6 +197,18 @@ function coreStores(db: () => Promise<Db>): CoreStores {
             AND (${orNull(kind)}::text IS NULL OR kind = ${orNull(kind)}::text)
             AND (${orNull(before)}::timestamptz IS NULL OR created_at < ${orNull(before)}::timestamptz)
           ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
+        return rows.map(toAnalysis)
+      },
+      async latest({ repo, kind } = {}) {
+        const { sql, t } = await db()
+        const rows: AnalysisRow[] = await sql`
+          SELECT * FROM ${t.analyses} WHERE seq IN (
+            SELECT DISTINCT ON (repo_forge, repo_path, kind) seq FROM ${t.analyses}
+            WHERE (${orNull(repo?.forge)}::text IS NULL
+                OR (repo_forge = ${orNull(repo?.forge)}::text AND repo_path = ${orNull(repo?.path)}::text))
+              AND (${orNull(kind)}::text IS NULL OR kind = ${orNull(kind)}::text)
+            ORDER BY repo_forge, repo_path, kind, created_at DESC, seq DESC)
+          ORDER BY created_at DESC, seq DESC`
         return rows.map(toAnalysis)
       },
     },

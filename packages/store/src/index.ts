@@ -35,3 +35,4 @@ export {
 } from './libraries.ts'
 export { databaseDomains, tableDomain } from './database.ts'
 export type { DatabaseDomain } from './database.ts'
+export { newestRecords } from './analyses.ts'

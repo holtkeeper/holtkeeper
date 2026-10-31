@@ -37,7 +37,7 @@ All pure.
 
 Packages the analyzed repositories define, for analyses that must tell them from third-party ones (licenses, fleet).
 
-- `latestDepgraphs(analyses, { accept?, maxRecords? })` — the newest valid `depgraph` record of every repository from an `AnalysisStore`, by `forge:path`; `accept` filters records (e.g. by visibility), at most `maxRecords` (default 2000) are read.
+- `latestDepgraphs(analyses, { accept? })` — the newest valid `depgraph` record of every repository from an `AnalysisStore`, by `forge:path` (`newestRecords` from [@holtkeeper/store](../../store/docs/README.md)): one record per repository, older ones only where the newest is not a valid graph; `accept` leaves out repositories by their newest record (e.g. by visibility).
 - `packageCatalog(entries: { repo, data }[]): PackageCatalog` — every versioned workspace (`ownPackages`) with the repository that defines it; when several define the same package, the highest version wins. `find(ecosystem, name)` returns `InternalPackage { ecosystem, name, version, repo, path? }`.
 - `loadPackageCatalog(analyses, options?)` — both together.
 
