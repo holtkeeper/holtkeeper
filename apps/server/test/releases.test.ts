@@ -191,6 +191,27 @@ describe('release backfill', () => {
     ])
   })
 
+  test('retakes public API snapshots that found no packages', async () => {
+    const repo = { forge: 'work', path: 'games/a' }
+    for (const [ref, packages] of [
+      ['v1.1.0', []],
+      ['v1.2.0', [{ name: '@games/a' }]],
+    ] as const)
+      // oxlint-disable-next-line no-await-in-loop -- two records in order
+      await store.analyses.add({
+        repo,
+        kind: 'api-surface',
+        ref,
+        createdAt: '2026-10-01T00:00:00.000Z',
+        data: { packages },
+      })
+    await backfilled({ repo: 'work:games/a', limit: 2, api: true })
+    const jobs = await store.jobs.list({ repo })
+    expect(jobs.filter((job) => job.analyzer === 'api-surface').map((job) => job.ref)).toEqual([
+      'v1.1.0',
+    ])
+  })
+
   test('a monorepo commit carrying package tags is one release', async () => {
     expect(await backfilled({ repo: 'work:libs/ui', limit: 2 })).toMatchObject({
       releases: 2,

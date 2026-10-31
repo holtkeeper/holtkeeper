@@ -29,6 +29,13 @@ type ListTags = NonNullable<GitForge['listTags']>
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+const emptySnapshot = z.object({ packages: z.array(z.unknown()).length(0) })
+
+/** Snapshots the extractor once read empty; a backfill retakes them instead of skipping. */
+const settled: Record<string, (data: unknown) => boolean> = {
+  'api-surface': (data) => !emptySnapshot.safeParse(data).success,
+}
+
 const releasesOf = (tags: { name: string; sha: string }[]) => [...new Set(tags.map(releaseTarget))]
 
 /**
@@ -90,7 +97,11 @@ export function releaseRoutes(deps: ServerDeps) {
       await Promise.all(
         run.analyzers.map(async (analyzer) => {
           const done = await store.analyses.list({ repo: target, kind: analyzer, limit: 500 })
-          return [analyzer, new Set(done.flatMap((record) => record.ref ?? []))] as const
+          const kept = settled[analyzer]
+          const refs = done.flatMap((record) =>
+            record.ref && (!kept || kept(record.data)) ? [record.ref] : [],
+          )
+          return [analyzer, new Set(refs)] as const
         }),
       ),
     )
