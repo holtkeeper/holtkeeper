@@ -40,12 +40,7 @@ describe('egressEnvironment', () => {
     )
     expect(await readFile(env.NODE_EXTRA_CA_CERTS ?? '', 'utf8')).toBe(ca)
     expect(await readFile(env.SSL_CERT_FILE ?? '', 'utf8')).toBe(`${system.trimEnd()}\n${ca}`)
-    for (const name of [
-      'CURL_CA_BUNDLE',
-      'GIT_SSL_CAINFO',
-      'REQUESTS_CA_BUNDLE',
-      'YARN_CA_FILE_PATH',
-    ])
+    for (const name of ['CURL_CA_BUNDLE', 'GIT_SSL_CAINFO', 'REQUESTS_CA_BUNDLE'])
       expect(env[name]).toBe(env.SSL_CERT_FILE)
   })
 

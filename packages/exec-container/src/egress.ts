@@ -87,13 +87,7 @@ export function egressEnvironment(
   const path = (file: string) => (options.containerDir ? posix.join(dir, file) : join(dir, file))
   env.NODE_EXTRA_CA_CERTS = path('ca.pem')
   if (bundle)
-    for (const name of [
-      'SSL_CERT_FILE',
-      'CURL_CA_BUNDLE',
-      'GIT_SSL_CAINFO',
-      'REQUESTS_CA_BUNDLE',
-      'YARN_CA_FILE_PATH',
-    ])
+    for (const name of ['SSL_CERT_FILE', 'CURL_CA_BUNDLE', 'GIT_SSL_CAINFO', 'REQUESTS_CA_BUNDLE'])
       env[name] = path('bundle.pem')
   const mounts = options.containerDir
     ? [{ hostDir, containerDir: options.containerDir, readOnly: true }]
