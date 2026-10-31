@@ -1,4 +1,5 @@
 import type { RepoRef } from '@holtkeeper/api'
+import type { ApiChange, ApiPackage } from '@holtkeeper/api-surface'
 import { compareVersions } from '@holtkeeper/depgraph'
 import type { AnalysisStore } from '@holtkeeper/store'
 import {
@@ -119,6 +120,31 @@ export function createUsageIndex(options: UsageIndexOptions) {
 export type UsageIndex = ReturnType<typeof createUsageIndex>
 
 /**
+ * The uses of `name` that `changes` (from `before` to version `target`) affect, over the newest
+ * usage record of every readable repository; repositories already on `target` or later are left
+ * out. Without `target` (a default branch) every user counts.
+ */
+export async function impactOfChanges(
+  usages: UsageIndex,
+  filter: RepoFilter,
+  name: string,
+  input: { before: ApiPackage | undefined; changes: ApiChange[]; target: string | undefined },
+) {
+  const declarations = new Map(
+    (input.before?.entries ?? []).flatMap((entry) =>
+      entry.symbols.map((symbol) => [symbol.name, symbol.signature] as const),
+    ),
+  )
+  const { target } = input
+  const entries = (await usages.entries(filter)).filter(({ data }) => {
+    const used = data.packages.find((pkg) => pkg.name === name)
+    if (!used || !target || !used.versions.length) return true
+    return used.versions.some((version) => compareVersions(version, target) < 0)
+  })
+  return upgradeImpact({ entries, package: name, changes: input.changes, declarations })
+}
+
+/**
  * The uses an upgrade of `name` affects: the API diff between two recorded versions joined with
  * the newest usage record of every readable repository. Repositories already on `to` or later are
  * left out. `undefined` when the catalog has no two versions to compare.
@@ -136,21 +162,14 @@ export async function impactOf(
     version: diff.from.analysisId,
     repo: repoKey(diff.repo),
   })
-  const declarations = new Map(
-    (old?.package.entries ?? []).flatMap((entry) =>
-      entry.symbols.map((symbol) => [symbol.name, symbol.signature] as const),
-    ),
-  )
-  const target = diff.to.head ? undefined : diff.to.version
-  const entries = (await usages.entries(filter)).filter(({ data }) => {
-    const used = data.packages.find((pkg) => pkg.name === name)
-    if (!used || !target || !used.versions.length) return true
-    return used.versions.some((version) => compareVersions(version, target) < 0)
-  })
   return {
     repo: diff.repo,
     from: diff.from,
     to: diff.to,
-    impact: upgradeImpact({ entries, package: name, changes: diff.diff.changes, declarations }),
+    impact: await impactOfChanges(usages, filter, name, {
+      before: old?.package,
+      changes: diff.diff.changes,
+      target: diff.to.head ? undefined : diff.to.version,
+    }),
   }
 }

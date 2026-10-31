@@ -22,6 +22,7 @@ import { sqliteAudit } from './audit.ts'
 import { sqliteCiJobs } from './ci-jobs.ts'
 import { sqliteConfig, sqliteKv } from './config.ts'
 import { sqliteKnowledge } from './knowledge.ts'
+import { sqliteLibraries } from './libraries.ts'
 import { migrate } from './migrations.ts'
 
 /** Options for `sqliteStore`. */
@@ -539,6 +540,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
     kv: sqliteKv(db),
     audit: sqliteAudit(db),
     externalAccounts: sqliteExternalAccounts(db),
+    libraries: sqliteLibraries(db),
     async close() {
       db.close()
     },

@@ -15,6 +15,7 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 | `ciJobs`           | Finished CI job attempts per repository, kept so job analytics fetch only what is new (see below)                              |
 | `audit`            | Optional. The append-only, hash-chained audit log (see below)                                                                  |
 | `externalAccounts` | Optional. External accounts (GitLab, GitHub, Slack ids) linked to principals (see below)                                       |
+| `libraries`        | Optional. Third-party library docs: libraries, indexed versions, document chunks and issues (see below)                        |
 
 ## Jobs
 
@@ -89,6 +90,24 @@ What the chain does and does not prove: anyone who edits the database without al
 ## External accounts
 
 `ExternalAccountStore` (`store.externalAccounts`) holds the links of [@holtkeeper/identities](../../identities/docs/README.md): `get`, `find(provider, externalId)`, `listByUser(userId)` and `list(provider?)` (oldest link first), `put` (upsert by id; rejects with `ExternalAccountConflictError` when another id holds the same `(provider, externalId)`) and `remove`. `removeUser` also removes the user's links. `User.avatarSeed` (optional) overrides the user id as the seed of the generated avatar.
+
+## Libraries
+
+`LibraryStore` (`store.libraries`, optional) holds the third-party documentation index of [library docs](../../../docs/library-docs.md). Libraries are keyed by `LibraryRef` `(ecosystem, name)`; `ecosystem` is `npm` or `Go`.
+
+- `putLibrary` / `putVersion` create or replace a `LibraryRecord` by `(ecosystem, name)` and a `LibraryVersionRecord` by `(ecosystem, name, version)`; both round-trip whole, optional fields stay absent. `getLibrary`, `getVersion`.
+- `listLibraries({ ecosystem?, query? })` — by ecosystem, then name (code-unit order); `query` keeps names containing it, case-insensitively.
+- `listVersions(ref)` — highest semantic version first (`compareLibraryVersions`): `1.10.0` above `1.9.0`, a prerelease below its release (`rc.1` above `beta.11` above `beta.2`), a Go `v` prefix and `+build` metadata ignored; strings that are not versions sort last.
+- `replaceChunks(ref, version, source, chunks)` — makes `chunks` exactly what `version` ships from `source`. A chunk is one heading section (`id`, `path`, `headings`, `anchor?`, `text`, `url?`); ids come from the caller and are stable for identical content, so an id stored before is reused and gains the version. The version is dropped from the library's other chunks of that `source` (chunks of other sources keep it), and chunks left without versions are deleted. The order of `chunks` is their document order; a reused chunk takes its position from the latest call. `versions` given in the input are ignored.
+- `listChunks(filter, limit = 200)` — in path order (code units), then document order. `removeVersion(ref, version)` deletes the version record, drops the version from the library's chunks and deletes orphans.
+- `searchChunks(text, filter?, limit = 20)` → `{ chunk, score }[]`, best first; `chunk.versions` is highest first. `LibraryChunkFilter`: `ecosystem`, `name`, `version` (only chunks that version ships), `source`, `path` (exact). Heading matches outrank text matches.
+- `libraryStats({ ecosystem? })`: `Map` keyed by `<ecosystem>:<name>` of every stored library (zero counts included) to `LibraryStats { versions, chunks, issues }`, in one query; `versions` counts every version record, those in their grace period included.
+- `putIssues(issues)` creates or replaces by id (`<host>/<owner>/<repo>#<number>`), `getIssue(id)`, `searchIssues(text, { ecosystem?, name?, state? }, limit = 20)`: title matches outrank digest matches (problem, symptoms, affected, fixed-in, workaround), which outrank first message and answer matches; ties go to the most recently updated.
+- `removeLibrary(ref)` removes the library with its versions, chunks and issues; other libraries keep theirs.
+
+Search text is plain words: every word is a prefix (`useEff` finds `useEffect`), any word may match, operators and punctuation are plain text, and blank text returns nothing. A quoted phrase of several words (`"cannot read property"`) matches only those words in that order; an unclosed quote is plain text. Scores are only comparable within one result.
+
+`compareLibraryVersions`, `newestVersionsFirst`, `libraryQueryTerms`, `libraryIssueDigestText`, `libraryIssueBodyText` and `plainChunk` are exported for implementations.
 
 ## Implementations
 

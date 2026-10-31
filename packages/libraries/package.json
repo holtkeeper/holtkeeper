@@ -1,0 +1,15 @@
+{
+  "name": "@holtkeeper/libraries",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/api-surface": "workspace:*",
+    "@holtkeeper/artifacts": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "fflate": "^0.8.3"
+  }
+}

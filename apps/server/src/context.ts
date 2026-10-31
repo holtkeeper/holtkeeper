@@ -1,6 +1,6 @@
 import type { Action, Principal, RepoTarget, Target } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
-import type { AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@holtkeeper/agent'
+import type { Agent, AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@holtkeeper/agent'
 import type { JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
@@ -58,6 +58,8 @@ export interface ServerDeps {
   aiCatalog?: AiCatalog
   /** AI providers from the config's `ai.providers`, which `ai-sdk` credentials may name. */
   aiProviders?: readonly AiProviderPlugin[]
+  /** The agent of a repository, for work routes run outside jobs (library issue digests). */
+  agentFor?: (repo: RepoRef) => Promise<Agent | undefined>
   /** Replaces the AI SDK models of `ai-sdk` credential tests; for tests. */
   languageModel?: LanguageModelFactory
   /** Runs host tools for routes, such as `ssh-keyscan` when a forge issues an SSH key. Default: `localRunner`. */

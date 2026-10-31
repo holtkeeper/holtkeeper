@@ -72,6 +72,10 @@ import type {
   KnowledgeEntry,
   KnowledgeList,
   KnowledgeStatus,
+  LibraryDetail,
+  LibraryList,
+  LibraryReindexResult,
+  LibrarySearchResult,
   LinkInfo,
   LinkResponse,
   MePrincipal,
@@ -371,6 +375,19 @@ export const api = {
   storage: () => request<StorageOverview>('GET', '/api/storage'),
   clearStorage: (providerId: string, input: ClearStorageInput = {}) =>
     request<ClearStorageResult>('POST', `/api/storage/${id(providerId)}/clear`, { body: input }),
+
+  libraries: (query: { q?: string; ecosystem?: string }) =>
+    request<LibraryList>('GET', '/api/libraries', { query }),
+  library: (ecosystem: string, name: string) =>
+    request<LibraryDetail>('GET', `/api/libraries/${id(ecosystem)}/${id(name)}`),
+  librarySearch: (query: {
+    q: string
+    ecosystem?: string
+    name?: string
+    version?: string
+    limit?: number
+  }) => request<LibrarySearchResult>('GET', '/api/libraries/search', { query }),
+  reindexLibraries: () => request<LibraryReindexResult>('POST', '/api/libraries/reindex'),
 
   egressCache: () => request<EgressCacheView>('GET', '/api/egress/cache'),
   deleteEgressCache: (input: DeleteEgressCacheInput = {}) =>

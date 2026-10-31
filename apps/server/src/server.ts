@@ -66,6 +66,7 @@ import {
   executionSettings,
   startJobs,
 } from './jobs.ts'
+import { librariesSetting, noteLibraryUses, startLibraryIndex } from './libraries.ts'
 import { limiterOptionsFor } from './limiter-state.ts'
 import { serverLimits } from './limits.ts'
 import { startManagedConfig } from './managed.ts'
@@ -285,6 +286,7 @@ export async function startServer(
       rateLimiter: limiter,
       aiCatalog,
       aiProviders,
+      artifacts,
     })
   const deps: ServerDeps = {
     config,
@@ -301,6 +303,7 @@ export async function startServer(
       limitsCredentialsSetting,
       pollingSetting,
       trackersSetting,
+      librariesSetting,
       ...analyzerSettings(analyzers),
       ...executionSettings(),
       ...(options.settings ?? []),
@@ -311,6 +314,7 @@ export async function startServer(
     artifacts,
     aiCatalog,
     aiProviders,
+    agentFor: async (repo) => agentFor(repo),
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),
@@ -373,7 +377,10 @@ export async function startServer(
     now: deps.now,
     run: { worker: duties.worker, scheduler: false },
     ...(options.worker && { worker: options.worker }),
-    onFinished: (job) => metrics?.observeJob(job),
+    onFinished: async (job, record) => {
+      metrics?.observeJob(job)
+      if (record) await noteLibraryUses(server.store.kv, record.kind, deps.now())
+    },
     log,
   })
 
@@ -402,6 +409,7 @@ export async function startServer(
       },
       () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
       () => startWebhookSync(deps, log),
+      () => startLibraryIndex(deps, log),
     ],
   })
   metrics = ops.metrics

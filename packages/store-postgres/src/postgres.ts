@@ -8,6 +8,7 @@ import { postgresCiJobs } from './ci-jobs.ts'
 import { postgresConfig, postgresKv } from './config.ts'
 import { postgresJobs } from './jobs.ts'
 import { postgresKnowledge } from './knowledge.ts'
+import { postgresLibraries } from './libraries.ts'
 import { checkSchemaName, migrate } from './migrations.ts'
 import {
   type ActivityRow,
@@ -110,6 +111,7 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
     kv: postgresKv(db),
     audit: postgresAudit(db),
     externalAccounts: postgresExternalAccounts(db),
+    libraries: postgresLibraries(db),
     async ready() {
       await db()
     },

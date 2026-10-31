@@ -25,3 +25,11 @@ export {
   verifyAuditEvents,
 } from './audit.ts'
 export { compareCiJobs, normalizeCiJob } from './ci-jobs.ts'
+export {
+  compareLibraryVersions,
+  libraryIssueBodyText,
+  libraryIssueDigestText,
+  libraryQueryTerms,
+  newestVersionsFirst,
+  plainChunk,
+} from './libraries.ts'

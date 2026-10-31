@@ -60,6 +60,7 @@ export const keys = {
   auditLog: ['audit-log'] as const,
   storage: ['storage'] as const,
   egressCache: ['egress-cache'] as const,
+  libraries: ['libraries'] as const,
   accounts: ['accounts'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
@@ -597,6 +598,57 @@ export function useDeleteEgressCache() {
   return useMutation({
     mutationFn: (input: DeleteEgressCacheInput) => api.deleteEgressCache(input),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.egressCache }),
+  })
+}
+
+/** Indexed third-party libraries used by readable repositories, with the last indexing run. */
+export const useLibraries = (query: { q?: string; ecosystem?: string }) =>
+  useQuery({
+    queryKey: [...keys.libraries, 'list', query.q ?? '', query.ecosystem ?? ''],
+    queryFn: () => api.libraries(query),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  })
+
+/** One library with its indexed versions and documents. */
+export const useLibrary = (ecosystem: string, name: string) =>
+  useQuery({
+    queryKey: [...keys.libraries, 'detail', ecosystem, name],
+    queryFn: () => api.library(ecosystem, name),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+/** Library document sections matching `q`, best first; idle while `q` is blank. */
+export const useLibrarySearch = (query: {
+  q: string
+  ecosystem?: string
+  name?: string
+  version?: string
+  limit?: number
+}) =>
+  useQuery({
+    queryKey: [
+      ...keys.libraries,
+      'search',
+      query.q,
+      query.ecosystem ?? '',
+      query.name ?? '',
+      query.version ?? '',
+      query.limit ?? 0,
+    ],
+    queryFn: () => api.librarySearch(query),
+    placeholderData: keepPreviousData,
+    enabled: query.q.trim().length > 0,
+    staleTime: 30_000,
+  })
+
+/** Starts an indexing run unless one is going; refreshes the library views. */
+export function useReindexLibraries() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: api.reindexLibraries,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.libraries }),
   })
 }
 

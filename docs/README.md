@@ -6,6 +6,7 @@
 - [Development](development.md) — tooling, conventions, why there is no build step
 - [Deployment](deployment.md) — Docker, compose, Kubernetes (Helm), roles, scaling, backups
 - [Agent access](agent-access.md) — let an AI agent sign in to the web UI with its own account and a login link
+- [Library docs for agents](library-docs.md) — design: version-exact docs, API and issues of third-party libraries over MCP
 
 ## Modules
 
@@ -67,6 +68,7 @@
 | `@holtkeeper/testids`             | Test id attributes on interactive elements of frontend templates         | [packages/testids/docs](../packages/testids/docs/README.md)                         |
 | `@holtkeeper/api-surface`         | Public API of packages per version, diffs, Markdown for agents           | [packages/api-surface/docs](../packages/api-surface/docs/README.md)                 |
 | `@holtkeeper/usages`              | Which exports, members and props of packages each repository uses        | [packages/usages/docs](../packages/usages/docs/README.md)                           |
+| `@holtkeeper/libraries`           | Third-party library versions, docs, API and issues for agents            | [packages/libraries/docs](../packages/libraries/docs/README.md)                     |
 | `@holtkeeper/licenses`            | Dependency licenses against an allowlist                                 | [packages/licenses/docs](../packages/licenses/docs/README.md)                       |
 | `@holtkeeper/fleet`               | Library versions and config drift across repositories                    | [packages/fleet/docs](../packages/fleet/docs/README.md)                             |
 | `@holtkeeper/stack`               | Runtimes, package managers and images across repositories, end of life   | [packages/stack/docs](../packages/stack/docs/README.md)                             |

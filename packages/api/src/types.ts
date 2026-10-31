@@ -26,6 +26,10 @@ import type {
   KnowledgePackage,
   KnowledgeRevision,
   KnowledgeStatus,
+  LibraryChunk,
+  LibraryEcosystem,
+  LibraryRecord,
+  LibraryVersionRecord,
   RegisteredWebhook,
   RepoTraitsDocumentData,
   RotationPolicy,
@@ -1415,4 +1419,61 @@ export interface McpUsageOverview {
   recent: McpCallView[]
   /** URL to configure in MCP clients. */
   endpoint: string
+}
+
+/** A library row of `GET /api/libraries`. */
+export interface LibrarySummary {
+  ecosystem: LibraryEcosystem
+  name: string
+  description?: string
+  latest?: string
+  repository?: string
+  /** Indexed versions, highest first. */
+  versions: string[]
+  /** Repositories using it that the caller may read. */
+  repos: number
+  chunks: number
+  issues: number
+  /** Sources whose last fetch failed, library-wide or for any version. */
+  failed: string[]
+  updatedAt: Timestamp
+}
+
+/** `GET /api/libraries?q=&ecosystem=` — libraries used by repositories the caller may read, by name. */
+export interface LibraryList {
+  libraries: LibrarySummary[]
+  /** Last indexing run, when one finished. */
+  lastRun?: LibraryIndexRun
+  /** Whether the server indexes libraries at all (a store with `libraries` and the setting on). */
+  enabled: boolean
+}
+
+/** Outcome of one indexing run. */
+export interface LibraryIndexRun {
+  startedAt: Timestamp
+  finishedAt?: Timestamp
+  libraries: number
+  versionsAdded: number
+  versionsRemoved: number
+  librariesRemoved: number
+  failures: { library: string; version?: string; source: string; message: string }[]
+  error?: string
+}
+
+/** `GET /api/libraries/:ecosystem/:name` — one library with its versions and documents. `usedBy` lists only readable repositories. */
+export interface LibraryDetail {
+  library: LibraryRecord
+  versions: LibraryVersionRecord[]
+  /** Document paths per source of the newest indexed version. */
+  documents: { source: LibraryChunk['source']; path: string; chunks: number }[]
+}
+
+/** `GET /api/libraries/search?q=&ecosystem=&name=&version=&limit=` — matching chunks, best first. */
+export interface LibrarySearchResult {
+  hits: { chunk: LibraryChunk; score: number }[]
+}
+
+/** `POST /api/libraries/reindex` (global `analyses:run`) — starts a run unless one is going. */
+export interface LibraryReindexResult {
+  started: boolean
 }

@@ -5,6 +5,7 @@ import { memoryCiJobs } from './ci-jobs.ts'
 import { memoryConfig, memoryKv } from './config.ts'
 import { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from './jobs.ts'
 import { memoryKnowledge } from './knowledge.ts'
+import { memoryLibraries } from './libraries.ts'
 import type {
   ActivityEvent,
   AnalysisRecord,
@@ -143,6 +144,7 @@ export function memoryStore(): Store {
     kv: memoryKv(),
     audit: memoryAudit(),
     externalAccounts,
+    libraries: memoryLibraries(),
     close: async () => {},
   }
 }

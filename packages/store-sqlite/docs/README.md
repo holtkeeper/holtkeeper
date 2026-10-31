@@ -22,22 +22,27 @@ Audit appends and sweeps run in `BEGIN IMMEDIATE` transactions that read and mov
 
 Columns that are queried or filtered are real columns; nested data is JSON text.
 
-| Table                    | Real columns                                                                                                              | JSON columns                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `audit_runs`             | `id`, `repo_forge`, `repo_path`, `trigger`, `actor`, `started_at`, `finished_at`                                          | `report`                                                   |
-| `credentials`            | `id`, `name`, `kind`, `url`, `secret`, `expires_at`, `last_rotated_at`, `last_error`, timestamps                          | `scope`, `rotation`, `options` (v5)                        |
-| `settings`               | `id`, `key`, `secret`, `updated_at`, `updated_by`                                                                         | `scope`, `value`                                           |
-| `users`                  | `id`, `name`, `email`, `email_lower`, `disabled`, `session_version`, `created_*`                                          | `grants`                                                   |
-| `passkeys`               | `id`, `user_id`, `public_key`, `counter`, `label`, timestamps                                                             | `transports`                                               |
-| `identities`             | `(provider, subject)`, `user_id`, `email`                                                                                 |                                                            |
-| `link_tokens`            | `token_hash`, `user_id`, `purpose`, `expires_at`, `used_at`, `created_by`                                                 |                                                            |
-| `activity`               | `id`, `at`, `actor`, `action`, `subject`                                                                                  | `details`                                                  |
-| `knowledge`              | `id`, `title`, `body`, `kind`, `status`, `source`, `author`, `supersedes`, `tags`, `version`, timestamps                  | `scope`, `topics`, `applies_to`, `packages`, `evidence`    |
-| `knowledge_history`      | `(entry_id, version)`, `edited_by`, `edited_at`                                                                           | `content`                                                  |
-| `ai_usage`               | every field of the record                                                                                                 | `groups`                                                   |
-| `audit_events` (v8)      | `seq`, `id`, `at`, `actor_id`, `via`, `action`, `target_type`, `target_id`, `target_repo`, `outcome`, `prev_hash`, `hash` | `event` (the whole event, the source of truth for hashing) |
-| `audit_chain` (v8)       | one row: `head_seq`, `head_hash`, `swept_through`                                                                         |                                                            |
-| `external_accounts` (v8) | `id`, `user_id`, `(provider, external_id)` unique, `username`, `verification`, `linked_*`, `verified_at`                  | `challenge`, `principal`                                   |
+| Table                          | Real columns                                                                                                              | JSON columns                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `audit_runs`                   | `id`, `repo_forge`, `repo_path`, `trigger`, `actor`, `started_at`, `finished_at`                                          | `report`                                                   |
+| `credentials`                  | `id`, `name`, `kind`, `url`, `secret`, `expires_at`, `last_rotated_at`, `last_error`, timestamps                          | `scope`, `rotation`, `options` (v5)                        |
+| `settings`                     | `id`, `key`, `secret`, `updated_at`, `updated_by`                                                                         | `scope`, `value`                                           |
+| `users`                        | `id`, `name`, `email`, `email_lower`, `disabled`, `session_version`, `created_*`                                          | `grants`                                                   |
+| `passkeys`                     | `id`, `user_id`, `public_key`, `counter`, `label`, timestamps                                                             | `transports`                                               |
+| `identities`                   | `(provider, subject)`, `user_id`, `email`                                                                                 |                                                            |
+| `link_tokens`                  | `token_hash`, `user_id`, `purpose`, `expires_at`, `used_at`, `created_by`                                                 |                                                            |
+| `activity`                     | `id`, `at`, `actor`, `action`, `subject`                                                                                  | `details`                                                  |
+| `knowledge`                    | `id`, `title`, `body`, `kind`, `status`, `source`, `author`, `supersedes`, `tags`, `version`, timestamps                  | `scope`, `topics`, `applies_to`, `packages`, `evidence`    |
+| `knowledge_history`            | `(entry_id, version)`, `edited_by`, `edited_at`                                                                           | `content`                                                  |
+| `ai_usage`                     | every field of the record                                                                                                 | `groups`                                                   |
+| `audit_events` (v8)            | `seq`, `id`, `at`, `actor_id`, `via`, `action`, `target_type`, `target_id`, `target_repo`, `outcome`, `prev_hash`, `hash` | `event` (the whole event, the source of truth for hashing) |
+| `audit_chain` (v8)             | one row: `head_seq`, `head_hash`, `swept_through`                                                                         |                                                            |
+| `external_accounts` (v8)       | `id`, `user_id`, `(provider, external_id)` unique, `username`, `verification`, `linked_*`, `verified_at`                  | `challenge`, `principal`                                   |
+| `libraries` (v11)              | `(ecosystem, name)`                                                                                                       | `data` (the whole record)                                  |
+| `library_versions` (v11)       | `(ecosystem, name, version)`                                                                                              | `data` (the whole record)                                  |
+| `library_chunks` (v11)         | `seq`, `id`, `ecosystem`, `name`, `source`, `path`, `position`, `heading_text`, `anchor`, `text`, `url`                   | `headings`                                                 |
+| `library_chunk_versions` (v11) | `(chunk_id, version)`, cascades when the chunk goes                                                                       |                                                            |
+| `library_issues` (v11)         | `seq`, `id`, `ecosystem`, `name`, `state`, `updated_at`, `title`, `digest_text`, `body_text`                              | `data` (the whole issue)                                   |
 
 Indexes: audit runs by `finished_at` and by `(repo_forge, repo_path, finished_at)`, activity by `at`, settings by `key`, users by `email_lower`, and `user_id` on the child tables. Timestamps are ISO 8601 strings, which sort correctly as text. Every table also has an internal `seq` (or natural key) that keeps insertion order stable for ties.
 
@@ -46,6 +51,10 @@ Indexes: audit runs by `finished_at` and by `(repo_forge, repo_path, finished_at
 Migration 4 adds `knowledge`, `knowledge_history` (cascades on delete) and `knowledge_fts`, an FTS5 external-content table over `knowledge` (`title`, `tags`, `body`; `tags` holds topics and package names) kept in sync by insert, update and delete triggers. The tokenizer is `unicode61` with diacritics removed, so `cafe` finds `café`.
 
 `search` turns the text into a query that cannot fail to parse (`ftsQuery`): every word becomes a quoted prefix term and terms are OR-ed — `react "migr` becomes `"react"* OR "migr"*`, and `AND`, `NEAR(`, `-`, `col:` are plain words. Results are ordered by `bm25` with column weights title 5, tags 3, body 1; the returned `score` is `-bm25`, so higher is better. Filters run inside the same query, so `limit` applies after filtering.
+
+## Library search
+
+Migration 11 adds the library tables and two FTS5 external-content tables kept in sync by triggers like `knowledge_fts`: `library_chunks_fts` (`heading_text`, `text`; weights 3 : 1) and `library_issues_fts` (`title`, `digest_text`, `body_text`; weights 5 : 3 : 1). `libraryFtsQuery` turns the text into a query that cannot fail to parse: words become quoted prefix terms, quoted phrases of several words quoted phrases, OR-ed (`use "cannot read"` becomes `"use"* OR "cannot read"`). Versions are sorted in JavaScript (`compareLibraryVersions`), since SQLite cannot order semantic versions. `replaceChunks`, `removeVersion` and `removeLibrary` each run in one `BEGIN IMMEDIATE` transaction. `libraryStats` is one query with correlated `count(*)` subqueries over the `(ecosystem, name)` keys.
 
 ## Migrations
 

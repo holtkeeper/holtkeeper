@@ -78,6 +78,21 @@ The `agent.tools.maxResultLines` setting maps to `maxResultLines`.
 
 `knowledge.search { query, limit? (default 5) }` prints `[id] kind: title (score)` with each body trimmed to its share of the budget. `knowledge.propose { title, body, kind?, topics?, packages? }` returns `proposed <id> (<status>)` or the duplicate it matched.
 
+### `libraries` — `libraryTools({ access, repo?, budget? })`
+
+`LibraryDocsAccess` is injected (implemented by `libraryDocs(...)` in `@holtkeeper/libraries`, which this package does not depend on). Every method returns compact Markdown that names the versions it comes from and marks third-party text; `repo` (`forge:path` of the task repository) is passed as the caller `{ repo }`, so `version` defaults to what that repository resolves, else the newest indexed one. Results are cut to the toolset budget (lines clipped to `maxLineLength`, at most `maxResultLines` with `… N more lines`).
+
+| Tool                 | Input                                                          | Output                                                                                     |
+| -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `libraries.versions` | `package`, `ecosystem?`                                        | Indexed versions with dates, deprecations and which repositories use them                  |
+| `libraries.search`   | `query`, `package?`, `ecosystem?`, `version?`, `limit?`        | Matching doc chunks with library, version, source and URL; all libraries without `package` |
+| `libraries.read`     | `package`, `ecosystem?`, `version?`, `path?`, `heading?`       | One document or section; the document list without `path`                                  |
+| `libraries.changes`  | `package`, `ecosystem?`, `from`, `to`                          | Changelog and release notes in `(from, to]`, migration sections for crossed majors         |
+| `libraries.issues`   | `package`, `ecosystem?`, `query`, `version?`, `limit?`         | Issue digests, then live search hits                                                       |
+| `libraries.source`   | `package`, `ecosystem?`, `version?`, `path?`, `start?`, `end?` | A file listing or lines of one file of the source snapshot                                 |
+
+`ecosystem` is `npm` (default) or `Go`; `limit` is 1–20. The descriptions steer the model to these tools instead of web search or reading `node_modules`.
+
 ### External: Context7
 
 `context7Server({ transport?, apiKey? })` returns an SDK `mcpServers` entry named `context7`: by default the hosted server at `https://mcp.context7.com/mcp` (`Authorization: Bearer <key>` when a key is given), or `npx -y @upstash/context7-mcp [--api-key <key>]` with `transport: 'stdio'`. Its tools are `resolve-library-id` and `query-docs`. `externalServers(settings)` returns it only when `agent.tools.context7` is `true`; it is off by default because it calls an external service.

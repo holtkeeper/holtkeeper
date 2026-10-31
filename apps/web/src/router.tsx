@@ -10,6 +10,7 @@ import { type AuditsSearch, isTrigger } from './features/audits/labels.ts'
 import { LinkPage } from './features/auth/LinkPage.tsx'
 import { AuthGate } from './features/shell/AuthGate.tsx'
 import { NotFound } from './features/shell/NotFound.tsx'
+import { parseEcosystem } from './lib/libraries.ts'
 import { ToastHost } from './ui/index.ts'
 
 const rootRoute = createRootRoute({
@@ -102,6 +103,14 @@ const WarmupPage = lazyRouteComponent(
 const PublicApiPage = lazyRouteComponent(
   () => import('./features/public-api/PublicApiPage.tsx'),
   'PublicApiPage',
+)
+const LibrariesPage = lazyRouteComponent(
+  () => import('./features/libraries/LibrariesPage.tsx'),
+  'LibrariesPage',
+)
+const LibraryPage = lazyRouteComponent(
+  () => import('./features/libraries/LibraryPage.tsx'),
+  'LibraryPage',
 )
 const LicensesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
@@ -238,6 +247,30 @@ const publicApiRoute = createRoute({
     ),
 })
 
+const librariesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'libraries',
+  component: LibrariesPage,
+  validateSearch: (search: Record<string, unknown>): { q?: string; ecosystem?: string } => ({
+    ...(typeof search.q === 'string' && search.q ? { q: search.q } : {}),
+    ...(parseEcosystem(search.ecosystem) ? { ecosystem: parseEcosystem(search.ecosystem) } : {}),
+  }),
+})
+
+const libraryRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'libraries/view',
+  component: LibraryPage,
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { ecosystem?: string; name?: string; version?: string } =>
+    Object.fromEntries(
+      ['ecosystem', 'name', 'version'].flatMap((key) =>
+        typeof search[key] === 'string' && search[key] ? [[key, search[key]]] : [],
+      ),
+    ),
+})
+
 const analysisRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'analyses/$id',
@@ -269,6 +302,8 @@ const routeTree = rootRoute.addChildren([
     analysisPage('fleet', FleetPage),
     analysisPage('stack', StackPage),
     publicApiRoute,
+    librariesRoute,
+    libraryRoute,
     analysisRoute,
     jobsRoute,
     page('jobs/$jobId', JobPage),

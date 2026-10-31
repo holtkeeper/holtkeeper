@@ -26,6 +26,7 @@ import {
   readBody,
   repoTarget,
 } from '../context.ts'
+import { noteLibraryUses } from '../libraries.ts'
 import { canSee } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
 
@@ -281,6 +282,7 @@ export function analysisRoutes(deps: ServerDeps) {
       actor: principal.id,
       data: parsed.data,
     })
+    await noteLibraryUses(store.kv, record.kind, deps.now())
     for (const artifact of decoded) {
       await deps.artifacts?.put(artifact.data, {
         ...(artifact.contentType ? { contentType: artifact.contentType } : {}),

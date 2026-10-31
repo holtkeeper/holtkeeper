@@ -63,11 +63,13 @@
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
+        "@holtkeeper/fleet": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/forge-gitlab": "workspace:*",
         "@holtkeeper/identities": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
         "@holtkeeper/knowledge": "workspace:*",
+        "@holtkeeper/libraries": "workspace:*",
         "@holtkeeper/limits": "workspace:*",
         "@holtkeeper/managed-config": "workspace:*",
         "@holtkeeper/media": "workspace:*",
@@ -598,6 +600,16 @@
         "@holtkeeper/access": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "zod": "^4.6.7",
+      },
+    },
+    "packages/libraries": {
+      "name": "@holtkeeper/libraries",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/api-surface": "workspace:*",
+        "@holtkeeper/artifacts": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "fflate": "^0.8.3",
       },
     },
     "packages/licenses": {
@@ -1274,6 +1286,8 @@
     "@holtkeeper/jobs": ["@holtkeeper/jobs@workspace:packages/jobs"],
 
     "@holtkeeper/knowledge": ["@holtkeeper/knowledge@workspace:packages/knowledge"],
+
+    "@holtkeeper/libraries": ["@holtkeeper/libraries@workspace:packages/libraries"],
 
     "@holtkeeper/licenses": ["@holtkeeper/licenses@workspace:packages/licenses"],
 

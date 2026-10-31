@@ -17,6 +17,7 @@ import {
   Layers,
   LayoutDashboard,
   Library,
+  LibraryBig,
   ListChecks,
   type LucideIcon,
   MousePointerClick,
@@ -59,6 +60,7 @@ export interface NavItem {
     | '/fleet'
     | '/stack'
     | '/public-api'
+    | '/libraries'
     | '/jobs'
     | '/knowledge'
     | '/credentials'
@@ -191,6 +193,14 @@ const navItems: readonly NavItem[] = [
     brand: 'api',
     label: 'Public API',
     icon: Library,
+    requires: 'analyses:read',
+  },
+  {
+    section: 'Code',
+    to: '/libraries',
+    brand: 'knowledge',
+    label: 'Libraries',
+    icon: LibraryBig,
     requires: 'analyses:read',
   },
   {

@@ -365,6 +365,101 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE ci_jobs ADD COLUMN tag INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 11,
+    sql: `
+      CREATE TABLE libraries (
+        ecosystem TEXT NOT NULL,
+        name TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (ecosystem, name)
+      );
+
+      CREATE TABLE library_versions (
+        ecosystem TEXT NOT NULL,
+        name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (ecosystem, name, version)
+      );
+
+      CREATE TABLE library_chunks (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        ecosystem TEXT NOT NULL,
+        name TEXT NOT NULL,
+        source TEXT NOT NULL,
+        path TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        headings TEXT NOT NULL,
+        heading_text TEXT NOT NULL,
+        anchor TEXT,
+        text TEXT NOT NULL,
+        url TEXT
+      );
+      CREATE INDEX library_chunks_library ON library_chunks (ecosystem, name, source, path, position);
+      CREATE INDEX library_chunks_path ON library_chunks (path, position);
+
+      CREATE TABLE library_chunk_versions (
+        chunk_id TEXT NOT NULL REFERENCES library_chunks (id) ON DELETE CASCADE,
+        version TEXT NOT NULL,
+        PRIMARY KEY (chunk_id, version)
+      );
+      CREATE INDEX library_chunk_versions_version ON library_chunk_versions (version, chunk_id);
+
+      CREATE VIRTUAL TABLE library_chunks_fts USING fts5(
+        heading_text, text,
+        content = 'library_chunks', content_rowid = 'seq',
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER library_chunks_fts_insert AFTER INSERT ON library_chunks BEGIN
+        INSERT INTO library_chunks_fts (rowid, heading_text, text) VALUES (new.seq, new.heading_text, new.text);
+      END;
+      CREATE TRIGGER library_chunks_fts_delete AFTER DELETE ON library_chunks BEGIN
+        INSERT INTO library_chunks_fts (library_chunks_fts, rowid, heading_text, text)
+          VALUES ('delete', old.seq, old.heading_text, old.text);
+      END;
+      CREATE TRIGGER library_chunks_fts_update AFTER UPDATE OF heading_text, text ON library_chunks BEGIN
+        INSERT INTO library_chunks_fts (library_chunks_fts, rowid, heading_text, text)
+          VALUES ('delete', old.seq, old.heading_text, old.text);
+        INSERT INTO library_chunks_fts (rowid, heading_text, text) VALUES (new.seq, new.heading_text, new.text);
+      END;
+
+      CREATE TABLE library_issues (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        ecosystem TEXT NOT NULL,
+        name TEXT NOT NULL,
+        state TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        title TEXT NOT NULL,
+        digest_text TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX library_issues_library ON library_issues (ecosystem, name);
+
+      CREATE VIRTUAL TABLE library_issues_fts USING fts5(
+        title, digest_text, body_text,
+        content = 'library_issues', content_rowid = 'seq',
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TRIGGER library_issues_fts_insert AFTER INSERT ON library_issues BEGIN
+        INSERT INTO library_issues_fts (rowid, title, digest_text, body_text)
+          VALUES (new.seq, new.title, new.digest_text, new.body_text);
+      END;
+      CREATE TRIGGER library_issues_fts_delete AFTER DELETE ON library_issues BEGIN
+        INSERT INTO library_issues_fts (library_issues_fts, rowid, title, digest_text, body_text)
+          VALUES ('delete', old.seq, old.title, old.digest_text, old.body_text);
+      END;
+      CREATE TRIGGER library_issues_fts_update AFTER UPDATE OF title, digest_text, body_text ON library_issues BEGIN
+        INSERT INTO library_issues_fts (library_issues_fts, rowid, title, digest_text, body_text)
+          VALUES ('delete', old.seq, old.title, old.digest_text, old.body_text);
+        INSERT INTO library_issues_fts (rowid, title, digest_text, body_text)
+          VALUES (new.seq, new.title, new.digest_text, new.body_text);
+      END;
+    `,
+  },
 ]
 
 /**

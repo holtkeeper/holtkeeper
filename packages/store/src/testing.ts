@@ -12,6 +12,12 @@ import type {
   ExternalAccount,
   KnowledgeEntryInput,
   KnowledgeFilter,
+  LibraryChunk,
+  LibraryChunkFilter,
+  LibraryIssue,
+  LibraryRecord,
+  LibraryRef,
+  LibraryVersionRecord,
   NewJob,
   Store,
   StoredCredential,
@@ -146,6 +152,61 @@ const ciJob = (
   createdAt,
   allowFailure: false,
   webUrl: `https://git/${path}/-/jobs/${jobId}`,
+  ...overrides,
+})
+
+const reactLib: LibraryRef = { ecosystem: 'npm', name: 'react' }
+const vueLib: LibraryRef = { ecosystem: 'npm', name: 'vue' }
+
+const libraryRecord = (ref: LibraryRef, overrides: Partial<LibraryRecord> = {}): LibraryRecord => ({
+  ...ref,
+  sources: {},
+  updatedAt: '2026-10-30T09:00:00.000Z',
+  ...overrides,
+})
+
+const libraryVersion = (
+  ref: LibraryRef,
+  version: string,
+  overrides: Partial<LibraryVersionRecord> = {},
+): LibraryVersionRecord => ({
+  ...ref,
+  version,
+  roles: ['used'],
+  usedBy: [],
+  sources: {},
+  updatedAt: '2026-10-30T09:00:00.000Z',
+  ...overrides,
+})
+
+const libraryChunk = (
+  id: string,
+  overrides: Partial<Omit<LibraryChunk, 'versions'>> = {},
+): Omit<LibraryChunk, 'versions'> => ({
+  ...reactLib,
+  id,
+  source: 'archive',
+  path: 'README.md',
+  headings: ['React'],
+  text: `Section ${id}.`,
+  ...overrides,
+})
+
+const libraryIssue = (number: number, overrides: Partial<LibraryIssue> = {}): LibraryIssue => ({
+  ...reactLib,
+  id: `github.com/facebook/react#${number}`,
+  number,
+  kind: 'issue',
+  title: `Issue ${number}`,
+  state: 'closed',
+  labels: [],
+  url: `https://github.com/facebook/react/issues/${number}`,
+  body: 'Nothing here.',
+  pulls: [],
+  reactions: 0,
+  comments: 0,
+  createdAt: '2026-10-01T00:00:00.000Z',
+  updatedAt: '2026-10-02T00:00:00.000Z',
   ...overrides,
 })
 
@@ -1194,6 +1255,399 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await accounts.get('a3')).toBeDefined()
       await accounts.put(externalAccount('again', { userId: 'u2', externalId: '1' }))
       expect((await accounts.find('gitlab:work', '1'))?.id).toBe('again')
+    })
+
+    test('libraries: put replaces, get, list by ecosystem then name with a query, remove', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      const react = libraryRecord(reactLib, {
+        description: 'UI library',
+        homepage: 'https://react.dev',
+        repository: {
+          host: 'github.com',
+          path: 'facebook/react',
+          directory: 'packages/react',
+          url: 'https://github.com/facebook/react',
+        },
+        latest: '19.0.0',
+        sources: {
+          registry: { status: 'ok', at: '2026-10-30T09:00:00.000Z' },
+          issues: { status: 'failed', at: '2026-10-30T09:01:00.000Z', message: 'rate limited' },
+        },
+        issuesCursor: 'cursor-1',
+      })
+      await libs.putLibrary(react)
+      await libs.putLibrary(libraryRecord({ ecosystem: 'npm', name: '@tanstack/react-query' }))
+      await libs.putLibrary(libraryRecord({ ecosystem: 'Go', name: 'github.com/spf13/cobra' }))
+      await libs.putLibrary(libraryRecord(vueLib))
+
+      expect(await libs.getLibrary(reactLib)).toEqual(react)
+      expect(await libs.getLibrary({ ecosystem: 'Go', name: 'react' })).toBeUndefined()
+      const names = async (filter?: Parameters<typeof libs.listLibraries>[0]) =>
+        (await libs.listLibraries(filter)).map((lib) => `${lib.ecosystem}:${lib.name}`)
+      expect(await names()).toEqual([
+        'Go:github.com/spf13/cobra',
+        'npm:@tanstack/react-query',
+        'npm:react',
+        'npm:vue',
+      ])
+      expect(await names({ ecosystem: 'npm' })).toEqual([
+        'npm:@tanstack/react-query',
+        'npm:react',
+        'npm:vue',
+      ])
+      expect(await names({ query: 'REACT' })).toEqual(['npm:@tanstack/react-query', 'npm:react'])
+      expect(await names({ ecosystem: 'Go', query: 'react' })).toEqual([])
+
+      const replaced = libraryRecord(reactLib, { latest: '19.1.0' })
+      await libs.putLibrary(replaced)
+      expect(await libs.getLibrary(reactLib)).toEqual(replaced)
+
+      await libs.removeLibrary(vueLib)
+      expect(await libs.getLibrary(vueLib)).toBeUndefined()
+      expect(await names()).toHaveLength(3)
+    })
+
+    test('libraries: versions round-trip and list highest semantic version first', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      const full = libraryVersion(reactLib, '1.10.0', {
+        publishedAt: '2026-09-01T00:00:00.000Z',
+        deprecated: 'use 2.x',
+        roles: ['used', 'minor'],
+        usedBy: ['work:games/app', 'work:games/web'],
+        tag: 'v1.10.0',
+        commit: 'abc123',
+        api: 'artifact-api',
+        sourceArchive: 'artifact-zip',
+        sources: { archive: { status: 'ok', at: '2026-10-30T09:00:00.000Z' } },
+        leftAt: '2026-10-29T00:00:00.000Z',
+      })
+      for (const version of ['1.9.0', '1.10.0-beta.2', '0.9.1', '2.0.0', '1.10.0-rc.1'])
+        await libs.putVersion(libraryVersion(reactLib, version))
+      await libs.putVersion(libraryVersion(reactLib, '1.10.0'))
+      await libs.putVersion(full)
+      await libs.putVersion(libraryVersion(reactLib, '1.10.0-beta.10'))
+      const cobra: LibraryRef = { ecosystem: 'Go', name: 'github.com/spf13/cobra' }
+      for (const version of ['v1.2.0', 'v0.0.0-20230101000000-abcdef012345', 'v2.1.0', 'v1.10.3'])
+        await libs.putVersion(libraryVersion(cobra, version))
+
+      expect(await libs.getVersion(reactLib, '1.10.0')).toEqual(full)
+      expect(await libs.getVersion(reactLib, '3.0.0')).toBeUndefined()
+      expect(await libs.getVersion(vueLib, '1.10.0')).toBeUndefined()
+      expect((await libs.listVersions(reactLib)).map((v) => v.version)).toEqual([
+        '2.0.0',
+        '1.10.0',
+        '1.10.0-rc.1',
+        '1.10.0-beta.10',
+        '1.10.0-beta.2',
+        '1.9.0',
+        '0.9.1',
+      ])
+      expect((await libs.listVersions(cobra)).map((v) => v.version)).toEqual([
+        'v2.1.0',
+        'v1.10.3',
+        'v1.2.0',
+        'v0.0.0-20230101000000-abcdef012345',
+      ])
+      expect(await libs.listVersions(vueLib)).toEqual([])
+
+      await libs.removeVersion(reactLib, '1.10.0')
+      expect(await libs.getVersion(reactLib, '1.10.0')).toBeUndefined()
+      expect(await libs.listVersions(reactLib)).toHaveLength(6)
+    })
+
+    test('libraries: replaceChunks reuses chunks by id and keeps other sources', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      const a = libraryChunk('a', { headings: ['React', 'Install'], anchor: 'install' })
+      const b = libraryChunk('b')
+      const b2 = libraryChunk('b2')
+      const c = libraryChunk('c', { path: 'docs/hooks.md', url: 'https://unpkg.test/hooks.md' })
+      const r = libraryChunk('r', { source: 'repository', path: 'CHANGELOG.md' })
+      const v = libraryChunk('v', { ...vueLib })
+      await libs.putVersion(libraryVersion(reactLib, '1.9.0'))
+      await libs.putVersion(libraryVersion(reactLib, '1.10.0'))
+      await libs.replaceChunks(reactLib, '1.9.0', 'archive', [a, b, c])
+      await libs.replaceChunks(reactLib, '1.10.0', 'archive', [a, b2, c])
+      await libs.replaceChunks(reactLib, '1.10.0', 'repository', [r])
+      await libs.replaceChunks(reactLib, '1.9.0', 'repository', [r])
+      await libs.replaceChunks(vueLib, '1.9.0', 'archive', [v])
+
+      const versions = async (filter = {}) =>
+        Object.fromEntries(
+          (await libs.listChunks({ name: 'react', ...filter })).map((chunk) => [
+            chunk.id,
+            chunk.versions,
+          ]),
+        )
+      expect(await versions()).toEqual({
+        a: ['1.10.0', '1.9.0'],
+        b: ['1.9.0'],
+        b2: ['1.10.0'],
+        c: ['1.10.0', '1.9.0'],
+        r: ['1.10.0', '1.9.0'],
+      })
+      expect((await libs.listChunks({ name: 'react', path: 'README.md' }))[0]).toEqual({
+        ...a,
+        versions: ['1.10.0', '1.9.0'],
+      })
+      expect((await libs.listChunks({ path: 'docs/hooks.md' }))[0]).toEqual({
+        ...c,
+        versions: ['1.10.0', '1.9.0'],
+      })
+
+      await libs.replaceChunks(reactLib, '1.10.0', 'archive', [a])
+      expect(await versions()).toEqual({
+        a: ['1.10.0', '1.9.0'],
+        b: ['1.9.0'],
+        c: ['1.9.0'],
+        r: ['1.10.0', '1.9.0'],
+      })
+
+      await libs.removeVersion(reactLib, '1.9.0')
+      expect(await versions()).toEqual({ a: ['1.10.0'], r: ['1.10.0'] })
+      expect(await libs.getVersion(reactLib, '1.9.0')).toBeUndefined()
+      expect((await libs.listChunks({ name: 'vue' })).map((chunk) => chunk.versions)).toEqual([
+        ['1.9.0'],
+      ])
+
+      await libs.replaceChunks(reactLib, '1.10.0', 'archive', [])
+      expect(await versions()).toEqual({ r: ['1.10.0'] })
+    })
+
+    test('libraries: listChunks filters, in path order then document order, with a limit', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      await libs.replaceChunks(reactLib, '1.0.0', 'archive', [
+        libraryChunk('x1', { path: 'docs/b.md' }),
+        libraryChunk('x2', { path: 'docs/a.md', headings: ['A', 'Second'] }),
+        libraryChunk('x3', { path: 'docs/a.md', headings: ['A', 'First'] }),
+      ])
+      await libs.replaceChunks(reactLib, '2.0.0', 'archive', [
+        libraryChunk('x1', { path: 'docs/b.md' }),
+      ])
+      await libs.replaceChunks(reactLib, '1.0.0', 'releases', [
+        libraryChunk('rel', { source: 'releases', path: 'v1.0.0' }),
+      ])
+      const cobra: LibraryRef = { ecosystem: 'Go', name: 'github.com/spf13/cobra' }
+      await libs.replaceChunks(cobra, 'v1.0.0', 'repository', [
+        libraryChunk('go', { ...cobra, source: 'repository', path: 'README.md' }),
+      ])
+
+      const ids = async (filter: LibraryChunkFilter, limit?: number) =>
+        (await libs.listChunks(filter, limit)).map((chunk) => chunk.id)
+      expect(await ids({})).toEqual(['go', 'x2', 'x3', 'x1', 'rel'])
+      expect(await ids({ ecosystem: 'npm' })).toEqual(['x2', 'x3', 'x1', 'rel'])
+      expect(await ids({ name: 'react', path: 'docs/a.md' })).toEqual(['x2', 'x3'])
+      expect(await ids({ version: '2.0.0' })).toEqual(['x1'])
+      expect(await ids({ name: 'react', version: '1.0.0', source: 'archive' })).toEqual([
+        'x2',
+        'x3',
+        'x1',
+      ])
+      expect(await ids({ source: 'releases' })).toEqual(['rel'])
+      expect(await ids({ ecosystem: 'Go' })).toEqual(['go'])
+      expect(await ids({ name: 'vue' })).toEqual([])
+      expect(await ids({ ecosystem: 'npm' }, 2)).toEqual(['x2', 'x3'])
+    })
+
+    test('libraries: searchChunks weighs headings above text, filters, phrases and plain words', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      await libs.replaceChunks(reactLib, '1.0.0', 'archive', [
+        libraryChunk('heading', {
+          headings: ['React', 'useEffect cleanup'],
+          text: 'Runs after the render is committed.',
+        }),
+        libraryChunk('text', {
+          headings: ['React', 'Effects'],
+          text: 'Call useEffect and return a function.',
+        }),
+        libraryChunk('phrase', {
+          path: 'docs/errors.md',
+          headings: ['Errors'],
+          text: 'TypeError: Cannot read property map of undefined',
+        }),
+        libraryChunk('scattered', {
+          path: 'docs/errors.md',
+          headings: ['Errors'],
+          text: 'A property you cannot read: map is undefined',
+        }),
+      ])
+      await libs.replaceChunks(reactLib, '2.0.0', 'repository', [
+        libraryChunk('repo', {
+          source: 'repository',
+          headings: ['Hooks'],
+          text: 'useEffect moved.',
+        }),
+      ])
+      await libs.replaceChunks(vueLib, '1.0.0', 'archive', [
+        libraryChunk('vue', { ...vueLib, headings: ['Vue'], text: 'There is no useEffect here.' }),
+      ])
+
+      const ids = async (text: string, filter?: LibraryChunkFilter, limit?: number) =>
+        (await libs.searchChunks(text, filter, limit)).map((hit) => hit.chunk.id)
+      const hits = await libs.searchChunks('useeffect', { name: 'react', version: '1.0.0' })
+      expect(hits.map((hit) => hit.chunk.id)).toEqual(['heading', 'text'])
+      expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score)
+      expect(hits[0]!.chunk.versions).toEqual(['1.0.0'])
+      expect((await ids('useEff')).toSorted()).toEqual(['heading', 'repo', 'text', 'vue'])
+      expect(await ids('useEffect', { name: 'vue' })).toEqual(['vue'])
+      expect(await ids('useEffect', { version: '2.0.0' })).toEqual(['repo'])
+      expect(await ids('useEffect', { source: 'repository' })).toEqual(['repo'])
+      expect(await ids('useEffect', { ecosystem: 'Go' })).toEqual([])
+      expect(await ids('useEffect', { path: 'docs/errors.md' })).toEqual([])
+      expect(await ids('useEffect', {}, 2)).toHaveLength(2)
+
+      expect(await ids('"Cannot read property"')).toEqual(['phrase'])
+      expect((await ids('cannot read property')).toSorted()).toEqual(['phrase', 'scattered'])
+      expect((await ids('"cannot read property')).toSorted()).toEqual(['phrase', 'scattered'])
+      expect(await ids('"TypeError: Cannot read" map')).toContain('scattered')
+      expect(await ids('TypeError:')).toEqual(['phrase'])
+      expect(await ids('   ')).toEqual([])
+      expect(await ids('"" ()')).toEqual([])
+      expect(await ids('nothing-like-this')).toEqual([])
+      for (const query of [
+        '"',
+        'AND',
+        'NOT',
+        'OR OR',
+        'NEAR(x y)',
+        'title:x',
+        '*',
+        'x*',
+        '-z',
+        '^a',
+        "it's",
+        '(((',
+        '{x}',
+        '\\',
+        "'",
+      ]) {
+        expect(Array.isArray(await libs.searchChunks(query))).toBeTrue()
+      }
+    })
+
+    test('libraries: issues round-trip, replace by id and search title over digest over body', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      const digest = libraryIssue(2, {
+        title: 'Build fails',
+        body: 'Logs attached.',
+        labels: ['bug', 'regression'],
+        answer: 'Fixed by the maintainers.',
+        pulls: [10, 11],
+        fixedIn: '18.3.1',
+        reactions: 12,
+        comments: 4,
+        closedAt: '2026-10-03T00:00:00.000Z',
+        digest: {
+          problem: 'Hydration error in SSR',
+          symptoms: ['Text content does not match server-rendered HTML'],
+          affected: '>=18.3.0 <18.3.1',
+          fixedIn: '18.3.1',
+          workaround: 'Pin 18.2',
+          at: '2026-10-04T00:00:00.000Z',
+        },
+      })
+      await libs.putIssues([
+        libraryIssue(1, { title: 'Hydration mismatch after upgrade' }),
+        digest,
+        libraryIssue(3, {
+          kind: 'discussion',
+          title: 'Question',
+          state: 'open',
+          body: 'I see hydration warnings in the console whenever the page loads on a slow network.',
+          answer: 'Use suppressHydrationWarning.',
+        }),
+        libraryIssue(4, {
+          ...vueLib,
+          id: 'github.com/vuejs/core#4',
+          title: 'Hydration in Vue',
+        }),
+      ])
+
+      expect(await libs.getIssue(digest.id)).toEqual(digest)
+      expect(await libs.getIssue('github.com/facebook/react#99')).toBeUndefined()
+      const ids = async (
+        text: string,
+        filter?: Parameters<typeof libs.searchIssues>[1],
+        limit?: number,
+      ) => (await libs.searchIssues(text, filter, limit)).map((hit) => hit.issue.number)
+      const hits = await libs.searchIssues('hydration', { name: 'react' })
+      expect(hits.map((hit) => hit.issue.number)).toEqual([1, 2, 3])
+      expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score)
+      expect(hits[1]!.score).toBeGreaterThan(hits[2]!.score)
+      expect((await ids('hydration')).toSorted((a, b) => a - b)).toEqual([1, 2, 3, 4])
+      expect(await ids('hydration', { ecosystem: 'npm', name: 'react', state: 'open' })).toEqual([
+        3,
+      ])
+      expect(await ids('hydration', { ecosystem: 'Go' })).toEqual([])
+      expect(await ids('hydration', {}, 2)).toHaveLength(2)
+      expect(await ids('"does not match"')).toEqual([2])
+      expect(await ids('"match does not"')).toEqual([])
+      expect(await ids('suppressHydrationWarning')).toEqual([3])
+      expect(await ids('pin')).toEqual([2])
+      expect(await ids('  ')).toEqual([])
+      expect(await ids('" (*)')).toEqual([])
+
+      await libs.putIssues([libraryIssue(1, { title: 'Renamed', state: 'open' })])
+      expect((await libs.getIssue(libraryIssue(1).id))?.title).toBe('Renamed')
+      expect(await ids('hydration', { name: 'react' })).toEqual([2, 3])
+      expect(await ids('renamed', { state: 'open' })).toEqual([1])
+      await libs.putIssues([])
+    })
+
+    test('libraries: removeLibrary drops its versions, chunks and issues only', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      for (const ref of [reactLib, vueLib]) {
+        await libs.putLibrary(libraryRecord(ref))
+        await libs.putVersion(libraryVersion(ref, '1.0.0'))
+        await libs.replaceChunks(ref, '1.0.0', 'archive', [
+          libraryChunk(`${ref.name}-chunk`, { ...ref, text: 'Shared words.' }),
+        ])
+        await libs.putIssues([
+          libraryIssue(1, { ...ref, id: `${ref.name}#1`, title: 'Shared words' }),
+        ])
+      }
+
+      await libs.removeLibrary(reactLib)
+      expect(await libs.getLibrary(reactLib)).toBeUndefined()
+      expect(await libs.listVersions(reactLib)).toEqual([])
+      expect(await libs.listChunks({ name: 'react' })).toEqual([])
+      expect(await libs.getIssue('react#1')).toBeUndefined()
+      expect((await libs.searchChunks('shared')).map((hit) => hit.chunk.id)).toEqual(['vue-chunk'])
+      expect((await libs.searchIssues('shared')).map((hit) => hit.issue.id)).toEqual(['vue#1'])
+      expect(await libs.getLibrary(vueLib)).toBeDefined()
+      expect(await libs.listVersions(vueLib)).toHaveLength(1)
+    })
+
+    test('libraries: libraryStats counts versions, chunks and issues per library', async () => {
+      const libs = store.libraries
+      if (!libs) return
+      const cobra: LibraryRef = { ecosystem: 'Go', name: 'github.com/spf13/cobra' }
+      for (const ref of [reactLib, vueLib, cobra]) await libs.putLibrary(libraryRecord(ref))
+      await libs.putVersion(libraryVersion(reactLib, '18.2.0'))
+      await libs.putVersion(libraryVersion(reactLib, '19.0.0'))
+      await libs.replaceChunks(reactLib, '18.2.0', 'archive', [
+        libraryChunk('a'),
+        libraryChunk('b'),
+      ])
+      await libs.replaceChunks(reactLib, '19.0.0', 'archive', [libraryChunk('a')])
+      await libs.putIssues([libraryIssue(1), libraryIssue(2)])
+      await libs.putVersion(libraryVersion(cobra, 'v1.8.0'))
+
+      const stats = await libs.libraryStats()
+      expect(Object.fromEntries(stats)).toEqual({
+        'npm:react': { versions: 2, chunks: 2, issues: 2 },
+        'npm:vue': { versions: 0, chunks: 0, issues: 0 },
+        'Go:github.com/spf13/cobra': { versions: 1, chunks: 0, issues: 0 },
+      })
+      expect([...(await libs.libraryStats({ ecosystem: 'Go' })).keys()]).toEqual([
+        'Go:github.com/spf13/cobra',
+      ])
     })
 
     test('users: avatar seed round-trips', async () => {

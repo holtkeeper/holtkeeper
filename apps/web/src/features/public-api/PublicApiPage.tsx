@@ -860,7 +860,7 @@ function ConnectPanel({ endpoint }: { endpoint: string }) {
           Connect an agent
         </span>
       }
-      description="Streamable HTTP, read-only tools: list_packages, get_package_api, search_symbols, get_symbol, list_versions, diff_versions."
+      description="Streamable HTTP, read-only tools: list_packages, get_package_api, search_symbols, get_symbol, list_versions, diff_versions; for third-party libraries (see Libraries) library_versions, search_library_docs, read_library_doc, library_changes, search_library_issues, library_source."
     >
       <div className="flex flex-col gap-3 text-sm">
         <CopyField label="MCP endpoint" value={endpoint} />

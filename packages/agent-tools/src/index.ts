@@ -13,4 +13,5 @@ export {
 } from './docs/markdown.ts'
 export { insideDir, listFiles } from './files.ts'
 export * from './knowledge.ts'
+export * from './libraries.ts'
 export { defineTool } from './tool.ts'

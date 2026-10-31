@@ -22,6 +22,7 @@ import { dependencyRoutes } from './routes/dependencies.ts'
 import { egressRoutes } from './routes/egress.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
+import { libraryRoutes } from './routes/libraries.ts'
 import { mediaRoutes } from './routes/media.ts'
 import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
@@ -88,6 +89,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', analysisRoutes(deps))
   api.route('/', dependencyRoutes(deps))
   api.route('/', apiSurface.routes)
+  api.route('/', libraryRoutes(deps))
   api.route('/', credentialRoutes(deps))
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))

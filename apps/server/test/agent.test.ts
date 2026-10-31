@@ -308,6 +308,41 @@ describe('settingsAgentFor', () => {
 describe('withServerDefaults', () => {
   const target = { ...repo, groups: ['games'] }
 
+  test('adds the libraries toolset with the task repository', async () => {
+    const seen: AgentTask[] = []
+    const inner: Agent = {
+      name: 'fake',
+      async run(task) {
+        seen.push(task)
+        return { text: 'ok', turns: 1 }
+      },
+    }
+    const asked: (string | undefined)[] = []
+    const answer = async (_input: unknown, caller?: { repo?: string }) => {
+      asked.push(caller?.repo)
+      return 'zod@3.22.0'
+    }
+    const agent = withServerDefaults(inner, {
+      repo: target,
+      store,
+      now,
+      libraries: {
+        versions: answer,
+        search: answer,
+        read: answer,
+        changes: answer,
+        issues: answer,
+        source: answer,
+      },
+    })
+    await agent.run({ dir: '/r', prompt: 'p' })
+    const toolset = seen[0]?.toolsets?.find((item) => item.name === 'libraries')
+    expect(toolset).toBeDefined()
+    const versions = toolset?.tools.find((tool) => tool.name === 'libraries.versions')
+    await versions?.run({ package: 'zod' }, { dir: '/r', signal: new AbortController().signal })
+    expect(asked).toEqual([`${repo.forge}:${repo.path}`])
+  })
+
   test('reports results and errors to onRun; task toolsets of the same name win', async () => {
     const seen: AgentTask[] = []
     let fail = false

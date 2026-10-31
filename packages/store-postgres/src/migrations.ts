@@ -390,6 +390,82 @@ export const migrations: readonly Migration[] = [
         WHERE status IN ('queued', 'running');
     `,
   },
+  {
+    version: 10,
+    sql: `
+      DO $migration$
+      BEGIN
+        EXECUTE format(
+          'CREATE FUNCTION library_search_text(value text) RETURNS text
+             LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+             AS $fn$ SELECT %I.knowledge_fold(regexp_replace(value, %L, %L, %L)) $fn$',
+          current_schema(), '[[:punct:]]+', ' ', 'g');
+      END
+      $migration$;
+
+      CREATE TABLE libraries (
+        ecosystem text NOT NULL,
+        name text NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (ecosystem, name)
+      );
+
+      CREATE TABLE library_versions (
+        ecosystem text NOT NULL,
+        name text NOT NULL,
+        version text NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (ecosystem, name, version)
+      );
+
+      CREATE TABLE library_chunks (
+        id text PRIMARY KEY,
+        ecosystem text NOT NULL,
+        name text NOT NULL,
+        source text NOT NULL,
+        path text NOT NULL,
+        position integer NOT NULL,
+        headings jsonb NOT NULL,
+        heading_text text NOT NULL,
+        anchor text,
+        text text NOT NULL,
+        url text,
+        search tsvector GENERATED ALWAYS AS (
+          setweight(to_tsvector('simple', library_search_text(heading_text)), 'A') ||
+          setweight(to_tsvector('simple', library_search_text(text)), 'C')
+        ) STORED
+      );
+      CREATE INDEX library_chunks_library ON library_chunks (ecosystem, name, source);
+      CREATE INDEX library_chunks_path ON library_chunks (path COLLATE "C", position);
+      CREATE INDEX library_chunks_search ON library_chunks USING gin (search);
+
+      CREATE TABLE library_chunk_versions (
+        chunk_id text NOT NULL REFERENCES library_chunks (id) ON DELETE CASCADE,
+        version text NOT NULL,
+        PRIMARY KEY (chunk_id, version)
+      );
+      CREATE INDEX library_chunk_versions_version ON library_chunk_versions (version, chunk_id);
+
+      CREATE TABLE library_issues (
+        id text PRIMARY KEY,
+        ecosystem text NOT NULL,
+        name text NOT NULL,
+        state text NOT NULL,
+        updated_at text NOT NULL,
+        title text NOT NULL,
+        digest_text text NOT NULL,
+        body_text text NOT NULL,
+        data jsonb NOT NULL,
+        search tsvector GENERATED ALWAYS AS (
+          setweight(to_tsvector('simple', library_search_text(title)), 'A') ||
+          setweight(to_tsvector('simple', library_search_text(digest_text)), 'B') ||
+          setweight(to_tsvector('simple', library_search_text(body_text)), 'C')
+        ) STORED
+      );
+      CREATE INDEX library_issues_library ON library_issues (ecosystem, name);
+      CREATE INDEX library_issues_search ON library_issues USING gin (search);
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

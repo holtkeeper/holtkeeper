@@ -23,6 +23,11 @@ export interface Tables {
   externalAccounts: SQL.Query<unknown>
   auditEvents: SQL.Query<unknown>
   auditState: SQL.Query<unknown>
+  libraries: SQL.Query<unknown>
+  libraryVersions: SQL.Query<unknown>
+  libraryChunks: SQL.Query<unknown>
+  libraryChunkVersions: SQL.Query<unknown>
+  libraryIssues: SQL.Query<unknown>
 }
 
 /** Table names of `schema`, qualified so queries never depend on `search_path`. */
@@ -50,6 +55,11 @@ export function tables(sql: SQL, schema: string): Tables {
     externalAccounts: name('external_accounts'),
     auditEvents: name('audit_events'),
     auditState: name('audit_state'),
+    libraries: name('libraries'),
+    libraryVersions: name('library_versions'),
+    libraryChunks: name('library_chunks'),
+    libraryChunkVersions: name('library_chunk_versions'),
+    libraryIssues: name('library_issues'),
   }
 }
 

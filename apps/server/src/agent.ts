@@ -24,10 +24,12 @@ import {
 import {
   type AgentToolSettings,
   type Context7Options,
+  type LibraryDocsAccess,
   codeTools,
   docsTools,
   externalServers,
   knowledgeTools,
+  libraryTools,
 } from '@holtkeeper/agent-tools'
 import {
   BudgetExceededError,
@@ -35,6 +37,7 @@ import {
   budgetGuard,
   usageRecorder,
 } from '@holtkeeper/ai-usage'
+import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { RepoRef } from '@holtkeeper/forge'
@@ -46,6 +49,12 @@ import type { Vault } from '@holtkeeper/vault'
 import { z } from 'zod'
 
 import { repoTarget } from './context.ts'
+import {
+  agentSummarize,
+  githubClientFor,
+  librariesConfigFrom,
+  serverLibraryDocs,
+} from './libraries.ts'
 
 /** Tokens of team knowledge put into a task's context when `agent.tools.knowledgeTokens` is unset. */
 export const DEFAULT_KNOWLEDGE_TOKENS = 1500
@@ -100,6 +109,8 @@ export interface ServerDefaultsOptions {
   /** Knowledge kinds the agent's proposals are accepted for without review. */
   autoAccept?: readonly KnowledgeKind[]
   context7?: Context7Options
+  /** Third-party library docs; adds the `libraries` toolset with versions defaulting to `repo`'s. */
+  libraries?: LibraryDocsAccess
   /** Checked before every run; a denial throws `BudgetExceededError` (and is reported to `onRun`). */
   budgets?: Pick<BudgetGuard, 'check'>
   onRun?: OnAgentRun
@@ -113,8 +124,8 @@ const merge = (ours: Toolset[], theirs: readonly Toolset[] = []): Toolset[] => {
 }
 
 /**
- * `agent` with what every server task gets: the `code`, `docs` and `knowledge` toolsets (a
- * toolset of the same name in the task wins), `instructions` for `*` and the task kind, then
+ * `agent` with what every server task gets: the `code`, `docs` and `knowledge` toolsets, and
+ * `libraries` when `libraries` is given (a toolset of the same name in the task wins), `instructions` for `*` and the task kind, then
  * accepted knowledge for the repository and task kind (within `tools.knowledgeTokens`, default
  * `DEFAULT_KNOWLEDGE_TOKENS`), placed before the task's own `context`, and the external MCP servers `tools` enables (Context7 only with
  * `context7: true`; the task's servers win). `budgets` may deny a run before it starts. `onRun`
@@ -183,6 +194,15 @@ export function withServerDefaults(
             codeTools({ budget }),
             docsTools({ budget, ...(options.runner && { runner: options.runner }) }),
             knowledgeTools({ access, repo, taskKind, actor: `agent:${taskKind}`, budget }),
+            ...(options.libraries
+              ? [
+                  libraryTools({
+                    access: options.libraries,
+                    repo: `${repo.forge}:${repo.path}`,
+                    budget,
+                  }),
+                ]
+              : []),
           ],
           task.toolsets,
         )
@@ -263,6 +283,11 @@ export interface SettingsAgentOptions {
   /** Runs commands for docs lookups and the OpenAI-compatible `run_command` when a job gives none. */
   runner?: CommandRunner
   context7?: Context7Options
+  /**
+   * Where the library index keeps API surfaces and source snapshots; with it and
+   * `store.libraries`, agents get the `libraries` toolset.
+   */
+  artifacts?: ArtifactStore
   /**
    * Hears about every run. Default: `usageRecorder(store.aiUsage)`, which records usage in the
    * store (and keeps the default budget guard's cached spend current).
@@ -390,6 +415,31 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     }
     const provider = credential.name
     const limited = { key: credential.id, credential }
+    const librariesConfig = librariesConfigFrom(entries)
+    let self: Agent | undefined
+    const libraries =
+      store.libraries && options.artifacts
+        ? serverLibraryDocs({
+            libraries: store.libraries,
+            artifacts: options.artifacts,
+            ...(store.kv ? { kv: store.kv } : {}),
+            github: () =>
+              githubClientFor(
+                {
+                  list: () => store.credentials.list(),
+                  reveal: async (id) => {
+                    const found = (await store.credentials.list()).find((item) => item.id === id)
+                    if (!found) throw new Error(`no credential ${id}`)
+                    return vault.open(found.secret)
+                  },
+                },
+                librariesConfig?.github,
+                log,
+              ),
+            summarize: async () =>
+              librariesConfig?.digests && self ? agentSummarize(self) : undefined,
+          })
+        : undefined
 
     const tools = resolveSetting(entries, 'agent.tools', target)?.value
     const instructions = resolveSetting(entries, 'agent.instructions', target)?.value
@@ -412,16 +462,18 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       ...(isStringRecord(instructions) && { instructions }),
       ...(autoAccept.length > 0 && { autoAccept }),
       ...(options.context7 && { context7: options.context7 }),
+      ...(libraries && { libraries }),
       onRunError: (error) =>
         log(
           `agent: recording a run failed: ${error instanceof Error ? error.message : String(error)}`,
         ),
     })
+    self = wrapped
     if (!options.rateLimiter) return wrapped
     const configuredLimits = z
       .record(z.string(), limitPolicySchema)
       .safeParse(resolveSetting(entries, 'limits.credentials', target)?.value)
-    return limitAgent(
+    self = limitAgent(
       wrapped,
       options.rateLimiter,
       limited.key,
@@ -430,5 +482,6 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         configuredLimits.success ? configuredLimits.data : undefined,
       ),
     )
+    return self
   }
 }

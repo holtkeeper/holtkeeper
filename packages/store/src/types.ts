@@ -1010,6 +1010,231 @@ export interface ExternalAccountStore {
   remove(id: string): Promise<void>
 }
 
+/** Package ecosystem of a third-party library, in OSV spelling. */
+export type LibraryEcosystem = 'npm' | 'Go'
+
+/** A third-party library. Go majors (`/v2`, `/v3`) are one library named by the module path without the suffix. */
+export interface LibraryRef {
+  ecosystem: LibraryEcosystem
+  name: string
+}
+
+/**
+ * Why a version is indexed: `used` by some repository, the newest `patch` of a used minor, the
+ * newest `minor` of a used major, the newest release of a `major` above the highest used one,
+ * the `first` release of such a major, or the newest stable release (`latest`).
+ */
+export type LibraryVersionRole = 'used' | 'patch' | 'minor' | 'major' | 'first' | 'latest'
+
+/** A place documents of a library come from. */
+export type LibrarySourceKind =
+  | 'registry'
+  | 'archive'
+  | 'api'
+  | 'repository'
+  | 'releases'
+  | 'source'
+  | 'issues'
+  | 'site'
+
+/** Outcome of the last fetch of one source. `missing`: the source does not exist for it. */
+export interface LibrarySourceStatus {
+  status: 'ok' | 'missing' | 'failed' | 'skipped'
+  at: Timestamp
+  message?: string
+}
+
+/** Where a library's code lives, from registry metadata. */
+export interface LibraryRepository {
+  /** `github.com`, `gitlab.com`, ... */
+  host: string
+  /** `owner/name` on that host. */
+  path: string
+  /** Folder of the package inside a monorepo repository, without leading or trailing slashes. */
+  directory?: string
+  url: string
+}
+
+/** One indexed library. */
+export interface LibraryRecord extends LibraryRef {
+  description?: string
+  homepage?: string
+  repository?: LibraryRepository
+  /** Newest stable release the registry knows. */
+  latest?: string
+  /** Library-wide sources: `registry`, `issues`, `site`. */
+  sources: Partial<Record<LibrarySourceKind, LibrarySourceStatus>>
+  /** Opaque incremental position of the issue index. */
+  issuesCursor?: string
+  updatedAt: Timestamp
+}
+
+/** One indexed version of a library. */
+export interface LibraryVersionRecord extends LibraryRef {
+  version: string
+  publishedAt?: Timestamp
+  /** Registry deprecation message. */
+  deprecated?: string
+  /** Empty once the version left the matrix; see `leftAt`. */
+  roles: LibraryVersionRole[]
+  /** Repositories resolving to this version, as `forge:path`. */
+  usedBy: string[]
+  /** Tag of the version in `LibraryRecord.repository`, when one was found. */
+  tag?: string
+  /** Commit of the version (npm `gitHead`, or the tag's commit). */
+  commit?: string
+  /** Artifact id of the version's API as JSON `ApiPackage[]` of `@holtkeeper/api-surface`. */
+  api?: string
+  /** Artifact id of a ZIP of the version's source, made on demand. */
+  sourceArchive?: string
+  /** Per-version sources: `archive`, `api`, `repository`, `releases`, `source`. */
+  sources: Partial<Record<LibrarySourceKind, LibrarySourceStatus>>
+  /** When the version last left the matrix; cleared when it returns. */
+  leftAt?: Timestamp
+  updatedAt: Timestamp
+}
+
+/** A section of a library document. Identical sections of several versions are one chunk. */
+export interface LibraryChunk extends LibraryRef {
+  /** Stable for the same library, source, path, headings and text. */
+  id: string
+  /** Versions that ship this chunk, highest first. */
+  versions: string[]
+  source: 'archive' | 'repository' | 'releases' | 'site'
+  /** File path inside the package or repository, or the URL path of a page. */
+  path: string
+  /** Heading path from the document title down to the section. */
+  headings: string[]
+  /** GitHub-style slug of the last heading. */
+  anchor?: string
+  /** Markdown of the section. */
+  text: string
+  url?: string
+}
+
+/** A chunk with its relevance; higher is better, comparable within one result only. */
+export interface LibraryChunkHit {
+  chunk: LibraryChunk
+  score: number
+}
+
+export interface LibraryChunkFilter {
+  ecosystem?: LibraryEcosystem
+  name?: string
+  /** Only chunks shipped by this version. */
+  version?: string
+  source?: LibraryChunk['source']
+  /** Exact path. */
+  path?: string
+}
+
+/** LLM summary of an issue thread. */
+export interface LibraryIssueDigest {
+  problem: string
+  /** Error messages and symptoms as reported. */
+  symptoms: string[]
+  affected?: string
+  fixedIn?: string
+  workaround?: string
+  at: Timestamp
+}
+
+/** An issue or discussion of a library's repository. */
+export interface LibraryIssue extends LibraryRef {
+  /** `<host>/<owner>/<repo>#<number>`. */
+  id: string
+  number: number
+  kind: 'issue' | 'discussion'
+  title: string
+  state: 'open' | 'closed'
+  labels: string[]
+  url: string
+  /** First message, trimmed. */
+  body: string
+  /** Accepted answer or the most useful maintainer reply, trimmed. */
+  answer?: string
+  /** Pull requests that closed or reference it. */
+  pulls: number[]
+  /** Release that shipped the fix, when known. */
+  fixedIn?: string
+  reactions: number
+  comments: number
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  closedAt?: Timestamp
+  digest?: LibraryIssueDigest
+}
+
+export interface LibraryIssueHit {
+  issue: LibraryIssue
+  score: number
+}
+
+/** How much the index holds of one library. */
+export interface LibraryStats {
+  /** Version records, the ones in their grace period included. */
+  versions: number
+  chunks: number
+  issues: number
+}
+
+/**
+ * Third-party library documentation: libraries, their indexed versions, document chunks and
+ * issues. Search treats any text as plain words; quoted phrases match as phrases.
+ */
+export interface LibraryStore {
+  putLibrary(record: LibraryRecord): Promise<void>
+  getLibrary(ref: LibraryRef): Promise<LibraryRecord | undefined>
+  /** By ecosystem, then name. `query` keeps names containing it, case-insensitively. */
+  listLibraries(filter?: { ecosystem?: LibraryEcosystem; query?: string }): Promise<LibraryRecord[]>
+  /** Removes the library with its versions, chunks and issues. */
+  removeLibrary(ref: LibraryRef): Promise<void>
+
+  /** Creates or replaces by `(ecosystem, name, version)`. */
+  putVersion(record: LibraryVersionRecord): Promise<void>
+  getVersion(ref: LibraryRef, version: string): Promise<LibraryVersionRecord | undefined>
+  /** Every version of the library, highest semantic version first. */
+  listVersions(ref: LibraryRef): Promise<LibraryVersionRecord[]>
+  /** Removes the version and drops it from its chunks; chunks left without versions go. */
+  removeVersion(ref: LibraryRef, version: string): Promise<void>
+
+  /**
+   * Makes `chunks` (their `versions` ignored) exactly the chunks `version` ships from `source`:
+   * the version is added to each, chunks stored before are reused by id, and the version is
+   * dropped from its other chunks of that source. Chunks left without versions go.
+   */
+  replaceChunks(
+    ref: LibraryRef,
+    version: string,
+    source: LibraryChunk['source'],
+    chunks: Omit<LibraryChunk, 'versions'>[],
+  ): Promise<void>
+  /** Matching chunks in path order, then document order. `limit` defaults to 200. */
+  listChunks(filter: LibraryChunkFilter, limit?: number): Promise<LibraryChunk[]>
+  /** Blank text returns nothing; heading matches weigh more than text. `limit` defaults to 20. */
+  searchChunks(
+    text: string,
+    filter?: LibraryChunkFilter,
+    limit?: number,
+  ): Promise<LibraryChunkHit[]>
+
+  /** Creates or replaces by id. */
+  putIssues(issues: LibraryIssue[]): Promise<void>
+  getIssue(id: string): Promise<LibraryIssue | undefined>
+  /** Title, digest and body matches, in that weight order. `limit` defaults to 20. */
+  searchIssues(
+    text: string,
+    filter?: { ecosystem?: LibraryEcosystem; name?: string; state?: LibraryIssue['state'] },
+    limit?: number,
+  ): Promise<LibraryIssueHit[]>
+
+  /**
+   * Counts of every stored library (zeros included), keyed by `<ecosystem>:<name>`, in one
+   * query; only libraries of `ecosystem` when given.
+   */
+  libraryStats(filter?: { ecosystem?: LibraryEcosystem }): Promise<Map<string, LibraryStats>>
+}
+
 /** Everything Holtkeeper persists. Implementations: in-memory, SQLite; Postgres later. */
 export interface Store {
   auditRuns: AuditRunStore
@@ -1030,5 +1255,7 @@ export interface Store {
   audit?: AuditStore
   /** External accounts linked to principals; servers without it cannot link accounts. */
   externalAccounts?: ExternalAccountStore
+  /** Third-party library docs; servers without it index no libraries. */
+  libraries?: LibraryStore
   close(): Promise<void>
 }

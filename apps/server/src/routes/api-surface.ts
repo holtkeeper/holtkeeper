@@ -10,12 +10,13 @@ import type {
   PublicApiSearchResult,
 } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
+import { libraryApi } from '@holtkeeper/libraries'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
 import { createApiCatalog } from '../api-surface/catalog.ts'
-import { handleMcpRequest } from '../api-surface/mcp.ts'
+import { type McpLibraryContext, handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { mcpUsage } from '../api-surface/usage.ts'
 import { createUsageIndex } from '../api-surface/usages.ts'
@@ -26,9 +27,18 @@ import {
   authorize,
   principalOf,
   publicUrlOf,
+  parseRepo,
   readBody,
   repoTarget,
 } from '../context.ts'
+import {
+  agentSummarize,
+  githubClientFor,
+  librariesConfigOf,
+  libraryReader,
+  serverLibraryDocs,
+  visibleLibraries,
+} from '../libraries.ts'
 import { canSee } from '../visibility.ts'
 import { usageRoutes } from './usages.ts'
 
@@ -77,6 +87,31 @@ export function createApiSurface(deps: ServerDeps) {
     return tokens
   }
   const endpointOf = (c: AppContext) => `${publicUrlOf(deps, c)}/mcp`
+
+  const libraryContext = (principal: Principal): McpLibraryContext | undefined => {
+    const artifacts = deps.artifacts
+    if (!store.libraries || !artifacts) return undefined
+    const canRead = readable(principal)
+    const libraries = visibleLibraries(
+      store.libraries,
+      libraryReader({ canRead, global: can(principal, 'analyses:read', GLOBAL) }),
+    )
+    const docs = serverLibraryDocs({
+      libraries,
+      artifacts,
+      ...(store.kv ? { kv: store.kv } : {}),
+      github: async () =>
+        githubClientFor(deps.credentials, (await librariesConfigOf(store.settings))?.github),
+      summarize: async (repo) => {
+        const target = repo ? parseRepo(repo) : undefined
+        if (!target || !deps.agentFor || !canRead(target)) return undefined
+        if (!(await librariesConfigOf(store.settings))?.digests) return undefined
+        const agent = await deps.agentFor(target)
+        return agent ? agentSummarize(agent) : undefined
+      },
+    })
+    return { docs, api: libraryApi({ store: libraries, artifacts }), store: libraries }
+  }
 
   const routes = new Hono<Env>()
   routes.route('/', usageRoutes({ catalog, usages, readable }))
@@ -232,7 +267,9 @@ export function createApiSurface(deps: ServerDeps) {
         { 'www-authenticate': 'Bearer realm="holtkeeper"' },
       )
     const client = clientOf(c.req.raw)
+    const library = libraryContext(principal)
     return handleMcpRequest(c.req.raw, {
+      ...(library ? { library } : {}),
       catalog,
       usages,
       usage,
@@ -245,12 +282,16 @@ export function createApiSurface(deps: ServerDeps) {
 
   /**
    * The read-only principal of an MCP token, for requests to `/mcp` and reads of
-   * `/api/api-surface/*` that carry one and are otherwise anonymous.
+   * `/api/api-surface/*` and `/api/libraries/*` that carry one and are otherwise anonymous.
    */
   const tokenPrincipal = async (request: Request, path: string) => {
     if (!tokens || !bearerToken(request)) return undefined
     const allowed =
-      path === '/mcp' || (request.method === 'GET' && path.startsWith('/api/api-surface/'))
+      path === '/mcp' ||
+      (request.method === 'GET' &&
+        (path.startsWith('/api/api-surface/') ||
+          path === '/api/libraries' ||
+          path.startsWith('/api/libraries/')))
     return allowed ? tokens.authenticate(request) : undefined
   }
 

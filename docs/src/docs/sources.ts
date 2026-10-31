@@ -24,12 +24,19 @@ export interface DocSource {
   order: number
 }
 
-const guideOrder = ['PLAN.md', 'development.md', 'deployment.md', 'agent-access.md']
+const guideOrder = [
+  'PLAN.md',
+  'development.md',
+  'deployment.md',
+  'agent-access.md',
+  'library-docs.md',
+]
 const guideLabels: Record<string, string> = {
   'PLAN.md': 'Plan',
   'development.md': 'Development',
   'deployment.md': 'Deployment',
   'agent-access.md': 'Agent access',
+  'library-docs.md': 'Library docs (design)',
 }
 
 const nonEmpty = (file: string) => existsSync(file) && statSync(file).size > 0

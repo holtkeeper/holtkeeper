@@ -37,6 +37,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Bundles',
     'Assets',
     'Public API',
+    'Libraries',
     'Releases',
     'Branches',
     'CI jobs',
@@ -59,6 +60,7 @@ test('finds the entry of a page, its sub-pages and analysis records by kind', ()
   expect(activeNav('/testids')?.label).toBe('Test ids')
   expect(activeNav('/repos/groups/g1')?.label).toBe('Repositories')
   expect(activeNav('/audit-log')?.label).toBe('Audit log')
+  expect(activeNav('/libraries/view')?.label).toBe('Libraries')
   expect(activeNav('/audits/r1')?.label).toBe('Audits')
   expect(activeNav('/analyses/a1', 'testids')?.label).toBe('Test ids')
   expect(activeNav('/analyses/a1', 'depgraph')?.label).toBe('Dependencies')

@@ -63,6 +63,7 @@ const byName: Record<string, GroupLabel> = {
   'agent-tools': 'AI',
   'ai-usage': 'AI',
   knowledge: 'AI',
+  libraries: 'AI',
   media: 'Media',
   assets: 'Media',
   notify: 'Integrations',
