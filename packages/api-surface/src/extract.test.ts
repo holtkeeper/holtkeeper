@@ -136,3 +136,37 @@ test('maps a missing build output back to its TypeScript source', async () => {
   expect(await extractApi({ dir, includePrivate: false })).toEqual([])
   expect(await extractApi({ dir, packages: ['@acme/*'] })).toEqual([])
 })
+
+test('maps build output to sources at the package root and expands wildcard-only packages', async () => {
+  const exports = { '.': './dist/index', './*': './dist/*' }
+  const dir = await checkout({
+    'package.json': json({ name: 'root', private: true, workspaces: ['libs/*'] }),
+    'libs/dialogs/package.json': json({ name: '@acme/dialogs', exports }),
+    'libs/dialogs/index.ts': "export * from './open.ts'",
+    'libs/dialogs/open.ts': 'export function open(): void {}',
+    'libs/hooks/package.json': json({ name: '@acme/hooks', exports }),
+    'libs/hooks/usePrevious.ts': 'export function usePrevious<T>(value: T): T { return value }',
+    'libs/hooks/useTab.tsx': 'export const useTab = (): number => 1',
+    'libs/hooks/useTab.test.ts': 'export const skipped = 1',
+    'libs/hooks/_global.ts': 'export const skipped = 1',
+    'libs/hooks/jest.config.ts': 'export default {}',
+    'libs/hooks/desktop/index.ts': 'export const desktop = true',
+    'libs/hooks/shared/helper.ts': 'export const helper = 1',
+    'libs/hooks/shared/deep/inner/far.ts': 'export const skipped = 1',
+    'libs/types/package.json': json({ name: '@acme/types', exports }),
+    'libs/types/index.d.ts': 'export declare const id: string',
+    'libs/hooks/__tests__/a.test.ts': 'export const skipped = 1',
+  })
+  const [dialogs, hooks, types] = await extractApi({ dir })
+  expect(dialogs?.entries.map((entry) => [entry.subpath, entry.file])).toEqual([
+    ['.', 'libs/dialogs/index.ts'],
+  ])
+  expect(dialogs?.entries[0]?.symbols.map((symbol) => symbol.name)).toEqual(['open'])
+  expect(hooks?.entries.map((entry) => [entry.subpath, entry.file])).toEqual([
+    ['./desktop', 'libs/hooks/desktop/index.ts'],
+    ['./shared/helper', 'libs/hooks/shared/helper.ts'],
+    ['./usePrevious', 'libs/hooks/usePrevious.ts'],
+    ['./useTab', 'libs/hooks/useTab.tsx'],
+  ])
+  expect(types?.entries[0]?.file).toBe('libs/types/index.d.ts')
+})

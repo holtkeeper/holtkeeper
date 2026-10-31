@@ -5,7 +5,7 @@ import { dirname, join, relative } from 'node:path'
 import { parseSync } from 'oxc-parser'
 
 import type { ApiEntry, ApiPackage, ApiSymbol, ApiSymbolKind } from './model.ts'
-import { type PackageManifest, findPackages, resolveEntry } from './packages.ts'
+import { type PackageManifest, expandWildcard, findPackages, resolveEntry } from './packages.ts'
 
 /** Caps that keep one analysis record small enough to store and send. */
 export const extractLimits = { symbols: 1000, signature: 3000, doc: 1500, member: 200 }
@@ -532,8 +532,9 @@ export interface ExtractApiOptions {
  * The public API of every package in a checkout: for each `exports` subpath (or the `types`,
  * `module`, `main` fallbacks) the names it exports with their declarations and doc comments,
  * following re-exports between files. Purely syntactic, nothing is built or type-checked, so it
- * works on TypeScript sources and on declaration files alike. Packages without any entry point
- * that resolves to a file are left out.
+ * works on TypeScript sources and on declaration files alike. A package none of whose entry
+ * points resolves to a file falls back to its wildcard subpaths (`./*`), expanded into the modules
+ * they cover; packages left with nothing are left out.
  */
 export async function extractApi(options: ExtractApiOptions): Promise<ApiPackage[]> {
   const names = (options.packages ?? []).map((pattern) => new Bun.Glob(pattern))
@@ -563,16 +564,20 @@ async function extractPackage(
 ): Promise<ApiPackage | undefined> {
   const packageDir = join(root, manifest.dir)
   const before = new Set(problems)
-  const entries: ApiEntry[] = []
-  for (const entry of manifest.entries) {
+  const resolved = manifest.entries.flatMap((entry) => {
     const file = entry.targets
       .map((target) => resolveEntry(packageDir, target))
       .find((found) => found !== undefined)
-    if (!file) continue
+    return file ? [{ subpath: entry.subpath, file }] : []
+  })
+  if (!resolved.length)
+    resolved.push(...manifest.wildcards.flatMap((wildcard) => expandWildcard(packageDir, wildcard)))
+  const entries: ApiEntry[] = []
+  for (const { subpath, file } of resolved) {
     // oxlint-disable-next-line no-await-in-loop -- entries share cached modules
     const symbols = [...(await walker.exportsOf(file)).values()].toSorted(bySymbol)
     entries.push({
-      subpath: entry.subpath,
+      subpath,
       file: relative(root, file).split('\\').join('/'),
       symbols: symbols.slice(0, extractLimits.symbols),
       ...(symbols.length > extractLimits.symbols
