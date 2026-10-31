@@ -255,6 +255,41 @@ ruby = "system"
       ])
     })
 
+    test('the newest go.mod wins, since each one is a minimum', async () => {
+      const toolchain = await detectToolchain(
+        await fixture({
+          'generated/antifraud/go.mod': 'module antifraud\ngo 1.25.0\n',
+          'generated/audit/go.mod': 'module audit\ngo 1.26.0\n',
+          'generated/general/go.mod': 'module general\ngo 1.26.0\n',
+        }),
+      )
+      expect(toolchain.tools).toEqual([
+        { name: 'go', version: '1.26.0', source: 'generated/audit/go.mod' },
+      ])
+      expect(toolchain.notes).toEqual([
+        'generated/antifraud/go.mod asks for go 1.25.0; using 1.26.0 from generated/audit/go.mod',
+      ])
+    })
+
+    test('a sub-project go.mod raises an older root go.mod', async () => {
+      const toolchain = await detectToolchain(
+        await fixture({
+          'go.mod': 'module root\ngo 1.22\n',
+          'tools/go.mod': 'module tools\ngo 1.23.1\n',
+        }),
+      )
+      expect(versions(toolchain)).toEqual({ go: '1.23.1' })
+      expect(toolchain.notes).toEqual(['go.mod asks for go 1.22; using 1.23.1 from tools/go.mod'])
+    })
+
+    test('a root pin beats every go.mod', async () => {
+      const toolchain = await detectToolchain(
+        await fixture({ 'mise.toml': '[tools]\ngo = "1.24.0"\n', 'a/go.mod': 'go 1.26.0\n' }),
+      )
+      expect(versions(toolchain)).toEqual({ go: '1.24.0' })
+      expect(toolchain.notes).toEqual(['a/go.mod asks for go 1.26.0; using 1.24.0 from mise.toml'])
+    })
+
     test('a given file list replaces walking the tree', async () => {
       const dir = await fixture(files)
       const toolchain = await detectToolchain(dir, ['.nvmrc', 'package.json', 'apps/web/.nvmrc'])

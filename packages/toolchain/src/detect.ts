@@ -3,6 +3,7 @@ import { join, posix } from 'node:path'
 
 import type { Tool, Toolchain } from './types.ts'
 import {
+  compareGoVersions,
   nodeMajorFor,
   nodeVersion,
   pythonMinorFor,
@@ -423,6 +424,8 @@ export function subProjects(files: readonly string[]): string[] {
   return [...dirs].toSorted()
 }
 
+const isGoMinimum = (tool: Tool) => tool.name === 'go' && posix.basename(tool.source) === 'go.mod'
+
 const reader =
   (dir: string): Read =>
   async (file) => {
@@ -457,14 +460,34 @@ export async function detectToolchainFrom(
   let packageManager = root.packageManager
   const defaults = [...root.implied]
 
-  for (const sub of subProjects(files)) {
-    const project = await detectProject((file) => read(posix.join(sub, file)), sub)
+  const projects: Project[] = []
+  for (const sub of subProjects(files))
+    projects.push(await detectProject((file) => read(posix.join(sub, file)), sub))
+
+  const newestGo = [root, ...projects]
+    .flatMap((project) => project.tools)
+    .filter(isGoMinimum)
+    .reduce<Tool | undefined>(
+      (newest, tool) =>
+        !newest || compareGoVersions(tool.version, newest.version) > 0 ? tool : newest,
+      undefined,
+    )
+  const rootGo = tools.findIndex((tool) => tool.name === 'go')
+  const rootGoTool = tools[rootGo]
+  if (newestGo && rootGoTool && isGoMinimum(rootGoTool) && rootGoTool !== newestGo) {
+    notes.push(
+      `${rootGoTool.source} asks for go ${rootGoTool.version}; using ${newestGo.version} from ${newestGo.source}`,
+    )
+    tools[rootGo] = newestGo
+  }
+
+  for (const project of projects) {
     notes.push(...project.notes)
     for (const tool of project.tools) {
-      const existing = tools.find((t) => t.name === tool.name)
+      let existing = tools.find((t) => t.name === tool.name)
       if (!existing) {
-        tools.push(tool)
-        continue
+        existing = isGoMinimum(tool) && newestGo ? newestGo : tool
+        tools.push(existing)
       }
       if (existing.version !== tool.version)
         notes.push(

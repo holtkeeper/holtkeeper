@@ -36,7 +36,7 @@ Without a pinned version, some files imply a default (reported in `notes`): `pac
 
 Ranges (`engines.node`, `requires-python`) are constraints: a pinned version from any other file wins, and a pin outside the range becomes a note. Disagreeing files become notes too (`.nvmrc asks for node 18; using 20 from mise.toml`). Malformed files are noted and skipped; detection never throws.
 
-**Monorepos.** Directories below the root that contain one of `toolchainFiles` are sub-projects: from `files` when given (repository-relative paths, e.g. from `git ls-files`), otherwise found by walking three levels deep (skipping dot directories, `node_modules`, `vendor`, `target`, `dist`, `build`, `out`). The root wins for every tool it names; sub-projects add tools the root does not name (first in path order), and conflicts are reported as notes with the sub-project path. Implied defaults apply only after all sub-projects, so `packages/a/.nvmrc` beats a root `package.json` without a version.
+**Monorepos.** Directories below the root that contain one of `toolchainFiles` are sub-projects: from `files` when given (repository-relative paths, e.g. from `git ls-files`), otherwise found by walking three levels deep (skipping dot directories, `node_modules`, `vendor`, `target`, `dist`, `build`, `out`). The root wins for every tool it names; sub-projects add tools the root does not name (first in path order), and conflicts are reported as notes with the sub-project path. Go is the exception: a `go.mod` version is a minimum, so the newest `go.mod` across the root and all sub-projects wins (a root pin from another file still beats it). Implied defaults apply only after all sub-projects, so `packages/a/.nvmrc` beats a root `package.json` without a version.
 
 ## Override
 

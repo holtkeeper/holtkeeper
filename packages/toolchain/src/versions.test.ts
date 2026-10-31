@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  compareGoVersions,
   latestNodeMajor,
   nodeMajorFor,
   nodeVersion,
@@ -67,4 +68,17 @@ test('sdkmanJava maps vendor suffixes', () => {
   expect(sdkmanJava('21.0.1-graalce')).toBe('graalvm-community-21.0.1')
   expect(sdkmanJava('11.0.2-weird')).toBe('11.0.2')
   expect(sdkmanJava('17')).toBe('17')
+})
+
+describe('compareGoVersions', () => {
+  test.each([
+    ['1.26.0', '1.25.0', 1],
+    ['1.9', '1.10', -1],
+    ['1.22', '1.22.0', 0],
+    ['1.23rc1', '1.23.0', -1],
+    ['1.23rc1', '1.23rc2', -1],
+    ['banana', '1.0', -1],
+  ])('%p vs %p → %p', (a, b, expected) => {
+    expect(Math.sign(compareGoVersions(a, b))).toBe(expected)
+  })
 })

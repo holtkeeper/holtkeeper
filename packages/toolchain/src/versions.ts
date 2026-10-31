@@ -44,6 +44,31 @@ const isRange = (range: string) => rangeish.test(range) && /\d|\*|x/i.test(range
 export const satisfies = (version: string, range: string) =>
   isRange(range) && Bun.semver.satisfies(version, range)
 
+const goParts = (version: string) => {
+  const match = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?(.*)$/.exec(version)
+  if (!match) return undefined
+  const [, major, minor, patch, pre] = match
+  return { numbers: [major, minor, patch].map((part) => Number(part ?? 0)), pre: pre ?? '' }
+}
+
+/**
+ * Orders Go versions (`1.22`, `1.22.1`, `1.23rc1`): negative when `a` is older, positive when
+ * newer, 0 when equal. A pre-release sorts before its release; unparseable versions sort first.
+ */
+export function compareGoVersions(a: string, b: string): number {
+  const left = goParts(a)
+  const right = goParts(b)
+  if (!left || !right) return Number(Boolean(left)) - Number(Boolean(right))
+  for (let i = 0; i < 3; i++) {
+    const diff = (left.numbers[i] ?? 0) - (right.numbers[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  if (left.pre === right.pre) return 0
+  if (!left.pre) return 1
+  if (!right.pre) return -1
+  return left.pre < right.pre ? -1 : 1
+}
+
 const minorsSatisfy = (major: number, range: string) => {
   for (let minor = 0; minor <= 40; minor++) {
     if (satisfies(`${major}.${minor}.0`, range) || satisfies(`${major}.${minor}.99`, range))
