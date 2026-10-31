@@ -1035,6 +1035,10 @@ export function useRevokeMcpToken() {
   })
 }
 
+/** The tools the MCP endpoint offers the caller, with their arguments. */
+export const useMcpTools = () =>
+  useQuery({ queryKey: ['mcp', 'tools'], queryFn: api.mcpTools, staleTime: 5 * 60_000 })
+
 /** MCP calls of the last `days` days; refreshes every half minute. */
 export const useMcpUsage = (days: number) =>
   useQuery({

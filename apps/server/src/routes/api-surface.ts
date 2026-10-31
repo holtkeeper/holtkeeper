@@ -264,7 +264,7 @@ export function createApiSurface(deps: ServerDeps) {
           id: null,
           error: {
             code: -32001,
-            message: 'send Authorization: Bearer <MCP token from the API page>',
+            message: 'send Authorization: Bearer <token from the MCP server page>',
           },
         },
         401,

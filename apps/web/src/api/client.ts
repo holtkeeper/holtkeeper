@@ -66,6 +66,43 @@ export async function request<T>(
   return (text ? JSON.parse(text) : undefined) as T
 }
 
+/**
+ * Sends one JSON-RPC request to the MCP endpoint (`/mcp`) with the session cookie and returns its
+ * `result`. Throws `ApiError` for HTTP and JSON-RPC errors.
+ */
+export async function mcpRequest<T>(method: string, params?: unknown): Promise<T> {
+  const response = await fetch('/mcp', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      accept: 'application/json, text/event-stream',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      ...(params === undefined ? {} : { params }),
+    }),
+  })
+  const body: unknown = await response.json().catch(() => undefined)
+  if (typeof body === 'object' && body !== null) {
+    if ('error' in body && typeof body.error === 'object' && body.error !== null)
+      throw new ApiError(
+        response.ok ? 500 : response.status,
+        'message' in body.error && typeof body.error.message === 'string'
+          ? body.error.message
+          : 'MCP request failed',
+      )
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    if (response.ok && 'result' in body) return body.result as T
+  }
+  throw new ApiError(
+    response.status,
+    response.statusText || `Request failed with ${response.status}`,
+  )
+}
+
 /** Sends a JSON request like `request` and returns the response body as a file download. */
 export async function requestBlob(
   method: 'GET' | 'POST',

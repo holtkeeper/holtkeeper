@@ -1,46 +1,28 @@
 import type {
   ApiChange,
   ApiSymbol,
-  McpUsageOverview,
   PublicApiPackageDetail,
   PublicApiPackageSummary,
 } from '@holtkeeper/api'
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import {
-  ArrowLeft,
-  Bot,
-  FileText,
-  KeyRound,
-  Library,
-  Plus,
-  RefreshCw,
-  Search,
-  Trash2,
-} from 'lucide-react'
+import { Link, Navigate, useNavigate, useSearch } from '@tanstack/react-router'
+import { ArrowLeft, FileText, Library, RefreshCw, Search } from 'lucide-react'
 import { useDeferredValue, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 import { messageOf } from '../../api/client.ts'
 import { api } from '../../api/endpoints.ts'
 import {
-  useCreateMcpToken,
-  useMcpTokens,
-  useMcpUsage,
   usePublicApiDiff,
   usePublicApiPackage,
   usePublicApiPackages,
   usePublicApiRescan,
   usePublicApiSearch,
-  useRevokeMcpToken,
 } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
-import { formatDate, formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
+import { formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import {
   documentedShare,
   groupSymbols,
-  mcpSetup,
   symbolKinds,
-  tokenLifetimes,
   versionKey,
   versionLabel,
 } from '../../lib/public-api.ts'
@@ -48,9 +30,6 @@ import { repoKey } from '../../lib/repo.ts'
 import {
   Button,
   Chip,
-  ConfirmDialog,
-  CopyField,
-  Dialog,
   EmptyState,
   ErrorState,
   LoadMore,
@@ -66,7 +45,6 @@ import {
   Table,
   Tabs,
   Td,
-  TextField,
   Th,
   notify,
 } from '../../ui/index.ts'
@@ -85,9 +63,10 @@ interface PublicApiSearch {
   tab?: string
 }
 
-/** Public API of every package per version, symbol search, and the MCP endpoint for agents. */
+/** Public API of every package per version and symbol search. */
 export function PublicApiPage() {
   const search: PublicApiSearch = useSearch({ strict: false })
+  if (search.tab === 'mcp' && !search.package) return <Navigate to="/mcp-server" replace />
   if (search.package)
     return (
       <PackageView
@@ -108,7 +87,7 @@ function CatalogView({ tab }: { tab: string }) {
     <Page
       title="Public API"
       icon="api"
-      description="What every package exports, per released version, for people and for agents over MCP"
+      description="What every package exports, per released version"
       actions={
         <div className="flex flex-wrap items-center gap-2">
           {can('analyses:run') ? (
@@ -137,7 +116,6 @@ function CatalogView({ tab }: { tab: string }) {
         items={[
           { id: 'packages', label: 'Packages', content: <PackagesTab /> },
           { id: 'search', label: 'Search', content: <SearchTab /> },
-          { id: 'mcp', label: 'MCP for agents', content: <McpTab /> },
           { id: 'records', label: 'Reports', content: <AnalysisRecords page={page} /> },
         ]}
       />
@@ -829,424 +807,5 @@ function SearchTab() {
         />
       )}
     </Panel>
-  )
-}
-
-const usageRanges = [
-  { id: '7', label: '7 days' },
-  { id: '30', label: '30 days' },
-  { id: '90', label: '90 days' },
-] as const
-
-function McpTab() {
-  const [range, setRange] = useState<(typeof usageRanges)[number]['id']>('30')
-  const usage = useMcpUsage(Number(range))
-  const endpoint = usage.data?.endpoint ?? `${window.location.origin}/mcp`
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ConnectPanel endpoint={endpoint} />
-        <TokensPanel endpoint={endpoint} />
-      </div>
-      <Panel
-        title="Usage"
-        description="Tool calls agents made through the MCP endpoint."
-        actions={
-          <Segmented aria-label="Range" value={range} onChange={setRange} options={usageRanges} />
-        }
-      >
-        {usage.isPending ? (
-          <Placeholder className="h-72" />
-        ) : usage.isError ? (
-          <ErrorState error={usage.error} />
-        ) : (
-          <UsageView usage={usage.data} />
-        )}
-      </Panel>
-    </div>
-  )
-}
-
-function ConnectPanel({ endpoint }: { endpoint: string }) {
-  const setup = mcpSetup(endpoint)
-  return (
-    <Panel
-      title={
-        <span className="inline-flex items-center gap-2">
-          <Bot className="size-4" />
-          Connect an agent
-        </span>
-      }
-      description="Streamable HTTP, read-only tools: list_packages, get_package_api, search_symbols, get_symbol, list_versions, diff_versions; for third-party libraries (see Libraries) library_versions, search_library_docs, read_library_doc, library_changes, search_library_issues, library_source."
-    >
-      <div className="flex flex-col gap-3 text-sm">
-        <CopyField label="MCP endpoint" value={endpoint} />
-        <div>
-          <div className="mb-1 text-muted">Claude Code</div>
-          <CopyField label="Claude Code command" value={setup.claudeCode} />
-        </div>
-        <div>
-          <div className="mb-1 text-muted">Other clients (.mcp.json, Cursor, …)</div>
-          <Signature code={setup.json} />
-        </div>
-        <p className="text-xs text-muted">
-          Replace &lt;token&gt; with a token from the next panel. Tokens only read the catalog,
-          within the repositories you can read.
-        </p>
-      </div>
-    </Panel>
-  )
-}
-
-function TokensPanel({ endpoint }: { endpoint: string }) {
-  const tokens = useMcpTokens()
-  const create = useCreateMcpToken()
-  const revoke = useRevokeMcpToken()
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [lifetime, setLifetime] = useState<(typeof tokenLifetimes)[number]['id']>('90')
-  const [secret, setSecret] = useState<string | undefined>(undefined)
-  const [revoking, setRevoking] = useState<string | undefined>(undefined)
-
-  const close = (next: boolean) => {
-    setOpen(next)
-    if (!next) {
-      setSecret(undefined)
-      setName('')
-    }
-  }
-  const submit = () =>
-    create.mutate(
-      { name: name.trim() || 'MCP client', expiresInDays: Number(lifetime) },
-      {
-        onSuccess: (result) => setSecret(result.secret),
-        onError: (error) => notify.error('Not created', messageOf(error)),
-      },
-    )
-
-  return (
-    <Panel
-      title={
-        <span className="inline-flex items-center gap-2">
-          <KeyRound className="size-4" />
-          Your tokens
-        </span>
-      }
-      description="Personal access tokens for the MCP endpoint and the catalog API."
-      actions={
-        tokens.data?.available ? (
-          <Button size="sm" variant="secondary" onPress={() => setOpen(true)}>
-            <Plus className="size-3.5" />
-            New token
-          </Button>
-        ) : null
-      }
-    >
-      {tokens.isPending ? (
-        <Placeholder className="h-32" />
-      ) : tokens.isError ? (
-        <ErrorState error={tokens.error} />
-      ) : !tokens.data.available ? (
-        <Notice title="Tokens are unavailable">
-          The store keeps no key-value state; signed-in requests still reach the endpoint.
-        </Notice>
-      ) : tokens.data.tokens.length ? (
-        <Table label="MCP tokens">
-          <thead>
-            <tr>
-              <Th>Name</Th>
-              <Th>Token</Th>
-              <Th>Expires</Th>
-              <Th>Last used</Th>
-              <Th />
-            </tr>
-          </thead>
-          <tbody>
-            {tokens.data.tokens.map((token) => (
-              <tr key={token.id}>
-                <Td>{token.name}</Td>
-                <Td className="font-mono text-xs text-muted">{token.prefix}…</Td>
-                <Td className="text-muted">
-                  {token.expiresAt ? formatDate(token.expiresAt) : 'never'}
-                </Td>
-                <Td className="text-muted">
-                  {token.lastUsedAt ? formatRelative(token.lastUsedAt) : 'never'}
-                </Td>
-                <Td align="right">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    isIconOnly
-                    aria-label={`Revoke ${token.name}`}
-                    onPress={() => setRevoking(token.id)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      ) : (
-        <EmptyState
-          icon={<KeyRound />}
-          title="No tokens yet"
-          description="Create one for each machine or agent you connect."
-        />
-      )}
-      <Dialog
-        isOpen={open}
-        onOpenChange={close}
-        title={secret ? 'Token created' : 'New MCP token'}
-        description={
-          secret ? 'Copy it now; it is not shown again.' : 'Read-only access to the catalog as you.'
-        }
-        footer={
-          secret ? (
-            <Button variant="primary" onPress={() => close(false)}>
-              Done
-            </Button>
-          ) : (
-            <>
-              <Button variant="tertiary" onPress={() => close(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" onPress={submit} isPending={create.isPending}>
-                Create
-              </Button>
-            </>
-          )
-        }
-      >
-        {secret ? (
-          <div className="flex flex-col gap-3">
-            <CopyField label="Token" value={secret} />
-            <div className="text-sm text-muted">Claude Code</div>
-            <CopyField label="Claude Code command" value={mcpSetup(endpoint, secret).claudeCode} />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <TextField
-              label="Name"
-              placeholder="Laptop, CI agent, …"
-              value={name}
-              onChange={setName}
-              autoFocus
-            />
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-sm">Expires after</span>
-              <Segmented
-                aria-label="Expires after"
-                value={lifetime}
-                onChange={setLifetime}
-                options={tokenLifetimes}
-              />
-            </div>
-          </div>
-        )}
-      </Dialog>
-      <ConfirmDialog
-        isOpen={revoking !== undefined}
-        onOpenChange={(next) => {
-          if (!next) setRevoking(undefined)
-        }}
-        title="Revoke this token?"
-        confirmLabel="Revoke"
-        isPending={revoke.isPending}
-        onConfirm={() => {
-          if (!revoking) return
-          revoke.mutate(revoking, {
-            onSuccess: () => setRevoking(undefined),
-            onError: (error) => notify.error('Not revoked', messageOf(error)),
-          })
-        }}
-      >
-        Agents using it lose access right away.
-      </ConfirmDialog>
-    </Panel>
-  )
-}
-
-const dayLabel = (day: string) =>
-  new Date(`${day}T00:00:00Z`).toLocaleDateString('en', {
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  })
-
-function UsageView({ usage }: { usage: McpUsageOverview }) {
-  const points = usage.days.map((day) => ({ ...day, ok: day.calls - day.errors }))
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Tool calls" value={usage.totals.calls} />
-        <StatCard
-          label="Failed"
-          value={usage.totals.errors}
-          accent={usage.totals.errors ? 'var(--danger)' : undefined}
-        />
-        <StatCard label="People" value={usage.totals.people} />
-        <StatCard label="Packages asked about" value={usage.packages.length} />
-      </div>
-      <div
-        className="h-56 w-full"
-        role="img"
-        aria-label={`MCP calls over ${usage.days.length} days, ${usage.totals.calls} in total`}
-      >
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-            <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-            <XAxis
-              dataKey="date"
-              tickFormatter={dayLabel}
-              tickLine={false}
-              axisLine={false}
-              minTickGap={32}
-              tick={{ fill: 'var(--chart-axis)', fontSize: 12 }}
-            />
-            <YAxis
-              allowDecimals={false}
-              tickLine={false}
-              axisLine={false}
-              width={48}
-              tick={{ fill: 'var(--chart-axis)', fontSize: 12 }}
-            />
-            <Tooltip
-              cursor={{ fill: 'var(--chart-grid)' }}
-              content={({ active, label }) => {
-                const point = points.find((p) => p.date === label)
-                if (!active || !point) return null
-                return (
-                  <div className="min-w-32 rounded-xl border border-border bg-overlay p-3 text-xs shadow-overlay">
-                    <div className="mb-2 font-medium">{dayLabel(point.date)}</div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted">Calls</span>
-                      <span className="tabular">{point.calls}</span>
-                    </div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted">Failed</span>
-                      <span className="tabular">{point.errors}</span>
-                    </div>
-                  </div>
-                )
-              }}
-            />
-            <Bar dataKey="ok" stackId="calls" fill="var(--accent)" radius={[0, 0, 0, 0]} />
-            <Bar dataKey="errors" stackId="calls" fill="var(--danger)" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <RankList
-          title="Tools"
-          rows={usage.tools.map((t) => ({
-            key: t.tool,
-            label: t.tool,
-            calls: t.calls,
-            note: t.errors ? `${t.errors} failed` : undefined,
-          }))}
-        />
-        <RankList
-          title="Packages"
-          rows={usage.packages.map((p) => ({ key: p.name, label: p.name, calls: p.calls }))}
-        />
-        <RankList
-          title="People and clients"
-          rows={[
-            ...usage.people.map((p) => ({ key: `p:${p.id}`, label: p.name, calls: p.calls })),
-            ...usage.clients.map((c) => ({
-              key: `c:${c.client}`,
-              label: c.client,
-              calls: c.calls,
-              note: 'client',
-            })),
-          ]}
-        />
-      </div>
-      <div>
-        <h3 className="mb-2 text-sm font-semibold">Recent calls</h3>
-        {usage.recent.length ? (
-          <Table label="Recent MCP calls">
-            <thead>
-              <tr>
-                <Th>When</Th>
-                <Th>Tool</Th>
-                <Th>About</Th>
-                <Th>Who</Th>
-                <Th>Client</Th>
-                <Th align="right">Time</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {usage.recent.map((call, index) => (
-                <tr key={`${call.at} ${index}`}>
-                  <Td className="whitespace-nowrap text-muted">{formatRelative(call.at)}</Td>
-                  <Td>
-                    <span className="font-mono text-xs">{call.tool}</span>
-                    {call.ok ? null : (
-                      <Chip className="ml-2" tone="danger" size="sm">
-                        failed
-                      </Chip>
-                    )}
-                  </Td>
-                  <Td className="font-mono text-xs">{call.subject ?? '—'}</Td>
-                  <Td>
-                    {usage.people.find((p) => p.id === call.principal)?.name ?? call.principal}
-                  </Td>
-                  <Td className="text-xs text-muted">{call.client ?? '—'}</Td>
-                  <Td align="right" className="tabular text-muted">
-                    {call.durationMs} ms
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <EmptyState
-            icon={<Bot />}
-            title="No calls yet"
-            description="Connect an agent with a token; its calls show up here."
-          />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function RankList({
-  title,
-  rows,
-}: {
-  title: string
-  rows: { key: string; label: string; calls: number; note?: string | undefined }[]
-}) {
-  const max = Math.max(1, ...rows.map((row) => row.calls))
-  return (
-    <div className="rounded-2xl border border-border p-4">
-      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
-      {rows.length ? (
-        <ul className="flex flex-col gap-2">
-          {rows.slice(0, 8).map((row) => (
-            <li key={row.key} className="flex flex-col gap-1">
-              <div className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="truncate font-mono text-xs">{row.label}</span>
-                <span className="tabular shrink-0 text-muted">
-                  {row.calls}
-                  {row.note ? <span className="ml-1 text-xs">· {row.note}</span> : null}
-                </span>
-              </div>
-              <span className="h-1 overflow-hidden rounded-full bg-default">
-                <span
-                  className="block h-full rounded-full bg-accent"
-                  style={{ width: `${(row.calls / max) * 100}%` }}
-                />
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted">Nothing yet.</p>
-      )}
-    </div>
   )
 }

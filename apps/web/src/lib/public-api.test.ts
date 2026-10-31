@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import type { ApiSymbol } from '@holtkeeper/api'
 
-import { documentedShare, groupSymbols, mcpSetup, versionKey, versionLabel } from './public-api.ts'
+import { documentedShare, groupSymbols, versionKey, versionLabel } from './public-api.ts'
 
 const symbol = (name: string, kind: ApiSymbol['kind'], doc?: string): ApiSymbol => ({
   name,
@@ -48,20 +48,7 @@ test('versionLabel shows refs that differ from the version', () => {
   expect(versionKey({ ...base, version: '1.5.0', head: true })).toBe('head')
 })
 
-test('documentedShare and mcpSetup', () => {
+test('documentedShare', () => {
   expect(documentedShare(1, 3)).toBe(33)
   expect(documentedShare(0, 0)).toBeUndefined()
-  const setup = mcpSetup('https://hk.test/mcp', 'hk_mcp_x')
-  expect(setup.claudeCode).toBe(
-    'claude mcp add --transport http holtkeeper https://hk.test/mcp --header "Authorization: Bearer hk_mcp_x"',
-  )
-  expect(JSON.parse(setup.json)).toEqual({
-    mcpServers: {
-      holtkeeper: {
-        type: 'http',
-        url: 'https://hk.test/mcp',
-        headers: { Authorization: 'Bearer hk_mcp_x' },
-      },
-    },
-  })
 })

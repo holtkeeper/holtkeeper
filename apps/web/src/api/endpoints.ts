@@ -113,8 +113,9 @@ import type {
   RegistrationResponseJSON,
 } from '@simplewebauthn/browser'
 
+import type { McpTool } from '../lib/mcp.ts'
 import { repoKey } from '../lib/repo.ts'
-import { request, requestBlob, uploadFile, urlOf } from './client.ts'
+import { mcpRequest, request, requestBlob, uploadFile, urlOf } from './client.ts'
 
 const id = (value: string) => encodeURIComponent(value)
 
@@ -232,6 +233,7 @@ export const api = {
     request<void>('DELETE', `/api/api-surface/mcp/tokens/${id(tokenId)}`),
   mcpUsage: (days: number) =>
     request<McpUsageOverview>('GET', '/api/api-surface/mcp/usage', { query: { days } }),
+  mcpTools: () => mcpRequest<{ tools: McpTool[] }>('tools/list').then((result) => result.tools),
 
   analysisKinds: () => request<AnalysisKindList>('GET', '/api/analyses/kinds'),
   analyses: (query: { repo?: RepoRef; kind?: string; limit?: number; before?: string }) =>

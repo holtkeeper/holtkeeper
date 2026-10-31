@@ -14,6 +14,7 @@ import {
   runSummary,
   sourceLabel,
 } from '../../lib/libraries.ts'
+import { libraryTools } from '../../lib/mcp.ts'
 import {
   Button,
   Chip,
@@ -37,16 +38,6 @@ import { IndexCoverage, RunningIndex } from './IndexStatus.tsx'
 
 const shownVersions = 4
 
-/** The MCP tools agents use to read indexed library docs. */
-export const libraryTools = [
-  'library_versions',
-  'search_library_docs',
-  'read_library_doc',
-  'library_changes',
-  'search_library_issues',
-  'library_source',
-] as const
-
 /** Where agents get this from: the MCP tools and a link to the endpoint setup. */
 export function AgentToolsNote() {
   return (
@@ -63,7 +54,7 @@ export function AgentToolsNote() {
           </span>
         ))}
         , answering for the version the asking repository uses.{' '}
-        <Link to="/public-api" search={{ tab: 'mcp' }} className="text-foreground hover:underline">
+        <Link to="/mcp-server" className="text-foreground hover:underline">
           Connect an agent
         </Link>
       </p>

@@ -50,32 +50,3 @@ export const versionKey = (version: PublicApiVersion) => (version.head ? 'head' 
 /** Share of exports with a doc comment, rounded; `undefined` without exports. */
 export const documentedShare = (documented: number, exports: number) =>
   exports ? Math.round((documented / exports) * 100) : undefined
-
-/** Ways to add the MCP endpoint to clients; `secret` defaults to a placeholder. */
-export function mcpSetup(endpoint: string, secret = '<token>') {
-  const header = `Authorization: Bearer ${secret}`
-  return {
-    claudeCode: `claude mcp add --transport http holtkeeper ${endpoint} --header "${header}"`,
-    json: JSON.stringify(
-      {
-        mcpServers: {
-          holtkeeper: {
-            type: 'http',
-            url: endpoint,
-            headers: { Authorization: `Bearer ${secret}` },
-          },
-        },
-      },
-      null,
-      2,
-    ),
-  }
-}
-
-/** Expiry choices of a new token, in days; `0` never expires. */
-export const tokenLifetimes = [
-  { id: '30', label: '30 days' },
-  { id: '90', label: '90 days' },
-  { id: '365', label: '1 year' },
-  { id: '0', label: 'Never' },
-] as const

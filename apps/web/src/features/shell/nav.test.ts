@@ -16,6 +16,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Dashboard',
     'Activity',
     'Audits',
+    'MCP server',
     'Users',
   ])
   expect(
@@ -33,17 +34,18 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Code quality',
     'Test coverage',
     'Test ids',
-    'Dependencies',
-    'Dependency updates',
     'Bundles',
     'Assets',
+    'Dependencies',
+    'Dependency updates',
     'Public API',
-    'Libraries',
     'Releases',
     'Branches',
     'CI jobs',
     'Build warm-up',
     'Jobs',
+    'MCP server',
+    'Libraries',
   ])
 })
 
@@ -52,6 +54,7 @@ test('groups visible items under their headings and drops empty ones', () => {
   expect(groups.map((g) => [g.section, g.items.map((i) => i.label)])).toEqual([
     ['Overview', ['Dashboard', 'Activity']],
     ['Security', ['Audits']],
+    ['MCP', ['MCP server']],
     ['Admin', ['Users']],
   ])
 })
@@ -62,6 +65,7 @@ test('finds the entry of a page, its sub-pages and analysis records by kind', ()
   expect(activeNav('/repos/groups/g1')?.label).toBe('Repositories')
   expect(activeNav('/audit-log')?.label).toBe('Audit log')
   expect(activeNav('/libraries/view')?.label).toBe('Libraries')
+  expect(activeNav('/mcp-server')?.label).toBe('MCP server')
   expect(activeNav('/audits/r1')?.label).toBe('Audits')
   expect(activeNav('/analyses/a1', 'testids')?.label).toBe('Test ids')
   expect(activeNav('/analyses/a1', 'depgraph')?.label).toBe('Dependencies')

@@ -24,6 +24,7 @@ import {
   MousePointerClick,
   Network,
   PackageCheck,
+  Plug,
   Scale,
   ScrollText,
   Settings2,
@@ -39,7 +40,17 @@ import { analysisPages, groupAnalysisPages } from '../../lib/analyses.ts'
 import type { BrandIconName } from '../../ui/BrandIcon.tsx'
 
 /** Sidebar headings in display order. */
-const navSections = ['Overview', 'Security', 'Code', 'Delivery', 'Agents', 'Admin'] as const
+const navSections = [
+  'Overview',
+  'Security',
+  'Code',
+  'Packages',
+  'Delivery',
+  'Agents',
+  'MCP',
+  'Admin',
+  'System',
+] as const
 
 export type NavSection = (typeof navSections)[number]
 
@@ -63,6 +74,7 @@ export interface NavItem {
     | '/fleet'
     | '/stack'
     | '/public-api'
+    | '/mcp-server'
     | '/libraries'
     | '/jobs'
     | '/knowledge'
@@ -169,22 +181,6 @@ const navItems: readonly NavItem[] = [
   },
   {
     section: 'Code',
-    to: '/dependencies',
-    brand: 'updates',
-    label: 'Dependencies',
-    icon: Network,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Code',
-    to: '/updates',
-    brand: 'updates',
-    label: 'Dependency updates',
-    icon: PackageCheck,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Code',
     to: '/bundles',
     brand: 'bundles',
     label: 'Bundles',
@@ -200,19 +196,27 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   {
-    section: 'Code',
+    section: 'Packages',
+    to: '/dependencies',
+    brand: 'updates',
+    label: 'Dependencies',
+    icon: Network,
+    requires: 'analyses:read',
+  },
+  {
+    section: 'Packages',
+    to: '/updates',
+    brand: 'updates',
+    label: 'Dependency updates',
+    icon: PackageCheck,
+    requires: 'analyses:read',
+  },
+  {
+    section: 'Packages',
     to: '/public-api',
     brand: 'api',
     label: 'Public API',
     icon: Library,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Code',
-    to: '/libraries',
-    brand: 'knowledge',
-    label: 'Libraries',
-    icon: LibraryBig,
     requires: 'analyses:read',
   },
   {
@@ -280,6 +284,21 @@ const navItems: readonly NavItem[] = [
     requires: 'ai:read',
   },
   {
+    section: 'MCP',
+    to: '/mcp-server',
+    brand: 'api',
+    label: 'MCP server',
+    icon: Plug,
+  },
+  {
+    section: 'MCP',
+    to: '/libraries',
+    brand: 'libraries',
+    label: 'Libraries',
+    icon: LibraryBig,
+    requires: 'analyses:read',
+  },
+  {
     section: 'Admin',
     to: '/credentials',
     brand: 'credentials',
@@ -293,29 +312,6 @@ const navItems: readonly NavItem[] = [
     brand: 'settings',
     label: 'Settings',
     icon: Settings2,
-    requires: 'settings:read',
-  },
-  {
-    section: 'Admin',
-    to: '/storage',
-    brand: 'storage',
-    label: 'Storage',
-    icon: HardDrive,
-    requires: 'settings:read',
-  },
-  {
-    section: 'Admin',
-    to: '/database',
-    brand: 'storage',
-    label: 'Database',
-    icon: Database,
-    requires: 'settings:read',
-  },
-  {
-    section: 'Admin',
-    to: '/caches',
-    label: 'Caches',
-    icon: DatabaseZap,
     requires: 'settings:read',
   },
   {
@@ -334,6 +330,29 @@ const navItems: readonly NavItem[] = [
     label: 'Audit log',
     icon: ScrollText,
     requires: 'audit:read',
+  },
+  {
+    section: 'System',
+    to: '/storage',
+    brand: 'storage',
+    label: 'Storage',
+    icon: HardDrive,
+    requires: 'settings:read',
+  },
+  {
+    section: 'System',
+    to: '/database',
+    brand: 'storage',
+    label: 'Database',
+    icon: Database,
+    requires: 'settings:read',
+  },
+  {
+    section: 'System',
+    to: '/caches',
+    label: 'Caches',
+    icon: DatabaseZap,
+    requires: 'settings:read',
   },
 ]
 

@@ -13,6 +13,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: server, changeOrigin: false },
       '/auth': { target: server, changeOrigin: false },
+      '^/mcp$': { target: server, changeOrigin: false },
     },
   },
   build: {

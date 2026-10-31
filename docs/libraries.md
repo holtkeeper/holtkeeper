@@ -89,7 +89,7 @@ The first run starts about two minutes after the server starts; the server rerea
 
 **Keeping up with the repositories.** Nobody maintains the list of libraries: every run takes it from the newest `usages` and `fleet` records, so packages added to a repository join the index, upgraded ones get their new versions, and dropped ones leave after `graceDays`. Those records are refreshed by the weekly schedules and, with `refreshOnPush` (on by default), right after a push to a repository's default branch that changes a manifest or lockfile (`package.json`, `bun.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.mod`, `go.sum`, ...): Holtkeeper queues `usages` for the repository and `fleet` for its groups, and the index runs about ten minutes after they finish. A version bump is in the index some 15–20 minutes after the merge. This needs the push to reach Holtkeeper: through the forge webhook, or through polling, which then also lists branches.
 
-The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it on the **Libraries** page (sidebar **Code → Libraries**): **Indexing now** shows how many libraries the running run has done of all, the ones it works on (`concurrency` at a time), the time so far with a rough estimate of the rest and, when every GitHub token is used up, until when it waits; **Coverage** shows per source (package archive, API, repository docs, release notes, issues) how many versions are indexed, have nothing to index, failed (fetched again on the next run) or are not fetched yet; **Last indexing run** shows the counts and failures of the run before. Or read the server log:
+The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it on the **Libraries** page (sidebar **MCP → Libraries**): **Indexing now** shows how many libraries the running run has done of all, the ones it works on (`concurrency` at a time), the time so far with a rough estimate of the rest and, when every GitHub token is used up, until when it waits; **Coverage** shows per source (package archive, API, repository docs, release notes, issues) how many versions are indexed, have nothing to index, failed (fetched again on the next run) or are not fetched yet; **Last indexing run** shows the counts and failures of the run before. Or read the server log:
 
 ```bash
 kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
@@ -99,11 +99,11 @@ kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
 
 ### In the web UI
 
-**Code → Libraries** lists the indexed libraries that repositories you can read use, with their versions, how many repositories use them, document sections, issues and sources whose last fetch failed. A library's page shows every version with why it is kept (`used`, `patch`, `minor`, `major`, `first`, `latest`), who uses it, the status of each source, its documents and a search over them.
+**MCP → Libraries** lists the indexed libraries that repositories you can read use, with their versions, how many repositories use them, document sections, issues and sources whose last fetch failed. A library's page shows every version with why it is kept (`used`, `patch`, `minor`, `major`, `first`, `latest`), who uses it, the status of each source, its documents and a search over them.
 
 ### From an agent over MCP
 
-1. Open **Public API → MCP for agents** and create a token. It acts as you, read-only, and sees only libraries your repositories use.
+1. Open **MCP server** in the sidebar and create a token. It acts as you, read-only, and sees only libraries your repositories use.
 2. Add the server to your agent, e.g. Claude Code:
 
    ```bash

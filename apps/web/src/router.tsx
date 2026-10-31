@@ -108,6 +108,7 @@ const PublicApiPage = lazyRouteComponent(
   () => import('./features/public-api/PublicApiPage.tsx'),
   'PublicApiPage',
 )
+const McpPage = lazyRouteComponent(() => import('./features/mcp/McpPage.tsx'), 'McpPage')
 const LibrariesPage = lazyRouteComponent(
   () => import('./features/libraries/LibrariesPage.tsx'),
   'LibrariesPage',
@@ -269,6 +270,14 @@ const publicApiRoute = createRoute({
     ),
 })
 
+const mcpRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'mcp-server',
+  component: McpPage,
+  validateSearch: (search: Record<string, unknown>): { tab?: string } =>
+    typeof search.tab === 'string' && search.tab ? { tab: search.tab } : {},
+})
+
 const librariesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'libraries',
@@ -325,6 +334,7 @@ const routeTree = rootRoute.addChildren([
     analysisPage('fleet', FleetPage),
     analysisPage('stack', StackPage),
     publicApiRoute,
+    mcpRoute,
     librariesRoute,
     libraryRoute,
     analysisRoute,
