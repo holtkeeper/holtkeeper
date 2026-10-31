@@ -386,21 +386,44 @@ export function modelCatalog(
  * The routing an agent of `provider` runs with — `routing` over the provider's own `model` and
  * `models` — with `@latest` references resolved by `list` (called only when there is one). Throws
  * when a reference matches no listed model, with the listing error if the API failed.
+ * `fallbacks` are models for task kinds neither `routing` nor the provider names; one is used only
+ * when the listing has it, so a provider without it keeps routing the kind to `model`.
  */
 export async function resolveProviderRouting(
   provider: Pick<AiProvider, 'kind' | 'options'>,
   routing: { model?: string; models?: Record<string, string> },
   list: () => Promise<ModelListing>,
+  fallbacks: Readonly<Record<string, string>> = {},
 ): Promise<{ model?: string; models?: Record<string, string> }> {
   const parsed = parseProviderOptions(provider)
   const model = routing.model ?? parsed.model
   const models =
     routing.models || parsed.models ? { ...parsed.models, ...routing.models } : undefined
   const effective = { ...(model !== undefined && { model }), ...(models && { models }) }
-  if (![model, ...Object.values(models ?? {})].some(isLatestReference)) return routing
-  const listing = await list()
+  const unrouted = Object.entries(fallbacks).filter(([kind]) => models?.[kind] === undefined)
+  const latest = [model, ...Object.values(models ?? {})].some(isLatestReference)
+  if (!latest && !unrouted.length) return routing
+  let listing: ModelListing
   try {
-    return resolveLatestRouting(effective, listing.models)
+    listing = await list()
+  } catch (error) {
+    if (latest) throw error
+    return routing
+  }
+  const fallback: Record<string, string> = {}
+  for (const [kind, reference] of unrouted) {
+    const resolved = isLatestReference(reference)
+      ? resolveLatestModel(reference, listing.models)
+      : listing.models.some((listed) => listed.id === reference)
+        ? reference
+        : undefined
+    if (resolved !== undefined) fallback[kind] = resolved
+  }
+  const withFallback = (result: { model?: string; models?: Record<string, string> }) =>
+    Object.keys(fallback).length ? { ...result, models: { ...fallback, ...result.models } } : result
+  if (!latest) return withFallback(routing)
+  try {
+    return withFallback(resolveLatestRouting(effective, listing.models))
   } catch (error) {
     if (listing.error === undefined) throw error
     throw new Error(

@@ -43,7 +43,7 @@ import type { CommandRunner } from '@holtkeeper/exec'
 import type { RepoRef } from '@holtkeeper/forge'
 import { knowledgeAccess, selectForTask } from '@holtkeeper/knowledge'
 import { type Limiter, limitAgent, limitPolicySchema, resolveLimitPolicy } from '@holtkeeper/limits'
-import { resolveSetting } from '@holtkeeper/settings'
+import { defaultTaskModels, resolveSetting } from '@holtkeeper/settings'
 import type { KnowledgeKind, SettingEntry, Store, StoredCredential } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
 import { z } from 'zod'
@@ -343,7 +343,12 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     options.models ?? modelCatalog(options.aiCatalog ? { catalog: options.aiCatalog } : {})
   const routingFor = async (key: string, provider: AiProvider, routing: CreateAgentOptions) => ({
     ...routing,
-    ...(await resolveProviderRouting(provider, routing, () => catalog.list(key, provider))),
+    ...(await resolveProviderRouting(
+      provider,
+      routing,
+      () => catalog.list(key, provider),
+      defaultTaskModels,
+    )),
   })
   const budgets =
     options.budgets === false

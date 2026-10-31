@@ -8,6 +8,10 @@ import {
   resolveProviderRouting,
 } from './models.ts'
 
+const listedIds = (ids: string[]) => async () => ({
+  models: ids.map((id) => ({ id, source: 'provider' as const })),
+})
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
@@ -187,6 +191,52 @@ describe('latest', () => {
     ).catch((error: unknown) => error)
     expect(failed).toBeInstanceOf(Error)
     expect(String(failed)).toContain('no listed model matches gemini@latest (HTTP 500)')
+  })
+
+  test('resolveProviderRouting adds a fallback only for unrouted kinds the provider lists', async () => {
+    const fallbacks = { 'library-digest': 'claude-haiku@latest' }
+    expect(
+      await resolveProviderRouting(
+        { kind: 'anthropic' },
+        { model: 'claude-opus-5-5' },
+        listedIds(['claude-opus-5-5', 'claude-haiku-5-5']),
+        fallbacks,
+      ),
+    ).toEqual({ model: 'claude-opus-5-5', models: { 'library-digest': 'claude-haiku-5-5' } })
+    expect(
+      await resolveProviderRouting(
+        { kind: 'openai-compatible' },
+        { model: 'gpt-5' },
+        listedIds(['gpt-5']),
+        fallbacks,
+      ),
+    ).toEqual({ model: 'gpt-5' })
+    expect(
+      await resolveProviderRouting(
+        { kind: 'anthropic' },
+        { model: 'claude-opus-5-5', models: { 'library-digest': 'claude-sonnet-5-5' } },
+        listedIds(['claude-haiku-5-5']),
+        fallbacks,
+      ),
+    ).toEqual({ model: 'claude-opus-5-5', models: { 'library-digest': 'claude-sonnet-5-5' } })
+    expect(
+      await resolveProviderRouting(
+        { kind: 'anthropic', options: { models: { 'library-digest': 'claude-opus-5-5' } } },
+        { model: 'claude-opus-5-5' },
+        listedIds(['claude-haiku-5-5']),
+        fallbacks,
+      ),
+    ).toEqual({ model: 'claude-opus-5-5' })
+    expect(
+      await resolveProviderRouting(
+        { kind: 'anthropic' },
+        { model: 'claude-opus-5-5' },
+        async () => {
+          throw new Error('catalog down')
+        },
+        fallbacks,
+      ),
+    ).toEqual({ model: 'claude-opus-5-5' })
   })
 
   test('modelCatalog caches listings per key and drops failed ones', async () => {

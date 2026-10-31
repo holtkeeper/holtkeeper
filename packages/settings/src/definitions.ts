@@ -68,6 +68,15 @@ export const llmModel = defineSetting({
   schema: z.string().min(1),
 })
 
+/**
+ * Models of task kinds that fit a small model whatever \`llm.model\` says, used when \`llm.models\`
+ * has no entry for the kind: issue thread digests of the library docs are short summaries of
+ * untrusted text, frequent and cheap.
+ */
+export const defaultTaskModels: Readonly<Record<string, string>> = {
+  'library-digest': 'claude-haiku@latest',
+}
+
 export const llmModels = defineSetting({
   key: 'llm.models',
   label: 'Models per task',
@@ -76,8 +85,9 @@ export const llmModels = defineSetting({
   section: 'AI',
   help: `Overrides the model per task kind, for example \`review\`, \`refactor\` or \`triage\`.
 
-- Keep cheap, frequent tasks (\`triage\`) on a small model and reserve the strongest one for \`review\`.
-- Kinds without an entry fall back to **Model**.`,
+- Keep cheap, frequent tasks (\`triage\`, \`library-digest\`) on a small model and reserve the strongest one for \`review\`.
+- \`library-digest\` (summaries of library issue threads) uses \`claude-haiku@latest\` without an entry here.
+- Other kinds without an entry fall back to **Model**.`,
   schema: z.record(z.string().min(1), z.string().min(1)),
   presets: [
     {
@@ -94,6 +104,7 @@ export const llmModels = defineSetting({
         quality: 'claude-sonnet@latest',
         'release-risk': 'claude-sonnet@latest',
         triage: 'claude-haiku@latest',
+        'library-digest': 'claude-haiku@latest',
       },
     },
     {
@@ -110,6 +121,7 @@ export const llmModels = defineSetting({
         quality: 'claude-haiku@latest',
         'release-risk': 'claude-haiku@latest',
         triage: 'claude-haiku@latest',
+        'library-digest': 'claude-haiku@latest',
       },
     },
     {
@@ -125,6 +137,7 @@ export const llmModels = defineSetting({
         quality: 'claude-opus@latest',
         'release-risk': 'claude-opus@latest',
         triage: 'claude-haiku@latest',
+        'library-digest': 'claude-haiku@latest',
       },
     },
   ],

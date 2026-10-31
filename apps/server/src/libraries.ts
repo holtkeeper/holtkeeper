@@ -105,7 +105,7 @@ export const librariesSetting = defineSetting({
 
 - **interval** (default \`1d\`, at least \`1h\`): how often to look for new releases; a run also starts about two minutes after the server starts.
 - **github**: credentials of kind \`github\` whose secrets are GitHub tokens, for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
-- **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`.
+- **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. The model is the \`library-digest\` entry of **Models per task**; without one, \`claude-haiku@latest\` when the provider lists it, else **Model**.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
   schema: librariesSchema,

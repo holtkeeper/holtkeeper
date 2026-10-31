@@ -132,6 +132,8 @@ Review, port, propagate and other agent tasks get the same tools as `libraries.v
 
 With `"digests": true`, the first time an issue thread comes up in a search it is summarized by the configured LLM into problem, symptoms, affected versions, fixed-in version and workaround, and the summary is stored, so later searches show it directly. At most three threads are summarized per search. Runs are charged to `llm.budget` under task kind `library-digest` and show up in **AI usage**. Over MCP they only happen when the call passes a `repo` you can read, since the repository decides which model and budget apply.
 
+The model is the `library-digest` entry of **Settings → AI → Models per task** (`llm.models`). Every preset there sets it to `claude-haiku@latest`; without an entry Holtkeeper still picks `claude-haiku@latest` when your provider lists it and falls back to **Model** (`llm.model`) otherwise. A summary is a short structured extraction, so a small model does it well; set another entry, e.g. `"library-digest": "claude-sonnet@latest"`, if you want more careful summaries.
+
 ## Tuning
 
 - **Too many libraries.** Exclude noise such as `@types/*` (default), test-only tooling or internal mirrors: `"exclude": ["@types/*", "eslint-*", "@storybook/*"]`.
