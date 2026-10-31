@@ -24,7 +24,7 @@ describe('warmup analyzer', () => {
     const options = warmupOptionsSchema.parse({
       command: 'yarn all',
       cwd: 'libs',
-      env: { TURBO_TEAMID: 'my-team' },
+      env: { TURBO_TEAM: 'my-team' },
       outputLines: 3,
       branch: 'main',
     })
@@ -37,7 +37,7 @@ describe('warmup analyzer', () => {
     })
     expect(calls[0]?.command).toEqual(['sh', '-c', 'yarn all'])
     expect(calls[0]?.options.cwd).toBe('/checkout/libs')
-    expect(calls[0]?.options.env).toEqual({ TURBO_TEAMID: 'my-team' })
+    expect(calls[0]?.options.env).toEqual({ TURBO_TEAM: 'my-team' })
     expect(ref).toBe('abc123')
     expect(data).toMatchObject({
       exitCode: 0,

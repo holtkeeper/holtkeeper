@@ -24,9 +24,11 @@ A failing command is a result, not a job failure: the job succeeds and the recor
    ```json
    {
      "command": "yarn install --immutable && yarn all",
-     "env": { "TURBO_TEAMID": "my-team", "TURBO_TOKEN": "<placeholder of the proxy secret>" }
+     "env": { "TURBO_TEAM": "my-team", "TURBO_TOKEN": "<placeholder of the proxy secret>" }
    }
    ```
+
+   Use `TURBO_TEAM` for a team slug. Turborepo sends `TURBO_TEAMID` only when it starts with `team_`, so a slug there leaves requests without a team and self-hosted caches answer `400 Bad Request`.
 
 2. **Secret.** Credentials → New credential → kind **Proxy secret**: URL = the cache's API URL (`apiurl` of `.turbo/config.json`, `http://` when the cache is plain HTTP), secret = the real token. Copy its placeholder into `TURBO_TOKEN`. Turborepo sends `Authorization: Bearer <placeholder>`; the egress proxy swaps in the token for that host only.
 3. **Trigger.** Automation → Triggers → **Branch push**: analyzer `warmup`, branches (e.g. `main`, `release/*`; none for every branch), optionally groups. Pushes arrive by webhook (registered hooks include push events) or by polling.
