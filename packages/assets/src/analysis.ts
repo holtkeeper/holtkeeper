@@ -435,18 +435,20 @@ function optimizationSection(
   const ok = images.filter((image) => !image.error)
   const changes = (data.changes ?? []).filter((change) => change.id.startsWith('assets:image:'))
   const failed = images.filter((image) => image.error)
+  const avif = ok.some((image) => image.variants.some((variant) => variant.format === 'avif'))
   return {
     id: 'optimization',
     title: 'Image optimization',
-    description:
-      'Real variants encoded with sharp for the largest images: AVIF, WebP and the original format re-encoded, in responsive widths or @1x/@2x densities. Sizes are measured, not estimated.',
+    description: `Real variants encoded with sharp for the largest images: ${avif ? 'AVIF, ' : ''}WebP and the original format re-encoded, in responsive widths or @1x/@2x densities. Sizes are measured, not estimated.`,
     blocks: [
       {
         type: 'table',
         columns: [
           { key: 'path', label: 'Image', format: 'code', path: true },
           { key: 'original', label: 'Original', unit: 'bytes', align: 'end' },
-          { key: 'avif', label: 'AVIF', unit: 'bytes', align: 'end' },
+          ...(avif
+            ? [{ key: 'avif', label: 'AVIF', unit: 'bytes' as const, align: 'end' as const }]
+            : []),
           { key: 'webp', label: 'WebP', unit: 'bytes', align: 'end' },
           { key: 'optimized', label: 'Re-encoded', unit: 'bytes', align: 'end' },
           { key: 'saving', label: 'Best saving', align: 'end' },
@@ -468,7 +470,7 @@ function optimizationSection(
           return {
             path: image.path,
             original: image.bytes,
-            avif: fullSize(image, 'avif')?.bytes ?? null,
+            ...(avif ? { avif: fullSize(image, 'avif')?.bytes ?? null } : {}),
             webp: fullSize(image, 'webp')?.bytes ?? null,
             optimized: fullSize(image, own)?.bytes ?? null,
             saving: percentCell(image.bytes, image.best?.bytes),
@@ -664,7 +666,7 @@ function deliverySection(data: AssetsData): Section | undefined {
     id: 'delivery',
     title: 'Image delivery',
     description:
-      'Rasters without AVIF/WebP versions next to them, large images shipped in a single resolution, and inline SVGs in markup and components that carry editor cruft or excess path precision.',
+      'Rasters without WebP (or, with `avif`, AVIF) versions next to them, large images shipped in a single resolution, and inline SVGs in markup and components that carry editor cruft or excess path precision.',
     blocks: [
       ...(findings.length
         ? [

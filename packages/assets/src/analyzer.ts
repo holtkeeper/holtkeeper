@@ -49,6 +49,8 @@ export const assetsOptionsSchema = z.object({
   optimizeTop: z.coerce.number().int().nonnegative().default(20),
   /** With `sharp`: svgo preset of SVG changes. */
   svgPreset: z.enum(['safe', 'default', 'aggressive']).default('safe'),
+  /** Expect, suggest and encode AVIF next to WebP. */
+  avif: z.coerce.boolean().default(false),
   /** With `sharp`: variant file name templates. */
   naming: z.object({ width: z.string().optional(), density: z.string().optional() }).optional(),
   /** Check inline `<svg>`/`<path>` elements of markup and components. */
@@ -88,6 +90,12 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
       type: 'boolean',
     },
     {
+      flag: 'avif',
+      option: 'avif',
+      description: 'expect, suggest and encode AVIF next to WebP (default false)',
+      type: 'boolean',
+    },
+    {
       flag: 'svg-preset',
       option: 'svgPreset',
       description: 'svgo preset: safe (default), default or aggressive',
@@ -106,6 +114,7 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
       ...(options.convert ? { convert: options.convert } : {}),
       optimizeTop: options.optimizeTop,
       svgPreset: options.svgPreset,
+      avif: options.avif,
       ...(options.naming ? { naming: options.naming } : {}),
       inlineSvg: options.inlineSvg,
       ...(cache ? { cache } : {}),

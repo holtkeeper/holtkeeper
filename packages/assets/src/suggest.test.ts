@@ -27,7 +27,13 @@ test('one candidate per asset by rule', () => {
     rule: 'alpha-png',
     estimate: 100_000 * estimateRatios['alpha-png'],
   })
-  expect(candidateFor(photo)).toMatchObject({ rule: 'jpeg', suggested: 'avif' })
+  expect(candidateFor(photo)).toMatchObject({
+    rule: 'jpeg',
+    suggested: 'webp',
+    how: 'WebP lossy q80 (cwebp -q 80)',
+  })
+  expect(candidateFor(photo, { avif: true })).toMatchObject({ rule: 'jpeg', suggested: 'avif' })
+  expect(candidateFor(opaque)?.how).not.toContain('AVIF')
   expect(candidateFor(sound)).toMatchObject({
     rule: 'uncompressed-audio',
     estimate: (2 * VORBIS_Q4_BITRATE) / 8 + 4096,
@@ -75,7 +81,7 @@ test('tools measure real sizes on temp copies and fall back to estimates', async
     if (command[0] === 'avifenc') throw new Error('command not found: avifenc')
     return { exitCode: 1, stderr: 'Unknown encoder libvorbis' }
   })
-  const list = candidates([opaque, photo, font, sound], 1)
+  const list = candidates([opaque, photo, font, sound], 1, { avif: true })
   const { suggestions, tools } = await measureSuggestions(list, {
     dir,
     runner,

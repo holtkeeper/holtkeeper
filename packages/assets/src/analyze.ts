@@ -41,6 +41,8 @@ export interface AnalyzeAssetsOptions {
   optimizeTop?: number
   /** With `sharp`: svgo preset for SVG changes. Default `safe`. */
   svgPreset?: SvgPreset
+  /** Expect, suggest and encode AVIF next to WebP. Default false: WebP alone counts as modern. */
+  avif?: boolean
   /** With `sharp`: variant file names. Default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}`. */
   naming?: NamingScheme
   /** Required for `convert: 'tools'`. */
@@ -134,13 +136,13 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
     ...variants,
     ...assets.filter((asset) => skipped(asset.path)).map((asset) => asset.path),
     ...families
-      .filter((family) => hasModernFormats(family) && hasSizes(family))
+      .filter((family) => hasModernFormats(family, options.avif) && hasSizes(family))
       .map((family) => family.original.path),
   ])
   const list =
     convert === 'off'
       ? []
-      : candidates(assets, options.minBytes ?? 8 * 1024).filter(
+      : candidates(assets, options.minBytes ?? 8 * 1024, { avif: options.avif === true }).filter(
           (candidate) =>
             !skipped(candidate.asset.path) &&
             !variants.has(candidate.asset.path) &&
@@ -179,6 +181,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       engines,
       minSaving,
       svgPreset: options.svgPreset ?? 'safe',
+      avif: options.avif === true,
       ...(options.naming ? { naming: options.naming } : {}),
       ...(options.cache ? { cache: options.cache } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
@@ -214,6 +217,7 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       ...findIssues(assets, {
         engines,
         families,
+        avif: options.avif === true,
         ...(options.minBytes === undefined ? {} : { minBytes: options.minBytes }),
       }),
       ...(inline?.findings ?? []),

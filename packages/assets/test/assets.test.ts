@@ -118,8 +118,8 @@ test('inventories, checks budgets, suggests and reports', async () => {
     ['public/sfx/jump.wav', 'uncompressed-audio'],
     ['public/background.png', 'opaque-png'],
     ['public/copy.png', 'opaque-png'],
-    ['public/photo.jpg', 'jpeg'],
     ['public/fonts/title.ttf', 'desktop-font'],
+    ['public/photo.jpg', 'jpeg'],
     ['public/sprites/sheet.png', 'alpha-png'],
   ])
   const imageTotal = data.totals.find((total) => total.kind === 'image')
@@ -213,6 +213,6 @@ test('the analyzer validates options and passes the runner for tool measurements
   expect(data.tools).toEqual([])
   expect(data.suggestions.every((suggestion) => suggestion.method === 'estimate')).toBe(true)
   expect(new Set(calls.map((call) => call.command[0]))).toEqual(
-    new Set(['cwebp', 'avifenc', 'ffmpeg', 'woff2_compress']),
+    new Set(['cwebp', 'ffmpeg', 'woff2_compress']),
   )
 })

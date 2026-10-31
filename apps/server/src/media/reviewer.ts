@@ -28,6 +28,8 @@ export interface MediaReviewerOptions {
   maxSuggestionLines?: number
   /** Encoded variants kept between reviews (e.g. `artifactCache` on S3), so re-pushes do not encode again. */
   cache?: VariantCache
+  /** Encode AVIF and ask for an AVIF sibling next to WebP. Default false. */
+  avif?: boolean
 }
 
 type Limits = Required<Omit<MediaReviewerOptions, 'publicUrl' | 'cache'>> & {
@@ -41,7 +43,9 @@ const legacyFormats = new Set(['png', 'jpeg', 'jpg', 'gif'])
 
 const formatNames: Record<string, string> = { avif: 'AVIF', webp: 'WebP' }
 
-const stemOf = (path: string) => path.replace(/(?:-\d+w|@\d+(?:\.\d+)?x)?\.[^./]+$/, '')
+const SIZE_SUFFIX = /(?:-\d+w?|@\d+(?:\.\d+)?x)\.[^./]+$/
+
+const stemOf = (path: string) => path.replace(/(?:-\d+w?|@\d+(?:\.\d+)?x)?\.[^./]+$/, '')
 
 /** What the merge request ships next to `path`: other formats and sized variants of the same image. */
 function siblingsOf(path: string, paths: readonly string[]) {
@@ -51,19 +55,26 @@ function siblingsOf(path: string, paths: readonly string[]) {
     formats: new Set(
       siblings.map((other) => other.slice(other.lastIndexOf('.') + 1).toLowerCase()),
     ),
-    sized: siblings.some((other) => /(?:-\d+w|@\d+(?:\.\d+)?x)\.[^./]+$/.test(other)),
+    sized: siblings.some((other) => SIZE_SUFFIX.test(other)),
   }
 }
 
-/** Delivery notes for a raster: missing AVIF/WebP siblings, one large resolution only. */
-function deliveryNotes(file: MediaFile, width: number, paths: readonly string[]): string[] {
+/** Delivery notes for a raster: missing WebP (and AVIF) siblings, one large resolution only. */
+function deliveryNotes(
+  file: MediaFile,
+  width: number,
+  paths: readonly string[],
+  avif: boolean,
+): string[] {
   const format = file.path.slice(file.path.lastIndexOf('.') + 1).toLowerCase()
   const siblings = siblingsOf(file.path, paths)
   const notes: string[] = []
-  const missing = ['avif', 'webp'].filter((other) => !siblings.formats.has(other))
+  const missing = (avif ? ['avif', 'webp'] : ['webp']).filter(
+    (other) => !siblings.formats.has(other),
+  )
   if (legacyFormats.has(format) && missing.length)
     notes.push(`no ${missing.map((other) => formatNames[other]).join('/')} version comes with it`)
-  if (width > HIGH_RES_WIDTH && !siblings.sized && !/(?:-\d+w|@\d+x)\./.test(file.path))
+  if (width > HIGH_RES_WIDTH && !siblings.sized && !SIZE_SUFFIX.test(file.path))
     notes.push(`only one resolution (${width} px wide): phones download the full-size file`)
   return notes
 }
@@ -132,14 +143,16 @@ async function reviewRaster(
       summary: `\`${file.path}\`: cannot decode (${error instanceof Error ? error.message : String(error)}).`,
     }
   }
-  const plan = media.planVariants(info)
+  const plan = media.planVariants(info, {
+    formats: [...(options.avif ? (['avif'] as const) : []), 'webp', media.originalOutput(info)],
+  })
   const { variants } = await media.encodeVariants(bytes, plan.specs, {
     info,
     ...(options.cache ? { cache: options.cache } : {}),
   })
   const original = { bytes: bytes.byteLength, width: info.width, format: info.format }
   const summary = media.savingsSummary(original, variants)
-  const notes = info.animated ? [] : deliveryNotes(file, info.width, paths)
+  const notes = info.animated ? [] : deliveryNotes(file, info.width, paths, options.avif)
   const table = [
     media.savingsMarkdown(summary, `${file.path} · ${info.width}×${info.height}`),
     ...(notes.length ? [`\`${file.path}\`: ${notes.join('; ')}.`] : []),
@@ -285,8 +298,8 @@ function reviewSvg(
 
 /**
  * Reviews images of a merge request with `@holtkeeper/media`: a savings table per raster image
- * (original against AVIF/WebP/re-encoded, typical transfer at 375/768/1440 CSS px) with a note
- * when no AVIF/WebP or smaller sizes come along, a `<picture>` suggestion on added usage lines, a
+ * (original against WebP/re-encoded, plus AVIF with `avif`, typical transfer at 375/768/1440 CSS px)
+ * with a note when no WebP (or AVIF) or smaller sizes come along, a `<picture>` suggestion on added usage lines, a
  * whole-file svgo suggestion for added SVGs that are short enough, suggestions for bloated inline
  * SVGs on added code lines, and links to the media panel.
  */
@@ -296,6 +309,7 @@ export function createMediaReviewer(options: MediaReviewerOptions = {}): MediaRe
     maxPixels: options.maxPixels ?? 50_000_000,
     minSaving: options.minSaving ?? 2048,
     maxSuggestionLines: options.maxSuggestionLines ?? 200,
+    avif: options.avif ?? false,
     ...(options.cache ? { cache: options.cache } : {}),
   }
   return {

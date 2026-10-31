@@ -61,6 +61,7 @@ export { detectEngines, enginesOf } from './engine.ts'
 export {
   type ImageFamily,
   hasModernFormats,
+  modernFormats,
   hasSizes,
   imageFamilies,
   variantPaths,

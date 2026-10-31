@@ -42,6 +42,20 @@ const base = {
   paths: [],
 }
 
+test('without avif only WebP is encoded and asked for', async () => {
+  const result = await createMediaReviewer().review({
+    ...base,
+    paths: ['public/bg-720.png', 'public/bg-1080.png'],
+    files: [{ path: 'public/bg-1080.png', status: 'added', bytes: await photo() }],
+    usages: [{ path: 'src/App.tsx', line: 4, text: '  <img src="/bg-1080.png" alt="" />' }],
+  })
+  expect(result.comments[0]?.body.split('\n')[0]).toBe(
+    'Serve bg-1080.png as WEBP with responsive <picture>',
+  )
+  expect(result.comments[0]?.suggestion?.replacement).not.toContain('image/avif')
+  expect(result.summary).toContain('`public/bg-1080.png`: no WebP version comes with it.')
+})
+
 test('raster images get a savings table, a <picture> suggestion and a panel link', async () => {
   const input: MediaReviewInput = {
     ...base,
@@ -51,7 +65,10 @@ test('raster images get a savings table, a <picture> suggestion and a panel link
       { path: 'README.md', line: 3, text: 'See hero.png' },
     ],
   }
-  const result = await createMediaReviewer({ publicUrl: 'https://hk.example.com/' }).review(input)
+  const result = await createMediaReviewer({
+    publicUrl: 'https://hk.example.com/',
+    avif: true,
+  }).review(input)
   expect(result.comments).toHaveLength(1)
   const comment = result.comments[0]
   expect(comment).toMatchObject({ path: 'src/App.tsx', line: 12 })

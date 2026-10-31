@@ -58,6 +58,15 @@ test('reports rasters without modern formats and large single-resolution images'
   expect(
     deliveryIssues(families, { engines: [] }).map((finding) => [finding.id, finding.tone]),
   ).toEqual([
+    ['missing-modern-formats:public/hero.png', 'warning'],
+    ['single-resolution:public/hero.png', 'warning'],
+  ])
+  expect(
+    deliveryIssues(families, { engines: [], avif: true }).map((finding) => [
+      finding.id,
+      finding.tone,
+    ]),
+  ).toEqual([
     ['missing-modern-formats:public/half.png', 'info'],
     ['missing-modern-formats:public/hero.png', 'warning'],
     ['single-resolution:public/hero.png', 'warning'],
@@ -67,4 +76,36 @@ test('reports rasters without modern formats and large single-resolution images'
       (finding) => finding.rule === 'single-resolution',
     )?.tone,
   ).toBe('info')
+})
+
+test('a bare -{n} suffix is a size only when n is the width or height', () => {
+  const families = imageFamilies([
+    asset('assets/snowy-720.webp', { image: { width: 1280, height: 720 } }),
+    asset('assets/snowy-1080.webp', { image: { width: 1920, height: 1080 } }),
+    asset('assets/snowy-1620.webp', { image: { width: 2880, height: 1620 }, bytes: 300_000 }),
+    asset('assets/snowy-1620.avif', { format: 'avif', image: { width: 2880, height: 1620 } }),
+    asset('assets/icon-256.webp', { image: { width: 256, height: 256 } }),
+    asset('assets/level-1.png', { image: { width: 800, height: 600 } }),
+    asset('assets/level-2.png', { image: { width: 800, height: 600 } }),
+  ])
+  expect(
+    families.map((family) => [
+      family.original.path,
+      family.members.map((member) => member.path),
+      family.widths,
+    ]),
+  ).toEqual([
+    ['assets/icon-256.webp', [], []],
+    ['assets/level-1.png', [], []],
+    ['assets/level-2.png', [], []],
+    [
+      'assets/snowy-1620.webp',
+      ['assets/snowy-720.webp', 'assets/snowy-1080.webp', 'assets/snowy-1620.avif'],
+      [1280, 1920, 2880],
+    ],
+  ])
+  const snowy = families.at(-1)
+  expect(snowy && hasSizes(snowy) && hasModernFormats(snowy)).toBe(true)
+  expect(snowy && hasModernFormats(snowy, true)).toBe(true)
+  expect(deliveryIssues(families, { engines: [] })).toEqual([])
 })

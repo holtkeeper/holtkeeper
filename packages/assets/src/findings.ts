@@ -1,5 +1,5 @@
 import type { Asset, Duplicate, Finding } from './data.ts'
-import { type ImageFamily, hasSizes } from './families.ts'
+import { type ImageFamily, hasSizes, modernFormats } from './families.ts'
 
 /** Largest texture side most mobile GPUs accept. */
 export const MAX_TEXTURE_SIDE = 4096
@@ -24,28 +24,31 @@ export interface FindingOptions {
   families?: readonly ImageFamily[]
   /** Rasters below this get no `missing-modern-formats` finding. Default 8 kB. */
   minBytes?: number
+  /** Expect AVIF next to WebP. Default false. */
+  avif?: boolean
 }
 
 /**
- * PNG/JPEG/GIF originals without AVIF or WebP versions next to them, and originals wider than
+ * PNG/JPEG/GIF originals without a WebP version (and AVIF, with `avif`) next to them, and originals wider than
  * `HIGH_RES_WIDTH` without smaller widths or densities, so every screen downloads the largest file.
  */
 export function deliveryIssues(
   families: readonly ImageFamily[],
-  options: { engines: readonly string[]; minBytes?: number },
+  options: { engines: readonly string[]; minBytes?: number; avif?: boolean },
 ): Finding[] {
   const minBytes = options.minBytes ?? 8 * 1024
   const findings: Finding[] = []
+  const expected = modernFormats(options.avif)
   for (const family of families) {
     const { original } = family
-    const missing = ['avif', 'webp'].filter((format) => !family.formats.has(format))
+    const missing = expected.filter((format) => !family.formats.has(format))
     if (legacyFormats.has(original.format) && original.bytes >= minBytes && missing.length) {
       const names = missing.map((format) => formatNames[format]).join(' and ')
       findings.push({
         id: `missing-modern-formats:${original.path}`,
         rule: 'missing-modern-formats',
         path: original.path,
-        tone: missing.length === 2 ? 'warning' : 'info',
+        tone: missing.length === expected.length ? 'warning' : 'info',
         title: `${original.path} has no ${names} version`,
         detail: `Browsers that support ${names} would download a smaller file through <picture> or image-set(); generate the variants and serve the ${original.format.toUpperCase()} as the fallback.`,
       })

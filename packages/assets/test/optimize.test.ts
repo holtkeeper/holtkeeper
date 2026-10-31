@@ -99,7 +99,7 @@ const sliceRange = (text: string, edit: Extract<Edit, { kind: 'replace' }>) => {
 }
 
 test('sharp measures real variants, proposes changes and keeps data JSON-safe', async () => {
-  const data = await analyzeAssets({ dir, convert: 'sharp', minBytes: 1024 })
+  const data = await analyzeAssets({ dir, convert: 'sharp', minBytes: 1024, avif: true })
   expect(data.convert).toBe('sharp')
   expect(data.tools).toEqual(['sharp', 'svgo'])
   expect(assetsDataSchema.parse(data)).toEqual(data)
@@ -265,6 +265,7 @@ test('optimizeTop limits the measured images and convert defaults to sharp', asy
   const data = await analyzeAssets({ dir, minBytes: 1024, optimizeTop: 1 })
   expect(data.convert).toBe('sharp')
   expect(data.optimized?.map((image) => image.path)).toEqual(['public/hero.png'])
+  expect(data.optimized?.[0]?.variants.some((variant) => variant.format === 'avif')).toBe(false)
   expect(data.svgs).toEqual([])
 })
 
@@ -280,7 +281,7 @@ test('the analyzer returns the encoded variants as run artifacts', async () => {
   const variants = data.optimized?.[0]?.variants.filter((variant) => variant.proposed) ?? []
   expect(artifacts?.length).toBe(new Set(variants.map((variant) => variant.sha256)).size)
   const first = artifacts?.find((artifact) => artifact.id === variants[0]?.sha256)
-  expect(first).toMatchObject({ contentType: 'image/avif', name: variants[0]?.file })
+  expect(first).toMatchObject({ contentType: 'image/webp', name: variants[0]?.file })
   expect(
     createHash('sha256')
       .update(first?.data ?? new Uint8Array())

@@ -15,6 +15,7 @@ import {
   formatOfFile,
   imageSetValue,
   pictureSnippets,
+  originalOutput,
   planVariants,
   probeImage,
   rangeOf,
@@ -43,6 +44,8 @@ export interface OptimizeOptions {
   /** Variants and SVGs saving less are not proposed. */
   minSaving: number
   svgPreset: SvgPreset
+  /** Encode AVIF variants next to WebP and the original format. Default false. */
+  avif?: boolean
   naming?: NamingScheme
   /** Encoded variants kept between runs; hits skip sharp. */
   cache?: VariantCache
@@ -165,7 +168,11 @@ async function optimizeRaster(
     return { image: { ...image, error: `cannot decode: ${message(error)}` }, artifacts: [] }
   }
   const { usage, displayWidth } = usageOf(references, options.engines)
-  const plan = planVariants(info, { usage, ...(displayWidth ? { displayWidth } : {}) })
+  const plan = planVariants(info, {
+    usage,
+    formats: [...(options.avif ? (['avif'] as const) : []), 'webp', originalOutput(info)],
+    ...(displayWidth ? { displayWidth } : {}),
+  })
   const { variants, failures, cached } = await encodeVariants(input, plan.specs, {
     info,
     ...(options.cache ? { cache: options.cache } : {}),
