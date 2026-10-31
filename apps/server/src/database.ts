@@ -35,6 +35,9 @@ const historySchema = z.object({
 
 const percent = (ratio: number) => `${(ratio * 100).toFixed(ratio < 0.995 ? 1 : 2)}%`
 
+/** Full-text search indexes, scanned only when someone searches. */
+const searchIndex = /\bUSING\s+(gin|gist)\b/i
+
 /** `CREATE INDEX` without the index name, so indexes on the same columns compare equal. */
 const shape = (definition: string) =>
   definition.replace(
@@ -63,7 +66,8 @@ export function annotateIndexes(indexes: readonly DatabaseIndex[]): DatabaseInde
     const duplicate = duplicateOf.get(index.name)
     return {
       ...index,
-      unused: index.scans === 0 && !index.unique && !index.primary,
+      unused:
+        index.scans === 0 && !index.unique && !index.primary && !searchIndex.test(index.definition),
       ...(duplicate && { duplicateOf: duplicate }),
     }
   })
@@ -137,7 +141,10 @@ export function databaseAdvice({
   for (const table of tables) {
     const dead = table.deadRows ?? 0
     const share = dead / Math.max(1, dead + table.rows)
-    if (dead >= 1000 && share >= 0.2)
+    const vacuumedAgo = table.lastVacuumAt
+      ? now.getTime() - Date.parse(table.lastVacuumAt)
+      : Infinity
+    if (dead >= 1000 && share >= 0.2 && vacuumedAgo > DAY_MS)
       add({
         kind: 'dead-rows',
         severity: 'warning',

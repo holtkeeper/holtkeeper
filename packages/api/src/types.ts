@@ -929,7 +929,7 @@ export interface DatabaseAdvice {
 
 /** Annotations of an index in `DatabaseView.indexes`. */
 export interface DatabaseIndexView extends DatabaseIndex {
-  /** Never scanned since statistics were reset, and not backing a constraint. */
+  /** Never scanned since statistics were reset, not backing a constraint and not a full-text search (GIN, GiST) index. */
   unused: boolean
   /** Name of an earlier index on the same columns, when this one repeats it. */
   duplicateOf?: string

@@ -192,6 +192,33 @@ describe('databaseAdvice', () => {
     ])
   })
 
+  test('leaves out dead rows autovacuum just handled and search indexes nobody searched yet', () => {
+    const advice = databaseAdvice({
+      overview,
+      tables: [
+        table('library_chunks', MB, {
+          rows: 6000,
+          deadRows: 6000,
+          lastVacuumAt: '2026-10-31T06:00:00.000Z',
+        }),
+        table('jobs', MB, { rows: 6000, deadRows: 6000, lastVacuumAt: '2026-10-29T00:00:00.000Z' }),
+      ],
+      indexes: annotateIndexes([
+        index(
+          'library_chunks_search',
+          'CREATE INDEX library_chunks_search ON s.library_chunks USING gin (search)',
+          {
+            table: 'library_chunks',
+            scans: 0,
+            bytes: 8 * MB,
+          },
+        ),
+      ]),
+      now,
+    })
+    expect(advice.map((entry) => [entry.kind, entry.subject])).toEqual([['dead-rows', 'jobs']])
+  })
+
   test('suggests VACUUM for a SQLite file with many free pages', () => {
     const advice = databaseAdvice({
       overview: { engine: 'sqlite', version: 'SQLite 3', bytes: 40 * MB, freeBytes: 20 * MB },
