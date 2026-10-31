@@ -46,7 +46,7 @@ export function createProbes(options: ProbeOptions): Probes {
     }),
     store: () => options.store.jobs.list({ limit: 1 }),
     ...(options.artifacts && {
-      artifacts: () => options.artifacts?.list({ limit: 1 }) ?? Promise.resolve(),
+      artifacts: () => options.artifacts?.ping() ?? Promise.resolve(),
     }),
     ...options.checks,
   }

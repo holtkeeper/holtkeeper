@@ -28,7 +28,7 @@ Worker flags:
 ### Health, readiness, metrics, shutdown
 
 - `GET /healthz` — 200 while the process answers.
-- `GET /readyz` — 200 when the store answers a query (stores migrate before their first answer; Postgres is also asked `ready()`), the artifact store lists, and the process is not draining; 503 with a JSON body per check otherwise.
+- `GET /readyz` — 200 when the store answers a query (stores migrate before their first answer; Postgres is also asked `ready()`), the artifact store answers a `ping()` (one cheap request, not a listing), and the process is not draining; 503 with a JSON body per check otherwise.
 - `GET /metrics` — Prometheus text format. Neither needs authentication; keep `/metrics` off public ingresses (the chart's Ingress only routes to the web Service, but the path is served there too — block it at the ingress if the host is public).
 - SIGTERM: readiness fails at once, the worker stops claiming, running jobs get the drain timeout to finish and are then aborted and requeued to run again at once on another worker (the interrupted attempt counts), the leader lease is released, the store is closed. Give the container a grace period longer than the drain timeout.
 

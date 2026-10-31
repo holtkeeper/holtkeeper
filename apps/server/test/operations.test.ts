@@ -47,9 +47,9 @@ describe('probes', () => {
       store,
       artifacts: {
         ...artifacts,
-        list: async (options) => {
+        list: () => Promise.reject(new Error('probes must not list every artifact')),
+        ping: async () => {
           if (artifactsDown) throw new Error('bucket unreachable')
-          return artifacts.list(options)
         },
       },
       draining: () => draining,

@@ -25,6 +25,7 @@ export function memoryArtifactStore(options: StoreOptions = {}): ArtifactStore {
         data.delete(id)
       },
       listMeta: async () => [...meta.values()],
+      ping: async () => {},
       readRef: async (name) => refs.get(name),
       writeRef: async (name, ref) => {
         refs.set(name, ref)

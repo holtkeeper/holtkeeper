@@ -64,6 +64,10 @@ const stores: [string, (options: StoreOptions) => Promise<ArtifactStore>][] = [
 
 for (const [name, create] of stores) {
   describe(`${name} store`, () => {
+    test('answers ping while reachable', async () => {
+      expect(await failure((await create({})).ping())).toBe('resolved')
+    })
+
     test('stores content under its sha256 and merges metadata of repeated puts', async () => {
       let now = new Date('2026-10-01T00:00:00Z')
       const store = await create({ now: () => now })
@@ -192,6 +196,23 @@ test('fs store fans content out in two levels with a sidecar', async () => {
     id,
     `${id}.json`,
   ])
+})
+
+test('s3 ping is one listing request however many artifacts there are', async () => {
+  const store = s3ArtifactStore({
+    bucket: 'bucket',
+    endpoint: s3.endpoint,
+    region: 'us-east-1',
+    accessKeyId: 'key',
+    secretAccessKey: 'secret',
+    prefix: 'hk',
+  })
+  await Promise.all([1, 2, 3].map((n) => store.put(text(`artifact ${n}`))))
+  s3.requests.length = 0
+  await store.ping()
+  expect(s3.requests).toHaveLength(1)
+  expect(s3.requests[0]).toStartWith('GET /bucket')
+  expect(s3.requests[0]).toContain('max-keys=1')
 })
 
 test('s3 store uses the prefix and presigns downloads', async () => {

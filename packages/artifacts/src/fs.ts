@@ -86,6 +86,9 @@ export function fsArtifactStore(options: FsArtifactStoreOptions): ArtifactStore 
         }
         return infos
       },
+      async ping() {
+        await mkdir(dir, { recursive: true })
+      },
       async readRef(name) {
         const file = Bun.file(refPath(name))
         if (!(await file.exists())) return undefined

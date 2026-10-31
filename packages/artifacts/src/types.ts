@@ -108,6 +108,11 @@ export interface ArtifactStore {
   /** `false` when there was nothing to delete. */
   delete(id: string): Promise<boolean>
   list(options?: ListOptions): Promise<ArtifactPage>
+  /**
+   * Rejects when the backing storage cannot be reached. One cheap request whatever the store
+   * holds, unlike `list`, which reads every artifact's metadata; for health checks.
+   */
+  ping(): Promise<void>
   usage(): Promise<ArtifactUsage>
   sweep(options: SweepOptions): Promise<SweepResult>
   /**

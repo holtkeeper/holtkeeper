@@ -117,6 +117,9 @@ export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore 
         }
         return infos
       },
+      async ping() {
+        await client.list({ prefix: root, maxKeys: 1 })
+      },
       readRef: (name) =>
         orMissing(async () => {
           const parsed: unknown = await client.file(refKey(name)).json()

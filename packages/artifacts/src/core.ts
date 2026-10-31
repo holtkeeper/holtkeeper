@@ -65,6 +65,8 @@ export interface ArtifactBackend {
   remove(id: string): Promise<void>
   /** Metadata of every stored artifact, in any order. */
   listMeta(): Promise<ArtifactInfo[]>
+  /** Rejects when the store cannot be reached; costs the same however many artifacts it holds. */
+  ping(): Promise<void>
   presign?(info: ArtifactInfo, options: PresignOptions): string
   readRef(name: string): Promise<ArtifactRef | undefined>
   writeRef(name: string, ref: ArtifactRef): Promise<void>
@@ -176,6 +178,8 @@ export function createArtifactStore(
       await remove(id)
       return true
     },
+
+    ping: () => backend.ping(),
 
     async list({ prefix = '', cursor, limit = 100 } = {}): Promise<ArtifactPage> {
       const size = Math.min(Math.max(limit, 1), 1000)
