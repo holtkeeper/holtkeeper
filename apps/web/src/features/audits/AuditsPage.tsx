@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 
 import { useAuditRuns, useRepos } from '../../api/queries.ts'
 import { sparkline } from '../../lib/dashboard.ts'
-import { durationBetween, formatDateTime, formatRelative } from '../../lib/format.ts'
+import { durationBetween, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import {
   Chip,
@@ -13,48 +13,112 @@ import {
   Page,
   Panel,
   Placeholder,
+  Segmented,
   Select,
   SeverityBar,
 } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
-import { triggerLabel } from './labels.ts'
+import { type AuditsSearch, isTrigger, triggerLabel } from './labels.ts'
 
 const allRepos = '*'
+const anyTrigger = '*'
 
-/** Audit runs, newest first, for one repository or all of them. */
+/** Audit runs, newest first: by default the latest run of each repository, or every run. */
 export function AuditsPage() {
   const search = useSearch({ from: '/app/audits' })
   const navigate = useNavigate({ from: '/audits' })
   const repo = parseRepoKey(search.repo)
+  const latestOnly = !repo && search.view !== 'all'
   const repos = useRepos()
-  const runs = useAuditRuns(repo, 100)
+  const runs = useAuditRuns(repo, 100, !latestOnly)
+  const update = (patch: Partial<AuditsSearch>) =>
+    void navigate({
+      search: (prev) =>
+        Object.fromEntries(
+          Object.entries({ ...prev, ...patch }).filter(([, value]) => value !== undefined),
+        ),
+    })
 
   const options = [
     { id: allRepos, label: 'All repositories' },
     ...(repos.data?.repos ?? []).map((r) => ({ id: repoKey(r.repo), label: repoKey(r.repo) })),
   ]
-  const list = runs.data?.runs ?? []
+  const source = latestOnly
+    ? (repos.data?.repos ?? [])
+        .flatMap((r) => (r.latestAudit ? [r.latestAudit] : []))
+        .toSorted((a, b) => b.finishedAt.localeCompare(a.finishedAt))
+    : (runs.data?.runs ?? [])
+  const list = source.filter(
+    (run) =>
+      (!search.trigger || run.trigger === search.trigger) &&
+      (!search.findings || (search.findings === 'open') === run.active > 0),
+  )
+  const query = latestOnly ? repos : runs
   const trend = sparkline(list).map((p) => ({ at: p.at, value: p.active }))
+  const filtered = list.length !== source.length
 
   return (
     <Page
       title="Audits"
       icon="audit"
-      description={repo ? `Runs of ${repoKey(repo)}` : 'Runs across every repository you can see'}
-      actions={
-        <>
-          <Select
-            aria-label="Repository"
-            className="w-72"
-            options={options}
-            value={search.repo ?? allRepos}
-            onChange={(id) => void navigate({ search: id === allRepos ? {} : { repo: id } })}
-          />
-          <RunJobButton analyzer="audit" label="Run audit" {...(repo ? { repo } : {})} />
-        </>
+      description={
+        repo
+          ? `Runs of ${repoKey(repo)}`
+          : latestOnly
+            ? 'The latest run of each repository you can see'
+            : 'Every run across the repositories you can see'
       }
+      actions={<RunJobButton analyzer="audit" label="Run audit" {...(repo ? { repo } : {})} />}
     >
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          aria-label="Repository"
+          className="w-72"
+          options={options}
+          value={search.repo ?? allRepos}
+          onChange={(id) => update({ repo: id === allRepos ? undefined : id })}
+        />
+        {repo ? null : (
+          <Segmented
+            aria-label="Runs"
+            value={latestOnly ? 'latest' : 'all'}
+            onChange={(id) => update({ view: id === 'all' ? 'all' : undefined })}
+            options={[
+              { id: 'latest', label: 'Latest per repository' },
+              { id: 'all', label: 'All runs' },
+            ]}
+          />
+        )}
+        <Select
+          aria-label="Trigger"
+          className="w-40"
+          options={[
+            { id: anyTrigger, label: 'Any trigger' },
+            ...Object.entries(triggerLabel).map(([id, label]) => ({ id, label })),
+          ]}
+          value={search.trigger ?? anyTrigger}
+          onChange={(id) => update({ trigger: isTrigger(id) ? id : undefined })}
+        />
+        <Segmented
+          aria-label="Findings"
+          value={search.findings ?? 'any'}
+          onChange={(id) => update({ findings: id === 'any' ? undefined : id })}
+          options={[
+            { id: 'any', label: 'Any' },
+            { id: 'open', label: 'With findings' },
+            { id: 'clean', label: 'Clean' },
+          ]}
+        />
+        {query.isSuccess ? (
+          <span className="ml-auto text-xs text-muted" aria-live="polite">
+            {filtered
+              ? `${list.length} of ${plural(source.length, 'run')}`
+              : plural(list.length, 'run')}
+          </span>
+        ) : null}
+      </div>
+
       {repo && list.length > 1 ? (
         <Panel
           title="Active findings per run"
@@ -69,20 +133,28 @@ export function AuditsPage() {
       ) : null}
 
       <Panel contentClassName="p-0">
-        {runs.isPending ? (
+        {query.isPending ? (
           <div className="flex flex-col gap-2 p-4">
             {[0, 1, 2, 3].map((i) => (
               <Placeholder key={i} className="h-14" />
             ))}
           </div>
-        ) : runs.isError ? (
-          <ErrorState error={runs.error} />
+        ) : query.isError ? (
+          <ErrorState error={query.error} />
         ) : list.length === 0 ? (
-          <EmptyState
-            icon={<FileSearch />}
-            title="No audit runs yet"
-            description="Runs appear here once the CLI or the schedule reports them."
-          />
+          filtered ? (
+            <EmptyState
+              icon={<FileSearch />}
+              title="No runs match"
+              description="Change or clear the filters to see more runs."
+            />
+          ) : (
+            <EmptyState
+              icon={<FileSearch />}
+              title="No audit runs yet"
+              description="Runs appear here once the CLI or the schedule reports them."
+            />
+          )
         ) : (
           <ul className="divide-y divide-separator">
             <AnimatePresence initial={false}>

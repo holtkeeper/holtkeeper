@@ -6,6 +6,7 @@ import {
   Outlet,
 } from '@tanstack/react-router'
 
+import { type AuditsSearch, isTrigger } from './features/audits/labels.ts'
 import { LinkPage } from './features/auth/LinkPage.tsx'
 import { AuthGate } from './features/shell/AuthGate.tsx'
 import { NotFound } from './features/shell/NotFound.tsx'
@@ -149,8 +150,14 @@ const auditsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'audits',
   component: AuditsPage,
-  validateSearch: (search: Record<string, unknown>): { repo?: string } =>
-    typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {},
+  validateSearch: (search: Record<string, unknown>): AuditsSearch => ({
+    ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
+    ...(search.view === 'all' ? { view: 'all' as const } : {}),
+    ...(isTrigger(search.trigger) ? { trigger: search.trigger } : {}),
+    ...(search.findings === 'open' || search.findings === 'clean'
+      ? { findings: search.findings }
+      : {}),
+  }),
 })
 
 const settingsRoute = createRoute({

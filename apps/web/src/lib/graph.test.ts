@@ -67,6 +67,25 @@ describe('layout', () => {
     expect(new Set(placed.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`)).size).toBe(3)
   })
 
+  test('grouped layout never overlaps boxes', () => {
+    const boxes = Array.from({ length: 40 }, (_, i) => ({
+      id: `n${i}`,
+      width: 120 + (i % 5) * 25,
+      height: 48,
+      group: `g${i % 3}`,
+    }))
+    const placed = groupedLayout(boxes)
+    for (const a of placed)
+      for (const b of placed)
+        if (a !== b)
+          expect(
+            a.x + a.width <= b.x ||
+              b.x + b.width <= a.x ||
+              a.y + a.height <= b.y ||
+              b.y + b.height <= a.y,
+          ).toBe(true)
+  })
+
   test('node width grows with size', () => {
     expect(nodeWidth(undefined, 10)).toBe(120)
     expect(nodeWidth(10, 10)).toBe(220)

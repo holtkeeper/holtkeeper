@@ -114,7 +114,9 @@ export function CellView({ cell, column }: { cell: Cell | undefined; column: Col
   const display =
     column.format === 'date' && !Number.isNaN(Date.parse(text)) ? formatDate(text) : text
   const mono = column.format === 'code' || unit === 'version'
-  const content = <span className={mono ? 'font-mono text-[12px]' : undefined}>{display}</span>
+  const content = (
+    <span className={mono ? 'whitespace-nowrap font-mono text-[12px]' : undefined}>{display}</span>
+  )
 
   if (typeof cell === 'object') {
     const body = cell.tone ? <ToneChip tone={cell.tone}>{content}</ToneChip> : content

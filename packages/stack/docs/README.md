@@ -94,9 +94,9 @@ interface StackData {
 
 - Metrics with deltas: repositories, components, repositories on end-of-life versions, with end of life soon, behind a major, components in several majors, unpinned versions.
 - **End of life**: issues for release lines in use that have ended or end soon, with the repositories and the upgrade target (`new` / `resolved` against the previous record), and a timeline of the end of life of every line in use.
-- **Versions**: matrix of repositories × components (the 40 most used; the tone is end of life first, then lag) and a stacked chart of the spread per component.
+- **Versions**: one matrix of repositories × components per kind (the 40 most used components; only repositories that use one; image columns are shortened to the trailing path segments that keep them apart, with the full name as the header hint; the tone is end of life first, then lag) and a stacked chart of the spread per component.
 - **Components**: latest, latest LTS, versions and release lines in use, counts per status, grouped by kind.
-- **Map**: a force graph linking repositories to the release lines they use, so repositories on the same line meet at one node; above 300 links it keeps components several repositories share.
+- **Map**: a grouped graph linking repositories to the release lines they use, so repositories on the same line meet at one node that lists its support and the versions written; above 300 links it keeps components several repositories share.
 - **Where versions are set**: every usage with its file and source (first 1000).
 - **Notes**: unreadable or archived repositories, unparsable files, unexpanded variables, unknown latest versions.
 

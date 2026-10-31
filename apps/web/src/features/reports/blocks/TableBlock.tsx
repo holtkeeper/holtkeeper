@@ -41,6 +41,9 @@ const numericUnit = (column: Column) =>
   column.unit === 'ms' ||
   column.format === 'delta'
 
+const stickyFirst = (index: number, base: string) =>
+  index === 0 ? `sticky left-0 z-[1] ${base} shadow-[1px_0_0_var(--separator)]` : ''
+
 const isEnd = (column: Column, rows: readonly Row[]) =>
   column.align
     ? column.align === 'end'
@@ -117,7 +120,7 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
         >
           <thead>
             <tr>
-              {visibleColumns.map((column) => {
+              {visibleColumns.map((column, index) => {
                 const sorted = table.getColumn(column.key)?.getIsSorted()
                 const end = isEnd(column, block.rows)
                 return (
@@ -127,7 +130,8 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
                     aria-sort={
                       sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none'
                     }
-                    className={`whitespace-nowrap border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted ${end ? 'text-right' : 'text-left'}`}
+                    title={column.hint}
+                    className={`whitespace-nowrap border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted ${end ? 'text-right' : 'text-left'} ${stickyFirst(index, 'bg-surface')}`}
                   >
                     <button
                       type="button"
@@ -163,11 +167,11 @@ export function TableBlock({ block }: { block: Extract<Block, { type: 'table' }>
                 </tr>
               ) : null}
               {group.rows.map((row) => (
-                <tr key={row.id} className="transition-colors hover:bg-default-soft">
-                  {visibleColumns.map((column) => (
+                <tr key={row.id} className="group/row transition-colors hover:bg-default-soft">
+                  {visibleColumns.map((column, index) => (
                     <td
                       key={column.key}
-                      className={`border-b border-separator px-3 py-2 align-middle ${isEnd(column, block.rows) ? 'text-right tabular' : ''}`}
+                      className={`border-b border-separator px-3 py-2 align-middle ${isEnd(column, block.rows) ? 'text-right tabular' : ''} ${stickyFirst(index, 'bg-surface group-hover/row:bg-[linear-gradient(var(--default-soft),var(--default-soft))]')}`}
                     >
                       <CellView cell={row.original[column.key]} column={column} />
                     </td>

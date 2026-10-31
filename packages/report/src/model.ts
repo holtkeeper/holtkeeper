@@ -69,6 +69,8 @@ export type Cell =
 export interface Column {
   key: string
   label: string
+  /** Shown on hover over the header, e.g. the full name behind a shortened label. */
+  hint?: string
   unit?: Unit
   /** `delta` cells are numbers shown as signed changes colored by `better`. */
   /** `sparkline` cells draw their `series` next to their text, in the column's unit. */

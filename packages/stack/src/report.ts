@@ -42,6 +42,21 @@ const kindLabels: Record<ComponentKind, string> = {
   tool: 'Other tools',
 }
 
+const kindOrder = Object.keys(kindLabels)
+
+/** Shortest trailing path segments that keep image names apart, e.g. `bet-service` for a registry path. */
+function columnLabels(names: readonly string[]): string[] {
+  const parts = names.map((name) => name.split('/'))
+  return parts.map((segments) => {
+    for (let take = 1; take < segments.length; take++) {
+      const label = segments.slice(-take).join('/')
+      if (parts.every((other) => other === segments || other.slice(-take).join('/') !== label))
+        return label
+    }
+    return segments.join('/')
+  })
+}
+
 const viaLabels: Record<UsageVia, string> = {
   'version-file': 'version file',
   dockerfile: 'Dockerfile',
@@ -278,20 +293,30 @@ function versionsSection(data: StackData, summaries: ComponentSummary[]): Sectio
       blocks: [{ type: 'markdown', text: 'No runtimes, package managers or images were found.' }],
     }
   const shown = summaries.slice(0, matrixLimit)
-  const columns: Column[] = [
-    { key: 'repo', label: 'Repository', format: 'code' },
-    ...shown.map((summary, index) => ({
-      key: `c${index}`,
-      label: summary.component.name,
-      unit: 'version' as const,
-    })),
-  ]
-  const rows = readableRepos(data).map((repo) => {
-    const row: Record<string, Cell> = { repo }
-    shown.forEach((summary, index) => {
-      row[`c${index}`] = matrixCell(summary.cells.get(repo))
-    })
-    return row
+  const kinds = [...new Set(shown.map((summary) => summary.component.kind))].toSorted(
+    (a, b) => kindOrder.indexOf(a) - kindOrder.indexOf(b),
+  )
+  const matrices: Block[] = kinds.map((kind) => {
+    const members = shown.filter((summary) => summary.component.kind === kind)
+    const labels = columnLabels(members.map((summary) => summary.component.name))
+    const columns: Column[] = [
+      { key: 'repo', label: 'Repository', format: 'code' },
+      ...members.map((summary, index) => ({
+        key: summary.component.id,
+        label: labels[index] ?? summary.component.name,
+        ...(labels[index] === summary.component.name ? {} : { hint: summary.component.name }),
+        unit: 'version' as const,
+      })),
+    ]
+    const rows = readableRepos(data)
+      .filter((repo) => members.some((summary) => summary.cells.has(repo)))
+      .map((repo) => {
+        const row: Record<string, Cell> = { repo }
+        for (const summary of members)
+          row[summary.component.id] = matrixCell(summary.cells.get(repo))
+        return row
+      })
+    return { type: 'table', title: kindLabels[kind], columns, rows }
   })
   const spread = summaries.map((summary) => {
     const counts: Record<Bucket, number> = {
@@ -307,7 +332,7 @@ function versionsSection(data: StackData, summaries: ComponentSummary[]): Sectio
     return { component: summary.component.name, ...counts }
   })
   const blocks: Block[] = [
-    { type: 'table', title: 'Oldest version per repository', columns, rows },
+    ...matrices,
     {
       type: 'chart',
       title: 'Spread per component',
@@ -329,13 +354,13 @@ function versionsSection(data: StackData, summaries: ComponentSummary[]): Sectio
   if (summaries.length > shown.length)
     blocks.push({
       type: 'markdown',
-      text: `The matrix shows the ${shown.length} most used of ${summaries.length} components; the Components section lists all of them.`,
+      text: `The tables show the ${shown.length} most used of ${summaries.length} components; the Components section lists all of them.`,
     })
   return {
     id: 'versions',
     title: 'Versions',
     description:
-      'Each cell is the most worrying version a repository names: end of life first, then the largest lag behind the latest release. Floating versions (`22`, `3.12`) are compared only as far as they are written.',
+      'One table per kind of component, listing only repositories that use one. Each cell is the most worrying version a repository names: end of life first, then the largest lag behind the latest release. Floating versions (`22`, `3.12`) are compared only as far as they are written.',
     blocks,
   }
 }
@@ -438,6 +463,7 @@ function mapSection(data: StackData, summaries: ComponentSummary[]): Section | u
       group: 'Repositories',
       size: list.length,
     })
+  const versions = new Map<string, Set<string>>()
   for (const { summary, repo, cell } of links) {
     const line = lineOf(cell)
     const id = `line:${summary.component.id}@${line}`
@@ -450,15 +476,25 @@ function mapSection(data: StackData, summaries: ComponentSummary[]): Section | u
         group: kindLabels[summary.component.kind],
         tone: toneOf(cell.status),
         size: 1,
-        detail: cellHint(cell),
+        ...(cell.status.cycle
+          ? {
+              detail: `${supportLabels[cell.status.support]}${cell.status.eolDate ? ` until ${cell.status.eolDate}` : ''}`,
+            }
+          : {}),
       })
+    versions.set(id, (versions.get(id) ?? new Set()).add(cell.usage.version ?? cell.usage.declared))
     edges.push({
       from: `repo:${repo}`,
       to: id,
-      label: cell.usage.version ?? cell.usage.declared,
       tone: toneOf(cell.status),
       ...(cell.status.lag === 'floating' ? { dashed: true } : {}),
     })
+  }
+  for (const [id, set] of versions) {
+    const node = nodes.get(id)
+    if (!node) continue
+    const list = [...set].join(', ')
+    node.detail = node.detail ? `${node.detail} · ${list}` : list
   }
   const blocks: Block[] = [
     {

@@ -103,32 +103,42 @@ export function layeredLayout(
 }
 
 /**
- * Simple stand-in for a force layout: each group is a ring, groups sit side by side. Stable and
- * cheap; good enough for clusters without a meaningful direction.
+ * Stand-in for a force layout: each group is a grid of non-overlapping boxes, taller than wide,
+ * groups side by side and centered on each other. Stable and cheap.
  */
 export function groupedLayout(
   nodes: readonly { id: string; width: number; height: number; group?: string | undefined }[],
+  gap = { x: 48, y: 20, group: 200 },
 ): Positioned[] {
-  const groups = new Map<string, typeof nodes>()
-  for (const node of nodes) {
-    const key = node.group ?? ''
-    groups.set(key, [...(groups.get(key) ?? []), node])
-  }
+  const groups = Map.groupBy(nodes, (node) => node.group ?? '')
+  const blocks = [...groups.values()].map((members) => {
+    const rows = Math.ceil(Math.sqrt(members.length * 3))
+    const cellWidth = Math.max(...members.map((node) => node.width)) + gap.x
+    const cellHeight = Math.max(...members.map((node) => node.height)) + gap.y
+    return {
+      members,
+      rows,
+      cellWidth,
+      cellHeight,
+      width: Math.ceil(members.length / rows) * cellWidth - gap.x,
+      height: Math.min(rows, members.length) * cellHeight - gap.y,
+    }
+  })
+  const tallest = Math.max(0, ...blocks.map((block) => block.height))
   const placed: Positioned[] = []
   let offsetX = 0
-  for (const members of groups.values()) {
-    const radius = members.length === 1 ? 0 : Math.max(120, (members.length * 140) / (2 * Math.PI))
-    members.forEach((node, index) => {
-      const angle = (2 * Math.PI * index) / members.length
+  for (const block of blocks) {
+    const top = (tallest - block.height) / 2
+    block.members.forEach((node, index) => {
       placed.push({
         id: node.id,
         width: node.width,
         height: node.height,
-        x: offsetX + radius + radius * Math.cos(angle) - node.width / 2,
-        y: radius + radius * Math.sin(angle) - node.height / 2,
+        x: offsetX + Math.floor(index / block.rows) * block.cellWidth,
+        y: top + (index % block.rows) * block.cellHeight,
       })
     })
-    offsetX += radius * 2 + 260
+    offsetX += block.width + gap.group
   }
   return placed
 }
