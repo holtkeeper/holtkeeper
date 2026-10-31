@@ -1690,8 +1690,10 @@ export interface LibraryIndexProgressView {
   /** Libraries the run goes through, and how many it finished. */
   total: number
   done: number
-  /** `<ecosystem>:<name>` the run works on. */
+  /** `<ecosystem>:<name>` the run works on: the first of `libraries`. */
   library?: string
+  /** Every library the run works on now, when it indexes several at a time. */
+  libraries?: string[]
   /** Set while every GitHub token is used up and the run waits for the reset. */
   waitingUntil?: Timestamp
   updatedAt: Timestamp

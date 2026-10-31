@@ -6,7 +6,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 
 import { fakeGitHub, tarball } from '../test/fixtures.ts'
 import { libraryApi } from './api.ts'
-import { indexLibraries } from './indexer.ts'
+import { type LibraryIndexProgress, indexLibraries } from './indexer.ts'
 import type { SiteSource } from './sources/site.ts'
 import {
   type ArchiveFiles,
@@ -305,17 +305,82 @@ describe('indexLibraries', () => {
     await indexLibraries({
       store: librariesOf(),
       artifacts: memoryArtifactStore(),
-      settings: { ...settings, exclude: [] },
+      settings: { ...settings, exclude: [], concurrency: 1 },
       registries: { npm: fakeRegistry().registry },
       uses: uses(['lib', '1.0.0'], ['@types/lib', '1.0.0']),
       now: at(0),
       onProgress: (state) => progress.push(state),
     })
     expect(progress).toEqual([
-      { total: 2, done: 0, library: 'npm:@types/lib' },
-      { total: 2, done: 1, library: 'npm:lib' },
+      { total: 2, done: 0, library: 'npm:@types/lib', libraries: ['npm:@types/lib'] },
+      { total: 2, done: 1, library: 'npm:lib', libraries: ['npm:lib'] },
       { total: 2, done: 2 },
     ])
+  })
+
+  test('indexes up to concurrency libraries at a time', async () => {
+    const names = ['a', 'b', 'c', 'd', 'e']
+    let running = 0
+    let peak = 0
+    const slow: LibraryRegistry = {
+      async library(target) {
+        running += 1
+        peak = Math.max(peak, running)
+        await Bun.sleep(10)
+        running -= 1
+        return { ...target, versions: [{ version: '1.0.0' }], latest: '1.0.0' }
+      },
+      async archive() {
+        return undefined
+      },
+    }
+    const progress: LibraryIndexProgress[] = []
+    const summary = await indexLibraries({
+      store: librariesOf(),
+      artifacts: memoryArtifactStore(),
+      settings: { ...settings, concurrency: 3 },
+      registries: { npm: slow },
+      uses: uses(...names.map((name): [string, string] => [name, '1.0.0'])),
+      now: at(0),
+      onProgress: (state) => progress.push(state),
+    })
+    expect(summary.libraries).toBe(5)
+    expect(peak).toBe(3)
+    expect(Math.max(...progress.map((state) => state.libraries?.length ?? 0))).toBe(3)
+    expect(progress.at(-1)).toEqual({ total: 5, done: 5 })
+  })
+
+  test('an unexpected failure stops the other workers from taking more libraries', async () => {
+    const taken: string[] = []
+    const broken: LibraryRegistry = {
+      async library(target) {
+        taken.push(target.name)
+        await Bun.sleep(5)
+        return { ...target, versions: [{ version: '1.0.0' }], latest: '1.0.0' }
+      },
+      async archive() {
+        return undefined
+      },
+    }
+    const store = librariesOf()
+    const failing: LibraryStore = {
+      ...store,
+      async putLibrary(record) {
+        if (record.name === 'b') throw new Error('store down')
+        return store.putLibrary(record)
+      },
+    }
+    const result = indexLibraries({
+      store: failing,
+      artifacts: memoryArtifactStore(),
+      settings: { ...settings, concurrency: 2 },
+      registries: { npm: broken },
+      uses: uses(['a', '1.0.0'], ['b', '1.0.0'], ['c', '1.0.0'], ['d', '1.0.0'], ['e', '1.0.0']),
+      now: at(0),
+    })
+    expect(result).rejects.toThrow('store down')
+    await result.catch(() => {})
+    expect(taken.length).toBeLessThan(5)
   })
 
   test('artifacts dropped by retention are fetched again', async () => {
@@ -346,8 +411,9 @@ describe('indexLibraries', () => {
     const site: SiteSource = async (library, version) => ({
       chunks: [
         {
-          ...ref,
-          id: `site-${version}`,
+          ecosystem: library.ecosystem,
+          name: library.name,
+          id: `site-${library.name}-${version}`,
           source: 'site',
           path: '/docs',
           headings: ['Site'],
@@ -377,7 +443,7 @@ describe('indexLibraries', () => {
       siteSource: site,
       now: at(0),
     })
-    expect(seen).toEqual([
+    expect(seen.toSorted((a, b) => a.name.localeCompare(b.name))).toEqual([
       { name: '@types/lib', oldest: '2024-01-01T00:00:00.000Z' },
       { name: 'lib', oldest: '2024-01-01T00:00:00.000Z' },
     ])

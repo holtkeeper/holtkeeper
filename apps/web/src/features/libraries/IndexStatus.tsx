@@ -15,6 +15,7 @@ const toneColor = {
 /** The index run going on now: libraries done of all, the current one, time and waits. */
 export function RunningIndex({ progress }: { progress: LibraryIndexProgressView }) {
   const { percent, elapsedMs, remainingMs } = runProgress(progress)
+  const working = progress.libraries ?? (progress.library ? [progress.library] : [])
   return (
     <Panel
       title="Indexing now"
@@ -45,9 +46,14 @@ export function RunningIndex({ progress }: { progress: LibraryIndexProgressView 
         >
           <div className="h-full rounded-full bg-accent" style={{ width: `${percent}%` }} />
         </div>
-        {progress.library ? (
-          <p className="text-xs text-muted">
-            Working on <span className="font-mono text-foreground">{progress.library}</span>
+        {working.length ? (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+            Working on
+            {working.map((name) => (
+              <span key={name} className="font-mono text-foreground">
+                {name}
+              </span>
+            ))}
           </p>
         ) : null}
         {progress.waitingUntil ? (

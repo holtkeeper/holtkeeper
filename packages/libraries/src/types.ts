@@ -67,6 +67,8 @@ export interface LibraryIndexSettings {
   }
   /** Days a version stays after leaving the matrix. */
   graceDays: number
+  /** Libraries indexed at the same time. */
+  concurrency: number
 }
 
 export const defaultLibraryIndexSettings: LibraryIndexSettings = {
@@ -77,6 +79,7 @@ export const defaultLibraryIndexSettings: LibraryIndexSettings = {
   firstOfMajor: true,
   sources: { repository: true, releases: true, issues: true, site: false },
   graceDays: 28,
+  concurrency: 3,
 }
 
 export type { LibraryEcosystem, LibraryRef }

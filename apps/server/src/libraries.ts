@@ -102,6 +102,8 @@ const librariesSchema = z.object({
     })
     .optional(),
   graceDays: z.number().int().min(0).max(365).optional(),
+  /** Libraries indexed at the same time. */
+  concurrency: z.number().int().min(1).max(8).optional(),
 })
 
 /** Setting `libraries` (section `Libraries`, read at global scope): the third-party library index. */
@@ -117,6 +119,7 @@ export const librariesSetting = defineSetting({
 - **github**: leave it unset to use every credential of kind \`github\` (add one on the Credentials page and it is picked up), or list the ones to use; \`[]\` reads GitHub anonymously. They are GitHub tokens for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
 - **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. The model is the \`library-digest\` entry of **Models per task**; without one, \`claude-haiku@latest\` when the provider lists it, else **Model**.
 - **refreshOnPush** (default on): when a push to a repository's default branch changes a manifest or lockfile (\`package.json\`, \`bun.lock\`, \`pnpm-lock.yaml\`, \`go.mod\`, ...), queue \`usages\` for it and \`fleet\` for its groups, so the index learns new packages and versions minutes after the merge instead of at the weekly runs.
+- **concurrency** (default 3, at most 8): libraries indexed at the same time; a run mostly waits for the network, so a few at once make it several times faster while the GitHub limit lasts.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
   schema: librariesSchema,
@@ -161,6 +164,7 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
       firstOfMajor: data.firstOfMajor ?? defaults.firstOfMajor,
       sources: { ...defaults.sources, ...data.sources },
       graceDays: data.graceDays ?? defaults.graceDays,
+      concurrency: data.concurrency ?? defaults.concurrency,
     },
     intervalMs: intervalMs(data.interval ?? DEFAULT_INTERVAL) ?? 86_400_000,
     ...(data.github ? { github: [...new Set(data.github)] } : {}),

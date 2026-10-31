@@ -78,11 +78,15 @@ export interface IndexLibrariesOptions {
   onProgress?: (progress: LibraryIndexProgress) => void
 }
 
-/** How far a run is: `done` of `total` libraries, and the one it works on (`<ecosystem>:<name>`). */
+/**
+ * How far a run is: `done` of `total` libraries, and the ones it works on (`<ecosystem>:<name>`)
+ * in the order it took them; `library` is the first of them.
+ */
 export interface LibraryIndexProgress {
   total: number
   done: number
   library?: string
+  libraries?: string[]
 }
 
 /** A source that failed for one library or version. */
@@ -131,9 +135,9 @@ const matcher = (patterns: readonly string[]) => {
 }
 
 /**
- * Indexes the libraries `uses` names, one library at a time: registry metadata, the version
- * matrix, then every source a matrix version lacks (`archive`, `api`, and with GitHub
- * `repository` and `releases`), then the issue and site hooks. Sources that ended `ok` or
+ * Indexes the libraries `uses` names, `settings.concurrency` of them at a time; each gets registry
+ * metadata, the version matrix, then every source a matrix version lacks (`archive`, `api`, and
+ * with GitHub `repository` and `releases`), then the issue and site hooks. Sources that ended `ok` or
  * `missing` are not fetched again; a failure is recorded on its source and in the summary and
  * never stops the run. Versions that left the matrix keep their data for `graceDays` and are then
  * removed; so are libraries no repository uses any more. Artifacts of kept versions are read
@@ -200,15 +204,44 @@ export async function indexLibraries(options: IndexLibrariesOptions): Promise<Li
     repositoryKb: new Map(),
   }
   const keys = [...groups.keys()].toSorted()
-  for (const [position, key] of keys.entries()) {
-    options.signal?.throwIfAborted()
-    const entry = groups.get(key)
-    if (!entry) continue
-    options.onProgress?.({ total: keys.length, done: position, library: libraryKey(entry.ref) })
-    await indexLibrary(run, entry.ref, entry.uses)
-    summary.libraries += 1
+  const active: string[] = []
+  let next = 0
+  let finished = 0
+  let failure: { error: unknown } | undefined
+  const report = () =>
+    options.onProgress?.({
+      total: keys.length,
+      done: finished,
+      ...(active[0] ? { library: active[0], libraries: [...active] } : {}),
+    })
+  const worker = async () => {
+    while (!failure && next < keys.length) {
+      options.signal?.throwIfAborted()
+      const entry = groups.get(keys[next++] ?? '')
+      if (!entry) {
+        finished += 1
+        continue
+      }
+      const name = libraryKey(entry.ref)
+      active.push(name)
+      report()
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each worker takes one library after another
+        await indexLibrary(run, entry.ref, entry.uses)
+        summary.libraries += 1
+      } catch (error) {
+        failure ??= { error }
+      } finally {
+        active.splice(active.indexOf(name), 1)
+        finished += 1
+      }
+    }
   }
-  options.onProgress?.({ total: keys.length, done: keys.length })
+  const workers = Math.max(1, Math.min(settings.concurrency ?? 1, keys.length || 1))
+  await Promise.all(Array.from({ length: workers }, worker))
+  options.signal?.throwIfAborted()
+  if (failure) throw failure.error
+  report()
   await dropUnused(run, new Set(groups.keys()))
   return summary
 }

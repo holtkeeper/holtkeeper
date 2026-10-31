@@ -11,6 +11,7 @@ const progressSchema = z.object({
   total: z.number(),
   done: z.number(),
   library: z.string().optional(),
+  libraries: z.array(z.string()).optional(),
   waitingUntil: z.string().optional(),
   updatedAt: z.string(),
 })
@@ -21,8 +22,13 @@ export async function libraryProgress(
 ): Promise<LibraryIndexProgressView | undefined> {
   const parsed = progressSchema.safeParse(await kv?.get(PROGRESS_KEY))
   if (!parsed.success) return undefined
-  const { library, waitingUntil, ...rest } = parsed.data
-  return { ...rest, ...(library ? { library } : {}), ...(waitingUntil ? { waitingUntil } : {}) }
+  const { library, libraries, waitingUntil, ...rest } = parsed.data
+  return {
+    ...rest,
+    ...(library ? { library } : {}),
+    ...(libraries?.length ? { libraries } : {}),
+    ...(waitingUntil ? { waitingUntil } : {}),
+  }
 }
 
 /** Writes how far one run is, for every process to read; see `libraryProgressWriter`. */
@@ -58,6 +64,7 @@ export function libraryProgressWriter(options: {
       total: state.total,
       done: state.done,
       ...(state.library ? { library: state.library } : {}),
+      ...(state.libraries?.length ? { libraries: state.libraries } : {}),
       ...(waitingUntil && Date.parse(waitingUntil) > at.getTime() ? { waitingUntil } : {}),
       updatedAt: at.toISOString(),
     }

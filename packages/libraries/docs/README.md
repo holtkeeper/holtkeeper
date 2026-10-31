@@ -19,7 +19,7 @@ Everything lives in a `LibraryStore` (`@holtkeeper/store`) and an `ArtifactStore
   - `isInternal?(ref)` — libraries the fleet defines itself, left to `api-surface`;
   - `apiExtractors?` — per-ecosystem API readers, default `defaultApiExtractors` (`npmApiExtractor`, `goApiExtractor`);
   - `issueIndexer?: LibraryHook` — default `indexIssues` from `src/issues` when `github` is given; runs with `sources.issues`;
-  - `onProgress?(progress)` — `{ total, done, library? }` before each library (`<ecosystem>:<name>`) and once with `done = total` at the end;
+  - `onProgress?(progress)` — `{ total, done, library?, libraries? }` whenever a library starts (`libraries` are the ones in work, `<ecosystem>:<name>`, `library` the first of them; `done` counts finished ones) and once with `done = total` at the end;
   - `siteSource?: SiteSource` — runs with `sources.site`;
   - `maxRepositoryKb?` (default 500 000), `now?`, `signal?`, `log?`.
   - The summary is `{ libraries, versionsAdded, versionsRemoved, librariesRemoved, failures: { library, version?, source, message }[] }`.
@@ -72,7 +72,7 @@ Example from the design: the fleet uses react `18.2.0`, `18.3.1`, `19.0.0`, the 
 
 ## How indexing works
 
-`indexLibraries` groups `uses` by library, drops excluded (unless also included) and internal ones, adds plain names from `include`, and then works through the libraries one at a time, sorted by `<ecosystem>:<name>`:
+`indexLibraries` groups `uses` by library, drops excluded (unless also included) and internal ones, adds plain names from `include`, and then works through the libraries, sorted by `<ecosystem>:<name>`: Libraries are indexed `settings.concurrency` at a time (default 3): each worker takes the next library when it finishes one, the run's summary, tag cache and repository sizes are shared, and an unexpected error (a store failure, not a source failure) lets the other workers finish their library, takes no new ones and rejects the run.
 
 1. **Registry metadata** (`registry` status on the library). A library the registry does not know (a private package, a typo) is not kept: a stored one is removed with its versions and counted in `librariesRemoved`. For known ones: description, homepage, normalized repository, latest, versions with dates, deprecations and commits. A failed lookup records `failed` and leaves the library's versions untouched.
 2. **Matrix**: versions in it get their roles, `usedBy`, date and deprecation, and lose `leftAt`; versions that left it get empty roles and `leftAt`, and are removed `graceDays` later (their chunks go with them unless other versions share them).
