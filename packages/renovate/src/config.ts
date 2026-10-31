@@ -63,11 +63,15 @@ export function repositoryConfig(
   }
 }
 
+const viaProxy = (platform: ReturnType<typeof renovatePlatform>, proxy?: string) =>
+  proxy ? { ...platform, endpoint: `${proxy}${new URL(platform.endpoint).pathname}` } : platform
+
 /**
  * The config file one run reads: global options that point Renovate at one repository of the
  * forge, write a report to `reportPath` and keep every clone under `baseDir`, then the repository
- * options. A run that may not open merge requests is a lookup-only dry run. The token and the
- * signing key are not part of it: `renovateEnv` passes them.
+ * options. A run that may not open merge requests is a lookup-only dry run. `proxy` (an origin
+ * from `startForgeProxy`) replaces the API origin Renovate calls. The token and the signing key
+ * are not part of it: `renovateEnv` passes them.
  */
 export function renovateConfig(input: {
   options: RenovateOptions
@@ -75,13 +79,14 @@ export function renovateConfig(input: {
   repo: string
   reportPath: string
   baseDir: string
+  proxy?: string
 }): RenovateConfig {
   const { options, access } = input
   const raw = input.options.config
   const repository = repositoryConfig(options)
   const rawRules = Array.isArray(raw.packageRules) ? raw.packageRules : []
   return {
-    ...renovatePlatform(access),
+    ...viaProxy(renovatePlatform(access), input.proxy),
     repositories: [input.repo],
     onboarding: false,
     requireConfig: options.repoConfig === 'merge' ? 'optional' : 'ignored',
@@ -106,10 +111,13 @@ export function renovateConfig(input: {
 /**
  * Environment of a Renovate run: the config file, the token and signing key, plain logs, and
  * every `HOLTKEEPER_*` variable of the worker removed so server secrets never reach Renovate.
+ * With `proxied`, a host rule hands the token to lookups Renovate makes on the forge's real API
+ * host (package registries, tags), which it would otherwise only do for the proxied endpoint.
  */
 export function renovateEnv(input: {
   configFile: string
   access: ForgeAccess
+  proxied?: boolean
   environment?: Record<string, string | undefined>
 }): Record<string, string | undefined> {
   const scrubbed = Object.fromEntries(
@@ -121,6 +129,15 @@ export function renovateEnv(input: {
     ...scrubbed,
     RENOVATE_CONFIG_FILE: input.configFile,
     RENOVATE_TOKEN: input.access.token,
+    ...(input.proxied && {
+      RENOVATE_HOST_RULES: JSON.stringify([
+        {
+          hostType: input.access.kind,
+          matchHost: new URL(renovatePlatform(input.access).endpoint).hostname,
+          token: input.access.token,
+        },
+      ]),
+    }),
     ...(input.access.signing && { RENOVATE_GIT_PRIVATE_KEY: input.access.signing.privateKey }),
     LOG_LEVEL: 'info',
     NO_COLOR: '1',

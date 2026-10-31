@@ -13,10 +13,11 @@ interface ForgeDefinition {
   create(): GitForge
   gitCredentials?(): { username: string; password: string }
   withFetch?(wrap: (fetch: ForgeFetch) => ForgeFetch): ForgeDefinition
+  fetch?: ForgeFetch
 }
 ```
 
-`withFetch` returns the same forge with its HTTP `fetch` wrapped, e.g. by shared rate limits; adapters that do not use `fetch` leave it out.
+`withFetch` returns the same forge with its HTTP `fetch` wrapped, e.g. by shared rate limits; adapters that do not use `fetch` leave it out. `fetch` is the wrapped `fetch` itself, for tools that call the forge API on their own and must share those limits (Renovate through [@holtkeeper/renovate](../../renovate/docs/README.md)).
 
 `create` is called lazily, when a task needs the forge, which is also when secrets are resolved. `gitCredentials()` returns HTTPS basic-auth credentials for `git clone`/`git fetch` of the forge's repositories (GitLab: username `oauth2`, the token as password); it resolves secrets on each call, and forges that cannot provide credentials leave it out.
 

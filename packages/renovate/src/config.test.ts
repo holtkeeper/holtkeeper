@@ -99,6 +99,18 @@ describe('renovateConfig', () => {
     ])
   })
 
+  test('a proxy replaces the API origin and keeps the path', () => {
+    const config = renovateConfig({
+      options: options(),
+      access: { ...access, url: 'https://example.com/gitlab' },
+      repo: 'games/app',
+      reportPath: '/r',
+      baseDir: '/b',
+      proxy: 'http://127.0.0.1:4100',
+    })
+    expect(config.endpoint).toBe('http://127.0.0.1:4100/gitlab/api/v4/')
+  })
+
   test('ignoring the repository config', () => {
     expect(build({ repoConfig: 'ignore' }).requireConfig).toBe('ignored')
   })
@@ -153,5 +165,15 @@ describe('renovateEnv', () => {
     })
     expect(env).toHaveProperty('HOLTKEEPER_VAULT_KEY', undefined)
     expect(env).not.toHaveProperty('PATH')
+  })
+
+  test('a proxied run gets a host rule for the real API host', () => {
+    const env = renovateEnv({ configFile: '/c', access, proxied: true, environment: {} })
+    expect(JSON.parse(env.RENOVATE_HOST_RULES ?? '')).toEqual([
+      { hostType: 'gitlab', matchHost: 'gitlab.example.com', token: 'glpat-secret' },
+    ])
+    expect(renovateEnv({ configFile: '/c', access, environment: {} })).not.toHaveProperty(
+      'RENOVATE_HOST_RULES',
+    )
   })
 })

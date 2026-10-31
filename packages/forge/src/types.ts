@@ -606,6 +606,11 @@ export interface ForgeDefinition {
    * rate limits. Absent when the adapter does not use `fetch`.
    */
   withFetch?(wrap: (fetch: ForgeFetch) => ForgeFetch): ForgeDefinition
+  /**
+   * The `fetch` the adapter calls, with every `withFetch` wrapper applied (shared rate limits),
+   * for tools that reach the forge API on their own. Absent when the adapter does not use `fetch`.
+   */
+  fetch?: ForgeFetch
 }
 
 /** The `fetch` shape forge adapters call; the global `fetch` satisfies it. */

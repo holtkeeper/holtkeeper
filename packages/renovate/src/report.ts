@@ -121,6 +121,15 @@ function metrics(data: RenovateData, previous?: RenovateData): Metric[] {
           }),
         ]
       : []),
+    ...(data.apiRequests !== undefined
+      ? [
+          metric('api-requests', 'API requests', data.apiRequests, {
+            better: 'down',
+            hint: 'Forge API requests Renovate made, counted against the token’s rate limits',
+            ...(previous?.apiRequests !== undefined && { previous: previous.apiRequests }),
+          }),
+        ]
+      : []),
   ]
 }
 

@@ -264,6 +264,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
           kind: definition.kind,
           url: definition.url,
           token,
+          ...(definition.fetch && { fetch: definition.fetch }),
           ...(key?.identity &&
             allows(key.usage, 'signing') && {
               signing: { privateKey: key.privateKey, ...key.identity },

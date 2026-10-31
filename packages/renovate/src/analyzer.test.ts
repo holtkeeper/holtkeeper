@@ -97,6 +97,38 @@ describe('renovate analyzer', () => {
     expect(data).toMatchObject({ mode: 'report', readOnly: true })
   })
 
+  test('API calls go through the forge fetch and are counted', async () => {
+    const limited: string[] = []
+    const forgeAccess: ForgeAccess = {
+      ...access,
+      fetch: async (input) => {
+        limited.push(input)
+        return Response.json({ version: '18.0.0' })
+      },
+    }
+    const fake = createFakeRunner(async (_command, { env }) => {
+      const config = (await Bun.file(env!.RENOVATE_CONFIG_FILE!).json()) as { endpoint: string }
+      await fetch(`${config.endpoint}version`, {
+        headers: { 'private-token': env!.RENOVATE_TOKEN! },
+      })
+      await fetch(`${config.endpoint}projects/games%2Fapp`)
+      return { exitCode: 1 }
+    })
+    const { data } = await createRenovateAnalyzer({ now: () => now }).run({
+      repo: { forge: 'work', path: 'games/app' },
+      forge: fakeForge(),
+      forgeAccess,
+      runner: fake.runner,
+      options: renovateOptionsSchema.parse({}),
+    })
+    expect(limited).toEqual([
+      'https://gitlab.example.com/api/v4/version',
+      'https://gitlab.example.com/api/v4/projects/games%2Fapp',
+    ])
+    expect(data.apiRequests).toBe(2)
+    expect(renovateReport(data).metrics.find((m) => m.id === 'api-requests')?.value).toBe(2)
+  })
+
   test('a run without a report is a failed result, not a job failure', async () => {
     const { data } = await run({}, access, false)
     expect(data.status).toBe('failed')

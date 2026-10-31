@@ -113,6 +113,8 @@ export const renovateDataSchema = z.object({
   problems: z.array(renovateProblemSchema),
   /** The last lines of Renovate's log. */
   output: z.string(),
+  /** Forge API requests Renovate made through Holtkeeper's rate limits, when it was proxied. */
+  apiRequests: z.number().optional(),
 })
 
 export type RenovateUpdateType = z.output<typeof renovateUpdateTypeSchema>

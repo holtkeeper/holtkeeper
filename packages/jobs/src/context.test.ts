@@ -194,6 +194,7 @@ describe('createContextFactory', () => {
 
 const commit = async () => ({ sha: 'def' })
 const push = async () => ({ pushed: true, sha: 'def' })
+const limited = async () => new Response('{}')
 
 const setup = (gitKey: ForgeGitKey | undefined, readOnly = false) => {
   const seen: CheckoutOptions[] = []
@@ -263,6 +264,21 @@ describe('forge SSH keys in checkouts', () => {
       token: 'tok',
       readOnly: false,
     })
+  })
+
+  test('forgeAccess carries the forge fetch, so external tools share its limits', async () => {
+    const withFetch = parseConfig({
+      forges: { work: { ...config.forges.work!, fetch: limited } },
+      groups: { games: { forge: 'work', include: ['games/*'] } },
+    })
+    const contextFor = createContextFactory({
+      config: withFetch,
+      store: memoryStore(),
+      cacheDir: '/cache',
+      runner: createFakeRunner().runner,
+    })
+    const { context } = await contextFor(job(), analyzer({ forgeAccess: true }), io)
+    expect(context.forgeAccess?.fetch).toBe(limited)
   })
 
   test('offers no publisher for read-only repositories', async () => {

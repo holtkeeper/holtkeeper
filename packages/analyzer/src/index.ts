@@ -1,6 +1,6 @@
 import type { Agent } from '@holtkeeper/agent'
 import type { CommandRunner } from '@holtkeeper/exec'
-import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import type { ForgeFetch, GitForge, RepoRef } from '@holtkeeper/forge'
 import type { AnalysisKind } from '@holtkeeper/report'
 import type { AnalysisStore, AuditRunStore, CiJobStore } from '@holtkeeper/store'
 import type { z } from 'zod'
@@ -39,6 +39,11 @@ export interface ForgeAccess {
   /** Base web URL of the forge, e.g. `https://gitlab.example.com`. */
   url: string
   token: string
+  /**
+   * The forge's own `fetch`, drawing from the same per-token limits as Holtkeeper's forge client;
+   * route the tool's API calls through it. Absent when the adapter does not use `fetch`.
+   */
+  fetch?: ForgeFetch
   signing?: { privateKey: string; name: string; email: string }
   /** The repository is read-only for Holtkeeper: the tool must not push or open merge requests. */
   readOnly: boolean

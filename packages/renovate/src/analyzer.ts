@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import { defineAnalyzer } from '@holtkeeper/analyzer'
 import type { GitForge } from '@holtkeeper/forge'
 
-import { opensMergeRequests, renovateConfig, renovateEnv } from './config.ts'
+import { opensMergeRequests, renovateConfig, renovateEnv, renovatePlatform } from './config.ts'
 import type { RenovateData, RenovateMergeRequest } from './model.ts'
 import { renovatePresets, type RenovateOptions, renovateOptionsSchema } from './options.ts'
 import { type RenovateBranch, parseRenovateReport } from './parse.ts'
+import { type ForgeProxy, startForgeProxy } from './proxy.ts'
 import { renovateAnalysis } from './report.ts'
 
 /** The Renovate release the analyzer runs unless `command` says otherwise. */
@@ -101,7 +102,9 @@ export async function renovateMergeRequests(input: {
  * The `renovate` analyzer (scope `repo`, needs `forge` and `forgeAccess`): runs Renovate for one
  * repository with a config built from the `analyzers.renovate` setting and reports what it found.
  * In `report` mode, and always on read-only repositories, it is a lookup-only dry run that pushes
- * nothing; in `merge-requests` mode Renovate opens and maintains its merge requests. `command`
+ * nothing; in `merge-requests` mode Renovate opens and maintains its merge requests. When the
+ * forge gives its `fetch`, Renovate's API calls go through a loopback proxy on it, so they share
+ * the token's rate limits with every other job and are counted in `apiRequests`. `command`
  * replaces how Renovate is started; `now` exists for tests.
  */
 export function createRenovateAnalyzer(settings: { command?: string[]; now?: () => Date } = {}) {
@@ -129,7 +132,13 @@ export function createRenovateAnalyzer(settings: { command?: string[]; now?: () 
         log?.('renovate: the repository is read-only, looking up updates only')
 
       const work = await mkdtemp(join(tmpdir(), 'holtkeeper-renovate-'))
+      let proxy: ForgeProxy | undefined
       try {
+        if (forgeAccess.fetch)
+          proxy = startForgeProxy({
+            target: renovatePlatform(forgeAccess).endpoint,
+            fetch: forgeAccess.fetch,
+          })
         const reportPath = join(work, 'report.json')
         const configFile = join(work, 'config.json')
         const config = renovateConfig({
@@ -138,6 +147,7 @@ export function createRenovateAnalyzer(settings: { command?: string[]; now?: () 
           repo: repo.path,
           reportPath,
           baseDir: join(work, 'base'),
+          ...(proxy && { proxy: proxy.origin }),
         })
         await Bun.write(configFile, JSON.stringify(config, null, 2))
         log?.(
@@ -145,7 +155,7 @@ export function createRenovateAnalyzer(settings: { command?: string[]; now?: () 
         )
         const result = await runner.run(command, {
           cwd: work,
-          env: renovateEnv({ configFile, access: forgeAccess }),
+          env: renovateEnv({ configFile, access: forgeAccess, proxied: Boolean(proxy) }),
           timeoutMs: options.timeoutMinutes * 60_000,
           ...(signal && { signal }),
         })
@@ -160,6 +170,7 @@ export function createRenovateAnalyzer(settings: { command?: string[]; now?: () 
           renovateVersion: RENOVATE_VERSION,
           startedAt: started.toISOString(),
           output,
+          ...(proxy && { apiRequests: proxy.requests }),
         } as const
         const report = Bun.file(reportPath)
         if (!(await report.exists())) {
@@ -206,6 +217,7 @@ export function createRenovateAnalyzer(settings: { command?: string[]; now?: () 
           },
         }
       } finally {
+        await proxy?.stop()
         await rm(work, { recursive: true, force: true })
       }
     },

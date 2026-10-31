@@ -1173,5 +1173,6 @@ export function gitlab(options: GitLabForgeOptions): ForgeDefinition {
     create: () => createGitLabForge(options),
     gitCredentials: () => ({ username: 'oauth2', password: resolveSecret(options.token) }),
     withFetch: (wrap) => gitlab({ ...options, fetch: wrap(options.fetch ?? fetch) }),
+    fetch: options.fetch ?? fetch,
   }
 }

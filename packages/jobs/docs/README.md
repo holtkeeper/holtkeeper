@@ -102,17 +102,17 @@ Jobs already queued or running for the same analyzer, repository and ref are ski
 
 `createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, gitKeyFor?, readOnly?, workDir?, toolchainFor?, createRunner?, detectToolchain?, cache? })` gives each analyzer what its `needs` ask for:
 
-| Need / member         | Provided                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------------- |
-| `checkout` (repo)     | `dir`: a worktree of the job's ref, or the default branch                                         |
-| `forge`               | the repository's `GitForge`                                                                       |
-| `forgeAccess`         | `{ kind, url, token, signing?, readOnly }` from the forge definition, `gitKeyFor` and `readOnly`  |
-| `agent`               | `agentFor(repo)`; a missing `required` agent fails the job                                        |
-| `history`             | `{ analyses, auditRuns }` from the store                                                          |
-| group scope           | `repos`: the group's repositories                                                                 |
-| `requiredCheckouts()` | `checkouts`: `forge:path` → dir for each extra repository the analyzer asks for                   |
-| always                | `checkout(repo, { ref?, writable? })` for on-demand checkouts, e.g. one per repository of a group |
-| `cache` option        | `cache`: a `RunCache` shared by all runs (`createJobEngine({ cache })`; the server's is S3/fs)    |
+| Need / member         | Provided                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `checkout` (repo)     | `dir`: a worktree of the job's ref, or the default branch                                                                                  |
+| `forge`               | the repository's `GitForge`                                                                                                                |
+| `forgeAccess`         | `{ kind, url, token, fetch?, signing?, readOnly }` from the forge definition (`fetch` carries its rate limits), `gitKeyFor` and `readOnly` |
+| `agent`               | `agentFor(repo)`; a missing `required` agent fails the job                                                                                 |
+| `history`             | `{ analyses, auditRuns }` from the store                                                                                                   |
+| group scope           | `repos`: the group's repositories                                                                                                          |
+| `requiredCheckouts()` | `checkouts`: `forge:path` → dir for each extra repository the analyzer asks for                                                            |
+| always                | `checkout(repo, { ref?, writable? })` for on-demand checkouts, e.g. one per repository of a group                                          |
+| `cache` option        | `cache`: a `RunCache` shared by all runs (`createJobEngine({ cache })`; the server's is S3/fs)                                             |
 
 Every checkout uses `@holtkeeper/workspace` with the forge's `gitCredentials?()` and is a private worktree (so writable and read-only checkouts are made the same way). All checkouts, including on-demand ones the analyzer did not clean up, are removed after the run.
 
