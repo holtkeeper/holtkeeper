@@ -1018,12 +1018,21 @@ export interface ScheduleRunList {
   schedules: { id: string; runs: ScheduleRun[] }[]
 }
 
-/** `POST /api/schedules/:id/run`: what a manual run queued. */
-export interface ScheduleRunResult {
+/**
+ * `POST /api/schedules/:id/run` answers 202 at once; listing repositories and queueing goes on in
+ * the background and ends in a `schedule.run` activity entry with `ScheduleRunResult` details.
+ */
+export interface ScheduleRunStarted {
   id: string
+  startedAt: string
+}
+
+/** Details of a `schedule.run` activity entry: what a manual run queued, or why it failed. */
+export interface ScheduleRunResult {
   queued: number
   /** Jobs left out because the same analyzer already waits or runs for that repository. */
   skipped: number
+  error?: string
 }
 
 /** How one repository learns about forge changes. */

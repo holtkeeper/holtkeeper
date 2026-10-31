@@ -1,4 +1,4 @@
-import type { ScheduleRunList, ScheduleRunResult } from '@holtkeeper/api'
+import type { ScheduleRunList, ScheduleRunResult, ScheduleRunStarted } from '@holtkeeper/api'
 import { enqueueUnique, groupRepositories, planSchedule, scheduleRuns } from '@holtkeeper/jobs'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -35,25 +35,41 @@ export function scheduleRoutes(deps: ServerDeps) {
     const id = c.req.param('id')
     const schedule = config.jobs?.schedules.find((s) => s.name === id)
     if (!schedule) throw new HTTPException(404, { message: `schedule ${id} not found` })
-    const requests = await planSchedule(schedule, {
-      config,
-      analyzers: deps.analyzers ?? [],
-      resolveRepos: groupRepositories(config),
-    })
-    const at = deps.now().toISOString()
-    const { enqueued, skipped } = await enqueueUnique(
-      store.jobs,
-      requests.map((request) => ({ ...request, actor: principal.id })),
-      at,
-    )
-    await store.activity.append({
-      at,
-      actor: principal.id,
-      action: 'schedule.run',
-      subject: id,
-      details: { queued: enqueued.length, skipped: skipped.length },
-    })
-    return c.json<ScheduleRunResult>({ id, queued: enqueued.length, skipped: skipped.length }, 201)
+    const startedAt = deps.now().toISOString()
+    const run = async (): Promise<ScheduleRunResult> => {
+      const requests = await planSchedule(schedule, {
+        config,
+        analyzers: deps.analyzers ?? [],
+        resolveRepos: groupRepositories(config),
+      })
+      const { enqueued, skipped } = await enqueueUnique(
+        store.jobs,
+        requests.map((request) => ({ ...request, actor: principal.id })),
+        startedAt,
+      )
+      return { queued: enqueued.length, skipped: skipped.length }
+    }
+    const done = run()
+      .catch((error: unknown): ScheduleRunResult => {
+        console.error(`schedules: run of ${id} failed`, error)
+        return {
+          queued: 0,
+          skipped: 0,
+          error: error instanceof Error ? error.message : String(error),
+        }
+      })
+      .then((details) =>
+        store.activity.append({
+          at: deps.now().toISOString(),
+          actor: principal.id,
+          action: 'schedule.run',
+          subject: id,
+          details: { ...details },
+        }),
+      )
+      .catch((error: unknown) => console.error('schedules: logging a run failed', error))
+    deps.onBackground?.(done)
+    return c.json<ScheduleRunStarted>({ id, startedAt }, 202)
   })
 
   return app

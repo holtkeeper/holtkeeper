@@ -41,7 +41,7 @@ import type {
   RepoAvatarInfo,
   SchedulePreview,
   ScheduleRunList,
-  ScheduleRunResult,
+  ScheduleRunStarted,
   StorageOverview,
   AiCatalogProviderList,
   AnalysisDetail,
@@ -311,7 +311,7 @@ export const api = {
   scheduleRuns: (limit = 10) =>
     request<ScheduleRunList>('GET', '/api/schedules/runs', { query: { limit } }),
   runSchedule: (scheduleId: string) =>
-    request<ScheduleRunResult>('POST', `/api/schedules/${id(scheduleId)}/run`),
+    request<ScheduleRunStarted>('POST', `/api/schedules/${id(scheduleId)}/run`),
   backfillReleases: (input: ReleaseBackfillInput) =>
     request<ReleaseBackfillStarted>('POST', '/api/releases/backfill', { body: input }),
   configExportUrl: () => urlOf('/api/config/export'),

@@ -131,11 +131,7 @@ export function RunNowButton({ id, name }: { id: string; name: string }) {
       isPending={run.isPending}
       onPress={() =>
         run.mutate(id, {
-          onSuccess: (result) =>
-            notify.success(
-              result.queued ? `${result.queued} jobs queued` : 'Nothing new to queue',
-              result.skipped ? `${result.skipped} already waiting or running` : `${name} runs now`,
-            ),
+          onSuccess: () => notify.success(`${name} started`, 'Jobs appear here as they are queued'),
           onError: (error) => notify.error('Not started', messageOf(error)),
         })
       }
