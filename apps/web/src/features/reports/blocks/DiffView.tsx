@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
 import { type SplitCell, diffStats, hunkHeader, splitRows, unifiedRows } from '../../../lib/diff.ts'
+import { formatMarkupLine } from '../../../lib/markup.ts'
 import { Chip, tableScrollClass } from '../../../ui/index.ts'
 
 /** How diffs are laid out: one column with both sides, or old and new side by side. */
@@ -17,9 +18,32 @@ const lineClass: Record<DiffLine['kind'], string> = {
 
 const sign: Record<DiffLine['kind'], string> = { add: '+', remove: '−', context: ' ' }
 
+function LineText({ file, text, formatted }: { file: string; text: string; formatted: boolean }) {
+  const lines = formatted ? formatMarkupLine(file, text) : undefined
+  if (!lines) return <>{text || ' '}</>
+  return (
+    <span
+      title="One line, formatted for reading"
+      className="inline-block border-l border-dashed border-muted pl-2 align-top"
+    >
+      {lines.join('\n')}
+    </span>
+  )
+}
+
 const gutter = 'w-px select-none whitespace-nowrap px-2 text-right align-top text-muted tabular'
 
-function Code({ text, kind }: { text: string; kind: DiffLine['kind'] }) {
+function Code({
+  file,
+  text,
+  kind,
+  formatted,
+}: {
+  file: string
+  text: string
+  kind: DiffLine['kind']
+  formatted: boolean
+}) {
   return (
     <td className="whitespace-pre px-2 align-top">
       <span aria-hidden className="mr-2 select-none text-muted">
@@ -28,12 +52,20 @@ function Code({ text, kind }: { text: string; kind: DiffLine['kind'] }) {
       <span className="sr-only">
         {kind === 'add' ? 'added: ' : kind === 'remove' ? 'removed: ' : ''}
       </span>
-      {text || ' '}
+      <LineText file={file} text={text} formatted={formatted} />
     </td>
   )
 }
 
-function SplitSide({ cell }: { cell: SplitCell | undefined }) {
+function SplitSide({
+  file,
+  cell,
+  formatted,
+}: {
+  file: string
+  cell: SplitCell | undefined
+  formatted: boolean
+}) {
   if (!cell) {
     return (
       <>
@@ -46,20 +78,25 @@ function SplitSide({ cell }: { cell: SplitCell | undefined }) {
     <>
       <td className={`${gutter} ${lineClass[cell.kind]}`}>{cell.no}</td>
       <td className={`whitespace-pre px-2 align-top ${lineClass[cell.kind]}`}>
-        {cell.text || ' '}
+        <LineText file={file} text={cell.text} formatted={formatted} />
       </td>
     </>
   )
 }
 
-/** One file of a change: header with status and line counts, collapsible hunks. */
+/**
+ * One file of a change: header with status and line counts, collapsible hunks. With `formatted`,
+ * long minified SVG, XML or HTML lines are shown indented while keeping their single line number.
+ */
 export function FileDiffView({
   file,
   mode,
+  formatted,
   defaultOpen,
 }: {
   file: FileDiff
   mode: DiffMode
+  formatted: boolean
   defaultOpen: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -110,13 +147,18 @@ export function FileDiffView({
                           <tr key={i} className={lineClass[row.kind]}>
                             <td className={gutter}>{row.old ?? ''}</td>
                             <td className={gutter}>{row.new ?? ''}</td>
-                            <Code text={row.text} kind={row.kind} />
+                            <Code
+                              file={file.file}
+                              text={row.text}
+                              kind={row.kind}
+                              formatted={formatted}
+                            />
                           </tr>
                         ))
                       : splitRows(hunk).map((row, i) => (
                           <tr key={i}>
-                            <SplitSide cell={row.left} />
-                            <SplitSide cell={row.right} />
+                            <SplitSide file={file.file} cell={row.left} formatted={formatted} />
+                            <SplitSide file={file.file} cell={row.right} formatted={formatted} />
                           </tr>
                         ))}
                   </tbody>

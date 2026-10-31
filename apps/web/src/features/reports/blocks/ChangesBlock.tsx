@@ -14,6 +14,7 @@ import { messageOf } from '../../../api/client.ts'
 import { useApplyChanges } from '../../../api/queries.ts'
 import { diffStats } from '../../../lib/diff.ts'
 import { plural } from '../../../lib/format.ts'
+import { isMarkupFile } from '../../../lib/markup.ts'
 import {
   conflictsByChange,
   mergeRequestTitle,
@@ -49,6 +50,7 @@ function downloadPatch(patch: string, name: string) {
 function ChangeCard({
   item,
   mode,
+  formatted,
   selectable,
   selected,
   onSelect,
@@ -56,6 +58,7 @@ function ChangeCard({
 }: {
   item: ChangeItem
   mode: DiffMode
+  formatted: boolean
   selectable: boolean
   selected: boolean
   onSelect: (on: boolean) => void
@@ -134,7 +137,13 @@ function ChangeCard({
       ) : null}
       <div className="flex flex-col gap-2">
         {item.diff.map((file) => (
-          <FileDiffView key={file.file} file={file} mode={mode} defaultOpen={openFiles} />
+          <FileDiffView
+            key={file.file}
+            file={file}
+            mode={mode}
+            formatted={formatted}
+            defaultOpen={openFiles}
+          />
         ))}
       </div>
     </motion.li>
@@ -146,6 +155,7 @@ export function ChangesBlock({ block }: { block: Extract<Block, { type: 'changes
   const actions = use(ReportContext)
   const actionable = block.applicable && actions?.canApply === true
   const [mode, setMode] = useState<DiffMode>('unified')
+  const [view, setView] = useState<'formatted' | 'raw'>('formatted')
   const [selection, setSelection] = useState<Set<string>>(new Set())
   const [result, setResult] = useState<ApplyChangesResult>()
   const [titleDialog, setTitleDialog] = useState(false)
@@ -153,6 +163,7 @@ export function ChangesBlock({ block }: { block: Extract<Block, { type: 'changes
   const apply = useApplyChanges(actions?.analysisId ?? '')
   const conflicts = conflictsByChange(result?.conflicts ?? [])
   const ids = selectedIds(selection, block.items)
+  const hasMarkup = block.items.some((i) => i.diff.some((f) => isMarkupFile(f.file)))
   const safeCount = block.items.filter((i) => i.change.confidence === 'safe').length
 
   if (block.items.length === 0) return <EmptyState icon={<Wand2 />} title="No suggested changes" />
@@ -232,6 +243,17 @@ export function ChangesBlock({ block }: { block: Extract<Block, { type: 'changes
           value={mode}
           onChange={setMode}
         />
+        {hasMarkup ? (
+          <Segmented
+            aria-label="Markup lines"
+            options={[
+              { id: 'formatted', label: 'Formatted' },
+              { id: 'raw', label: 'Raw' },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+        ) : null}
       </div>
 
       <ul className="flex flex-col gap-3">
@@ -240,6 +262,7 @@ export function ChangesBlock({ block }: { block: Extract<Block, { type: 'changes
             key={item.change.id}
             item={item}
             mode={mode}
+            formatted={view === 'formatted'}
             selectable={actionable}
             selected={selection.has(item.change.id)}
             onSelect={(on) => setSelection((s) => toggle(s, item.change.id, on))}
