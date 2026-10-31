@@ -94,6 +94,10 @@ const BranchesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'BranchesPage',
 )
+const WarmupPage = lazyRouteComponent(
+  () => import('./features/warmup/WarmupPage.tsx'),
+  'WarmupPage',
+)
 const PublicApiPage = lazyRouteComponent(
   () => import('./features/public-api/PublicApiPage.tsx'),
   'PublicApiPage',
@@ -249,6 +253,7 @@ const routeTree = rootRoute.addChildren([
     analysisPage('testids', TestIdsPage),
     analysisPage('branches', BranchesPage),
     analysisPage('ci', CiJobsPage),
+    analysisPage('warmup', WarmupPage),
     analysisPage('licenses', LicensesPage),
     analysisPage('fleet', FleetPage),
     analysisPage('stack', StackPage),

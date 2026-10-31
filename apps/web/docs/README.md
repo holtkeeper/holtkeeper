@@ -76,6 +76,10 @@ Scope editors (grants, settings, knowledge) and the schedule and trigger dialogs
 
 Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog` (`size="xl"` for wide editors), `Markdown`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through.
 
+## Build warm-up
+
+`/warmup` (sidebar Delivery → Build warm-up, `features/warmup/WarmupPage.tsx`) lists runs of the `warmup` analyzer, newest first, from `GET /api/jobs?analyzer=warmup` joined with their records by `analysisId` (`lib/warmup.ts`): the command's outcome (`ok`, `failed`, `timed out` from the record; the job status while it is queued or running, since a failing build still ends the job as succeeded), repository, branch, commit, trigger, start, duration, and links to the job log and to the report with the output tail. Below it are the usual duration trends and repository cards of the analysis kind. The repository picker narrows everything to one repository.
+
 ## Proxy secrets
 
 Credentials of kind `egress-secret` ("Proxy secret") hold a secret the egress proxy puts into job requests in place of a placeholder (`EgressSecretFields.tsx`): a generated UUID with copy and regenerate buttons, more hosts, paths, methods and where to replace (headers, URL, body). The URL is where the secret goes, e.g. a Turborepo remote cache. The form keeps them as `options`, see the server docs on egress rules.

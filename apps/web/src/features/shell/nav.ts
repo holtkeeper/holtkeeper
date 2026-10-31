@@ -5,6 +5,7 @@ import {
   Boxes,
   CalendarClock,
   FileSearch,
+  Flame,
   FlaskConical,
   FolderGit2,
   GitBranch,
@@ -50,6 +51,7 @@ export interface NavItem {
     | '/testids'
     | '/branches'
     | '/ci'
+    | '/warmup'
     | '/licenses'
     | '/fleet'
     | '/stack'
@@ -158,6 +160,13 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   { section: 'Delivery', to: '/ci', label: 'CI jobs', icon: Timer, requires: 'analyses:read' },
+  {
+    section: 'Delivery',
+    to: '/warmup',
+    label: 'Build warm-up',
+    icon: Flame,
+    requires: 'analyses:read',
+  },
   {
     section: 'Agents',
     to: '/knowledge',

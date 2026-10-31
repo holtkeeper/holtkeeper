@@ -72,7 +72,9 @@ export function jobRoutes(deps: ServerDeps) {
     const repo = parseRepo(c.req.query('repo'))
     const before = c.req.query('before')
     const schedule = c.req.query('schedule')
+    const analyzer = c.req.query('analyzer')
     const jobs = await store.jobs.list({
+      ...(analyzer ? { analyzer } : {}),
       ...(status ? { status } : {}),
       ...(repo ? { repo } : {}),
       ...(schedule ? { schedule } : {}),

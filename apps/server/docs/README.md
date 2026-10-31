@@ -149,7 +149,7 @@ At startup the server seeds the defaults of a fresh install (`seedDefaultSetting
 
 | Endpoint                      | Does                                                                                                                                                                             |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/jobs`               | `?status=&repo=forge:path&schedule=&limit=&before=`, newest first, without logs (`JobList`)                                                                                      |
+| `GET /api/jobs`               | `?status=&repo=forge:path&analyzer=&schedule=&limit=&before=`, newest first, without logs (`JobList`)                                                                            |
 | `GET /api/jobs/analyzers`     | `JobAnalyzerList`: whether jobs are enabled and every analyzer with label, scope, needs, presets and its options as JSON Schema (for run forms); any signed-in caller            |
 | `GET /api/jobs/:id`           | one `Job` with its last 200 log lines                                                                                                                                            |
 | `POST /api/jobs`              | `CreateJobInput { analyzer, repo?, group?, ref?, options? }`: `repo` for repo-scope analyzers, `group` for group-scope ones; options are validated. 409 without a `jobs` section |

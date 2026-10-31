@@ -109,6 +109,14 @@ export const analysisPages = [
       'Images, fonts and media: budgets, AVIF/WebP and responsive variants, SVG and inline SVG optimization',
     trend: [/savings/i, /^total$/i],
   },
+  {
+    to: '/warmup',
+    kind: 'warmup',
+    title: 'Build warm-up',
+    icon: 'ci',
+    description: 'Commands run on branch pushes to fill build caches: status, duration and output',
+    trend: [/duration/i],
+  },
 ] as const
 
 /**

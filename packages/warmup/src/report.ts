@@ -20,6 +20,9 @@ function metrics(data: WarmupData, previous?: WarmupData): Metric[] {
       better: 'down',
       hint: 'How long the command ran; a warm cache makes it shorter',
     }),
+    ...(data.branch
+      ? [{ id: 'branch', label: 'Branch', value: data.branch, unit: 'text' as const }]
+      : []),
   ]
 }
 

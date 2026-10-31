@@ -13,6 +13,8 @@ The `warmup` analyzer and analysis kind: runs a command of your choosing in a ch
   - `branch: string` — set by push triggers.
 - `warmupAnalysis` — the `AnalysisKind` (`schema: warmupDataSchema`); `warmupReport(data, { previous?, ref? })` builds the report: status, duration against the previous run, command and output tail.
 
+The panel's **Build warm-up** page lists every run with its outcome, branch, duration and links to the job log and the report; `summarize` reports `status`, `duration` and, for pushes, `branch`.
+
 A failing command is a result, not a job failure: the job succeeds and the record shows `failed` (or `timed out`) with the exit code, so a broken build is not retried over and over. The last 40 lines also go to the job log.
 
 ## Warming a Turborepo cache on every push

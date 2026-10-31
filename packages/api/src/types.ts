@@ -481,7 +481,10 @@ export type Job = StoredJob
 /** A job without its log, for lists. */
 export type JobSummary = Omit<StoredJob, 'log'>
 
-/** `GET /api/jobs?status=&repo=&limit=&before=` — newest first, only repositories the caller may read. */
+/**
+ * `GET /api/jobs?status=&repo=&analyzer=&schedule=&limit=&before=` — newest first, only
+ * repositories the caller may read.
+ */
 export interface JobList {
   jobs: JobSummary[]
 }

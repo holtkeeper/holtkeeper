@@ -331,6 +331,7 @@ export const api = {
   jobs: (filter: {
     status?: string
     repo?: RepoRef
+    analyzer?: string
     schedule?: string
     limit?: number
     before?: string
@@ -339,6 +340,7 @@ export const api = {
       query: {
         status: filter.status,
         repo: filter.repo ? repoKey(filter.repo) : undefined,
+        analyzer: filter.analyzer,
         schedule: filter.schedule,
         limit: filter.limit,
         before: filter.before,

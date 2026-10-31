@@ -113,6 +113,8 @@ describe('job routes', () => {
     expect('log' in (list.jobs[0] ?? {})).toBeFalse()
     const byRepo = (await (await app.request('/api/jobs?repo=work:games/a')).json()) as JobList
     expect(byRepo.jobs.map((j) => j.id)).toEqual([job.id])
+    const byAnalyzer = (await (await app.request('/api/jobs?analyzer=fleet')).json()) as JobList
+    expect(byAnalyzer.jobs.map((j) => j.id)).toEqual([group.id])
     expect((await app.request('/api/jobs?status=bogus')).status).toBe(400)
 
     await store.jobs.appendLog(job.id, ['hello'])

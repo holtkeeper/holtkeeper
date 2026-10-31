@@ -449,7 +449,13 @@ const activeStatus = (status: string) => status === 'queued' || status === 'runn
 
 /** Jobs, newest first; refreshes every few seconds while some are queued or running. */
 export const useJobs = (
-  filter: { status?: string; repo?: RepoRef; schedule?: string; limit?: number } = {},
+  filter: {
+    status?: string
+    repo?: RepoRef
+    analyzer?: string
+    schedule?: string
+    limit?: number
+  } = {},
 ) =>
   useQuery({
     queryKey: [
@@ -457,6 +463,7 @@ export const useJobs = (
       'list',
       filter.status ?? '',
       filter.repo ? repoKey(filter.repo) : '*',
+      filter.analyzer ?? '*',
       filter.schedule ?? '*',
       filter.limit ?? 100,
     ],
