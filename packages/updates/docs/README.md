@@ -19,7 +19,7 @@ const { events, cursor, requests } = await pollRepository({
 - **Comments** (`listDiscussions` of merge requests that changed): every non-system note newer than the last one seen, with `inThread` set for diff notes and replies.
 - **Pipelines** (`listPipelines` with `updatedAfter`): pipelines that ended `success` or `failed` on the head of an open merge request, once each.
 - **Tags** (`listTags`, newest 20): new tags and tags that moved.
-- **Pushes** (`listBranches`, every branch): `push` events for branches whose head moved and new branches, oldest commit first. The first poll that lists branches only records them, also for cursors written before branches were polled. The server asks for pushes only while `jobs.onPush` is configured, since listing every branch costs a request per page.
+- **Pushes** (`listBranches`, every branch): `push` events for branches whose head moved and new branches, oldest commit first. The first poll that lists branches only records them, also for cursors written before branches were polled. Push events carry the head the previous poll saw as `before`. The server asks for pushes only while something reacts to them (`jobs.onPush`, or the library index's `refreshOnPush`), since listing every branch costs a request per page.
 
 Kinds the forge cannot list are skipped. Windows overlap by two minutes for clock skew; a change already in the cursor is not reported again. `requests` counts forge calls (about one HTTP request each) for budgeting. Polling cannot see who made a change, so `actor` is empty: changes the bot made itself are not filtered out the way webhook events by `jobs.botUsername` are.
 

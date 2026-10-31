@@ -47,7 +47,7 @@ const asGames = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'games' }
 const asReader = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'reader' }
 
 let store: Store
-const setup = (auth: AuthProvider = noAuth(), cfg = config) => {
+const setup = (auth: AuthProvider = noAuth(), cfg = config, list = analyzers) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
     config: cfg,
@@ -61,7 +61,7 @@ const setup = (auth: AuthProvider = noAuth(), cfg = config) => {
     }),
     settings: builtinSettings,
     analyses: [],
-    analyzers,
+    analyzers: list,
     now: () => new Date('2026-10-30T12:00:00.000Z'),
   })
 }
@@ -393,5 +393,78 @@ describe('branch push webhook', () => {
       ),
     ).toContain('not to a branch')
     expect(await store.jobs.list()).toEqual([])
+  })
+})
+
+const dependencyPush = (
+  branch: string,
+  commits: { added?: string[]; modified?: string[]; removed?: string[] }[],
+  extra: Record<string, unknown> = {},
+) => ({
+  ...branchPush('games/a', branch),
+  before: 'b'.repeat(40),
+  project: {
+    path_with_namespace: 'games/a',
+    web_url: 'https://gitlab.test/games/a',
+    default_branch: 'main',
+  },
+  commits,
+  total_commits_count: commits.length,
+  ...extra,
+})
+const pushHook = (app: ReturnType<typeof setup>, body: unknown) =>
+  hook(app, body, 'hook-secret', 'Push Hook')
+
+describe('dependency refresh on push', () => {
+  const withUsages: JobAnalyzerInfo[] = [
+    ...analyzers,
+    { kind: 'usages', scope: 'repo', options: z.object({}) },
+  ]
+  test('a lockfile change on the default branch queues usages and the group fleet', async () => {
+    const app = setup(noAuth(), config, withUsages)
+    const response = await pushHook(
+      app,
+      dependencyPush('main', [{ modified: ['src/a.ts'] }, { modified: ['apps/web/bun.lock'] }]),
+    )
+    expect(response.status).toBe(202)
+    const jobs = await store.jobs.list()
+    expect(
+      jobs
+        .toSorted((a, b) => a.analyzer.localeCompare(b.analyzer))
+        .map((j) => [j.analyzer, j.repo.path, j.ref, j.options]),
+    ).toEqual([
+      ['fleet', 'games', undefined, {}],
+      ['usages', 'games/a', 'c'.repeat(40), { branch: 'main' }],
+    ])
+    expect((await store.activity.list())[0]?.action).toBe('job.dependencies_changed')
+  })
+
+  test('other files, other branches and a turned off refresh queue nothing', async () => {
+    const app = setup(noAuth(), config, withUsages)
+    expect(
+      await ignored(await pushHook(app, dependencyPush('main', [{ added: ['README.md'] }]))),
+    ).toBe('jobs.onPush is not configured')
+    await pushHook(app, dependencyPush('feature/x', [{ modified: ['package.json'] }]))
+    await store.settings.put({
+      id: 'libraries-global',
+      key: 'libraries',
+      scope: { all: true },
+      value: { refreshOnPush: false },
+      secret: false,
+      updatedAt: '2026-10-30T12:00:00.000Z',
+    })
+    await pushHook(app, dependencyPush('main', [{ modified: ['go.mod'] }]))
+    expect(await store.jobs.list()).toEqual([])
+  })
+
+  test('a push whose commits the hook does not all list refreshes to be safe', async () => {
+    const app = setup(noAuth(), config, withUsages)
+    await pushHook(
+      app,
+      dependencyPush('main', [{ modified: ['src/a.ts'] }], { total_commits_count: 40 }),
+    )
+    expect(
+      (await store.jobs.list()).map((j) => j.analyzer).toSorted((a, b) => a.localeCompare(b)),
+    ).toEqual(['fleet', 'usages'])
   })
 })

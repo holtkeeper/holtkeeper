@@ -26,6 +26,8 @@ import type { JobTrigger, KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { type ServerDeps, repoTarget } from './context.ts'
+import { defaultBranchOf, pushChangesDependencies } from './dependency-refresh.ts'
+import { librariesConfigOf, librariesEnabled } from './libraries.ts'
 
 /** Every note Holtkeeper posts carries this marker. */
 const OWN_MARKER = 'holtkeeper:review'
@@ -349,7 +351,56 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       return { enqueued }
     }
 
-    const handlePush = async ({ repo, branch, sha, actor }: BranchPushedEvent) => {
+    /**
+     * A push to the default branch that changed a manifest or lockfile (or whose changes cannot be
+     * told) queues `usages` for the repository and `fleet` for its groups while the library index
+     * and its `refreshOnPush` are on, so the index sees new packages and versions soon.
+     */
+    const refreshDependencies = async (event: BranchPushedEvent): Promise<string[]> => {
+      if (!analyzers.has('usages') && !analyzers.has('fleet')) return []
+      const settings = await librariesConfigOf(store.settings)
+      if (!settings || !librariesEnabled(settings) || !settings.refreshOnPush) return []
+      const { repo, branch, sha } = event
+      const forge = config.forges[repo.forge]?.create()
+      if ((await defaultBranchOf(event, forge)) !== branch) return []
+      if ((await pushChangesDependencies(event, forge)) === false) return []
+      if (analyzers.has('usages')) {
+        const stale = await store.jobs.list({
+          status: ['queued'],
+          repo,
+          analyzer: 'usages',
+          limit: 500,
+        })
+        for (const job of stale)
+          if (job.options['branch'] === branch && job.ref !== sha)
+            // oxlint-disable-next-line no-await-in-loop -- few jobs, and order does not matter
+            await store.jobs.cancel(job.id, deps.now().toISOString())
+      }
+      const requests: JobRequest[] = [
+        ...(analyzers.has('usages')
+          ? [{ analyzer: 'usages', repo, ref: sha, options: { branch } }]
+          : []),
+        ...(analyzers.get('fleet')?.scope === 'group'
+          ? resolveRepo(config, repo).groups.map((group) => ({
+              analyzer: 'fleet',
+              repo: { forge: repo.forge, path: group },
+              group,
+            }))
+          : []),
+      ]
+      const enqueued = await enqueue(requests, trigger('push'))
+      if (enqueued.length)
+        await activity('job.dependencies_changed', repo, { branch, sha, jobs: enqueued })
+      return enqueued
+    }
+
+    const handlePush = async (event: BranchPushedEvent): Promise<EventOutcome> => {
+      const refreshed = await refreshDependencies(event)
+      const outcome = await handleConfiguredPush(event)
+      return refreshed.length ? { enqueued: [...refreshed, ...outcome.enqueued] } : outcome
+    }
+
+    const handleConfiguredPush = async ({ repo, branch, sha, actor }: BranchPushedEvent) => {
       const onPush = config.jobs?.onPush
       if (!onPush) return ignore('jobs.onPush is not configured')
       if (fromBot(actor)) return ignore('event from the bot user')

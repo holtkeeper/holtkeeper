@@ -65,12 +65,13 @@ Optional: `ensureWebhook(target, { url, secret, events })` makes sure a hook wit
 
 `ForgeEvent` is something that happened on a forge, whichever way Holtkeeper learned it (a webhook delivery or polling with `@holtkeeper/updates`):
 
-| `kind`         | Fields                                                                                                                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tag`          | `repo`, `tag`, `sha`                                                                                                                                                                  |
-| `mergeRequest` | `repo`, `action` (`open`, `reopen`, `update`, `merge`, `close`, `approved`), `actor` (empty when unknown), `newCommits`, `leftDraft`, `labelsAdded`, `mr` (with `headSha` when known) |
-| `note`         | `repo`, `mergeRequest`, `mergeRequestState`, `headSha?`, `author`, `body`, `discussionId?`, `inThread` (a diff or discussion note rather than a standalone comment)                   |
-| `pipeline`     | `repo`, `mergeRequest`, `pipelineId`, `status`, `sha`, `actor`; only finished merge request pipelines                                                                                 |
+| `kind`         | Fields                                                                                                                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tag`          | `repo`, `tag`, `sha`                                                                                                                                                                                                                   |
+| `push`         | `repo`, `branch`, `sha` (the new head), `actor` (empty when unknown), `before?` (the head before; absent for a new branch), `files?` (every path the pushed commits touched, only when the source lists all of them), `defaultBranch?` |
+| `mergeRequest` | `repo`, `action` (`open`, `reopen`, `update`, `merge`, `close`, `approved`), `actor` (empty when unknown), `newCommits`, `leftDraft`, `labelsAdded`, `mr` (with `headSha` when known)                                                  |
+| `note`         | `repo`, `mergeRequest`, `mergeRequestState`, `headSha?`, `author`, `body`, `discussionId?`, `inThread` (a diff or discussion note rather than a standalone comment)                                                                    |
+| `pipeline`     | `repo`, `mergeRequest`, `pipelineId`, `status`, `sha`, `actor`; only finished merge request pipelines                                                                                                                                  |
 
 ## Read-only repositories
 

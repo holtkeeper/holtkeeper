@@ -509,6 +509,12 @@ export interface BranchPushedEvent {
   sha: string
   /** Username of whoever pushed; empty when unknown (polling). */
   actor: string
+  /** The branch head before the push; absent for a new branch or when unknown. */
+  before?: string
+  /** Every path the pushed commits added, changed or removed; absent when the source does not know all of them. */
+  files?: string[]
+  /** The repository's default branch, when the source tells. */
+  defaultBranch?: string
 }
 
 /**

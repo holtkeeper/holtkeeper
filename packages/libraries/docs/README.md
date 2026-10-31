@@ -73,7 +73,7 @@ Example from the design: the fleet uses react `18.2.0`, `18.3.1`, `19.0.0`, the 
 
 `indexLibraries` groups `uses` by library, drops excluded (unless also included) and internal ones, adds plain names from `include`, and then works through the libraries one at a time, sorted by `<ecosystem>:<name>`:
 
-1. **Registry metadata** (`registry` status on the library): description, homepage, normalized repository, latest, versions with dates, deprecations and commits. A failed lookup records `failed` and leaves the library's versions untouched.
+1. **Registry metadata** (`registry` status on the library). A library the registry does not know (a private package, a typo) is not kept: a stored one is removed with its versions and counted in `librariesRemoved`. For known ones: description, homepage, normalized repository, latest, versions with dates, deprecations and commits. A failed lookup records `failed` and leaves the library's versions untouched.
 2. **Matrix**: versions in it get their roles, `usedBy`, date and deprecation, and lose `leftAt`; versions that left it get empty roles and `leftAt`, and are removed `graceDays` later (their chunks go with them unless other versions share them).
 3. **Per-version sources**, skipped when the version already has them `ok` or `missing` (`failed` and `skipped` are retried next run):
    - `archive` and `api` share one archive download;

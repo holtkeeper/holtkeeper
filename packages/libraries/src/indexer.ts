@@ -240,9 +240,14 @@ async function indexLibrary(run: RunContext, ref: LibraryRef, uses: LibraryUse[]
   else {
     try {
       published = await registry.library(ref)
-      registryStatus = published
-        ? sourceStatus('ok', run.now)
-        : sourceStatus('missing', run.now, 'unknown to the registry')
+      if (!published) {
+        if (previous) {
+          await store.removeLibrary(ref)
+          run.summary.librariesRemoved += 1
+        }
+        return
+      }
+      registryStatus = sourceStatus('ok', run.now)
     } catch (error) {
       registryStatus = fail(run, ref, 'registry', error)
       await store.putLibrary({

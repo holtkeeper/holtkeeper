@@ -24,7 +24,7 @@ That is usually three to eight versions per library, at most `maxVersions` (8). 
 | `source`     | A snapshot of the source at the tag, made the first time an agent asks for it             | GitHub              |
 | `site`       | The docs site (`llms.txt`, sitemap), off by default                                       | access to that site |
 
-Libraries your own repositories publish are left out: their API already comes from the `api-surface` analysis.
+Libraries your own repositories publish are left out: their API already comes from the `api-surface` analysis. So are packages the public registry does not know, such as the ones your GitLab package registry hosts: there is nothing to index for them, and a library that disappears from the registry leaves the index on the next run.
 
 ## Before you start
 
@@ -68,22 +68,25 @@ To add the token, open **Settings → Libraries → Library docs**, add an entry
 
 Everything else has defaults:
 
-| Field          | Default                                           | Meaning                                                                                          |
-| -------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `enabled`      | `true`                                            | `false` stops indexing; what is indexed stays readable                                           |
-| `interval`     | `1d`                                              | How often to look for new releases and uses, `<n>m`, `<n>h` or `<n>d`, at least `1h`             |
-| `github`       | `[]`                                              | Ids or names of GitHub token credentials, shared by every request; a single string also works    |
-| `digests`      | `false`                                           | Summarize issue threads agents hit with the configured LLM (see [Issue digests](#issue-digests)) |
-| `exclude`      | `["@types/*"]`                                    | Globs of library names never indexed; `Go:` limits a glob to Go, e.g. `Go:github.com/acme/**`    |
-| `include`      | `[]`                                              | Globs indexed even when no repository uses them                                                  |
-| `maxVersions`  | `8`                                               | Versions kept per library (1–50); the ones in use are always kept                                |
-| `firstOfMajor` | `true`                                            | Also index the `x.0.0` release of each crossed major                                             |
-| `sources`      | `repository`, `releases`, `issues` on; `site` off | Turn single sources off, or docs sites on                                                        |
-| `graceDays`    | `28`                                              | Days a version (or library) stays after nothing needs it any more                                |
+| Field           | Default                                           | Meaning                                                                                          |
+| --------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `enabled`       | `true`                                            | `false` stops indexing; what is indexed stays readable                                           |
+| `interval`      | `1d`                                              | How often to look for new releases and uses, `<n>m`, `<n>h` or `<n>d`, at least `1h`             |
+| `github`        | `[]`                                              | Ids or names of GitHub token credentials, shared by every request; a single string also works    |
+| `digests`       | `false`                                           | Summarize issue threads agents hit with the configured LLM (see [Issue digests](#issue-digests)) |
+| `refreshOnPush` | `true`                                            | Queue `usages` and `fleet` when a push to a default branch changes a manifest or lockfile        |
+| `exclude`       | `["@types/*"]`                                    | Globs of library names never indexed; `Go:` limits a glob to Go, e.g. `Go:github.com/acme/**`    |
+| `include`       | `[]`                                              | Globs indexed even when no repository uses them                                                  |
+| `maxVersions`   | `8`                                               | Versions kept per library (1–50); the ones in use are always kept                                |
+| `firstOfMajor`  | `true`                                            | Also index the `x.0.0` release of each crossed major                                             |
+| `sources`       | `repository`, `releases`, `issues` on; `site` off | Turn single sources off, or docs sites on                                                        |
+| `graceDays`     | `28`                                              | Days a version (or library) stays after nothing needs it any more                                |
 
 ### 3. Watch the first run
 
 The first run starts about two minutes after the server starts; the server rereads the setting every 30 seconds, so changes need no restart. Later runs come every `interval`, about ten minutes after new `usages` or `fleet` records arrive, and on **Libraries → Reindex now** (needs global `analyses:run`).
+
+**Keeping up with the repositories.** Nobody maintains the list of libraries: every run takes it from the newest `usages` and `fleet` records, so packages added to a repository join the index, upgraded ones get their new versions, and dropped ones leave after `graceDays`. Those records are refreshed by the weekly schedules and, with `refreshOnPush` (on by default), right after a push to a repository's default branch that changes a manifest or lockfile (`package.json`, `bun.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.mod`, `go.sum`, ...): Holtkeeper queues `usages` for the repository and `fleet` for its groups, and the index runs about ten minutes after they finish. A version bump is in the index some 15–20 minutes after the merge. This needs the push to reach Holtkeeper: through the forge webhook, or through polling, which then also lists branches.
 
 The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it on the **Libraries** page (sidebar **Code → Libraries**), which shows the last run with its counts and failures, or in the server log:
 

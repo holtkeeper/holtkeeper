@@ -27,9 +27,9 @@ function fakeRegistry(options: { failArchive?: string } = {}) {
   const archives: string[] = []
   const registry: LibraryRegistry = {
     async library(target) {
-      if (target.name !== 'lib') return undefined
+      if (target.name !== 'lib' && target.name !== '@types/lib') return undefined
       return {
-        ...ref,
+        ...target,
         description: 'The lib',
         repository,
         latest: '2.0.0',
@@ -267,6 +267,39 @@ describe('indexLibraries', () => {
     expect((await store.getVersion(ref, '1.1.0'))?.sources.api?.status).toBe('ok')
   })
 
+  test('libraries the registry does not know are not kept, and leave once it stops knowing them', async () => {
+    const store = librariesOf()
+    const artifacts = memoryArtifactStore()
+    const { registry } = fakeRegistry()
+    const summary = await indexLibraries({
+      store,
+      artifacts,
+      settings,
+      registries: { npm: registry },
+      uses: uses(['@acme/private', '1.0.0'], ['lib', '1.0.0']),
+      now: at(0),
+    })
+    expect(summary.failures).toEqual([])
+    expect((await store.listLibraries()).map((library) => library.name)).toEqual(['lib'])
+
+    await store.putLibrary({
+      ecosystem: 'npm',
+      name: '@acme/gone',
+      sources: {},
+      updatedAt: at(0)().toISOString(),
+    })
+    const later = await indexLibraries({
+      store,
+      artifacts,
+      settings,
+      registries: { npm: registry },
+      uses: uses(['@acme/gone', '1.0.0'], ['lib', '1.0.0']),
+      now: at(1),
+    })
+    expect(later.librariesRemoved).toBe(1)
+    expect(await store.getLibrary({ ecosystem: 'npm', name: '@acme/gone' })).toBeUndefined()
+  })
+
   test('artifacts dropped by retention are fetched again', async () => {
     const store = librariesOf()
     const artifacts = memoryArtifactStore()
@@ -327,7 +360,7 @@ describe('indexLibraries', () => {
       now: at(0),
     })
     expect(seen).toEqual([
-      { name: '@types/lib' },
+      { name: '@types/lib', oldest: '2024-01-01T00:00:00.000Z' },
       { name: 'lib', oldest: '2024-01-01T00:00:00.000Z' },
     ])
     expect(summary.failures.map((failure) => [failure.library, failure.source])).toEqual([

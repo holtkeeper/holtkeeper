@@ -19,6 +19,7 @@ import { markWebhookSeen } from '../updates.ts'
 const projectSchema = z.object({
   path_with_namespace: z.string().min(1),
   web_url: z.string().optional(),
+  default_branch: z.string().optional(),
 })
 const userSchema = z.object({ username: z.string() }).optional()
 
@@ -33,10 +34,36 @@ const tagPushSchema = z.object({
 const pushSchema = z.object({
   object_kind: z.literal('push'),
   ref: z.string(),
+  before: z.string().optional(),
   after: z.string(),
   user_username: z.string().optional(),
   project: projectSchema,
+  commits: z
+    .array(
+      z.object({
+        added: z.array(z.string()).optional(),
+        modified: z.array(z.string()).optional(),
+        removed: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
+  total_commits_count: z.number().optional(),
 })
+
+/** Paths a push hook's commits touched, when the hook lists every commit (GitLab sends at most 20). */
+const pushedFiles = (hook: z.infer<typeof pushSchema>) => {
+  const commits = hook.commits
+  if (!commits || (hook.total_commits_count ?? commits.length) > commits.length) return undefined
+  return [
+    ...new Set(
+      commits.flatMap((commit) => [
+        ...(commit.added ?? []),
+        ...(commit.modified ?? []),
+        ...(commit.removed ?? []),
+      ]),
+    ),
+  ]
+}
 
 const labelsSchema = z.array(z.object({ title: z.string() }))
 
@@ -160,6 +187,7 @@ async function parseGitlab(
     if (deletedSha.test(hook.after)) return { ignored: 'branch was deleted' }
     const repo = repoOf(hook.project)
     if (!repo) return noForge
+    const files = pushedFiles(hook)
     return {
       event: {
         kind: 'push',
@@ -167,6 +195,9 @@ async function parseGitlab(
         branch: hook.ref.slice('refs/heads/'.length),
         sha: hook.after,
         actor: hook.user_username ?? '',
+        ...(hook.before && !deletedSha.test(hook.before) ? { before: hook.before } : {}),
+        ...(files ? { files } : {}),
+        ...(hook.project.default_branch ? { defaultBranch: hook.project.default_branch } : {}),
       },
     }
   }

@@ -84,6 +84,8 @@ const librariesSchema = z.object({
     .optional(),
   /** LLM digests of issue threads agents hit, charged to the AI budget. */
   digests: z.boolean().optional(),
+  /** Queue `usages` and `fleet` when a push to a default branch changes a manifest or lockfile. */
+  refreshOnPush: z.boolean().optional(),
   exclude: globSchema.optional(),
   include: globSchema.optional(),
   maxVersions: z.number().int().min(1).max(50).optional(),
@@ -111,6 +113,7 @@ export const librariesSetting = defineSetting({
 - **interval** (default \`1d\`, at least \`1h\`): how often to look for new releases; a run also starts about two minutes after the server starts.
 - **github**: credentials of kind \`github\` whose secrets are GitHub tokens, for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
 - **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. The model is the \`library-digest\` entry of **Models per task**; without one, \`claude-haiku@latest\` when the provider lists it, else **Model**.
+- **refreshOnPush** (default on): when a push to a repository's default branch changes a manifest or lockfile (\`package.json\`, \`bun.lock\`, \`pnpm-lock.yaml\`, \`go.mod\`, ...), queue \`usages\` for it and \`fleet\` for its groups, so the index learns new packages and versions minutes after the merge instead of at the weekly runs.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
   schema: librariesSchema,
@@ -137,6 +140,7 @@ export interface LibrariesConfig {
   /** Credential references of the GitHub tokens, without duplicates. */
   github: string[]
   digests: boolean
+  refreshOnPush: boolean
 }
 
 /** The effective config of a stored value; `undefined` when unset or invalid (nothing is indexed). */
@@ -158,6 +162,7 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
     intervalMs: intervalMs(data.interval ?? DEFAULT_INTERVAL) ?? 86_400_000,
     github: [...new Set(data.github ?? [])],
     digests: data.digests ?? false,
+    refreshOnPush: data.refreshOnPush ?? true,
   }
 }
 

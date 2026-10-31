@@ -18,6 +18,7 @@ import {
 
 import { type ServerDeps, repoTarget } from './context.ts'
 import type { EventDispatcher } from './events.ts'
+import { librariesConfigOf, librariesEnabled } from './libraries.ts'
 import { fileForgeKey, globalLimits } from './limits.ts'
 
 const seenKey = (repo: RepoRef) => `webhook-seen:${repo.forge}:${repo.path}`
@@ -295,13 +296,17 @@ function createPoller(options: PollerOptions) {
     try {
       const definition = config.forges[repo.forge]
       if (!definition) throw new Error(`forge ${repo.forge} is not configured`)
+      const libraries = await librariesConfigOf(store.settings)
+      const pushesWanted =
+        config.jobs?.onPush !== undefined ||
+        (libraries !== undefined && librariesEnabled(libraries) && libraries.refreshOnPush)
       const result = await pollRepository({
         forge: definition.create(),
         repo,
         cursor: state.cursor,
         now: started,
-        // Listing every branch costs requests; only pay for it while a push trigger wants it.
-        events: config.jobs?.onPush
+        // Listing every branch costs requests; only pay for it while something reacts to pushes.
+        events: pushesWanted
           ? settings.events
           : settings.events.filter((kind) => kind !== 'pushes'),
       })

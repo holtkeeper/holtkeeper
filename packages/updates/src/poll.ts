@@ -236,8 +236,16 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
     branches = {}
     for (const branch of listed.toSorted((a, b) => a.committedAt.localeCompare(b.committedAt))) {
       branches[branch.name] = branch.sha
-      if (known && known[branch.name] !== branch.sha)
-        events.push({ kind: 'push', repo, branch: branch.name, sha: branch.sha, actor: '' })
+      const before = known?.[branch.name]
+      if (known && before !== branch.sha)
+        events.push({
+          kind: 'push',
+          repo,
+          branch: branch.name,
+          sha: branch.sha,
+          actor: '',
+          ...(before ? { before } : {}),
+        })
     }
     branches = Object.fromEntries(Object.entries(branches).slice(-MAX_BRANCHES))
   }

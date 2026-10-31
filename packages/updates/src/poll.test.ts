@@ -188,7 +188,14 @@ describe('pollRepository', () => {
     ]
     const second = await pushes(first.cursor, '2026-10-30T11:05:00Z')
     expect(second.events).toEqual([
-      { kind: 'push', repo, branch: 'main', sha: 'b'.repeat(40), actor: '' },
+      {
+        kind: 'push',
+        repo,
+        branch: 'main',
+        sha: 'b'.repeat(40),
+        actor: '',
+        before: 'a'.repeat(40),
+      },
       { kind: 'push', repo, branch: 'feature', sha: 'c'.repeat(40), actor: '' },
     ])
     expect((await pushes(second.cursor, '2026-10-30T11:10:00Z')).events).toEqual([])
