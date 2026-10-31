@@ -8,6 +8,8 @@ export interface ForgeDraft {
   url: string
   credentialId: string
   packages: boolean
+  /** Only takes effect with `packages`. */
+  cachePackages: boolean
 }
 
 export type ForgeDraftErrors = Partial<Record<keyof ForgeDraft, string>>
@@ -17,6 +19,7 @@ export const toForgeDraft = (forge?: ConfigEntryView<'forge'>): ForgeDraft => ({
   url: forge?.data.url ?? '',
   credentialId: forge?.data.credentialId ?? '',
   packages: forge?.data.packages ?? true,
+  cachePackages: forge?.data.cachePackages ?? false,
 })
 
 /** Problems by field; `taken` are ids a new forge must not reuse. */
@@ -38,4 +41,5 @@ export const toForgeInput = (draft: ForgeDraft): PutConfigInput['forge'] => ({
   url: draft.url.trim().replace(/\/+$/, ''),
   credentialId: draft.credentialId,
   ...(!draft.packages && { packages: false }),
+  ...(draft.packages && draft.cachePackages && { cachePackages: true }),
 })

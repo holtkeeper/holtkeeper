@@ -444,8 +444,16 @@ for (const backend of ['dir', 's3'] as const)
       await writeFile(
         join(dir, 'rules.json'),
         JSON.stringify({
-          rules: [],
+          rules: [
+            {
+              host: 'localhost',
+              paths: ['^/private/'],
+              headers: { Authorization: 'Bearer forge-token-value' },
+            },
+          ],
           cache: [
+            { kind: 'packages', host: 'localhost', paths: ['^/private/cached/'], private: true },
+            { kind: 'packages', host: 'localhost', paths: ['^/private/plain/'] },
             { kind: 'packages', host: 'localhost', paths: ['^/files/'] },
             { kind: 'tools', host: 'localhost', paths: ['^/redirect/'] },
           ],
@@ -528,6 +536,20 @@ for (const backend of ['dir', 's3'] as const)
         await (await get(path)).arrayBuffer()
         expect(served.get(path)).toBe(2)
       }
+    })
+
+    test('caches downloads it added credentials to only for private rules', async () => {
+      for (const path of ['/private/cached/a.tgz', '/private/plain/a.tgz']) {
+        await (await get(path)).arrayBuffer()
+        await Bun.sleep(100)
+        await (await get(path)).arrayBuffer()
+      }
+      await stored('/private/cached/a.tgz')
+      const again = await get('/private/cached/a.tgz')
+      expect(again.headers.get('x-egress-cache')).toBe('hit')
+      expect(new Uint8Array(await again.arrayBuffer())).toEqual(payload)
+      expect(served.get('/private/cached/a.tgz')).toBeLessThanOrEqual(2)
+      expect(served.get('/private/plain/a.tgz')).toBe(2)
     })
 
     test('stores a redirected download under the URL that redirected', async () => {

@@ -597,10 +597,12 @@ export interface EgressRule {
  * `GET /api/egress/rules` with `Authorization: Bearer <server.egress.secret>`: the rules for the
  * panel GitLab forges (all but those with `packages: false`), carrying their credential's current
  * token, and one replacement rule per host of every `egress-secret` credential. Never cache it
- * longer than a minute: rotation revokes the previous token at once.
+ * longer than a minute: rotation revokes the previous token at once. `cache` lists the private
+ * cache rules of forges with `cachePackages`: their package files, downloaded with the token.
  */
 export interface EgressRulesResponse {
   rules: EgressRule[]
+  cache?: EgressCacheRule[]
 }
 
 /** What an egress proxy caches: package archives or tool downloads, each with its own TTL. */
@@ -1027,6 +1029,8 @@ export interface ForgeConfigView {
   credentialId?: string
   /** Panel forges: jobs read its package registries with its token, through the egress proxy. */
   packages?: boolean
+  /** Panel forges: the egress proxy caches the package files jobs download from it. */
+  cachePackages?: boolean
   webhook?: {
     /** Where the forge sends events: `${publicUrl}/api/webhooks/<forgeId>`. */
     url: string
@@ -1089,7 +1093,13 @@ export interface ConfigEntryDetail<T extends ConfigDocumentType = ConfigDocument
 
 /** Bodies of `PUT /api/config/<collection>/:id`. */
 export interface PutConfigInput {
-  forge: { kind: 'gitlab' | 'github'; url: string; credentialId: string; packages?: boolean }
+  forge: {
+    kind: 'gitlab' | 'github'
+    url: string
+    credentialId: string
+    packages?: boolean
+    cachePackages?: boolean
+  }
   group: { forge: string; include: string[]; exclude?: string[] }
   repoTraits: {
     pattern: string

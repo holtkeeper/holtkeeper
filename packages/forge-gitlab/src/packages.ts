@@ -20,3 +20,25 @@ export function gitlabPackageRegistry(url: string): PackageRegistryLocation {
     paths: [`^${base}/api/v4/(projects/[^/]+/|groups/[^/]+/(-/)?)?packages/`],
   }
 }
+
+/**
+ * The files of the package registries of the GitLab at `url` whose content does not change once
+ * published, for caching proxies: npm tarballs, Maven files of release versions (not
+ * `maven-metadata.xml` or `-SNAPSHOT`), PyPI files (their sha256 is in the path) and generic
+ * package files. Indexes and metadata never match. GitLab lets generic files be uploaded again
+ * under the same version by default; a cache keeps the copy it has.
+ */
+export function gitlabPackageFiles(url: string): PackageRegistryLocation {
+  const parsed = new URL(url)
+  const base = escape(parsed.pathname.replace(/\/+$/, ''))
+  const scope = `^${base}/api/v4/(projects/[^/]+/|groups/[^/]+/(-/)?)?packages`
+  return {
+    host: parsed.hostname,
+    paths: [
+      `${scope}/npm/(@[^/]+/)?[^/]+/-/(@[^/]+/)?[^/]+\\.tgz$`,
+      `${scope}/maven/(?!.*-SNAPSHOT/)(?!.*/maven-metadata\\.xml)(.+/)?[^/]+\\.[A-Za-z0-9.]+$`,
+      `${scope}/pypi/files/[0-9a-f]{64}/[^/]+$`,
+      `${scope}/generic/[^/]+/[^/]+/[^/]+$`,
+    ],
+  }
+}

@@ -119,6 +119,9 @@ export function ForgesSection() {
                         <Chip variant="secondary">{forge.data.kind}</Chip>
                         {panel ? null : <Chip>config file</Chip>}
                         {forge.data.packages === false ? <Chip>no packages for jobs</Chip> : null}
+                        {forge.data.cachePackages ? (
+                          <Chip tone="warning">packages cached</Chip>
+                        ) : null}
                       </div>
                       <div className="truncate font-mono text-xs text-muted">
                         {forge.data.url}
@@ -592,6 +595,13 @@ function ForgeDialog({
           isSelected={draft.packages}
           onChange={(on) => set('packages', on)}
           description="Jobs download private packages from this forge's registries with this token, through the egress proxy. They never see the token, and it is used only to read packages."
+        />
+        <Switch
+          label="Cache packages"
+          isSelected={draft.packages && draft.cachePackages}
+          isDisabled={!draft.packages}
+          onChange={(on) => set('cachePackages', on)}
+          description="The egress proxy keeps the npm, Maven, PyPI and generic package files jobs download from this forge, so repeated installs skip the forge. Every job gets a cached copy until it goes unused for the packages TTL, even after this token loses access or the package is deleted. Generic files re-uploaded under the same version keep the cached copy until it expires or is removed under Caches."
         />
         <button type="submit" hidden />
       </form>

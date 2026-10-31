@@ -67,7 +67,7 @@ More URLs go into the rules document as a `cache` list, from the file or the URL
 }
 ```
 
-`private: true` on such a rule also caches downloads that a rule added credentials to. Without it they always go upstream. Only add patterns for URLs whose content cannot change.
+`private: true` on such a rule also caches downloads that a rule added credentials to. Without it they always go upstream. Holtkeeper's rules URL serves such private rules for panel GitLab forges with **Cache packages** on (npm, Maven, PyPI and generic package files of their registries). Only add patterns for URLs whose content cannot change.
 
 **How it stays out of the way.**
 

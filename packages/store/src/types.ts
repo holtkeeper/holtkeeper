@@ -648,6 +648,12 @@ export interface ForgeDocumentData {
   credentialId: string
   /** Jobs read this forge's package registries with its token, through the egress proxy. Default on. */
   packages?: boolean
+  /**
+   * The egress proxy also keeps the package files jobs download from this forge's registries
+   * (npm, Maven, PyPI, generic) in its download cache. Cached copies outlive the token's access.
+   * Default off; needs `packages`.
+   */
+  cachePackages?: boolean
   webhook?: ForgeWebhook
   sshKey?: ForgeSshKey
 }

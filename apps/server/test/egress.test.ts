@@ -32,7 +32,7 @@ const appWith = (server?: Partial<NonNullable<HoltkeeperConfig['server']>>) =>
     now: () => new Date('2026-10-30T12:00:00.000Z'),
   })
 
-const putForge = (id: string, url: string, packages?: boolean) =>
+const putForge = (id: string, url: string, packages?: boolean, cachePackages?: boolean) =>
   store.config?.put({
     type: 'forge',
     id,
@@ -42,6 +42,7 @@ const putForge = (id: string, url: string, packages?: boolean) =>
       url,
       credentialId: tokenId,
       ...(packages !== undefined && { packages }),
+      ...(cachePackages !== undefined && { cachePackages }),
     },
   })
 
@@ -100,6 +101,18 @@ describe('egress rules', () => {
     await credentials.update(tokenId, { secret: 'glpat-rotated' }, 'root')
     const next = (await (await rules(app, `Bearer ${secret}`)).json()) as EgressRulesResponse
     expect(next.rules[0]?.headers?.Authorization).toBe('Bearer glpat-rotated')
+  })
+
+  test('adds a private cache rule for the package files of forges that cache packages', async () => {
+    const app = appWith({ egress: { secret } })
+    const plain = (await (await rules(app, `Bearer ${secret}`)).json()) as EgressRulesResponse
+    expect(plain.cache).toBeUndefined()
+    await putForge('cloud', 'https://gitlab.com', undefined, true)
+    await putForge('other', 'https://other.test', false, true)
+    const cached = (await (await rules(app, `Bearer ${secret}`)).json()) as EgressRulesResponse
+    expect(cached.cache).toHaveLength(1)
+    expect(cached.cache?.[0]).toMatchObject({ kind: 'packages', host: 'gitlab.com', private: true })
+    expect(cached.cache?.[0]?.paths.some((path) => path.includes('/npm/'))).toBe(true)
   })
 
   test('leaves out forges whose credential is gone', async () => {

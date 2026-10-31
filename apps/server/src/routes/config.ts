@@ -247,7 +247,10 @@ export function configRoutes(deps: ServerDeps) {
             kind: origin.kind,
             url: origin.url,
             ...(origin.credentialId !== undefined && { credentialId: origin.credentialId }),
-            ...(doc?.type === 'forge' && { packages: doc.data.packages !== false }),
+            ...(doc?.type === 'forge' && {
+              packages: doc.data.packages !== false,
+              cachePackages: doc.data.packages !== false && doc.data.cachePackages === true,
+            }),
             ...(webhook && {
               webhook: {
                 url: `${publicUrlOf(deps, c)}/api/webhooks/${id}`,

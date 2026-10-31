@@ -11,7 +11,13 @@ describe('forge form', () => {
     })
     expect(
       validateForgeDraft(
-        { id: 'work', url: 'ssh://gitlab.test', credentialId: 'c1', packages: true },
+        {
+          id: 'work',
+          url: 'ssh://gitlab.test',
+          credentialId: 'c1',
+          packages: true,
+          cachePackages: false,
+        },
         ['work'],
       ),
     ).toEqual({ id: 'A forge with this id exists', url: 'An http(s) URL' })
@@ -43,5 +49,14 @@ describe('forge form', () => {
     expect(draft.packages).toBe(false)
     expect(toForgeInput(draft).packages).toBe(false)
     expect(toForgeInput({ ...draft, packages: true })).not.toHaveProperty('packages')
+  })
+
+  test('package caching is off by default and sent only together with packages', () => {
+    const draft = toForgeDraft()
+    expect(draft.cachePackages).toBe(false)
+    expect(toForgeInput({ ...draft, cachePackages: true })).toMatchObject({ cachePackages: true })
+    expect(toForgeInput({ ...draft, packages: false, cachePackages: true })).not.toHaveProperty(
+      'cachePackages',
+    )
   })
 })

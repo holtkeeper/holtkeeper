@@ -110,6 +110,8 @@ Failures are `GitLabApiError` with `status` and a message like `GitLab POST /api
 
 `gitlabPackageRegistry(url)` returns `{ host, paths }`: the host of the instance and a regular expression for its package registry endpoints (`/api/v4/packages/…`, `/api/v4/groups/:id/-/packages/…`, `/api/v4/projects/:id/packages/…`; npm, Maven, PyPI, generic and the rest), keeping an instance's sub-path. The server builds egress proxy rules from it for panel forges ("Packages for jobs", on by default), so a GitLab token reads packages for jobs without them seeing it. GitLab accepts personal, group and project access tokens there as `Authorization: Bearer`.
 
+`gitlabPackageFiles(url)` returns the same shape for the registry files that do not change once published, for caching proxies: npm tarballs (`…/npm/<name>/-/<file>.tgz`), Maven files of release versions (not `maven-metadata.xml`, not `-SNAPSHOT`), PyPI files (`…/pypi/files/<sha256>/<file>`) and generic package files (`…/generic/<name>/<version>/<file>`), on instance, group and project level. Package metadata, `/simple` indexes and version lists never match. GitLab lets generic files be uploaded again under the same version unless duplicates are turned off for the project; a cache keeps the copy it has. The server serves these as private cache rules for forges with **Cache packages**.
+
 ## Token rotation
 
 ```ts

@@ -2,12 +2,13 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 
 import type {
   DeleteEgressCacheResult,
+  EgressCacheRule,
   EgressCacheView,
   EgressRule,
   EgressRulesResponse,
 } from '@holtkeeper/api'
 import { resolveSecret } from '@holtkeeper/forge'
-import { gitlabPackageRegistry } from '@holtkeeper/forge-gitlab'
+import { gitlabPackageFiles, gitlabPackageRegistry } from '@holtkeeper/forge-gitlab'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -23,15 +24,17 @@ const sameSecret = (given: string, expected: string) =>
 /**
  * Egress proxy rules from the panel GitLab forges (all but those with `packages: false`): GET and
  * HEAD requests to their package registries get `Authorization: Bearer <token>` with the forge
- * credential's current token. Then every `egress-secret` credential's replacement rules. Forges
- * and secrets that cannot be read are left out.
+ * credential's current token; forges with `cachePackages` add a private cache rule for their
+ * package files. Then every `egress-secret` credential's replacement rules. Forges and secrets
+ * that cannot be read are left out.
  */
 async function egressRules(
   deps: Pick<ServerDeps, 'store' | 'credentials'>,
   log: (line: string) => void = () => {},
-): Promise<EgressRule[]> {
+): Promise<EgressRulesResponse> {
   const forges = (await deps.store.config?.list('forge')) ?? []
   const rules: EgressRule[] = []
+  const cache: EgressCacheRule[] = []
   for (const forge of forges) {
     if (forge.data.packages === false || forge.data.kind !== 'gitlab') continue
     try {
@@ -41,6 +44,8 @@ async function egressRules(
         methods: ['GET', 'HEAD'],
         headers: { Authorization: `Bearer ${token}` },
       })
+      if (forge.data.cachePackages === true)
+        cache.push({ kind: 'packages', ...gitlabPackageFiles(forge.data.url), private: true })
     } catch (error) {
       log(`egress: forge ${forge.id}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -55,7 +60,7 @@ async function egressRules(
       )
     }
   }
-  return rules
+  return { rules, ...(cache.length ? { cache } : {}) }
 }
 
 /** The reserved host on which the egress proxy answers about its cache instead of forwarding. */
@@ -159,7 +164,7 @@ export function egressRoutes(deps: ServerDeps) {
     if (!sameSecret(given, resolveSecret(secret)))
       throw new HTTPException(401, { message: 'unauthorized' })
     c.header('cache-control', 'no-store')
-    return c.json<EgressRulesResponse>({ rules: await egressRules(deps, console.error) })
+    return c.json<EgressRulesResponse>(await egressRules(deps, console.error))
   })
 
   app.get('/egress/cache', async (c) => {
