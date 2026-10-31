@@ -149,13 +149,17 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   analysis: AnalysisKind<any>
   /** `repo`: one repository at a time. `group`: all repositories of a config group at once. */
   scope: 'repo' | 'group'
+  /**
+   * `true`: the runner must provide it. `'optional'`: provided when the runner can (the task
+   * engine always can; the CLI provides neither forge nor history), and `run` copes without it.
+   */
   needs: {
     checkout?: boolean
-    forge?: boolean
+    forge?: boolean | 'optional'
     /** `context.forgeAccess`: the forge token for tools that call the forge themselves. */
-    forgeAccess?: boolean
+    forgeAccess?: boolean | 'optional'
     agent?: 'required' | 'optional'
-    history?: boolean
+    history?: boolean | 'optional'
   }
   /**
    * The run changes repositories: pushes branches, commits, opens or updates merge requests. The

@@ -45,7 +45,16 @@ function context(root: string, options: Partial<Options>, previous: BundleRecord
     runner,
     options: bundleAnalyzer.options.parse(options),
     forge: { npmRegistry: (repo: string) => `https://gitlab.test/api/v4/projects/${repo}/npm/` },
-    forgeAccess: { kind: 'gitlab', url: 'https://gitlab.test', token: 'secret', readOnly: true },
+    forgeAccess: {
+      kind: 'gitlab',
+      url: 'https://gitlab.test',
+      token: 'secret',
+      readOnly: true,
+      fetch: (url: string, init: RequestInit) => {
+        lines.push(`forge fetch ${url}`)
+        return globalThis.fetch(url, init)
+      },
+    },
     history: {
       analyses: {
         list: () => Promise.resolve(previous.map((data, index) => ({ id: `p${index}`, data }))),
@@ -97,7 +106,7 @@ test('measures published package versions from the registry the checkout names',
   const measured: BundleRecordData = {
     targets: [{ name: '@acme/ui', source: 'package', version: '1.0.0', status: 'ok' }],
   }
-  const { value, calls } = context(root, { history: 5 }, [measured])
+  const { value, calls, lines } = context(root, { history: 5 }, [measured])
   const { data } = await bundleAnalyzer.run(value)
   const targets = data.targets
   expect(targets.map((target) => [target.name, target.version, target.status])).toEqual([
@@ -108,6 +117,7 @@ test('measures published package versions from the registry the checkout names',
   expect(targets[0]?.data?.assets.map((asset) => asset.file)).toEqual(['index.js'])
   expect(targets[0]?.data?.entrypoints.map((entry) => entry.name)).toEqual(['.'])
   expect(requests.every((request) => request.auth === 'Bearer secret')).toBeTrue()
+  expect(lines.filter((line) => line.startsWith('forge fetch')).length).toBe(requests.length)
   expect(calls).toEqual([])
 })
 
@@ -143,4 +153,24 @@ test('builds an app with several entrypoints and keeps a failed build as a gap',
     'desktop',
     'mobile',
   ])
+})
+
+test('a build script calling a bundler makes a target without a standard config file', async () => {
+  const root = await checkout({
+    'package.json': JSON.stringify({
+      name: 'game',
+      private: true,
+      scripts: { build: 'NODE_ENV=production webpack --config webpack.mjs' },
+    }),
+    'package-lock.json': '{}',
+    'packages/tool/package.json': JSON.stringify({
+      name: 'tool',
+      private: true,
+      scripts: { build: 'tsc -p .' },
+    }),
+  })
+  const { value, calls } = context(root, { install: false, source: 'build' })
+  const { data } = await bundleAnalyzer.run(value)
+  expect(data.targets.map((target) => target.name)).toEqual(['app'])
+  expect(calls[0]?.command).toEqual(['sh', '-c', 'npm run build'])
 })

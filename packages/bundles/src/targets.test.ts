@@ -159,3 +159,63 @@ test('a failing build or missing output becomes a failed target', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+const version = (value: string): BundleTarget => ({
+  name: 'lib',
+  source: 'package',
+  version: value,
+  status: 'ok',
+  data: data(1),
+})
+
+test('package versions without publish times follow semantic version order', () => {
+  const series = bundleSeries([
+    {
+      id: 'r1',
+      createdAt: '2026-01-01T00:00:00Z',
+      data: { targets: [version('1.10.0'), version('1.9.0'), version('1.10.0-beta.2')] },
+    },
+  ])
+  const points = series[0]?.points ?? []
+  expect(points.map((point) => point.version)).toEqual(['1.9.0', '1.10.0-beta.2', '1.10.0'])
+  expect(points[0]?.at).toBeUndefined()
+  expect(points[0]?.measuredAt).toBe('2026-01-01T00:00:00Z')
+  expect(
+    findTargetPoint(
+      [
+        {
+          id: 'r1',
+          createdAt: '2026-01-01T00:00:00Z',
+          data: { targets: [version('1.10.0'), version('1.9.0')] },
+        },
+      ],
+      { name: 'lib' },
+    )?.current.target.version,
+  ).toBe('1.10.0')
+})
+
+test('precompressed copies and webpack stats reports are not shipped assets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-precompressed-'))
+  try {
+    await mkdir(join(dir, 'build/frontend/scripts'), { recursive: true })
+    await mkdir(join(dir, 'build/reports/webpack-stats'), { recursive: true })
+    await writeFile(
+      join(dir, 'build/frontend/game.html'),
+      '<script defer src="/scripts/game.js"></script>',
+    )
+    await writeFile(join(dir, 'build/frontend/scripts/game.js'), 'console.log("game")\n')
+    await writeFile(join(dir, 'build/frontend/scripts/game.js.gz'), 'gz')
+    await writeFile(join(dir, 'build/reports/webpack-stats/game.json'), '{}')
+    const target = await analyzeBuildTarget({ name: 'app', dir, dist: 'build' })
+    expect(target.data?.assets.map((asset) => asset.file)).toEqual([
+      'frontend/game.html',
+      'frontend/scripts/game.js',
+    ])
+    expect(target.data?.entrypoints[0]?.initial.toSorted()).toEqual([
+      'frontend/game.html',
+      'frontend/scripts/game.js',
+    ])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

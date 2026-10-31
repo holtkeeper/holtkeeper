@@ -657,7 +657,12 @@ export interface JobAnalyzerView {
   label: string
   /** `repo`: queued per repository; `group`: once per config group. */
   scope: 'repo' | 'group'
-  needs: { checkout?: boolean; forge?: boolean; agent?: 'required' | 'optional'; history?: boolean }
+  needs: {
+    checkout?: boolean
+    forge?: boolean | 'optional'
+    agent?: 'required' | 'optional'
+    history?: boolean | 'optional'
+  }
   schema: unknown
   presets?: SettingPresetView[]
 }

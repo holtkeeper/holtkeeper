@@ -88,3 +88,31 @@ test('a broken manifest becomes a failed target', async () => {
   expect(target.status).toBe('failed')
   expect(target.error).toBeString()
 })
+
+test('explicit subpaths come before pattern expansions under the cap', () => {
+  const icons = Array.from({ length: 150 }, (_, index) => `dist/icons/i${index}.js`)
+  const entries = packageEntries(
+    { exports: { './icons/*': './dist/icons/*.js', '.': './dist/index.js' } },
+    new Set(['dist/index.js', ...icons]),
+  )
+  expect(entries).toHaveLength(100)
+  expect(entries[0]?.name).toBe('.')
+})
+
+test('packages without declared entries are measured by their modules nothing else imports', async () => {
+  const target = await analyzePackage({
+    name: 'hooks',
+    version: '0.4.3',
+    files: files({
+      'package.json': JSON.stringify({ name: 'hooks', version: '0.4.3' }),
+      'useTabKey.js':
+        "import { KEY } from './registry/constants.js'\nexport const useTabKey = () => KEY\n",
+      'registry/constants.js': "export const KEY = 'tab'\n",
+      'registry/index.js': "export * from './constants.js'\n",
+    }),
+  })
+  expect(target.data?.entrypoints.map((entry) => [entry.name, entry.initial.toSorted()])).toEqual([
+    ['./registry', ['registry/constants.js', 'registry/index.js']],
+    ['./useTabKey', ['registry/constants.js', 'useTabKey.js']],
+  ])
+})

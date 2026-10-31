@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { type BundleData, type Sizes, bundleDataSchema } from './data.ts'
+import { compareVersions } from './version.ts'
 
 /** Where a target's files came from: a build of the checkout or a package published to a registry. */
 export type TargetSource = 'build' | 'package'
@@ -26,7 +27,10 @@ export interface BundleTarget {
   source: TargetSource
   /** Package version; absent for builds. */
   version?: string
-  /** When the package version was published (ISO 8601); builds use the record's time. */
+  /**
+   * When the package version was published (ISO 8601), when the registry says (GitLab's does
+   * not); builds use the record's time.
+   */
   at?: string
   status: 'ok' | 'failed'
   /** Last lines of the failure, for `failed` targets. */
@@ -115,8 +119,10 @@ export interface BundlePoint {
   analysisId: string
   ref?: string
   version?: string
-  /** Publish time for package versions, else the record's time. */
-  at: string
+  /** Publish time of a package version when the registry knows it; the record's time for builds. */
+  at?: string
+  /** When the record measuring it was made. */
+  measuredAt: string
   status: 'ok' | 'failed'
   error?: string
   total?: Sizes
@@ -152,7 +158,8 @@ function pointOf(record: BundleRecordLike, target: BundleTarget): BundlePoint {
     analysisId: record.id,
     ...(record.ref ? { ref: record.ref } : {}),
     ...(target.version ? { version: target.version } : {}),
-    at: target.at ?? record.createdAt,
+    ...(target.at || target.source === 'build' ? { at: target.at ?? record.createdAt } : {}),
+    measuredAt: record.createdAt,
     status: target.status,
     ...(target.error ? { error: target.error } : {}),
     ...(data
@@ -177,10 +184,31 @@ export interface LocatedTarget {
   target: BundleTarget
 }
 
+/** History order: package versions by semantic version, builds by time. */
+const historyOrder = (
+  a: { version?: string | undefined; at: string; id: string },
+  b: { version?: string | undefined; at: string; id: string },
+) =>
+  (a.version && b.version ? compareVersions(a.version, b.version) : 0) ||
+  a.at.localeCompare(b.at) ||
+  a.id.localeCompare(b.id)
+
+const orderOfPoint = (point: BundlePoint) => ({
+  version: point.version,
+  at: point.at ?? point.measuredAt,
+  id: point.analysisId,
+})
+
+const orderOfTarget = ({ record, target }: LocatedTarget) => ({
+  version: target.version,
+  at: target.at ?? record.createdAt,
+  id: record.id,
+})
+
 /**
  * Every target of the records as a history per target name, sorted by name. A package version
  * measured by several records counts once, from the newest record; builds get one point per
- * record. Points are ordered by `at`.
+ * record. Package versions are ordered by semantic version, builds by time.
  */
 export function bundleSeries(records: BundleRecordLike[]): BundleSeries[] {
   const located = locateTargets(records)
@@ -195,9 +223,7 @@ export function bundleSeries(records: BundleRecordLike[]): BundleSeries[] {
     series.set(target.name, entry)
   }
   for (const entry of series.values())
-    entry.points.sort(
-      (a, b) => a.at.localeCompare(b.at) || a.analysisId.localeCompare(b.analysisId),
-    )
+    entry.points.sort((a, b) => historyOrder(orderOfPoint(a), orderOfPoint(b)))
   return [...series.values()].toSorted((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -227,9 +253,7 @@ export function findTargetPoint(
 ): { current: LocatedTarget; previous?: LocatedTarget } | undefined {
   const located = [...locateTargets(records).values()]
     .filter(({ target }) => target.name === query.name)
-    .toSorted((a, b) =>
-      (a.target.at ?? a.record.createdAt).localeCompare(b.target.at ?? b.record.createdAt),
-    )
+    .toSorted((a, b) => historyOrder(orderOfTarget(a), orderOfTarget(b)))
   const index = query.version
     ? located.findIndex(({ target }) => target.version === query.version)
     : query.analysisId

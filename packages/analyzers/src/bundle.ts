@@ -19,6 +19,7 @@ import {
   bundleAnalysis,
   bundleTargetSchema,
   bundleTargets,
+  compareVersions,
   isBundleAnalysisData,
   targetKey,
 } from '@holtkeeper/bundles'
@@ -29,6 +30,8 @@ import { z } from 'zod'
 const bundlerConfigs = ['vite', 'webpack', 'rspack', 'rsbuild', 'rollup'].flatMap((tool) =>
   ['ts', 'mts', 'js', 'mjs', 'cjs'].map((extension) => `${tool}.config.${extension}`),
 )
+
+const bundlerCommand = /(?:^|[\s;&|(])(?:vite|webpack|rspack|rsbuild|rollup)(?:\s|$)/
 
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
 const BUILD_TIMEOUT_MS = 20 * 60 * 1000
@@ -116,12 +119,14 @@ async function buildTargets(root: string, options: BundleOptions): Promise<Build
     ]
   const found: BuildTarget[] = []
   for (const manifest of await findPackages(root)) {
-    if (!manifest.private && manifest.dir !== '.') continue
+    if (!manifest.private && (manifest.dir !== '.' || manifest.version)) continue
     const dir = join(root, manifest.dir)
-    if (!bundlerConfigs.some((file) => existsSync(join(dir, file)))) continue
     // oxlint-disable-next-line no-await-in-loop -- a few manifests, read one after another
     const scripts = (await readJson(join(dir, 'package.json')))['scripts']
-    if (!isRecord(scripts) || typeof scripts['build'] !== 'string') continue
+    const build = isRecord(scripts) ? scripts['build'] : undefined
+    if (typeof build !== 'string') continue
+    if (!bundlerConfigs.some((file) => existsSync(join(dir, file))) && !bundlerCommand.test(build))
+      continue
     found.push({ name: manifest.dir === '.' ? APP_TARGET : manifest.name, dir: manifest.dir })
   }
   return found
@@ -228,11 +233,15 @@ function registryClients(context: Context) {
     }
   })()
   const token = context.forgeAccess?.token
+  const forgeFetch = context.forgeAccess?.fetch
+  const onForge = (target: string) => Boolean(forgeHost) && new URL(target).host === forgeHost
   return (url: string) => {
     let client = clients.get(url)
     if (!client) {
       client = npmRegistry({
         url: url.replace(/\/$/, ''),
+        fetch: (target, init) =>
+          forgeFetch && onForge(target) ? forgeFetch(target, init ?? {}) : fetch(target, init),
         maxTarballBytes: 200_000_000,
         archive: {
           keep: () => true,
@@ -241,9 +250,7 @@ function registryClients(context: Context) {
           maxTotalBytes: 500_000_000,
         },
         headers: (target) =>
-          token && forgeHost && new URL(target).host === forgeHost
-            ? { authorization: `Bearer ${token}` }
-            : undefined,
+          token && onForge(target) ? { authorization: `Bearer ${token}` } : undefined,
       })
       clients.set(url, client)
     }
@@ -309,13 +316,10 @@ async function measurePackages(context: Context, root: string): Promise<BundleTa
           const older = library.versions
             .filter(
               (item) =>
-                item.version !== manifest.version &&
-                item.publishedAt &&
-                current?.publishedAt &&
-                item.publishedAt < current.publishedAt &&
+                compareVersions(item.version, manifest.version ?? '') < 0 &&
                 (options.includePrereleases || !item.version.includes('-')),
             )
-            .toSorted((a, b) => (b.publishedAt ?? '').localeCompare(a.publishedAt ?? ''))
+            .toSorted((a, b) => compareVersions(b.version, a.version))
             .slice(0, options.history)
           return [current, ...older].flatMap((item) =>
             item && !done.has(`${manifest.name}@${item.version}`)
@@ -382,7 +386,7 @@ export const bundleAnalyzer = defineAnalyzer({
   kind: 'bundle',
   analysis: bundleAnalysis,
   scope: 'repo',
-  needs: { checkout: true, forge: true, forgeAccess: true, history: true },
+  needs: { checkout: true, forge: 'optional', forgeAccess: 'optional', history: 'optional' },
   options: bundleOptions,
   appliesTo: anyOf(
     fileContains(

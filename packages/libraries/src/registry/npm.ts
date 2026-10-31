@@ -11,7 +11,7 @@ import type {
 } from '../types.ts'
 
 export interface NpmRegistryOptions {
-  fetch?: typeof fetch
+  fetch?: (input: string, init?: RequestInit) => Promise<Response>
   /** Default `https://registry.npmjs.org`. */
   url?: string
   /** Largest tarball downloaded. Default 50 MB. */

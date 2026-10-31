@@ -8,7 +8,7 @@ Each step is a separate export and can be replaced.
 
 1. **Build** (optional) — `buildProject({ dir, command, runner?, env?, signal?, timeoutMs? })` runs the command the caller chooses (e.g. `['bun', 'run', 'build']`) through a `CommandRunner` from `@holtkeeper/exec` and throws `CommandError` on failure.
 2. **Entrypoints** — an `EntrypointResolver` turns the dist directory into `{ name, initial, lazy }[]`. `followImports` then completes the lists by scanning ES module `import` / `export from` (initial) and `import()` (lazy) in the JS files.
-3. **Measure** — every file in dist except `defaultIgnore` (`**/*.map`, `.vite/**`, `stats.json`, `asset-manifest.json`) and `ignore` globs gets a kind (`js`, `css`, `html`, `image`, `font`, `other`), raw size, gzip (level 9) and brotli (quality 11) size.
+3. **Measure** — every file in dist except `defaultIgnore` (`**/*.map`, `.vite/**`, `**/stats.json`, `**/webpack-stats/**`, `asset-manifest.json`), precompressed copies (`x.js.gz`, `x.js.br` next to `x.js`) and `ignore` globs gets a kind (`js`, `css`, `html`, `image`, `font`, `other`), raw size, gzip (level 9) and brotli (quality 11) size.
 4. **Names** — `normalizeAssetNames` removes content hashes so assets match across builds (`assets/index-B3x9kQz1.js` → `assets/index.js`, `main.3f2a1b9c.css` → `main.css`). Hashes made only of lowercase letters are recognised by learning the hash length and alphabet from the rest of the build. When two files still share a name (`chunk-a.js`, `chunk-b.js`), each gets the first source of its source map: `chunk.js [react]`, `chunk.js [src/lazy.ts]`. Pass `normalizeName` to use your own rule.
 5. **Attribution** — source maps of JS and CSS split each asset's bytes between original sources, which `sourceOrigin` maps to npm packages or app modules.
 6. **Compare and report** — `compareBundles(previous, current)` diffs two results; `bundleAnalysis` turns them into a `Report`.
@@ -35,7 +35,7 @@ Without `entries` or `resolver`, `analyzeBundle` tries `defaultResolvers()` in o
 
 - `viteManifestResolver()` — `.vite/manifest.json` or `manifest.json`: each `isEntry` chunk with its CSS and static imports, recursively; `dynamicImports` become lazy. HTML entries (`src: 'index.html'`) include the page.
 - `webpackStatsResolver()` — `stats.json` `entrypoints[name].assets`, lazy chunks through `chunks[].children`; or `asset-manifest.json` with an `entrypoints` list.
-- `htmlResolver()` — one entrypoint per HTML page (`index.html` → `index`, `admin/index.html` → `admin`): the page, `<script src>`, `<link rel=stylesheet|modulepreload|preload>` and imports in inline module scripts. Root-relative URLs with a deploy base (`/app/assets/x.js`) are matched to dist files.
+- `htmlResolver()` — one entrypoint per HTML page (`index.html` → `index`, `admin/index.html` → `admin`): the page, `<script src>`, `<link rel=stylesheet|modulepreload|preload>` and imports in inline module scripts. Root-relative URLs with a deploy base (`/app/assets/x.js`) are matched to dist files, also relative to the page's folder when the site root is a subfolder of dist (`frontend/game.html` loading `/scripts/x.js`).
 - `importGraphResolver()` — every JS file that no other JS file imports.
 
 Configure entrypoints explicitly with `entries: [{ name: 'admin', globs: ['assets/admin-*.js'] }]`, or pass any `resolver`; combine your own with `firstEntrypoints(...resolvers)`. Set `followImports: false` when the resolver already returns complete lists.

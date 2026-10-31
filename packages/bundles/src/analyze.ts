@@ -30,7 +30,13 @@ import {
 import { attributeSourceMap } from './sourcemap.ts'
 
 /** Files that describe the build rather than ship with it. */
-export const defaultIgnore = ['**/*.map', '.vite/**', 'stats.json', 'asset-manifest.json']
+export const defaultIgnore = [
+  '**/*.map',
+  '.vite/**',
+  '**/stats.json',
+  '**/webpack-stats/**',
+  'asset-manifest.json',
+]
 
 /** Resolvers tried in order when no entries or resolver are given. */
 export const defaultResolvers = (): EntrypointResolver[] => [
@@ -168,7 +174,12 @@ export async function analyzeBundle(options: AnalyzeBundleOptions): Promise<Bund
   const ignore = [...defaultIgnore, ...(options.ignore ?? [])].map((glob) => new Bun.Glob(glob))
 
   const allFiles = await listFiles(distDir)
-  const shipped = allFiles.filter((file) => !ignore.some((glob) => glob.match(file)))
+  const present = new Set(allFiles)
+  const shipped = allFiles.filter(
+    (file) =>
+      !ignore.some((glob) => glob.match(file)) &&
+      !(/\.(?:gz|br)$/.test(file) && present.has(file.replace(/\.(?:gz|br)$/, ''))),
+  )
   const learnedNames = options.normalizeName ? undefined : normalizeAssetNames(shipped)
   const normalize = (file: string) =>
     options.normalizeName?.(file) ?? learnedNames?.get(file) ?? file

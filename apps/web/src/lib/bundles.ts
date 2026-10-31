@@ -10,7 +10,7 @@ const MAX_ENTRY_LINES = 6
 export function pointLabel(point: BundlePoint): string {
   if (point.version) return point.version
   if (point.ref) return /^[0-9a-f]{40}$/.test(point.ref) ? point.ref.slice(0, 8) : point.ref
-  return point.at.slice(0, 10)
+  return (point.at ?? point.measuredAt).slice(0, 10)
 }
 
 /** Search parameters that select a point: the version for packages, the record for builds. */
@@ -73,7 +73,8 @@ export function chartEntrypoints(series: BundleSeries, compression: Compression)
 export interface ChartRow {
   key: string
   label: string
-  at: string
+  /** Publish or build time, when known. */
+  at?: string
   status: BundlePoint['status']
   total: number | null
   [entrypoint: `entry:${string}`]: number | null
@@ -89,7 +90,7 @@ export function chartRows(
     const row: ChartRow = {
       key: point.version ?? point.analysisId,
       label: pointLabel(point),
-      at: point.at,
+      ...(point.at ? { at: point.at } : {}),
       status: point.status,
       total: point.total?.[compression] ?? null,
     }

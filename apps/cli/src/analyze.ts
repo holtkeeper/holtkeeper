@@ -45,7 +45,11 @@ export async function runAnalyzer({ analyzer, dir, values, agent, ref }: RunAnal
     throw new UsageError(`${analyzer.kind} runs across a group; use the server's task engine`)
   if (analyzer.needs.agent === 'required' && !agent)
     throw new UsageError(`${analyzer.kind} needs an LLM: set ANTHROPIC_API_KEY`)
-  if (analyzer.needs.forge || analyzer.needs.history) {
+  if (
+    analyzer.needs.forge === true ||
+    analyzer.needs.forgeAccess === true ||
+    analyzer.needs.history === true
+  ) {
     throw new UsageError(
       `${analyzer.kind} needs forge access or history; run it through the server`,
     )

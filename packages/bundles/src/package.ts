@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path'
 
 import { analyzeBundle } from './analyze.ts'
 import type { Entrypoint, EntrypointResolver } from './entrypoints.ts'
+import { entryNameOf } from './files.ts'
+import { importGraphResolver } from './resolvers.ts'
 import type { BundleTarget, PackageInfo } from './targets.ts'
 
 /** Files of a package archive that never reach a bundle, left out of its assets. */
@@ -64,7 +66,7 @@ const escape = (text: string) => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
 /**
  * Entry files of a package by subpath: what a browser bundler resolves for each `exports`
  * subpath (conditions `browser`, `import`, `module`, `default`, `require`, `node`; never `types`),
- * with `*` patterns expanded over the archive, at most 100. Without `exports`: `module`, a string
+ * then `*` patterns expanded over the archive, at most 100 in all. Without `exports`: `module`, a string
  * `browser`, `main`, else `index.js`. Subpaths whose file is missing are left out.
  */
 export function packageEntries(
@@ -82,14 +84,15 @@ export function packageEntries(
       isRecord(exports) && Object.keys(exports).some((key) => key.startsWith('.'))
         ? exports
         : { '.': exports }
+    const patterns: [string, string][] = []
     for (const [subpath, value] of Object.entries(map)) {
       if (!subpath.startsWith('.') || subpath === './package.json') continue
       const target = pick(value)
       if (!target) continue
-      if (!subpath.includes('*') || !target.includes('*')) {
-        add(subpath, target)
-        continue
-      }
+      if (subpath.includes('*') && target.includes('*')) patterns.push([subpath, target])
+      else add(subpath, target)
+    }
+    for (const [subpath, target] of patterns) {
       const pattern = new RegExp(`^${escape(clean(target)).replace('*', '(.+)')}$`)
       for (const file of files) {
         const match = pattern.exec(file)?.[1]
@@ -106,13 +109,23 @@ export function packageEntries(
   return entries
 }
 
-/** A resolver that answers `packageEntries` for whatever dist directory it is asked about. */
+/**
+ * `packageEntries`, or for packages that declare no entry and ship no `index.js` (imported by
+ * deep paths such as `pkg/useThing`) every JS module no other module of the package imports.
+ */
 export const packageResolver = (
   manifest: Record<string, unknown>,
   files: ReadonlySet<string>,
 ): EntrypointResolver => ({
   name: 'package-exports',
-  resolve: () => Promise.resolve(packageEntries(manifest, files)),
+  async resolve(distDir) {
+    const entries = packageEntries(manifest, files)
+    if (entries.length) return entries
+    const roots = (await importGraphResolver().resolve(distDir)) ?? []
+    return roots
+      .slice(0, MAX_ENTRIES)
+      .map((entry) => ({ ...entry, name: `./${entryNameOf(entry.initial[0] ?? entry.name)}` }))
+  },
 })
 
 const names = (value: unknown) => (isRecord(value) ? Object.keys(value).toSorted() : [])

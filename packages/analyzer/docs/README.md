@@ -23,6 +23,10 @@ defineAnalyzer({
 })
 ```
 
+## Optional needs
+
+`forge`, `forgeAccess` and `history` take `true` (the runner must provide it) or `'optional'` (provided when the runner can, and `run` copes without it). The task engine provides all three; for `'optional'` forge access it skips a forge that gives no token instead of failing the job. The CLI provides none of them, so it refuses analyzers that need one with `true` and runs those that only take them as `'optional'`.
+
 ## Forge access
 
 `needs.forgeAccess` gives `context.forgeAccess` (`ForgeAccess`): the forge's `kind`, base `url` and API `token`, its `fetch` with the per-token rate limits (send the tool's API calls through it), the forge's SSH signing key with its identity when it has one, and `readOnly` for repositories Holtkeeper must not change. It is for analyzers that hand the forge to an external tool, such as [@holtkeeper/renovate](../../renovate/docs/README.md); everything else uses `context.forge`. Pass the token to the tool through its environment, never in files or logs, and push nothing when `readOnly` is set.

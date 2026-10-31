@@ -258,19 +258,21 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
       if (analyzer.needs.forgeAccess) {
         const definition = definitionOf(job.repo.forge)
         const token = gitCredentialsOf(definition)?.password
-        if (!token) throw new Error(`forge ${job.repo.forge} gives no token to external tools`)
-        const key = await factory.gitKeyFor?.(job.repo.forge)
-        context.forgeAccess = {
-          kind: definition.kind,
-          url: definition.url,
-          token,
-          ...(definition.fetch && { fetch: definition.fetch }),
-          ...(key?.identity &&
-            allows(key.usage, 'signing') && {
-              signing: { privateKey: key.privateKey, ...key.identity },
-            }),
-          readOnly: Boolean(await factory.readOnly?.(job.repo)),
-        }
+        if (!token && analyzer.needs.forgeAccess === true)
+          throw new Error(`forge ${job.repo.forge} gives no token to external tools`)
+        const key = token ? await factory.gitKeyFor?.(job.repo.forge) : undefined
+        if (token)
+          context.forgeAccess = {
+            kind: definition.kind,
+            url: definition.url,
+            token,
+            ...(definition.fetch && { fetch: definition.fetch }),
+            ...(key?.identity &&
+              allows(key.usage, 'signing') && {
+                signing: { privateKey: key.privateKey, ...key.identity },
+              }),
+            readOnly: Boolean(await factory.readOnly?.(job.repo)),
+          }
       }
       if (analyzer.needs.history)
         context.history = {

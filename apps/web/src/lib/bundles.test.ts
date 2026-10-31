@@ -10,6 +10,7 @@ const point = (id: string, gzip: number | undefined, entries: Record<string, num
   ({
     analysisId: id,
     at: `2026-01-0${id}T00:00:00Z`,
+    measuredAt: `2026-01-0${id}T00:00:00Z`,
     status: gzip === undefined ? 'failed' : 'ok',
     ...(gzip === undefined
       ? { error: 'build failed' }

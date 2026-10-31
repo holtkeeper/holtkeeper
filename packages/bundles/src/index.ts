@@ -82,3 +82,4 @@ export {
   targetKey,
   totalSizes,
 } from './targets.ts'
+export { compareVersions } from './version.ts'

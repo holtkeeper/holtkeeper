@@ -13,7 +13,8 @@ export async function listFiles(dir: string): Promise<string[]> {
 /**
  * Turns a URL found in HTML, a manifest or an import into a dist-relative file, or `undefined`
  * when it is external or not part of the build. Root-relative URLs may carry a deploy base
- * (`/app/assets/x.js`), so leading segments are dropped until a known file matches.
+ * (`/app/assets/x.js`), so leading segments are dropped until a known file matches; the site
+ * root may also be the referring file's folder (`frontend/page.html` loading `/scripts/x.js`).
  */
 export function toDistPath(
   ref: string,
@@ -31,6 +32,8 @@ export function toDistPath(
     for (let start = 0; start < parts.length; start++) {
       const candidate = parts.slice(start).join('/')
       if (files.has(candidate)) return candidate
+      const local = fromDir ? `${fromDir}/${candidate}` : undefined
+      if (local && files.has(local)) return local
     }
     return undefined
   }

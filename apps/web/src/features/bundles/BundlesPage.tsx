@@ -207,7 +207,9 @@ function HistoryChart({
                   <div className="min-w-48 rounded-xl border border-border bg-overlay p-3 text-xs shadow-overlay">
                     <div className="mb-2 font-medium">
                       {row.label}
-                      <span className="ml-2 text-muted">{row.at.slice(0, 10)}</span>
+                      {row.at ? (
+                        <span className="ml-2 text-muted">{row.at.slice(0, 10)}</span>
+                      ) : null}
                     </div>
                     {row.status === 'failed' ? (
                       <div className="text-danger">Not measured</div>
@@ -314,7 +316,7 @@ function PointTable({
                   </span>
                 ) : null}
               </Td>
-              <Td className="text-muted">{point.at.slice(0, 10)}</Td>
+              <Td className="text-muted">{point.at ? point.at.slice(0, 10) : '—'}</Td>
               <Td align="right" className="tabular">
                 {size === undefined ? '—' : bytes(size)}
               </Td>
