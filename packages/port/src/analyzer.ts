@@ -91,6 +91,7 @@ export function createPortAnalyzer(dependencies: PortAnalyzerDependencies = {}) 
     kind: 'port',
     analysis: portAnalysis,
     scope: 'group',
+    exclusive: true,
     needs: { forge: true, agent: 'optional' },
     options: portOptionsSchema,
     flags: [

@@ -73,6 +73,7 @@ export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependenc
     kind: 'propagate',
     analysis: propagationAnalysis,
     scope: 'group',
+    exclusive: true,
     needs: { forge: true, agent: 'optional' },
     options: propagateOptionsSchema,
     flags: [

@@ -17,7 +17,7 @@ plan (forge API) ─► checkout ─► bump ─► verify ─┬─ pass ──
 
 ## Analyzer
 
-`propagateAnalyzer` (kind `propagate`, analysis `propagation`, scope `group`, needs `forge`, agent `optional`) and `createPropagateAnalyzer({ registry?, steps? })` to inject a registry or replace any step. It needs `context.checkout` and `context.repos` from the runner.
+`propagateAnalyzer` (kind `propagate`, analysis `propagation`, scope `group`, `exclusive`, needs `forge`, agent `optional`) and `createPropagateAnalyzer({ registry?, steps? })` to inject a registry or replace any step. It needs `context.checkout` and `context.repos` from the runner.
 
 | Option                        | Default                         | Meaning                                                                               |
 | ----------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- |

@@ -155,6 +155,9 @@ function memoryJobs(): JobStore {
   const order = new Map<string, number>()
   let seq = 0
 
+  const ahead = (a: Job, b: Job) =>
+    a.runAfter.localeCompare(b.runAfter) || (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)
+
   const running = (id: string) => {
     const job = jobs.get(id)
     return job?.status === 'running' ? job : undefined
@@ -183,19 +186,23 @@ function memoryJobs(): JobStore {
       order.set(job.id, seq++)
       return clone(job)
     },
-    async claim(workerId, now) {
-      const busy = [...jobs.values()].filter((job) => job.status === 'running')
-      const next = [...jobs.values()]
-        .filter(
-          (job) =>
-            job.status === 'queued' &&
-            job.runAfter <= now &&
-            !busy.some((other) => sameRepo(other.repo, job.repo)),
+    async claim(workerId, now, { exclusive = [], after = {} } = {}) {
+      const all = [...jobs.values()]
+      const blocked = (job: Job) =>
+        all.some(
+          (other) =>
+            other !== job &&
+            sameRepo(other.repo, job.repo) &&
+            ((other.status === 'running' &&
+              (other.analyzer === job.analyzer || exclusive.includes(job.analyzer))) ||
+              ((exclusive.includes(other.analyzer) ||
+                (after[job.analyzer] ?? []).includes(other.analyzer)) &&
+                (other.status === 'running' ||
+                  (other.status === 'queued' && ahead(other, job) < 0)))),
         )
-        .toSorted(
-          (a, b) =>
-            a.runAfter.localeCompare(b.runAfter) || (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0),
-        )[0]
+      const next = all
+        .filter((job) => job.status === 'queued' && job.runAfter <= now && !blocked(job))
+        .toSorted(ahead)[0]
       if (!next) return undefined
       next.status = 'running'
       next.attempts += 1

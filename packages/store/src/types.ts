@@ -281,18 +281,34 @@ export interface JobQuery {
   limit?: number
 }
 
+/** How jobs of one repository may run side by side, by analyzer kind; see `JobStore.claim`. */
+export interface ClaimRules {
+  /** Kinds whose jobs change their repository and so run alone on it. */
+  exclusive?: string[]
+  /**
+   * Per kind, the kinds whose results its jobs read: a job waits while a job of one of these kinds
+   * of its repository is running, or queued ahead of it in claim order.
+   */
+  after?: Record<string, string[]>
+}
+
 /**
- * The task queue. State changes are atomic: a job is claimed by at most one worker, and a
- * repository never has two running jobs at once. Methods that change a job return it as it is
- * afterwards, or `undefined` when it does not exist or was not in a state the change applies to.
+ * The task queue. State changes are atomic: a job is claimed by at most one worker, and the
+ * running jobs of a repository always satisfy the `ClaimRules` they were claimed under. Methods
+ * that change a job return it as it is afterwards, or `undefined` when it does not exist or was
+ * not in a state the change applies to.
  */
 export interface JobStore {
   enqueue(job: NewJob): Promise<Job>
   /**
-   * Takes the oldest queued job with `runAfter <= now` whose repository has no running job, marks
-   * it running for `workerId` and counts the attempt.
+   * Takes the first queued job in `(runAfter, enqueue order)` with `runAfter <= now` that may start
+   * next to the running jobs of its repository, marks it running for `workerId` and counts the
+   * attempt. A job may start unless its repository runs a job of the same analyzer, the job is
+   * exclusive and anything runs there, or an exclusive job or a job it comes `after` runs there or
+   * is queued ahead of it, so readers neither overtake nor starve an exclusive job. Without `rules`
+   * no kind is exclusive or ordered.
    */
-  claim(workerId: string, now: Timestamp): Promise<Job | undefined>
+  claim(workerId: string, now: Timestamp, rules?: ClaimRules): Promise<Job | undefined>
   /** Records that `workerId` still works on the job; `false` when it no longer runs it (canceled). */
   heartbeat(id: string, workerId: string, now: Timestamp): Promise<boolean>
   /** Marks a running job succeeded. */

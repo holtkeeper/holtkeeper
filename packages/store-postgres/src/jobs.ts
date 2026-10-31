@@ -5,8 +5,14 @@ import { SQL } from 'bun'
 import { type JobRow, toJob } from './rows.ts'
 import type { Db } from './tables.ts'
 
-/** How often `claim` retries after losing a race for a repository to another worker. */
+/** How often `claim` picks a new job after another worker started a conflicting one first. */
 const CLAIM_RETRIES = 5
+
+/** The key `pg_advisory_xact_lock` takes while starting a job of one repository. */
+const claimLockKey = (repo: { forge: string; path: string }) =>
+  `holtkeeper.claim:${repo.forge}:${repo.path}`
+
+class ClaimConflict extends Error {}
 
 /** Whether `error` is the server rejecting a row that breaks a unique index. */
 export const isUniqueViolation = (error: unknown) =>
@@ -16,15 +22,17 @@ export const isUniqueViolation = (error: unknown) =>
 export const statusList = (status: string | string[] | undefined) =>
   status === undefined ? null : [status].flat()
 
-/**
- * The Postgres `JobStore`. `claim` is one statement that locks the oldest due job with
- * `FOR UPDATE SKIP LOCKED`, so concurrent workers never wait on or take the same row. The partial
- * unique index `jobs_one_running_per_repo` makes "one running job per repository" hold even when
- * two workers pick different jobs of one repository at the same moment: the later commit fails,
- * and `claim` retries with fresh data.
- */
 const one = (rows: JobRow[]) => (rows[0] ? toJob(rows[0]) : undefined)
 
+/**
+ * The Postgres `JobStore`. `claim` locks the first job that may start with `FOR UPDATE SKIP LOCKED`,
+ * so concurrent workers never wait on or take the same row, then takes a transaction-level
+ * advisory lock on the job's repository and starts the job only if it still may start. Workers
+ * starting jobs of one repository serialize on that lock and each sees what the previous one
+ * started, so the claim rules hold across processes; a worker whose job no longer may start rolls
+ * back and picks again. The partial unique index `jobs_one_running_per_analyzer` backs the
+ * one-running-job-per-analyzer rule.
+ */
 export function postgresJobs(db: () => Promise<Db>): JobStore {
   return {
     async enqueue(job) {
@@ -41,33 +49,52 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       if (!stored) throw new Error('job insert returned nothing')
       return stored
     },
-    async claim(workerId, now) {
+    async claim(workerId, now, { exclusive = [], after = {} } = {}) {
       const { sql, t } = await db()
-      for (let attempt = 0; ; attempt++) {
+      const startable = () => sql`
+        NOT EXISTS (
+          SELECT 1 FROM ${t.jobs} r
+          WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
+            AND (r.analyzer = j.analyzer
+              OR j.analyzer IN (SELECT jsonb_array_elements_text(${sql.json(exclusive)}::jsonb)))
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${t.jobs} d
+          WHERE d.repo_forge = j.repo_forge AND d.repo_path = j.repo_path
+            AND (d.analyzer IN (SELECT jsonb_array_elements_text(${sql.json(exclusive)}::jsonb))
+              OR d.analyzer IN (SELECT jsonb_array_elements_text(
+                COALESCE(${sql.json(after)}::jsonb -> j.analyzer, '[]'::jsonb))))
+            AND (d.status = 'running'
+              OR (d.status = 'queued' AND (d.run_after, d.seq) < (j.run_after, j.seq)))
+        )`
+      for (let attempt = 0; attempt <= CLAIM_RETRIES; attempt++) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- a retry runs only after the previous attempt lost a race
-          const rows: JobRow[] = await sql`
-            WITH next AS (
-              SELECT j.seq FROM ${t.jobs} j
-              WHERE j.status = 'queued' AND j.run_after <= ${now}::timestamptz
-                AND NOT EXISTS (
-                  SELECT 1 FROM ${t.jobs} r
-                  WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
-                )
+          return await sql.begin(async (tx) => {
+            const [next]: { id: string; repo_forge: string; repo_path: string }[] = await tx`
+              SELECT j.id, j.repo_forge, j.repo_path FROM ${t.jobs} j
+              WHERE j.status = 'queued' AND j.run_after <= ${now}::timestamptz AND ${startable()}
               ORDER BY j.run_after, j.seq
               LIMIT 1
-              FOR UPDATE SKIP LOCKED
-            )
-            UPDATE ${t.jobs} AS u SET status = 'running', attempts = u.attempts + 1,
-              worker_id = ${workerId}, started_at = ${now}::timestamptz,
-              heartbeat_at = ${now}::timestamptz, finished_at = NULL
-            FROM next WHERE u.seq = next.seq
-            RETURNING u.*`
-          return one(rows)
+              FOR UPDATE SKIP LOCKED`
+            if (!next) return undefined
+            const key = claimLockKey({ forge: next.repo_forge, path: next.repo_path })
+            await tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`
+            const rows: JobRow[] = await tx`
+              UPDATE ${t.jobs} AS j SET status = 'running', attempts = j.attempts + 1,
+                worker_id = ${workerId}, started_at = ${now}::timestamptz,
+                heartbeat_at = ${now}::timestamptz, finished_at = NULL
+              WHERE j.id = ${next.id} AND j.status = 'queued' AND ${startable()}
+              RETURNING j.*`
+            const claimed = one(rows)
+            if (!claimed) throw new ClaimConflict()
+            return claimed
+          })
         } catch (error) {
-          if (!isUniqueViolation(error) || attempt >= CLAIM_RETRIES) throw error
+          if (!(error instanceof ClaimConflict)) throw error
         }
       }
+      return undefined
     },
     async heartbeat(id, workerId, now) {
       const { sql, t } = await db()

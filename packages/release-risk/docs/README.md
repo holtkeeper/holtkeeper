@@ -4,7 +4,7 @@ Scores how risky a release is from analyses Holtkeeper already stored — change
 
 ## Analyzer
 
-`releaseRiskAnalyzer` — kind `release-risk`, scope `repo`, needs `history`, agent `optional`. Assessing a given ref, it is recorded at the time of that ref's changelog record, so past releases sort by release date.
+`releaseRiskAnalyzer` — kind `release-risk`, scope `repo`, needs `history`, agent `optional`, `after` `changelog`, `bundle`, `quality`, `depgraph` and `audit`: the queue starts it only once those jobs of its repository queued before it have ended. Assessing a given ref, it is recorded at the time of that ref's changelog record, so past releases sort by release date.
 
 Options (zod `releaseRiskOptions`):
 

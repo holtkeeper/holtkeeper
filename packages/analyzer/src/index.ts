@@ -129,6 +129,17 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
     agent?: 'required' | 'optional'
     history?: boolean
   }
+  /**
+   * The run changes repositories: pushes branches, commits, opens or updates merge requests. The
+   * queue runs such a job alone on its `repo` (the group for group analyzers); jobs of other
+   * analyzers of one repository run side by side.
+   */
+  exclusive?: boolean
+  /**
+   * Kinds whose results of the same `repo` the run reads from `history`. The queue starts its job
+   * only once jobs of these kinds of that repository queued ahead of it have ended.
+   */
+  after?: string[]
   /** Validates options from config or flags; numbers should use `z.coerce`. */
   options: z.ZodType<Options>
   flags?: AnalyzerFlag[]

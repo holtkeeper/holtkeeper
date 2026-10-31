@@ -1,6 +1,6 @@
 import type { AnalyzerArtifact, AnyAnalyzer } from '@holtkeeper/analyzer'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { AnalysisRecord, AnalysisStore, Job, JobStore } from '@holtkeeper/store'
+import type { AnalysisRecord, AnalysisStore, ClaimRules, Job, JobStore } from '@holtkeeper/store'
 
 import type { ContextFor } from './context.ts'
 
@@ -145,6 +145,14 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 export function createWorker(options: WorkerOptions): Worker {
   const { store, contextFor } = options
   const analyzers = new Map(options.analyzers.map((analyzer) => [analyzer.kind, analyzer]))
+  const rules: ClaimRules = {
+    exclusive: options.analyzers.filter((analyzer) => analyzer.exclusive).map((a) => a.kind),
+    after: Object.fromEntries(
+      options.analyzers.flatMap((analyzer) =>
+        analyzer.after ? [[analyzer.kind, analyzer.after]] : [],
+      ),
+    ),
+  }
   const now = options.now ?? (() => new Date())
   const at = () => now().toISOString()
   const workerId = options.workerId ?? `worker-${crypto.randomUUID().slice(0, 8)}`
@@ -362,7 +370,7 @@ export function createWorker(options: WorkerOptions): Worker {
 
   const claim = async () => {
     if (claimed >= maxJobs) return undefined
-    const job = await store.jobs.claim(workerId, at())
+    const job = await store.jobs.claim(workerId, at(), rules)
     if (job) claimed++
     return job
   }

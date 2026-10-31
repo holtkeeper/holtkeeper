@@ -36,6 +36,7 @@ export const releaseRiskAnalyzer = defineAnalyzer<ReleaseRiskData, ReleaseRiskOp
   kind: 'release-risk',
   analysis: releaseRiskAnalysis,
   scope: 'repo',
+  after: ['changelog', 'bundle', 'quality', 'depgraph', 'audit'],
   needs: { history: true, agent: 'optional' },
   options: releaseRiskOptions,
   flags: [

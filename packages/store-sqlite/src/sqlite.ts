@@ -620,7 +620,7 @@ function sqliteJobs(db: Database): JobStore {
        RETURNING *`,
     ),
     // One statement, so picking and taking the job is atomic even across processes.
-    claim: db.query<JobRow, [string, string]>(
+    claim: db.query<JobRow, [string, string, string, string]>(
       `UPDATE jobs SET status = 'running', attempts = attempts + 1, worker_id = ?1, started_at = ?2,
          heartbeat_at = ?2, finished_at = NULL
        WHERE id = (
@@ -629,6 +629,16 @@ function sqliteJobs(db: Database): JobStore {
            AND NOT EXISTS (
              SELECT 1 FROM jobs r
              WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
+               AND (r.analyzer = j.analyzer OR j.analyzer IN (SELECT value FROM json_each(?3)))
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM jobs d
+             WHERE d.repo_forge = j.repo_forge AND d.repo_path = j.repo_path
+               AND (d.analyzer IN (SELECT value FROM json_each(?3))
+                 OR d.analyzer IN (SELECT value FROM json_each(?4, '$.' || json_quote(j.analyzer))))
+               AND (d.status = 'running'
+                 OR (d.status = 'queued' AND (d.run_after < j.run_after
+                   OR (d.run_after = j.run_after AND d.seq < j.seq))))
            )
          ORDER BY j.run_after, j.seq LIMIT 1
        )
@@ -723,8 +733,8 @@ function sqliteJobs(db: Database): JobStore {
       if (!row) throw new Error('job insert returned nothing')
       return toJob(row)
     },
-    async claim(workerId, now) {
-      return one(sql.claim.get(workerId, now))
+    async claim(workerId, now, { exclusive = [], after = {} } = {}) {
+      return one(sql.claim.get(workerId, now, JSON.stringify(exclusive), JSON.stringify(after)))
     },
     async heartbeat(id, workerId, now) {
       return sql.heartbeat.get(id, workerId, now) !== null

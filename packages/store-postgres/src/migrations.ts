@@ -380,6 +380,16 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE ci_jobs ADD COLUMN tag boolean NOT NULL DEFAULT false;
     `,
   },
+  {
+    version: 9,
+    sql: `
+      DROP INDEX jobs_one_running_per_repo;
+      CREATE UNIQUE INDEX jobs_one_running_per_analyzer ON jobs (repo_forge, repo_path, analyzer)
+        WHERE status = 'running';
+      CREATE INDEX jobs_active_repo ON jobs (repo_forge, repo_path, analyzer)
+        WHERE status IN ('queued', 'running');
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

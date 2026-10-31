@@ -85,21 +85,76 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     expect(row.a).toBeNull()
   })
 
-  test('concurrent claims start one job per repository', async () => {
+  test('concurrent claims keep exclusive jobs alone and one job per analyzer', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema(), max: 8 })
-    for (let i = 0; i < 6; i++)
+    const analyzers = ['bundle', 'bundle', 'changelog', 'coverage']
+    for (let i = 0; i < 8; i++)
       // oxlint-disable-next-line no-await-in-loop -- creation order decides which job is oldest
       await store.jobs.enqueue({
-        analyzer: 'bundle',
-        repo: { forge: 'work', path: `games/${i % 2}` },
+        analyzer: i < 4 ? (analyzers[i] ?? 'bundle') : 'port',
+        repo: { forge: 'work', path: i < 4 ? 'games/shared' : `games/fix-${i % 2}` },
         trigger: 'manual',
         createdAt: `2026-10-30T10:0${i}:00.000Z`,
       })
     const claimed = await Promise.all(
-      Array.from({ length: 8 }, (_, i) => store.jobs.claim(`w${i}`, '2026-10-30T11:00:00.000Z')),
+      Array.from({ length: 8 }, (_, i) =>
+        store.jobs.claim(`w${i}`, '2026-10-30T11:00:00.000Z', { exclusive: ['port'] }),
+      ),
     )
-    const repos = claimed.flatMap((job) => (job ? [job.repo.path] : []))
-    expect(repos.toSorted()).toEqual(['games/0', 'games/1'])
+    const started = claimed.flatMap((job) => (job ? [`${job.repo.path} ${job.analyzer}`] : []))
+    expect(started.toSorted()).toEqual([
+      'games/fix-0 port',
+      'games/fix-1 port',
+      'games/shared bundle',
+      'games/shared changelog',
+      'games/shared coverage',
+    ])
+    await store.close()
+  })
+
+  test('concurrent claims never start a reader next to an exclusive job', async () => {
+    const store = postgresStore({ url: url!, schema: nextSchema(), max: 8 })
+    for (let round = 0; round < 10; round++) {
+      const path = `games/${round}`
+      for (const [i, analyzer] of ['changelog', 'port', 'bundle', 'coverage'].entries())
+        // oxlint-disable-next-line no-await-in-loop -- creation order decides which job is oldest
+        await store.jobs.enqueue({
+          analyzer,
+          repo: { forge: 'work', path },
+          trigger: 'manual',
+          createdAt: `2026-10-30T10:0${i}:00.000Z`,
+          runAfter: `2026-10-30T10:0${round % 2 ? 3 - i : i}:00.000Z`,
+        })
+    }
+    const claimed = await Promise.all(
+      Array.from({ length: 16 }, (_, i) =>
+        store.jobs.claim(`w${i}`, '2026-10-30T11:00:00.000Z', { exclusive: ['port'] }),
+      ),
+    )
+    const byRepo = Map.groupBy(
+      claimed.flatMap((job) => (job ? [job] : [])),
+      (job) => job.repo.path,
+    )
+    for (const jobs of byRepo.values()) {
+      if (jobs.some((job) => job.analyzer === 'port')) expect(jobs).toHaveLength(1)
+    }
+    await store.close()
+  })
+
+  test('migration 9 relaxes the running-job index of an existing database', async () => {
+    const schema = nextSchema()
+    await migrate(admin!, schema, migrations.slice(0, 8))
+    await admin!.unsafe(
+      `
+      INSERT INTO ${schema}.jobs (id, analyzer, repo_forge, repo_path, options, trigger, status,
+        attempts, max_attempts, run_after, created_at)
+      VALUES ('old', 'bundle', 'work', 'games/a', '{}', 'manual', 'running', 1, 3, $1, $1),
+        ('next', 'changelog', 'work', 'games/a', '{}', 'manual', 'queued', 0, 3, $1, $1)`,
+      ['2026-10-30T10:00:00.000Z'],
+    )
+    expect(await migrate(admin!, schema)).toEqual(migrations.slice(8).map((step) => step.version))
+    const store = postgresStore({ url: url!, schema })
+    expect((await store.jobs.claim('w1', '2026-10-30T11:00:00.000Z'))?.id).toBe('next')
     await store.close()
   })
 

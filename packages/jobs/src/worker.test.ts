@@ -280,6 +280,53 @@ describe('worker', () => {
     expect(all.every((j) => j.runAfter <= clock.toISOString())).toBeTrue()
   })
 
+  test('claims by the exclusive and after declarations of its analyzers', async () => {
+    const gates = new Map<string, () => void>()
+    const hold = (kind: string, overrides: Partial<AnyAnalyzer> = {}) =>
+      analyzer(
+        kind,
+        () =>
+          new Promise((resolve) => {
+            gates.set(kind, () => resolve({ data: {} }))
+          }),
+        overrides,
+      )
+    const worker = createWorker({
+      store,
+      analyzers: [
+        hold('lint'),
+        hold('changelog'),
+        hold('fix', { exclusive: true }),
+        hold('risk', { after: ['changelog'] }),
+      ],
+      contextFor,
+      now: () => clock,
+      concurrency: 4,
+      pollMs: 5,
+    })
+    const lint = await enqueue('lint')
+    const changelog = await enqueue('changelog')
+    const risk = await enqueue('risk')
+    const fix = await enqueue('fix')
+    const status = async () =>
+      Promise.all(
+        [lint, changelog, risk, fix].map(async (job) => (await store.jobs.get(job.id))?.status),
+      )
+
+    await worker.start()
+    await Bun.sleep(30)
+    expect(await status()).toEqual(['running', 'running', 'queued', 'queued'])
+    gates.get('changelog')?.()
+    await Bun.sleep(30)
+    expect(await status()).toEqual(['running', 'succeeded', 'running', 'queued'])
+    gates.get('lint')?.()
+    gates.get('risk')?.()
+    await Bun.sleep(30)
+    expect(await status()).toEqual(['succeeded', 'succeeded', 'succeeded', 'running'])
+    gates.get('fix')?.()
+    await worker.stop()
+  })
+
   test('merges defaults, schedule options, the scoped setting and manual options in order', async () => {
     const seen: unknown[] = []
     const merge = analyzer(

@@ -21,7 +21,14 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 `JobStore` is the queue of [@holtkeeper/jobs](../../jobs/docs/README.md). A `Job` is one analyzer run for one repository (or one config group: `repo` is `{ forge, path: <group> }` and `group` is set) with `status` `queued | running | succeeded | failed | canceled`.
 
 - `enqueue` — defaults: `maxAttempts` 3, `runAfter` = `createdAt`, empty `options` and `log`.
-- `claim(workerId, now)` — atomically takes the oldest due queued job whose repository has no running job, marks it running and counts the attempt.
+- `claim(workerId, now, rules?)` — atomically takes the first due queued job in `(runAfter, enqueue order)` that may start next to the running jobs of its repository, marks it running and counts the attempt. `ClaimRules` name analyzer kinds: `exclusive` kinds change their repository, `after` maps a kind to the kinds whose results it reads. A job is skipped while its repository:
+  - runs a job of the same analyzer;
+  - runs anything, when the job is exclusive;
+  - runs an exclusive job or has one queued ahead of it, so readers neither overtake nor starve it;
+  - runs a job of a kind the job comes `after`, or has one queued ahead of it.
+
+  Without `rules` only the first rule applies, so jobs of different analyzers of one repository run side by side.
+
 - `heartbeat(id, workerId, now)` — `false` once the job is no longer running for that worker (e.g. canceled).
 - `complete`, `fail(id, { at, error, retryAt? })` (back to the queue while attempts remain and `retryAt` is given), `cancel`, `recoverStale(heartbeatBefore, at)` for jobs of dead workers.
 - A job queued by a schedule carries its `schedule` name, also when someone ran the schedule by hand (`actor` is set then).

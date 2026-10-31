@@ -398,7 +398,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(plain.schedule).toBeUndefined()
     })
 
-    test('jobs: claim takes the oldest due job and skips busy repositories', async () => {
+    test('jobs: claim takes the oldest due job and skips repositories running the same analyzer', async () => {
       const late = await store.jobs.enqueue(job('games/a', t(0), { runAfter: t(30) }))
       const a1 = await store.jobs.enqueue(job('games/a', t(1)))
       const a2 = await store.jobs.enqueue(job('games/a', t(2)))
@@ -427,6 +427,57 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         finishedAt: t(11),
         analysisId: 'an1',
       })
+    })
+
+    test('jobs: read-only jobs of one repository run side by side', async () => {
+      const bundle = await store.jobs.enqueue(job('games/a', t(1)))
+      const changelog = await store.jobs.enqueue(job('games/a', t(2), { analyzer: 'changelog' }))
+      const coverage = await store.jobs.enqueue(job('games/a', t(3), { analyzer: 'coverage' }))
+      const rules = { exclusive: ['port'] }
+      const ids = [
+        (await store.jobs.claim('w1', t(10), rules))?.id,
+        (await store.jobs.claim('w2', t(10), rules))?.id,
+        (await store.jobs.claim('w3', t(10), rules))?.id,
+      ]
+      expect(ids).toEqual([bundle.id, changelog.id, coverage.id])
+    })
+
+    test('jobs: an exclusive job runs alone on its repository and is not overtaken', async () => {
+      const bundle = await store.jobs.enqueue(job('games/a', t(1)))
+      const port = await store.jobs.enqueue(job('games/a', t(2), { analyzer: 'port' }))
+      const changelog = await store.jobs.enqueue(job('games/a', t(3), { analyzer: 'changelog' }))
+      const other = await store.jobs.enqueue(job('games/b', t(4)))
+      const rules = { exclusive: ['port'] }
+
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(bundle.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(other.id)
+      expect(await store.jobs.claim('w1', t(10), rules)).toBeUndefined()
+
+      await store.jobs.complete(bundle.id, { at: t(11) })
+      expect((await store.jobs.claim('w1', t(11), rules))?.id).toBe(port.id)
+      expect(await store.jobs.claim('w1', t(11), rules)).toBeUndefined()
+
+      await store.jobs.complete(port.id, { at: t(12) })
+      expect((await store.jobs.claim('w1', t(12), rules))?.id).toBe(changelog.id)
+    })
+
+    test('jobs: a job waits for the jobs it comes after that are running or queued ahead', async () => {
+      const changelog = await store.jobs.enqueue(job('games/a', t(1), { analyzer: 'changelog' }))
+      const risk = await store.jobs.enqueue(job('games/a', t(2), { analyzer: 'release-risk' }))
+      const bundle = await store.jobs.enqueue(job('games/a', t(3)))
+      const alone = await store.jobs.enqueue(job('games/b', t(4), { analyzer: 'release-risk' }))
+      await store.jobs.enqueue(job('games/c', t(5), { analyzer: 'changelog', runAfter: t(20) }))
+      const early = await store.jobs.enqueue(job('games/c', t(6), { analyzer: 'release-risk' }))
+      const rules = { after: { 'release-risk': ['changelog'] } }
+
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(changelog.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(bundle.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(alone.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(early.id)
+      expect(await store.jobs.claim('w1', t(10), rules)).toBeUndefined()
+
+      await store.jobs.complete(changelog.id, { at: t(11) })
+      expect((await store.jobs.claim('w1', t(11), rules))?.id).toBe(risk.id)
     })
 
     test('jobs: concurrent claims never hand out a job twice', async () => {

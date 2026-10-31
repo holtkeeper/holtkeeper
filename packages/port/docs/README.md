@@ -23,7 +23,7 @@ Outcomes per target: `ported-clean`, `ported-remapped`, `ported-adapted`, `alrea
 
 ## Analyzer
 
-`portAnalyzer` (kind `port`, analysis `port`, scope `group`, needs `forge`, agent `optional`) and `createPortAnalyzer({ steps?, toolsets? })` to replace steps or mount agent code tools (e.g. from `@holtkeeper/agent-tools`). It needs `context.checkout` and `context.repos`; when a checkout carries its own `runner`, commands for it run there.
+`portAnalyzer` (kind `port`, analysis `port`, scope `group`, `exclusive`, needs `forge`, agent `optional`) and `createPortAnalyzer({ steps?, toolsets? })` to replace steps or mount agent code tools (e.g. from `@holtkeeper/agent-tools`). It needs `context.checkout` and `context.repos`; when a checkout carries its own `runner`, commands for it run there.
 
 | Option                        | Default                   | Meaning                                                                                  |
 | ----------------------------- | ------------------------- | ---------------------------------------------------------------------------------------- |
