@@ -221,7 +221,8 @@ export function StoragePage() {
           )
         }
       >
-        {clearing ? `${formatBytes(clearing.bytes)} will be removed. ` : ''}
+        {clearing ? `${formatBytes(clearing.bytes)} will be removed` : ''}
+        {clearing?.reportedBy ? ' on every worker within seconds. ' : '. '}
         Holtkeeper rebuilds what it needs on the next run, which may take longer.
       </ConfirmDialog>
     </Page>

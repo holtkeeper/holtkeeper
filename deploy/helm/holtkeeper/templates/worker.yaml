@@ -74,6 +74,26 @@ spec:
     - name: http
       port: {{ .Values.port }}
       targetPort: http
+{{- if and (eq .Values.worker.mirrorCache.type "pvc") (not .Values.worker.mirrorCache.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-mirrors
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    {{- toYaml .Values.worker.mirrorCache.accessModes | nindent 4 }}
+  {{- with .Values.worker.mirrorCache.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.worker.mirrorCache.size }}
+{{- end }}
 {{- if and (eq .Values.worker.miseCache.type "pvc") (not .Values.worker.miseCache.existingClaim) }}
 ---
 apiVersion: v1

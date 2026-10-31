@@ -32,6 +32,9 @@ worker:
   miseCache:
     type: pvc
     storageClassName: nfs
+  mirrorCache:
+    type: pvc
+    storageClassName: nfs
 scheduler:
   enabled: true
 metrics:

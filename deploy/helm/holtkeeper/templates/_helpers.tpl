@@ -209,6 +209,10 @@ securityContext:
     {{- include "holtkeeper.configMount" .ctx | nindent 4 }}
     - name: workspace
       mountPath: /workspace
+    {{- if eq .ctx.Values.worker.mirrorCache.type "pvc" }}
+    - name: mirrors
+      mountPath: /workspace/cache
+    {{- end }}
     - name: mise
       mountPath: /mise
     {{- if .ctx.Values.egressProxy.enabled }}
@@ -223,6 +227,11 @@ securityContext:
 - name: workspace
   emptyDir:
     sizeLimit: {{ .Values.worker.workspace.sizeLimit }}
+{{- if eq .Values.worker.mirrorCache.type "pvc" }}
+- name: mirrors
+  persistentVolumeClaim:
+    claimName: {{ default (printf "%s-mirrors" (include "holtkeeper.fullname" .)) .Values.worker.mirrorCache.existingClaim }}
+{{- end }}
 - name: mise
   {{- if eq .Values.worker.miseCache.type "pvc" }}
   persistentVolumeClaim:

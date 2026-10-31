@@ -38,6 +38,9 @@ podSecurityContext:
   runAsUser: 10001
   runAsGroup: 10001
   fsGroup: 10001
+  # Volumes that keep data (mirror cache, PVCs) are only re-owned when their root is not ours yet,
+  # not file by file on every start.
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 
@@ -96,6 +99,15 @@ worker:
   extraArgs: []
   workspace:
     sizeLimit: 20Gi
+  # Bare git mirrors of analyzed repositories (/workspace/cache). `workspace`: inside the workspace
+  # emptyDir, so a new pod clones every repository again. `pvc`: a volume kept across restarts;
+  # ReadWriteMany (e.g. NFS) shares it between workers, which take a lock file per mirror.
+  mirrorCache:
+    type: workspace
+    size: 50Gi
+    storageClassName: ''
+    accessModes: [ReadWriteMany]
+    existingClaim: ''
   # Tools mise installs (Node, Go, ...): `emptyDir` per pod or a shared `pvc`.
   miseCache:
     type: emptyDir

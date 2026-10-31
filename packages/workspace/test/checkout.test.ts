@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -109,6 +109,35 @@ describe.skipIf(!Bun.which('git'))('checkout with real git', () => {
     ])
     expect(a.dir).not.toBe(b.dir)
     await Promise.all([a.cleanup(), b.cleanup()])
+  })
+
+  test('keeps worktrees another host made in a shared cache, drops abandoned ones', async () => {
+    const cacheDir = join(root, 'cache-shared')
+    const elsewhere = await checkout({ cloneUrl, cacheDir, runner: localRunner, workDir: root })
+    const hidden = `${elsewhere.dir}-on-another-host`
+    const [mirror] = (await readdir(cacheDir)).filter((name) => name.endsWith('.git'))
+    const metadata = join(cacheDir, mirror ?? '', 'worktrees')
+    const [id] = await readdir(metadata)
+
+    await rename(elsewhere.dir, hidden)
+    const here = await checkout({ cloneUrl, cacheDir, runner: localRunner, workDir: root })
+    expect(await readdir(metadata)).toContain(id ?? '')
+    await rename(hidden, elsewhere.dir)
+    expect((await git(elsewhere.dir, 'status', '--porcelain')).stdout).toBe('')
+
+    await writeFile(
+      join(metadata, id ?? '', 'locked'),
+      'holtkeeper other-host 2026-01-01T00:00:00.000Z',
+    )
+    await rename(elsewhere.dir, hidden)
+    const later = await checkout({ cloneUrl, cacheDir, runner: localRunner, workDir: root })
+    const gitdirs = await Promise.all(
+      (await readdir(metadata)).map((entry) => readFile(join(metadata, entry, 'gitdir'), 'utf8')),
+    )
+    expect(gitdirs.filter((gitdir) => gitdir.startsWith(elsewhere.dir))).toEqual([])
+    expect(gitdirs).toHaveLength(2)
+    await rename(hidden, elsewhere.dir)
+    await Promise.all([elsewhere.cleanup(), here.cleanup(), later.cleanup()])
   })
 
   test('rejects unknown refs and leaves no checkout behind', async () => {

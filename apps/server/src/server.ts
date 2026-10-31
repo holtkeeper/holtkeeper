@@ -1,3 +1,4 @@
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import {
@@ -75,6 +76,7 @@ import { createMediaReviewer } from './media/reviewer.ts'
 import { startOperations } from './operations.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
+import { startStorageReports } from './storage-reports.ts'
 import { databaseStorage } from './storage.ts'
 import { serverPoller } from './updates.ts'
 import { serveWeb } from './web.ts'
@@ -288,6 +290,22 @@ export async function startServer(
       aiProviders,
       artifacts,
     })
+  // Areas on the disks of the process that runs jobs; web processes see them through reports.
+  const workerStorage =
+    config.jobs && duties.worker
+      ? [
+          mirrorStorage(config.jobs.cacheDir),
+          miseCacheStorage(
+            config.jobs.execution?.mode === 'container'
+              ? {
+                  mode: 'container',
+                  ...(config.jobs.execution.engine ? { engine: config.jobs.execution.engine } : {}),
+                  hostRunner: localRunner,
+                }
+              : { mode: 'host' },
+          ),
+        ]
+      : []
   const deps: ServerDeps = {
     config,
     auth: server.auth,
@@ -319,22 +337,7 @@ export async function startServer(
     storage: [
       artifactStorage(artifacts),
       databaseStorage(server.databasePath),
-      ...(config.jobs
-        ? [
-            mirrorStorage(config.jobs.cacheDir),
-            miseCacheStorage(
-              config.jobs.execution?.mode === 'container'
-                ? {
-                    mode: 'container',
-                    ...(config.jobs.execution.engine
-                      ? { engine: config.jobs.execution.engine }
-                      : {}),
-                    hostRunner: localRunner,
-                  }
-                : { mode: 'host' },
-            ),
-          ]
-        : []),
+      ...workerStorage,
       ...(options.storage ?? []),
     ],
     now: () => new Date(),
@@ -413,6 +416,20 @@ export async function startServer(
     ],
   })
   metrics = ops.metrics
+  const stopStorageReports =
+    workerStorage.length && server.store.kv
+      ? startStorageReports({
+          kv: server.store.kv,
+          providers: workerStorage,
+          directories: {
+            ...(config.jobs ? { 'git-mirrors': config.jobs.cacheDir } : {}),
+            ...(config.jobs?.execution?.mode !== 'container'
+              ? { 'mise-cache': Bun.env.MISE_DATA_DIR ?? join(homedir(), '.local/share/mise') }
+              : {}),
+          },
+          log,
+        })
+      : undefined
 
   const listener = Bun.serve({
     hostname: server.hostname,
@@ -433,6 +450,7 @@ export async function startServer(
         log(`drained: ${drained.finished} job(s) finished, ${drained.requeued} requeued`)
       }
       await ops.stop()
+      await stopStorageReports?.()
       managed.stop()
       await listener.stop()
       await jobs?.stop()

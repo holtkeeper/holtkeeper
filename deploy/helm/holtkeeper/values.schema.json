@@ -370,6 +370,31 @@
               }
             }
           }
+        },
+        "mirrorCache": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["workspace", "pvc"]
+            },
+            "size": {
+              "type": ["string", "integer"]
+            },
+            "storageClassName": {
+              "type": "string"
+            },
+            "accessModes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "existingClaim": {
+              "type": "string"
+            }
+          }
         }
       }
     },

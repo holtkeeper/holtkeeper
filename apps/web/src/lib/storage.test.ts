@@ -39,5 +39,7 @@ describe('clearedMessage', () => {
     expect(clearedMessage({ removed: 1 })).toBe('Removed 1 item')
     expect(clearedMessage({})).toBe('Cleared')
     expect(clearedMessage(undefined)).toBe('Cleared')
+    expect(clearedMessage({ requested: 3 })).toBe('Asked 3 workers to clear their copies')
+    expect(clearedMessage({ requested: 0 })).toBe('No worker reports this area right now')
   })
 })

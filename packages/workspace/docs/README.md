@@ -21,7 +21,8 @@ await tree.cleanup()
 
 - One bare mirror per repository lives in `cacheDir` (`<name>-<hash>.git`, see `mirrorName`). The first call runs `git clone --mirror`, later calls `git fetch --prune --tags`, so only new objects cross the network.
 - Each call adds a detached git worktree of the mirror in a fresh temporary directory (`workDir`, default the OS temp dir). Checkouts have full history, every branch and every tag, and are private to the caller: modifying one does not affect others. `cleanup` removes the worktree and its directory and is safe to call twice.
-- Calls for the same mirror are serialized in-process, so concurrent checkouts of one repository do not race on the mirror.
+- Calls for the same mirror are serialized in-process and, across processes, by `<mirror>.lock` (created with `O_EXCL`), so `cacheDir` can be one volume shared by several hosts (NFS or another ReadWriteMany volume). The holder refreshes the lock every 30 s; one not refreshed for 5 minutes belongs to a killed process and is taken over. Holding it, git's own leftover `*.lock` files at the top of the mirror and under `refs/` are removed, and `fetch` runs garbage collection in the foreground (`gc.autoDetach=false`) so it finishes under the lock.
+- Worktrees are added locked (`--lock`, reason `holtkeeper <host> <time>`): on a shared mirror `git worktree prune` would otherwise drop other hosts' live worktrees, whose directories it cannot see. `cleanup` removes its own with `--force --force`; locks of ours older than a day are lifted so prune drops worktrees of processes that died.
 - Credentials never touch disk: they are passed only to the git processes that talk to the remote, through environment variables read by an inline credential helper (`-c credential.helper=...`). They do not appear in argv, the mirror's config or the remote URL. Git never prompts (`GIT_TERMINAL_PROMPT=0`).
 
 ## SSH transport and signed commits

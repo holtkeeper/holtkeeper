@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 
+import { withMirrorLock } from './lock.ts'
 import {
   assertSigningKey,
   type CommitSigning,
@@ -121,10 +122,14 @@ const exists = (path: string) =>
 
 const locks = new Map<string, Promise<unknown>>()
 
-/** Runs `task` after every earlier task for the same key has settled. */
+/**
+ * Runs `task` after every earlier task for the same mirror in this process has settled, holding
+ * the mirror's file lock against other processes sharing the cache directory.
+ */
 function serialized<T>(key: string, task: () => Promise<T>): Promise<T> {
   const previous = locks.get(key) ?? Promise.resolve()
-  const next = previous.then(task, task)
+  const locked = () => withMirrorLock(key, task)
+  const next = previous.then(locked, locked)
   const settled: Promise<unknown> = next
     .catch(() => undefined)
     .finally(() => {
@@ -132,6 +137,24 @@ function serialized<T>(key: string, task: () => Promise<T>): Promise<T> {
     })
   locks.set(key, settled)
   return next
+}
+
+const LOCK_REASON = 'holtkeeper'
+const ABANDONED_MS = 86_400_000
+
+/**
+ * Worktrees are added locked, because on a cache directory shared between hosts `git worktree
+ * prune` would drop the metadata of other hosts' live worktrees, whose directories it cannot see.
+ * Locks of ours older than a day belong to processes that died; unlocking them lets prune go.
+ */
+async function unlockAbandonedWorktrees(mirror: string, now = Date.now()): Promise<void> {
+  const root = join(mirror, 'worktrees')
+  for (const id of await readdir(root).catch(() => [] as string[])) {
+    const lock = join(root, id, 'locked')
+    const reason = await readFile(lock, 'utf8').catch(() => undefined)
+    const at = reason?.startsWith(`${LOCK_REASON} `) ? Date.parse(reason.split(' ')[2] ?? '') : NaN
+    if (Number.isFinite(at) && now - at > ABANDONED_MS) await rm(lock, { force: true })
+  }
 }
 
 /**
@@ -163,7 +186,20 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
     await mkdir(cacheDir, { recursive: true })
     if (await exists(join(mirror, 'HEAD'))) {
       log(`fetching ${mirrorName(cloneUrl)}`)
-      await remote(['fetch', '--prune', '--tags', 'origin'], mirror)
+      // Garbage collection must finish inside the lock, not detached after it.
+      await remote(
+        [
+          '-c',
+          'gc.autoDetach=false',
+          '-c',
+          'maintenance.autoDetach=false',
+          'fetch',
+          '--prune',
+          '--tags',
+          'origin',
+        ],
+        mirror,
+      )
     } else {
       log(`cloning ${mirrorName(cloneUrl)}`)
       await rm(mirror, { recursive: true, force: true })
@@ -182,11 +218,16 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
       await git(['rev-parse', '--verify', '--end-of-options', `${resolvedRef}^{commit}`], mirror)
     ).stdout.trim()
 
+    await unlockAbandonedWorktrees(mirror)
     await git(['worktree', 'prune'], mirror)
     const parent = await mkdtemp(join(options.workDir ?? tmpdir(), 'holtkeeper-checkout-'))
     const worktree = join(parent, 'repo')
+    const reason = `${LOCK_REASON} ${hostname()} ${new Date().toISOString()}`
     try {
-      await git(['worktree', 'add', '--detach', '--quiet', worktree, commit], mirror)
+      await git(
+        ['worktree', 'add', '--detach', '--quiet', '--lock', '--reason', reason, worktree, commit],
+        mirror,
+      )
     } catch (error) {
       await rm(parent, { recursive: true, force: true })
       throw error
@@ -261,14 +302,17 @@ export async function checkout(options: CheckoutOptions): Promise<GitCheckout> {
         ],
         dir,
       )
-      await git(['update-ref', remoteRef, head], mirror)
+      await serialized(mirror, () => git(['update-ref', remoteRef, head], mirror))
       log(`pushed ${head.slice(0, 12)} to ${branch}`)
       return { pushed: true, sha: head }
     },
     cleanup() {
       cleaned ??= serialized(mirror, async () => {
         await runner
-          .run(['git', 'worktree', 'remove', '--force', dir], { cwd: mirror, env: baseEnv })
+          .run(['git', 'worktree', 'remove', '--force', '--force', dir], {
+            cwd: mirror,
+            env: baseEnv,
+          })
           .catch(() => undefined)
         await rm(temp, { recursive: true, force: true })
         await runner

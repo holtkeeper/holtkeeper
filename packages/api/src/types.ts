@@ -850,6 +850,11 @@ export interface StorageProviderView {
   clearable: boolean
   /** Set when measuring failed. */
   error?: string
+  /**
+   * For areas on worker disks (git mirrors, tool caches): how many workers reported them in the
+   * last 15 minutes. `details` then lists the workers, and clearing asks each to clear its copy.
+   */
+  reportedBy?: number
 }
 
 /** `GET /api/storage` */
@@ -863,10 +868,14 @@ export interface ClearStorageInput {
   scope?: string
 }
 
-/** Result of `POST /api/storage/:id/clear`. */
+/**
+ * Result of `POST /api/storage/:id/clear`. For areas workers report, `requested` is how many
+ * workers were asked to clear their copy; they do so within seconds and report again.
+ */
 export interface ClearStorageResult {
   removed?: number
   bytes?: number
+  requested?: number
 }
 
 /** `GET /api/ai/usage`: aggregate buckets and their totals over the same records. */
