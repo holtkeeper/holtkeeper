@@ -125,7 +125,7 @@ body.l-page::after {
   color: inherit;
 }
 
-.l-page :is(h1, h2, h3, h4, p, figure) {
+:where(.l-page :is(h1, h2, h3, h4, p, figure)) {
   margin: 0;
 }
 

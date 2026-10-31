@@ -69,8 +69,10 @@ const first = steps[0]!
     const screen = root.querySelector<HTMLElement>('.screen')!
     const buttons = [...root.querySelectorAll<HTMLButtonElement>('[data-step]')]
     const replay = root.querySelector<HTMLButtonElement>('[data-replay]')!
+    const term = root.querySelector<HTMLElement>('.term')!
     let run = 0
     let paused = false
+    let progress: Animation | undefined
 
     const wait = async (ms: number, token: number) => {
       let left = ms
@@ -99,7 +101,8 @@ const first = steps[0]!
         if (!bar) return
         bar.getAnimations().forEach((a) => a.cancel())
         if (i === index && duration && !reduce) {
-          bar.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration, fill: 'forwards' })
+          progress = bar.animate([{ transform: 'scaleX(0)' }, { transform: 'scaleX(1)' }], { duration, fill: 'forwards' })
+          if (paused) progress.pause()
         }
       })
     }
@@ -139,21 +142,28 @@ const first = steps[0]!
       replay.hidden = false
     }
 
+    const pause = (value: boolean) => {
+      paused = value
+      root.toggleAttribute('data-paused', value)
+      if (value) progress?.pause()
+      else if (progress?.playState === 'paused') progress.play()
+    }
+
     buttons.forEach((button, i) =>
       button.addEventListener('click', () => {
+        pause(false)
         if (reduce) show(i)
         else void play(i)
       }),
     )
-    replay.addEventListener('click', () => void play(0))
-    root.addEventListener('mouseenter', () => {
-      paused = true
-      root.toggleAttribute('data-paused', true)
+    replay.addEventListener('click', () => {
+      pause(false)
+      void play(0)
     })
-    root.addEventListener('mouseleave', () => {
-      paused = false
-      root.toggleAttribute('data-paused', false)
+    term.addEventListener('pointerenter', (e) => {
+      if (e.pointerType === 'mouse') pause(true)
     })
+    term.addEventListener('pointerleave', () => pause(false))
 
     if (reduce) {
       show(0)

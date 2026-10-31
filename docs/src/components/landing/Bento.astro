@@ -1,6 +1,7 @@
 ---
 import {
   BookOpen,
+  Boxes,
   Check,
   Flag,
   Gauge,
@@ -62,6 +63,49 @@ const spark = (() => {
     .map((v, i) => `${i === 0 ? 'M' : 'L'}${((i / (sizes.length - 1)) * 200).toFixed(1)} ${(46 - ((v - min) / (max - min)) * 42).toFixed(1)}`)
     .join(' ')
 })()
+
+const quality = [
+  { label: 'lint', value: '0', note: 'errors' },
+  { label: 'coverage', value: '78%', note: '+3.1' },
+  { label: 'duplication', value: '2.1%', note: '−0.4' },
+  { label: 'dead code', value: '3', note: 'files' },
+]
+
+const shelf = [
+  {
+    title: 'Dependencies',
+    items: [
+      { name: 'Renovate', what: 'pinned runs, its merge requests on one board' },
+      { name: 'browserslist', what: 'caniuse-lite updates as merge requests' },
+      { name: 'Licenses', what: 'SPDX allow and deny lists' },
+      { name: 'Dependency graph', what: 'cycles, libraries in several versions' },
+      { name: 'Usages', what: 'which exports and props are used where' },
+      { name: 'Fleet drift', what: 'shared library versions, golden configs' },
+    ],
+  },
+  {
+    title: 'Code',
+    items: [
+      { name: 'Coverage', what: 'line, function and branch per file' },
+      { name: 'Test ids', what: 'interactive elements without one' },
+      { name: 'API surface', what: 'every exported name with its docs' },
+      { name: 'i18n', what: 'missing keys, placeholder mismatches' },
+      { name: 'Assets', what: 'budgets for images, audio, fonts' },
+      { name: 'Stack', what: 'runtimes and images, how far behind' },
+    ],
+  },
+  {
+    title: 'Delivery',
+    items: [
+      { name: 'DORA', what: 'lead time, deploys, change failure rate' },
+      { name: 'CI jobs', what: 'duration and failure rate over time' },
+      { name: 'Branches', what: 'merged, abandoned and stale ones' },
+      { name: 'Port', what: 'carry a change to sibling repositories' },
+      { name: 'Warmup', what: 'build caches warm before people push' },
+      { name: 'Notify', what: 'Slack and webhooks for any report' },
+    ],
+  },
+]
 
 const images = [
   { file: 'hub/hero.png', before: '1.84 MB', avif: '212 kB', webp: '348 kB', saved: '88%' },
@@ -175,7 +219,7 @@ const budget = 200
           <p>From stored changelog, bundle, quality and audit records — no checkout needed.</p>
         </header>
         <div class="b-mock risk">
-          <svg viewBox="0 0 160 92" class="gauge" role="img" aria-label={`Risk score ${score} of 100, medium`}>
+          <svg viewBox="0 0 160 102" class="gauge" role="img" aria-label={`Risk score ${score} of 100, medium`}>
             <defs>
               <linearGradient id="risk-grad" x1="0" x2="1">
                 <stop offset="0" stop-color="var(--l-teal)"></stop>
@@ -192,7 +236,7 @@ const budget = 200
               style={`stroke-dasharray:${arc};--off:${arc * (1 - score / 100)};--arc:${arc}`}></path>
             <circle cx={needle.x} cy={needle.y} r="4.5" class="knob"></circle>
             <text x="80" y="70" class="num">{score}</text>
-            <text x="80" y="86" class="lvl">medium · 85% confidence</text>
+            <text x="80" y="99" class="lvl">medium · 85% confidence</text>
           </svg>
           <ul class="factors">
             {
@@ -292,7 +336,7 @@ const budget = 200
           <img class="b-icon" src={qualityIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><LayoutDashboard size={14} /> Reports</span>
           <h3>Every analysis, one report format</h3>
-          <p>Bundle size per package, growth between releases, changelogs with identical messages collapsed.</p>
+          <p>Bundle size per package, growth between releases, quality and coverage trends, changelogs with identical messages collapsed.</p>
         </header>
         <div class="b-mock reports">
           <div class="r-tree" role="img" aria-label="Bundle composition by package">
@@ -317,6 +361,17 @@ const budget = 200
               </svg>
               <div class="r-ticks"><span>v2.1</span><span>v2.4</span></div>
             </div>
+            <ul class="r-quality">
+              {
+                quality.map((q) => (
+                  <li>
+                    <span>{q.label}</span>
+                    <b>{q.value}</b>
+                    <i>{q.note}</i>
+                  </li>
+                ))
+              }
+            </ul>
             <ol class="r-log">
               <li><span class="t feat">feat</span>hub: promo banner</li>
               <li><span class="t fix">fix</span>app: banner renders late on slow devices <span class="x">×4</span></li>
@@ -475,6 +530,34 @@ const budget = 200
         </div>
       </article>
 
+      <article class="l-card b-card span-6 l-reveal">
+        <header class="b-head">
+          <span class="b-tag"><Boxes size={14} /> And more</span>
+          <h3>A shelf of analyzers, all on the same rails</h3>
+          <p>
+            Each one is a module with its own docs. Turn on the ones a group needs; they queue, report and propose changes
+            like everything above.
+          </p>
+        </header>
+        <div class="shelf">
+          {
+            shelf.map((g) => (
+              <section>
+                <h4>{g.title}</h4>
+                <ul>
+                  {g.items.map((m) => (
+                    <li>
+                      <b>{m.name}</b>
+                      <span>{m.what}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))
+          }
+        </div>
+        <a class="shelf-link" href="/modules/">All modules →</a>
+      </article>
     </div>
   </div>
 </section>
@@ -493,6 +576,9 @@ const budget = 200
   }
   .span-4 {
     grid-column: span 4;
+  }
+  .span-6 {
+    grid-column: 1 / -1;
   }
   .b-card {
     display: flex;
@@ -922,6 +1008,7 @@ const budget = 200
   /* Reports */
   .reports {
     display: grid;
+    flex: 1;
     grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
     gap: 0.9rem;
     padding: 0.9rem;
@@ -966,6 +1053,38 @@ const budget = 200
   .r-side {
     display: grid;
     gap: 0.8rem;
+    align-content: space-between;
+  }
+  .r-quality {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .r-quality li {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.45rem 0.5rem;
+    border: 1px solid var(--l-line);
+    border-radius: 0.5rem;
+    background: var(--l-card);
+  }
+  .r-quality span {
+    overflow: hidden;
+    color: var(--l-dim);
+    font-size: 0.64rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .r-quality b {
+    color: var(--l-text);
+    font: 500 0.85rem var(--l-mono);
+  }
+  .r-quality i {
+    color: var(--l-muted);
+    font: normal 0.62rem var(--l-mono);
   }
   .r-spark {
     padding: 0.6rem 0.7rem;
@@ -1311,12 +1430,65 @@ const budget = 200
     transform: scaleX(0);
   }
 
+  /* Shelf */
+  .shelf {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .shelf section {
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--l-line);
+    border-radius: 0.9rem;
+    background: var(--l-bg-2);
+  }
+  .shelf h4 {
+    margin: 0 0 0.7rem;
+    color: var(--l-dim);
+    font: 500 0.7rem var(--l-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .shelf ul {
+    display: grid;
+    gap: 0.55rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .shelf li {
+    display: grid;
+    gap: 0.05rem;
+  }
+  .shelf b {
+    color: var(--l-text);
+    font-size: 0.86rem;
+    font-weight: 560;
+  }
+  .shelf li span {
+    color: var(--l-muted);
+    font-size: 0.76rem;
+    line-height: 1.4;
+  }
+  .b-card .shelf-link {
+    align-self: flex-start;
+    color: var(--l-amber-ink);
+    font: 500 0.82rem var(--l-mono);
+    text-decoration: none;
+  }
+  .b-card .shelf-link:hover {
+    text-decoration: underline;
+  }
+
   @media (max-width: 64rem) {
     .span-2,
     .span-4 {
       grid-column: span 3;
     }
     .reports {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .shelf {
       grid-template-columns: minmax(0, 1fr);
     }
   }
@@ -1340,6 +1512,9 @@ const budget = 200
     }
     .mr-note {
       margin-left: 0.8rem;
+    }
+    .r-quality {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 </style>
