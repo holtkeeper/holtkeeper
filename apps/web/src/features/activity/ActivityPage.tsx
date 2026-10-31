@@ -51,7 +51,7 @@ export function ActivityPage() {
   const days = Map.groupBy(events, (event: ActivityEvent) => isoDay(event.at))
 
   return (
-    <Page title="Activity" description="Changes and audits, newest first">
+    <Page title="Activity" icon="activity" description="Changes and audits, newest first">
       {activity.isPending ? (
         <Placeholder className="h-72" />
       ) : activity.isError ? (

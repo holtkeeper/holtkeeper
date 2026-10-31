@@ -27,6 +27,15 @@ copy them from there instead of editing them here.
 | `@holtkeeper/brand/api.svg`          | Public API of packages              |
 | `@holtkeeper/brand/fleet.svg`        | Fleet: shared versions and drift    |
 | `@holtkeeper/brand/stack.svg`        | Tech stack and end of life          |
+| `@holtkeeper/brand/activity.svg`     | Activity feed                       |
+| `@holtkeeper/brand/ai.svg`           | AI usage                            |
+| `@holtkeeper/brand/storage.svg`      | Storage                             |
+| `@holtkeeper/brand/auditlog.svg`     | Audit log                           |
+| `@holtkeeper/brand/users.svg`        | Users                               |
+| `@holtkeeper/brand/automation.svg`   | Automation: schedules and triggers  |
+| `@holtkeeper/brand/jobs.svg`         | Background jobs                     |
+| `@holtkeeper/brand/settings.svg`     | Settings                            |
+| `@holtkeeper/brand/warmup.svg`       | Build warm-up                       |
 
 ```ts
 import auditIcon from '@holtkeeper/brand/audit.svg'

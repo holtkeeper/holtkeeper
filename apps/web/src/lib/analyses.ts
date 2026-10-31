@@ -113,7 +113,7 @@ export const analysisPages = [
     to: '/warmup',
     kind: 'warmup',
     title: 'Build warm-up',
-    icon: 'ci',
+    icon: 'warmup',
     description: 'Commands run on branch pushes to fill build caches: status, duration and output',
     trend: [/duration/i],
   },

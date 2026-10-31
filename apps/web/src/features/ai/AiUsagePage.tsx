@@ -235,7 +235,7 @@ export function AiUsagePage() {
 
   if (overview.isError)
     return (
-      <Page title="AI usage">
+      <Page title="AI usage" icon="ai">
         <ErrorState error={overview.error} />
       </Page>
     )
@@ -244,6 +244,7 @@ export function AiUsagePage() {
   return (
     <Page
       title="AI usage"
+      icon="ai"
       description={
         data
           ? `${monthLabel(data.month.from)} compared with ${monthLabel(data.previousMonth.from)}`

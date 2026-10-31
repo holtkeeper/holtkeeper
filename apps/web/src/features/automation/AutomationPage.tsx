@@ -22,6 +22,7 @@ export function AutomationPage() {
   return (
     <Page
       title="Automation"
+      icon="automation"
       description="What runs when. Panel changes are layered over holtkeeper.config.ts and take effect at once."
     >
       <Tabs

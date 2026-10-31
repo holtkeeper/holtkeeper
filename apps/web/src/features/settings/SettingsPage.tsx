@@ -60,7 +60,7 @@ export function SettingsPage() {
 
   if (settings.isPending) {
     return (
-      <Page title="Settings">
+      <Page title="Settings" icon="settings">
         <Placeholder className="h-10 w-96" />
         <Placeholder className="h-48" />
         <Placeholder className="h-48" />
@@ -69,7 +69,7 @@ export function SettingsPage() {
   }
   if (settings.isError)
     return (
-      <Page title="Settings">
+      <Page title="Settings" icon="settings">
         <ErrorState error={settings.error} />
       </Page>
     )
@@ -116,7 +116,11 @@ export function SettingsPage() {
       : tabs[0]?.id
 
   return (
-    <Page title="Settings" description="Values per scope; narrower scopes override broader ones">
+    <Page
+      title="Settings"
+      icon="settings"
+      description="Values per scope; narrower scopes override broader ones"
+    >
       {definitions.length === 0 ? (
         <EmptyState icon={<Settings2 />} title="No settings defined" />
       ) : (

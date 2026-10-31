@@ -127,7 +127,11 @@ export function StoragePage() {
   const measured = providers.filter((provider) => provider.available && provider.bytes > 0)
 
   return (
-    <Page title="Storage" description="Space used by the database, artifacts, caches and checkouts">
+    <Page
+      title="Storage"
+      icon="storage"
+      description="Space used by the database, artifacts, caches and checkouts"
+    >
       {storage.isPending ? (
         <div className="flex flex-col gap-4">
           <Placeholder className="h-28" />

@@ -61,6 +61,7 @@ export function JobsPage() {
   return (
     <Page
       title="Jobs"
+      icon="jobs"
       description="Background analyzer runs, newest first"
       actions={<RunJobButton {...(repo ? { repo } : {})} />}
     >

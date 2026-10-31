@@ -38,7 +38,7 @@ export function UsersPage() {
 
   if (!enabled)
     return (
-      <Page title="Users">
+      <Page title="Users" icon="users">
         <Forbidden />
       </Page>
     )
@@ -51,6 +51,7 @@ export function UsersPage() {
   return (
     <Page
       title="Users"
+      icon="users"
       description="Accounts signing in with passkeys or single sign-on"
       actions={
         canInvite ? (

@@ -143,7 +143,7 @@ export function AuditLogPage() {
 
   if (unconfigured)
     return (
-      <Page title="Audit log">
+      <Page title="Audit log" icon="auditlog">
         <Notice tone="warning" title="No audit log configured">
           This server's store has no audit log, so changes are not recorded here.
         </Notice>
@@ -155,6 +155,7 @@ export function AuditLogPage() {
   return (
     <Page
       title="Audit log"
+      icon="auditlog"
       description={
         count.data
           ? `${plural(count.data.count, 'event')}${filtered ? ' match the filters' : ' recorded'}`
