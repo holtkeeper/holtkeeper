@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import type { Env, ServerDeps } from '../context.ts'
+import { EGRESS_SECRET_KIND, egressSecretRules } from '../egress-secrets.ts'
 
 const digest = (value: string) => createHash('sha256').update(value).digest()
 
@@ -15,9 +16,9 @@ const sameSecret = (given: string, expected: string) =>
 
 /**
  * Egress proxy rules from the panel GitLab forges (all but those with `packages: false`): GET and
- * HEAD requests to their
- * package registries get `Authorization: Bearer <token>` with the forge credential's current token.
- * Forges whose credential cannot be read are left out.
+ * HEAD requests to their package registries get `Authorization: Bearer <token>` with the forge
+ * credential's current token. Then every `egress-secret` credential's replacement rules. Forges
+ * and secrets that cannot be read are left out.
  */
 async function egressRules(
   deps: Pick<ServerDeps, 'store' | 'credentials'>,
@@ -36,6 +37,16 @@ async function egressRules(
       })
     } catch (error) {
       log(`egress: forge ${forge.id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  for (const credential of await deps.credentials.list()) {
+    if (credential.kind !== EGRESS_SECRET_KIND) continue
+    try {
+      rules.push(...egressSecretRules(credential, await deps.credentials.reveal(credential.id)))
+    } catch (error) {
+      log(
+        `egress: secret ${credential.id}: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   }
   return rules

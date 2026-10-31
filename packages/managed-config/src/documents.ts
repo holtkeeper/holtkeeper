@@ -83,6 +83,12 @@ export const triggerDataSchema = z.discriminatedUnion('on', [
     groups: z.array(groupMatchSchema).optional(),
   }),
   z.object({
+    on: z.literal('push'),
+    analyzers: analyzerList,
+    branches: z.array(z.string().min(1)).min(1).optional(),
+    groups: z.array(groupMatchSchema).optional(),
+  }),
+  z.object({
     on: z.literal('mergeRequest'),
     analyzers: analyzerList,
     actions: z.array(z.enum(['open', 'update', 'reopen'])).optional(),
@@ -107,9 +113,13 @@ export const documentDataSchemas = {
   trigger: triggerDataSchema,
 } satisfies Record<ConfigDocumentType, z.ZodType>
 
-/** The fixed document id of a trigger: `tag`, `merge-request`, `label:<label>`, `command:<name>`. */
+/**
+ * The fixed document id of a trigger: `tag`, `push`, `merge-request`, `label:<label>`,
+ * `command:<name>`.
+ */
 export function triggerId(data: TriggerDocumentData): string {
   if (data.on === 'tag') return 'tag'
+  if (data.on === 'push') return 'push'
   if (data.on === 'mergeRequest') return 'merge-request'
   if (data.on === 'label') return `label:${data.label}`
   return `command:${data.command}`

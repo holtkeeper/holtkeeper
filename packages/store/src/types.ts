@@ -210,7 +210,7 @@ export interface ActivityStore {
   list(query?: { before?: Timestamp; limit?: number }): Promise<ActivityEvent[]>
 }
 
-export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag' | 'poll'
+export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag' | 'push' | 'poll'
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 
@@ -707,6 +707,7 @@ export interface ScheduleDocumentData {
  */
 export type TriggerDocumentData =
   | { on: 'tag'; analyzers: string[]; groups?: GroupMatch[] }
+  | { on: 'push'; analyzers: string[]; branches?: string[]; groups?: GroupMatch[] }
   | {
       on: 'mergeRequest'
       analyzers: string[]

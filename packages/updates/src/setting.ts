@@ -2,7 +2,7 @@ import { type DefaultSetting, defineSetting } from '@holtkeeper/settings'
 import { z } from 'zod'
 
 /** What polling looks for. */
-export const pollEventKinds = ['mergeRequests', 'notes', 'pipelines', 'tags'] as const
+export const pollEventKinds = ['mergeRequests', 'notes', 'pipelines', 'tags', 'pushes'] as const
 
 export type PollEventKind = (typeof pollEventKinds)[number]
 
@@ -78,7 +78,7 @@ export const pollingSetting = defineSetting({
   key: 'polling',
   label: 'Polling',
   description:
-    'Look for merge request changes, comments, finished pipelines and tags on a schedule, for repositories webhooks do not reach.',
+    'Look for merge request changes, comments, finished pipelines, tags and branch pushes on a schedule, for repositories webhooks do not reach.',
   section: 'Updates',
   help: `Polling finds the same changes a forge webhook delivers and reacts to them the same way: triggers, merge request policies and commands.
 

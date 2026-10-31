@@ -2,6 +2,7 @@ import { groupsMatch } from '@holtkeeper/access'
 import { releaseTarget } from '@holtkeeper/changelog'
 import { resolveRepo } from '@holtkeeper/core'
 import type {
+  BranchPushedEvent,
   ForgeEvent,
   GitForge,
   MergeRequest,
@@ -151,6 +152,9 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * How Holtkeeper reacts to forge events, whether a webhook delivered them or polling found them:
  *
  * - Tags queue `jobs.onTag.analyzers` with `ref` = the tag.
+ * - Branch pushes matching `jobs.onPush.branches` queue `jobs.onPush.analyzers` with `ref` = the
+ *   pushed commit and `{ branch }` as options; a job of an older commit of that branch still queued
+ *   is canceled, so only the newest push runs.
  * - Merge request changes run merge request policies (`mergeRequests.policies`), write every
  *   outcome to the activity log, then queue `jobs.onMergeRequest.analyzers` (open, new commits,
  *   reopen) and `jobs.onLabel[label]` for added labels minus the policies' `skipAnalyzers`, plus
@@ -161,7 +165,7 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
- * Events of repositories `deps.readOnly` marks read-only are ignored, except tags. Events by
+ * Events of repositories `deps.readOnly` marks read-only are ignored, except tags and pushes. Events by
  * `jobs.botUsername` or carrying Holtkeeper's note marker are ignored. A job already
  * queued or running with the same ref and options is not queued again, so the same change seen
  * by a webhook and by polling runs once.
@@ -342,6 +346,30 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       )
       const enqueued = await enqueue(requests, trigger('tag'))
       await activity('job.tag_pushed', repo, { tag, jobs: enqueued })
+      return { enqueued }
+    }
+
+    const handlePush = async ({ repo, branch, sha, actor }: BranchPushedEvent) => {
+      const onPush = config.jobs?.onPush
+      if (!onPush) return ignore('jobs.onPush is not configured')
+      if (fromBot(actor)) return ignore('event from the bot user')
+      if (onPush.branches && !onPush.branches.some((glob) => new Bun.Glob(glob).match(branch)))
+        return ignore('branch is not in jobs.onPush.branches')
+      if (onPush.groups && !groupsMatch(onPush.groups, resolveRepo(config, repo).groups))
+        return ignore('repository is not in jobs.onPush.groups')
+      const kinds = repoAnalyzers(onPush.analyzers)
+      for (const analyzer of kinds) {
+        const stale = await store.jobs.list({ status: ['queued'], repo, analyzer, limit: 500 })
+        for (const job of stale)
+          if (job.options.branch === branch && job.ref !== sha)
+            // oxlint-disable-next-line no-await-in-loop -- few jobs, and order does not matter
+            await store.jobs.cancel(job.id, deps.now().toISOString())
+      }
+      const enqueued = await enqueue(
+        kinds.map((analyzer) => ({ analyzer, repo, ref: sha, options: { branch } })),
+        trigger('push'),
+      )
+      await activity('job.branch_pushed', repo, { branch, sha, jobs: enqueued })
       return { enqueued }
     }
 
@@ -536,14 +564,15 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       return { enqueued }
     }
 
-    return { handleTag, handleMergeRequest, handleNote, handlePipeline }
+    return { handleTag, handlePush, handleMergeRequest, handleNote, handlePipeline }
   }
 
   return async (event, source) => {
-    if (event.kind !== 'tag' && (await deps.readOnly?.(event.repo)))
+    if (event.kind !== 'tag' && event.kind !== 'push' && (await deps.readOnly?.(event.repo)))
       return ignore('the repository is read-only')
     const handle = handlers(source)
     if (event.kind === 'tag') return handle.handleTag(event)
+    if (event.kind === 'push') return handle.handlePush(event)
     if (event.kind === 'mergeRequest') return handle.handleMergeRequest(event)
     if (event.kind === 'note') return handle.handleNote(event)
     return handle.handlePipeline(event)

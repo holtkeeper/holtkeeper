@@ -240,7 +240,13 @@ describe('config routes', () => {
       { group: 'studio' },
       { project: 'tools/cli' },
     ])
-    expect(registrations[0]?.hook.events).toEqual(['tag_push', 'merge_request', 'note', 'pipeline'])
+    expect(registrations[0]?.hook.events).toEqual([
+      'push',
+      'tag_push',
+      'merge_request',
+      'note',
+      'pipeline',
+    ])
     expect(result.registered.map((h) => h.target)).toEqual(['studio/a', 'studio/b', 'tools/cli'])
     expect(result.notes).toEqual(['project hooks for studio'])
 

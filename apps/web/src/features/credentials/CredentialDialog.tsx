@@ -6,10 +6,12 @@ import { useCredentialMutations, useRepos } from '../../api/queries.ts'
 import { Button, Dialog, Notice, Select, Switch, TextField, notify } from '../../ui/index.ts'
 import { ScopeEditor } from '../access/ScopeEditor.tsx'
 import { AiProviderFields } from './AiProviderFields.tsx'
+import { EgressSecretFields } from './EgressSecretFields.tsx'
 import {
   type AiDraft,
   type CredentialDraft,
   type DraftErrors,
+  type EgressDraft,
   credentialKinds,
   defaultUrl,
   toCreateInput,
@@ -38,6 +40,9 @@ export function CredentialDialog({
   const errors: DraftErrors = submitted ? validateDraft(draft, isNew) : {}
   const ai = draft.kind === 'ai-sdk'
   const setAi = (patch: Partial<AiDraft>) => setDraft((d) => ({ ...d, ai: { ...d.ai, ...patch } }))
+  const egress = draft.kind === 'egress-secret'
+  const setEgress = (patch: Partial<EgressDraft>) =>
+    setDraft((d) => ({ ...d, egress: { ...d.egress, ...patch } }))
   const [autoName, setAutoName] = useState<string>()
   const pick = (provider: AiCatalogProviderView | undefined) => {
     const name = provider?.name ?? ''
@@ -118,7 +123,9 @@ export function CredentialDialog({
                       ? 'Anthropic'
                       : kind === 'ai-sdk'
                         ? 'AI provider'
-                        : 'Other',
+                        : kind === 'egress-secret'
+                          ? 'Proxy secret'
+                          : 'Other',
             }))}
             value={credentialKinds.some((kind) => kind === draft.kind) ? draft.kind : 'other'}
             onChange={(kind) =>
@@ -141,8 +148,14 @@ export function CredentialDialog({
             error={errors.url}
             isRequired
             mono
+            {...(egress && {
+              description: "Where the secret is used, e.g. the Turborepo cache's API URL.",
+            })}
           />
         )}
+        {egress ? (
+          <EgressSecretFields egress={draft.egress} errors={errors} onChange={setEgress} />
+        ) : null}
         <TextField
           label={ai ? 'API key' : 'Secret'}
           type="password"
@@ -176,7 +189,7 @@ export function CredentialDialog({
           />
           {errors.scope ? <span className="text-xs text-danger">{errors.scope}</span> : null}
         </div>
-        {ai ? null : (
+        {ai || egress ? null : (
           <fieldset className="flex flex-col gap-3 rounded-xl border border-separator p-3">
             <legend className="px-1 text-sm font-medium">Rotation</legend>
             <Switch

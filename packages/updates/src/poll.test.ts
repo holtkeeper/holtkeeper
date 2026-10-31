@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import type {
+  BranchRecord,
   Discussion,
   GitForge,
   MergeRequestRecord,
@@ -58,6 +59,15 @@ function fakeForge(state: {
   } as unknown as GitForge
   return { forge, calls }
 }
+
+const branch = (name: string, sha: string, committedAt: string): BranchRecord => ({
+  name,
+  sha,
+  committedAt,
+  merged: false,
+  protected: false,
+  default: name === 'main',
+})
 
 const poll = (forge: GitForge, cursor: RepoCursor | undefined, at: string) =>
   pollRepository({ forge, repo, cursor, now: new Date(at), events: pollEventKinds })
@@ -160,5 +170,30 @@ describe('pollRepository', () => {
       events: ['tags'],
     })
     expect(result).toMatchObject({ events: [], requests: 0 })
+  })
+
+  test('reports branches that moved or appeared since the previous poll', async () => {
+    let branches = [branch('main', 'a'.repeat(40), '2026-10-30T09:00:00Z')]
+    const forge = { kind: 'gitlab', listBranches: async () => branches } as unknown as GitForge
+    const pushes = (cursor: RepoCursor | undefined, at: string) =>
+      pollRepository({ forge, repo, cursor, now: new Date(at), events: ['pushes'] })
+
+    const first = await pushes(undefined, '2026-10-30T11:00:00Z')
+    expect(first.events).toEqual([])
+    expect(first.cursor.branches).toEqual({ main: 'a'.repeat(40) })
+
+    branches = [
+      branch('feature', 'c'.repeat(40), '2026-10-30T11:02:00Z'),
+      branch('main', 'b'.repeat(40), '2026-10-30T11:01:00Z'),
+    ]
+    const second = await pushes(first.cursor, '2026-10-30T11:05:00Z')
+    expect(second.events).toEqual([
+      { kind: 'push', repo, branch: 'main', sha: 'b'.repeat(40), actor: '' },
+      { kind: 'push', repo, branch: 'feature', sha: 'c'.repeat(40), actor: '' },
+    ])
+    expect((await pushes(second.cursor, '2026-10-30T11:10:00Z')).events).toEqual([])
+
+    const { branches: _, ...older } = second.cursor
+    expect((await pushes(older, '2026-10-30T11:15:00Z')).events).toEqual([])
   })
 })

@@ -292,6 +292,7 @@
         "@holtkeeper/vuln-go": "workspace:*",
         "@holtkeeper/vuln-js": "workspace:*",
         "@holtkeeper/vuln-osv": "workspace:*",
+        "@holtkeeper/warmup": "workspace:*",
         "zod": "^4.6.7",
       },
       "devDependencies": {
@@ -948,6 +949,16 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/warmup": {
+      "name": "@holtkeeper/warmup",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/workspace": {
       "name": "@holtkeeper/workspace",
       "version": "0.0.0",
@@ -1335,6 +1346,8 @@
     "@holtkeeper/vuln-osv": ["@holtkeeper/vuln-osv@workspace:packages/vuln-osv"],
 
     "@holtkeeper/waibee-ai-provider": ["@holtkeeper/waibee-ai-provider@0.1.0", "", { "dependencies": { "@ai-sdk/anthropic": "^4.0.92", "@ai-sdk/openai-compatible": "^3.0.81", "@ai-sdk/provider": "^4.0.34", "@ai-sdk/provider-utils": "^5.0.71" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ScN/VbVS2v0Rytbp47LNVb8KUcD2ajGsU2tREiGDNvQ0mzQkQXVsnQR8tA3/DHuN3DPhTsx+ClIp51H5atoN+Q=="],
+
+    "@holtkeeper/warmup": ["@holtkeeper/warmup@workspace:packages/warmup"],
 
     "@holtkeeper/web": ["@holtkeeper/web@workspace:apps/web"],
 

@@ -66,7 +66,7 @@ const configCollections: Record<string, ConfigDocumentType> = {
 }
 
 /** Events a registered forge webhook delivers. */
-const WEBHOOK_EVENTS: WebhookEvent[] = ['tag_push', 'merge_request', 'note', 'pipeline']
+const WEBHOOK_EVENTS: WebhookEvent[] = ['push', 'tag_push', 'merge_request', 'note', 'pipeline']
 
 const GLOBAL = { kind: 'global' } as const
 
@@ -99,6 +99,7 @@ const triggersOf = (config: HoltkeeperConfig): [string, TriggerDocumentData][] =
   if (!jobs) return []
   const list: TriggerDocumentData[] = [
     ...(jobs.onTag ? [{ on: 'tag' as const, ...jobs.onTag }] : []),
+    ...(jobs.onPush ? [{ on: 'push' as const, ...jobs.onPush }] : []),
     ...(jobs.onMergeRequest ? [{ on: 'mergeRequest' as const, ...jobs.onMergeRequest }] : []),
     ...Object.entries(jobs.onLabel ?? {}).map(([label, analyzers]) => ({
       on: 'label' as const,

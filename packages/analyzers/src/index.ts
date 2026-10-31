@@ -28,6 +28,7 @@ import { stackAnalyzer } from '@holtkeeper/stack'
 import { testIdsAnalyzer } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
 import { usagesAnalyzer } from '@holtkeeper/usages'
+import { warmupAnalyzer } from '@holtkeeper/warmup'
 import { z } from 'zod'
 
 import { auditAnalyzer } from './audit.ts'
@@ -181,5 +182,6 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   portAnalyzer,
   createReviewAnalyzer({ checks: reviewChecks() }),
   trackerAnalyzer,
+  warmupAnalyzer,
   auditAnalyzer,
 ]

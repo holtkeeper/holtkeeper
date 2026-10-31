@@ -98,6 +98,7 @@ function triggerKeys(jobs: Jobs | undefined): string[] {
   if (!jobs) return []
   return [
     ...(jobs.onTag ? ['tag'] : []),
+    ...(jobs.onPush ? ['push'] : []),
     ...(jobs.onMergeRequest ? ['merge-request'] : []),
     ...Object.keys(jobs.onLabel ?? {}).map((label) => `label:${label}`),
     ...Object.keys(jobs.commands ?? {}).map((name) => `command:${name}`),
@@ -204,6 +205,12 @@ export function effectiveConfig(
         const data = doc.data
         if (data.on === 'tag')
           jobs.onTag = without({ analyzers: data.analyzers, groups: data.groups })
+        else if (data.on === 'push')
+          jobs.onPush = without({
+            analyzers: data.analyzers,
+            branches: data.branches,
+            groups: data.groups,
+          })
         else if (data.on === 'mergeRequest')
           jobs.onMergeRequest = without({
             analyzers: data.analyzers,

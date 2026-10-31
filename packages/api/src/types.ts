@@ -560,23 +560,31 @@ export interface RepoExplain {
 }
 
 /**
- * A request an egress proxy adds headers to: to `host` (exact, or `*.example.com`), with a path
- * matching one of `paths` (regular expressions; none: every path) and a method in `methods`
- * (default `GET` and `HEAD`), over TLS unless `insecure`.
+ * A request an egress proxy changes: to `host` (exact, or `*.example.com`), with a path matching
+ * one of `paths` (regular expressions; none: every path) and a method in `methods` (default `GET`
+ * and `HEAD`; `*` for any), over TLS unless `insecure`. A rule has `headers`, `replace` or both.
  */
 export interface EgressRule {
   host: string
   paths?: string[]
   methods?: string[]
-  /** Set on matching requests, replacing what the client sent. */
-  headers: Record<string, string>
+  /** Set on matching requests, replacing what the client sent. The first matching rule sets them. */
+  headers?: Record<string, string>
+  /**
+   * Placeholder to real value: every occurrence of a placeholder in the parts named by `in` is
+   * replaced. Every matching rule applies its replacements.
+   */
+  replace?: Record<string, string>
+  /** Where `replace` looks; default `headers`. `url` is the path with its query. */
+  in?: ('headers' | 'url' | 'body')[]
   insecure?: boolean
 }
 
 /**
  * `GET /api/egress/rules` with `Authorization: Bearer <server.egress.secret>`: the rules for the
- * panel GitLab forges (all but those with `packages: false`), carrying their credential's current token. Never cache it longer
- * than a minute: rotation revokes the previous token at once.
+ * panel GitLab forges (all but those with `packages: false`), carrying their credential's current
+ * token, and one replacement rule per host of every `egress-secret` credential. Never cache it
+ * longer than a minute: rotation revokes the previous token at once.
  */
 export interface EgressRulesResponse {
   rules: EgressRule[]
@@ -1042,7 +1050,7 @@ export interface RepoUpdatesView {
     /** From the `polling` setting that applies to the repository. */
     enabled: boolean
     intervalMs: number
-    events: ('mergeRequests' | 'notes' | 'pipelines' | 'tags')[]
+    events: ('mergeRequests' | 'notes' | 'pipelines' | 'tags' | 'pushes')[]
     /** Interval while webhooks reach the repository; absent when polling stops then. */
     withWebhookMs?: number
     /** Interval in effect after the webhook fallback and the credential's polling budget. */

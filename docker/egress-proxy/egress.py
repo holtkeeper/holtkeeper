@@ -1,6 +1,7 @@
 """mitmproxy addon that adds credentials to matching requests, so clients never hold them.
 
-Rules come from a JSON file (option `egress_rules`), from a URL (option `egress_rules_url`, read
+A rule either sets headers or replaces placeholders with real values (in headers, the URL or the
+body), or both; clients then hold only the placeholder. Rules come from a JSON file (option `egress_rules`), from a URL (option `egress_rules_url`, read
 with `EGRESS_RULES_TOKEN` as a bearer token), or both. Header values in the file may reference the
 proxy's own environment as `${NAME}`; a missing variable fails the start. URL rules are taken
 literally and re-read every `egress_rules_refresh` seconds, and at once when an upstream answers a
@@ -21,6 +22,8 @@ from string import Template
 from mitmproxy import ctx, http, tls
 
 DEFAULT_METHODS = ("GET", "HEAD")
+TARGETS = ("headers", "url", "body")
+MIN_PLACEHOLDER = 8
 MIN_REFRESH_GAP = 5.0
 
 
@@ -30,6 +33,8 @@ class Rule:
     paths: tuple[re.Pattern[str], ...]
     methods: tuple[str, ...]
     headers: dict[str, str]
+    replace: dict[str, str]
+    targets: tuple[str, ...]
     insecure: bool
 
     def matches_host(self, host: str) -> bool:
@@ -41,11 +46,54 @@ class Rule:
     def matches(self, request: http.Request) -> bool:
         if request.scheme != "https" and not self.insecure:
             return False
-        if request.method.upper() not in self.methods:
+        if "*" not in self.methods and request.method.upper() not in self.methods:
             return False
         if not self.matches_host(request.host):
             return False
         return not self.paths or any(p.search(request.path) for p in self.paths)
+
+    def substitute(self, request: http.Request) -> bool:
+        """Replaces every placeholder in the rule's targets; whether anything changed."""
+
+        def swap(text: str) -> str:
+            for placeholder, value in self.replace.items():
+                text = text.replace(placeholder, value)
+            return text
+
+        changed = False
+        if "headers" in self.targets:
+            for name in list(request.headers.keys()):
+                values = request.headers.get_all(name)
+                swapped = [swap(value) for value in values]
+                if swapped != values:
+                    request.headers.set_all(name, swapped)
+                    changed = True
+        if "url" in self.targets:
+            path = swap(request.path)
+            if path != request.path:
+                request.path = path
+                changed = True
+        if "body" in self.targets and request.raw_content:
+            body = request.raw_content
+            for placeholder, value in self.replace.items():
+                body = body.replace(placeholder.encode(), value.encode())
+            if body != request.raw_content:
+                request.raw_content = body
+                changed = True
+        return changed
+
+
+def resolve(values: dict, env: dict[str, str] | None, where: str) -> dict[str, str]:
+    """String values with `${NAME}` read from `env`; `None` keeps them as they are."""
+    try:
+        return {
+            str(k): str(v) if env is None else Template(str(v)).substitute(env)
+            for k, v in values.items()
+        }
+    except KeyError as missing:
+        raise ValueError(f"{where}: environment variable {missing} is not set") from None
+    except ValueError as error:
+        raise ValueError(f"{where}: {error}") from None
 
 
 def parse_rules(document: object, env: dict[str, str] | None) -> list[Rule]:
@@ -60,24 +108,27 @@ def parse_rules(document: object, env: dict[str, str] | None) -> list[Rule]:
         host = raw.get("host")
         if not isinstance(host, str) or not host:
             raise ValueError(f"{where}.host: expected a host name")
-        headers = raw.get("headers")
-        if not isinstance(headers, dict) or not headers:
-            raise ValueError(f"{where}.headers: expected at least one header")
-        try:
-            values = {
-                str(k): str(v) if env is None else Template(str(v)).substitute(env)
-                for k, v in headers.items()
-            }
-        except KeyError as missing:
-            raise ValueError(f"{where}.headers: environment variable {missing} is not set") from None
-        except ValueError as error:
-            raise ValueError(f"{where}.headers: {error}") from None
+        headers = raw.get("headers") or {}
+        replace = raw.get("replace") or {}
+        if not isinstance(headers, dict) or not isinstance(replace, dict):
+            raise ValueError(f"{where}: headers and replace must be objects")
+        if not headers and not replace:
+            raise ValueError(f"{where}: expected headers or replace")
+        if any(len(str(placeholder)) < MIN_PLACEHOLDER for placeholder in replace):
+            raise ValueError(f"{where}.replace: placeholders need {MIN_PLACEHOLDER} characters or more")
+        targets = tuple(raw.get("in") or ("headers",))
+        if any(target not in TARGETS for target in targets):
+            raise ValueError(f"{where}.in: expected some of {', '.join(TARGETS)}")
+        values = resolve(headers, env, f"{where}.headers")
+        replacements = resolve(replace, env, f"{where}.replace")
         rules.append(
             Rule(
                 host=host.lower().rstrip("."),
                 paths=tuple(re.compile(p) for p in raw.get("paths") or []),
                 methods=tuple(m.upper() for m in raw.get("methods") or DEFAULT_METHODS),
                 headers=values,
+                replace=replacements,
+                targets=targets,
                 insecure=bool(raw.get("insecure", False)),
             )
         )
@@ -169,12 +220,19 @@ class Egress:
         return any(rule.matches_host(host) for rule in self.rules)
 
     def request(self, flow: http.HTTPFlow) -> None:
+        headers_set = False
         for rule in self.rules:
-            if rule.matches(flow.request):
+            if not rule.matches(flow.request):
+                continue
+            changed = False
+            if rule.headers and not headers_set:
                 for name, value in rule.headers.items():
                     flow.request.headers[name] = value
-                flow.metadata["egress"] = rule in self.url_rules
-                return
+                headers_set = changed = True
+            if rule.replace and rule.substitute(flow.request):
+                changed = True
+            if changed and rule in self.url_rules:
+                flow.metadata["egress"] = True
 
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.metadata.get("egress") and flow.response and flow.response.status_code in (401, 403):

@@ -18,7 +18,77 @@ export const aiProviderKinds: readonly string[] = [
 ]
 
 /** Credential kinds the UI offers; anything else is stored as `other`. */
-export const credentialKinds = ['gitlab', 'github', 'ai-sdk', 'anthropic', 'other'] as const
+export const credentialKinds = [
+  'gitlab',
+  'github',
+  'ai-sdk',
+  'anthropic',
+  'egress-secret',
+  'other',
+] as const
+
+/** Where the egress proxy looks for an egress secret's placeholder. */
+export const egressTargets = ['headers', 'url', 'body'] as const
+
+/** Egress secret part of the form (kind `egress-secret`). */
+export interface EgressDraft {
+  placeholder: string
+  hosts: string[]
+  paths: string[]
+  methods: string[]
+  targets: (typeof egressTargets)[number][]
+}
+
+/** A fresh placeholder: a random UUID, which no real token looks like. */
+export const newPlaceholder = (): string => crypto.randomUUID()
+
+const emptyEgress = (): EgressDraft => ({
+  placeholder: newPlaceholder(),
+  hosts: [],
+  paths: [],
+  methods: [],
+  targets: ['headers'],
+})
+
+const strings = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+
+function egressDraftOf(options: Record<string, unknown> | undefined): EgressDraft {
+  const targets = strings(options?.in).filter((t): t is EgressDraft['targets'][number] =>
+    egressTargets.some((target) => target === t),
+  )
+  return {
+    placeholder: text(options?.placeholder) || newPlaceholder(),
+    hosts: strings(options?.hosts),
+    paths: strings(options?.paths),
+    methods: strings(options?.methods),
+    targets: targets.length ? targets : ['headers'],
+  }
+}
+
+/** `options` of an egress secret credential. */
+const egressOptions = (egress: EgressDraft): Record<string, unknown> => ({
+  placeholder: egress.placeholder.trim(),
+  ...(egress.hosts.length && { hosts: [...egress.hosts] }),
+  ...(egress.paths.length && { paths: [...egress.paths] }),
+  ...(egress.methods.length && { methods: egress.methods.map((m) => m.toUpperCase()) }),
+  ...(egress.targets.join() !== 'headers' && { in: [...egress.targets] }),
+})
+
+/** Problem of a host entry, for the hosts input. */
+export const egressHostError = (value: string): string | undefined =>
+  /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(value)
+    ? undefined
+    : 'A host name or *.example.com'
+
+/** Problem of a path entry, for the paths input. */
+export const egressPathError = (value: string): string | undefined => {
+  try {
+    return RegExp(value) ? undefined : 'Not a regular expression'
+  } catch {
+    return 'Not a regular expression'
+  }
+}
 
 /** Package for providers of your own and catalog providers without a package of their own. */
 export const OPENAI_COMPATIBLE = '@ai-sdk/openai-compatible'
@@ -57,9 +127,11 @@ export interface CredentialDraft {
   daysBefore: string
   lifetimeDays: string
   ai: AiDraft
+  egress: EgressDraft
 }
 
 const defaultUrls: Record<string, string> = {
+  'egress-secret': 'https://',
   gitlab: 'https://gitlab.com',
   github: 'https://api.github.com',
   anthropic: 'https://api.anthropic.com',
@@ -110,6 +182,8 @@ export function toDraft(credential?: CredentialView): CredentialDraft {
     daysBefore: String(credential?.rotation?.daysBefore ?? 14),
     lifetimeDays: String(credential?.rotation?.lifetimeDays ?? 90),
     ai: credential?.kind === 'ai-sdk' ? aiDraftOf(credential.options) : emptyAi,
+    egress:
+      credential?.kind === 'egress-secret' ? egressDraftOf(credential.options) : emptyEgress(),
   }
 }
 
@@ -138,7 +212,10 @@ function validateAi(ai: AiDraft): DraftErrors {
 
 /** Field errors of a draft by field; AI provider fields have their own keys. */
 export type DraftErrors = Partial<
-  Record<keyof CredentialDraft | 'provider' | 'baseUrl' | 'advanced', string>
+  Record<
+    keyof CredentialDraft | 'provider' | 'baseUrl' | 'advanced' | 'placeholder' | 'targets',
+    string
+  >
 >
 
 /** Field errors of a draft; empty when it can be submitted. */
@@ -154,6 +231,11 @@ export function validateDraft(draft: CredentialDraft, isNew: boolean): DraftErro
     } catch {
       errors.url = 'Enter a full URL, e.g. https://gitlab.example.com'
     }
+  }
+  if (draft.kind === 'egress-secret') {
+    if (!/^[A-Za-z0-9._~-]{16,128}$/.test(draft.egress.placeholder.trim()))
+      errors.placeholder = '16 to 128 letters, digits, ., _, ~ or -'
+    if (!draft.egress.targets.length) errors.targets = 'Pick at least one place'
   }
   if (isNew && !draft.secret) errors.secret = 'Secret is required'
   if (isEmptyScope(draft.scope)) errors.scope = 'Choose at least one group or repository pattern'
@@ -187,6 +269,7 @@ export function toCreateInput(draft: CredentialDraft): CreateCredentialInput {
     kind: draft.kind,
     url: ai ? endpointOf(draft) : draft.url.trim(),
     ...(ai && { options: aiOptions(draft.ai) }),
+    ...(draft.kind === 'egress-secret' && { options: egressOptions(draft.egress) }),
     scope: normalizeScope(draft.scope),
     secret: draft.secret,
     ...(draft.expires ? { expiresAt: `${draft.expires}T00:00:00.000Z` } : {}),

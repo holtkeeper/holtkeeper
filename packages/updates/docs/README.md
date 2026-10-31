@@ -10,7 +10,7 @@ const { events, cursor, requests } = await pollRepository({
   repo, // { forge, path }
   cursor, // RepoCursor from the previous poll, or undefined
   now: new Date(),
-  events: ['mergeRequests', 'notes', 'pipelines', 'tags'],
+  events: ['mergeRequests', 'notes', 'pipelines', 'tags', 'pushes'],
 })
 ```
 
@@ -19,10 +19,11 @@ const { events, cursor, requests } = await pollRepository({
 - **Comments** (`listDiscussions` of merge requests that changed): every non-system note newer than the last one seen, with `inThread` set for diff notes and replies.
 - **Pipelines** (`listPipelines` with `updatedAfter`): pipelines that ended `success` or `failed` on the head of an open merge request, once each.
 - **Tags** (`listTags`, newest 20): new tags and tags that moved.
+- **Pushes** (`listBranches`, every branch): `push` events for branches whose head moved and new branches, oldest commit first. The first poll that lists branches only records them, also for cursors written before branches were polled. The server asks for pushes only while `jobs.onPush` is configured, since listing every branch costs a request per page.
 
 Kinds the forge cannot list are skipped. Windows overlap by two minutes for clock skew; a change already in the cursor is not reported again. `requests` counts forge calls (about one HTTP request each) for budgeting. Polling cannot see who made a change, so `actor` is empty: changes the bot made itself are not filtered out the way webhook events by `jobs.botUsername` are.
 
-The cursor is JSON and stays small: open merge requests and those closed in the last week (at most 200), the last 100 tags and 200 reported pipelines.
+The cursor is JSON and stays small: open merge requests and those closed in the last week (at most 200), the last 100 tags, 200 reported pipelines and up to 500 branch heads.
 
 ## Setting
 
@@ -32,7 +33,7 @@ The cursor is JSON and stays small: open merge requests and those closed in the 
 {
   enabled: boolean
   interval?: string // '30s' | '5m' | '1h' | '1d', at least 30s; default 5m
-  events?: ('mergeRequests' | 'notes' | 'pipelines' | 'tags')[] // default all
+  events?: ('mergeRequests' | 'notes' | 'pipelines' | 'tags' | 'pushes')[] // default all
   withWebhook?: string | 'off' // interval while webhooks reach the repository; default 1h
 }
 ```

@@ -283,7 +283,10 @@ function createPoller(options: PollerOptions) {
         repo,
         cursor: state.cursor,
         now: started,
-        events: settings.events,
+        // Listing every branch costs requests; only pay for it while a push trigger wants it.
+        events: config.jobs?.onPush
+          ? settings.events
+          : settings.events.filter((kind) => kind !== 'pushes'),
       })
       spend.record(key, started.getTime(), result.requests)
       let enqueued = 0

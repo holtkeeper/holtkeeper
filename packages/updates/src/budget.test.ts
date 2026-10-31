@@ -54,7 +54,7 @@ describe('pollingConfig', () => {
     expect(pollingConfig({ enabled: true })).toEqual({
       enabled: true,
       intervalMs: 300_000,
-      events: ['mergeRequests', 'notes', 'pipelines', 'tags'],
+      events: ['mergeRequests', 'notes', 'pipelines', 'tags', 'pushes'],
       withWebhookMs: 3_600_000,
     })
     expect(pollingConfig({ enabled: true, interval: '10s' }).enabled).toBe(false)

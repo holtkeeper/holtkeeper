@@ -269,6 +269,7 @@ export type TriggerKind = TriggerDocumentData['on']
 /** Kinds of triggers with their labels, in the order the panel lists them. */
 export const triggerKinds: readonly { id: TriggerKind; label: string }[] = [
   { id: 'tag', label: 'Tag pushed' },
+  { id: 'push', label: 'Branch push' },
   { id: 'mergeRequest', label: 'Merge request' },
   { id: 'label', label: 'Label added' },
   { id: 'command', label: 'Comment command' },
@@ -277,10 +278,14 @@ export const triggerKinds: readonly { id: TriggerKind; label: string }[] = [
 /** Merge request events a trigger may react to. */
 export const mergeRequestActions = ['open', 'update', 'reopen'] as const
 
-/** The fixed document id of a trigger: `tag`, `merge-request`, `label:<label>`, `command:<name>`. */
+/**
+ * The fixed document id of a trigger: `tag`, `push`, `merge-request`, `label:<label>`,
+ * `command:<name>`.
+ */
 export function triggerId(
   trigger:
     | { on: 'tag' }
+    | { on: 'push' }
     | { on: 'mergeRequest' }
     | { on: 'label'; label: string }
     | { on: 'command'; command: string },
@@ -288,6 +293,8 @@ export function triggerId(
   switch (trigger.on) {
     case 'tag':
       return 'tag'
+    case 'push':
+      return 'push'
     case 'mergeRequest':
       return 'merge-request'
     case 'label':
@@ -301,6 +308,8 @@ export interface TriggerDraft {
   on: TriggerKind
   analyzers: string[]
   groups: string[]
+  /** Branch globs of a push trigger; empty means every branch. */
+  branches: string[]
   actions: (typeof mergeRequestActions)[number][]
   draft: boolean
   label: string
@@ -323,6 +332,7 @@ export function toTriggerDraft(
     on: data?.on ?? kind,
     analyzers: [],
     groups: [],
+    branches: [],
     actions: [],
     draft: false,
     label: '',
@@ -337,6 +347,13 @@ export function toTriggerDraft(
         ...draft,
         analyzers: [...data.analyzers],
         groups: (data.groups ?? []).map(formatGroupMatch),
+      }
+    case 'push':
+      return {
+        ...draft,
+        analyzers: [...data.analyzers],
+        groups: (data.groups ?? []).map(formatGroupMatch),
+        branches: [...(data.branches ?? [])],
       }
     case 'mergeRequest':
       return {
@@ -383,6 +400,13 @@ export function toTriggerInput(draft: TriggerDraft): TriggerDocumentData {
         analyzers: [...draft.analyzers],
         ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
       }
+    case 'push':
+      return {
+        on: 'push',
+        analyzers: [...draft.analyzers],
+        ...(draft.branches.length ? { branches: [...draft.branches] } : {}),
+        ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+      }
     case 'mergeRequest':
       return {
         on: 'mergeRequest',
@@ -409,6 +433,10 @@ export function describeTrigger(trigger: TriggerDocumentData): string {
   switch (trigger.on) {
     case 'tag':
       return 'A tag is pushed'
+    case 'push':
+      return trigger.branches?.length
+        ? `Commits are pushed to ${trigger.branches.join(', ')}`
+        : 'Commits are pushed to any branch'
     case 'mergeRequest': {
       const actions = trigger.actions?.length ? trigger.actions : mergeRequestActions
       return `Merge request ${actions.join(', ')}${trigger.draft ? ', drafts included' : ''}`

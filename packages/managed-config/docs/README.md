@@ -4,13 +4,13 @@ Forges, groups, repository traits, schedules and triggers edited in the panel, l
 
 ## Documents
 
-| Type         | Id                                                                      | Data                                                                                                                             |
-| ------------ | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `forge`      | forge id (`work`)                                                       | `{ kind: 'gitlab' \| 'github', url, credentialId, packages?, webhook?: { secret (sealed), createdAt, registered? } }`            |
-| `group`      | group id                                                                | `{ forge, include[], exclude[] }`                                                                                                |
-| `repoTraits` | free; merged by `pattern`                                               | `{ pattern, forge?, traits }`                                                                                                    |
-| `schedule`   | the schedule's config `name`                                            | `{ name (display), enabled, analyzers, groups?, repos?, options?, cron \| every, timezone?, windows?, jitterMinutes?, spread? }` |
-| `trigger`    | `tag`, `merge-request`, `label:<label>`, `command:<name>` (`triggerId`) | `{ on: 'tag' \| 'mergeRequest' \| 'label' \| 'command', ... }` as the matching `jobs` entry                                      |
+| Type         | Id                                                                              | Data                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `forge`      | forge id (`work`)                                                               | `{ kind: 'gitlab' \| 'github', url, credentialId, packages?, webhook?: { secret (sealed), createdAt, registered? } }`            |
+| `group`      | group id                                                                        | `{ forge, include[], exclude[] }`                                                                                                |
+| `repoTraits` | free; merged by `pattern`                                                       | `{ pattern, forge?, traits }`                                                                                                    |
+| `schedule`   | the schedule's config `name`                                                    | `{ name (display), enabled, analyzers, groups?, repos?, options?, cron \| every, timezone?, windows?, jitterMinutes?, spread? }` |
+| `trigger`    | `tag`, `push`, `merge-request`, `label:<label>`, `command:<name>` (`triggerId`) | `{ on: 'tag' \| 'push' \| 'mergeRequest' \| 'label' \| 'command', ... }` as the matching `jobs` entry                            |
 
 Every document has `version` (1, 2, …), `updatedAt`, `updatedBy`; earlier versions stay in `history(type, id)` until the document is removed. Body schemas for the panel's endpoints are in `documentDataSchemas`; they use the file config's rules (ids, cron checked with croner, `every` like `15m`/`1h`/`1d`, IANA zones, `HH:MM` windows). A forge's token is never in a document: `credentialId` points at a stored credential.
 
@@ -18,7 +18,7 @@ Every document has `version` (1, 2, …), `updatedAt`, `updatedBy`; earlier vers
 
 `effectiveConfig(file, documents, { forgeFactories, tokens?, webhookSecrets?, reuse? })`:
 
-- A document **replaces** the file entry with the same key — forges and groups by id, schedules by name, repo traits by pattern, triggers by trigger id (`onTag`, `onMergeRequest`, `onLabel[label]`, `commands[name]`) — or **adds** a new one. Panel documents cannot delete file entries; a panel schedule with `enabled: false` switches a file schedule off.
+- A document **replaces** the file entry with the same key — forges and groups by id, schedules by name, repo traits by pattern, triggers by trigger id (`onTag`, `onPush`, `onMergeRequest`, `onLabel[label]`, `commands[name]`) — or **adds** a new one. Panel documents cannot delete file entries; a panel schedule with `enabled: false` switches a file schedule off.
 - Panel forges are built by `forgeFactories[kind](doc, token)` with the credential's plaintext token from `tokens`. A missing token or adapter gives a forge whose `create()` throws, so only tasks using it fail.
 - A panel forge with a webhook secret (opened, in `webhookSecrets`) becomes `jobs.webhooks.<id>.secret`.
 - Panel schedules, triggers and webhook secrets create a `jobs` section with defaults when the file has none (the server only starts its job engine for a config that has `jobs` at start).

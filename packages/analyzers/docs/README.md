@@ -28,6 +28,7 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 | `port`         | group | a change ported to the sibling repositories of a group                    |
 | `review`       | repo  | AI review of a merge request                                              |
 | `tracker`      | group | declared entities tracked across repositories and documents               |
+| `warmup`       | repo  | runs a command of your choosing to fill build caches (Turborepo, Nx, ...) |
 | `audit`        | repo  | vulnerability audit with osv-scanner (data is an `AuditReport`)           |
 
 `reviewChecks()` returns the quality checks the review analyzer runs on changed lines.

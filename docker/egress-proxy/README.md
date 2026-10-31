@@ -16,6 +16,12 @@ Rules come from a JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`, u
       "paths": ["^/api/v4/(projects/[^/]+/|groups/[^/]+/-/)?packages/npm/"],
       "methods": ["GET", "HEAD"],
       "headers": { "Authorization": "Bearer ${GITLAB_PACKAGES_TOKEN}" }
+    },
+    {
+      "host": "turbo-cache.internal",
+      "methods": ["*"],
+      "replace": { "6c1d7c9e-3a51-4b8e-9f0a-2d5e8b7c4f10": "${TURBO_TOKEN}" },
+      "insecure": true
     }
   ]
 }
@@ -25,11 +31,13 @@ Rules come from a JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`, u
 | ---------- | ---------------------------------------------------------------------------------------------------------- |
 | `host`     | Destination host, exact or `*.example.com`. Matched against where the request really goes, not its `Host`. |
 | `paths`    | Regular expressions searched in the path (with query). Empty or missing: every path.                       |
-| `methods`  | Default `GET` and `HEAD`, so a token with write scopes still only reads through the proxy.                 |
+| `methods`  | Default `GET` and `HEAD`, so a token with write scopes still only reads through the proxy. `*`: any.       |
 | `headers`  | Set on matching requests, replacing what the client sent. `${NAME}` reads the proxy's environment.         |
+| `replace`  | Placeholder (8 characters or more) to real value, replaced wherever it occurs in the parts `in` names.     |
+| `in`       | Where `replace` looks: `headers` (default), `url` (path with query), `body`.                               |
 | `insecure` | Also add the headers over plain HTTP. Default `false`: credentials only travel over TLS.                   |
 
-The first matching rule wins. In the file, `${NAME}` reads the proxy's environment, and a variable that is not set stops the proxy at start. Rules from the URL are taken literally. Header values are never logged.
+A rule needs `headers`, `replace` or both. The first matching rule sets its headers; every matching rule applies its replacements, so clients holding only a placeholder get the real value on the hosts the rule names and nowhere else. In the file, `${NAME}` reads the proxy's environment, and a variable that is not set stops the proxy at start. Rules from the URL are taken literally. Header values are never logged.
 
 The URL is read with `Authorization: Bearer $EGRESS_RULES_TOKEN` at start, every `EGRESS_RULES_REFRESH` seconds (default 60), and at once (at most every 5 seconds) when an upstream answers a request it added URL credentials to with 401 or 403, which is how a rotated token is picked up. A failed read is logged and keeps the previous rules.
 

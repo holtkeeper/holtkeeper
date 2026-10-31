@@ -6,6 +6,7 @@ import { join } from 'node:path'
 const available = Boolean(Bun.which('mitmdump') && Bun.which('openssl'))
 const addon = join(import.meta.dir, 'egress.py')
 const token = 'test-token-value'
+const placeholder = '0b6f3c1e-placeholder'
 
 const rules = {
   rules: [
@@ -19,6 +20,14 @@ const rules = {
       insecure: true,
       paths: ['^/plain/'],
       headers: { 'X-Token': '${EGRESS_TEST_TOKEN}' },
+    },
+    {
+      host: 'localhost',
+      insecure: true,
+      paths: ['^/cache/'],
+      methods: ['*'],
+      replace: { [placeholder]: '${EGRESS_TEST_TOKEN}' },
+      in: ['headers', 'url'],
     },
   ],
 }
@@ -109,7 +118,11 @@ const echo = (request: Request) => {
     authorization !== `Bearer ${registryToken}`
   )
     return Response.json({ authorization }, { status: 401 })
-  return Response.json({ authorization, token: request.headers.get('x-token') })
+  return Response.json({
+    authorization,
+    token: request.headers.get('x-token'),
+    query: new URL(request.url).search,
+  })
 }
 
 const servedRules = (request: Request) =>
@@ -198,7 +211,11 @@ describe.skipIf(!available)('egress addon', () => {
       ...(ca && { tls: { ca } }),
     })
     expect(response.status).toBe(200)
-    return (await response.json()) as { authorization: string | null; token: string | null }
+    return (await response.json()) as {
+      authorization: string | null
+      token: string | null
+      query: string
+    }
   }
 
   test('adds the header to matching HTTPS requests and replaces the client one', async () => {
@@ -227,6 +244,19 @@ describe.skipIf(!available)('egress addon', () => {
   test('adds headers over plain HTTP only for insecure rules', async () => {
     expect((await send(`http://localhost:${plain.port}/plain/x`)).token).toBe(token)
     expect((await send(`http://localhost:${plain.port}/packages/x`)).authorization).toBeNull()
+  })
+
+  test('replaces placeholders in headers and the URL of matching requests only', async () => {
+    const put = await send(`http://localhost:${plain.port}/cache/a?team=x&token=${placeholder}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${placeholder}` },
+    })
+    expect(put.authorization).toBe(`Bearer ${token}`)
+    expect(put.query).toBe(`?team=x&token=${token}`)
+    const elsewhere = await send(`http://localhost:${plain.port}/other`, {
+      headers: { Authorization: `Bearer ${placeholder}` },
+    })
+    expect(elsewhere.authorization).toBe(`Bearer ${placeholder}`)
   })
 
   test('takes rules from a URL and re-reads them when the upstream refuses the token', async () => {

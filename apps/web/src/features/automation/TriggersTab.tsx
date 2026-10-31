@@ -104,7 +104,9 @@ export function TriggersTab() {
           <tbody>
             {list.map((entry) => {
               const groups =
-                entry.data.on === 'tag' || entry.data.on === 'mergeRequest'
+                entry.data.on === 'tag' ||
+                entry.data.on === 'push' ||
+                entry.data.on === 'mergeRequest'
                   ? (entry.data.groups ?? [])
                   : undefined
               return (
@@ -367,7 +369,17 @@ function TriggerDialog({
           </FormSection>
         ) : null}
 
-        {draft.on === 'tag' || draft.on === 'mergeRequest' ? (
+        {draft.on === 'push' ? (
+          <TagInput
+            label="Branches"
+            values={draft.branches}
+            onChange={(v) => set('branches', v)}
+            placeholder="main"
+            description="Globs such as main or release/*; ** matches names with slashes. None: every branch. A newer push cancels queued jobs of the same branch."
+          />
+        ) : null}
+
+        {draft.on === 'tag' || draft.on === 'push' || draft.on === 'mergeRequest' ? (
           <GroupPicker
             value={draft.groups}
             onChange={(v) => set('groups', v)}

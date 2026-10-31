@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
-import type { EgressRulesResponse } from '@holtkeeper/api'
+import type { EgressRule, EgressRulesResponse } from '@holtkeeper/api'
 import { noAuth } from '@holtkeeper/auth-none'
 import { type HoltkeeperConfig, parseConfig } from '@holtkeeper/core'
 import { type CredentialService, createCredentialService } from '@holtkeeper/credentials'
@@ -10,6 +10,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
 import { createApp } from '../src/app.ts'
+import { validateEgressSecretOptions } from '../src/egress-secrets.ts'
 
 const vault = aesVault('v'.repeat(32))
 const secret = 'egress-secret'
@@ -51,7 +52,11 @@ const rules = (app: ReturnType<typeof appWith>, authorization?: string) =>
 
 beforeEach(async () => {
   store = memoryStore()
-  credentials = createCredentialService({ credentials: store.credentials, vault })
+  credentials = createCredentialService({
+    credentials: store.credentials,
+    vault,
+    validateOptions: validateEgressSecretOptions,
+  })
   tokenId = (
     await credentials.create(
       {
@@ -94,7 +99,7 @@ describe('egress rules', () => {
     ])
     await credentials.update(tokenId, { secret: 'glpat-rotated' }, 'root')
     const next = (await (await rules(app, `Bearer ${secret}`)).json()) as EgressRulesResponse
-    expect(next.rules[0]?.headers.Authorization).toBe('Bearer glpat-rotated')
+    expect(next.rules[0]?.headers?.Authorization).toBe('Bearer glpat-rotated')
   })
 
   test('leaves out forges whose credential is gone', async () => {
@@ -103,5 +108,41 @@ describe('egress rules', () => {
       await rules(appWith({ egress: { secret } }), `Bearer ${secret}`)
     ).json()) as EgressRulesResponse
     expect(body.rules).toEqual([])
+  })
+
+  test('turns egress secrets into placeholder replacements per host', async () => {
+    await credentials.remove(tokenId, 'root')
+    const placeholder = '6c1d7c9e-3a51-4b8e-9f0a-2d5e8b7c4f10'
+    const created = await credentials.create(
+      {
+        name: 'Turbo cache',
+        kind: 'egress-secret',
+        url: 'http://turbo-cache.internal',
+        scope: { all: true },
+        secret: 'turbo-token',
+        options: { placeholder, hosts: ['*.turbo.example'] },
+      },
+      'root',
+    )
+    const body = (await (
+      await rules(appWith({ egress: { secret } }), `Bearer ${secret}`)
+    ).json()) as EgressRulesResponse
+    const replacement: Omit<EgressRule, 'host'> = {
+      methods: ['*'],
+      replace: { [placeholder]: 'turbo-token' },
+      in: ['headers'],
+      insecure: true,
+    }
+    expect(body.rules).toEqual([
+      { host: 'turbo-cache.internal', ...replacement },
+      { host: '*.turbo.example', ...replacement },
+    ])
+    const refused = await credentials
+      .update(created.id, { options: { placeholder: 'short' } }, 'root')
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      )
+    expect(String(refused)).toContain('placeholder')
   })
 })

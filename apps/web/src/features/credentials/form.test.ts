@@ -11,6 +11,50 @@ import {
 } from './form.ts'
 
 describe('credential form', () => {
+  test('an egress secret carries its placeholder and matching as options', () => {
+    const draft = {
+      ...toDraft(),
+      name: 'Turbo',
+      kind: 'egress-secret',
+      url: 'http://turbo-cache.internal',
+      secret: 'token',
+    }
+    expect(draft.egress.placeholder).toMatch(/^[0-9a-f-]{36}$/)
+    expect(validateDraft(draft, true)).toEqual({})
+    const input = toCreateInput({
+      ...draft,
+      egress: { ...draft.egress, placeholder: 'p'.repeat(16), methods: ['put'] },
+    })
+    expect(input.options).toEqual({ placeholder: 'p'.repeat(16), methods: ['PUT'] })
+    expect(
+      validateDraft(
+        { ...draft, egress: { ...draft.egress, placeholder: 'short', targets: [] } },
+        true,
+      ),
+    ).toEqual({
+      placeholder: '16 to 128 letters, digits, ., _, ~ or -',
+      targets: 'Pick at least one place',
+    })
+    const stored = toDraft({
+      id: 'c',
+      name: 'Turbo',
+      kind: 'egress-secret',
+      url: 'http://turbo-cache.internal',
+      scope: { all: true },
+      rotatable: false,
+      options: { placeholder: 'q'.repeat(20), hosts: ['*.cache.test'], in: ['headers', 'url'] },
+      createdAt: '2026-10-31T00:00:00.000Z',
+      updatedAt: '2026-10-31T00:00:00.000Z',
+    })
+    expect(stored.egress).toEqual({
+      placeholder: 'q'.repeat(20),
+      hosts: ['*.cache.test'],
+      paths: [],
+      methods: [],
+      targets: ['headers', 'url'],
+    })
+  })
+
   test('a new draft needs name and secret', () => {
     const draft = toDraft()
     expect(validateDraft(draft, true)).toEqual({

@@ -264,6 +264,19 @@ const jobsSchema = z.object({
     })
     .optional(),
   /**
+   * Analyzers run for a repository when commits are pushed to a branch (forge webhook or polling).
+   * Jobs get the pushed commit as `ref` and `{ branch }` as options.
+   */
+  onPush: z
+    .object({
+      analyzers: z.array(z.string().min(1)).min(1),
+      /** Branch name globs (`main`, `release/*`); every branch when omitted. */
+      branches: z.array(z.string().min(1)).min(1).optional(),
+      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
+      groups: z.array(groupMatchSchema).optional(),
+    })
+    .optional(),
+  /**
    * Analyzers run when a merge request is opened, gets new commits or is reopened (forge webhook).
    * Jobs get `{ mergeRequest: <iid> }` as options and the head commit as `ref`.
    */
@@ -420,6 +433,7 @@ export const configSchema = z
       }
     }
     unknownGroups(config.jobs?.onTag?.groups, ['jobs', 'onTag', 'groups'])
+    unknownGroups(config.jobs?.onPush?.groups, ['jobs', 'onPush', 'groups'])
     unknownGroups(config.jobs?.onMergeRequest?.groups, ['jobs', 'onMergeRequest', 'groups'])
 
     const names = new Set<string>()

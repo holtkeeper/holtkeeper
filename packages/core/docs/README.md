@@ -47,7 +47,7 @@ Globs follow `Bun.Glob`: `*` stays within one path segment, `**` crosses segment
 
 ### Group lists
 
-A repository can belong to any number of groups, so groups double as tags: one set by layer (`frontend`, `backend`), another by product (`storefront`, `admin-panel`, `catalog`). Every list of groups in the config (plugin `groups`, schedule `groups`, `jobs.onTag.groups`, `jobs.onMergeRequest.groups`) and every access, settings and knowledge `Scope` takes `GroupMatch` entries from [@holtkeeper/access](../../access/docs/README.md): a group name, or a list of groups a repository must all belong to. Entries combine with OR, groups inside an entry with AND:
+A repository can belong to any number of groups, so groups double as tags: one set by layer (`frontend`, `backend`), another by product (`storefront`, `admin-panel`, `catalog`). Every list of groups in the config (plugin `groups`, schedule `groups`, `jobs.onTag.groups`, `jobs.onPush.groups`, `jobs.onMergeRequest.groups`) and every access, settings and knowledge `Scope` takes `GroupMatch` entries from [@holtkeeper/access](../../access/docs/README.md): a group name, or a list of groups a repository must all belong to. Entries combine with OR, groups inside an entry with AND:
 
 ```ts
 groups: {

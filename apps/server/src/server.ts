@@ -57,6 +57,7 @@ import { createApp } from './app.ts'
 import { startAuditRetention } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
+import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
 import {
   type AgentFor,
@@ -205,6 +206,7 @@ export async function startServer(
     rotators: [gitlabTokenRotator(), ...(options.rotators ?? [])],
     validateOptions: (kind, values) =>
       validateSshCredentialOptions(kind, values) ??
+      validateEgressSecretOptions(kind, values) ??
       aiProviderOptionsValidatorFor(aiProviders)(kind, values),
   })
   const duties = roleDuties(options.roles ?? ['all'])

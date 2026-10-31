@@ -29,6 +29,15 @@ const tagPushSchema = z.object({
   project: projectSchema,
 })
 
+/** GitLab "Push Hook" payload, the fields used here. */
+const pushSchema = z.object({
+  object_kind: z.literal('push'),
+  ref: z.string(),
+  after: z.string(),
+  user_username: z.string().optional(),
+  project: projectSchema,
+})
+
 const labelsSchema = z.array(z.object({ title: z.string() }))
 
 /** GitLab "Merge Request Hook" payload, the fields used here. */
@@ -142,6 +151,23 @@ async function parseGitlab(
     if (!repo) return noForge
     return {
       event: { kind: 'tag', repo, tag: hook.ref.slice('refs/tags/'.length), sha: hook.after },
+    }
+  }
+
+  if (header === 'Push Hook') {
+    const hook = await parse(pushSchema)
+    if (!hook.ref.startsWith('refs/heads/')) return { ignored: 'push is not to a branch' }
+    if (deletedSha.test(hook.after)) return { ignored: 'branch was deleted' }
+    const repo = repoOf(hook.project)
+    if (!repo) return noForge
+    return {
+      event: {
+        kind: 'push',
+        repo,
+        branch: hook.ref.slice('refs/heads/'.length),
+        sha: hook.after,
+        actor: hook.user_username ?? '',
+      },
     }
   }
 

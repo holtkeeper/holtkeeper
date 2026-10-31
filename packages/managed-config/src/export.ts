@@ -83,6 +83,7 @@ function jobsOf(jobs: Jobs) {
       }),
     ),
     onTag: jobs.onTag,
+    onPush: jobs.onPush,
     onMergeRequest: jobs.onMergeRequest && {
       ...jobs.onMergeRequest,
       draft: jobs.onMergeRequest.draft ? true : undefined,

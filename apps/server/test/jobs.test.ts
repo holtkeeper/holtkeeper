@@ -271,6 +271,13 @@ const tagPush = (path: string, tag: string, after = 'a'.repeat(40)) => ({
   after,
   project: { path_with_namespace: path, web_url: `https://gitlab.test/${path}` },
 })
+const branchPush = (path: string, branch: string, after = 'c'.repeat(40)) => ({
+  object_kind: 'push',
+  ref: `refs/heads/${branch}`,
+  after,
+  user_username: 'jane',
+  project: { path_with_namespace: path, web_url: `https://gitlab.test/${path}` },
+})
 const hook = (
   app: ReturnType<typeof setup>,
   body: unknown,
@@ -322,16 +329,67 @@ describe('gitlab webhook', () => {
     expect((await hook(disabled, tagPush('games/a', 'v1'))).status).toBe(404)
   })
 
-  test('ignores pushes, deleted tags and repositories outside onTag groups', async () => {
+  test('ignores unconfigured pushes, deleted tags and repositories outside onTag groups', async () => {
     const app = setup()
     expect(
-      await ignored(await hook(app, { object_kind: 'push' }, 'hook-secret', 'Push Hook')),
-    ).toContain('Push Hook')
+      await ignored(await hook(app, branchPush('games/a', 'main'), 'hook-secret', 'Push Hook')),
+    ).toContain('onPush')
     expect(await ignored(await hook(app, tagPush('games/a', 'v1', '0'.repeat(40))))).toContain(
       'deleted',
     )
     expect(await ignored(await hook(app, tagPush('tools/x', 'v1')))).toContain('onTag.groups')
     expect((await hook(app, { object_kind: 'tag_push' })).status).toBe(400)
+    expect(await store.jobs.list()).toEqual([])
+  })
+})
+
+const push = (app: ReturnType<typeof setup>, branch: string, after?: string) =>
+  hook(app, branchPush('games/a', branch, after), 'hook-secret', 'Push Hook')
+
+describe('branch push webhook', () => {
+  const withPush = parseConfig({
+    ...baseConfig,
+    jobs: {
+      onPush: { analyzers: ['changelog', 'fleet'], branches: ['main', 'release/*'] },
+      webhookSecret: 'hook-secret',
+    },
+  })
+
+  test('queues repo analyzers for matching branches with the commit and branch', async () => {
+    const app = setup(noAuth(), withPush)
+    expect((await push(app, 'release/1.2')).status).toBe(202)
+    const jobs = await store.jobs.list()
+    expect(jobs.map((j) => [j.analyzer, j.ref, j.options, j.trigger])).toEqual([
+      ['changelog', 'c'.repeat(40), { branch: 'release/1.2' }, 'push'],
+    ])
+    expect((await store.activity.list())[0]?.action).toBe('job.branch_pushed')
+  })
+
+  test('a newer push cancels the queued job of the same branch', async () => {
+    const app = setup(noAuth(), withPush)
+    await push(app, 'main', 'd'.repeat(40))
+    await push(app, 'main', 'e'.repeat(40))
+    const jobs = await store.jobs.list()
+    expect(jobs.map((j) => `${j.ref?.[0]} ${j.status}`).toSorted()).toEqual([
+      'd canceled',
+      'e queued',
+    ])
+  })
+
+  test('ignores other branches, deleted branches and tags', async () => {
+    const app = setup(noAuth(), withPush)
+    expect(await ignored(await push(app, 'feature/x'))).toContain('onPush.branches')
+    expect(await ignored(await push(app, 'main', '0'.repeat(40)))).toContain('deleted')
+    expect(
+      await ignored(
+        await hook(
+          app,
+          { ...branchPush('games/a', 'x'), ref: 'refs/tags/v1' },
+          'hook-secret',
+          'Push Hook',
+        ),
+      ),
+    ).toContain('not to a branch')
     expect(await store.jobs.list()).toEqual([])
   })
 })

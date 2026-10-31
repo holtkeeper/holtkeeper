@@ -28,6 +28,8 @@ export interface RepoCursor {
   mergeRequests: Record<string, MergeRequestSnapshot>
   /** Tag name to sha. */
   tags: Record<string, string>
+  /** Branch name to head sha; missing until branches are polled once. */
+  branches?: Record<string, string>
   /** Finished pipelines already reported, newest last. */
   pipelines: number[]
 }
@@ -56,6 +58,7 @@ const MAX_MERGE_REQUESTS = 100
 const MAX_TAGS = 100
 const LISTED_TAGS = 20
 const MAX_PIPELINES = 200
+const MAX_BRANCHES = 500
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
@@ -87,7 +90,7 @@ const snapshotOf = (
 
 /**
  * Looks at one repository and reports what changed since `cursor` as forge events, in the order
- * they matter: merge request changes, then comments, finished pipelines and tags. Calls only the
+ * they matter: merge request changes, then comments, finished pipelines, tags and branch pushes. Calls only the
  * optional `GitForge` reads the forge has; kinds it cannot read are skipped. A change seen once is
  * not reported again, so overlapping windows are harmless.
  */
@@ -225,6 +228,20 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
     }
   }
 
+  let branches = previous?.branches
+  if (wants.has('pushes') && forge.listBranches) {
+    const listBranches = forge.listBranches.bind(forge)
+    const listed = await call(() => listBranches(repo.path))
+    const known = branches
+    branches = {}
+    for (const branch of listed.toSorted((a, b) => a.committedAt.localeCompare(b.committedAt))) {
+      branches[branch.name] = branch.sha
+      if (known && known[branch.name] !== branch.sha)
+        events.push({ kind: 'push', repo, branch: branch.name, sha: branch.sha, actor: '' })
+    }
+    branches = Object.fromEntries(Object.entries(branches).slice(-MAX_BRANCHES))
+  }
+
   return {
     events,
     requests,
@@ -237,6 +254,7 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
       ),
       tags: Object.fromEntries(Object.entries(tags).slice(-MAX_TAGS)),
       pipelines: pipelines.slice(-MAX_PIPELINES),
+      ...(branches && { branches }),
     },
   }
 }

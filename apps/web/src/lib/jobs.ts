@@ -35,6 +35,7 @@ const triggerLabels: Record<JobTrigger, string> = {
   manual: 'Manual',
   webhook: 'Webhook',
   tag: 'Tag',
+  push: 'Push',
   poll: 'Poll',
 }
 

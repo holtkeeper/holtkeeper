@@ -30,6 +30,7 @@ jobs: {
     },
   ],
   onTag: { analyzers: ['changelog'], groups: ['games'] }, // used by the server's forge webhooks
+  onPush: { analyzers: ['warmup'], branches: ['main', 'release/*'] }, // branch pushes, webhooks or polling
   webhookSecret: env('HOLTKEEPER_WEBHOOK_SECRET'),
   execution: { mode: 'container', network: 'install' }, // see "Execution and toolchains"
 }

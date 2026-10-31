@@ -76,6 +76,10 @@ Scope editors (grants, settings, knowledge) and the schedule and trigger dialogs
 
 Everything from `@heroui/react` is imported in `src/ui/` only. Pages use `Button`, `Panel`, `Dialog` (`size="xl"` for wide editors), `Markdown`, `TextField`, `Select`, `Switch`, `Checkbox`, `Segmented`, `MultiToggle`, `Tabs`, `Tooltip`, `SearchInput`, `notify` and friends from `ui/index.ts`, so replacing the component kit means rewriting `src/ui/` and nothing else. Wrappers expose small, explicit props rather than passing HeroUI props through.
 
+## Proxy secrets
+
+Credentials of kind `egress-secret` ("Proxy secret") hold a secret the egress proxy puts into job requests in place of a placeholder (`EgressSecretFields.tsx`): a generated UUID with copy and regenerate buttons, more hosts, paths, methods and where to replace (headers, URL, body). The URL is where the secret goes, e.g. a Turborepo remote cache. The form keeps them as `options`, see the server docs on egress rules.
+
 ## Forges
 
 The Credentials page also lists forges (global `settings:read`). With global `settings:write` you add a GitLab forge (id, URL and a GitLab token credential, `PUT /api/config/forges/:id`), edit or delete panel forges, and issue, rotate or remove a forge's SSH key (`POST`/`DELETE /api/forges/:id/ssh-key`): what it is used for (clone and push, signing, or both), its lifetime and an optional commit identity. Forges from the config file are shown read-only. `forge-form.ts` holds the form's validation.

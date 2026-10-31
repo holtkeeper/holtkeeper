@@ -24,7 +24,7 @@ import { type RepoHook, type RepoHooks, repoHookPath } from '../repo-hooks.ts'
 import type { Poller } from '../updates.ts'
 
 /** Events a repository webhook registered by Holtkeeper delivers. */
-const WEBHOOK_EVENTS: WebhookEvent[] = ['tag_push', 'merge_request', 'note', 'pipeline']
+const WEBHOOK_EVENTS: WebhookEvent[] = ['push', 'tag_push', 'merge_request', 'note', 'pipeline']
 
 const webhookInputSchema = z.object({ repo: z.string().min(1), register: z.boolean().optional() })
 const pollInputSchema = z.object({ repo: z.string().min(1) })

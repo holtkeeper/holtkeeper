@@ -485,6 +485,7 @@ export interface GitForge {
  */
 export type ForgeEvent =
   | TagPushedEvent
+  | BranchPushedEvent
   | MergeRequestChangedEvent
   | NoteAddedEvent
   | PipelineDoneEvent
@@ -495,6 +496,17 @@ export interface TagPushedEvent {
   repo: RepoRef
   tag: string
   sha: string
+}
+
+/** Commits were pushed to a branch, or a branch was created. Deleted branches are not reported. */
+export interface BranchPushedEvent {
+  kind: 'push'
+  repo: RepoRef
+  branch: string
+  /** The branch head after the push. */
+  sha: string
+  /** Username of whoever pushed; empty when unknown (polling). */
+  actor: string
 }
 
 /**

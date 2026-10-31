@@ -7,6 +7,7 @@ const eventLabels: Record<RepoUpdatesView['polling']['events'][number], string> 
   notes: 'Comments',
   pipelines: 'Pipelines',
   tags: 'Tags',
+  pushes: 'Branch pushes',
 }
 
 export const pollEventLabel = (event: RepoUpdatesView['polling']['events'][number]) =>
