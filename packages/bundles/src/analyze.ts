@@ -192,7 +192,7 @@ export async function analyzeBundle(options: AnalyzeBundleOptions): Promise<Bund
       const path = join(distDir, file)
       const content = new Uint8Array(await Bun.file(path).arrayBuffer())
       const kind = assetKind(file)
-      const sizes = measure(content)
+      const sizes = await measure(content)
       const result: Measured = {
         asset: { file, name: normalize(file), kind, ...sizes, mapped: 0 },
         origins: [],

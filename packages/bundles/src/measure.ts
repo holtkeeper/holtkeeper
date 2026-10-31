@@ -1,18 +1,24 @@
 import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { brotliCompressSync, constants } from 'node:zlib'
+import { promisify } from 'node:util'
+import { brotliCompress, constants, gzip } from 'node:zlib'
 
 import type { Sizes } from './data.ts'
 import type { RawSourceMap } from './sourcemap.ts'
 
-/** Raw, gzip (level 9) and brotli (quality 11) sizes of one file's content. */
-export function measure(content: Uint8Array<ArrayBuffer>): Sizes {
-  return {
-    raw: content.byteLength,
-    gzip: Bun.gzipSync(content, { level: 9 }).byteLength,
-    brotli: brotliCompressSync(content, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } })
-      .byteLength,
-  }
+const gzipAsync = promisify(gzip)
+const brotliAsync = promisify(brotliCompress)
+
+/**
+ * Raw, gzip (level 9) and brotli (quality 11) sizes of one file's content. Compression runs off
+ * the event loop, so measuring a large build keeps the process responsive (health probes).
+ */
+export async function measure(content: Uint8Array<ArrayBuffer>): Promise<Sizes> {
+  const [gzipped, brotli] = await Promise.all([
+    gzipAsync(content, { level: 9 }),
+    brotliAsync(content, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }),
+  ])
+  return { raw: content.byteLength, gzip: gzipped.byteLength, brotli: brotli.byteLength }
 }
 
 function asSourceMap(value: unknown): RawSourceMap | undefined {
