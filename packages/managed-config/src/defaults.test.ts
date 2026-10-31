@@ -22,6 +22,7 @@ const kinds = [
   'coverage',
   'testids',
   'branches',
+  'assets',
   'changelog',
 ]
 
@@ -42,6 +43,7 @@ describe('seedDefaults', () => {
       'schedule:quality-weekly',
       'schedule:tests-weekly',
       'schedule:branches-weekly',
+      'schedule:assets-weekly',
       'trigger:tag',
     ])
     expect(await store.config?.get('schedule', 'security-weekly')).toMatchObject({
@@ -70,6 +72,7 @@ describe('seedDefaults', () => {
       'schedule:quality-weekly',
       'schedule:tests-weekly',
       'schedule:branches-weekly',
+      'schedule:assets-weekly',
       'trigger:tag',
     ])
   })
@@ -83,6 +86,7 @@ describe('seedDefaults', () => {
     expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
       'schedule:tests-weekly',
       'schedule:branches-weekly',
+      'schedule:assets-weekly',
     ])
     expect((await store.config?.get('schedule', 'tests-weekly'))?.data).toMatchObject({
       analyzers: ['coverage', 'testids'],

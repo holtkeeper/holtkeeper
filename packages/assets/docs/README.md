@@ -4,7 +4,7 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
 
 ## Analyzer
 
-`assetsAnalyzer` — kind `assets`, scope `repo`, needs a checkout. Options (`assetsOptionsSchema`):
+`assetsAnalyzer` — kind `assets`, scope `repo`, needs a checkout; the default `assets-weekly` schedule of `@holtkeeper/managed-config` runs it on Friday nights. Options (`assetsOptionsSchema`):
 
 | Option        | Default                              | Meaning                                                                                                                  |
 | ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
