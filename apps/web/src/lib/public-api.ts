@@ -1,5 +1,7 @@
 import type { ApiSymbol, ApiSymbolKind, PublicApiVersion } from '@holtkeeper/api'
 
+import { formatRef } from './format.ts'
+
 /** Kinds in the order the package view lists them, with their headings. */
 export const symbolKinds: readonly { kind: ApiSymbolKind; label: string }[] = [
   { kind: 'function', label: 'Functions' },
@@ -38,7 +40,7 @@ export function versionLabel(version: PublicApiVersion): string {
   if (version.head) return `head · ${version.version}`
   const ref = version.ref
   return ref && ref !== version.version && ref !== `v${version.version}`
-    ? `${version.version} · ${ref}`
+    ? `${version.version} · ${formatRef(ref)}`
     : version.version
 }
 

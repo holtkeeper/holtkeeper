@@ -4,7 +4,7 @@ import { motion } from 'motion/react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { sectionAnchor } from '../../lib/analyses.ts'
-import { formatDateTime, formatRelative } from '../../lib/format.ts'
+import { formatDateTime, formatRef, formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { Chip, EmptyState, stagger } from '../../ui/index.ts'
 import { BlockView } from './BlockView.tsx'
@@ -51,9 +51,9 @@ export function ReportView({ report }: { report: Report }) {
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
           {subject?.repo ? <Chip>{repoKey(subject.repo)}</Chip> : null}
           {subject?.ref ? (
-            <span className="inline-flex items-center gap-1 font-mono">
+            <span className="inline-flex items-center gap-1 font-mono" title={subject.ref}>
               <GitBranch className="size-3.5" />
-              {subject.ref}
+              {formatRef(subject.ref)}
             </span>
           ) : null}
           {subject?.compareTo ? (

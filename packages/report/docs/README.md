@@ -52,4 +52,4 @@ Kinds: [`changelog`](../../changelog/docs/README.md), [`bundle`](../../bundles/d
 
 ## Helpers
 
-`metric(id, label, value, { unit, previous, better })` builds a metric with its delta; `formatBytes` and `percentChange` keep numbers consistent across reports and clients.
+`metric(id, label, value, { unit, previous, better })` builds a metric with its delta; `formatBytes`, `formatRef` (full commit SHAs as short ones) and `percentChange` keep numbers and refs consistent across reports and clients.

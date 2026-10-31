@@ -36,6 +36,14 @@ test('versionLabel shows refs that differ from the version', () => {
   expect(versionLabel({ ...base, version: '1.4.0', ref: '@acme/ui@1.4.0', head: false })).toBe(
     '1.4.0 · @acme/ui@1.4.0',
   )
+  expect(
+    versionLabel({
+      ...base,
+      version: '3.9.0',
+      ref: '8628d6816e870c8a863b98066a30121df1862839',
+      head: false,
+    }),
+  ).toBe('3.9.0 · 8628d681')
   expect(versionLabel({ ...base, version: '1.5.0', head: true })).toBe('head · 1.5.0')
   expect(versionKey({ ...base, version: '1.5.0', head: true })).toBe('head')
 })

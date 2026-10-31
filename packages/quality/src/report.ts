@@ -6,6 +6,7 @@ import {
   type Section,
   type Tone,
   defineAnalysis,
+  formatRef,
   metric,
 } from '@holtkeeper/report'
 
@@ -280,7 +281,7 @@ export const qualityAnalysis = defineAnalysis<QualityData>({
 
     return {
       kind: 'quality',
-      title: `Code quality${current.ref ? ` of ${current.ref}` : ''}`,
+      title: `Code quality${current.ref ? ` of ${formatRef(current.ref)}` : ''}`,
       subtitle: `${data.issues.length} issues, ${data.tests.length} places worth testing, ${data.changes.length} suggested changes`,
       subject: {
         repo: current.repo,

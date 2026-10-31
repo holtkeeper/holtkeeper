@@ -1,6 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
-import { daysUntil, expiryTone, formatDuration, formatRelative, isoDay, plural } from './format.ts'
+import {
+  daysUntil,
+  expiryTone,
+  formatDuration,
+  formatRef,
+  formatRelative,
+  isoDay,
+  plural,
+} from './format.ts'
 
 const now = new Date('2026-10-29T12:00:00.000Z')
 
@@ -10,6 +18,14 @@ describe('formatRelative', () => {
     expect(formatRelative('2026-10-29T09:00:00.000Z', now)).toBe('3 hours ago')
     expect(formatRelative('2026-10-31T12:00:00.000Z', now)).toBe('in 2 days')
     expect(formatRelative('2026-10-28T12:00:00.000Z', now)).toBe('yesterday')
+  })
+})
+
+describe('formatRef', () => {
+  test('shortens full SHAs only', () => {
+    expect(formatRef('28200925da86859b3f6b345d600856262b32945e')).toBe('28200925')
+    expect(formatRef('main')).toBe('main')
+    expect(formatRef('v1.2.0')).toBe('v1.2.0')
   })
 })
 

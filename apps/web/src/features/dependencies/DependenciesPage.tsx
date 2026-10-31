@@ -18,7 +18,7 @@ import {
   versionBreakdown,
   worstLag,
 } from '../../lib/dependencies.ts'
-import { formatDateTime, formatRelative, plural } from '../../lib/format.ts'
+import { formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import { parseRepoKey, repoKey, repoName } from '../../lib/repo.ts'
 import {
   Button,
@@ -418,7 +418,9 @@ function LibraryList({
                                     className="hover:underline"
                                     title={formatDateTime(record.createdAt)}
                                   >
-                                    {record.ref ?? formatRelative(record.createdAt)}
+                                    {record.ref
+                                      ? formatRef(record.ref)
+                                      : formatRelative(record.createdAt)}
                                   </Link>
                                 ) : null}
                               </Td>

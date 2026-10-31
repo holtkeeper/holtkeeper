@@ -23,6 +23,10 @@ export function metric(
   }
 }
 
+/** A full commit SHA as its 8-character short form; branch and tag names stay as they are. */
+export const formatRef = (ref: string): string =>
+  /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(ref) ? ref.slice(0, 8) : ref
+
 const units = ['B', 'kB', 'MB', 'GB']
 
 /** `1536` → `1.5 kB`. Shared so every report and client shows sizes the same way. */

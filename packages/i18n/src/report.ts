@@ -3,6 +3,7 @@ import {
   type Block,
   type Cell,
   defineAnalysis,
+  formatRef,
   type Issue,
   type Metric,
   metric,
@@ -438,7 +439,7 @@ function layersSection(data: I18nData): Section | undefined {
       rows: data.layers.map((l) => ({
         id: l.shared ? { text: l.id, hint: 'shared' } : l.id,
         repo: l.repo
-          ? `${l.repo.forge}:${l.repo.path}${l.ref ? `@${l.ref}` : ''}`
+          ? `${l.repo.forge}:${l.repo.path}${l.ref ? `@${formatRef(l.ref)}` : ''}`
           : 'this repository',
         files: l.files ?? null,
         catalogs: l.catalogs,

@@ -5,7 +5,7 @@ import { motion } from 'motion/react'
 import { useState } from 'react'
 
 import { type RepoLatest, latestPerRepo, withDeltas } from '../../lib/analyses.ts'
-import { formatDateTime, formatRelative } from '../../lib/format.ts'
+import { formatDateTime, formatRef, formatRelative } from '../../lib/format.ts'
 import { splitRepoPath } from '../../lib/repo.ts'
 import { formatValue } from '../../lib/units.ts'
 import { Avatar, Segmented, fadeItem, stagger } from '../../ui/index.ts'
@@ -90,7 +90,11 @@ function RepoCard({
         <div className="mt-auto flex items-center justify-between gap-2 text-[11px] text-muted">
           <span>
             {card.count} {card.count === 1 ? 'run' : 'runs'}
-            {latest.ref ? <span className="ml-1 font-mono">· {latest.ref}</span> : null}
+            {latest.ref ? (
+              <span className="ml-1 font-mono" title={latest.ref}>
+                · {formatRef(latest.ref)}
+              </span>
+            ) : null}
           </span>
           <Person id={latest.actor} people={people} />
         </div>
@@ -179,7 +183,9 @@ export function RecordRows({
               <div className="text-sm font-medium" title={formatDateTime(analysis.createdAt)}>
                 {formatRelative(analysis.createdAt, now)}
                 {analysis.ref ? (
-                  <span className="ml-2 font-mono text-xs text-muted">{analysis.ref}</span>
+                  <span className="ml-2 font-mono text-xs text-muted" title={analysis.ref}>
+                    {formatRef(analysis.ref)}
+                  </span>
                 ) : null}
               </div>
               <div className="mt-0.5 flex items-center gap-1 text-xs text-muted">

@@ -14,7 +14,7 @@ import { useState } from 'react'
 
 import { useGroups, useRepos } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
-import { formatDateTime, formatRelative, plural } from '../../lib/format.ts'
+import { formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import { type Freshness, auditFreshness, repoKey, splitRepoPath } from '../../lib/repo.ts'
 import { compareCounts } from '../../lib/severity.ts'
 import {
@@ -358,7 +358,7 @@ function AnalysisPill({
       {latest ? (
         <>
           <span className="text-muted">
-            {latest.ref ? `${latest.ref} · ` : ''}
+            {latest.ref ? `${formatRef(latest.ref)} · ` : ''}
             {formatRelative(latest.createdAt)}
           </span>
           <MetricChips metrics={latest.metrics} limit={3} />

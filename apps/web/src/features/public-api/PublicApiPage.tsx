@@ -34,7 +34,7 @@ import {
   useRevokeMcpToken,
 } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
-import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
+import { formatDate, formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import {
   documentedShare,
   groupSymbols,
@@ -282,7 +282,11 @@ function PackageRow({ pkg }: { pkg: PublicApiPackageSummary }) {
         {pkg.versions}
       </Td>
       <Td className="whitespace-nowrap text-muted">
-        {pkg.ref ? <span className="mr-1 font-mono text-xs">{pkg.ref}</span> : null}
+        {pkg.ref ? (
+          <span className="mr-1 font-mono text-xs" title={pkg.ref}>
+            {formatRef(pkg.ref)}
+          </span>
+        ) : null}
         {formatRelative(pkg.analyzedAt)}
       </Td>
     </tr>
@@ -449,7 +453,9 @@ function PackageFacts({
       <span>
         <span className="text-foreground">{data.package.version ?? 'no version'}</span>
         {data.ref ? (
-          <span className="ml-1 font-mono text-xs">({data.ref})</span>
+          <span className="ml-1 font-mono text-xs" title={data.ref}>
+            ({formatRef(data.ref)})
+          </span>
         ) : (
           ' · default branch'
         )}

@@ -22,6 +22,10 @@ export function formatRelative(at: string | Date, now: Date = new Date()): strin
   return relative.format(seconds, 'second')
 }
 
+/** A full commit SHA as its 8-character short form; branch and tag names stay as they are. */
+export const formatRef = (ref: string): string =>
+  /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(ref) ? ref.slice(0, 8) : ref
+
 const dateTime = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' })
 const dateOnly = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
 

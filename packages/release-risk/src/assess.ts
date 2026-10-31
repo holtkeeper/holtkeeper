@@ -1,4 +1,4 @@
-import { type Tone, formatBytes } from '@holtkeeper/report'
+import { type Tone, formatBytes, formatRef } from '@holtkeeper/report'
 import { findingKey } from '@holtkeeper/vuln'
 
 import type {
@@ -80,7 +80,7 @@ export const sourceHref = (source: Pick<RiskSource<unknown>, 'id' | 'kind'>) =>
   source.kind === 'audit' ? '/audits' : `/analyses/${source.id}`
 
 const sourceEvidence = (source: RiskSource<unknown>): Evidence => ({
-  label: `${source.kind}${source.ref ? ` ${source.ref}` : ''}`,
+  label: `${source.kind}${source.ref ? ` ${formatRef(source.ref)}` : ''}`,
   href: sourceHref(source),
 })
 
@@ -237,7 +237,7 @@ function bundleFactor(inputs: RiskInputs, weights: RiskWeights): RiskFactor {
     'bundle',
     weights,
     Math.max(0, share) / 0.1 + 0.25 * heavy.length,
-    `${sign}${formatBytes(delta)} gzip${percent} against ${previousBundle.ref ?? 'the previous build'}.${heavyText}`,
+    `${sign}${formatBytes(delta)} gzip${percent} against ${previousBundle.ref ? formatRef(previousBundle.ref) : 'the previous build'}.${heavyText}`,
     [sourceEvidence(bundle), sourceEvidence(previousBundle)],
   )
 }

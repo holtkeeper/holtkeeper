@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useJob, useJobAnalyzers, useJobMutations } from '../../api/queries.ts'
-import { formatDateTime, formatDuration, formatRelative } from '../../lib/format.ts'
+import { formatDateTime, formatDuration, formatRef, formatRelative } from '../../lib/format.ts'
 import {
   analyzerLabel,
   canCancelJob,
@@ -153,7 +153,9 @@ export function JobPage() {
           </Fact>
           <Fact label="Ref">
             {data.ref ? (
-              <span className="font-mono text-xs">{data.ref}</span>
+              <span className="font-mono text-xs" title={data.ref}>
+                {formatRef(data.ref)}
+              </span>
             ) : (
               <span className="text-muted">Default branch</span>
             )}

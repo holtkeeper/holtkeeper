@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, ListChecks, X } from 'lucide-react'
 
 import { useJobAnalyzers, useJobs } from '../../api/queries.ts'
-import { formatDateTime, formatDuration, formatRelative } from '../../lib/format.ts'
+import { formatDateTime, formatDuration, formatRef, formatRelative } from '../../lib/format.ts'
 import {
   analyzerLabel,
   isJobStatus,
@@ -195,7 +195,9 @@ function JobRow({ job, label, now }: { job: JobSummary; label: string; now: Date
       </Td>
       <Td>
         {job.ref ? (
-          <span className="font-mono text-xs">{job.ref}</span>
+          <span className="font-mono text-xs" title={job.ref}>
+            {formatRef(job.ref)}
+          </span>
         ) : (
           <span className="text-muted">—</span>
         )}

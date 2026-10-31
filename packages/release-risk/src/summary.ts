@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Agent } from '@holtkeeper/agent'
+import { formatRef } from '@holtkeeper/report'
 import { z } from 'zod'
 
 import { regularCommits, type RiskAssessment } from './assess.ts'
@@ -62,7 +63,7 @@ export function deterministicSummary(
   changelog: ChangelogView | undefined,
 ): RiskSummary {
   const parts = [
-    `**Release ${assessment.ref ?? 'unknown'}.** ${headline(assessment)}`,
+    `**Release ${assessment.ref ? formatRef(assessment.ref) : 'unknown'}.** ${headline(assessment)}`,
     '### What changed for users',
   ]
   const changes = changelog ? userChanges(changelog) : []

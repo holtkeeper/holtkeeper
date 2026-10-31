@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
-import { formatBytes, metric, percentChange } from './format.ts'
+import { formatBytes, formatRef, metric, percentChange } from './format.ts'
 
 describe('format helpers', () => {
+  test('shortens full commit SHAs only', () => {
+    expect(formatRef('28200925da86859b3f6b345d600856262b32945e')).toBe('28200925')
+    expect(formatRef('main')).toBe('main')
+  })
+
   test('formats bytes', () => {
     expect([0, 512, 1536, 250 * 1024, 5 * 1024 ** 2, -2048].map(formatBytes)).toEqual([
       '0 B',
