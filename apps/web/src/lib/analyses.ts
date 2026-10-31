@@ -40,7 +40,7 @@ export const analysisPages = [
     to: '/dependencies',
     kind: 'depgraph',
     title: 'Dependencies',
-    icon: 'updates',
+    icon: 'dependencies',
     description: 'Workspace graph, cycles and duplicates',
     trend: [/cycle/i, /duplicate/i],
   },

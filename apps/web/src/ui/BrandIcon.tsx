@@ -8,13 +8,17 @@ import automation from '@holtkeeper/brand/automation.svg'
 import branches from '@holtkeeper/brand/branches.svg'
 import browserslist from '@holtkeeper/brand/browserslist.svg'
 import bundles from '@holtkeeper/brand/bundles.svg'
+import caches from '@holtkeeper/brand/caches.svg'
 import ci from '@holtkeeper/brand/ci.svg'
 import coverage from '@holtkeeper/brand/coverage.svg'
 import credentials from '@holtkeeper/brand/credentials.svg'
+import database from '@holtkeeper/brand/database.svg'
+import dependencies from '@holtkeeper/brand/dependencies.svg'
 import fleet from '@holtkeeper/brand/fleet.svg'
 import holtkeeper from '@holtkeeper/brand/holtkeeper.svg'
 import jobs from '@holtkeeper/brand/jobs.svg'
 import knowledge from '@holtkeeper/brand/knowledge.svg'
+import libraries from '@holtkeeper/brand/libraries.svg'
 import licenses from '@holtkeeper/brand/licenses.svg'
 import quality from '@holtkeeper/brand/quality.svg'
 import release from '@holtkeeper/brand/release.svg'
@@ -39,13 +43,17 @@ const icons = {
   branches,
   browserslist,
   bundles,
+  caches,
   ci,
   coverage,
   credentials,
+  database,
+  dependencies,
   fleet,
   holtkeeper,
   jobs,
   knowledge,
+  libraries,
   licenses,
   quality,
   release,

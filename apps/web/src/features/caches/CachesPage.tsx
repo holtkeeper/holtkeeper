@@ -341,7 +341,7 @@ export function CachesPage() {
   return (
     <Page
       title="Caches"
-      icon="storage"
+      icon="caches"
       description="Package and tool downloads the egress proxy keeps for jobs"
       actions={
         writable && view && 'backend' in view && view.total.count ? (

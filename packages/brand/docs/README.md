@@ -30,6 +30,10 @@ copy them from there instead of editing them here.
 | `@holtkeeper/brand/activity.svg`     | Activity feed                       |
 | `@holtkeeper/brand/ai.svg`           | AI usage                            |
 | `@holtkeeper/brand/storage.svg`      | Storage                             |
+| `@holtkeeper/brand/database.svg`     | Database                            |
+| `@holtkeeper/brand/caches.svg`       | Download caches                     |
+| `@holtkeeper/brand/libraries.svg`    | Third-party library docs            |
+| `@holtkeeper/brand/dependencies.svg` | Dependency graph                    |
 | `@holtkeeper/brand/auditlog.svg`     | Audit log                           |
 | `@holtkeeper/brand/users.svg`        | Users                               |
 | `@holtkeeper/brand/automation.svg`   | Automation: schedules and triggers  |

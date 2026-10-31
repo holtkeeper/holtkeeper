@@ -686,7 +686,7 @@ export function DatabasePage() {
   return (
     <Page
       title="Database"
-      icon="storage"
+      icon="database"
       description={
         view?.available
           ? view.overview.version

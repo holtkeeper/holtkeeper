@@ -109,7 +109,7 @@ export function LibrariesPage() {
   return (
     <Page
       title="Libraries"
-      icon="knowledge"
+      icon="libraries"
       description="Version-exact docs of the third-party libraries the fleet depends on, indexed for agents"
       actions={
         can('analyses:run') && data?.enabled ? (
