@@ -123,10 +123,11 @@ export const useDependencies = (enabled = true) =>
   })
 
 /** A rendered report, compared with `compare` or, by default, the previous record. */
-export const useAnalysis = (analysisId: string, compare?: string) =>
+export const useAnalysis = (analysisId: string, compare?: string, enabled = true) =>
   useQuery({
     queryKey: keys.analysis(analysisId, compare),
     queryFn: () => api.analysis(analysisId, compare),
+    enabled,
     placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
   })

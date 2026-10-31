@@ -62,6 +62,9 @@ const icons = {
 
 export type BrandIconName = keyof typeof icons
 
+/** URL of a brand icon, usable as an image source or favicon. */
+export const brandIconUrl = (name: BrandIconName): string => icons[name]
+
 /** The mascot or a capability icon from `@holtkeeper/brand`; decorative. */
 export function BrandIcon({ name, className }: { name: BrandIconName; className?: string }) {
   return <img src={icons[name]} alt="" aria-hidden draggable={false} className={className} />

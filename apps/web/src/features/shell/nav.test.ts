@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { groupNav, visibleNav } from './nav.ts'
+import { activeNav, groupNav, visibleNav } from './nav.ts'
 
 const principal = {
   id: 'a',
@@ -52,4 +52,17 @@ test('groups visible items under their headings and drops empty ones', () => {
     ['Security', ['Audits']],
     ['Admin', ['Users']],
   ])
+})
+
+test('finds the entry of a page, its sub-pages and analysis records by kind', () => {
+  expect(activeNav('/')?.label).toBe('Dashboard')
+  expect(activeNav('/testids')?.label).toBe('Test ids')
+  expect(activeNav('/repos/groups/g1')?.label).toBe('Repositories')
+  expect(activeNav('/audit-log')?.label).toBe('Audit log')
+  expect(activeNav('/audits/r1')?.label).toBe('Audits')
+  expect(activeNav('/analyses/a1', 'testids')?.label).toBe('Test ids')
+  expect(activeNav('/analyses/a1', 'depgraph')?.label).toBe('Dependencies')
+  expect(activeNav('/analyses/a1', 'stack')?.label).toBe('Tech stack')
+  expect(activeNav('/analyses/a1')).toBeUndefined()
+  expect(activeNav('/account')).toBeUndefined()
 })

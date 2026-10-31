@@ -1,6 +1,6 @@
 export { AnimatedNumber } from './AnimatedNumber.tsx'
 export { Avatar } from './Avatar.tsx'
-export { BrandIcon } from './BrandIcon.tsx'
+export { BrandIcon, brandIconUrl } from './BrandIcon.tsx'
 export { Button, LinkButton, buttonClass } from './Button.tsx'
 export { Panel } from './Card.tsx'
 export { Chip } from './Chip.tsx'

@@ -1,12 +1,12 @@
-import { Link, Outlet, useRouterState } from '@tanstack/react-router'
+import { Link, Outlet, useMatch, useRouterState } from '@tanstack/react-router'
 import { ArrowUpRight, BookText, LogOut, Menu, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useAuthMutations } from '../../api/queries.ts'
-import { Avatar, BrandIcon, Button, Tooltip, notify } from '../../ui/index.ts'
-import { docsUrl, groupNav, visibleNav } from './nav.ts'
+import { useAnalysis, useAuthMutations } from '../../api/queries.ts'
+import { Avatar, BrandIcon, Button, Tooltip, brandIconUrl, notify } from '../../ui/index.ts'
+import { type NavItem, activeNav, docsUrl, groupNav, visibleNav } from './nav.ts'
 import { useSession } from './session.ts'
 import { ThemeToggle } from './ThemeToggle.tsx'
 
@@ -22,9 +22,38 @@ function Brand() {
   )
 }
 
-function Nav({ onNavigate }: { onNavigate?: () => void }) {
-  const { principal, auth } = useSession()
+const appName = 'Holtkeeper'
+const defaultFavicon = '/favicon.svg'
+
+function useActiveNav(): NavItem | undefined {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const record = useMatch({ from: '/app/analyses/$id', shouldThrow: false })
+  const analysis = useAnalysis(
+    record?.params.id ?? '',
+    record?.search.compare,
+    record !== undefined,
+  )
+  return activeNav(pathname, record ? analysis.data?.analysis.kind : undefined)
+}
+
+function setDocumentMeta(title: string, favicon: string) {
+  document.title = title
+  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (icon) icon.href = favicon
+}
+
+function useDocumentMeta(item: NavItem | undefined) {
+  useEffect(() => {
+    setDocumentMeta(
+      item ? `${item.label} · ${appName}` : appName,
+      item?.brand ? brandIconUrl(item.brand) : defaultFavicon,
+    )
+    return () => setDocumentMeta(appName, defaultFavicon)
+  }, [item])
+}
+
+function Nav({ active, onNavigate }: { active?: NavItem; onNavigate?: () => void }) {
+  const { principal, auth } = useSession()
   const groups = groupNav(visibleNav(principal, auth))
   return (
     <nav
@@ -37,20 +66,20 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
             {group.section}
           </h2>
           {group.items.map((item) => {
-            const active = item.to === '/' ? pathname === '/' : pathname.startsWith(item.to)
+            const current = item.to === active?.to
             return (
               <Link
                 key={item.to}
                 to={item.to}
                 {...(onNavigate ? { onClick: onNavigate } : {})}
-                aria-current={active ? 'page' : undefined}
+                aria-current={current ? 'page' : undefined}
                 className={`relative flex items-center gap-3 rounded-xl px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
-                  active
+                  current
                     ? 'font-medium text-accent-soft-foreground'
                     : 'text-muted hover:bg-default-soft hover:text-foreground'
                 }`}
               >
-                {active ? (
+                {current ? (
                   <motion.span
                     layoutId="nav-active"
                     className="absolute inset-0 rounded-xl bg-accent-soft"
@@ -134,6 +163,8 @@ function Account() {
 /** Sidebar, header and the routed page of the signed-in app. */
 export function AppShell() {
   const [drawer, setDrawer] = useState(false)
+  const active = useActiveNav()
+  useDocumentMeta(active)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (drawer && event.key === 'Escape') setDrawer(false)
@@ -152,7 +183,7 @@ export function AppShell() {
       </a>
       <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-6 border-r border-separator px-3 py-4 lg:flex">
         <Brand />
-        <Nav />
+        <Nav active={active} />
         <div className="flex flex-col gap-2">
           <DocsLink />
           <div className="px-3 text-xs text-muted">Keeps every repository in shape.</div>
@@ -191,7 +222,7 @@ export function AppShell() {
                   <X className="size-4" />
                 </Button>
               </div>
-              <Nav onNavigate={() => setDrawer(false)} />
+              <Nav active={active} onNavigate={() => setDrawer(false)} />
               <DocsLink />
             </motion.aside>
           </motion.div>
