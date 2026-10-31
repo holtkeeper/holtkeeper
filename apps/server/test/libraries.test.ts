@@ -287,7 +287,8 @@ describe('libraries setting', () => {
   })
 
   test('reads github as a list of credential references, one string included', () => {
-    expect(librariesConfig({})?.github).toEqual([])
+    expect(librariesConfig({})?.github).toBeUndefined()
+    expect(librariesConfig({ github: [] })?.github).toEqual([])
     expect(librariesConfig({ github: 'gh-a' })?.github).toEqual(['gh-a'])
     expect(librariesConfig({ github: ['gh-a', 'gh-b', 'gh-a'] })?.github).toEqual(['gh-a', 'gh-b'])
     expect(librariesConfig({ github: [''] })).toBeUndefined()
@@ -337,8 +338,34 @@ describe('githubClientFor', () => {
     expect(lines.join('\n')).toContain('no credential "missing"')
   })
 
-  test('is anonymous without references', async () => {
+  test('is anonymous with an empty list', async () => {
     expect((await githubClientFor(credentials, [])).authenticated).toBe(false)
+  })
+
+  test('takes every github credential when the setting names none', async () => {
+    const realFetch = globalThis.fetch
+    const seen: string[] = []
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      seen.push(new Headers(init?.headers).get('authorization') ?? '')
+      return new Response('{}')
+    }) as typeof fetch
+    try {
+      const client = await githubClientFor(
+        {
+          list: async () => [
+            { id: 'c1', name: 'gitlab-main', kind: 'gitlab' },
+            { id: 'c2', name: 'github-libraries', kind: 'github' },
+          ],
+          reveal: async (id) => `token-${id}`,
+        },
+        undefined,
+      )
+      expect(client.authenticated).toBe(true)
+      await client.rest('/repos/x/y')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+    expect(seen).toEqual(['Bearer token-c2'])
   })
 })
 

@@ -42,7 +42,7 @@ import { z } from 'zod'
 
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
-import { githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
+import { githubReferences, githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
 
 const intervalPattern = /^([1-9]\d*)(m|h|d)$/
 const MIN_INTERVAL_MS = 3_600_000
@@ -52,7 +52,8 @@ const REQUEST_KEY = 'libraries:reindex'
 const RUNNING_KEY = 'libraries:running'
 const TOKENS_KEY = 'libraries:tokens'
 
-const tokensOf = (config: LibrariesConfig) => JSON.stringify(config.github)
+const tokensOf = async (credentials: CredentialSource, config: LibrariesConfig) =>
+  JSON.stringify(await githubReferences(credentials, config.github))
 const RUNNING_TTL_S = 900
 const MAX_STORED_FAILURES = 200
 const CHANGE_DEBOUNCE_MS = 600_000
@@ -74,7 +75,7 @@ const librariesSchema = z.object({
     .optional(),
   /**
    * Ids or names of credentials whose secrets are GitHub tokens, shared by every request; a
-   * single string is read as a list of one.
+   * single string is read as a list of one. Unset: every credential of kind `github`; `[]`: none.
    */
   github: z
     .preprocess(
@@ -111,7 +112,7 @@ export const librariesSetting = defineSetting({
   help: `Holtkeeper reads the newest \`usages\` and \`fleet\` records, keeps a few versions of every npm and Go library they name (the ones in use and the ones an upgrade would land on) and indexes their docs. Only the value for **All repositories** counts; without one the index runs with the defaults below (anonymous GitHub), and \`enabled: false\` turns it off. Changing the GitHub tokens starts a new run at once.
 
 - **interval** (default \`1d\`, at least \`1h\`): how often to look for new releases; a run also starts about two minutes after the server starts.
-- **github**: credentials of kind \`github\` whose secrets are GitHub tokens, for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
+- **github**: leave it unset to use every credential of kind \`github\` (add one on the Credentials page and it is picked up), or list the ones to use; \`[]\` reads GitHub anonymously. They are GitHub tokens for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
 - **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. The model is the \`library-digest\` entry of **Models per task**; without one, \`claude-haiku@latest\` when the provider lists it, else **Model**.
 - **refreshOnPush** (default on): when a push to a repository's default branch changes a manifest or lockfile (\`package.json\`, \`bun.lock\`, \`pnpm-lock.yaml\`, \`go.mod\`, ...), queue \`usages\` for it and \`fleet\` for its groups, so the index learns new packages and versions minutes after the merge instead of at the weekly runs.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
@@ -137,8 +138,8 @@ export const librariesSetting = defineSetting({
 export interface LibrariesConfig {
   index: LibraryIndexSettings
   intervalMs: number
-  /** Credential references of the GitHub tokens, without duplicates. */
-  github: string[]
+  /** Credential references of the GitHub tokens, without duplicates; every `github` credential when unset. */
+  github?: string[]
   digests: boolean
   refreshOnPush: boolean
 }
@@ -160,7 +161,7 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
       graceDays: data.graceDays ?? defaults.graceDays,
     },
     intervalMs: intervalMs(data.interval ?? DEFAULT_INTERVAL) ?? 86_400_000,
-    github: [...new Set(data.github ?? [])],
+    ...(data.github ? { github: [...new Set(data.github)] } : {}),
     digests: data.digests ?? false,
     refreshOnPush: data.refreshOnPush ?? true,
   }
@@ -187,7 +188,7 @@ export const librariesEnabled = (config: LibrariesConfig | undefined) =>
 
 /** A credential list and a way to reveal one secret, e.g. the credential service. */
 export interface CredentialSource {
-  list(): Promise<readonly { id: string; name: string }[]>
+  list(): Promise<readonly { id: string; name: string; kind?: string }[]>
   reveal(id: string): Promise<string>
 }
 
@@ -195,8 +196,9 @@ export interface CredentialSource {
 export type GitHubWait = 'index' | 'request'
 
 /**
- * The GitHub client over the tokens the `github` references (credential id, else name) reveal,
- * with `ETag`s cached in `kv`; anonymous without references. References that match no credential
+ * The GitHub client over the tokens the `github` references (credential id, else name; every
+ * credential of kind `github` when `undefined`) reveal, with `ETag`s cached in `kv`; anonymous
+ * without any. References that match no credential
  * or cannot be read are left out with a log line. `wait: 'index'` waits out a rate limit reset
  * (up to 65 minutes, abortable by `signal`); `'request'` waits at most 10 seconds.
  */
@@ -211,7 +213,7 @@ export async function githubClientFor(
   } = {},
 ): Promise<GitHubClient> {
   const log = options.log ?? (() => {})
-  const resolved = await resolveGitHubTokens(credentials, references ?? [])
+  const resolved = await resolveGitHubTokens(credentials, references)
   for (const credential of resolved)
     if (credential.error)
       log(
@@ -470,7 +472,7 @@ export function startLibraryIndex(
     const everyMs = config.intervalMs
     if (!started || requestDue(await kv?.get(REQUEST_KEY), deps.now())) return true
     const used = await kv?.get(TOKENS_KEY)
-    if (used !== undefined && used !== tokensOf(config)) return true
+    if (used !== undefined && used !== (await tokensOf(deps.credentials, config))) return true
     const last = await lastLibraryRun(kv)
     const lastAt = Math.max(lastStartedAt, last ? Date.parse(last.startedAt) : 0)
     return deps.now().getTime() - lastAt >= everyMs
@@ -481,7 +483,12 @@ export function startLibraryIndex(
       void kv?.set(RUNNING_KEY, true, RUNNING_TTL_S)
       void (async () => {
         const config = await librariesConfigOf(deps.store.settings)
-        if (run && config && runTokens !== undefined && tokensOf(config) !== runTokens) {
+        if (
+          run &&
+          config &&
+          runTokens !== undefined &&
+          (await tokensOf(deps.credentials, config)) !== runTokens
+        ) {
           log('libraries: GitHub tokens changed; restarting the index run with them')
           run.abort()
         }
@@ -497,7 +504,7 @@ export function startLibraryIndex(
       if (!(await due(config))) return
       started = true
       lastStartedAt = deps.now().getTime()
-      runTokens = tokensOf(config)
+      runTokens = await tokensOf(deps.credentials, config)
       run = new AbortController()
       await kv?.delete(REQUEST_KEY)
       await kv?.set(TOKENS_KEY, runTokens)

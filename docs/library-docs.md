@@ -161,7 +161,7 @@ Where the server differs from the design above:
 
 - Indexing runs on an interval (setting `libraries.interval`, default daily, instead of weekly), about two minutes after the server starts, 10 minutes after the last new `usages` or `fleet` record, and on `POST /api/libraries/reindex`.
 - The setting is read at global scope only. Without it the index runs with the defaults (on, anonymous GitHub until tokens are added); a change of the GitHub tokens starts a new run at once, aborting a running one, and without readable tokens the client does not wait for rate limit resets.
-- GitHub tokens are the credentials listed in `libraries.github` (kind `github` in the panel), pooled by the client: each request goes to the token with the most of its limit left. Tokens of one account share GitHub's limit, so duplicates are dropped.
+- GitHub tokens are every credential of kind `github`, or the ones `libraries.github` lists, pooled by the client: each request goes to the token with the most of its limit left. Tokens of one account share GitHub's limit, so duplicates are dropped.
 - Tarballs are streamed: npm and GitHub downloads stop at a size limit (50 MB npm, 100 MB repository docs, 200 MB source snapshots) and tar entries that are not kept are skipped without being held in memory.
 - Request budgets are the GitHub client's own rate-limit handling, not the distributed limiter: REST `GET`s are conditional (`ETag` in `Store.kv`, so unchanged tags, releases and repository metadata cost nothing), and an index run waits for the hourly reset when every token is exhausted instead of failing its sources.
 - Issue digests run through the agent of the caller's repository, so an MCP call without `repo` gets no digests. Knowledge proposals from digests are not wired.

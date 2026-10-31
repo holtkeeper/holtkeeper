@@ -172,15 +172,16 @@ function Usage({ usage }: { usage: GitHubTokenUsage }) {
           <Link to="/credentials" className="font-medium hover:underline">
             Credentials
           </Link>{' '}
-          page and name it under <code className="font-mono text-xs">github</code> in the{' '}
+          page: every one is used, and a new run starts with it. The{' '}
+          <code className="font-mono text-xs">github</code> field of the{' '}
           <Link
             to="/settings"
             search={{ tab: 'libraries' }}
             className="font-medium hover:underline"
           >
             libraries setting
-          </Link>
-          .
+          </Link>{' '}
+          picks some of them instead, and an empty list keeps GitHub anonymous.
           {anonymous.requests
             ? ` ${plural(anonymous.requests, 'anonymous request')} in the range.`
             : null}

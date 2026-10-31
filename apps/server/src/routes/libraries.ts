@@ -156,7 +156,7 @@ export function libraryRoutes(deps: ServerDeps) {
     const settings = await librariesConfigOf(store.settings)
     return c.json<GitHubTokenUsage>(
       await githubTokenUsage({
-        credentials: await resolveGitHubTokens(deps.credentials, settings?.github ?? []),
+        credentials: await resolveGitHubTokens(deps.credentials, settings?.github),
         usage: githubUsageFor(store.kv),
         days,
         now: deps.now,

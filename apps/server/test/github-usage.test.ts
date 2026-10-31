@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test'
 
 import { memoryStore } from '@holtkeeper/store/memory'
 
-import { githubTokenUsage, githubUsage, resolveGitHubTokens } from '../src/github-usage.ts'
+import {
+  githubReferences,
+  githubTokenUsage,
+  githubUsage,
+  resolveGitHubTokens,
+} from '../src/github-usage.ts'
 
 const request = (resource: 'core' | 'search' | 'graphql', extra = {}) => ({
   kind: 'request' as const,
@@ -102,5 +107,20 @@ describe('resolveGitHubTokens', () => {
       { id: 'c2', name: 'broken', error: 'sealed' },
       { id: 'gone', name: 'gone', error: 'no credential "gone"' },
     ])
+  })
+})
+
+describe('githubReferences', () => {
+  test('stands for every github credential when unset, and for itself otherwise', async () => {
+    const credentials = {
+      list: async () => [
+        { id: 'c1', name: 'a', kind: 'github' },
+        { id: 'c2', name: 'b', kind: 'gitlab' },
+        { id: 'c3', name: 'c', kind: 'github' },
+      ],
+    }
+    expect(await githubReferences(credentials, undefined)).toEqual(['c1', 'c3'])
+    expect(await githubReferences(credentials, ['b'])).toEqual(['b'])
+    expect(await githubReferences(credentials, [])).toEqual([])
   })
 })

@@ -188,19 +188,37 @@ export interface GitHubTokenCredential {
 
 /** A credential list and a way to reveal one secret, e.g. the credential service. */
 export interface GitHubCredentialSource {
-  list(): Promise<readonly { id: string; name: string }[]>
+  list(): Promise<readonly { id: string; name: string; kind?: string }[]>
   reveal(id: string): Promise<string>
 }
 
+/** Credential kind whose credentials are GitHub tokens. */
+const GITHUB_KIND = 'github'
+
 /**
- * The credentials `references` name (id, else name), in order and once each, with their tokens.
- * A reference that matches nothing comes back with only `error`; one that cannot be revealed
- * with `error` and no `token`.
+ * The references a `libraries.github` value stands for: the value itself, or, when it is not set,
+ * the id of every credential of kind `github` in creation order. `[]` means none (anonymous).
+ */
+export async function githubReferences(
+  credentials: Pick<GitHubCredentialSource, 'list'>,
+  references: readonly string[] | undefined,
+): Promise<readonly string[]> {
+  if (references) return references
+  return (await credentials.list())
+    .filter((credential) => credential.kind === GITHUB_KIND)
+    .map((credential) => credential.id)
+}
+
+/**
+ * The credentials `references` name (id, else name; every `github` credential when `undefined`),
+ * in order and once each, with their tokens. A reference that matches nothing comes back with
+ * only `error`; one that cannot be revealed with `error` and no `token`.
  */
 export async function resolveGitHubTokens(
   credentials: GitHubCredentialSource,
-  references: readonly string[],
+  given: readonly string[] | undefined,
 ): Promise<GitHubTokenCredential[]> {
+  const references = await githubReferences(credentials, given)
   if (!references.length) return []
   const all = await credentials.list()
   const result: GitHubTokenCredential[] = []
