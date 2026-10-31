@@ -6,7 +6,7 @@ A `Fixer` for JavaScript projects. It removes vulnerable npm packages by editing
 
 - `jsFixer({ runner? }): Fixer` — fixer named `js`. `supports(source)` is true for `bun.lock`, `pnpm-lock.yaml`, `yarn.lock` and `package-lock.json`. `runner` defaults to `localRunner`.
 - `planManifestEdits(manifest, findings, manager)` — pure: returns the edited manifest, the fixed finding ids and notes.
-- `detectPackageManager(kind, dir, packageManagerField)` and `lockfileUpdateCommand(manager)` — package-manager detection (`LockfileKind` is the lockfile family: `npm`, `bun`, `pnpm`, `yarn`) and the command that regenerates its lockfile.
+- `lockfileKind(path)`, `detectPackageManager(kind, dir, packageManagerField)` and `lockfileUpdateCommand(manager)` — package-manager detection (`LockfileKind` is the lockfile family: `npm`, `bun`, `pnpm`, `yarn`) and the command that regenerates its lockfile.
 
 ## How a fix works
 

@@ -34,6 +34,7 @@ export { type JobRequest, enqueueUnique } from './enqueue.ts'
 export { type ResolveRepos, groupRepositories, matchesRepoGlob, staticPrefix } from './repos.ts'
 export {
   type CheckedSchedule,
+  type ForgeReaderFor,
   type Scheduler,
   type SchedulerOptions,
   createScheduler,

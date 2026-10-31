@@ -2,6 +2,7 @@ import { type AnyAnalyzer, defineAnalyzer } from '@holtkeeper/analyzer'
 import { apiSurfaceAnalyzer } from '@holtkeeper/api-surface'
 import { assetsAnalyzer } from '@holtkeeper/assets'
 import { branchesAnalyzer } from '@holtkeeper/branches'
+import { browserslistAnalyzer } from '@holtkeeper/browserslist'
 import { analyzeBundle, bundleAnalysis } from '@holtkeeper/bundles'
 import { analyzeChangelog, changelogAnalysis, forgeLinks } from '@holtkeeper/changelog'
 import { ciJobsAnalyzer } from '@holtkeeper/ci-jobs'
@@ -183,5 +184,6 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   createReviewAnalyzer({ checks: reviewChecks() }),
   trackerAnalyzer,
   warmupAnalyzer,
+  browserslistAnalyzer,
   auditAnalyzer,
 ]

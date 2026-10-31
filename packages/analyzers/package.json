@@ -11,6 +11,7 @@
     "@holtkeeper/api-surface": "workspace:*",
     "@holtkeeper/assets": "workspace:*",
     "@holtkeeper/branches": "workspace:*",
+    "@holtkeeper/browserslist": "workspace:*",
     "@holtkeeper/bundles": "workspace:*",
     "@holtkeeper/changelog": "workspace:*",
     "@holtkeeper/ci-jobs": "workspace:*",

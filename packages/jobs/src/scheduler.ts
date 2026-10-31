@@ -1,5 +1,5 @@
 import { groupsMatch } from '@holtkeeper/access'
-import type { AnyAnalyzer } from '@holtkeeper/analyzer'
+import type { AnyAnalyzer, ApplicabilityContext } from '@holtkeeper/analyzer'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { Job, JobStore } from '@holtkeeper/store'
@@ -26,6 +26,8 @@ export interface SchedulerOptions {
   analyzers: AnyAnalyzer[]
   /** Default: `groupRepositories(config)`, which lists repositories from the forge. */
   resolveRepos?: ResolveRepos
+  /** Reads files for analyzers' `appliesTo` checks. Default: the forge clients of `config`. */
+  forgeFor?: ForgeReaderFor
   now?: () => Date
   /** IANA zone for schedules without `timezone`. Default: the process's local zone. */
   timezone?: string
@@ -79,10 +81,45 @@ export function scheduleProblems(
   return problems
 }
 
+/** Reads files of a forge's repositories, for `appliesTo` checks. */
+export type ForgeReaderFor = (forgeId: string) => ApplicabilityContext['forge']
+
+/** Every forge's client from the config, created once per forge. */
+function configForgeReaders(config: HoltkeeperConfig): ForgeReaderFor {
+  const clients = new Map<string, ApplicabilityContext['forge']>()
+  return (forgeId) => {
+    let client = clients.get(forgeId)
+    if (!client) {
+      const definition = config.forges[forgeId]
+      if (!definition) throw new Error(`unknown forge "${forgeId}"`)
+      client = definition.create()
+      clients.set(forgeId, client)
+    }
+    return client
+  }
+}
+
+/** A reader that fetches each file of a repository once, so checks of several analyzers share reads. */
+function memoizedReader(forge: ApplicabilityContext['forge']): ApplicabilityContext['forge'] {
+  const files = new Map<string, Promise<string | undefined>>()
+  return {
+    readFile(repo, file, ref) {
+      const key = `${repo}\0${file}\0${ref ?? ''}`
+      let read = files.get(key)
+      if (!read) {
+        read = forge.readFile(repo, file, ref)
+        files.set(key, read)
+      }
+      return read
+    },
+  }
+}
+
 /**
  * The jobs one schedule produces: repo-scope analyzers once per repository of the schedule's
- * groups (every group when it names none) that matches its `repos` globs, group-scope analyzers
- * once per group with `repo` = `{ forge, path: <group> }`.
+ * groups (every group when it names none) that matches its `repos` globs and the analyzer's
+ * `appliesTo` (a failing check counts as applying), group-scope analyzers once per group with
+ * `repo` = `{ forge, path: <group> }`.
  */
 export async function planSchedule(
   schedule: Pick<Schedule, 'analyzers' | 'groups' | 'repos' | 'options'> &
@@ -91,10 +128,15 @@ export async function planSchedule(
     config,
     analyzers,
     resolveRepos,
+    forgeFor = configForgeReaders(config),
+    log = () => {},
   }: {
     config: HoltkeeperConfig
-    analyzers: readonly Pick<AnyAnalyzer, 'kind' | 'scope'>[]
+    analyzers: readonly Pick<AnyAnalyzer, 'kind' | 'scope' | 'appliesTo'>[]
     resolveRepos: ResolveRepos
+    /** Default: the forge clients of `config`. */
+    forgeFor?: ForgeReaderFor
+    log?: (line: string) => void
   },
 ): Promise<JobRequest[]> {
   const byKind = new Map(analyzers.map((analyzer) => [analyzer.kind, analyzer]))
@@ -117,8 +159,35 @@ export async function planSchedule(
         repos.set(`${repo.forge}:${repo.path}`, repo)
       }
     }
+    const readers = new Map<string, ApplicabilityContext['forge']>()
+    const readerOf = (repo: RepoRef) => {
+      const key = `${repo.forge}:${repo.path}`
+      let reader = readers.get(key)
+      if (!reader) {
+        reader = memoizedReader(forgeFor(repo.forge))
+        readers.set(key, reader)
+      }
+      return reader
+    }
+    const applies = async (analyzer: (typeof selected)[number], repo: RepoRef) => {
+      if (!analyzer.appliesTo) return true
+      try {
+        return await analyzer.appliesTo({ repo, forge: readerOf(repo) })
+      } catch (error) {
+        log(
+          `${analyzer.kind} on ${repo.forge}:${repo.path}: applicability check failed, queued anyway: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        return true
+      }
+    }
     for (const analyzer of selected.filter((a) => a.scope === 'repo')) {
+      let skipped = 0
       for (const repo of repos.values()) {
+        // oxlint-disable-next-line no-await-in-loop -- one repository after another keeps rate limits
+        if (!(await applies(analyzer, repo))) {
+          skipped++
+          continue
+        }
         requests.push({
           analyzer: analyzer.kind,
           repo,
@@ -127,6 +196,10 @@ export async function planSchedule(
           ...(schedule.name ? { schedule: schedule.name } : {}),
         })
       }
+      if (skipped)
+        log(
+          `${analyzer.kind}: ${skipped} repositor${skipped === 1 ? 'y does' : 'ies do'} not use it`,
+        )
     }
   }
 
@@ -191,7 +264,13 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   let ticking: Promise<Job[]> | undefined
 
   const run = async (schedule: Schedule, at = now(), actor?: string) => {
-    let requests = await planSchedule(schedule, { config, analyzers, resolveRepos })
+    let requests = await planSchedule(schedule, {
+      config,
+      analyzers,
+      resolveRepos,
+      ...(options.forgeFor && { forgeFor: options.forgeFor }),
+      log: (line) => log(`schedule ${schedule.name}: ${line}`),
+    })
     if (actor) requests = requests.map((request) => ({ ...request, actor }))
     if (schedule.spread) requests = spreadRequests(requests, at, runWindowEnd(schedule, at, zone))
     const { enqueued, skipped } = await enqueueUnique(store.jobs, requests, now().toISOString())

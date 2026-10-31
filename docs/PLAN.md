@@ -121,6 +121,8 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 
 ### 2. Browserslist
 
+Status: done as the `browserslist` analyzer ([packages/browserslist](../packages/browserslist/docs/README.md)) on a default weekly schedule; it runs only in repositories whose lockfile resolves `caniuse-lite` (analyzer `appliesTo`). Auto-merge waits for the forge contract.
+
 - On a schedule per repository group: `update-browserslist-db` through the repository's package manager.
 - If the lockfile changed — branch, commit, MR (or update the already open MR), optional auto-merge after a green pipeline.
 - Report: whether the resolved browser list changed (`browserslist` before/after) — the main thing a reviewer looks at.
@@ -192,7 +194,7 @@ Credentials (forge accounts, API keys) and settings (models, keys, review rules,
 - `forge` + `forge-gitlab` (primary), `forge-github` skeleton, contract tests.
 - `workspace`, `apps/cli`.
 
-**1. Browserslist** — the first end-to-end scenario without AI.
+**1. Browserslist** — the first end-to-end scenario without AI. _Done._
 
 **2. Audit** — without the agent: report normalization, autofix, allowlist. _Engine and CLI done; MR plugin pending the workspace._
 

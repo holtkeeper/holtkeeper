@@ -263,6 +263,7 @@
         "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/branches": "workspace:*",
+        "@holtkeeper/browserslist": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/ci-jobs": "workspace:*",
@@ -404,6 +405,19 @@
     "packages/brand": {
       "name": "@holtkeeper/brand",
       "version": "0.0.0",
+    },
+    "packages/browserslist": {
+      "name": "@holtkeeper/browserslist",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/propagate": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/vuln-js": "workspace:*",
+        "zod": "^4.6.7",
+      },
     },
     "packages/bundles": {
       "name": "@holtkeeper/bundles",
@@ -1238,6 +1252,8 @@
     "@holtkeeper/branches": ["@holtkeeper/branches@workspace:packages/branches"],
 
     "@holtkeeper/brand": ["@holtkeeper/brand@workspace:packages/brand"],
+
+    "@holtkeeper/browserslist": ["@holtkeeper/browserslist@workspace:packages/browserslist"],
 
     "@holtkeeper/bundles": ["@holtkeeper/bundles@workspace:packages/bundles"],
 

@@ -142,6 +142,47 @@ describe('scheduler', () => {
     ])
   })
 
+  test('repository jobs skip repositories the analyzer does not apply to', async () => {
+    const reads: string[] = []
+    const files: Record<string, string> = { 'games/a:bun.lock': 'caniuse-lite' }
+    const usesLockfile = (kind: string): AnyAnalyzer => ({
+      ...analyzer(kind),
+      appliesTo: async ({ repo, forge: reader }) =>
+        (await reader.readFile(repo.path, 'bun.lock')) !== undefined,
+    })
+    const broken: AnyAnalyzer = {
+      ...analyzer('quality'),
+      appliesTo: async () => {
+        throw new Error('rate limited')
+      },
+    }
+    const lines: string[] = []
+    const requests = await planSchedule(
+      { analyzers: ['browserslist', 'renovate', 'quality'], groups: ['games'] },
+      {
+        config,
+        analyzers: [usesLockfile('browserslist'), usesLockfile('renovate'), broken],
+        resolveRepos,
+        forgeFor: () => ({
+          readFile: async (repo, file) => {
+            reads.push(`${repo}:${file}`)
+            return files[`${repo}:${file}`]
+          },
+        }),
+        log: (line) => lines.push(line),
+      },
+    )
+    expect(requests.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
+      'browserslist games/a',
+      'renovate games/a',
+      'quality games/a',
+      'quality games/b',
+    ])
+    expect(reads).toEqual(['games/a:bun.lock', 'games/b:bun.lock'])
+    expect(lines).toContain('browserslist: 1 repository does not use it')
+    expect(lines.some((line) => line.includes('queued anyway: rate limited'))).toBe(true)
+  })
+
   test('jobs carry their schedule, and the person who ran it by hand', async () => {
     const jobs = await scheduler().run('weekly', { actor: 'u1' })
     expect(jobs.map((j) => [j.schedule, j.actor, j.trigger])).toEqual([

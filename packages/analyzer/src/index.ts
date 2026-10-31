@@ -5,6 +5,10 @@ import type { AnalysisKind } from '@holtkeeper/report'
 import type { AnalysisStore, AuditRunStore, CiJobStore } from '@holtkeeper/store'
 import type { z } from 'zod'
 
+import type { Applicability } from './applies.ts'
+
+export * from './applies.ts'
+
 /**
  * Bytes kept between runs, e.g. on S3, under keys the analyzer derives from its inputs (source
  * hash, settings, tool versions). Entries may vanish at any time, so a miss is normal; methods
@@ -151,6 +155,13 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
    * Runners check them out before `run` and pass the directories in `context.checkouts`.
    */
   requiredCheckouts?(options: Options, repo: RepoRef): { repo: RepoRef | string; ref?: string }[]
+  /**
+   * Whether a repository uses what the analyzer works on. Schedules check it before queueing a
+   * repository job, so repositories that start or stop using it join or leave on the next run
+   * without config changes; a check that throws counts as applying. Absent: every repository
+   * applies. Manual runs skip it, so `run` must still cope with a repository it does not apply to.
+   */
+  appliesTo?: Applicability
   /**
    * Produces the data. `artifacts` are binary files the data refers to by `id` (e.g. the
    * `artifact` of `write-binary` edits); runners store them after the record, tagged with it.

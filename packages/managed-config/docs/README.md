@@ -55,18 +55,19 @@ A rebuild that fails validation keeps the previous config (`lastError()`). Panel
 
 Every default schedule covers all groups and spreads its repository jobs over 01:00–07:00 (server time zone):
 
-| Id                | Analyzers                                                          | When             |
-| ----------------- | ------------------------------------------------------------------ | ---------------- |
-| `ci-jobs-nightly` | `ci-jobs`                                                          | every night      |
-| `delivery-weekly` | `delivery`                                                         | Monday nights    |
-| `security-weekly` | `audit`, `depgraph`                                                | Saturday nights  |
-| `quality-weekly`  | `quality` (`coverage: skip`, so no test runs), `licenses`, `fleet` | Sunday nights    |
-| `tests-weekly`    | `coverage`, `testids`                                              | Wednesday nights |
-| `branches-weekly` | `branches`                                                         | Tuesday nights   |
-| `stack-weekly`    | `stack`                                                            | Monday nights    |
-| `api-weekly`      | `api-surface`                                                      | Thursday nights  |
-| `usages-weekly`   | `usages`                                                           | Thursday nights  |
-| `assets-weekly`   | `assets`                                                           | Friday nights    |
+| Id                    | Analyzers                                                            | When             |
+| --------------------- | -------------------------------------------------------------------- | ---------------- |
+| `ci-jobs-nightly`     | `ci-jobs`                                                            | every night      |
+| `delivery-weekly`     | `delivery`                                                           | Monday nights    |
+| `security-weekly`     | `audit`, `depgraph`                                                  | Saturday nights  |
+| `quality-weekly`      | `quality` (`coverage: skip`, so no test runs), `licenses`, `fleet`   | Sunday nights    |
+| `tests-weekly`        | `coverage`, `testids`                                                | Wednesday nights |
+| `branches-weekly`     | `branches`                                                           | Tuesday nights   |
+| `stack-weekly`        | `stack`                                                              | Monday nights    |
+| `api-weekly`          | `api-surface`                                                        | Thursday nights  |
+| `usages-weekly`       | `usages`                                                             | Thursday nights  |
+| `assets-weekly`       | `assets`                                                             | Friday nights    |
+| `browserslist-weekly` | `browserslist` (only repositories whose lockfile has `caniuse-lite`) | Tuesday nights   |
 
 The default trigger `tag` queues `changelog`, `release-risk` and `api-surface` for every new or moved tag, from webhooks or polling. `defaultTriggerAdditions` bring analyzers added to a default trigger later to installs that already have it: each addition appends its missing analyzers to the existing document once (marker `config:default-seeded:trigger:<id>`, e.g. `tag+api-surface`), so taking one out again in the panel sticks.
 
