@@ -85,19 +85,37 @@ export const toolParams = (tool: McpTool): McpToolParam[] => {
     .toSorted((a, b) => Number(b.required) - Number(a.required))
 }
 
-const isLibraryTool = (name: string) => (libraryTools as readonly string[]).includes(name)
+const knowledgeTools = new Set(['search_knowledge', 'get_knowledge', 'propose_knowledge'])
 
-/** `tools` split into the catalog of the organization's packages and third-party libraries; empty groups are left out. */
+const isLibraryTool = (name: string) =>
+  name === 'evaluate_dependency' || (libraryTools as readonly string[]).includes(name)
+const isKnowledgeTool = (name: string) => knowledgeTools.has(name)
+
+/**
+ * `tools` split into the catalog of the organization's packages, third-party libraries and the
+ * knowledge base; empty groups are left out.
+ */
 export const groupTools = (tools: readonly McpTool[]) =>
   [
     {
       id: 'packages',
       label: 'Your packages',
-      tools: tools.filter((tool) => !isLibraryTool(tool.name)),
+      description:
+        'Exports, versions, usages and upgrade impact of the packages your repositories publish.',
+      tools: tools.filter((tool) => !isLibraryTool(tool.name) && !isKnowledgeTool(tool.name)),
     },
     {
       id: 'libraries',
       label: 'Third-party libraries',
+      description:
+        'Whether to add or upgrade a dependency, and the docs, changes, issues and source of the libraries your repositories depend on, at the version each repository uses.',
       tools: tools.filter((tool) => isLibraryTool(tool.name)),
+    },
+    {
+      id: 'knowledge',
+      label: 'Team knowledge',
+      description:
+        'Decisions, conventions and migration notes of the knowledge base; proposals from agents wait for review on the Knowledge page.',
+      tools: tools.filter((tool) => isKnowledgeTool(tool.name)),
     },
   ].filter((group) => group.tools.length)

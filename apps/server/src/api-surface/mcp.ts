@@ -10,8 +10,9 @@ import {
   renderPackage,
   renderSymbol,
 } from '@holtkeeper/api-surface'
+import { knowledgeKinds } from '@holtkeeper/knowledge'
 import { type LibraryApi, type LibraryDocs, sameVersion, thirdParty } from '@holtkeeper/libraries'
-import type { LibraryEcosystem, LibraryRef, LibraryStore } from '@holtkeeper/store'
+import type { LibraryEcosystem, LibraryRef, LibraryStore, Store } from '@holtkeeper/store'
 import {
   findSites,
   packageUsage,
@@ -26,6 +27,14 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod'
 
 import type { ApiCatalog, RepoFilter } from './catalog.ts'
+import { evaluateDependency } from './dependency.ts'
+import {
+  type McpKnowledgeContext,
+  proposeKnowledge,
+  readKnowledge,
+  searchKnowledge,
+} from './knowledge.ts'
+import { ToolError } from './tool-error.ts'
 import type { McpUsage } from './usage.ts'
 import { type UsageIndex, impactOf, impactOfChanges } from './usages.ts'
 
@@ -44,6 +53,11 @@ const instructions = [
   'package, at which versions and which exports, members and JSX props; find_usages returns the',
   'code of those uses; upgrade_impact lists the uses an upgrade breaks, for planning migrations;',
   'repo_packages lists what one repository depends on.',
+  'Before adding or upgrading a dependency, call evaluate_dependency: who already uses it,',
+  'advisories, licenses, bundle share and team decisions about it.',
+  'The team knowledge base holds decisions, conventions, migration notes and quirks:',
+  'search_knowledge before solving a problem the team may have solved, cite entries as [kb:<id>],',
+  'and propose_knowledge for a reusable lesson (people review proposals before agents rely on them).',
 ].join(' ')
 
 const libraryInstructions = [
@@ -82,16 +96,20 @@ const text = (value: string) => ({
   ],
 })
 
-class ToolError extends Error {}
-
 /** Everything the MCP tools need for one request. */
 export interface McpRequestContext {
   catalog: ApiCatalog
   usages: UsageIndex
   usage: McpUsage
+  /** Stored analyses and audits that `evaluate_dependency` reads. */
+  store: Pick<Store, 'analyses' | 'auditRuns'>
+  /** The knowledge base for this caller. */
+  knowledge: McpKnowledgeContext
   principal: Principal
   /** Repositories the caller may read. */
   canRead: RepoFilter
+  /** Repositories whose audits the caller may read. */
+  canReadAudits: RepoFilter
   /** First word of the client's User-Agent. */
   client?: string
   /** The third-party library index; without it the library tools are not offered. */
@@ -167,13 +185,14 @@ function buildServer(context: McpRequestContext) {
     shape: Shape,
     handler: (args: z.infer<z.ZodObject<Shape>>) => Promise<string>,
     subjectOf: (args: z.infer<z.ZodObject<Shape>>) => string | undefined,
+    { readOnly = true }: { readOnly?: boolean } = {},
   ) =>
     register(
       name,
       {
         description,
         inputSchema: shape,
-        annotations: { readOnlyHint: true, openWorldHint: false },
+        annotations: { readOnlyHint: readOnly, openWorldHint: false },
       },
       async (input) => {
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the SDK parsed `input` with `shape`
@@ -720,6 +739,95 @@ function buildServer(context: McpRequestContext) {
       ].join('\n')
     },
     ({ repo }) => repo,
+  )
+
+  tool(
+    'evaluate_dependency',
+    'Everything the organization knows about a dependency before you add or upgrade it: which repositories use it at which versions (and whether it is an internal package), deprecations, advisories from the newest audits with fixed versions, licenses with each repository’s verdict (and the verdict under `repo`’s policy), its gzip share of measured bundles, and accepted team knowledge about it. Reads stored analyses only.',
+    {
+      package: z.string().min(1).describe('Package name, e.g. date-fns or github.com/spf13/cobra'),
+      ecosystem: z.enum(['npm', 'Go']).optional().describe('Default npm'),
+      version: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('The version you consider; advisories seen at it are marked'),
+      repo: z
+        .string()
+        .optional()
+        .describe('The repository you would add it to, as forge:path; its license policy applies'),
+    },
+    async (input) =>
+      evaluateDependency(
+        {
+          analyses: context.store.analyses,
+          auditRuns: context.store.auditRuns,
+          catalog,
+          usages,
+          canRead,
+          canReadAudits: context.canReadAudits,
+          knowledge: context.knowledge,
+          ...(library ? { libraries: library.store } : {}),
+        },
+        input,
+      ),
+    ({ package: name }) => name,
+  )
+
+  const kindArg = z.enum(knowledgeKinds)
+
+  tool(
+    'search_knowledge',
+    'Searches the accepted entries of the team knowledge base — decisions, conventions, migration notes, quirks and how-tos — best match first, bodies trimmed. With `repo`, only entries that apply to that repository. Without `query`, lists every applicable entry, most specific first.',
+    {
+      query: z.string().optional().describe('Words to match, e.g. an API name or error message'),
+      repo: z.string().optional().describe('The repository you work in, as forge:path'),
+      kind: kindArg.optional(),
+      package: z.string().optional().describe('Only entries about this package, e.g. react'),
+      topic: z.string().optional().describe('Only entries with this topic, e.g. testing'),
+      limit: z.number().int().min(1).max(30).optional().describe('Default 10'),
+    },
+    async (input) => searchKnowledge(context.knowledge, input),
+    (input) => input.package ?? input.repo ?? input.query,
+  )
+
+  tool(
+    'get_knowledge',
+    'One knowledge base entry in full: body, status, scope, packages, topics, evidence links and the entry it supersedes.',
+    { id: z.string().min(1).describe('Entry id, or its citation [kb:<id>]') },
+    async ({ id }) => readKnowledge(context.knowledge, id),
+    ({ id }) => id,
+  )
+
+  tool(
+    'propose_knowledge',
+    'Proposes a knowledge base entry for one repository: a short, reusable lesson other people and agents should know (a convention, a pitfall, an upgrade step). It is attributed to you and waits for review; a proposal that repeats an existing entry is not added. Search first.',
+    {
+      title: z.string().min(1).max(200).describe('One-sentence statement'),
+      body: z.string().min(1).max(8000).describe('Markdown explanation with an example'),
+      repo: z.string().min(1).describe('The repository it applies to, as forge:path'),
+      kind: kindArg.optional().describe('Default: classified from the text'),
+      topics: z.array(z.string().min(1)).max(10).optional(),
+      packages: z
+        .array(
+          z.object({
+            ecosystem: z.string().min(1).describe('npm or go'),
+            name: z.string().min(1),
+            from: z.string().optional().describe('Semver range the note starts from'),
+            to: z.string().optional().describe('Semver range the note lands on'),
+          }),
+        )
+        .max(10)
+        .optional(),
+      evidence: z
+        .array(z.object({ label: z.string().min(1), url: z.url() }))
+        .max(10)
+        .optional()
+        .describe('Links backing it up: merge requests, issues, docs'),
+    },
+    async (input) => proposeKnowledge(context.knowledge, input),
+    ({ repo }) => repo,
+    { readOnly: false },
   )
 
   if (library) {

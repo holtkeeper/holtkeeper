@@ -135,9 +135,9 @@ function ToolsTab() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted">
-          {tools.data.length} read-only tools, answering only about repositories you can read.
-          Agents pick them on their own; name a package, symbol or error and they call the right
-          ones.
+          {tools.data.length} tools, answering only about repositories you can read; all of them
+          only read, except that agents can propose knowledge entries for review. Agents pick them
+          on their own; name a package, symbol or error and they call the right ones.
         </p>
         <SearchInput
           aria-label="Filter tools"
@@ -149,15 +149,7 @@ function ToolsTab() {
       </div>
       {groups.length ? (
         groups.map((group) => (
-          <Panel
-            key={group.id}
-            title={group.label}
-            description={
-              group.id === 'libraries'
-                ? 'Docs, changes, issues and source of the third-party libraries your repositories depend on, at the version each repository uses.'
-                : 'Exports, versions, usages and upgrade impact of the packages your repositories publish.'
-            }
-          >
+          <Panel key={group.id} title={group.label} description={group.description}>
             <div className="flex flex-col">
               {group.tools.map((tool) => (
                 <ToolCard key={tool.name} tool={tool} />

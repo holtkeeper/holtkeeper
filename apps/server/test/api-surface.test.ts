@@ -19,7 +19,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { builtinSettings } from '@holtkeeper/settings'
-import type { Store } from '@holtkeeper/store'
+import type { KnowledgeEntry, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
@@ -331,6 +331,10 @@ describe('MCP endpoint', () => {
       'find_usages',
       'upgrade_impact',
       'repo_packages',
+      'evaluate_dependency',
+      'search_knowledge',
+      'get_knowledge',
+      'propose_knowledge',
     ])
 
     const packages = await callTool('list_packages', {}, bearer)
@@ -566,6 +570,226 @@ describe('usage routes and tools', () => {
     expect(packages.content[0]?.text).toContain(
       '- **@acme/ui** 1.0.0 — 3 uses in 2 files, 2 exports',
     )
+  })
+})
+
+const entry = (id: string, fields: Partial<KnowledgeEntry>) =>
+  store.knowledge.put({
+    id,
+    title: `Entry ${id}`,
+    body: 'Body.',
+    kind: 'decision',
+    scope: { all: true },
+    topics: [],
+    appliesTo: ['*'],
+    status: 'accepted',
+    evidence: [],
+    source: 'human',
+    author: 'header:jane',
+    createdAt: '2026-10-01T00:00:00.000Z',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    ...fields,
+  })
+
+describe('knowledge tools', () => {
+  beforeEach(async () => {
+    await entry('dates', {
+      title: 'Use date-fns instead of moment',
+      body: 'moment is frozen; new code formats dates with date-fns.',
+      scope: { groups: ['games'] },
+      packages: [{ ecosystem: 'npm', name: 'moment' }],
+    })
+    await entry('tokens', {
+      title: 'Design tokens come from @acme/ui',
+      body: 'Never hardcode colors.',
+      scope: { repos: ['work:libs/ui'] },
+    })
+    await entry('draft', { title: 'Maybe drop moment', status: 'proposed' })
+  })
+
+  test('search accepted entries, by repository and in full', async () => {
+    const found = await callTool('search_knowledge', { query: 'moment' }, asAdmin)
+    expect(found.content[0]?.text).toContain('### [kb:dates] Use date-fns instead of moment')
+    expect(found.content[0]?.text).not.toContain('Maybe drop moment')
+
+    const forUi = await callTool('search_knowledge', { repo: 'work:libs/ui' }, asAdmin)
+    expect(forUi.content[0]?.text).toContain('[kb:tokens]')
+    expect(forUi.content[0]?.text).not.toContain('[kb:dates]')
+
+    const draft = await callTool('get_knowledge', { id: '[kb:draft]' }, asAdmin)
+    expect(draft.content[0]?.text).toContain('status: proposed (not reviewed yet')
+
+    const denied = await callTool('search_knowledge', { repo: 'work:games/a' }, asGames)
+    expect(denied.isError).toBe(true)
+    expect((await callTool('get_knowledge', { id: 'dates' }, asGames)).isError).toBe(true)
+  })
+
+  test('proposals wait for review and duplicates are not added', async () => {
+    const proposed = await callTool(
+      'propose_knowledge',
+      {
+        title: 'Scenes unload their textures',
+        body: 'Call scene.dispose() before switching levels, or textures leak.',
+        repo: 'work:games/a',
+        evidence: [{ label: 'MR', url: 'https://gitlab.test/games/a/-/merge_requests/7' }],
+      },
+      asAdmin,
+    )
+    expect(proposed.content[0]?.text).toContain('for `work:games/a`')
+    const stored = (await store.knowledge.list({ status: 'proposed' })).find((item) =>
+      item.title.startsWith('Scenes'),
+    )
+    expect(stored).toMatchObject({
+      source: 'agent',
+      author: 'header:jane',
+      scope: { repos: ['work:games/a'] },
+    })
+
+    const again = await callTool(
+      'propose_knowledge',
+      { title: 'Scenes unload their textures', body: 'Other words.', repo: 'work:games/a' },
+      asAdmin,
+    )
+    expect(again.content[0]?.text).toStartWith(`Not added: [kb:${stored?.id}] (proposed)`)
+
+    const denied = await callTool(
+      'propose_knowledge',
+      { title: 'Anything', body: 'Anything.', repo: 'work:games/a' },
+      asGames,
+    )
+    expect(denied.isError).toBe(true)
+  })
+})
+
+describe('evaluate_dependency', () => {
+  beforeEach(async () => {
+    const moment = {
+      name: 'moment',
+      versions: ['2.29.1'],
+      ranges: ['^2.29.0'],
+      workspaces: ['root'],
+      count: 4,
+      files: 3,
+      exports: [],
+    }
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      data: { packages: [moment], files: 10, types: { status: 'used', projects: [], sites: 0 } },
+    })
+    await store.auditRuns.add({
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'schedule',
+      startedAt: '2026-10-20T00:00:00.000Z',
+      finishedAt: '2026-10-20T00:01:00.000Z',
+      report: {
+        scanner: 'osv-scanner',
+        findings: [
+          {
+            id: 'GHSA-wc69-rhjr-hc9g',
+            aliases: ['CVE-2022-31129'],
+            summary: 'Inefficient parsing of RFC 2822 dates',
+            severity: 'high',
+            url: 'https://osv.dev/GHSA-wc69-rhjr-hc9g',
+            package: { name: 'moment', version: '2.29.1', ecosystem: 'npm' },
+            source: 'package-lock.json',
+            fixedVersions: ['2.29.4'],
+          },
+        ],
+        ignored: [],
+        expired: [],
+        fixes: [],
+        resolved: [],
+        changedFiles: [],
+      },
+    })
+    const policy = { allow: ['MIT'], deny: ['GPL-*'], ignore: [] }
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'licenses',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      data: {
+        tool: { name: 'osv-scanner' },
+        policy,
+        packages: [
+          {
+            name: 'moment',
+            version: '2.29.1',
+            ecosystem: 'npm',
+            sources: ['package-lock.json'],
+            licenses: ['MIT'],
+            verdict: 'allowed',
+          },
+        ],
+      },
+    })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'libs/ui' },
+      kind: 'licenses',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      data: { tool: { name: 'osv-scanner' }, policy: { ...policy, deny: ['MIT'] }, packages: [] },
+    })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'bundle',
+      createdAt: '2026-10-20T00:00:00.000Z',
+      data: {
+        assets: [
+          {
+            file: 'a.js',
+            name: 'a.js',
+            kind: 'js',
+            raw: 4000,
+            gzip: 1600,
+            brotli: 1400,
+            mapped: 4000,
+          },
+        ],
+        entrypoints: [],
+        packages: [
+          {
+            name: 'moment',
+            bytes: 2000,
+            gzip: 400,
+            versions: ['2.29.1'],
+            instances: ['node_modules/moment'],
+            modules: 3,
+            entrypoints: ['main'],
+          },
+        ],
+        modules: [],
+        unmapped: 0,
+      },
+    })
+    await entry('dates', {
+      title: 'Use date-fns instead of moment',
+      packages: [{ ecosystem: 'npm', name: 'moment' }],
+    })
+  })
+
+  test('joins uses, advisories, licenses, bundles and knowledge', async () => {
+    const result = await callTool(
+      'evaluate_dependency',
+      { package: 'moment', version: '2.29.1', repo: 'work:libs/ui' },
+      asAdmin,
+    )
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('  - `work:games/a`: 2.29.1 (4 uses in 3 files)')
+    expect(text).toContain(
+      '- high `GHSA-wc69-rhjr-hc9g` Inefficient parsing of RFC 2822 dates — **affects 2.29.1**, seen at 2.29.1 in `work:games/a`; fixed in 2.29.4',
+    )
+    expect(text).toContain('- 2.29.1: MIT — allowed in `work:games/a`')
+    expect(text).toContain('- Under the license policy of `work:libs/ui`: denied (MIT).')
+    expect(text).toContain('- `work:games/a` build `app`: 0.4 kB gzip (25.0% of 1.6 kB), 2.29.1')
+    expect(text).toContain('[kb:dates] Use date-fns instead of moment')
+  })
+
+  test('advisories need audits:read', async () => {
+    const result = await callTool('evaluate_dependency', { package: 'moment' }, asGames)
+    const text = result.content[0]?.text ?? ''
+    expect(text).toContain('No advisory in the newest audits of 0 repositories')
+    expect(text).toContain('`work:games/a`: 2.29.1')
   })
 })
 

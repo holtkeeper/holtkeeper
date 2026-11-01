@@ -35,6 +35,7 @@
     "@holtkeeper/jobs": "workspace:*",
     "@holtkeeper/knowledge": "workspace:*",
     "@holtkeeper/libraries": "workspace:*",
+    "@holtkeeper/licenses": "workspace:*",
     "@holtkeeper/limits": "workspace:*",
     "@holtkeeper/managed-config": "workspace:*",
     "@holtkeeper/media": "workspace:*",

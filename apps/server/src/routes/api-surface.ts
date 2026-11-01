@@ -16,6 +16,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
 import { createApiCatalog } from '../api-surface/catalog.ts'
+import type { McpKnowledgeContext } from '../api-surface/knowledge.ts'
 import { type McpLibraryContext, handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { mcpUsage } from '../api-surface/usage.ts'
@@ -116,6 +117,22 @@ export function createApiSurface(deps: ServerDeps) {
     })
     return { docs, api: libraryApi({ store: libraries, artifacts }), store: libraries }
   }
+
+  const knowledgeContext = (principal: Principal): McpKnowledgeContext => ({
+    store,
+    canReadScope: (scope) => can(principal, 'knowledge:read', { kind: 'scope', scope }),
+    repoOf: (value) => {
+      const separator = value.indexOf(':')
+      if (separator < 1 || separator === value.length - 1) return undefined
+      const target = repoTarget(config, {
+        forge: value.slice(0, separator),
+        path: value.slice(separator + 1),
+      })
+      return canSee(principal, 'knowledge:read', target) ? target : undefined
+    },
+    actor: principal.id,
+    now: deps.now,
+  })
 
   const routes = new Hono<Env>()
   routes.route('/', usageRoutes({ catalog, usages, readable }))
@@ -278,8 +295,11 @@ export function createApiSurface(deps: ServerDeps) {
       catalog,
       usages,
       usage,
+      store,
+      knowledge: knowledgeContext(principal),
       principal,
       canRead: readable(principal),
+      canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),
       ...(client ? { client } : {}),
       now: deps.now,
     })

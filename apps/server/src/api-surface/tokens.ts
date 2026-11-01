@@ -4,8 +4,16 @@ import type { McpTokenView } from '@holtkeeper/api'
 import type { KvStore, UserStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
-/** What a token may do, whatever its owner may: read the API catalog, nothing else. */
-const tokenActions: readonly Action[] = ['analyses:read', 'repos:read']
+/**
+ * What a token may do, whatever its owner may: read the API catalog, audits and the knowledge
+ * base (and propose to it over MCP), nothing else.
+ */
+const tokenActions: readonly Action[] = [
+  'analyses:read',
+  'repos:read',
+  'audits:read',
+  'knowledge:read',
+]
 
 const prefix = 'hk_mcp_'
 const tokenKey = (hash: string) => `mcp:token:${hash}`

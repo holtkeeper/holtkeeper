@@ -37,7 +37,7 @@ A migration's `from` and `to` are the ranges it starts from and lands on: a reac
 
 ## Server
 
-`/api/knowledge` routes (in `apps/server`) let people list, search, edit, accept, reject, archive and delete entries with `knowledge:read` / `knowledge:write` checked against each entry's scope. Accepting an entry archives the one it supersedes.
+`/api/knowledge` routes (in `apps/server`) let people list, search, edit, accept, reject, archive and delete entries with `knowledge:read` / `knowledge:write` checked against each entry's scope. Accepting an entry archives the one it supersedes. The MCP endpoint offers `search_knowledge`, `get_knowledge` and `propose_knowledge` to external agents under the same permissions; their proposals always wait for review.
 
 ## Limitations
 
