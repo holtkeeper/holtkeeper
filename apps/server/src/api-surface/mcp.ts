@@ -1,4 +1,5 @@
 import type { Principal } from '@holtkeeper/access'
+import type { PublicApiPackageRemoval, RepoRef } from '@holtkeeper/api'
 import {
   type ApiPackage,
   type PackageDiff,
@@ -37,7 +38,8 @@ const instructions = [
   'branch. Prefer it over reading package sources or node_modules.',
   'Start with search_symbols or list_packages, read get_package_api (narrow with subpath or',
   'docs: false for big packages), and use list_versions / diff_versions to see what changed',
-  'between versions before upgrading.',
+  'between versions before upgrading. Packages marked removed were dropped from their repository:',
+  'do not add new uses of them.',
   'It also indexes how every repository uses its dependencies: package_usage shows who uses a',
   'package, at which versions and which exports, members and JSX props; find_usages returns the',
   'code of those uses; upgrade_impact lists the uses an upgrade breaks, for planning migrations;',
@@ -56,6 +58,17 @@ const libraryInstructions = [
 ].join(' ')
 
 const repoKey = (repo: { forge: string; path: string }) => `${repo.forge}:${repo.path}`
+
+const removalNote = (name: string, repo: RepoRef, removed: PublicApiPackageRemoval) =>
+  [
+    `**Removed:** \`${repoKey(repo)}\` dropped ${name} on ${removed.at.slice(0, 10)}; do not use it in new code and plan to migrate existing uses.`,
+    ...(removed.renamedTo ? [`It was probably renamed to ${removed.renamedTo}.`] : []),
+    ...(removed.movedTo
+      ? [
+          `It still lives in ${removed.movedTo.map((r) => `\`${repoKey(r)}\``).join(', ')} (pass \`repo\`).`,
+        ]
+      : []),
+  ].join(' ')
 
 const text = (value: string) => ({
   content: [
@@ -303,12 +316,15 @@ function buildServer(context: McpRequestContext) {
       const packages = await catalog.packages(canRead, query)
       if (!packages.length)
         return query ? `No package matches "${query}".` : 'No package is indexed yet.'
-      return packages
-        .map(
-          (pkg) =>
-            `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded`,
-        )
-        .join('\n')
+      const line = (pkg: (typeof packages)[number]) =>
+        `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded${pkg.removed ? `\n  ${removalNote(pkg.name, pkg.repo, pkg.removed)}` : ''}`
+      const removed = packages.filter((pkg) => pkg.removed)
+      return [
+        ...packages.filter((pkg) => !pkg.removed).map(line),
+        ...(removed.length
+          ? ['', 'Removed from their repositories, do not use in new code:', ...removed.map(line)]
+          : []),
+      ].join('\n')
     },
     ({ query }) => query,
   )
@@ -376,6 +392,7 @@ function buildServer(context: McpRequestContext) {
         .slice(0, 8)
         .map((v) => (v.head ? 'head' : v.version))
       return [
+        ...(found.removed ? [removalNote(name, found.record.repo, found.removed)] : []),
         renderPackage(found.package, {
           repo: repoKey(found.record.repo),
           ...(found.record.ref ? { ref: found.record.ref } : {}),
@@ -460,6 +477,7 @@ function buildServer(context: McpRequestContext) {
           : `import ${['interface', 'type'].includes(symbol.kind) ? 'type ' : ''}{ ${name} } from '${from}'`
       return [
         `${pkgName}${found.package.version ? `@${found.package.version}` : ''}, repo \`${repoKey(found.record.repo)}\``,
+        ...(found.removed ? [removalNote(pkgName, found.record.repo, found.removed)] : []),
         `\`\`\`ts\n${statement}\n\`\`\``,
         renderSymbol(symbol),
       ].join('\n\n')
@@ -510,7 +528,10 @@ function buildServer(context: McpRequestContext) {
         lines.push('Call library_versions for every indexed version and who uses which.')
         return lines.join('\n')
       }
-      const lines = [`# ${name} in \`${repoKey(found.record.repo)}\``]
+      const lines = [
+        `# ${name} in \`${repoKey(found.record.repo)}\``,
+        ...(found.removed ? [removalNote(name, found.record.repo, found.removed)] : []),
+      ]
       const versions = found.versions
       for (const [index, version] of versions.entries()) {
         let change = ''

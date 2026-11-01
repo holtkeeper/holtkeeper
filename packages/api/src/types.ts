@@ -1411,6 +1411,19 @@ export interface RepoPollResult {
   skipped?: string
 }
 
+/**
+ * A package its repository dropped: at least two non-empty default branch runs since its last
+ * record lack it, so new code should not depend on it.
+ */
+export interface PublicApiPackageRemoval {
+  /** The first non-empty default branch run without the package. */
+  at: Timestamp
+  /** Other readable repositories that still have a package of this name. */
+  movedTo?: RepoRef[]
+  /** A package that took its folder in the newest default branch run, likely its new name. */
+  renamedTo?: string
+}
+
 /** A package as the newest `api-surface` record of its repository describes it. */
 export interface PublicApiPackageSummary {
   name: string
@@ -1431,6 +1444,8 @@ export interface PublicApiPackageSummary {
   deprecated: number
   /** Versions on record: one per released version, plus the default branch. */
   versions: number
+  /** Set when the repository no longer has the package; the other fields describe its last record. */
+  removed?: PublicApiPackageRemoval
 }
 
 /** `GET /api/api-surface/packages`. */
@@ -1464,6 +1479,8 @@ export interface PublicApiPackageDetail {
   versions: PublicApiVersion[]
   /** Other repositories that have a package of the same name. */
   alsoIn: RepoRef[]
+  /** Set when the repository no longer has the package. */
+  removed?: PublicApiPackageRemoval
 }
 
 /** `GET /api/api-surface/diff?name=&from=&to=&repo=`. */

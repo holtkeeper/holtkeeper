@@ -215,6 +215,77 @@ const callTool = async (
   return body.result
 }
 
+describe('removed packages', () => {
+  const kit = { ...ui('2.0.0', ['button']), name: '@acme/kit' }
+  const other = { ...ui('1.0.0', ['tab']), name: '@acme/other', dir: 'packages/other' }
+
+  test('are marked once two non-empty default branch runs lack them, with their likely new name', async () => {
+    await add('libs/ui', { packages: [kit] }, '2026-10-25T00:00:00.000Z')
+    const once = await createApiCatalog({ analyses: store.analyses }).packages(() => true)
+    expect(once.find((p) => p.name === '@acme/ui')?.removed).toBeUndefined()
+
+    await add('libs/ui', { packages: [kit] }, '2026-10-26T00:00:00.000Z')
+    const list = await get<PublicApiPackageList>('/api/api-surface/packages')
+    const removed = list.packages.find((p) => p.name === '@acme/ui')
+    expect(removed?.version).toBe('1.1.0')
+    expect(removed?.removed).toEqual({ at: '2026-10-25T00:00:00.000Z', renamedTo: '@acme/kit' })
+    expect(list.packages.find((p) => p.name === '@acme/kit')?.removed).toBeUndefined()
+
+    const detail = await get<PublicApiPackageDetail>('/api/api-surface/package?name=@acme/ui')
+    expect(detail.removed?.renamedTo).toBe('@acme/kit')
+
+    const packages = await callTool('list_packages', {}, asAdmin)
+    const text = packages.content[0]?.text ?? ''
+    expect(text.indexOf('Removed from their repositories')).toBeLessThan(
+      text.indexOf('**@acme/ui**'),
+    )
+    expect(text).toContain(
+      '**Removed:** `work:libs/ui` dropped @acme/ui on 2026-10-25; do not use it in new code',
+    )
+    const api = await callTool('get_package_api', { package: '@acme/ui' }, asAdmin)
+    expect(api.content[0]?.text).toStartWith('**Removed:**')
+  })
+
+  test('point at repositories that still have them and resolve there by default', async () => {
+    await add('libs/ui', { packages: [] }, '2026-10-24T00:00:00.000Z')
+    await add('libs/ui', { packages: [] }, '2026-10-24T01:00:00.000Z')
+    const empty = await createApiCatalog({ analyses: store.analyses }).packages(() => true)
+    expect(empty.find((p) => p.name === '@acme/ui')?.removed).toBeUndefined()
+
+    await add('libs/ui', { packages: [other] }, '2026-10-25T00:00:00.000Z')
+    await add('libs/ui', { packages: [other] }, '2026-10-26T00:00:00.000Z')
+    await add('games/a', { packages: [ui('1.2.0', ['button'])] }, '2026-10-27T00:00:00.000Z')
+
+    const list = await get<PublicApiPackageList>('/api/api-surface/packages')
+    const removed = list.packages.find((p) => p.name === '@acme/ui' && p.repo.path === 'libs/ui')
+    expect(removed?.removed?.movedTo).toEqual([{ forge: 'work', path: 'games/a' }])
+    expect(
+      list.packages.find((p) => p.name === '@acme/ui' && p.repo.path === 'games/a')?.removed,
+    ).toBeUndefined()
+
+    const detail = await get<PublicApiPackageDetail>('/api/api-surface/package?name=@acme/ui')
+    expect(detail.repo.path).toBe('games/a')
+    expect(detail.removed).toBeUndefined()
+    const old = await get<PublicApiPackageDetail>(
+      '/api/api-surface/package?name=@acme/ui&repo=work:libs/ui',
+    )
+    expect(old.removed?.movedTo).toEqual([{ forge: 'work', path: 'games/a' }])
+  })
+
+  test('removed in two repositories, they point at neither', async () => {
+    await add('games/a', { packages: [ui('1.2.0', ['button'])] }, '2026-10-21T00:00:00.000Z')
+    for (const repo of ['libs/ui', 'games/a'])
+      for (const day of ['25', '26'])
+        // oxlint-disable-next-line no-await-in-loop -- records must keep their order
+        await add(repo, { packages: [other] }, `2026-10-${day}T00:00:00.000Z`)
+    const list = await get<PublicApiPackageList>('/api/api-surface/packages')
+    expect(
+      list.packages.filter((p) => p.name === '@acme/ui').map((p) => p.removed?.movedTo),
+    ).toEqual([undefined, undefined])
+    expect(list.packages.filter((p) => p.name === '@acme/ui' && p.removed)).toHaveLength(2)
+  })
+})
+
 describe('MCP endpoint', () => {
   test('rejects anonymous requests and answers tools for token holders', async () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {})).status).toBe(401)

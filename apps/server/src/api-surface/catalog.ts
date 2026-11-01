@@ -1,4 +1,5 @@
 import type {
+  PublicApiPackageRemoval,
   PublicApiPackageSummary,
   PublicApiSymbolHit,
   PublicApiVersion,
@@ -20,6 +21,8 @@ const kind = 'api-surface'
 const pageSize = 20
 const headPageSize = 500
 const readConcurrency = 4
+/** Default branch runs that must lack a package before it counts as removed, so one bad run does not. */
+const missingRuns = 2
 
 interface IndexedPackage {
   name: string
@@ -83,6 +86,8 @@ export interface ResolvedPackage {
   versions: PublicApiVersion[]
   /** Other repositories with a package of the same name. */
   alsoIn: RepoRef[]
+  /** Set when the repository no longer has the package. */
+  removed?: PublicApiPackageRemoval
 }
 
 /** Options of `createApiCatalog`. */
@@ -240,6 +245,38 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     ).values(),
   ]
 
+  /** The non-empty default branch runs since the last record of `name` in `repo`, when there are enough. */
+  const missingHeads = (all: IndexedRecord[], name: string, repo: string) => {
+    const own = all.filter((record) => repoKey(record.repo) === repo)
+    const last = own.findIndex((record) => record.packages.some((p) => p.name === name))
+    if (last < 0) return undefined
+    // An empty snapshot means the extractor read nothing, not that every package left.
+    const heads = own.slice(0, last).filter((record) => !record.ref && record.packages.length)
+    return heads.length < missingRuns ? undefined : { heads, last: own[last] }
+  }
+
+  /** How `name` left `repo`, if it did. */
+  const removalOf = (
+    all: IndexedRecord[],
+    name: string,
+    repo: string,
+  ): PublicApiPackageRemoval | undefined => {
+    const missing = missingHeads(all, name, repo)
+    if (!missing) return undefined
+    const dir = missing.last?.packages.find((p) => p.name === name)?.dir
+    const renamedTo = missing.heads[0]?.packages.find(
+      (p) => p.dir === dir && !missing.last?.packages.some((old) => old.name === p.name),
+    )?.name
+    const movedTo = reposOf(all, name).filter(
+      (other) => repoKey(other) !== repo && !missingHeads(all, name, repoKey(other)),
+    )
+    return {
+      at: missing.heads.at(-1)?.createdAt ?? '',
+      ...(movedTo.length ? { movedTo } : {}),
+      ...(renamedTo ? { renamedTo } : {}),
+    }
+  }
+
   const strip = (version: PublicApiVersion & { record: IndexedRecord }): PublicApiVersion => ({
     version: version.version,
     ...(version.ref ? { ref: version.ref } : {}),
@@ -273,8 +310,11 @@ export function createApiCatalog(options: ApiCatalogOptions) {
   ): Promise<ResolvedPackage | undefined> => {
     const all = await visible(filter)
     const repos = reposOf(all, name)
-    const repo = query.repo ? repos.find((r) => repoKey(r) === query.repo) : repos[0]
+    const repo = query.repo
+      ? repos.find((r) => repoKey(r) === query.repo)
+      : (repos.find((r) => !missingHeads(all, name, repoKey(r))) ?? repos[0])
     if (!repo) return undefined
+    const removed = removalOf(all, name, repoKey(repo))
     const versions = versionsOf(all, name, repoKey(repo))
     const chosen = pick(versions, query.version)
     if (!chosen) return undefined
@@ -286,6 +326,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
       version: strip(chosen),
       versions: versions.map(strip),
       alsoIn: repos.filter((r) => repoKey(r) !== repoKey(repo)),
+      ...(removed ? { removed } : {}),
     }
   }
 
@@ -295,7 +336,10 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     /** When every record was last read. */
     indexedAt: () => (scannedAt ? new Date(scannedAt).toISOString() : undefined),
 
-    /** The newest version of every package in readable repositories, sorted by name. */
+    /**
+     * The newest version of every package in readable repositories, sorted by name; packages their
+     * repository dropped stay listed with `removed`.
+     */
     async packages(filter: RepoFilter, query?: string): Promise<PublicApiPackageSummary[]> {
       const all = await visible(filter)
       const latest = new Map<string, PublicApiPackageSummary>()
@@ -311,6 +355,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
             !repoKey(record.repo).toLowerCase().includes(needle)
           )
             continue
+          const removed = removalOf(all, pkg.name, repoKey(record.repo))
           latest.set(key, {
             ...pkg,
             repo: record.repo,
@@ -318,6 +363,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
             analysisId: record.id,
             analyzedAt: record.createdAt,
             versions: versionsOf(all, pkg.name, repoKey(record.repo)).length,
+            ...(removed ? { removed } : {}),
           })
         }
       return [...latest.values()].toSorted(

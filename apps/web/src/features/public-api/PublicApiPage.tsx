@@ -18,7 +18,7 @@ import {
   usePublicApiSearch,
 } from '../../api/queries.ts'
 import { analysisPages } from '../../lib/analyses.ts'
-import { formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
+import { formatDate, formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import {
   documentedShare,
   groupSymbols,
@@ -243,6 +243,13 @@ function PackageRow({ pkg }: { pkg: PublicApiPackageSummary }) {
             private
           </Chip>
         ) : null}
+        {pkg.removed ? (
+          <span title={`Not on the default branch since ${formatDate(pkg.removed.at)}`}>
+            <Chip className="ml-2" size="sm" tone="danger">
+              removed
+            </Chip>
+          </span>
+        ) : null}
         {pkg.description ? (
           <div className="mt-0.5 max-w-md truncate text-xs text-muted">{pkg.description}</div>
         ) : null}
@@ -407,6 +414,16 @@ function PackageView({
         <ErrorState error={detail.error} />
       ) : data ? (
         <>
+          {data.removed ? (
+            <Notice tone="danger" title="Removed from the repository">
+              {repoKey(data.repo)} has not had this package on its default branch since{' '}
+              {formatDate(data.removed.at)}; avoid it in new code.
+              {data.removed.renamedTo ? ` Probably renamed to ${data.removed.renamedTo}.` : ''}
+              {data.removed.movedTo
+                ? ` Still in ${data.removed.movedTo.map((other) => repoKey(other)).join(', ')}.`
+                : ''}
+            </Notice>
+          ) : null}
           <PackageFacts data={data} onRepo={(next) => go({ repo: next })} />
           <Tabs
             aria-label="Package views"

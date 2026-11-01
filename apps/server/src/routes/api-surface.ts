@@ -140,6 +140,7 @@ export function createApiSurface(deps: ServerDeps) {
       package: found.package,
       versions: found.versions,
       alsoIn: found.alsoIn,
+      ...(found.removed ? { removed: found.removed } : {}),
     })
   })
 
