@@ -11,13 +11,13 @@ const pattern = z
   .refine((value) => compilePattern(value) !== undefined, 'not a valid regular expression')
 
 const ticket = z.object({
-  pattern: pattern.describe('One key, e.g. GTW-\\d+'),
+  pattern: pattern.describe('One key, e.g. ABC-\\d+'),
   required: z.boolean().default(true),
   placement: z
     .enum(['lead', 'bracket', 'prefix', 'scope', 'suffix', 'anywhere'])
     .optional()
     .describe(
-      'Commit titles: [GTW-1] type: subject, type: [GTW-1] subject, type: GTW-1 subject, type(GTW-1): subject, subject (GTW-1)',
+      'Commit titles: [ABC-1] type: subject, type: [ABC-1] subject, type: ABC-1 subject, type(ABC-1): subject, subject (ABC-1)',
     ),
 })
 

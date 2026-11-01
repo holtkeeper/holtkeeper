@@ -25,16 +25,16 @@ const branch = (name: string, day: number): BranchRecord => ({
 })
 
 const titles = [
-  'feat(web): [GTW-1] add the board',
-  'fix(server): [GTW-2] retry snapshots',
-  'feat(core): [GTW-3] read push rules',
-  'fix(web): [GTW-4] keep scroll',
-  'refactor(web): [GTW-5] split the view',
-  'feat(server): [GTW-6] knowledge tools',
-  'chore(deps): [GTW-7] bump zod',
-  'fix(core): [GTW-8] handle null',
-  'feat(cli): [GTW-9] release command',
-  'Docs(core): [GTW-10] Describe the contract.',
+  'feat(web): [ABC-1] add the board',
+  'fix(server): [ABC-2] retry snapshots',
+  'feat(core): [ABC-3] read push rules',
+  'fix(web): [ABC-4] keep scroll',
+  'refactor(web): [ABC-5] split the view',
+  'feat(server): [ABC-6] knowledge tools',
+  'chore(deps): [ABC-7] bump zod',
+  'fix(core): [ABC-8] handle null',
+  'feat(cli): [ABC-9] release command',
+  'Docs(core): [ABC-10] Describe the contract.',
 ]
 
 function fakeForge(options: {
@@ -62,10 +62,10 @@ function fakeForge(options: {
     listCommits: async (_repo, query) => titles.map(record).slice(0, query.limit),
     listBranches: async () => [
       { ...branch('main', 30), default: true, protected: true },
-      branch('feat/GTW-1-board', 29),
-      branch('fix/GTW-2-snapshots', 28),
-      branch('feat/GTW-3-push-rules', 27),
-      branch('fix/GTW-4-scroll', 26),
+      branch('feat/ABC-1-board', 29),
+      branch('fix/ABC-2-snapshots', 28),
+      branch('feat/ABC-3-push-rules', 27),
+      branch('fix/ABC-4-scroll', 26),
       branch('feat/Wrong_Name', 25),
     ],
     getPushRules: async () => options.pushRules,
@@ -85,7 +85,7 @@ describe('commitConventions', () => {
       label: 'gitlab:g/app',
       setting: {
         history: true,
-        commit: { maxLength: 60, examples: ['feat(web): [GTW-42] configured example'] },
+        commit: { maxLength: 60, examples: ['feat(web): [ABC-42] configured example'] },
         notes: 'Squash before merging.',
       },
     })
@@ -101,13 +101,13 @@ describe('commitConventions', () => {
     expect(conventions.commit.patterns).toEqual([
       { source: 'push-rules', pattern: '^(feat|fix|chore|refactor|docs)' },
     ])
-    expect(conventions.commit.examples[0]).toBe('feat(web): [GTW-42] configured example')
+    expect(conventions.commit.examples[0]).toBe('feat(web): [ABC-42] configured example')
     expect(conventions.commit.examples).not.toContain(titles[9])
     expect(conventions.branch.examples).toEqual([
-      'feat/GTW-1-board',
-      'fix/GTW-2-snapshots',
-      'feat/GTW-3-push-rules',
-      'fix/GTW-4-scroll',
+      'feat/ABC-1-board',
+      'fix/ABC-2-snapshots',
+      'feat/ABC-3-push-rules',
+      'fix/ABC-4-scroll',
     ])
     expect(conventions.consulted.map((item) => item.detail)).toEqual([
       'commits.conventions setting',

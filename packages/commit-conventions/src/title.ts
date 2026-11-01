@@ -9,7 +9,7 @@ export interface Title {
   type?: string
   scope?: string
   breaking: boolean
-  /** A bracketed ticket key before the type: `[GTW-1] feat: subject`. */
+  /** A bracketed ticket key before the type: `[ABC-1] feat: subject`. */
   lead?: string
   /** The title after `type(scope): `, or the whole title. */
   subject: string
@@ -32,7 +32,7 @@ export function parseTitle(title: string): Title {
 const ticketKey = /(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,9}-\d+(?![A-Za-z0-9])/gu
 const notTickets = new Set(['UTF', 'ISO', 'RFC', 'SHA', 'CVE', 'ECMA', 'ES', 'TLS', 'SSL', 'MD'])
 
-/** Tracker keys such as `GTW-435` in `text`, in order. */
+/** Tracker keys such as `ABC-435` in `text`, in order. */
 export function ticketKeys(text: string): string[] {
   return [...text.matchAll(ticketKey)]
     .map((match) => match[0])

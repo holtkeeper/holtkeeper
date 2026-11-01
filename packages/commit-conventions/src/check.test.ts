@@ -7,7 +7,7 @@ const commits: Ruleset<CommitRules> = {
   rules: {
     conventional: true,
     types: ['feat', 'fix'],
-    ticket: { pattern: 'GTW-\\d+', required: true, placement: 'bracket' },
+    ticket: { pattern: 'ABC-\\d+', required: true, placement: 'bracket' },
     maxLength: 72,
     subjectCase: 'lower',
     noTrailingPeriod: true,
@@ -31,9 +31,9 @@ const messages = (message: string) =>
 
 describe('checkCommitMessage', () => {
   test('accepts a message that follows every rule', () => {
-    expect(messages('feat(web): [GTW-1] add the board')).toEqual([])
-    expect(messages('fix: [GTW-2] API errors keep their status')).toEqual([])
-    expect(messages('[GTW-3] fix: retry')).toEqual([
+    expect(messages('feat(web): [ABC-1] add the board')).toEqual([])
+    expect(messages('fix: [ABC-2] API errors keep their status')).toEqual([])
+    expect(messages('[ABC-3] fix: retry')).toEqual([
       'error: The message must match `(?i)^(feat|fix)`',
     ])
   })
@@ -42,7 +42,7 @@ describe('checkCommitMessage', () => {
     expect(messages('chore: Bump deps.\n\nBecause.')).toEqual([
       'error: The message must match `(?i)^(feat|fix)`',
       'error: Type `chore` is not one of feat, fix',
-      'error: The title needs a ticket key matching `GTW-\\d+`',
+      'error: The title needs a ticket key matching `ABC-\\d+`',
       'warning: Start the subject with a lowercase letter',
       'warning: Drop the trailing period',
       'warning: Write the title only, without a body',
@@ -53,7 +53,7 @@ describe('checkCommitMessage', () => {
   })
 
   test('ignores git trailers when looking for a body', () => {
-    expect(messages('fix: [GTW-3] retry\n\nCo-Authored-By: A <a@example.com>')).toEqual([])
+    expect(messages('fix: [ABC-3] retry\n\nCo-Authored-By: A <a@example.com>')).toEqual([])
   })
 })
 
@@ -61,7 +61,7 @@ describe('checkBranchName', () => {
   const branches: Ruleset<BranchRules> = {
     rules: {
       prefixes: ['feat', 'fix'],
-      ticket: { pattern: 'GTW-\\d+', required: true },
+      ticket: { pattern: 'ABC-\\d+', required: true },
       case: 'kebab',
     },
     sources: { prefixes: 'history', ticket: 'setting', case: 'history' },
@@ -71,14 +71,14 @@ describe('checkBranchName', () => {
   const names = (name: string) => checkBranchName(branches, name).map((p) => p.message)
 
   test('accepts a conforming name', () => {
-    expect(names('feat/GTW-12-release-board')).toEqual([])
+    expect(names('feat/ABC-12-release-board')).toEqual([])
   })
 
   test('reports every broken rule', () => {
     expect(names('Release_Board')).toEqual([
       'The branch name must match `^(feat|fix)/`',
       'Start with one of `feat/`, `fix/`',
-      'The name needs a ticket key matching `GTW-\\d+`',
+      'The name needs a ticket key matching `ABC-\\d+`',
       'Use lowercase words joined by `-`',
     ])
   })

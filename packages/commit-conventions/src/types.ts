@@ -7,9 +7,9 @@ export type RuleSource = 'setting' | 'push-rules' | 'commitlint' | 'history'
 /** Where a ticket key sits in a commit title. */
 export type TicketPlacement = 'lead' | 'bracket' | 'prefix' | 'scope' | 'suffix' | 'anywhere'
 
-/** A tracker key such as `GTW-435`. */
+/** A tracker key such as `ABC-435`. */
 export interface TicketRule {
-  /** Regular expression source matching one key, e.g. `GTW-\d+`. */
+  /** Regular expression source matching one key, e.g. `ABC-\d+`. */
   pattern: string
   required: boolean
   /** Commit titles only. */
