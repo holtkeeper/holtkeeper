@@ -1,6 +1,7 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
 
 import { Page, Tabs } from '../../ui/index.ts'
+import { AutomationMap } from './AutomationMap.tsx'
 import { RuntimeTab } from './RuntimeTab.tsx'
 import { SchedulesTab } from './SchedulesTab.tsx'
 import { TraitsTab } from './TraitsTab.tsx'
@@ -9,6 +10,7 @@ import { TriggersTab } from './TriggersTab.tsx'
 const tabs = [
   { id: 'schedules', label: 'Schedules', content: <SchedulesTab /> },
   { id: 'triggers', label: 'Triggers', content: <TriggersTab /> },
+  { id: 'map', label: 'Map', content: <AutomationMap /> },
   { id: 'traits', label: 'Repository traits', content: <TraitsTab /> },
   { id: 'runtime', label: 'Runtime', content: <RuntimeTab /> },
 ]
