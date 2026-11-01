@@ -406,6 +406,7 @@ describe('server', () => {
     expect(resolved.groups).toEqual(['games'])
     expect(resolved.settings['llm.model']?.value).toBe('claude-opus-5-5')
     expect(resolved.settings['test.token']?.value).toBeNull()
+    expect(resolved.cascade['llm.model']?.[0]).toEqual(resolved.settings['llm.model'])
   })
 
   test('limits setting writes to the caller scope', async () => {

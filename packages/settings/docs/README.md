@@ -47,4 +47,4 @@ The model references assume an Anthropic provider; with another one, change `llm
 4. groups (`games`)
 5. everything
 
-Ties go to the most recently updated entry. The ranking is `scopeSpecificity` of [@holtkeeper/access](../../access/docs/README.md), shared with merge request policies, knowledge and AI budgets. `resolveSettings(entries, repo)` resolves every key at once; the API exposes it as `GET /api/settings/resolve?repo=forge:path`.
+Ties go to the most recently updated entry. The ranking is `scopeSpecificity` of [@holtkeeper/access](../../access/docs/README.md), shared with merge request policies, knowledge and AI budgets. `resolveSettings(entries, repo)` resolves every key at once. `settingCascade(entries, key, repo)` lists every covering entry in override order (the one that applies first, then the ones it overrides from narrow to broad) and `settingCascades(entries, repo)` does that for every key with a covering entry; the API exposes both as `GET /api/settings/resolve?repo=forge:path` (`settings` with the winners, `cascade` with the full lists).

@@ -1,25 +1,27 @@
-import type { SettingDefinitionView } from '@holtkeeper/api'
+import type { Scope, SettingDefinitionView, SettingView } from '@holtkeeper/api'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { Wand2 } from 'lucide-react'
+import { ChevronRight, Plus, Wand2 } from 'lucide-react'
 
 import { useRepos, useResolvedSettings } from '../../api/queries.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import { previewValue } from '../../lib/schema.ts'
-import {
-  Chip,
-  EmptyState,
-  ErrorState,
-  Loading,
-  Panel,
-  Select,
-  Table,
-  Td,
-  Th,
-} from '../../ui/index.ts'
+import { Chip, EmptyState, ErrorState, Loading, Panel, Select } from '../../ui/index.ts'
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
 
-/** Which entry of every setting wins for a chosen repository. */
-export function ResolvePreview({ definitions }: { definitions: readonly SettingDefinitionView[] }) {
+/**
+ * How every setting cascades onto a chosen repository: the entries covering it from broad to
+ * narrow, the one that applies last and highlighted. With `onEdit` and `onAdd`, clicking an entry
+ * edits it and the trailing slot adds an override for just this repository.
+ */
+export function ResolvePreview({
+  definitions,
+  onEdit,
+  onAdd,
+}: {
+  definitions: readonly SettingDefinitionView[]
+  onEdit?: (definition: SettingDefinitionView, entry: SettingView) => void
+  onAdd?: (definition: SettingDefinitionView, scope: Scope) => void
+}) {
   const search = useSearch({ from: '/app/settings' })
   const navigate = useNavigate({ from: '/settings' })
   const repos = useRepos()
@@ -29,7 +31,7 @@ export function ResolvePreview({ definitions }: { definitions: readonly SettingD
   return (
     <Panel
       title="Resolve for repository"
-      description="The most specific entry covering the repository wins"
+      description="Entries covering the repository, from broad to narrow; the narrowest applies and overrides the rest"
       actions={
         <Select
           aria-label="Repository"
@@ -66,38 +68,98 @@ export function ResolvePreview({ definitions }: { definitions: readonly SettingD
               ))}
             </div>
           ) : null}
-          <Table label="Resolved settings">
-            <thead>
-              <tr>
-                <Th>Setting</Th>
-                <Th>Value</Th>
-                <Th>From</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {definitions.map((definition) => {
-                const winner = resolved.data.settings[definition.key]
-                return (
-                  <tr key={definition.key}>
-                    <Td>
-                      <div className="font-medium">{definition.label}</div>
-                      <div className="font-mono text-[11px] text-muted">{definition.key}</div>
-                    </Td>
-                    <Td className="max-w-xs truncate font-mono text-xs">
-                      {winner ? (
-                        previewValue(winner.value, winner.secret)
-                      ) : (
-                        <span className="text-muted">default</span>
-                      )}
-                    </Td>
-                    <Td>{winner ? <ScopeBadge scope={winner.scope} /> : null}</Td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </Table>
+          <ol className="flex flex-col divide-y divide-separator">
+            {definitions.map((definition) => {
+              const cascade = resolved.data.cascade[definition.key] ?? []
+              const own = cascade[0]?.scope.repos?.includes(repoKey(repo)) ?? false
+              return (
+                <li
+                  key={definition.key}
+                  className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:gap-4"
+                >
+                  <div className="min-w-0 md:w-56 md:shrink-0">
+                    <div className="truncate font-medium">{definition.label}</div>
+                    <div className="truncate font-mono text-[11px] text-muted">
+                      {definition.key}
+                    </div>
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    {cascade.length === 0 ? (
+                      <span className="rounded-lg border border-dashed border-border px-2.5 py-1.5 text-xs text-muted">
+                        default
+                      </span>
+                    ) : null}
+                    {cascade.toReversed().map((entry, i, list) => (
+                      <CascadeStep
+                        key={entry.id}
+                        entry={entry}
+                        applies={i === list.length - 1}
+                        first={i === 0}
+                        {...(onEdit ? { onPress: () => onEdit(definition, entry) } : {})}
+                      />
+                    ))}
+                    {onAdd && !own ? (
+                      <>
+                        <ChevronRight className="size-3.5 shrink-0 text-muted" />
+                        <button
+                          type="button"
+                          className="flex items-center gap-1 rounded-lg border border-dashed border-border px-2.5 py-1.5 text-xs text-muted hover:border-accent hover:text-foreground"
+                          onClick={() => onAdd(definition, { repos: [repoKey(repo)] })}
+                        >
+                          <Plus className="size-3.5" />
+                          Only here
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
         </div>
       )}
     </Panel>
+  )
+}
+
+function CascadeStep({
+  entry,
+  applies,
+  first,
+  onPress,
+}: {
+  entry: SettingView
+  applies: boolean
+  first: boolean
+  onPress?: () => void
+}) {
+  const body = (
+    <>
+      <ScopeBadge scope={entry.scope} />
+      <span className={`max-w-56 truncate font-mono text-xs ${applies ? '' : 'line-through'}`}>
+        {previewValue(entry.value, entry.secret)}
+      </span>
+      {applies ? <Chip tone="success">applies</Chip> : null}
+    </>
+  )
+  const className = `flex min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1 ${
+    applies ? 'border-accent bg-surface shadow-surface' : 'border-border opacity-60'
+  }`
+  return (
+    <>
+      {first ? null : <ChevronRight className="size-3.5 shrink-0 text-muted" />}
+      {onPress ? (
+        <button
+          type="button"
+          className={`${className} text-left hover:opacity-100`}
+          title={applies ? 'Applies here; click to edit' : 'Overridden here; click to edit'}
+          onClick={onPress}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className={className}>{body}</div>
+      )}
+    </>
   )
 }

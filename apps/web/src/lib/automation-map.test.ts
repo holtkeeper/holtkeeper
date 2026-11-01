@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test'
 
 import type { ConfigEntryView, JobAnalyzerView } from '@holtkeeper/api'
 
-import { automationMap, withAnalyzer, withoutAnalyzer } from './automation-map.ts'
+import {
+  automationMap,
+  withAnalyzer,
+  withGroup,
+  withoutAnalyzer,
+  withoutGroup,
+} from './automation-map.ts'
 
 const analyzer = (kind: string, scope: 'repo' | 'group' = 'repo'): JobAnalyzerView => ({
   kind,
@@ -53,7 +59,8 @@ describe('automation map', () => {
         entryId: 'nightly',
         title: 'Nightly audit',
         when: 'Every day, no weekends',
-        scope: 'groups games, web + shop',
+        scope: '',
+        grouped: true,
         enabled: true,
       },
       {
@@ -62,7 +69,8 @@ describe('automation map', () => {
         entryId: 'weekly',
         title: 'weekly',
         when: 'Every day',
-        scope: 'repos work:games/*',
+        scope: 'only repos work:games/*',
+        grouped: true,
         enabled: false,
       },
       {
@@ -71,7 +79,8 @@ describe('automation map', () => {
         entryId: 'merge-request',
         title: 'merge-request',
         when: 'Merge request open, update, reopen',
-        scope: 'every repository',
+        scope: '',
+        grouped: true,
         enabled: true,
       },
       {
@@ -80,16 +89,26 @@ describe('automation map', () => {
         entryId: 'command:port',
         title: 'command:port',
         when: '/holtkeeper port',
-        scope: 'every repository',
+        scope: 'any repository',
+        grouped: false,
         enabled: true,
       },
     ])
     expect(map.edges).toEqual([
-      { from: 'schedule:nightly', to: 'analyzer:audit', enabled: true },
-      { from: 'schedule:nightly', to: 'analyzer:licenses', enabled: true },
-      { from: 'schedule:weekly', to: 'analyzer:audit', enabled: false },
-      { from: 'trigger:merge-request', to: 'analyzer:review', enabled: true },
-      { from: 'trigger:command:port', to: 'analyzer:gone', enabled: true },
+      { from: 'group:games', to: 'schedule:nightly', kind: 'scope', enabled: true },
+      { from: 'group:web + shop', to: 'schedule:nightly', kind: 'scope', enabled: true },
+      { from: 'schedule:nightly', to: 'analyzer:audit', kind: 'run', enabled: true },
+      { from: 'schedule:nightly', to: 'analyzer:licenses', kind: 'run', enabled: true },
+      { from: 'group:*', to: 'schedule:weekly', kind: 'scope', enabled: false },
+      { from: 'schedule:weekly', to: 'analyzer:audit', kind: 'run', enabled: false },
+      { from: 'group:*', to: 'trigger:merge-request', kind: 'scope', enabled: true },
+      { from: 'trigger:merge-request', to: 'analyzer:review', kind: 'run', enabled: true },
+      { from: 'trigger:command:port', to: 'analyzer:gone', kind: 'run', enabled: true },
+    ])
+    expect(map.groups).toEqual([
+      { id: 'group:*', label: 'Every group', idle: false },
+      { id: 'group:games', label: 'games', match: 'games', idle: false },
+      { id: 'group:web + shop', label: 'web + shop', match: ['web', 'shop'], idle: false },
     ])
     expect(map.analyzers).toEqual([
       {
@@ -123,6 +142,7 @@ describe('automation map', () => {
 
   test('an empty config has nothing to draw', () => {
     expect(automationMap([], [], [analyzer('audit')])).toEqual({
+      groups: [],
       events: [],
       analyzers: [],
       edges: [],
@@ -135,8 +155,13 @@ describe('automation map', () => {
       [schedule('nightly', { analyzers: ['audit'] })],
       [],
       [analyzer('audit'), analyzer('quality')],
-      { withIdle: true },
+      { withIdle: true, groups: ['games', 'web'] },
     )
+    expect(map.groups.map((g) => [g.label, g.idle])).toEqual([
+      ['Every group', false],
+      ['games', true],
+      ['web', true],
+    ])
     expect(map.analyzers.map((a) => [a.kind, a.idle])).toEqual([
       ['audit', false],
       ['quality', true],
@@ -184,5 +209,38 @@ describe('linking analyzers', () => {
     expect(withoutAnalyzer({ on: 'mergeRequest', analyzers: ['a', 'b'] }, 'a')).toEqual({
       data: { on: 'mergeRequest', analyzers: ['b'] },
     })
+  })
+})
+
+describe('limiting to groups', () => {
+  const nightly = schedule('nightly', { analyzers: ['audit'], groups: ['games'] }).data
+
+  test('adds a group or an intersection once', () => {
+    expect(withGroup(nightly, ['web', 'shop'])).toEqual({
+      data: { ...nightly, groups: ['games', ['web', 'shop']] },
+    })
+    expect(withGroup(nightly, 'games')).toEqual({ data: nightly })
+    expect(withGroup({ on: 'tag', analyzers: ['a'] }, 'games')).toEqual({
+      data: { on: 'tag', analyzers: ['a'], groups: ['games'] },
+    })
+  })
+
+  test('every group drops the limit', () => {
+    const { groups: _groups, ...everywhere } = nightly
+    expect(withGroup(nightly, undefined)).toEqual({ data: everywhere })
+  })
+
+  test('label and command triggers have no groups', () => {
+    expect(withGroup({ on: 'label', label: 'ready', analyzers: ['a'] }, 'games')).toHaveProperty(
+      'error',
+    )
+  })
+
+  test('removes a group, never the last one', () => {
+    expect(withoutGroup({ ...nightly, groups: ['games', ['web', 'shop']] }, 'web + shop')).toEqual({
+      data: nightly,
+    })
+    expect(withoutGroup(nightly, 'games')).toHaveProperty('error')
+    expect(withoutGroup(nightly, 'other')).toEqual({ data: nightly })
   })
 })

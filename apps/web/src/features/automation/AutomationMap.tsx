@@ -1,34 +1,40 @@
-import type { ConfigEntryView } from '@holtkeeper/api'
+import type { ConfigEntryView, ScheduleDocumentData, TriggerDocumentData } from '@holtkeeper/api'
 import {
-  BaseEdge,
   type Connection,
   type Edge,
-  EdgeLabelRenderer,
-  type EdgeProps,
   Handle,
   MarkerType,
   type Node,
   type NodeProps,
   Position,
   ReactFlow,
-  getBezierPath,
 } from '@xyflow/react'
-import { CalendarClock, Plus, Workflow, X, Zap } from 'lucide-react'
+import { CalendarClock, FolderTree, Plus, Workflow, Zap } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useConfigEntries, useConfigMutations, useJobAnalyzers } from '../../api/queries.ts'
 import {
+  useConfigEntries,
+  useConfigMutations,
+  useGroups,
+  useJobAnalyzers,
+} from '../../api/queries.ts'
+import {
+  ALL_GROUPS,
   type AutomationMap as MapData,
   automationMap,
   withAnalyzer,
+  withGroup,
   withoutAnalyzer,
+  withoutGroup,
 } from '../../lib/automation-map.ts'
 import { layeredLayout } from '../../lib/graph.ts'
 import {
   Button,
   EmptyState,
   ErrorState,
+  type LinkEdge,
+  LinkLine,
   Panel,
   Placeholder,
   notify,
@@ -43,17 +49,20 @@ type EventData = {
   title: string
   when: string
   scope: string
+  grouped: boolean
   enabled: boolean
   dim: boolean
   editable: boolean
 }
+type GroupData = { label: string; every: boolean; idle: boolean; dim: boolean; editable: boolean }
+type GroupNode = Node<GroupData, 'group'>
 type AnalyzerData = { label: string; detail: string; known: boolean; idle: boolean; dim: boolean }
 type EventNode = Node<EventData, 'event'>
 type AnalyzerNode = Node<AnalyzerData, 'analyzer'>
-type LinkEdge = Edge<{ onRemove?: () => void }, 'link'>
 
 const EVENT = { width: 280, height: 68 }
 const ANALYZER = { width: 200, height: 48 }
+const GROUP = { width: 180, height: 44 }
 const HANDLE = '!border-0 !bg-border-tertiary'
 
 function EventCard({ data }: NodeProps<EventNode>) {
@@ -65,20 +74,51 @@ function EventCard({ data }: NodeProps<EventNode>) {
         opacity: data.dim ? 0.35 : data.enabled ? 1 : 0.6,
         borderStyle: data.enabled ? 'solid' : 'dashed',
       }}
-      title={`${data.title}\n${data.when}\n${data.scope}${data.enabled ? '' : '\nOff'}`}
+      title={[data.title, data.when, data.scope, data.enabled ? '' : 'Off']
+        .filter(Boolean)
+        .join('\n')}
     >
+      {data.grouped ? (
+        <Handle type="target" position={Position.Left} className={`${HANDLE} !size-1.5`} />
+      ) : null}
       <span className="flex items-center gap-1.5 truncate text-[12px] font-medium">
         <Icon className="size-3.5 shrink-0 text-muted" />
         <span className="truncate">{data.title}</span>
         {data.enabled ? null : <span className="text-[10px] text-muted">off</span>}
       </span>
       <span className="truncate text-[11px]">{data.when}</span>
-      <span className="truncate text-[10px] text-muted">{data.scope}</span>
+      {data.scope ? <span className="truncate text-[10px] text-muted">{data.scope}</span> : null}
       <Handle
         type="source"
         position={Position.Right}
         className={`${HANDLE} ${data.editable ? '!size-3 !bg-accent-soft-foreground' : '!size-1.5'}`}
         title={data.editable ? 'Drag to an analyzer to run it here' : undefined}
+      />
+    </div>
+  )
+}
+
+function GroupCard({ data }: NodeProps<GroupNode>) {
+  return (
+    <div
+      className="flex h-full w-full items-center gap-1.5 overflow-hidden rounded-xl border border-border bg-surface px-3 shadow-surface transition-opacity"
+      style={{
+        opacity: data.dim ? 0.35 : data.idle ? 0.6 : 1,
+        borderStyle: data.idle ? 'dashed' : 'solid',
+      }}
+      title={data.every ? 'Every config group' : `Group ${data.label}`}
+    >
+      <FolderTree className="size-3.5 shrink-0 text-muted" />
+      <span className={`truncate text-[12px] ${data.every ? 'italic' : 'font-mono'}`}>
+        {data.label}
+      </span>
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={`${HANDLE} ${data.editable ? '!size-3 !bg-accent-soft-foreground' : '!size-1.5'}`}
+        title={
+          data.editable ? 'Drag to a schedule or trigger to limit it to this group' : undefined
+        }
       />
     </div>
   )
@@ -102,60 +142,14 @@ function AnalyzerCard({ data }: NodeProps<AnalyzerNode>) {
   )
 }
 
-function LinkLine({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  style,
-  markerEnd,
-  data,
-}: EdgeProps<LinkEdge>) {
-  const [path, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-  })
-  return (
-    <>
-      <BaseEdge
-        id={id}
-        path={path}
-        {...(style ? { style } : {})}
-        {...(markerEnd ? { markerEnd } : {})}
-      />
-      {data?.onRemove ? (
-        <EdgeLabelRenderer>
-          <button
-            type="button"
-            aria-label="Stop running this analyzer here"
-            title="Stop running this analyzer here"
-            className="nodrag nopan pointer-events-auto absolute flex size-5 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-surface hover:border-danger hover:text-danger"
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            onClick={data.onRemove}
-          >
-            <X className="size-3" />
-          </button>
-        </EdgeLabelRenderer>
-      ) : null}
-    </>
-  )
-}
-
-const nodeTypes = { event: EventCard, analyzer: AnalyzerCard }
+const nodeTypes = { group: GroupCard, event: EventCard, analyzer: AnalyzerCard }
 const edgeTypes = { link: LinkLine }
 
 function flowGraph(
   map: MapData,
   focus: string | null,
   onRemove: ((from: string, to: string) => void) | undefined,
-): { nodes: (EventNode | AnalyzerNode)[]; edges: LinkEdge[]; height: number } {
+): { nodes: (GroupNode | EventNode | AnalyzerNode)[]; edges: LinkEdge[]; height: number } {
   const near = new Set<string>()
   if (focus) {
     near.add(focus)
@@ -168,6 +162,7 @@ function flowGraph(
   const placed = new Map(
     layeredLayout(
       [
+        ...map.groups.map((group) => ({ id: group.id, ...GROUP })),
         ...map.events.map((event) => ({ id: event.id, ...EVENT })),
         ...map.analyzers.map((analyzer) => ({ id: analyzer.id, ...ANALYZER })),
       ],
@@ -175,7 +170,7 @@ function flowGraph(
     ).map((box) => [box.id, box]),
   )
   const analyzerX = Math.max(
-    EVENT.width + 72,
+    GROUP.width + EVENT.width + 144,
     ...map.analyzers.filter((a) => !a.idle).map((a) => placed.get(a.id)?.x ?? 0),
   )
   let idleY = Math.max(0, ...[...placed.values()].map((box) => box.y + box.height)) + 24
@@ -188,7 +183,21 @@ function flowGraph(
     const box = placed.get(id)
     return { x: box?.x ?? 0, y: box?.y ?? 0 }
   }
-  const nodes: (EventNode | AnalyzerNode)[] = [
+  const nodes: (GroupNode | EventNode | AnalyzerNode)[] = [
+    ...map.groups.map((group): GroupNode => ({
+      id: group.id,
+      type: 'group',
+      position: position(group.id),
+      ...GROUP,
+      data: {
+        label: group.label,
+        every: group.id === ALL_GROUPS,
+        idle: group.idle,
+        dim: dim(group.id),
+        editable: onRemove !== undefined,
+      },
+      draggable: false,
+    })),
     ...map.events.map((event): EventNode => ({
       id: event.id,
       type: 'event',
@@ -199,6 +208,7 @@ function flowGraph(
         title: event.title,
         when: event.when,
         scope: event.scope,
+        grouped: event.grouped,
         enabled: event.enabled,
         dim: dim(event.id),
         editable: onRemove !== undefined,
@@ -240,7 +250,14 @@ function flowGraph(
         strokeDasharray: edge.enabled ? undefined : '4 4',
         opacity: focus !== null && !lit ? 0.3 : 1,
       },
-      data: lit && onRemove ? { onRemove: () => onRemove(edge.from, edge.to) } : {},
+      data:
+        lit && onRemove && edge.from !== ALL_GROUPS
+          ? {
+              onRemove: () => onRemove(edge.from, edge.to),
+              removeLabel:
+                edge.kind === 'run' ? 'Stop running this analyzer here' : 'Lift this group limit',
+            }
+          : {},
     }
   })
   const height = Math.max(0, ...[...placed.values()].map((box) => box.y + box.height))
@@ -252,9 +269,10 @@ type Editing =
   | { kind: 'trigger'; entry?: ConfigEntryView<'trigger'> }
 
 /**
- * What runs when: every schedule and trigger linked to the analyzers it queues. Hovering a card
- * highlights its links. With `settings:write`, dragging from a schedule or trigger to an analyzer
- * runs it there, the × on a highlighted link stops it, and clicking a card opens its form.
+ * What runs when and where: config groups → the schedules and triggers limited to them → the
+ * analyzers they queue. Hovering a card highlights its links. With `settings:write`, dragging a
+ * group onto an event limits it to that group, dragging an event onto an analyzer runs it there,
+ * the × on a highlighted link undoes either, and clicking an event opens its form.
  */
 export function AutomationMap() {
   const { theme } = useTheme()
@@ -263,6 +281,7 @@ export function AutomationMap() {
   const schedules = useConfigEntries('schedules')
   const triggers = useConfigEntries('triggers')
   const analyzers = useJobAnalyzers()
+  const groups = useGroups()
   const scheduleMutations = useConfigMutations('schedules')
   const triggerMutations = useConfigMutations('triggers')
   const [focus, setFocus] = useState<string | null>(null)
@@ -273,50 +292,95 @@ export function AutomationMap() {
     () =>
       automationMap(scheduleList, triggerList, analyzers.data?.analyzers ?? [], {
         withIdle: writable,
+        groups: (groups.data?.entries ?? []).map((group) => group.id),
       }),
-    [scheduleList, triggerList, analyzers.data, writable],
+    [scheduleList, triggerList, analyzers.data, groups.data, writable],
   )
   const busy = scheduleMutations.put.isPending || triggerMutations.put.isPending
 
-  const relink = (eventId: string, analyzerId: string, link: boolean) => {
-    const kind = analyzerId.replace(/^analyzer:/, '')
+  type Change<T> = (data: T) => { data: T } | { error: string }
+  const change = (
+    eventId: string,
+    message: string,
+    onSchedule: Change<ScheduleDocumentData>,
+    onTrigger: Change<TriggerDocumentData>,
+  ) => {
     const event = map.events.find((e) => e.id === eventId)
     if (!event) return
     const done = {
-      onSuccess: () =>
-        notify.success(
-          link ? `${event.title} runs ${kind}` : `${event.title} no longer runs ${kind}`,
-        ),
+      onSuccess: () => notify.success(message, event.title),
       onError: (error: unknown) => notify.error('Not changed', messageOf(error)),
     }
     if (event.kind === 'schedule') {
       const entry = scheduleList.find((e) => e.id === event.entryId)
-      if (!entry) return
-      const next = link
-        ? { data: withAnalyzer(entry.data, kind) }
-        : withoutAnalyzer(entry.data, kind)
+      const next = entry && onSchedule(entry.data)
+      if (!entry || !next) return
       if ('error' in next) notify.error('Not changed', next.error)
-      else scheduleMutations.put.mutate({ id: entry.id, data: next.data }, done)
+      else if (next.data !== entry.data)
+        scheduleMutations.put.mutate({ id: entry.id, data: next.data }, done)
       return
     }
     const entry = triggerList.find((e) => e.id === event.entryId)
-    if (!entry) return
-    const next = link ? { data: withAnalyzer(entry.data, kind) } : withoutAnalyzer(entry.data, kind)
+    const next = entry && onTrigger(entry.data)
+    if (!entry || !next) return
     if ('error' in next) notify.error('Not changed', next.error)
-    else triggerMutations.put.mutate({ id: entry.id, data: next.data }, done)
+    else if (next.data !== entry.data)
+      triggerMutations.put.mutate({ id: entry.id, data: next.data }, done)
   }
 
-  const graph = flowGraph(
-    map,
-    focus,
-    writable && !busy ? (from, to) => relink(from, to, false) : undefined,
-  )
+  const connect = (from: string, to: string) => {
+    if (to.startsWith('analyzer:')) {
+      const kind = to.slice('analyzer:'.length)
+      change(
+        from,
+        `Runs ${kind}`,
+        (data) => ({ data: withAnalyzer(data, kind) }),
+        (data) => ({ data: withAnalyzer(data, kind) }),
+      )
+      return
+    }
+    const group = map.groups.find((g) => g.id === from)
+    if (!group) return
+    const message = group.match === undefined ? 'Runs for every group' : `Limited to ${group.label}`
+    change(
+      to,
+      message,
+      (data) => withGroup(data, group.match),
+      (data) => withGroup(data, group.match),
+    )
+  }
+
+  const disconnect = (from: string, to: string) => {
+    if (to.startsWith('analyzer:')) {
+      const kind = to.slice('analyzer:'.length)
+      change(
+        from,
+        `No longer runs ${kind}`,
+        (data) => withoutAnalyzer(data, kind),
+        (data) => withoutAnalyzer(data, kind),
+      )
+      return
+    }
+    const label = map.groups.find((g) => g.id === from)?.label ?? ''
+    change(
+      to,
+      `No longer limited to ${label}`,
+      (data) => withoutGroup(data, label),
+      (data) => withoutGroup(data, label),
+    )
+  }
+
+  const graph = flowGraph(map, focus, writable && !busy ? disconnect : undefined)
   const linked = new Set(map.edges.map((edge) => `${edge.from}->${edge.to}`))
-  const canLink = (connection: Connection | Edge) =>
-    connection.source.startsWith('schedule:') || connection.source.startsWith('trigger:')
-      ? connection.target.startsWith('analyzer:') &&
-        !linked.has(`${connection.source}->${connection.target}`)
-      : false
+  const canLink = (connection: Connection | Edge) => {
+    if (linked.has(`${connection.source}->${connection.target}`)) return false
+    if (connection.source.startsWith('group:'))
+      return map.events.some((event) => event.id === connection.target && event.grouped)
+    return (
+      (connection.source.startsWith('schedule:') || connection.source.startsWith('trigger:')) &&
+      connection.target.startsWith('analyzer:')
+    )
+  }
   const openEvent = (eventId: string) => {
     const event = map.events.find((e) => e.id === eventId)
     if (!event) return
@@ -335,8 +399,8 @@ export function AutomationMap() {
       title="Map"
       description={
         writable
-          ? 'Every schedule and trigger with the analyzers it queues. Drag from the dot of a card to an analyzer to run it there; hover a card and press × on a link to stop it; click a card to edit everything else. Dashed: switched off or not linked; red: an analyzer this server does not know.'
-          : 'Every schedule and trigger with the analyzers it queues. Hover a card to follow its links. Dashed: switched off; red: an analyzer this server does not know.'
+          ? 'Groups → schedules and triggers → analyzers. Drag from the dot of a group to a schedule or trigger to limit it to that group (Every group lifts the limit), from a schedule or trigger to an analyzer to run it there; hover a card and press × on a link to undo it; click a schedule or trigger to edit everything else. Dashed: switched off or not linked; red: an analyzer this server does not know.'
+          : 'Groups → schedules and triggers → analyzers. Hover a card to follow its links. Dashed: switched off; red: an analyzer this server does not know.'
       }
       actions={
         writable ? (
@@ -388,7 +452,7 @@ export function AutomationMap() {
               zoomOnScroll={false}
               preventScrolling={false}
               isValidConnection={canLink}
-              onConnect={(connection) => relink(connection.source, connection.target, true)}
+              onConnect={(connection) => connect(connection.source, connection.target)}
               onNodeMouseEnter={(_, node) => setFocus(node.id)}
               onEdgeMouseEnter={(_, edge) => setFocus(edge.source)}
               onPaneClick={() => setFocus(null)}

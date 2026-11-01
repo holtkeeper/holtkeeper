@@ -338,11 +338,16 @@ export interface PutSettingInput {
   value: unknown
 }
 
-/** `GET /api/settings/resolve?repo=forge:path` — the winning entry per key. */
+/** `GET /api/settings/resolve?repo=forge:path` — the winning entry per key and what it overrides. */
 export interface ResolvedSettings {
   repo: RepoRef
   groups: string[]
   settings: Record<string, SettingView>
+  /**
+   * Every entry covering the repository per key, the one that applies first, then the ones it
+   * overrides from narrow to broad.
+   */
+  cascade: Record<string, SettingView[]>
 }
 
 /** Compact view of an analysis record for lists. */

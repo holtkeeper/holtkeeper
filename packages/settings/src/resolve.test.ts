@@ -4,7 +4,7 @@ import type { Scope } from '@holtkeeper/access'
 import type { SettingEntry } from '@holtkeeper/store'
 
 import { builtinSettings } from './definitions.ts'
-import { resolveSetting, resolveSettings } from './resolve.ts'
+import { resolveSetting, resolveSettings, settingCascade, settingCascades } from './resolve.ts'
 
 const entry = (
   id: string,
@@ -64,6 +64,34 @@ describe('resolveSetting', () => {
     expect([...all].map(([key, value]) => [key, value.id])).toEqual([
       ['llm.model', 'glob'],
       ['audit.fix', 'fix'],
+    ])
+  })
+})
+
+describe('settingCascade', () => {
+  const entries = [
+    entry('global', { all: true }, 'claude-sonnet-5-5'),
+    entry('group', { groups: ['games'] }, 'claude-opus-5-5'),
+    entry('glob', { repos: ['games/app-*'] }, 'claude-haiku-5-5'),
+    entry('other', { groups: ['tools'] }, 'x'),
+  ]
+
+  test('lists covering entries from the one that applies to the broadest', () => {
+    expect(settingCascade(entries, 'llm.model', repo).map((e) => e.id)).toEqual([
+      'glob',
+      'group',
+      'global',
+    ])
+    expect(settingCascade(entries, 'audit.fix', repo)).toEqual([])
+  })
+
+  test('cascades of every key with a covering entry', () => {
+    const all = settingCascades(
+      [...entries, { ...entry('fix', { groups: ['tools'] }, true), key: 'audit.fix' }],
+      repo,
+    )
+    expect([...all].map(([key, list]) => [key, list.map((e) => e.id)])).toEqual([
+      ['llm.model', ['glob', 'group', 'global']],
     ])
   })
 })

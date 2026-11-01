@@ -1,6 +1,7 @@
 import type {
   ActivityPerson,
   CredentialView,
+  Scope,
   SettingDefinitionView,
   SettingView,
 } from '@holtkeeper/api'
@@ -35,7 +36,7 @@ import { findCredential } from './CredentialPicker.tsx'
 import { EntryDialog } from './EntryDialog.tsx'
 import { ResolvePreview } from './ResolvePreview.tsx'
 
-type Editing = { definition: SettingDefinitionView; entry?: SettingView }
+type Editing = { definition: SettingDefinitionView; entry?: SettingView; scope?: Scope }
 
 const RESOLVE_TAB = 'resolve'
 
@@ -135,7 +136,17 @@ export function SettingsPage() {
             {
               id: RESOLVE_TAB,
               label: 'Resolve for repository',
-              content: <ResolvePreview definitions={definitions} />,
+              content: (
+                <ResolvePreview
+                  definitions={definitions}
+                  {...(writable
+                    ? {
+                        onEdit: (definition, entry) => setEditing({ definition, entry }),
+                        onAdd: (definition, scope) => setEditing({ definition, scope }),
+                      }
+                    : {})}
+                />
+              ),
             },
           ]}
         />
@@ -146,6 +157,7 @@ export function SettingsPage() {
           key={editing.entry?.id ?? editing.definition.key}
           definition={editing.definition}
           {...(editing.entry ? { entry: editing.entry } : {})}
+          {...(editing.scope ? { initialScope: editing.scope } : {})}
           groups={groups}
           onClose={() => setEditing(null)}
         />

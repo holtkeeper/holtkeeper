@@ -17,6 +17,7 @@ import {
   Page,
   Panel,
   Placeholder,
+  Segmented,
   Switch,
   Tooltip,
   notify,
@@ -24,6 +25,7 @@ import {
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
 import { Forbidden } from '../shell/Forbidden.tsx'
 import { useSession } from '../shell/session.ts'
+import { AccessMap } from './AccessMap.tsx'
 import { LinkDialog, UserDialog } from './UserDialog.tsx'
 
 /** People who can sign in with the `users` provider. */
@@ -35,6 +37,7 @@ export function UsersPage() {
   const [editing, setEditing] = useState<UserView | 'new' | null>(null)
   const [link, setLink] = useState<LinkResponse | null>(null)
   const [passkey, setPasskey] = useState<{ user: UserView; id: string; label: string } | null>(null)
+  const [view, setView] = useState<'list' | 'map'>('list')
 
   if (!enabled)
     return (
@@ -54,12 +57,23 @@ export function UsersPage() {
       icon="users"
       description="Accounts signing in with passkeys or single sign-on"
       actions={
-        canInvite ? (
-          <Button variant="primary" onPress={() => setEditing('new')}>
-            <UserPlus className="size-4" />
-            Invite user
-          </Button>
-        ) : null
+        <>
+          <Segmented
+            aria-label="View"
+            options={[
+              { id: 'list', label: 'List' },
+              { id: 'map', label: 'Map' },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+          {canInvite ? (
+            <Button variant="primary" onPress={() => setEditing('new')}>
+              <UserPlus className="size-4" />
+              Invite user
+            </Button>
+          ) : null}
+        </>
       }
     >
       {users.isPending ? (
@@ -68,6 +82,8 @@ export function UsersPage() {
         <ErrorState error={users.error} />
       ) : list.length === 0 ? (
         <EmptyState icon={<Users />} title="No users" />
+      ) : view === 'map' ? (
+        <AccessMap users={list} onEdit={setEditing} />
       ) : (
         <div className="flex flex-col gap-3">
           <AnimatePresence initial={false}>

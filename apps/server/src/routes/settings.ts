@@ -5,7 +5,7 @@ import type {
   SettingList,
   SettingView,
 } from '@holtkeeper/api'
-import { resolveSettings } from '@holtkeeper/settings'
+import { settingCascades } from '@holtkeeper/settings'
 import type { SettingEntry } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -143,11 +143,16 @@ export function settingRoutes(deps: ServerDeps) {
     if (!repo) throw new HTTPException(400, { message: 'repo is required' })
     const target = repoTarget(config, repo)
     authorize(c, 'settings:read', { kind: 'repo', repo: target })
-    const resolved = resolveSettings(await store.settings.list(), target)
+    const cascades = settingCascades(await store.settings.list(), target)
     return c.json<ResolvedSettings>({
       repo,
       groups: target.groups,
-      settings: Object.fromEntries([...resolved].map(([key, entry]) => [key, toView(entry)])),
+      settings: Object.fromEntries(
+        [...cascades].flatMap(([key, [winner]]) => (winner ? [[key, toView(winner)]] : [])),
+      ),
+      cascade: Object.fromEntries(
+        [...cascades].map(([key, cascade]) => [key, cascade.map(toView)]),
+      ),
     })
   })
 
