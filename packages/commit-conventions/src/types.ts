@@ -5,7 +5,7 @@
 export type RuleSource = 'setting' | 'push-rules' | 'commitlint' | 'history'
 
 /** Where a ticket key sits in a commit title. */
-export type TicketPlacement = 'bracket' | 'prefix' | 'scope' | 'suffix' | 'anywhere'
+export type TicketPlacement = 'lead' | 'bracket' | 'prefix' | 'scope' | 'suffix' | 'anywhere'
 
 /** A tracker key such as `GTW-435`. */
 export interface TicketRule {

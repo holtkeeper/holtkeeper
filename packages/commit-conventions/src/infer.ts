@@ -77,6 +77,7 @@ export function commitTemplate(rules: CommitRules): string {
   const ticket = rules.ticket ? '<TICKET>' : ''
   const placement = rules.ticket?.placement
   const scope = placement === 'scope' ? `(${ticket})` : rules.scopeRequired ? '(<scope>)' : ''
+  const lead = placement === 'lead' ? `[${ticket}] ` : ''
   const head = rules.conventional ? `<type>${scope}: ` : ''
   const subject =
     placement === 'bracket'
@@ -86,7 +87,7 @@ export function commitTemplate(rules: CommitRules): string {
         : placement === 'suffix'
           ? `<subject> (${ticket})`
           : '<subject>'
-  return head + subject
+  return lead + head + subject
 }
 
 /**
@@ -205,7 +206,9 @@ export function inferBranchRules(
   if (style === 'kebab' || style === 'snake') rules.case = style
 
   const separator = rules.case === 'snake' ? '_' : '-'
-  const ticketFirst = rests.filter((rest, index) => keys[index]?.length && /^[-_]/u.test(rest))
+  const ticketFirst = rests.filter(
+    (rest, index) => keys[index]?.length && /^(?:[-_]|$)/u.test(rest),
+  )
   const parts = rules.ticket
     ? share(ticketFirst.length, keys.filter((list) => list.length).length) >= 0.5
       ? `<TICKET>${separator}<description>`

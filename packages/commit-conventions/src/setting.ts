@@ -14,9 +14,11 @@ const ticket = z.object({
   pattern: pattern.describe('One key, e.g. GTW-\\d+'),
   required: z.boolean().default(true),
   placement: z
-    .enum(['bracket', 'prefix', 'scope', 'suffix', 'anywhere'])
+    .enum(['lead', 'bracket', 'prefix', 'scope', 'suffix', 'anywhere'])
     .optional()
-    .describe('Commit titles: [GTW-1] subject, GTW-1 subject, type(GTW-1), subject (GTW-1)'),
+    .describe(
+      'Commit titles: [GTW-1] type: subject, type: [GTW-1] subject, type: GTW-1 subject, type(GTW-1): subject, subject (GTW-1)',
+    ),
 })
 
 const word = z.string().trim().min(1)

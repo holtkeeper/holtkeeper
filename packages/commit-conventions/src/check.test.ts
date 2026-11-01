@@ -33,6 +33,9 @@ describe('checkCommitMessage', () => {
   test('accepts a message that follows every rule', () => {
     expect(messages('feat(web): [GTW-1] add the board')).toEqual([])
     expect(messages('fix: [GTW-2] API errors keep their status')).toEqual([])
+    expect(messages('[GTW-3] fix: retry')).toEqual([
+      'error: The message must match `(?i)^(feat|fix)`',
+    ])
   })
 
   test('reports configured rules as errors and learned ones as warnings', () => {

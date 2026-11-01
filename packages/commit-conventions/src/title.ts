@@ -1,21 +1,28 @@
 import type { TicketPlacement } from './types.ts'
 
-const conventional = /^(?<type>[a-z][\w-]*)(?:\((?<scope>[^)]*)\))?(?<bang>!)?:\s(?<subject>.*)$/u
+const leadingTicket = /^\[(?<key>[A-Z][A-Z0-9]{1,9}-\d+)\]\s*/u
+const conventional =
+  /^(?<type>[a-z][\w-]*)(?:\((?<scope>[^)]*)\))?(?<bang>!)?\s?:\s(?<subject>.*)$/u
 
 /** A commit title split into its Conventional Commits parts; `type` is absent for other titles. */
 export interface Title {
   type?: string
   scope?: string
   breaking: boolean
+  /** A bracketed ticket key before the type: `[GTW-1] feat: subject`. */
+  lead?: string
   /** The title after `type(scope): `, or the whole title. */
   subject: string
 }
 
 export function parseTitle(title: string): Title {
-  const match = conventional.exec(title.trim())?.groups
-  if (!match?.type || match.subject === undefined) return { breaking: false, subject: title.trim() }
+  const trimmed = title.trim()
+  const lead = leadingTicket.exec(trimmed)
+  const match = conventional.exec(lead ? trimmed.slice(lead[0].length) : trimmed)?.groups
+  if (!match?.type || match.subject === undefined) return { breaking: false, subject: trimmed }
   return {
     type: match.type,
+    ...(lead?.groups?.key ? { lead: lead.groups.key } : {}),
     ...(match.scope?.trim() ? { scope: match.scope.trim() } : {}),
     breaking: Boolean(match.bang),
     subject: match.subject.trim(),
@@ -37,6 +44,7 @@ const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
 /** Where `key` sits in a title. */
 export function ticketPlacement(title: Title, key: string): TicketPlacement {
   const k = escape(key)
+  if (title.lead === key) return 'lead'
   if (title.scope === key) return 'scope'
   if (new RegExp(`^\\[${k}\\]`, 'u').test(title.subject)) return 'bracket'
   if (new RegExp(`^${k}(?::|\\s)`, 'u').test(title.subject)) return 'prefix'

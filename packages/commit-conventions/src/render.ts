@@ -16,6 +16,7 @@ const sourceLabels: Record<RuleSource, string> = {
 }
 
 const placements: Record<TicketPlacement, string> = {
+  lead: 'in brackets before the type: `[KEY-1] type: subject`',
   bracket: 'in brackets at the start of the subject: `[KEY-1] subject`',
   prefix: 'at the start of the subject: `KEY-1 subject`',
   scope: 'as the scope: `type(KEY-1): subject`',

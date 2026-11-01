@@ -45,7 +45,7 @@ Merges, reverts, `fixup!`/`squash!`/`amend!` commits and WIP commits are left ou
 - **Commit titles.**
   - `conventional`: titles have the form `type(scope)!: subject`.
   - `scopeRequired`: at least 80% of conventional titles have a scope.
-  - `ticket`: tracker keys such as `GTW-435`. A key pattern is set once 30% of titles carry one, and it becomes `required` at 80%. Keys of projects seen once are dropped when others repeat. The placement (`bracket`, `prefix`, `scope`, `suffix`) needs 60% agreement, otherwise it is `anywhere`.
+  - `ticket`: tracker keys such as `GTW-435`. A key pattern is set once 30% of titles carry one, and it becomes `required` at 80%. Keys of projects seen once are dropped when others repeat. The placement needs 60% agreement, otherwise it is `anywhere`. The placements are `lead` (`[GTW-1] feat: subject`, where the title still counts as conventional), `bracket` (`feat: [GTW-1] subject`), `prefix` (`feat: GTW-1 subject`), `scope` (`feat(GTW-1): subject`) and `suffix` (`feat: subject (GTW-1)`).
   - `maxLength`: 72, or 100 if 72 does not fit, when 95% of titles fit.
   - `subjectCase`: the first letter of the subject, ignoring leading acronyms like `API`.
   - `noTrailingPeriod`: at most 5% of titles end with a period.

@@ -107,4 +107,33 @@ describe('inferBranchRules', () => {
   test('needs enough branches', () => {
     expect(inferBranchRules([{ name: 'feat/a' }, { name: 'feat/b' }]).rules).toEqual({})
   })
+
+  test('puts the ticket first when names hold only the ticket after the prefix', () => {
+    const { rules } = inferBranchRules(
+      [
+        'feature/BCT-5128-main',
+        'feature/BCT-4943',
+        'feature/BCT-4790',
+        'feature/BCT-4235',
+        'feature/BCT-1-fix-npm',
+      ].map((name) => ({ name })),
+    )
+    expect(rules.template).toBe('<prefix>/<TICKET>-<description>')
+  })
+})
+
+describe('tickets before the type', () => {
+  test('are read as conventional titles with a leading ticket', () => {
+    const titles = Array.from({ length: 12 }, (_, i) =>
+      commit(`[BCT-${5100 + i}] ${i % 3 ? 'feat' : 'fix'}: Change number ${i}`),
+    )
+    const { rules, types } = inferCommitRules(titles)
+    expect(rules).toMatchObject({
+      conventional: true,
+      ticket: { pattern: 'BCT-\\d+', required: true, placement: 'lead' },
+      subjectCase: 'upper',
+      template: '[<TICKET>] <type>: <subject>',
+    })
+    expect(types.map((type) => type.name)).toEqual(['feat', 'fix'])
+  })
 })
