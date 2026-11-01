@@ -199,7 +199,8 @@ export function TriggersTab() {
 
 const actionLabels = { open: 'Opened', update: 'New commits', reopen: 'Reopened' } as const
 
-function TriggerDialog({
+/** Creates a panel trigger or edits one; editing a file trigger creates a panel override. */
+export function TriggerDialog({
   entry,
   taken,
   onClose,

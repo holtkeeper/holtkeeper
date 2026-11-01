@@ -6,6 +6,7 @@ import {
   newTracker,
   normalizeTrackers,
   partVariants,
+  linkSource,
   rolesOf,
   trackerLinks,
   trackerProblems,
@@ -129,6 +130,23 @@ test('trackerLinks connects roles and flags missing and unread ones', () => {
     outputs: [{ id: 'notify-1', kind: 'notify' }],
     unread: ['files-3'],
   })
+})
+
+test('linkSource gives the source a role the rule still lacks', () => {
+  const linked = linkSource(tracker(), variants, schema, 2, 1)
+  expect(linked?.role).toBe('staging')
+  expect(linked?.tracker.sources[2]).toEqual({
+    kind: 'files',
+    role: 'staging',
+    paths: ['README.md'],
+  })
+  expect(trackerLinks(linked?.tracker ?? tracker(), variants, schema).rules[1]?.missing).toEqual([])
+})
+
+test('linkSource falls back to a read role and skips links that exist', () => {
+  expect(linkSource(tracker(), variants, schema, 2, 0)?.role).toBe('definition')
+  expect(linkSource(tracker(), variants, schema, 0, 0)).toBeUndefined()
+  expect(linkSource(tracker(), variants, schema, 9, 0)).toBeUndefined()
 })
 
 test('normalizeTrackers fills the entity and drops junk', () => {

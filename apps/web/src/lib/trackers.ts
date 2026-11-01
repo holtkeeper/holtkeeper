@@ -169,6 +169,45 @@ export function trackerLinks(
   }
 }
 
+/**
+ * The tracker with source `sourceIndex` feeding rule `ruleIndex`: the source now provides a role
+ * the rule reads, preferring one no source provides yet. `undefined` when the source has no role
+ * field or the rule reads nothing.
+ */
+export function linkSource(
+  tracker: TrackerValue,
+  variants: Record<PartList, Map<string, JsonSchema>>,
+  root: unknown,
+  sourceIndex: number,
+  ruleIndex: number,
+): { tracker: TrackerValue; role: string } | undefined {
+  const source = tracker.sources[sourceIndex]
+  const rule = tracker.rules[ruleIndex]
+  if (!source || !rule) return undefined
+  const links = trackerLinks(tracker, variants, root)
+  const reads = links.rules[ruleIndex]?.reads ?? []
+  const current = links.sources[sourceIndex]?.role ?? []
+  if (reads.some((role) => current.includes(role))) return undefined
+  const role = links.rules[ruleIndex]?.missing[0] ?? reads[0]
+  const variant = variants.sources.get(source.kind)
+  const properties = isRecord(variant?.properties) ? variant.properties : {}
+  const field = Object.entries(properties).find(
+    ([, raw]) => resolve(raw, root)['x-role'] === 'provides',
+  )
+  if (!role || !field) return undefined
+  const [name, raw] = field
+  const value = resolve(raw, root).type === 'array' ? [role] : role
+  return {
+    tracker: {
+      ...tracker,
+      sources: tracker.sources.map((part, i) =>
+        i === sourceIndex ? { ...part, [name]: value } : part,
+      ),
+    },
+    role,
+  }
+}
+
 /** Problems that would make the server reject a tracker, by tracker index. */
 export function trackerProblems(trackers: readonly TrackerValue[]): Map<number, string[]> {
   const problems = new Map<number, string[]>()

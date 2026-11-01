@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { ConfigEntryView, JobAnalyzerView } from '@holtkeeper/api'
 
-import { automationMap } from './automation-map.ts'
+import { automationMap, withAnalyzer, withoutAnalyzer } from './automation-map.ts'
 
 const analyzer = (kind: string, scope: 'repo' | 'group' = 'repo'): JobAnalyzerView => ({
   kind,
@@ -92,10 +92,31 @@ describe('automation map', () => {
       { from: 'trigger:command:port', to: 'analyzer:gone', enabled: true },
     ])
     expect(map.analyzers).toEqual([
-      { id: 'analyzer:audit', kind: 'audit', label: 'AUDIT', known: true, scope: 'repo' },
-      { id: 'analyzer:gone', kind: 'gone', label: 'gone', known: false },
-      { id: 'analyzer:licenses', kind: 'licenses', label: 'LICENSES', known: true, scope: 'group' },
-      { id: 'analyzer:review', kind: 'review', label: 'REVIEW', known: true, scope: 'repo' },
+      {
+        id: 'analyzer:audit',
+        kind: 'audit',
+        label: 'AUDIT',
+        known: true,
+        scope: 'repo',
+        idle: false,
+      },
+      { id: 'analyzer:gone', kind: 'gone', label: 'gone', known: false, idle: false },
+      {
+        id: 'analyzer:licenses',
+        kind: 'licenses',
+        label: 'LICENSES',
+        known: true,
+        scope: 'group',
+        idle: false,
+      },
+      {
+        id: 'analyzer:review',
+        kind: 'review',
+        label: 'REVIEW',
+        known: true,
+        scope: 'repo',
+        idle: false,
+      },
     ])
     expect(map.idle).toEqual(['quality'])
   })
@@ -106,6 +127,62 @@ describe('automation map', () => {
       analyzers: [],
       edges: [],
       idle: ['audit'],
+    })
+  })
+
+  test('editors also get the analyzers nothing runs', () => {
+    const map = automationMap(
+      [schedule('nightly', { analyzers: ['audit'] })],
+      [],
+      [analyzer('audit'), analyzer('quality')],
+      { withIdle: true },
+    )
+    expect(map.analyzers.map((a) => [a.kind, a.idle])).toEqual([
+      ['audit', false],
+      ['quality', true],
+    ])
+    expect(map.idle).toEqual(['quality'])
+  })
+})
+
+describe('linking analyzers', () => {
+  const nightly = schedule('nightly', {
+    analyzers: ['audit', 'licenses'],
+    options: { licenses: { policy: 'strict' }, audit: { fix: true } },
+  }).data
+
+  test('adds an analyzer once', () => {
+    expect(withAnalyzer(nightly, 'quality').analyzers).toEqual(['audit', 'licenses', 'quality'])
+    expect(withAnalyzer(nightly, 'audit')).toBe(nightly)
+    expect(withAnalyzer({ on: 'tag', analyzers: ['a'] }, 'b')).toEqual({
+      on: 'tag',
+      analyzers: ['a', 'b'],
+    })
+  })
+
+  test('a command trigger swaps its analyzer', () => {
+    expect(withAnalyzer({ on: 'command', command: 'port', analyzer: 'port' }, 'audit')).toEqual({
+      on: 'command',
+      command: 'port',
+      analyzer: 'audit',
+    })
+    expect(
+      withoutAnalyzer({ on: 'command', command: 'port', analyzer: 'port' }, 'port'),
+    ).toHaveProperty('error')
+  })
+
+  test('removes an analyzer with its options, never the last one', () => {
+    expect(withoutAnalyzer(nightly, 'licenses')).toEqual({
+      data: { ...nightly, analyzers: ['audit'], options: { audit: { fix: true } } },
+    })
+    const onlyAudit = { ...nightly, analyzers: ['audit'], options: { audit: { fix: true } } }
+    expect(withoutAnalyzer(onlyAudit, 'audit')).toHaveProperty('error')
+    const { options: _options, ...bare } = nightly
+    expect(withoutAnalyzer({ ...nightly, options: { audit: {} } }, 'audit')).toEqual({
+      data: { ...bare, analyzers: ['licenses'] },
+    })
+    expect(withoutAnalyzer({ on: 'mergeRequest', analyzers: ['a', 'b'] }, 'a')).toEqual({
+      data: { on: 'mergeRequest', analyzers: ['b'] },
     })
   })
 })

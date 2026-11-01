@@ -1,4 +1,5 @@
 import {
+  type Connection,
   type Edge,
   Handle,
   MarkerType,
@@ -20,6 +21,7 @@ import {
   type TrackerPart,
   type TrackerValue,
   isNormalizeStep,
+  linkSource,
   newPart,
   newTracker,
   normalizeTrackers,
@@ -28,7 +30,16 @@ import {
   trackerLinks,
   trackerProblems,
 } from '../../lib/trackers.ts'
-import { Button, Notice, Segmented, Select, TagInput, TextField, useTheme } from '../../ui/index.ts'
+import {
+  Button,
+  Notice,
+  Segmented,
+  Select,
+  TagInput,
+  TextField,
+  notify,
+  useTheme,
+} from '../../ui/index.ts'
 import { Railed, RemoveButton } from './blocks.tsx'
 import { SchemaForm } from './SchemaField.tsx'
 
@@ -319,7 +330,18 @@ function TrackerBlock({
         </Notice>
       ) : null}
 
-      <TrackerFlow links={links} />
+      <TrackerFlow
+        links={links}
+        onLink={(sourceIndex, ruleIndex) => {
+          const linked = linkSource(tracker, variants, root, sourceIndex, ruleIndex)
+          if (!linked) return
+          onChange(linked.tracker)
+          notify.success(
+            `${links.sources[sourceIndex]?.id ?? 'Source'} now provides ${linked.role}`,
+            `Read by ${links.rules[ruleIndex]?.id ?? 'the rule'}`,
+          )
+        }}
+      />
 
       {PART_LISTS.map((list) => (
         <Railed key={list} rail={list} hint={LIST_HINTS[list]}>
@@ -437,6 +459,7 @@ type FlowData = {
   tone: 'default' | 'warning' | 'danger'
   inbound: boolean
   outbound: boolean
+  linkable?: boolean
 }
 type FlowNode = Node<FlowData, 'part'>
 
@@ -462,7 +485,8 @@ function PartNode({ data }: NodeProps<FlowNode>) {
         <Handle
           type="source"
           position={Position.Right}
-          className="!size-1.5 !border-0 !bg-border-tertiary"
+          className={`!border-0 ${data.linkable ? '!size-3 !bg-accent-soft-foreground' : '!size-1.5 !bg-border-tertiary'}`}
+          title={data.linkable ? 'Drag to a rule to feed it' : undefined}
         />
       ) : null}
     </div>
@@ -484,7 +508,7 @@ const edge = (source: string, target: string, label?: string): Edge => ({
   labelStyle: { fontSize: 10 },
 })
 
-function flowGraph(links: TrackerLinks): { nodes: FlowNode[]; edges: Edge[] } {
+function flowGraph(links: TrackerLinks, linkable: boolean): { nodes: FlowNode[]; edges: Edge[] } {
   const middle = links.rules.length > 0
   const node = (id: string, column: number, row: number, data: FlowData): FlowNode => ({
     id,
@@ -506,6 +530,7 @@ function flowGraph(links: TrackerLinks): { nodes: FlowNode[]; edges: Edge[] } {
         tone: links.unread.includes(source.id) ? 'warning' : 'default',
         inbound: false,
         outbound: true,
+        linkable: linkable && middle,
       }),
     ),
     ...links.rules.map((rule, i) =>
@@ -552,10 +577,29 @@ function flowGraph(links: TrackerLinks): { nodes: FlowNode[]; edges: Edge[] } {
   return { nodes, edges }
 }
 
-/** A read-only map of the tracker: sources by role → rules that read them → outputs. */
-function TrackerFlow({ links }: { links: TrackerLinks }) {
+/**
+ * A map of the tracker: sources by role → rules that read them → outputs. With `onLink`, dragging
+ * from a source to a rule asks to make the source feed that rule.
+ */
+function TrackerFlow({
+  links,
+  onLink,
+}: {
+  links: TrackerLinks
+  onLink?: (sourceIndex: number, ruleIndex: number) => void
+}) {
   const { theme } = useTheme()
-  const { nodes, edges } = useMemo(() => flowGraph(links), [links])
+  const { nodes, edges } = useMemo(() => flowGraph(links, onLink !== undefined), [links, onLink])
+  const indexes = (connection: Connection | Edge) => ({
+    source: links.sources.findIndex((source) => `s:${source.id}` === connection.source),
+    rule: links.rules.findIndex((rule) => `r:${rule.id}` === connection.target),
+  })
+  const canLink = (connection: Connection | Edge) => {
+    const { source, rule } = indexes(connection)
+    if (source < 0 || rule < 0) return false
+    const reads = links.rules[rule]?.reads ?? []
+    return !reads.some((role) => links.sources[source]?.role.includes(role))
+  }
   const rows = Math.max(links.sources.length, links.rules.length, links.outputs.length, 1)
   if (nodes.length === 0) return null
   const missing = links.rules.flatMap((rule) =>
@@ -576,7 +620,12 @@ function TrackerFlow({ links }: { links: TrackerLinks }) {
           colorMode={theme}
           fitView
           fitViewOptions={{ padding: 0.12 }}
-          nodesConnectable={false}
+          nodesConnectable={onLink !== undefined}
+          isValidConnection={canLink}
+          onConnect={(connection) => {
+            const { source, rule } = indexes(connection)
+            if (source >= 0 && rule >= 0) onLink?.(source, rule)
+          }}
           nodesDraggable={false}
           elementsSelectable={false}
           panOnDrag={false}
