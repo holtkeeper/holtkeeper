@@ -8,6 +8,7 @@ import {
   type DiffRefs,
   type Discussion,
   type ForgeDefinition,
+  type ForgeRelease,
   type GitForge,
   type Job,
   type JobRun,
@@ -233,6 +234,23 @@ const draftResponseSchema = z.union([draftSchema, z.array(draftSchema).length(1)
 
 const commitSchema = z.object({ id: z.string(), web_url: z.string() })
 const tagSchema = z.object({ name: z.string(), commit: z.object({ id: z.string() }) })
+const commitRecordSchema = z.object({
+  id: z.string(),
+  parent_ids: z.array(z.string()).nullable().optional(),
+  author_name: z.string().nullable().optional(),
+  author_email: z.string().nullable().optional(),
+  authored_date: z.string().nullable().optional(),
+  committed_date: z.string().nullable().optional(),
+  title: z.string(),
+  message: z.string().nullable().optional(),
+  web_url: z.string().nullable().optional(),
+})
+const releaseSchema = z.object({
+  tag_name: z.string(),
+  name: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  _links: z.object({ self: z.string().nullable().optional() }).nullable().optional(),
+})
 const userSchema = z.object({ id: z.number(), username: z.string() })
 const currentUserSchema = z.object({
   username: z.string(),
@@ -241,6 +259,13 @@ const currentUserSchema = z.object({
   email: z.string().nullable().optional(),
 })
 const anySchema = z.unknown()
+
+const toRelease = (release: z.infer<typeof releaseSchema>, fallbackUrl: string): ForgeRelease => ({
+  tag: release.tag_name,
+  name: release.name ?? release.tag_name,
+  description: release.description ?? '',
+  webUrl: release['_links']?.self ?? fallbackUrl,
+})
 
 const toRepository = (project: z.infer<typeof projectSchema>): Repository => ({
   path: project.path_with_namespace,
@@ -593,6 +618,9 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
       throw error
     }
   }
+
+  const releaseUrl = (repo: string, tag: string) =>
+    `${options.url.replace(/\/+$/, '')}/${repo}/-/releases/${encode(tag)}`
 
   const branchExists = async (repo: string, branch: string) => {
     try {
@@ -968,6 +996,54 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         default: branch.default ?? false,
         ...(branch.web_url ? { webUrl: branch.web_url } : {}),
       }))
+    },
+
+    async listCommits(repo, query) {
+      const list = client.paginate(`${project(repo)}/repository/commits`, commitRecordSchema, {
+        ref_name: query.since ? `${query.since}..${query.ref}` : query.ref,
+        per_page: pageSize(query.limit),
+      })
+      return (await take(list, query.limit)).map((commit) => ({
+        sha: commit.id,
+        parents: commit.parent_ids ?? [],
+        authorName: commit.author_name ?? '',
+        authorEmail: commit.author_email ?? '',
+        authoredAt: commit.authored_date ?? commit.committed_date ?? '',
+        title: commit.title,
+        message: commit.message ?? commit.title,
+        ...(commit.web_url ? { webUrl: commit.web_url } : {}),
+      }))
+    },
+
+    async getRelease(repo, tag) {
+      try {
+        const release = await client.json(
+          'GET',
+          `${project(repo)}/releases/${encode(tag)}`,
+          releaseSchema,
+        )
+        return toRelease(release, releaseUrl(repo, tag))
+      } catch (error) {
+        if (isNotFound(error)) return undefined
+        throw error
+      }
+    },
+
+    async createRelease(repo, input) {
+      const release = await client.json('POST', `${project(repo)}/releases`, releaseSchema, {
+        body: { tag_name: input.tag, name: input.name, description: input.description },
+      })
+      return toRelease(release, releaseUrl(repo, input.tag))
+    },
+
+    async updateRelease(repo, input) {
+      const release = await client.json(
+        'PUT',
+        `${project(repo)}/releases/${encode(input.tag)}`,
+        releaseSchema,
+        { body: withoutUndefined({ name: input.name, description: input.description }) },
+      )
+      return toRelease(release, releaseUrl(repo, input.tag))
     },
 
     async listCiVariables(scope) {

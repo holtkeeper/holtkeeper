@@ -28,6 +28,7 @@ import { z } from 'zod'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { defaultBranchOf, pushChangesDependencies } from './dependency-refresh.ts'
 import { librariesConfigOf, librariesEnabled } from './libraries.ts'
+import { releaseServiceFor } from './releases.ts'
 
 /** Every note Holtkeeper posts carries this marker. */
 const OWN_MARKER = 'holtkeeper:review'
@@ -167,6 +168,7 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
+ * Pushes and merge request changes also go to the release assistant, in the background.
  * Events of repositories `deps.readOnly` marks read-only are ignored, except tags and pushes. Events by
  * `jobs.botUsername` or carrying Holtkeeper's note marker are ignored. A job already
  * queued or running with the same ref and options is not queued again, so the same change seen
@@ -619,6 +621,12 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
   }
 
   return async (event, source) => {
+    if (event.kind === 'push' || event.kind === 'mergeRequest') {
+      const work = releaseServiceFor(deps)
+        .onEvent(event, source.actor)
+        .catch((error: unknown) => console.error('releases: event failed', error))
+      deps.onBackground?.(work)
+    }
     if (event.kind !== 'tag' && event.kind !== 'push' && (await deps.readOnly?.(event.repo)))
       return ignore('the repository is read-only')
     const handle = handlers(source)

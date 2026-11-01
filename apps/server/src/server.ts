@@ -35,6 +35,7 @@ import {
   seedDefaults,
 } from '@holtkeeper/managed-config'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
+import { releaseNotifyDefinition, releaseSettingsDefinition } from '@holtkeeper/release'
 import type { AnalysisKind } from '@holtkeeper/report'
 import { createReviewAnalyzer } from '@holtkeeper/review'
 import {
@@ -322,6 +323,8 @@ export async function startServer(
       limitsCredentialsSetting,
       pollingSetting,
       trackersSetting,
+      releaseSettingsDefinition,
+      releaseNotifyDefinition,
       librariesSetting,
       ...analyzerSettings(analyzers),
       ...executionSettings(),

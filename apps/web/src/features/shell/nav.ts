@@ -18,6 +18,7 @@ import {
   Layers,
   LayoutDashboard,
   Library,
+  Rocket,
   LibraryBig,
   ListChecks,
   type LucideIcon,
@@ -60,6 +61,7 @@ export interface NavItem {
     | '/repos'
     | '/audits'
     | '/releases'
+    | '/release-board'
     | '/bundles'
     | '/assets'
     | '/dependencies'
@@ -218,6 +220,14 @@ const navItems: readonly NavItem[] = [
     label: 'Public API',
     icon: Library,
     requires: 'analyses:read',
+  },
+  {
+    section: 'Delivery',
+    to: '/release-board',
+    brand: 'release',
+    label: 'Release board',
+    icon: Rocket,
+    requires: 'releases:read',
   },
   {
     section: 'Delivery',

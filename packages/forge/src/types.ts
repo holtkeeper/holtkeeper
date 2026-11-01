@@ -230,6 +230,39 @@ export interface TagRecord extends Tag {
   createdAt?: string
 }
 
+/** A commit as the forge lists it. Times are ISO 8601. */
+export interface CommitRecord {
+  sha: string
+  /** Parent shas; two or more for merge commits. */
+  parents: string[]
+  authorName: string
+  authorEmail: string
+  authoredAt: string
+  /** First line of the message. */
+  title: string
+  /** The whole message, title included. */
+  message: string
+  webUrl?: string
+}
+
+/** Filters for `listCommits`. */
+export interface CommitQuery {
+  /** Branch, tag or commit whose history is listed. */
+  ref: string
+  /** Leaves out commits reachable from this ref, like `git log since..ref`. */
+  since?: string
+  /** At most this many, newest first; all when omitted. */
+  limit?: number
+}
+
+/** A release the forge shows for a tag. */
+export interface ForgeRelease {
+  tag: string
+  name: string
+  description: string
+  webUrl: string
+}
+
 /** A branch with its head commit, for branch hygiene. Times are ISO 8601. */
 export interface BranchRecord {
   name: string
@@ -415,6 +448,26 @@ export interface GitForge {
   listTags?(repo: string, query?: { limit?: number }): Promise<TagRecord[]>
   /** Every branch of the repository, the default branch included, in no particular order. */
   listBranches?(repo: string): Promise<BranchRecord[]>
+  /**
+   * Commits reachable from `query.ref` and not from `query.since`, newest first. Rejects when
+   * `ref` does not exist.
+   */
+  listCommits?(repo: string, query: CommitQuery): Promise<CommitRecord[]>
+
+  // Releases. Optional so forges can add them one by one.
+
+  /** The release of a tag, or `undefined` when the tag has none. */
+  getRelease?(repo: string, tag: string): Promise<ForgeRelease | undefined>
+  /** Creates a release for an existing tag. */
+  createRelease?(
+    repo: string,
+    input: { tag: string; name: string; description: string },
+  ): Promise<ForgeRelease>
+  /** Replaces the name and description of a tag's release. */
+  updateRelease?(
+    repo: string,
+    input: { tag: string; name?: string; description?: string },
+  ): Promise<ForgeRelease>
 
   // Code review. Optional so forges can add them one by one.
 

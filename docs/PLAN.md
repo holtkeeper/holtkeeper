@@ -149,6 +149,8 @@ Status: scanner, fixers, allowlist and `holtkeeper audit` exist (see [packages/v
 
 ### 5. Releases
 
+Status: the release assistant ([packages/release](../packages/release/docs/README.md)) proposes the next version from conventional commits, builds the changelog of unique messages and a summary, opens or updates the `develop → main` candidate merge request, creates versions after a configurable acceptance (person, API/CLI, label or merge), deploys through the tag pipeline's manual jobs and follows them; the **Release board** in the web UI, `holtkeeper release` in the CLI. Not done: chat bot buttons.
+
 - Creating a `develop → main` MR with a changelog from commits/MRs, readiness checks (green pipeline, no open blockers).
 - After merge: a tag following the project scheme (semver/calver/custom), a release with notes.
 - Deploy: running the pipeline's manual jobs for the tag, waiting, retries, status notifications.

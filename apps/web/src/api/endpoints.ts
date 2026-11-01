@@ -46,6 +46,17 @@ import type {
   RuntimeConfigView,
   ReleaseBackfillInput,
   ReleaseBackfillStarted,
+  ReleaseAcceptInput,
+  ReleaseBatchInput,
+  ReleaseBatchResult,
+  ReleaseBoardView,
+  ReleaseDeployInput,
+  ReleaseEditsInput,
+  ReleaseRepoView,
+  ReleaseStepInput,
+  ReleaseStepResult,
+  ReleaseSummaryInput,
+  DeployState,
   RepoAvatarInfo,
   SchedulePreview,
   ScheduleRunList,
@@ -347,6 +358,28 @@ export const api = {
     request<ScheduleRunStarted>('POST', `/api/schedules/${id(scheduleId)}/run`),
   backfillReleases: (input: ReleaseBackfillInput) =>
     request<ReleaseBackfillStarted>('POST', '/api/releases/backfill', { body: input }),
+  releaseBoard: (filter: { group?: string; refresh?: boolean }) =>
+    request<ReleaseBoardView>('GET', '/api/releases/board', {
+      query: { group: filter.group, refresh: filter.refresh ? 1 : undefined },
+    }),
+  releaseRepo: (repo: RepoRef) =>
+    request<ReleaseRepoView>('GET', '/api/releases/repo', { query: { repo: repoKey(repo) } }),
+  releaseDeploy: (repo: RepoRef, tag: string) =>
+    request<DeployState>('GET', '/api/releases/deploy', { query: { repo: repoKey(repo), tag } }),
+  saveReleaseEdits: (input: ReleaseEditsInput) =>
+    request<{ ok: true }>('PUT', '/api/releases/edits', { body: input }),
+  writeReleaseSummary: (input: ReleaseSummaryInput) =>
+    request<{ markdown: string }>('POST', '/api/releases/summary', { body: input }),
+  runReleaseStep: (step: 'propose' | 'version', input: ReleaseStepInput) =>
+    request<ReleaseStepResult>('POST', `/api/releases/${step}`, { body: input }),
+  acceptRelease: (input: ReleaseAcceptInput) =>
+    request<ReleaseStepResult>('POST', '/api/releases/accept', { body: input }),
+  withdrawRelease: (repo: RepoRef) =>
+    request<{ ok: true }>('DELETE', '/api/releases/accept', { query: { repo: repoKey(repo) } }),
+  startReleaseDeploy: (input: ReleaseDeployInput) =>
+    request<ReleaseStepResult>('POST', '/api/releases/deploy', { body: input }),
+  releaseBatch: (input: ReleaseBatchInput) =>
+    request<ReleaseBatchResult>('POST', '/api/releases/batch', { body: input }),
   configExportUrl: () => urlOf('/api/config/export'),
   runtimeConfig: () => request<RuntimeConfigView>('GET', '/api/config/runtime'),
   repoAvatarUrl: (repo: RepoRef, version?: number) =>

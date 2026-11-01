@@ -127,6 +127,15 @@ interface FakeTag {
   created_at: string | null
 }
 
+interface FakeCommit {
+  sha: string
+  parents: string[]
+  title: string
+  message: string
+  author_name: string
+  authored_date: string
+}
+
 interface FakeProject {
   id: number
   path: string
@@ -139,6 +148,8 @@ interface FakeProject {
   jobs: FakeJob[]
   deployments: FakeDeployment[]
   tags: Map<string, FakeTag>
+  commits: Map<string, FakeCommit>
+  releases: Map<string, { name: string; description: string }>
 }
 
 export interface RecordedCall {
@@ -246,6 +257,8 @@ export class FakeGitLab {
       jobs: [],
       deployments: [],
       tags: new Map(),
+      commits: new Map(),
+      releases: new Map(),
     }
     this.projects.set(path, project)
     return project
@@ -422,6 +435,106 @@ export class FakeGitLab {
     })
   }
 
+  /** Commits `messages` on top of `branch` (created from the default branch when missing), oldest first. */
+  addCommits(project: FakeProject, branch: string, messages: string[], date = EPOCH): string[] {
+    let head =
+      project.branches.get(branch)?.sha ?? project.branches.get(project.defaultBranch)?.sha ?? ''
+    const shas = messages.map((message, index) => {
+      const sha = this.sha()
+      const authored = new Date(Date.parse(date) + index * 60_000).toISOString()
+      project.commits.set(sha, {
+        sha,
+        parents: head ? [head] : [],
+        title: message.split('\n')[0] ?? message,
+        message,
+        author_name: 'Fake User',
+        authored_date: authored,
+      })
+      head = sha
+      return sha
+    })
+    const current = project.branches.get(branch)
+    project.branches.set(branch, { ...current, sha: head, files: current?.files ?? new Map() })
+    return shas
+  }
+
+  /** A merge commit of `from`'s head into `into`. */
+  mergeBranch(project: FakeProject, from: string, into: string, message: string): string {
+    const source = project.branches.get(from)
+    const target = project.branches.get(into)
+    if (!source || !target) throw new Error('unknown branch')
+    const sha = this.sha()
+    project.commits.set(sha, {
+      sha,
+      parents: [target.sha, source.sha],
+      title: message.split('\n')[0] ?? message,
+      message,
+      author_name: 'Fake User',
+      authored_date: new Date(Date.parse(EPOCH) + 86_400_000).toISOString(),
+    })
+    project.branches.set(into, { ...target, sha })
+    return sha
+  }
+
+  private resolveRef(project: FakeProject, ref: string): string | undefined {
+    return (
+      project.branches.get(ref)?.sha ??
+      project.tags.get(ref)?.sha ??
+      (project.commits.has(ref) ? ref : undefined)
+    )
+  }
+
+  private reachable(project: FakeProject, sha: string): string[] {
+    const seen = new Set<string>()
+    const order: string[] = []
+    const stack = [sha]
+    while (stack.length) {
+      const next = stack.pop()!
+      if (seen.has(next)) continue
+      seen.add(next)
+      order.push(next)
+      for (const parent of (project.commits.get(next)?.parents ?? []).toReversed())
+        stack.push(parent)
+    }
+    return order
+  }
+
+  private listCommits(project: FakeProject, url: URL): Response {
+    const ref = url.searchParams.get('ref_name') ?? project.defaultBranch
+    const [since, to] = ref.includes('..') ? ref.split('..') : [undefined, ref]
+    const head = this.resolveRef(project, to ?? '')
+    if (!head) return json(404, { message: '404 Reference Not Found' })
+    const base = since ? this.resolveRef(project, since) : undefined
+    if (since && !base) return json(404, { message: '404 Reference Not Found' })
+    const excluded = new Set(base ? this.reachable(project, base) : [])
+    const list = this.reachable(project, head)
+      .filter((sha) => !excluded.has(sha))
+      .map(
+        (sha) =>
+          project.commits.get(sha) ?? {
+            sha,
+            parents: [],
+            title: 'Initial commit',
+            message: 'Initial commit',
+            author_name: 'Fake User',
+            authored_date: EPOCH,
+          },
+      )
+      .toSorted((a, b) => b.authored_date.localeCompare(a.authored_date))
+      .map((commit) => ({
+        id: commit.sha,
+        parent_ids: commit.parents,
+        title: commit.title,
+        message: commit.message,
+        author_name: commit.author_name,
+        author_email: 'fake@example.com',
+        authored_date: commit.authored_date,
+        committed_date: commit.authored_date,
+        web_url: this.webUrl(`${project.path}/-/commit/${commit.sha}`),
+      }))
+    return this.page(url, list)
+  }
+
   private sha(): string {
     return (++this.shaCounter).toString(16).padStart(40, '0')
   }
@@ -550,17 +663,49 @@ export class FakeGitLab {
     }
     if (method === 'POST' && rest.join('/') === 'repository/commits')
       return this.commit(project, body)
+    if (method === 'GET' && rest.join('/') === 'repository/commits')
+      return this.listCommits(project, url)
+    if (rest[0] === 'releases') {
+      const releaseJson = (tag: string, release: { name: string; description: string }) => ({
+        tag_name: tag,
+        name: release.name,
+        description: release.description,
+        _links: { self: this.webUrl(`${project.path}/-/releases/${tag}`) },
+      })
+      if (method === 'POST' && rest.length === 1) {
+        const tag = String(body['tag_name'])
+        if (!project.tags.has(tag)) return json(422, { message: 'Tag does not exist' })
+        if (project.releases.has(tag)) return json(409, { message: 'Release already exists' })
+        const release = { name: String(body['name']), description: String(body['description']) }
+        project.releases.set(tag, release)
+        return json(201, releaseJson(tag, release))
+      }
+      const tag = rest[1] ?? ''
+      const release = project.releases.get(tag)
+      if (!release) return json(404, { message: '404 Not Found' })
+      if (method === 'GET') return json(200, releaseJson(tag, release))
+      if (method === 'PUT') {
+        const updated = {
+          name: typeof body['name'] === 'string' ? body['name'] : release.name,
+          description:
+            typeof body['description'] === 'string' ? body['description'] : release.description,
+        }
+        project.releases.set(tag, updated)
+        return json(200, releaseJson(tag, updated))
+      }
+    }
     if (method === 'POST' && rest.join('/') === 'repository/tags') {
-      const branch = project.branches.get(String(body['ref']))
-      if (!branch) return json(400, { message: 'Target ref is invalid' })
+      const target = this.resolveRef(project, String(body['ref']))
+      if (!target) return json(400, { message: 'Target ref is invalid' })
       const name = String(body['tag_name'])
+      if (project.tags.has(name)) return json(400, { message: 'Tag already exists' })
       project.tags.set(name, {
-        sha: branch.sha,
+        sha: target,
         message: body['message'] as string | undefined,
         committed_date: EPOCH,
         created_at: body['message'] ? EPOCH : null,
       })
-      return json(201, { name, commit: { id: branch.sha } })
+      return json(201, { name, commit: { id: target } })
     }
     if (rest[0] === 'merge_requests') return this.mergeRequests(project, method, rest, url, body)
     if (method === 'GET' && rest.join('/') === 'repository/tree') return this.tree(project, url)
@@ -691,6 +836,15 @@ export class FakeGitLab {
       else files.set(action.file_path, action.content ?? '')
     }
     const sha = this.sha()
+    const message = typeof body['commit_message'] === 'string' ? body['commit_message'] : ''
+    project.commits.set(sha, {
+      sha,
+      parents: [branch.sha],
+      title: message.split('\n')[0] ?? message,
+      message,
+      author_name: 'Fake User',
+      authored_date: new Date().toISOString(),
+    })
     project.branches.set(name, { sha, files })
     return json(201, { id: sha, web_url: this.webUrl(`${project.path}/-/commit/${sha}`) })
   }

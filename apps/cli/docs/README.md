@@ -46,6 +46,19 @@ holtkeeper audit ./games/app-x --fix --allowlist allowlist.json --trait ssr=fals
 
 Needs `osv-scanner` on `PATH`; fixing needs the project's package manager or `go`.
 
+### `release <action>`
+
+The release assistant (see [@holtkeeper/release](../../../packages/release/docs/README.md)) against the config's forges. Settings are the `releases` setting from the config's store when the config has a `server` section, with `--preset <ids>` (comma-separated) and a JSON `--settings <file>` laid over it.
+
+- `status [--repo <forge>:<path> | --group <name>]` — one tab-separated line per repository: path, stage, latest → next version, commits ahead and unreleased, open candidate, acceptance, deploy state (`--json` for the rows).
+- `plan --repo <forge>:<path> [--step propose|version] [--version x.y.z]` — the plan of the step that waits (or the given one): range, suggested version with reasons, gates and the text; exits 2 while a gate fails.
+- `propose --repo …` — opens or updates the release candidate merge request.
+- `accept --repo … [--note <text>]` — accepts the target branch head for release in the store, like the panel; needs a store with `kv`. Use it from CI or scripts to tie acceptance to any process.
+- `version --repo … [--version x.y.z]` — creates the version (tag, release, optional changelog file).
+- `deploy --repo … --env <name> [--tag <tag>] [--redeploy]` — starts the deploy job of an environment for the version (the latest by default).
+
+`--force` overrides failing pipeline, freeze, blocker and acceptance gates (and the deploy order); `--dry-run` (or `dryRun` in the config) reports without changing anything.
+
 ### `users <action>`
 
 Manages accounts of `users` sign-in (see [@holtkeeper/auth-users](../../../packages/auth-users/docs/README.md)) directly in the config's store, without delegation checks: whoever can read the config and its secrets is an operator. Every change is logged with actor `cli`. `<user>` is an id, an email or a name that only one user has.

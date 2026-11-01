@@ -41,6 +41,7 @@
     "@holtkeeper/media": "workspace:*",
     "@holtkeeper/mr-policies": "workspace:*",
     "@holtkeeper/propagate": "workspace:*",
+    "@holtkeeper/release": "workspace:*",
     "@holtkeeper/renovate": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",

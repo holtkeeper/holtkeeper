@@ -34,6 +34,14 @@ const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', compo
 const page = <P extends string>(path: P, component: ReturnType<typeof lazyRouteComponent>) =>
   createRoute({ getParentRoute: () => appRoute, path, component })
 
+const ReleaseBoardPage = lazyRouteComponent(
+  () => import('./features/releases/ReleaseBoardPage.tsx'),
+  'ReleaseBoardPage',
+)
+const ReleaseRepoPage = lazyRouteComponent(
+  () => import('./features/releases/ReleaseRepoPage.tsx'),
+  'ReleaseRepoPage',
+)
 const DashboardPage = lazyRouteComponent(
   () => import('./features/dashboard/DashboardPage.tsx'),
   'DashboardPage',
@@ -302,6 +310,22 @@ const libraryRoute = createRoute({
     ),
 })
 
+const releaseBoardRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'release-board',
+  component: ReleaseBoardPage,
+  validateSearch: (search: Record<string, unknown>): { group?: string } =>
+    typeof search.group === 'string' && search.group ? { group: search.group } : {},
+})
+
+const releaseRepoRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'release-board/repo',
+  component: ReleaseRepoPage,
+  validateSearch: (search: Record<string, unknown>): { repo?: string } =>
+    typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {},
+})
+
 const analysisRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'analyses/$id',
@@ -319,6 +343,8 @@ const routeTree = rootRoute.addChildren([
     groupRoute,
     auditsRoute,
     page('audits/$runId', AuditRunPage),
+    releaseBoardRoute,
+    releaseRepoRoute,
     analysisPage('releases', ReleasesPage),
     bundlesRoute,
     analysisPage('assets', AssetsPage),

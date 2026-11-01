@@ -14,6 +14,7 @@
     "@holtkeeper/changes": "workspace:*",
     "@holtkeeper/depgraph": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/release": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/store": "workspace:*",
     "@holtkeeper/usages": "workspace:*",

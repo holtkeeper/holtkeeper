@@ -25,15 +25,17 @@ interface ForgeDefinition {
 
 Repositories are addressed by their full path (`games/app-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
 
-| Area                 | Methods                                                                                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                                        |
-| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                                 |
-| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                                   |
-| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                                              |
-| Tags                 | `createTag`                                                                                                                                                                    |
-| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                                             |
-| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `npmRegistry` |
+| Area                 | Methods                                                                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                                             |
+| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                                      |
+| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                                        |
+| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                                                   |
+| Tags                 | `createTag`                                                                                                                                                                         |
+| History (optional)   | `listCommits(repo, { ref, since?, limit? })`: commits reachable from `ref` and not from `since` (`git log since..ref`), newest first, as `CommitRecord`                             |
+| Releases (optional)  | `getRelease(repo, tag)`, `createRelease(repo, { tag, name, description })`, `updateRelease(repo, { tag, name?, description? })` → `ForgeRelease { tag, name, description, webUrl }` |
+| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                                                  |
+| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `npmRegistry`      |
 
 ### Listing files
 
@@ -77,7 +79,7 @@ Optional: `ensureWebhook(target, { url, secret, events })` makes sure a hook wit
 
 ## Read-only repositories
 
-`readOnlyForge(forge, isReadOnly)` returns `forge` with every change to a repository for which `isReadOnly(path)` (sync or async) is true rejected with `ReadOnlyRepositoryError` (`repo`, `operation`) before anything reaches the forge: `createBranch`, `deleteBranch`, `commit`, `createTag`, the merge request writes (`createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`), `submitReview`, `replyToDiscussion`, `resolveDiscussion`, `playJob`, `retryJob`, deploy keys (`registerSshKey` with a deploy scope, `enableDeployKey`) and project webhooks (`ensureWebhook` with `{ project }`). Reads, user keys, group webhooks and removing keys and hooks pass through; optional methods stay absent when the forge lacks them. `readOnlyDefinition(definition, isReadOnly)` does the same for every client a `ForgeDefinition` creates, including those of its `withFetch` copies.
+`readOnlyForge(forge, isReadOnly)` returns `forge` with every change to a repository for which `isReadOnly(path)` (sync or async) is true rejected with `ReadOnlyRepositoryError` (`repo`, `operation`) before anything reaches the forge: `createBranch`, `deleteBranch`, `commit`, `createTag`, `createRelease`, `updateRelease`, the merge request writes (`createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`), `submitReview`, `replyToDiscussion`, `resolveDiscussion`, `playJob`, `retryJob`, deploy keys (`registerSshKey` with a deploy scope, `enableDeployKey`) and project webhooks (`ensureWebhook` with `{ project }`). Reads, user keys, group webhooks and removing keys and hooks pass through; optional methods stay absent when the forge lacks them. `readOnlyDefinition(definition, isReadOnly)` does the same for every client a `ForgeDefinition` creates, including those of its `withFetch` copies.
 
 ## Secrets
 

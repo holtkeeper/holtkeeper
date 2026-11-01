@@ -1,4 +1,12 @@
 import type {
+  DeployState,
+  ReleaseAcceptInput,
+  ReleaseBatchInput,
+  ReleaseDeployInput,
+  ReleaseEditsInput,
+  ReleaseRepoView,
+  ReleaseStepInput,
+  ReleaseSummaryInput,
   ReleaseBackfillInput,
   ApplyChangesInput,
   AuditRunSummary,
@@ -67,6 +75,11 @@ export const keys = {
   users: ['users'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
+  releases: ['releases'] as const,
+  releaseBoard: (group?: string) => ['releases', 'board', group ?? '*'] as const,
+  releaseRepo: (repo: RepoRef) => ['releases', 'repo', repoKey(repo)] as const,
+  releaseDeploy: (repo: RepoRef, tag: string) =>
+    ['releases', 'deploy', repoKey(repo), tag] as const,
 }
 
 /** The signed-in principal and the login methods. */
@@ -1047,3 +1060,83 @@ export const useMcpUsage = (days: number) =>
     placeholderData: keepPreviousData,
     refetchInterval: 30_000,
   })
+
+const deployActive = (state: DeployState | undefined) =>
+  state?.environments.some((env) => env.status === 'pending' || env.status === 'running') ?? false
+
+/** Release state of every repository; refreshes every minute, `refresh` reads the forges again. */
+export const useReleaseBoard = (group?: string) =>
+  useQuery({
+    queryKey: keys.releaseBoard(group),
+    queryFn: () => api.releaseBoard(group ? { group } : {}),
+    placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
+  })
+
+/** Release page data of one repository; polls while a deploy of the latest version runs. */
+export const useReleaseRepo = (repo: RepoRef | undefined) =>
+  useQuery({
+    queryKey: repo ? keys.releaseRepo(repo) : ['releases', 'repo', 'none'],
+    queryFn: () => api.releaseRepo(repo!),
+    enabled: repo !== undefined,
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) => (deployActive(query.state.data?.deploy) ? 5_000 : 60_000),
+  })
+
+/** Deploy state of one version; polls while a job is pending or running. */
+export const useReleaseDeploy = (repo: RepoRef, tag: string | undefined, initial?: DeployState) =>
+  useQuery({
+    queryKey: keys.releaseDeploy(repo, tag ?? ''),
+    queryFn: () => api.releaseDeploy(repo, tag!),
+    enabled: tag !== undefined,
+    ...(initial && initial.tag === tag ? { initialData: initial } : {}),
+    refetchInterval: (query) => (deployActive(query.state.data) ? 5_000 : 30_000),
+  })
+
+/** Every release action; each refreshes the release queries when it settles. */
+export function useReleaseActions() {
+  const client = useQueryClient()
+  const onSettled = () => client.invalidateQueries({ queryKey: keys.releases })
+  return {
+    refreshBoard: useMutation({
+      mutationFn: (group?: string) =>
+        api.releaseBoard({ ...(group ? { group } : {}), refresh: true }),
+      onSuccess: (data, group) => client.setQueryData(keys.releaseBoard(group), data),
+    }),
+    edits: useMutation({
+      mutationFn: (input: ReleaseEditsInput) => api.saveReleaseEdits(input),
+      onSettled,
+    }),
+    summary: useMutation({
+      mutationFn: (input: ReleaseSummaryInput) => api.writeReleaseSummary(input),
+      onSettled,
+    }),
+    step: useMutation({
+      mutationFn: ({ step, ...input }: ReleaseStepInput & { step: 'propose' | 'version' }) =>
+        api.runReleaseStep(step, input),
+      onSettled,
+    }),
+    accept: useMutation({
+      mutationFn: (input: ReleaseAcceptInput) => api.acceptRelease(input),
+      onSettled,
+    }),
+    withdraw: useMutation({ mutationFn: (repo: RepoRef) => api.withdrawRelease(repo), onSettled }),
+    deploy: useMutation({
+      mutationFn: (input: ReleaseDeployInput) => api.startReleaseDeploy(input),
+      onSettled,
+    }),
+    batch: useMutation({
+      mutationFn: (input: ReleaseBatchInput) => api.releaseBatch(input),
+      onSettled,
+    }),
+  }
+}
+
+/** Patches the cached plan of a repository right away, before the server answers. */
+export function usePatchReleaseView() {
+  const client = useQueryClient()
+  return (repo: RepoRef, patch: (view: ReleaseRepoView) => ReleaseRepoView) =>
+    client.setQueryData<ReleaseRepoView>(keys.releaseRepo(repo), (view) =>
+      view ? patch(view) : view,
+    )
+}

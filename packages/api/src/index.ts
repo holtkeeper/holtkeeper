@@ -68,4 +68,25 @@ export type {
   TriggerDocumentData,
   Weekday,
 } from '@holtkeeper/store'
+export type {
+  Acceptance,
+  BumpReason,
+  DeployAttempt,
+  DeployState,
+  DeployStatus,
+  EnvironmentState,
+  FlowDetection,
+  GateResult,
+  PipelineState,
+  ReleaseBoardRow,
+  ReleaseEdits,
+  ReleaseEntry,
+  ReleaseEvent,
+  ReleaseEventKind,
+  ReleasePlan,
+  ReleaseSettings,
+  ReleaseStage,
+  VersionTag,
+  Bump as ReleaseBump,
+} from '@holtkeeper/release'
 export type { AuditReport, Finding, FixAttempt, IgnoredFinding, Severity } from '@holtkeeper/vuln'

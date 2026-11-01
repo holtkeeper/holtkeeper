@@ -481,6 +481,51 @@ describe('pipelines, jobs and tags', () => {
     expect(tag).toEqual({ name: 'v1.0.0', sha: project.branches.get('main')!.sha })
     expect(server.calls[0]?.body).toEqual({ tag_name: 'v1.0.0', ref: 'main', message: 'Release' })
   })
+
+  test('lists commits of a range, newest first, up to the limit', async () => {
+    const { server, forge } = setup({ perPage: 2 })
+    const project = server.addProject('g/a')
+    server.addCommits(project, 'main', ['feat: one'])
+    server.addTag(project, 'v1.0.0', { committed_date: '2026-01-01T00:00:00Z' })
+    server.addCommits(project, 'development', ['fix: two', 'feat(ui): three\n\nBody text'])
+
+    const commits = await forge.listCommits!('g/a', { ref: 'development', since: 'v1.0.0' })
+    expect(commits.map((c) => [c.title, c.parents.length])).toEqual([
+      ['feat(ui): three', 1],
+      ['fix: two', 1],
+    ])
+    expect(commits[0]).toMatchObject({
+      message: 'feat(ui): three\n\nBody text',
+      authorName: 'Fake User',
+    })
+    expect(server.calls.at(-1)?.url).toContain('ref_name=v1.0.0..development')
+    expect(await forge.listCommits!('g/a', { ref: 'development', limit: 1 })).toHaveLength(1)
+    expect(
+      ((await errorOf(forge.listCommits!('g/a', { ref: 'nope' }))) as GitLabApiError).status,
+    ).toBe(404)
+  })
+
+  test('creates, reads and updates releases', async () => {
+    const { server, forge } = setup()
+    const project = server.addProject('g/a')
+    await forge.createTag('g/a', { name: 'v1.0.0', ref: 'main' })
+    expect(await forge.getRelease!('g/a', 'v1.0.0')).toBeUndefined()
+    const created = await forge.createRelease!('g/a', {
+      tag: 'v1.0.0',
+      name: 'v1.0.0',
+      description: 'Notes',
+    })
+    expect(created).toEqual({
+      tag: 'v1.0.0',
+      name: 'v1.0.0',
+      description: 'Notes',
+      webUrl: 'https://gitlab.example.com/g/a/-/releases/v1.0.0',
+    })
+    const updated = await forge.updateRelease!('g/a', { tag: 'v1.0.0', description: 'Better' })
+    expect(updated.description).toBe('Better')
+    expect(project.releases.get('v1.0.0')?.name).toBe('v1.0.0')
+    expect((await forge.getRelease!('g/a', 'v1.0.0'))?.description).toBe('Better')
+  })
 })
 
 describe('git credentials', () => {

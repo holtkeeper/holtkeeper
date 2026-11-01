@@ -66,6 +66,8 @@ export interface ServerDeps {
   hostRunner?: CommandRunner
   /** Areas the storage overview reports, e.g. artifacts, git mirrors, the database. */
   storage?: StorageProvider[]
+  /** How often the release assistant polls a started deploy, in milliseconds. Default 15 s. */
+  releasePollMs?: number
   /** Receives work routes leave running after responding, e.g. a release backfill; for tests. */
   onBackground?: (work: Promise<unknown>) => void
   now: () => Date

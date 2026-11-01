@@ -36,6 +36,8 @@ const writes: Record<string, (args: readonly unknown[]) => string | undefined> =
   playJob: firstArgument,
   retryJob: firstArgument,
   createTag: firstArgument,
+  createRelease: firstArgument,
+  updateRelease: firstArgument,
   submitReview: firstArgument,
   replyToDiscussion: firstArgument,
   resolveDiscussion: firstArgument,
@@ -54,7 +56,7 @@ const writes: Record<string, (args: readonly unknown[]) => string | undefined> =
 
 /**
  * `forge` with every change to a read-only repository rejected with `ReadOnlyRepositoryError`
- * before it reaches the forge: branches, commits, tags, merge requests, comments, reviews, threads,
+ * before it reaches the forge: branches, commits, tags, releases, merge requests, comments, reviews, threads,
  * pipeline jobs, deploy keys and project webhooks. Reads, user keys, group webhooks and removals of
  * keys and hooks pass through. Optional methods stay absent when `forge` lacks them.
  */

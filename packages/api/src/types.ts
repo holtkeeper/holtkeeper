@@ -5,6 +5,17 @@ import type { BundlePoint, BundleSeries } from '@holtkeeper/bundles'
 import type { Conflict } from '@holtkeeper/changes'
 import type { FleetLibrary } from '@holtkeeper/depgraph'
 import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
+import type {
+  DeployState,
+  FlowDetection,
+  GateResult,
+  ReleaseBoardRow,
+  ReleaseEdits,
+  ReleaseEvent,
+  ReleasePlan,
+  ReleaseSettings,
+  VersionTag,
+} from '@holtkeeper/release'
 import type { Metric, Report } from '@holtkeeper/report'
 import type {
   ActivityEvent,
@@ -613,6 +624,99 @@ export interface ReleaseBackfillInput {
 }
 
 export type { BundlePoint, BundleSeries }
+
+/** `GET /api/releases/board?group=&repo=&refresh=`: release state of every repository the caller may read. */
+export interface ReleaseBoardView {
+  rows: ReleaseBoardRow[]
+  /** When the rows were read from the forges; rows are cached for a minute without `refresh`. */
+  readAt: string
+  dryRun: boolean
+}
+
+/** `GET /api/releases/repo?repo=`: everything the release page of one repository shows. */
+export interface ReleaseRepoView {
+  repo: RepoRef
+  row: ReleaseBoardRow
+  settings: ReleaseSettings
+  /** Plan of the release candidate merge request, when the source branch has changes. */
+  proposal?: ReleasePlan
+  /** Plan of the next version, when the target branch has unreleased changes. */
+  version?: ReleasePlan
+  /** Newest versions, for deploying or rolling back. */
+  versions: VersionTag[]
+  /** Deploy state of the latest version. */
+  deploy?: DeployState
+  /** Suggested flow when no setting names this repository or its groups. */
+  detection?: FlowDetection
+  history: ReleaseEvent[]
+  /** What the caller may do here. */
+  can: { run: boolean; configure: boolean }
+  readOnly: boolean
+  dryRun: boolean
+  /** An AI agent is configured for this repository, so summaries can be written by it. */
+  agent: boolean
+}
+
+/** `PUT /api/releases/edits`: a person's changes to the plan of one step; `null` drops them all. */
+export interface ReleaseEditsInput {
+  repo: string
+  step: 'propose' | 'version'
+  edits: ReleaseEdits | null
+}
+
+/** `POST /api/releases/summary`: has the AI agent write the summary of one step's plan. */
+export interface ReleaseSummaryInput {
+  repo: string
+  step: 'propose' | 'version'
+}
+
+/** `POST /api/releases/propose` and `/version`: runs the step; `force` overrides failing soft gates. */
+export interface ReleaseStepInput {
+  repo: string
+  force?: boolean
+}
+
+/** `POST /api/releases/accept`: accepts the target branch head for release; `DELETE` withdraws it. */
+export interface ReleaseAcceptInput {
+  repo: string
+  note?: string
+}
+
+/** `POST /api/releases/deploy`: starts the deploy job of one environment for a version. */
+export interface ReleaseDeployInput {
+  repo: string
+  tag: string
+  environment: string
+  redeploy?: boolean
+  force?: boolean
+}
+
+/** What a step did. */
+export interface ReleaseStepResult {
+  kind: 'proposed' | 'versioned' | 'accepted' | 'deploy-started'
+  url?: string
+  version?: string
+  tag?: string
+  dryRun?: boolean
+  detail: string
+}
+
+/** `POST /api/releases/batch`: runs one step for several repositories, each on its own. */
+export interface ReleaseBatchInput {
+  repos: string[]
+  step: 'propose' | 'version'
+  force?: boolean
+}
+
+export interface ReleaseBatchResult {
+  results: { repo: string; ok: boolean; result?: ReleaseStepResult; error?: string }[]
+}
+
+/** Answer of a refused step: the failing gates, so the UI can offer an override. */
+export interface ReleaseGateError {
+  error: string
+  gates?: GateResult[]
+}
 
 /**
  * `GET /api/bundles/targets?repo=`: every target the newest `bundle` records of one repository

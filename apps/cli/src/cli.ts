@@ -20,6 +20,7 @@ import {
   parseTraits,
   uploadReport,
 } from './audit.ts'
+import { releaseCommand } from './release.ts'
 import { type StartServer, serve, serveOptions } from './serve.ts'
 import { usersCommand } from './users.ts'
 
@@ -30,6 +31,7 @@ Commands:
   explain <forge>:<path>    Show groups, traits and plugin options for a repository
   audit [dir]               Scan a checkout for vulnerable dependencies (default: .)
   analyze <kind> [dir]      Run an analysis (see "Analyze options") and print its report
+  release <action>          Release assistant: status, plan, propose, accept, version, deploy
   serve                     Start the web server from the config's \`server\` section
   users <action>            Manage accounts of \`users\` sign-in in the config's store:
                             list, add <name>, login-link <user>, enroll-link <user>,
@@ -54,6 +56,23 @@ Users options:
 
 A login link signs its holder in once, without a passkey: hand it to an AI agent that drives
 the web UI. Treat it like a password until it expires.
+
+Release options:
+  --repo <forge>:<path>     Repository (status without it covers every group, or --group)
+  --group <name>            status: one config group
+  --step <propose|version>  plan: which step (default: what waits)
+  --version <x.y.z>         plan, version: use this version instead of the suggestion
+  --tag <tag>               deploy: version to deploy (default: the latest)
+  --env <name>              deploy: environment from the settings
+  --preset <ids>            Release presets laid over the stored setting, comma-separated
+  --settings <file>         JSON release settings laid over presets and the stored setting
+  --note <text>             accept: why the changes are accepted
+  --force                   Override failing gates (or the deploy order)
+  --redeploy                deploy: run again although the environment succeeded
+  --dry-run                 Show what would happen without changing the forge
+
+release plan exits with 2 while a gate fails. Settings come from the config's store when it
+has a server section; accept needs that store.
 
 Audit options:
   --fix                     Try to fix findings and rescan
@@ -114,6 +133,17 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
       admin: { type: 'boolean', default: false },
       email: { type: 'string' },
       ttl: { type: 'string' },
+      group: { type: 'string' },
+      step: { type: 'string' },
+      version: { type: 'string' },
+      tag: { type: 'string' },
+      env: { type: 'string' },
+      preset: { type: 'string' },
+      settings: { type: 'string' },
+      note: { type: 'string' },
+      force: { type: 'boolean', default: false },
+      redeploy: { type: 'boolean', default: false },
+      'dry-run': { type: 'boolean', default: false },
       ...analyzerArgOptions(builtinAnalyzers),
     },
   })
@@ -251,6 +281,10 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
           (line) => io.out(line),
         )
       }
+      case 'release':
+        return await releaseCommand(await loadConfig(values.config), args, values, (line) =>
+          io.out(line),
+        )
       case 'users':
         return await usersCommand(await loadConfig(values.config), args, values, (line) =>
           io.out(line),
