@@ -282,6 +282,9 @@ export class FakeGitLab {
     this.ciVariables.set(`${kind}:${path}`, variables)
   }
 
+  /** Push rules by project path, as `GET /projects/:id/push_rule` returns them; missing answers 404. */
+  readonly pushRules = new Map<string, Record<string, unknown> | null>()
+
   /** Container registry repositories by project path, as `GET /projects/:id/registry/repositories?tags=true` lists them. */
   readonly registry = new Map<string, { location: string; tags: string[] }[]>()
 
@@ -665,6 +668,10 @@ export class FakeGitLab {
       return this.commit(project, body)
     if (method === 'GET' && rest.join('/') === 'repository/commits')
       return this.listCommits(project, url)
+    if (method === 'GET' && rest.join('/') === 'push_rule') {
+      const rule = this.pushRules.get(project.path)
+      return rule === undefined ? json(404, { message: '404 Not Found' }) : json(200, rule)
+    }
     if (rest[0] === 'releases') {
       const releaseJson = (tag: string, release: { name: string; description: string }) => ({
         tag_name: tag,

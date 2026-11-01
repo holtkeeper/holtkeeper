@@ -16,6 +16,7 @@ import {
   fsArtifactStore,
   s3ArtifactStore,
 } from '@holtkeeper/artifacts'
+import { commitConventionsSetting } from '@holtkeeper/commit-conventions'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import {
   type TokenRotator,
@@ -325,6 +326,7 @@ export async function startServer(
       trackersSetting,
       releaseSettingsDefinition,
       releaseNotifyDefinition,
+      commitConventionsSetting,
       librariesSetting,
       ...analyzerSettings(analyzers),
       ...executionSettings(),

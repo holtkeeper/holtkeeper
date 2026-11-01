@@ -10,6 +10,12 @@ import {
   renderPackage,
   renderSymbol,
 } from '@holtkeeper/api-surface'
+import {
+  checkBranchName,
+  checkCommitMessage,
+  renderCommitConventions,
+  renderProblems,
+} from '@holtkeeper/commit-conventions'
 import { knowledgeKinds } from '@holtkeeper/knowledge'
 import { type LibraryApi, type LibraryDocs, sameVersion, thirdParty } from '@holtkeeper/libraries'
 import type { LibraryEcosystem, LibraryRef, LibraryStore, Store } from '@holtkeeper/store'
@@ -27,6 +33,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod'
 
 import type { ApiCatalog, RepoFilter } from './catalog.ts'
+import type { McpCommitContext } from './commits.ts'
 import { evaluateDependency } from './dependency.ts'
 import {
   type McpKnowledgeContext,
@@ -58,6 +65,12 @@ const instructions = [
   'The team knowledge base holds decisions, conventions, migration notes and quirks:',
   'search_knowledge before solving a problem the team may have solved, cite entries as [kb:<id>],',
   'and propose_knowledge for a reusable lesson (people review proposals before agents rely on them).',
+].join(' ')
+
+const commitInstructions = [
+  'Before writing a commit message, branch name or merge request title for a repository, call',
+  'commit_conventions for its template, rules and real examples, and check_commit_message to',
+  'verify the result.',
 ].join(' ')
 
 const libraryInstructions = [
@@ -114,6 +127,8 @@ export interface McpRequestContext {
   client?: string
   /** The third-party library index; without it the library tools are not offered. */
   library?: McpLibraryContext
+  /** Commit conventions of repositories; without it the commit tools are not offered. */
+  commits?: McpCommitContext
   now: () => Date
 }
 
@@ -160,10 +175,16 @@ const optional = <T extends Record<string, unknown>>(input: T) =>
   Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as T
 
 function buildServer(context: McpRequestContext) {
-  const { catalog, usages, canRead, library } = context
+  const { catalog, usages, canRead, library, commits } = context
   const server = new McpServer(
     { name: 'holtkeeper', version: '1.0.0' },
-    { instructions: library ? `${instructions} ${libraryInstructions}` : instructions },
+    {
+      instructions: [
+        instructions,
+        ...(commits ? [commitInstructions] : []),
+        ...(library ? [libraryInstructions] : []),
+      ].join(' '),
+    },
   )
 
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the SDK's overloads infer arguments from its own zod typings; it validates them against the shape
@@ -829,6 +850,62 @@ function buildServer(context: McpRequestContext) {
     ({ repo }) => repo,
     { readOnly: false },
   )
+
+  if (commits) {
+    const conventionsOf = async (repo: string, limit?: number) => {
+      const found = await commits.conventions(repo, limit)
+      if (!found)
+        throw new ToolError(
+          `No readable repository ${repo}; pass forge:path, e.g. gitlab:group/app.`,
+        )
+      return found
+    }
+    const conventionsRepoArg = z.string().min(1).describe('The repository, as forge:path')
+
+    tool(
+      'commit_conventions',
+      'How commit messages and branch names of a repository should look: a template, rules with where each comes from (team setting, forge push rules, commitlint, recent history), real examples that follow them and team notes. Use before committing, naming a branch or titling a merge request.',
+      {
+        repo: conventionsRepoArg,
+        commits: z
+          .number()
+          .int()
+          .min(20)
+          .max(500)
+          .optional()
+          .describe('Recent commits of the default branch to learn from; default 100'),
+      },
+      async ({ repo, commits: limit }) => renderCommitConventions(await conventionsOf(repo, limit)),
+      ({ repo }) => repo,
+    )
+
+    tool(
+      'check_commit_message',
+      'Checks a commit message and/or a branch name against the conventions of a repository; errors break configured or enforced rules, warnings only differ from what recent history does.',
+      {
+        repo: conventionsRepoArg,
+        message: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('The whole commit message or a merge request title'),
+        branch: z.string().min(1).optional().describe('A branch name'),
+      },
+      async ({ repo, message, branch }) => {
+        if (!message && !branch) throw new ToolError('Pass message, branch or both.')
+        const conventions = await conventionsOf(repo)
+        return renderProblems([
+          ...(message
+            ? [{ what: 'Message', problems: checkCommitMessage(conventions.commit, message) }]
+            : []),
+          ...(branch
+            ? [{ what: 'Branch', problems: checkBranchName(conventions.branch, branch) }]
+            : []),
+        ])
+      },
+      ({ repo }) => repo,
+    )
+  }
 
   if (library) {
     const { docs } = library

@@ -245,6 +245,13 @@ const commitRecordSchema = z.object({
   message: z.string().nullable().optional(),
   web_url: z.string().nullable().optional(),
 })
+const pushRuleSchema = z
+  .object({
+    commit_message_regex: z.string().nullable().optional(),
+    commit_message_negative_regex: z.string().nullable().optional(),
+    branch_name_regex: z.string().nullable().optional(),
+  })
+  .nullish()
 const releaseSchema = z.object({
   tag_name: z.string(),
   name: z.string().nullable().optional(),
@@ -1013,6 +1020,24 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         message: commit.message ?? commit.title,
         ...(commit.web_url ? { webUrl: commit.web_url } : {}),
       }))
+    },
+
+    async getPushRules(repo) {
+      let rule: z.infer<typeof pushRuleSchema>
+      try {
+        rule = await client.json('GET', `${project(repo)}/push_rule`, pushRuleSchema)
+      } catch (error) {
+        if (isDenied(error)) return undefined
+        throw error
+      }
+      const rules = {
+        ...(rule?.commit_message_regex ? { commitMessage: rule.commit_message_regex } : {}),
+        ...(rule?.commit_message_negative_regex
+          ? { commitMessageNegative: rule.commit_message_negative_regex }
+          : {}),
+        ...(rule?.branch_name_regex ? { branchName: rule.branch_name_regex } : {}),
+      }
+      return Object.keys(rules).length ? rules : undefined
     },
 
     async getRelease(repo, tag) {

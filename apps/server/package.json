@@ -22,6 +22,7 @@
     "@holtkeeper/bundles": "workspace:*",
     "@holtkeeper/changelog": "workspace:*",
     "@holtkeeper/changes": "workspace:*",
+    "@holtkeeper/commit-conventions": "workspace:*",
     "@holtkeeper/confluence": "workspace:*",
     "@holtkeeper/core": "workspace:*",
     "@holtkeeper/credentials": "workspace:*",

@@ -64,6 +64,7 @@
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
         "@holtkeeper/confluence": "workspace:*",
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/credentials": "workspace:*",
@@ -469,6 +470,14 @@
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/commit-conventions": {
+      "name": "@holtkeeper/commit-conventions",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/forge": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -1302,6 +1311,8 @@
     "@holtkeeper/ci-jobs": ["@holtkeeper/ci-jobs@workspace:packages/ci-jobs"],
 
     "@holtkeeper/cli": ["@holtkeeper/cli@workspace:apps/cli"],
+
+    "@holtkeeper/commit-conventions": ["@holtkeeper/commit-conventions@workspace:packages/commit-conventions"],
 
     "@holtkeeper/confluence": ["@holtkeeper/confluence@workspace:packages/confluence"],
 

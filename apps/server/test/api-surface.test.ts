@@ -27,8 +27,23 @@ import { aesVault } from '@holtkeeper/vault'
 import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { createApp } from '../src/app.ts'
 
+const workForge = {
+  getRepository: async (path: string) => ({ path, defaultBranch: 'main' }),
+  readFile: async () => undefined,
+  listCommits: async () =>
+    Array.from({ length: 12 }, (_, i) => ({
+      parents: ['p'],
+      title: `feat(scene): [GAME-${i}] add level ${i}`,
+      message: `feat(scene): [GAME-${i}] add level ${i}`,
+    })),
+  listBranches: async () => [],
+  getPushRules: async () => ({ branchName: '^(feat|fix)/' }),
+}
+
 const config = parseConfig({
-  forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
+  forges: {
+    work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => workForge as never },
+  },
   groups: {
     libs: { forge: 'work', include: ['libs/ui'] },
     games: { forge: 'work', include: ['games/a'] },
@@ -335,6 +350,8 @@ describe('MCP endpoint', () => {
       'search_knowledge',
       'get_knowledge',
       'propose_knowledge',
+      'commit_conventions',
+      'check_commit_message',
     ])
 
     const packages = await callTool('list_packages', {}, bearer)
@@ -821,5 +838,36 @@ describe('API catalog index', () => {
     reads.length = 0
     await catalog.rescan()
     expect(reads).toEqual([added.id])
+  })
+})
+
+describe('commit conventions', () => {
+  test('combine the setting with history and check messages', async () => {
+    await store.settings.put({
+      id: 'conventions',
+      key: 'commits.conventions',
+      scope: { repos: ['work:games/a'] },
+      value: { commit: { maxLength: 50 }, notes: 'Squash merge requests.' },
+      secret: false,
+      updatedAt: now.toISOString(),
+    })
+    const listed = await callTool('commit_conventions', { repo: 'work:games/a' }, asGames)
+    const text = listed.content[0]?.text ?? ''
+    expect(text).toContain('Template: `<type>(<scope>): [<TICKET>] <subject>`')
+    expect(text).toContain('- Title at most 50 characters _(team setting)_')
+    expect(text).toContain('`feat(scene): [GAME-0] add level 0`')
+    expect(text).toContain('Squash merge requests.')
+
+    const checked = await callTool(
+      'check_commit_message',
+      { repo: 'work:games/a', message: 'Add level', branch: 'levels' },
+      asGames,
+    )
+    expect(checked.content[0]?.text).toContain('error: The branch name must match `^(feat|fix)/`')
+    expect(checked.content[0]?.text).toContain('warning: The title must look like')
+
+    expect((await callTool('commit_conventions', { repo: 'work:libs/ui' }, asGames)).isError).toBe(
+      true,
+    )
   })
 })

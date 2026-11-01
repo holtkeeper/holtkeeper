@@ -16,6 +16,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
 import { createApiCatalog } from '../api-surface/catalog.ts'
+import { type McpCommitContext, commitConventionsReader } from '../api-surface/commits.ts'
 import type { McpKnowledgeContext } from '../api-surface/knowledge.ts'
 import { type McpLibraryContext, handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
@@ -26,6 +27,7 @@ import {
   type Env,
   type ServerDeps,
   authorize,
+  forgeFor,
   principalOf,
   publicUrlOf,
   parseRepo,
@@ -88,6 +90,21 @@ export function createApiSurface(deps: ServerDeps) {
     return tokens
   }
   const endpointOf = (c: AppContext) => `${publicUrlOf(deps, c)}/mcp`
+
+  const conventions = commitConventionsReader({
+    forgeOf: (forge) => forgeFor(config, forge),
+    settings: store.settings,
+    now: deps.now,
+  })
+  const commitContext = (principal: Principal): McpCommitContext => ({
+    conventions: async (value, commits) => {
+      const separator = value.indexOf(':')
+      if (separator < 1 || separator === value.length - 1) return undefined
+      const repo = { forge: value.slice(0, separator), path: value.slice(separator + 1) }
+      if (!config.forges[repo.forge] || !readable(principal)(repo)) return undefined
+      return conventions(repoTarget(config, repo), commits)
+    },
+  })
 
   const libraryContext = (principal: Principal): McpLibraryContext | undefined => {
     const artifacts = deps.artifacts
@@ -297,6 +314,7 @@ export function createApiSurface(deps: ServerDeps) {
       usage,
       store,
       knowledge: knowledgeContext(principal),
+      commits: commitContext(principal),
       principal,
       canRead: readable(principal),
       canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),

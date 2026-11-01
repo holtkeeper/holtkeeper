@@ -255,6 +255,19 @@ export interface CommitQuery {
   limit?: number
 }
 
+/**
+ * Rules the forge enforces on every push, as regular expression sources in the forge's own
+ * dialect (GitLab: RE2). Absent fields are not enforced.
+ */
+export interface PushRules {
+  /** Every commit message must match. */
+  commitMessage?: string
+  /** No commit message may match. */
+  commitMessageNegative?: string
+  /** Names of new branches must match. */
+  branchName?: string
+}
+
 /** A release the forge shows for a tag. */
 export interface ForgeRelease {
   tag: string
@@ -453,6 +466,11 @@ export interface GitForge {
    * `ref` does not exist.
    */
   listCommits?(repo: string, query: CommitQuery): Promise<CommitRecord[]>
+  /**
+   * The push rules of the repository; `undefined` when it has none or the forge, its edition or the
+   * token cannot read them.
+   */
+  getPushRules?(repo: string): Promise<PushRules | undefined>
 
   // Releases. Optional so forges can add them one by one.
 

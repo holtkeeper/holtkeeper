@@ -25,17 +25,18 @@ interface ForgeDefinition {
 
 Repositories are addressed by their full path (`games/app-x`), merge requests by their per-repository number (GitLab `iid`, GitHub PR number). The terms follow GitLab — merge request, pipeline, job — and adapters map them to their provider.
 
-| Area                 | Methods                                                                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Repositories         | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                                             |
-| Branches and commits | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                                      |
-| Merge requests       | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                                        |
-| Pipelines            | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                                                   |
-| Tags                 | `createTag`                                                                                                                                                                         |
-| History (optional)   | `listCommits(repo, { ref, since?, limit? })`: commits reachable from `ref` and not from `since` (`git log since..ref`), newest first, as `CommitRecord`                             |
-| Releases (optional)  | `getRelease(repo, tag)`, `createRelease(repo, { tag, name, description })`, `updateRelease(repo, { tag, name?, description? })` → `ForgeRelease { tag, name, description, webUrl }` |
-| Account (optional)   | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                                                  |
-| Insights (optional)  | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `npmRegistry`      |
+| Area                  | Methods                                                                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repositories          | `listRepositories`, `getRepository`, `readFile`, `listFiles` (optional)                                                                                                             |
+| Branches and commits  | `createBranch`, `deleteBranch`, `commit` (several file changes in one commit, through the API)                                                                                      |
+| Merge requests        | `findMergeRequest`, `createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`                                                                        |
+| Pipelines             | `listPipelines` (`ref`, `sha`, `updatedAfter`), `listJobs`, `playJob`, `retryJob`                                                                                                   |
+| Tags                  | `createTag`                                                                                                                                                                         |
+| History (optional)    | `listCommits(repo, { ref, since?, limit? })`: commits reachable from `ref` and not from `since` (`git log since..ref`), newest first, as `CommitRecord`                             |
+| Push rules (optional) | `getPushRules(repo)`: the regular expressions the forge enforces on commit messages and new branch names (`PushRules`), `undefined` when there are none or they cannot be read      |
+| Releases (optional)   | `getRelease(repo, tag)`, `createRelease(repo, { tag, name, description })`, `updateRelease(repo, { tag, name?, description? })` → `ForgeRelease { tag, name, description, webUrl }` |
+| Account (optional)    | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                                                  |
+| Insights (optional)   | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `npmRegistry`      |
 
 ### Listing files
 

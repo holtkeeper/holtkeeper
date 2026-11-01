@@ -505,6 +505,25 @@ describe('pipelines, jobs and tags', () => {
     ).toBe(404)
   })
 
+  test('reads push rules', async () => {
+    const { server, forge } = setup()
+    server.addProject('g/a')
+    server.addProject('g/b')
+    server.addProject('g/c')
+    server.pushRules.set('g/a', {
+      commit_message_regex: '^(feat|fix): ',
+      commit_message_negative_regex: '',
+      branch_name_regex: '^(feat|fix)/',
+    })
+    server.pushRules.set('g/b', { commit_message_regex: null })
+    expect(await forge.getPushRules!('g/a')).toEqual({
+      commitMessage: '^(feat|fix): ',
+      branchName: '^(feat|fix)/',
+    })
+    expect(await forge.getPushRules!('g/b')).toBeUndefined()
+    expect(await forge.getPushRules!('g/c')).toBeUndefined()
+  })
+
   test('creates, reads and updates releases', async () => {
     const { server, forge } = setup()
     const project = server.addProject('g/a')
