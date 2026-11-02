@@ -32,6 +32,8 @@ export class FakeForge {
   readonly releases = new Map<string, ForgeRelease>()
   readonly files = new Map<string, string>()
   readonly calls: string[] = []
+  /** Merge request notes by id, as last written. */
+  readonly notes = new Map<number, { mergeRequest: number; body: string }>()
   private counter = 0
   private clock = Date.parse('2026-10-01T00:00:00Z')
 
@@ -181,6 +183,14 @@ export class FakeForge {
     },
     mergeMergeRequest: unsupported,
     commentOnMergeRequest: unsupported,
+    postMergeRequestNote: async (_repo, mergeRequest, body) => {
+      const noteId = this.notes.size + 1
+      this.notes.set(noteId, { mergeRequest, body })
+      return { noteId }
+    },
+    updateMergeRequestNote: async (_repo, mergeRequest, noteId, body) => {
+      this.notes.set(noteId, { mergeRequest, body })
+    },
     listPipelines: async (_repo, query) =>
       this.pipelines.filter((pipeline) => !query.ref || pipeline.ref === query.ref),
     listJobs: async (_repo, id) => this.jobs.get(id) ?? [],

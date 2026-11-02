@@ -21,7 +21,7 @@ const projectSchema = z.object({
   web_url: z.string().optional(),
   default_branch: z.string().optional(),
 })
-const userSchema = z.object({ username: z.string() }).optional()
+const userSchema = z.object({ username: z.string(), id: z.number().optional() }).optional()
 
 const tagPushSchema = z.object({
   object_kind: z.literal('tag_push'),
@@ -251,6 +251,7 @@ async function parseGitlab(
         mergeRequestState: mrState(mr.state),
         ...(head && { headSha: head }),
         author: hook.user?.username ?? '',
+        ...(hook.user?.id !== undefined && { authorId: String(hook.user.id) }),
         body: note.note,
         ...(note.discussion_id && { discussionId: note.discussion_id }),
         inThread: note.type === 'DiffNote' || note.type === 'DiscussionNote',

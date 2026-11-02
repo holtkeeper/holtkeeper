@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
+import { rootPrincipal } from '@holtkeeper/access'
 import { noAuth } from '@holtkeeper/auth-none'
+import { commandOptions, parseCommandLine } from '@holtkeeper/chat'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import type { Discussion, GitForge } from '@holtkeeper/forge'
+import { createIdentities } from '@holtkeeper/identities'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -12,7 +15,6 @@ import { z } from 'zod'
 
 import { createApp } from '../src/app.ts'
 import type { JobAnalyzerInfo } from '../src/context.ts'
-import { commandOptions, parseCommand } from '../src/events.ts'
 
 const HEAD = 'c'.repeat(40)
 
@@ -168,13 +170,13 @@ beforeEach(() => {
 })
 
 describe('parsing commands', () => {
-  test('parseCommand finds the first command line', () => {
-    expect(parseCommand('Please\n/holtkeeper port web  api\nthanks')).toEqual({
+  test('parseCommandLine finds the first command line', () => {
+    expect(parseCommandLine('Please\n/holtkeeper port web  api\nthanks')).toEqual({
       name: 'port',
       args: ['web', 'api'],
     })
-    expect(parseCommand('/holtkeeper review')).toEqual({ name: 'review', args: [] })
-    expect(parseCommand('see /holtkeeper review')).toBeUndefined()
+    expect(parseCommandLine('/holtkeeper review')).toEqual({ name: 'review', args: [] })
+    expect(parseCommandLine('see /holtkeeper review')).toBeUndefined()
   })
 
   test('commandOptions maps positional and key=value arguments', () => {
@@ -287,7 +289,7 @@ describe('note events', () => {
       },
     ])
     expect(notes[0]?.body).toContain('Queued `port`')
-    expect(notes[0]?.body).toContain('holtkeeper:review')
+    expect(notes[0]?.body).toContain('holtkeeper:chat')
     expect((await store.activity.list())[0]?.action).toBe('job.command')
   })
 
@@ -298,12 +300,54 @@ describe('note events', () => {
     expect(await ignored(await hook('Note Hook', noteEvent('/holtkeeper deploy')))).toContain(
       'unknown command',
     )
-    expect(notes.at(-1)?.body).toContain('Available: `review`, `port`')
+    expect(notes.at(-1)?.body).toContain('Unknown command `deploy`')
+    expect(notes.at(-1)?.body).toContain('`/holtkeeper port [targets]`')
     expect(
       await ignored(await hook('Note Hook', noteEvent('/holtkeeper review mode=fast'))),
     ).toContain('invalid')
     expect(notes.at(-1)?.body).toContain('Could not run')
     expect(await jobs()).toHaveLength(1)
+  })
+
+  test('release needs a verified linked account, verify links one', async () => {
+    expect(await ignored(await hook('Note Hook', noteEvent('/holtkeeper release')))).toBe(
+      'command release denied: not-linked',
+    )
+    expect(notes.at(-1)?.body).toContain('account is not linked')
+
+    const accounts = store.externalAccounts
+    if (!accounts) throw new Error('the memory store keeps external accounts')
+    const identities = createIdentities({ accounts, now: () => new Date() })
+    const root = rootPrincipal('none')
+    const linked = await identities.link(root, { provider: 'gitlab:work', externalId: '2' })
+    const { code } = await identities.issueChallenge(root, linked.id)
+    expect((await hook('Note Hook', noteEvent(`/holtkeeper verify ${code}`))).status).toBe(202)
+    expect(notes.at(-1)?.body).toContain('Your account is verified.')
+    expect((await accounts.find('gitlab:work', '2'))?.verification).toBe('challenge')
+    expect((await store.activity.list())[0]?.action).toBe('chat.command')
+  })
+
+  test('replies in chat threads are left alone', async () => {
+    discussions = [
+      {
+        id: 'disc-1',
+        resolvable: true,
+        resolved: false,
+        notes: [
+          {
+            id: 1,
+            author: 'holtkeeper',
+            body: 'Deploying <!-- holtkeeper:chat -->',
+            createdAt: '',
+            system: false,
+          },
+          { id: 2, author: 'jane', body: 'Thanks', createdAt: '', system: false },
+        ],
+      },
+    ]
+    expect(
+      await ignored(await hook('Note Hook', noteEvent('Thanks', { type: 'DiscussionNote' }))),
+    ).toContain('not started by Holtkeeper')
   })
 
   test('a reply in our thread queues a reply job', async () => {

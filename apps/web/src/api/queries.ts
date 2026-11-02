@@ -1,4 +1,5 @@
 import type {
+  DigestInput,
   DeployState,
   ReleaseAcceptInput,
   ReleaseBatchInput,
@@ -42,6 +43,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 
+import { hasLiveCards } from '../lib/chat.ts'
 import { repoKey } from '../lib/repo.ts'
 import { type AiUsageQuery, type AuditLogQuery, type ConfigCollections, api } from './endpoints.ts'
 
@@ -72,6 +74,8 @@ export const keys = {
   egressCache: ['egress-cache'] as const,
   libraries: ['libraries'] as const,
   accounts: ['accounts'] as const,
+  chat: ['chat'] as const,
+  digests: ['digests'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
@@ -780,6 +784,60 @@ export function useReindexLibraries() {
 }
 
 /** External accounts (GitLab, GitHub, Slack, ...) linked to the signed-in principal. */
+/** Every digest, the analysis kinds sections can read and the presets. */
+export const useDigests = () => useQuery({ queryKey: keys.digests, queryFn: api.digests })
+
+/** What a digest being edited would send now; previous previews stay while a new one loads. */
+export const useDigestPreview = (input: DigestInput | undefined, digestId?: string) =>
+  useQuery({
+    queryKey: [...keys.digests, 'preview', digestId, input],
+    queryFn: ({ signal }) =>
+      api.previewDigest({ ...input!, ...(digestId && { id: digestId }) }, signal),
+    enabled: input !== undefined,
+    placeholderData: keepPreviousData,
+    retry: false,
+  })
+
+/** Create, change, delete and send digests; each refreshes the list. */
+export function useDigestMutations() {
+  const client = useQueryClient()
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.digests })
+  return {
+    create: useMutation({ mutationFn: api.createDigest, onSuccess }),
+    update: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: DigestInput }) =>
+        api.updateDigest(id, input),
+      onSuccess,
+    }),
+    remove: useMutation({ mutationFn: api.deleteDigest, onSuccess }),
+    send: useMutation({ mutationFn: api.sendDigest, onSuccess }),
+  }
+}
+
+/** The signed-in person's chat; polls every 3 s while a card shows unfinished steps, else 20 s. */
+export const useChat = () =>
+  useQuery({
+    queryKey: keys.chat,
+    queryFn: api.chat,
+    refetchInterval: (query) =>
+      hasLiveCards(query.state.data?.messages ?? [], new Date()) ? 3_000 : 20_000,
+  })
+
+/** Sends a command to the chat, or forgets the conversation; both refresh it. */
+export function useChatMutations() {
+  const client = useQueryClient()
+  return {
+    send: useMutation({
+      mutationFn: api.sendChat,
+      onSuccess: (conversation) => client.setQueryData(keys.chat, conversation),
+    }),
+    clear: useMutation({
+      mutationFn: api.clearChat,
+      onSuccess: () => client.invalidateQueries({ queryKey: keys.chat }),
+    }),
+  }
+}
+
 export const useAccounts = (enabled = true) =>
   useQuery({ queryKey: keys.accounts, queryFn: api.accounts, enabled, retry: false })
 

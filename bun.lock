@@ -64,11 +64,14 @@
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
+        "@holtkeeper/chat": "workspace:*",
+        "@holtkeeper/chat-slack": "workspace:*",
         "@holtkeeper/commit-conventions": "workspace:*",
         "@holtkeeper/confluence": "workspace:*",
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/credentials": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
+        "@holtkeeper/digest": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
         "@holtkeeper/fleet": "workspace:*",
@@ -326,7 +329,9 @@
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
+        "@holtkeeper/chat": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
+        "@holtkeeper/digest": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/release": "workspace:*",
         "@holtkeeper/report": "workspace:*",
@@ -463,6 +468,25 @@
         "diff": "^9.0.0",
       },
     },
+    "packages/chat": {
+      "name": "@holtkeeper/chat",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/chat-slack": {
+      "name": "@holtkeeper/chat-slack",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/chat": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/notify": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/ci-jobs": {
       "name": "@holtkeeper/ci-jobs",
       "version": "0.0.0",
@@ -556,6 +580,19 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/depgraph": "workspace:*",
+      },
+    },
+    "packages/digest": {
+      "name": "@holtkeeper/digest",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/chat": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "croner": "^9",
+        "zod": "^4.6.7",
       },
     },
     "packages/exec": {
@@ -1322,6 +1359,10 @@
 
     "@holtkeeper/changes": ["@holtkeeper/changes@workspace:packages/changes"],
 
+    "@holtkeeper/chat": ["@holtkeeper/chat@workspace:packages/chat"],
+
+    "@holtkeeper/chat-slack": ["@holtkeeper/chat-slack@workspace:packages/chat-slack"],
+
     "@holtkeeper/ci-jobs": ["@holtkeeper/ci-jobs@workspace:packages/ci-jobs"],
 
     "@holtkeeper/cli": ["@holtkeeper/cli@workspace:apps/cli"],
@@ -1343,6 +1384,8 @@
     "@holtkeeper/depgraph-go": ["@holtkeeper/depgraph-go@workspace:packages/depgraph-go"],
 
     "@holtkeeper/depgraph-js": ["@holtkeeper/depgraph-js@workspace:packages/depgraph-js"],
+
+    "@holtkeeper/digest": ["@holtkeeper/digest@workspace:packages/digest"],
 
     "@holtkeeper/docs": ["@holtkeeper/docs@workspace:docs"],
 

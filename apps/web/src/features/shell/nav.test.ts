@@ -15,6 +15,7 @@ test('hides items the principal cannot use and Users outside the users provider'
   expect(visibleNav(principal, { provider: 'users', methods: [] }).map((i) => i.label)).toEqual([
     'Dashboard',
     'Activity',
+    'Chat',
     'Audits',
     'MCP server',
     'Users',
@@ -30,6 +31,7 @@ test('hides items the principal cannot use and Users outside the users provider'
     'Fleet',
     'Tech stack',
     'Activity',
+    'Chat',
     'Licenses',
     'Code quality',
     'Test coverage',
@@ -52,7 +54,7 @@ test('hides items the principal cannot use and Users outside the users provider'
 test('groups visible items under their headings and drops empty ones', () => {
   const groups = groupNav(visibleNav(principal, { provider: 'users', methods: [] }))
   expect(groups.map((g) => [g.section, g.items.map((i) => i.label)])).toEqual([
-    ['Overview', ['Dashboard', 'Activity']],
+    ['Overview', ['Dashboard', 'Activity', 'Chat']],
     ['Security', ['Audits']],
     ['MCP', ['MCP server']],
     ['Admin', ['Users']],

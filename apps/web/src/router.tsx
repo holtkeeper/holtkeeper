@@ -34,6 +34,11 @@ const appRoute = createRoute({ getParentRoute: () => rootRoute, id: 'app', compo
 const page = <P extends string>(path: P, component: ReturnType<typeof lazyRouteComponent>) =>
   createRoute({ getParentRoute: () => appRoute, path, component })
 
+const ChatPage = lazyRouteComponent(() => import('./features/chat/ChatPage.tsx'), 'ChatPage')
+const DigestsPage = lazyRouteComponent(
+  () => import('./features/digests/DigestsPage.tsx'),
+  'DigestsPage',
+)
 const ReleaseBoardPage = lazyRouteComponent(
   () => import('./features/releases/ReleaseBoardPage.tsx'),
   'ReleaseBoardPage',
@@ -378,6 +383,8 @@ const routeTree = rootRoute.addChildren([
     page('users', UsersPage),
     page('account', AccountPage),
     page('activity', ActivityPage),
+    page('chat', ChatPage),
+    page('digests', DigestsPage),
   ]),
 ])
 

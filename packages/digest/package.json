@@ -1,0 +1,18 @@
+{
+  "name": "@holtkeeper/digest",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/chat": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "croner": "^9",
+    "zod": "^4.6.7"
+  }
+}

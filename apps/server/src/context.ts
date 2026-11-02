@@ -4,6 +4,7 @@ import type { Agent, AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@
 import type { JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
+import type { SlackFetch } from '@holtkeeper/chat-slack'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
 import type { CommandRunner } from '@holtkeeper/exec'
@@ -71,6 +72,8 @@ export interface ServerDeps {
   releasePollMs?: number
   /** Receives work routes leave running after responding, e.g. a release backfill; for tests. */
   onBackground?: (work: Promise<unknown>) => void
+  /** `fetch` of Slack Web API calls; for tests. */
+  slackFetch?: SlackFetch
   now: () => Date
 }
 

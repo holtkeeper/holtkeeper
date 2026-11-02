@@ -193,7 +193,7 @@ const outcomeOf = (status: number): AuditOutcome =>
   status === 401 || status === 403 ? 'denied' : status >= 400 ? 'error' : 'ok'
 
 function viaOf(c: AppContext, path: string): AuditVia {
-  if (path.startsWith('/api/webhooks')) return 'webhook'
+  if (path.startsWith('/api/webhooks') || path.startsWith('/api/chat/slack')) return 'webhook'
   return c.req.header('sec-fetch-site') !== undefined ? 'ui' : 'api'
 }
 

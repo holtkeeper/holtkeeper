@@ -360,6 +360,8 @@ export interface ReviewComment {
 export interface DiscussionNote {
   id: number | string
   author: string
+  /** The author's stable user id, when the forge reports it. */
+  authorId?: string
   body: string
   createdAt: string
   system: boolean
@@ -505,6 +507,18 @@ export interface GitForge {
   /** Posts all comments as one review where the forge supports batching (GitLab draft notes). */
   submitReview?(repo: string, id: number, review: ReviewSubmission): Promise<ReviewOutcome>
   replyToDiscussion?(repo: string, id: number, discussionId: string, body: string): Promise<void>
+  /**
+   * Posts a note on a merge request: a reply in `discussionId` when given, else a standalone
+   * comment that is not a resolvable thread. Returns the note id for `updateMergeRequestNote`.
+   */
+  postMergeRequestNote?(
+    repo: string,
+    id: number,
+    body: string,
+    options?: { discussionId?: string },
+  ): Promise<{ noteId: number; discussionId?: string }>
+  /** Replaces the body of a note of the token's own account. */
+  updateMergeRequestNote?(repo: string, id: number, noteId: number, body: string): Promise<void>
   resolveDiscussion?(
     repo: string,
     id: number,
@@ -633,6 +647,8 @@ export interface NoteAddedEvent {
   mergeRequestState: MergeRequestState
   headSha?: string
   author: string
+  /** The author's stable user id (numeric on GitLab), when the source reports it. */
+  authorId?: string
   body: string
   discussionId?: string
   /** The note is part of a thread (a diff or discussion note), not a standalone comment. */

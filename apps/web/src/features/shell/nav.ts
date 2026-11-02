@@ -22,6 +22,8 @@ import {
   LibraryBig,
   ListChecks,
   type LucideIcon,
+  MessagesSquare,
+  Newspaper,
   MousePointerClick,
   Network,
   PackageCheck,
@@ -90,6 +92,8 @@ export interface NavItem {
     | '/users'
     | '/audit-log'
     | '/activity'
+    | '/chat'
+    | '/digests'
   /** Sidebar heading the entry is listed under. */
   section: NavSection
   label: string
@@ -140,6 +144,21 @@ const navItems: readonly NavItem[] = [
     brand: 'activity',
     label: 'Activity',
     icon: Activity,
+  },
+  {
+    section: 'Overview',
+    to: '/chat',
+    brand: 'holtkeeper',
+    label: 'Chat',
+    icon: MessagesSquare,
+  },
+  {
+    section: 'Overview',
+    to: '/digests',
+    brand: 'activity',
+    label: 'Digests',
+    icon: Newspaper,
+    requires: 'settings:read',
   },
   {
     section: 'Security',

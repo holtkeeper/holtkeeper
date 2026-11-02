@@ -195,6 +195,33 @@ describe('discussions', () => {
   })
 })
 
+describe('editable notes', () => {
+  test('posts a standalone note and edits it', async () => {
+    const { server, forge, mr } = setup()
+    const posted = await forge.postMergeRequestNote('g/a', 1, 'Deploying')
+    expect(server.calls.at(-1)).toMatchObject({ method: 'POST', url: `${API}/notes` })
+    expect(posted.discussionId).toBeUndefined()
+    await forge.updateMergeRequestNote('g/a', 1, posted.noteId, 'Deployed')
+    expect(server.calls.at(-1)).toMatchObject({
+      method: 'PUT',
+      url: `${API}/notes/${posted.noteId}`,
+      body: { body: 'Deployed' },
+    })
+    expect(mr.notes).toEqual(['Deployed'])
+  })
+
+  test('replies in a thread and edits the reply', async () => {
+    const { forge, server, mr } = setup()
+    const discussion = server.addDiscussion(mr, [{ body: 'q' }])
+    const reply = await forge.postMergeRequestNote('g/a', 1, 'More', {
+      discussionId: discussion.id,
+    })
+    expect(reply.discussionId).toBe(discussion.id)
+    await forge.updateMergeRequestNote('g/a', 1, reply.noteId, 'Less')
+    expect(discussion.notes.map((n) => n.body)).toEqual(['q', 'Less'])
+  })
+})
+
 const draftBodies = (server: FakeGitLab) =>
   server.calls
     .filter((c) => c.method === 'POST' && c.url === `${API}/draft_notes`)

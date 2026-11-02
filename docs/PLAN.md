@@ -149,7 +149,7 @@ Status: scanner, fixers, allowlist and `holtkeeper audit` exist (see [packages/v
 
 ### 5. Releases
 
-Status: the release assistant ([packages/release](../packages/release/docs/README.md)) proposes the next version from conventional commits, builds the changelog of unique messages and a summary, opens or updates the `develop → main` candidate merge request, creates versions after a configurable acceptance (person, API/CLI, label or merge), deploys through the tag pipeline's manual jobs and follows them; the **Release board** in the web UI, `holtkeeper release` in the CLI. Not done: chat bot buttons.
+Status: the release assistant ([packages/release](../packages/release/docs/README.md)) proposes the next version from conventional commits, builds the changelog of unique messages and a summary, opens or updates the `develop → main` candidate merge request, creates versions after a configurable acceptance (person, API/CLI, label or merge), deploys through the tag pipeline's manual jobs and follows them; the **Release board** in the web UI, `holtkeeper release` in the CLI. Chat: `/holtkeeper release` in merge requests shows the state and runs the steps with confirmations, and a deploy card is edited in place as the deploy runs. In Slack the same commands run from `/holtkeeper`, mentions, direct messages and buttons, with form modals, and the panel has its own **Chat** page.
 
 - Creating a `develop → main` MR with a changelog from commits/MRs, readiness checks (green pipeline, no open blockers).
 - After merge: a tag following the project scheme (semver/calver/custom), a release with notes.
@@ -176,7 +176,8 @@ Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run o
 - **CLI** — the first interface: `run <plugin>`, `--repo`/`--group`, `--dry-run`, `validate-config`, `explain`, `audit`, `serve`.
 - **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and activity; audit ingestion; credential rotation._
 - **Web** — repositories and their state per plugin, run history with logs, manual runs, confirmations, audit allowlist, release dashboard. _Started: dashboard, audit reports, repositories, credentials, settings, users, activity._
-- **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters.
+- **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters. _Started: [@holtkeeper/chat](../packages/chat/docs/README.md) with commands, cards, forms and the merge request surface; `release`, `verify` and `jobs.commands` run through it; Slack through [@holtkeeper/chat-slack](../packages/chat-slack/docs/README.md), talking to the Web API directly (the router and cards are ours, so Chat SDK would only add its own state store and a smaller form model)._
+- **Digests** — scheduled summaries of what analyses found (license problems, images to optimize, stale merge requests…) per group of repositories, to Slack channels and panel chats. _Started: [@holtkeeper/digest](../packages/digest/docs/README.md), the **Digests** page with presets and a live preview, sending on the leader._
 
 ### Access
 

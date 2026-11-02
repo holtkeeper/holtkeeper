@@ -3,7 +3,9 @@ import type { ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface
 import type { AuthInfo } from '@holtkeeper/auth'
 import type { BundlePoint, BundleSeries } from '@holtkeeper/bundles'
 import type { Conflict } from '@holtkeeper/changes'
+import type { Card } from '@holtkeeper/chat'
 import type { FleetLibrary } from '@holtkeeper/depgraph'
+import type { Digest, DigestPreset } from '@holtkeeper/digest'
 import type { RepoRef, SshKeyUsage } from '@holtkeeper/forge'
 import type {
   DeployState,
@@ -180,6 +182,105 @@ export interface RepoSummary {
 /** `GET /api/repos` */
 export interface RepoList {
   repos: RepoSummary[]
+}
+
+export type {
+  Card as ChatCard,
+  CardAction as ChatCardAction,
+  CardBlock as ChatCardBlock,
+  CardStep as ChatCardStep,
+  CardTone as ChatCardTone,
+  Form as ChatForm,
+  FormField as ChatFormField,
+  StepStatus as ChatStepStatus,
+} from '@holtkeeper/chat'
+
+/** One message of the caller's conversation with Holtkeeper in the panel. */
+export interface ChatMessageView {
+  id: string
+  from: 'user' | 'holtkeeper'
+  at: string
+  /** When a card was last changed in place, e.g. a deploy that moved on. */
+  updatedAt?: string
+  /** What the person typed. */
+  text?: string
+  card?: Card
+  /** The repository the message was about (`forge:path`). */
+  repo?: string
+}
+
+/** A command people can run from the chat, for hints. */
+export interface ChatCommandView {
+  name: string
+  summary: string
+  usage?: string
+}
+
+/** `GET /api/chat/messages`: the caller's conversation, oldest first, and the commands. */
+export interface ChatConversation {
+  messages: ChatMessageView[]
+  commands: ChatCommandView[]
+}
+
+export type {
+  Digest,
+  DigestInput,
+  DigestPreset,
+  DigestSchedule,
+  DigestSection,
+  DigestTarget,
+  Weekday,
+} from '@holtkeeper/digest'
+
+/** What the last run of a digest did. */
+export interface DigestRun {
+  at: string
+  /** `sent` to at least one target, `skipped` because it was empty, or `failed` everywhere. */
+  status: 'sent' | 'skipped' | 'failed'
+  /** Items across sections. */
+  items: number
+  errors: string[]
+  /** Started from the panel rather than the schedule. */
+  manual?: boolean
+}
+
+/** A digest with its schedule in words, when it runs next and its last run. */
+export interface DigestView extends Digest {
+  scheduleText: string
+  nextRun?: string
+  lastRun?: DigestRun
+}
+
+/** An analysis kind a digest section can read. */
+export interface DigestSourceView {
+  kind: string
+  label: string
+}
+
+/** `GET /api/digests` */
+export interface DigestList {
+  digests: DigestView[]
+  sources: DigestSourceView[]
+  presets: DigestPreset[]
+  /** Whether Slack targets can be delivered (`chat.slack` is configured). */
+  slack: boolean
+}
+
+/** `POST /api/digests/preview`: the card the digest would send now, and its item count. */
+export interface DigestPreview {
+  card: Card
+  items: number
+  empty: boolean
+  repos: number
+  scheduleText: string
+  /** When it would go out next, counting from now. */
+  nextRun?: string
+}
+
+/** `POST /api/chat/messages`: a command line, optionally about one repository (`forge:path`). */
+export interface ChatSendInput {
+  text: string
+  repo?: string
 }
 
 /** A credential without its secret. */

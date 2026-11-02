@@ -209,7 +209,7 @@ const nullableNumber = z.number().nullable().optional()
 const noteSchema = z.object({
   id: z.union([z.number(), z.string()]),
   body: z.string(),
-  author: z.object({ username: z.string() }).nullable().optional(),
+  author: z.object({ username: z.string(), id: z.number().optional() }).nullable().optional(),
   created_at: z.string(),
   system: z.boolean().optional(),
   resolvable: z.boolean().optional(),
@@ -266,6 +266,7 @@ const currentUserSchema = z.object({
   email: z.string().nullable().optional(),
 })
 const anySchema = z.unknown()
+const noteIdSchema = z.object({ id: z.number() })
 
 const toRelease = (release: z.infer<typeof releaseSchema>, fallbackUrl: string): ForgeRelease => ({
   tag: release.tag_name,
@@ -345,6 +346,7 @@ const toDiscussion = (discussion: z.infer<typeof discussionSchema>): Discussion 
     notes: discussion.notes.map((note) => ({
       id: note.id,
       author: note.author?.username ?? '',
+      ...(note.author?.id !== undefined && { authorId: String(note.author.id) }),
       body: note.body,
       createdAt: note.created_at,
       system: note.system ?? false,
@@ -1258,6 +1260,28 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         anySchema,
         { body: { body } },
       )
+    },
+
+    async postMergeRequestNote(repo, id, body, where) {
+      if (where?.discussionId) {
+        const note = await client.json(
+          'POST',
+          `${mrPath(repo, id)}/discussions/${encode(where.discussionId)}/notes`,
+          noteIdSchema,
+          { body: { body } },
+        )
+        return { noteId: note.id, discussionId: where.discussionId }
+      }
+      const note = await client.json('POST', `${mrPath(repo, id)}/notes`, noteIdSchema, {
+        body: { body },
+      })
+      return { noteId: note.id }
+    },
+
+    async updateMergeRequestNote(repo, id, noteId, body) {
+      await client.json('PUT', `${mrPath(repo, id)}/notes/${noteId}`, anySchema, {
+        body: { body },
+      })
     },
 
     async resolveDiscussion(repo, id, discussionId, resolved) {

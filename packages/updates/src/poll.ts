@@ -173,6 +173,7 @@ export async function pollRepository(input: PollInput): Promise<PollResult> {
               mergeRequestState: record.state,
               ...(headSha && { headSha }),
               author: note.author,
+              ...(note.authorId !== undefined && { authorId: note.authorId }),
               body: note.body,
               discussionId: discussion.id,
               inThread:

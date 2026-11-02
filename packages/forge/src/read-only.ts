@@ -40,6 +40,8 @@ const writes: Record<string, (args: readonly unknown[]) => string | undefined> =
   updateRelease: firstArgument,
   submitReview: firstArgument,
   replyToDiscussion: firstArgument,
+  postMergeRequestNote: firstArgument,
+  updateMergeRequestNote: firstArgument,
   resolveDiscussion: firstArgument,
   registerSshKey: (args) =>
     typeof args[0] === 'object' && args[0] !== null

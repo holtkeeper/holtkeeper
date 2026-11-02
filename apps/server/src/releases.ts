@@ -106,6 +106,7 @@ function createReleaseService(deps: ServerDeps) {
   const kv = store.kv ?? memoryKv()
   const pollMs = deps.releasePollMs ?? 15_000
   const watching = new Set<string>()
+  const listeners = new Set<(event: ReleaseEvent) => Promise<void> | void>()
   let boardCache: { at: number; rows: Map<string, ReleaseBoardView['rows'][number]> } | undefined
 
   const forgeOf = (repo: RepoRef): GitForge => {
@@ -181,6 +182,20 @@ function createReleaseService(deps: ServerDeps) {
     const failures = await announce(await notifyOf(event.repo), event)
     for (const failure of failures) console.error(`releases: notification failed: ${failure}`)
     boardCache?.rows.delete(repoKeyOf(event.repo))
+    for (const listener of listeners) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- listeners see events in order
+        await listener(event)
+      } catch (error) {
+        console.error(`releases: event listener failed: ${messageOf(error)}`)
+      }
+    }
+  }
+
+  /** Calls `listener` with every recorded event; returns the unsubscribe function. */
+  const subscribe = (listener: (event: ReleaseEvent) => Promise<void> | void) => {
+    listeners.add(listener)
+    return () => void listeners.delete(listener)
   }
 
   const event = (
@@ -676,6 +691,7 @@ function createReleaseService(deps: ServerDeps) {
     deploy,
     onEvent,
     isReadOnly,
+    subscribe,
   }
 }
 

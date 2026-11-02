@@ -60,6 +60,7 @@ import { createApp } from './app.ts'
 import { startAuditRetention } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { startDatabaseSnapshots } from './database.ts'
+import { digestServiceFor } from './digests.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
@@ -421,6 +422,7 @@ export async function startServer(
       () => startWebhookSync(deps, log),
       () => startLibraryIndex(deps, log),
       () => startDatabaseSnapshots(server.store, { log }),
+      () => digestServiceFor(deps).start(log),
     ],
   })
   metrics = ops.metrics

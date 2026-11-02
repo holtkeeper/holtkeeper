@@ -17,11 +17,13 @@ import { auditLogRoutes } from './routes/audit.ts'
 import { auditRoutes } from './routes/audits.ts'
 import { activityPeople, avatarRoutes, withAvatar } from './routes/avatars.ts'
 import { bundleRoutes } from './routes/bundles.ts'
+import { chatRoutes } from './routes/chat.ts'
 import { configRoutes } from './routes/config.ts'
 import { credentialRoutes } from './routes/credentials.ts'
 import { databaseRoutes } from './routes/database.ts'
 import { dependencyRoutes } from './routes/dependencies.ts'
 import { dependencyUpdateRoutes } from './routes/dependency-updates.ts'
+import { digestRoutes } from './routes/digests.ts'
 import { egressRoutes } from './routes/egress.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
@@ -31,6 +33,7 @@ import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
+import { slackRoutes } from './routes/slack.ts'
 import { storageRoutes } from './routes/storage.ts'
 import { trackerRoutes } from './routes/trackers.ts'
 import { updateRoutes } from './routes/updates.ts'
@@ -110,6 +113,9 @@ export function createApp(deps: ServerDeps) {
     '/',
     updateRoutes(deps, { ...(poller && { poller }), ...(hooks && { repoHooks: hooks }) }),
   )
+  api.route('/', slackRoutes(deps))
+  api.route('/', chatRoutes(deps))
+  api.route('/', digestRoutes(deps))
   api.route('/', configRoutes(deps))
   api.route('/', egressRoutes(deps))
   api.route('/', aiRoutes(deps))

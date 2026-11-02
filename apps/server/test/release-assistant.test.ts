@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
+import type { Principal } from '@holtkeeper/access'
 import type {
   ReleaseBoardView,
   ReleaseGateError,
@@ -9,6 +10,7 @@ import type {
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
+import { createIdentities } from '@holtkeeper/identities'
 import { releaseSettingsDefinition } from '@holtkeeper/release'
 import { FakeForge } from '@holtkeeper/release/testing'
 import { builtinSettings } from '@holtkeeper/settings'
@@ -198,5 +200,78 @@ describe('release assistant routes', () => {
       ['deploy-failed', 'preprod'],
       ['deploy-started', 'preprod'],
     ])
+  })
+})
+
+const linkJane = async () => {
+  const accounts = store.externalAccounts
+  if (!accounts) throw new Error('the memory store keeps external accounts')
+  const identities = createIdentities({ accounts, now: () => new Date() })
+  const jane: Principal = {
+    id: 'jane',
+    name: 'jane',
+    provider: 'header',
+    grants: [{ scope: { all: true }, actions: ['releases:read', 'releases:run'] }],
+  }
+  const linked = await identities.link(jane, { provider: 'gitlab:work', externalId: '5' })
+  const { code } = await identities.issueChallenge(jane, linked.id)
+  await identities.completeChallenge({ provider: 'gitlab:work', externalId: '5', code })
+}
+
+const say = (body: string) =>
+  createEventDispatcher(deps)(
+    {
+      kind: 'note',
+      repo: { forge: 'work', path: 'g/app' },
+      mergeRequest: 3,
+      mergeRequestState: 'open',
+      author: 'jane',
+      authorId: '5',
+      body,
+      inThread: false,
+    },
+    { actor: 'webhook:gitlab', via: 'webhook' },
+  )
+
+const lastNote = () => [...fake.notes.values()].at(-1)?.body ?? ''
+
+describe('release chat command', () => {
+  test('shows the state with the next steps as commands', async () => {
+    await linkJane()
+    expect(await say('/holtkeeper release')).toEqual({ enqueued: [] })
+    expect(lastNote()).toContain('#### 🔵 Release · g/app')
+    expect(lastNote()).toContain('- **Next:** `1.1.0` (minor)')
+    expect(lastNote()).toContain('`/holtkeeper release propose` — Open the release candidate')
+  })
+
+  test('asks before deploying, then follows the deploy in one note', async () => {
+    await store.settings.put({
+      id: 'releases-deploy',
+      key: 'releases',
+      scope: { repos: ['g/app'] },
+      value: { deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }] } },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    fake.addPipeline('v1.0.0', 'manual', [{ name: 'deploy:preprod', status: 'manual' }])
+    await linkJane()
+
+    await say('/holtkeeper release deploy preprod')
+    expect(lastNote()).toContain('Deploy v1.0.0 of g/app to preprod?')
+    expect(lastNote()).toContain('`/holtkeeper release deploy preprod tag=v1.0.0 --yes`')
+    expect(fake.jobs.get(1)?.[0]?.status).toBe('manual')
+
+    await say('/holtkeeper release deploy preprod tag=v1.0.0 --yes')
+    const noteId = fake.notes.size
+    expect(fake.notes.get(noteId)?.body).toContain(
+      '- 🔄 [**preprod**](https://forge/j/100) — queued',
+    )
+    fake.jobs.get(1)![0]!.status = 'success'
+    await Promise.all(background)
+    expect(fake.notes.size).toBe(noteId)
+    expect(fake.notes.get(noteId)?.body).toContain('#### 🟢 Deploy v1.0.0 · g/app')
+    expect(fake.notes.get(noteId)?.body).toContain(
+      '- ✅ [**preprod**](https://forge/j/100) — deployed',
+    )
   })
 })

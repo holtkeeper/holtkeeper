@@ -389,6 +389,8 @@ export class FakeGitLab {
     return { versions: [], drafts: [], discussions: [], approvals: [], reviewerStates: [] }
   }
 
+  private readonly standaloneNotes = new Map<number, { mr: FakeMergeRequest; index: number }>()
+
   private note(input: Partial<FakeNote>): FakeNote {
     return {
       body: '',
@@ -942,8 +944,10 @@ export class FakeGitLab {
       return json(200, this.mrJson(project, mr))
     }
     if (rest[2] === 'notes' && method === 'POST') {
+      const id = this.nextId++
+      this.standaloneNotes.set(id, { mr, index: mr.notes.length })
       mr.notes.push(String(body['body']))
-      return json(201, { id: this.nextId++, body: body['body'] })
+      return json(201, { id, body: body['body'] })
     }
     return this.review(project, mr, method, rest.slice(2), url, body)
   }
@@ -1042,6 +1046,17 @@ export class FakeGitLab {
         return new Response(null, { status: 204 })
       }
     }
+    if (rest[0] === 'notes' && method === 'PUT' && rest[1]) {
+      const standalone = this.standaloneNotes.get(Number(rest[1]))
+      if (standalone?.mr === mr) {
+        mr.notes[standalone.index] = String(body['body'])
+        return json(200, { id: Number(rest[1]), body: body['body'] })
+      }
+      const note = mr.discussions.flatMap((d) => d.notes).find((n) => String(n.id) === rest[1])
+      if (!note) return json(404, { message: '404 Note Not Found' })
+      note.body = String(body['body'])
+      return json(200, note)
+    }
     if (rest[0] === 'discussions') {
       if (method === 'GET' && rest.length === 1)
         return this.page(
@@ -1056,6 +1071,14 @@ export class FakeGitLab {
             })),
           })),
         )
+      if (method === 'POST' && rest.length === 1) {
+        const created: FakeDiscussion = {
+          id: (this.nextId++).toString(16).padStart(40, 'd'),
+          notes: [this.note({ body: String(body['body']) })],
+        }
+        mr.discussions.push(created)
+        return json(201, created)
+      }
       const discussion = mr.discussions.find((d) => d.id === rest[1])
       if (!discussion) return json(404, { message: '404 Not found' })
       if (method === 'POST' && rest[2] === 'notes' && rest.length === 3) {

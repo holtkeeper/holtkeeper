@@ -1,4 +1,11 @@
 import type {
+  ChatConversation,
+  DigestInput,
+  DigestList,
+  DigestPreview,
+  DigestRun,
+  DigestView,
+  ChatSendInput,
   AccountChallenge,
   ActivityList,
   AiRunList,
@@ -470,6 +477,24 @@ export const api = {
   egressCache: () => request<EgressCacheView>('GET', '/api/egress/cache'),
   deleteEgressCache: (input: DeleteEgressCacheInput = {}) =>
     request<DeleteEgressCacheResult>('POST', '/api/egress/cache/delete', { body: input }),
+
+  digests: () => request<DigestList>('GET', '/api/digests'),
+  createDigest: (input: DigestInput) =>
+    request<DigestView>('POST', '/api/digests', { body: input }),
+  updateDigest: (digestId: string, input: DigestInput) =>
+    request<DigestView>('PUT', `/api/digests/${id(digestId)}`, { body: input }),
+  deleteDigest: (digestId: string) => request<void>('DELETE', `/api/digests/${id(digestId)}`),
+  sendDigest: (digestId: string) => request<DigestRun>('POST', `/api/digests/${id(digestId)}/send`),
+  previewDigest: (input: DigestInput & { id?: string }, signal?: AbortSignal) =>
+    request<DigestPreview>('POST', '/api/digests/preview', {
+      body: input,
+      ...(signal && { signal }),
+    }),
+
+  chat: () => request<ChatConversation>('GET', '/api/chat/messages'),
+  sendChat: (input: ChatSendInput) =>
+    request<ChatConversation>('POST', '/api/chat/messages', { body: input }),
+  clearChat: () => request<void>('DELETE', '/api/chat/messages'),
 
   accounts: () => request<ExternalAccountList>('GET', '/api/accounts'),
   linkAccount: (input: LinkAccountInput) =>

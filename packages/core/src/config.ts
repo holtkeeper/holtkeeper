@@ -372,6 +372,15 @@ const repoSchema = z.object({
   traits: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
 })
 
+/** Where people talk to Holtkeeper besides merge request comments. */
+const chatSchema = z.object({
+  /**
+   * A Slack app: its bot token (`xoxb-…`, scopes `chat:write`, `commands`, `app_mentions:read`,
+   * `im:history`) and signing secret. Requests reach `/api/chat/slack/{events,commands,interactions}`.
+   */
+  slack: z.object({ botToken: secretSchema, signingSecret: secretSchema }).optional(),
+})
+
 /** Validates a whole config, including references between sections and every plugin's options. */
 export const configSchema = z
   .object({
@@ -384,6 +393,7 @@ export const configSchema = z
     jobs: jobsSchema.optional(),
     limits: limitsSchema.optional(),
     ai: aiSchema.optional(),
+    chat: chatSchema.optional(),
   })
   .superRefine((config, ctx) => {
     const aiPackages = new Set<string>()

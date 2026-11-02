@@ -1,5 +1,12 @@
 import { groupsMatch } from '@holtkeeper/access'
 import { releaseTarget } from '@holtkeeper/changelog'
+import {
+  type ChatCommand,
+  commandOptions,
+  mergeRequestThread,
+  parseCommandLine,
+  textCard,
+} from '@holtkeeper/chat'
 import { resolveRepo } from '@holtkeeper/core'
 import type {
   BranchPushedEvent,
@@ -12,6 +19,7 @@ import type {
   RepoRef,
   TagPushedEvent,
 } from '@holtkeeper/forge'
+import { forgeProvider } from '@holtkeeper/identities'
 import {
   type MergeRequestEvent,
   type MergeRequestEventAction,
@@ -25,6 +33,7 @@ import {
 import type { JobTrigger, KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
+import { CHAT_MARKER, chatFor } from './chat.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { defaultBranchOf, pushChangesDependencies } from './dependency-refresh.ts'
 import { librariesConfigOf, librariesEnabled } from './libraries.ts'
@@ -64,41 +73,6 @@ interface EventSource {
 export type EventDispatcher = (event: ForgeEvent, source: EventSource) => Promise<EventOutcome>
 
 const ignore = (reason: string): EventOutcome => ({ enqueued: [], ignored: reason })
-
-/** A `/holtkeeper <name> [args]` command in a note, from its first line that has one. */
-export function parseCommand(note: string): { name: string; args: string[] } | undefined {
-  for (const line of note.split('\n')) {
-    const match = /^\s*\/holtkeeper\s+([a-z][\w-]*)(.*)$/.exec(line)
-    if (match?.[1])
-      return { name: match[1], args: (match[2] ?? '').trim().split(/\s+/).filter(Boolean) }
-  }
-  return undefined
-}
-
-/**
- * Options from command arguments: `key=value` pairs by name, the rest by position onto `names`;
- * when there are more positional arguments than names, the last name gets the rest as a list.
- * Positional arguments without a name are dropped.
- */
-export function commandOptions(
-  args: readonly string[],
-  names: readonly string[] = [],
-): Record<string, unknown> {
-  const options: Record<string, unknown> = {}
-  const positional: string[] = []
-  for (const arg of args) {
-    const separator = arg.indexOf('=')
-    if (separator > 0) options[arg.slice(0, separator)] = arg.slice(separator + 1)
-    else positional.push(arg)
-  }
-  names.forEach((name, index) => {
-    const isLast = index === names.length - 1
-    const values = isLast ? positional.slice(index) : positional.slice(index, index + 1)
-    if (values.length === 0) return
-    options[name] = isLast && values.length > 1 ? values : values[0]
-  })
-  return options
-}
 
 /** The policy event for a merge request change, or `undefined` for actions policies do not see. */
 export function mergeRequestAction(
@@ -162,9 +136,10 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  *   outcome to the activity log, then queue `jobs.onMergeRequest.analyzers` (open, new commits,
  *   reopen) and `jobs.onLabel[label]` for added labels minus the policies' `skipAnalyzers`, plus
  *   their `enqueue` intents, with `{ mergeRequest: iid }` and `ref` = head sha.
- * - Notes: `/holtkeeper <command>` runs policies as a `command` event and queues
- *   `jobs.commands[command]`; a reply in a thread Holtkeeper started queues `review` with
- *   `{ mergeRequest, replyTo: discussionId }`.
+ * - Notes: `/holtkeeper <command>` runs policies as a `command` event, then goes to the chat router
+ *   (see `chatFor`): `jobs.commands[command]` queues its analyzer, built-in commands (`release`,
+ *   `verify`, `help`) answer in the merge request; a reply in a review thread Holtkeeper started
+ *   queues `review` with `{ mergeRequest, replyTo: discussionId }`.
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
@@ -206,25 +181,6 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
   const fromBot = (username: string | undefined) =>
     botUsername() !== undefined && username === botUsername()
 
-  /** Posts a short note; failures do not fail the event. */
-  const acknowledge = async (
-    repo: RepoRef,
-    mergeRequest: number,
-    discussionId: string | undefined,
-    text: string,
-  ) => {
-    try {
-      const forge = config.forges[repo.forge]?.create()
-      if (!forge) return
-      const body = `${text}\n\n<!-- ${OWN_MARKER} ack -->`
-      if (discussionId && forge.replyToDiscussion)
-        await forge.replyToDiscussion(repo.path, mergeRequest, discussionId, body)
-      else await forge.commentOnMergeRequest(repo.path, mergeRequest, body)
-    } catch {
-      // The job is queued either way; a missing acknowledgement is not worth a failed event.
-    }
-  }
-
   const isOurThread = async (repo: RepoRef, mergeRequest: number, discussionId: string) => {
     const forge = config.forges[repo.forge]?.create()
     if (!forge?.listDiscussions) return false
@@ -233,7 +189,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
     )
     const notes = discussion?.notes.filter((note) => !note.system) ?? []
     const first = notes[0]
-    if (!first || notes.length < 2) return false
+    if (!first || notes.length < 2 || first.body.includes(CHAT_MARKER)) return false
     const bot = botUsername()
     return first.body.includes(OWN_MARKER) || (bot !== undefined && first.author === bot)
   }
@@ -496,7 +452,11 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
 
     const handleNote = async (event: NoteAddedEvent): Promise<EventOutcome> => {
       const { repo, mergeRequest: iid, headSha: head } = event
-      if (fromBot(event.author) || event.body.includes(OWN_MARKER))
+      if (
+        fromBot(event.author) ||
+        event.body.includes(OWN_MARKER) ||
+        event.body.includes(CHAT_MARKER)
+      )
         return ignore('event from the bot user')
       const request = (analyzer: string, options: Record<string, unknown>): JobRequest => ({
         analyzer,
@@ -505,12 +465,12 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         options: { mergeRequest: iid, ...options },
       })
 
-      const command = parseCommand(event.body)
-      if (command) {
+      const line = parseCommandLine(event.body)
+      if (line) {
         const policy = await runPolicies(repo, {
           iid,
           action: 'command',
-          command: command.name,
+          command: line.name,
           actor: event.author,
           mr: stub(iid, event.mergeRequestState, head),
         })
@@ -521,53 +481,99 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
               trigger('webhook'),
             )
           : []
-        const commands = config.jobs?.commands
-        const definition = commands?.[command.name]
-        if (!definition && policy?.matched.length) return { enqueued: fromPolicies }
-        if (!commands) return ignore('jobs.commands is not configured')
-        if (!definition) {
-          const available = Object.keys(commands)
-            .map((name) => `\`${name}\``)
-            .join(', ')
-          await acknowledge(
-            repo,
-            iid,
-            event.discussionId,
-            `Unknown command \`${command.name}\`. Available: ${available}.`,
-          )
-          return ignore(`unknown command ${command.name}`)
+
+        let queued: string[] = []
+        const jobCommand = (
+          name: string,
+          definition: { analyzer: string; args?: string[] | undefined },
+        ): ChatCommand<unknown> => {
+          const schema = analyzers.get(definition.analyzer)?.options
+          return {
+            name,
+            summary: `Runs \`${definition.analyzer}\` on this merge request.`,
+            ...(definition.args?.length && {
+              usage: definition.args.map((arg) => `[${arg}]`).join(' '),
+              positional: definition.args,
+            }),
+            options: z.record(z.string(), z.unknown()).superRefine((value, check) => {
+              const checked = schema?.safeParse({ ...value, mergeRequest: iid })
+              if (checked && !checked.success)
+                for (const issue of checked.error.issues)
+                  check.addIssue({ code: 'custom', message: issue.message, path: issue.path })
+            }),
+            run: async (context) => {
+              const job = request(
+                definition.analyzer,
+                commandOptions(context.line.args, definition.args),
+              )
+              const skip = policy?.skipAnalyzers ?? []
+              queued =
+                skip === '*' || skip.includes(job.analyzer)
+                  ? fromPolicies
+                  : [...fromPolicies, ...(await enqueue([job], trigger('webhook')))]
+              await context.reply(
+                textCard(
+                  '',
+                  queued.length
+                    ? `Queued \`${name}\` (job ${queued.join(', ')}).`
+                    : `\`${name}\` is already queued for this commit.`,
+                ),
+              )
+              await activity('job.command', repo, {
+                mergeRequest: iid,
+                command: name,
+                ...(event.author && { author: event.author }),
+                jobs: queued,
+              })
+            },
+          }
         }
-        const job = request(definition.analyzer, commandOptions(command.args, definition.args))
-        const checked = analyzers.get(definition.analyzer)?.options.safeParse(job.options)
-        if (checked && !checked.success) {
-          await acknowledge(
-            repo,
-            iid,
-            event.discussionId,
-            `Could not run \`${command.name}\`:\n\n${z.prettifyError(checked.error)}`,
-          )
-          return ignore('invalid command options')
-        }
-        const skip = policy?.skipAnalyzers ?? []
-        const enqueued =
-          skip === '*' || skip.includes(job.analyzer)
-            ? fromPolicies
-            : [...fromPolicies, ...(await enqueue([job], trigger('webhook')))]
-        await acknowledge(
-          repo,
-          iid,
-          event.discussionId,
-          enqueued.length
-            ? `Queued \`${command.name}\` (job ${enqueued.join(', ')}).`
-            : `\`${command.name}\` is already queued for this commit.`,
+
+        const chat = chatFor(deps)
+        const router = chat.router(
+          Object.entries(config.jobs?.commands ?? {}).map(([name, definition]) =>
+            jobCommand(name, definition),
+          ),
         )
-        await activity('job.command', repo, {
-          mergeRequest: iid,
-          command: command.name,
-          ...(event.author && { author: event.author }),
-          jobs: enqueued,
-        })
-        return { enqueued }
+        if (
+          !router.commands.some((command) => command.name === line.name) &&
+          policy?.matched.length
+        )
+          return { enqueued: fromPolicies }
+        const surface = chat.surface('merge-requests')
+        if (!surface) return ignore('no merge request surface')
+        const forgeKind = config.forges[repo.forge]?.kind === 'github' ? 'github' : 'gitlab'
+        const outcome = await router.handle(
+          {
+            surface: surface.id,
+            thread: mergeRequestThread(repo, iid, event.inThread ? event.discussionId : undefined),
+            actor: {
+              provider: forgeProvider(forgeKind, repo.forge),
+              externalId: event.authorId ?? '',
+              ...(event.author && { username: event.author }),
+            },
+            text: event.body,
+            repo,
+            mergeRequest: iid,
+            ...(head && { headSha: head }),
+          },
+          surface,
+          line,
+        )
+        if (outcome.status === 'done') {
+          if (!config.jobs?.commands?.[line.name])
+            await activity('chat.command', repo, {
+              mergeRequest: iid,
+              command: line.name,
+              ...(event.author && { author: event.author }),
+            })
+          return { enqueued: queued.length ? queued : fromPolicies }
+        }
+        if (outcome.status === 'unknown') return ignore(`unknown command ${line.name}`)
+        if (outcome.status === 'invalid') return ignore('invalid command options')
+        return ignore(
+          `command ${line.name} ${outcome.status}${outcome.detail && outcome.status === 'denied' ? `: ${outcome.detail}` : ''}`,
+        )
       }
 
       const discussionId = event.discussionId
