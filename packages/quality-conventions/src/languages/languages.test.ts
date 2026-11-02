@@ -32,7 +32,7 @@ describe('name kinds', () => {
     const text = [
       'export const MAX = 1',
       'const pattern = /x/, list = [1]',
-      'export function App() { const local = 1; return <div>{local}</div> }',
+      'export function App() { const local = 1; let count = 0; return <div>{local}{count}</div> }',
       'const helper = () => 1',
       'function Row() { const Icon = pick(); return <Icon /> }',
       'const Lazy = lazy(() => null)',
@@ -48,7 +48,8 @@ describe('name kinds', () => {
       'module-constant:pattern:module',
       'module-variable:list:module',
       'component:App:none',
-      'local-variable:local:local',
+      'local-constant:local:local',
+      'local-variable:count:local',
       'function:helper:module',
       'component:Row:module',
       'component:Icon:local',
@@ -61,6 +62,27 @@ describe('name kinds', () => {
       'enum-member:Red:none',
       'enum-member:Green:none',
       'module-variable:obj:module',
+    ])
+  })
+
+  test('typescript components, aliases and literal locals', () => {
+    const text = [
+      'const Plugin = require("some-plugin")',
+      'export function withShape(Inner) {',
+      '  function Wrapped() { const LIMITS = [1, 2]; const Icon = flag ? Round : Square; return <Inner /> }',
+      '  return Wrapped',
+      '}',
+      'export function renderRow() { const filter = 1; return <svg><filter /></svg> }',
+      'export const Tile = withTheme(() => <div />)',
+      '',
+    ].join('\n')
+    expect(names(typescript, 'shapes.tsx', text)).toEqual([
+      'function:withShape:none',
+      'component:Wrapped:local',
+      'local-constant:LIMITS:local',
+      'function:renderRow:none',
+      'local-constant:filter:local',
+      'component:Tile:none',
     ])
   })
 

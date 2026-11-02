@@ -56,7 +56,7 @@ test('installs from the lockfile only when node_modules is missing', async () =>
 test('a failed install is reported with the collection error', async () => {
   await writeFile(join(dir, 'package.json'), '{}')
   await writeFile(join(dir, 'package-lock.json'), '{}')
-  const { runner } = createFakeRunner(() => ({ exitCode: 1, stderr: 'npm ERR! network' }))
+  const { runner } = createFakeRunner(() => ({ exitCode: 1, stderr: 'npm ERR! code EINTEGRITY' }))
   const lines: string[] = []
   const failing = {
     name: 'vitest --coverage',
@@ -69,10 +69,34 @@ test('a failed install is reported with the collection error', async () => {
     log: (line) => lines.push(line),
   })
   expect(run).rejects.toThrow(
-    'npm ci --ignore-scripts --no-audit --no-fund failed before: exit 1: npm ERR! network',
+    'npm ci --ignore-scripts --no-audit --no-fund failed before: exit 1: npm ERR! code EINTEGRITY',
   )
   await run.catch(() => undefined)
   expect(lines).toEqual([
-    'dependencies: npm ci --ignore-scripts --no-audit --no-fund failed\nexit 1: npm ERR! network',
+    'dependencies: npm ci --ignore-scripts --no-audit --no-fund failed\nexit 1: npm ERR! code EINTEGRITY',
   ])
+})
+
+test('retries an install that failed on the network once', async () => {
+  await writeFile(join(dir, 'package.json'), '{}')
+  await writeFile(join(dir, 'package-lock.json'), '{}')
+  let attempts = 0
+  const { runner, calls } = createFakeRunner(() =>
+    ++attempts === 1
+      ? { exitCode: 1, stderr: 'npm error network socket hang up' }
+      : { exitCode: 0 },
+  )
+  expect(await installDependencies({ dir, runner, retryDelayMs: 0 })).toMatchObject({
+    status: 'installed',
+  })
+  expect(calls).toHaveLength(2)
+
+  const { runner: broken, calls: brokenCalls } = createFakeRunner(() => ({
+    exitCode: 1,
+    stderr: 'npm error code EINTEGRITY',
+  }))
+  expect(await installDependencies({ dir, runner: broken, retryDelayMs: 0 })).toMatchObject({
+    status: 'failed',
+  })
+  expect(brokenCalls).toHaveLength(1)
 })

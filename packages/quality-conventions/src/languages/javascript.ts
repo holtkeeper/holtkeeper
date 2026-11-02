@@ -68,13 +68,39 @@ function returnsJsx(fn: SgNode): boolean {
 }
 
 const COMPONENT_FACTORY = /(?:^|\.)(?:lazy\w*|memo|forwardRef|createContext|styled|\w*Component)$/
+const HOC = /^(?:observer|inject|connect|with[A-Z]\w*)$/
+const isJsxFile = (file: SourceFile) => /\.[jt]sx$/.test(file.path)
+const capitalized = (name: string) => /^[_$]*[A-Z]/.test(name)
+
+/**
+ * Whether `value` builds a component: a component factory (`memo`, `lazy`, `styled.div`...``,
+ * `styled(Button).attrs()`), a higher-order component (`observer`, `withRouter`, `connect(a)(B)`)
+ * or any call that wraps a function returning JSX.
+ */
+function isComponentValue(value: SgNode | null, file: SourceFile): boolean {
+  if (value?.kind() !== 'call_expression') return false
+  const callee = value.field('function')
+  if (!callee) return false
+  const text = callee.text()
+  if (COMPONENT_FACTORY.test(text) || /^styled\b/.test(text)) return true
+  if (HOC.test(text.split('.').at(-1) ?? '')) return true
+  if (isComponentValue(callee, file)) return true
+  return (
+    isJsxFile(file) &&
+    (value.field('arguments')?.children() ?? []).some(
+      (arg) =>
+        (arg.kind() === 'arrow_function' || arg.kind() === 'function_expression') &&
+        returnsJsx(arg),
+    )
+  )
+}
 const tags = new WeakMap<SourceFile, Set<string>>()
 
 /** Names used as JSX tags (`<Icon />`, `<Context.Provider>`): values that are components. */
 function jsxTags(file: SourceFile): Set<string> {
   let names = tags.get(file)
   if (!names) {
-    if (!/\.[jt]sx$/.test(file.path)) return new Set()
+    if (!isJsxFile(file)) return new Set()
     const nodes = file.root.findAll({
       rule: {
         kind: 'identifier',
@@ -90,7 +116,12 @@ function jsxTags(file: SourceFile): Set<string> {
         ],
       },
     })
-    names = new Set(nodes.map((node) => node.text()))
+    // A lowercase tag (`<filter>`, `<path>`) is an intrinsic element, not the variable of that name.
+    names = new Set(
+      nodes
+        .filter((node) => node.parent()?.kind() === 'member_expression' || capitalized(node.text()))
+        .map((node) => node.text()),
+    )
     tags.set(file, names)
   }
   return names
@@ -117,12 +148,50 @@ function isPrimitive(value: SgNode | null): boolean {
   return false
 }
 
+/** A literal made of primitives only: `1`, `'a'`, `[1, 2]`, `{ a: 1, b: ['x'] }`. */
+function isLiteral(value: SgNode | null): boolean {
+  if (!value) return false
+  if (isPrimitive(value)) return true
+  const kind = String(value.kind())
+  if (kind === 'array') return value.namedChildren().every((item) => isLiteral(item))
+  if (kind === 'object')
+    return value
+      .namedChildren()
+      .every((pair) => pair.kind() === 'pair' && isLiteral(pair.field('value')))
+  if (kind === 'as_expression' || kind === 'satisfies_expression')
+    return isLiteral(value.namedChildren()[0] ?? null)
+  return false
+}
+
+/**
+ * Whether `value` only names a class or component defined elsewhere, so the variable keeps
+ * its case: `require('x')`, `await import('x')`, `global.WebSocket`, `isMobile ? A : B`.
+ */
+function isAlias(value: SgNode | null): boolean {
+  if (!value) return false
+  const kind = String(value.kind())
+  if (kind === 'identifier') return capitalized(value.text())
+  if (kind === 'member_expression') return capitalized(value.field('property')?.text() ?? '')
+  if (kind === 'ternary_expression')
+    return isAlias(value.field('consequence')) && isAlias(value.field('alternative'))
+  if (kind === 'parenthesized_expression') return isAlias(value.namedChildren()[0] ?? null)
+  if (kind === 'await_expression') return isAlias(value.namedChildren()[0] ?? null)
+  if (kind === 'call_expression') {
+    const callee = value.field('function')
+    return callee?.text() === 'require' || callee?.kind() === 'import'
+  }
+  return false
+}
+
+const notAlias = (name: SgNode) => !isAlias(name.parent()?.field('value') ?? null)
+
 const kinds: NameKind[] = [
   {
     id: 'component',
     label: 'component',
-    rule: { kind: 'identifier', ...declaredFunction(atModuleLevel) },
-    when: (name, file) => /\.[jt]sx$/.test(file.path) && returnsJsx(functionOf(name) ?? name),
+    rule: { kind: 'identifier', ...declaredFunction() },
+    when: (name, file) =>
+      isJsxFile(file) && capitalized(name.text()) && returnsJsx(functionOf(name) ?? name),
   },
   {
     id: 'component',
@@ -132,7 +201,7 @@ const kinds: NameKind[] = [
       inside: { kind: 'variable_declarator', field: 'name', inside: declaration },
     },
     when: (name, file) =>
-      COMPONENT_FACTORY.test(name.parent()?.field('value')?.field('function')?.text() ?? '') ||
+      isComponentValue(name.parent()?.field('value') ?? null, file) ||
       jsxTags(file).has(name.text()),
   },
   { id: 'function', label: 'function', rule: { kind: 'identifier', ...declaredFunction() } },
@@ -156,6 +225,25 @@ const kinds: NameKind[] = [
       kind: 'identifier',
       inside: { kind: 'variable_declarator', field: 'name', inside: moduleDeclaration },
     },
+    when: notAlias,
+  },
+  {
+    id: 'local-constant',
+    label: 'local constant',
+    rule: {
+      kind: 'identifier',
+      inside: {
+        kind: 'variable_declarator',
+        field: 'name',
+        inside: {
+          ...declaration,
+          regex: '^const\\b',
+          inside: { stopBy: 'end', any: FUNCTION_SCOPES.map((kind) => ({ kind })) },
+        },
+      },
+    },
+    when: (name) => isLiteral(name.parent()?.field('value') ?? null),
+    scope: 'local',
   },
   {
     id: 'local-variable',
@@ -171,6 +259,7 @@ const kinds: NameKind[] = [
         },
       },
     },
+    when: notAlias,
     scope: 'local',
   },
   {

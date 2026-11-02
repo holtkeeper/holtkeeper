@@ -1,5 +1,7 @@
 import { CASE_STYLES, type CaseStyle, classifyCase, compatibleStyles } from './case.ts'
 
+const singleWord = (style: CaseStyle) => style === 'flatcase' || style === 'UPPERCASE'
+
 /** When a kind of name counts as having a convention. */
 export interface ConventionThresholds {
   /** Fewest classifiable names a kind needs. Default 10. */
@@ -17,7 +19,10 @@ export interface InferredConvention {
   total: number
   /** Indexes into the input of names that do not fit the dominant style. */
   outliers: number[]
-  /** Whether the thresholds are met, so outliers are worth reporting. */
+  /**
+   * Whether the thresholds are met, so outliers are worth reporting. Names of more than one word
+   * must meet `minShare` on their own too: single words fit many styles and prove none.
+   */
   established: boolean
 }
 
@@ -43,15 +48,34 @@ export function inferConvention(
   }
   if (!total) return undefined
 
-  const evidence = (style: CaseStyle) =>
-    (exact.get(style) ?? 0) * (style === 'flatcase' || style === 'UPPERCASE' ? 0.5 : 1)
+  const evidence = (style: CaseStyle) => (exact.get(style) ?? 0) * (singleWord(style) ? 0.5 : 1)
+  const multiWord = names.filter((name) => {
+    const style = classifyCase(name)
+    return style !== undefined && !singleWord(style)
+  })
+  // Single words say nothing about how longer names are joined, so they never become the style.
+  const candidates = multiWord.length
+    ? CASE_STYLES.filter((style) => !singleWord(style))
+    : CASE_STYLES
   const dominant =
-    CASE_STYLES.toSorted(
-      (a, b) => (fitting.get(b) ?? 0) - (fitting.get(a) ?? 0) || evidence(b) - evidence(a),
-    ).find((style) => fitting.has(style)) ?? 'mixed'
+    candidates
+      .toSorted(
+        (a, b) => (fitting.get(b) ?? 0) - (fitting.get(a) ?? 0) || evidence(b) - evidence(a),
+      )
+      .find((style) => fitting.has(style)) ?? 'mixed'
   const share = (fitting.get(dominant) ?? 0) / total
   const outliers = names.flatMap((name, index) =>
     classifyCase(name) !== undefined && !compatibleStyles(name).includes(dominant) ? [index] : [],
   )
-  return { dominant, share, total, outliers, established: total >= minNames && share >= minShare }
+  const multiWordShare =
+    multiWord.filter((name) => compatibleStyles(name).includes(dominant)).length /
+    (multiWord.length || 1)
+  return {
+    dominant,
+    share,
+    total,
+    outliers,
+    established:
+      total >= minNames && share >= minShare && multiWord.length > 0 && multiWordShare >= minShare,
+  }
 }

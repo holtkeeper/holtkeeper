@@ -50,6 +50,9 @@ export interface ParsedDuplication {
   issues: QualityIssue[]
 }
 
+const lineCount = (issue: QualityIssue) =>
+  (issue.range?.end.line ?? 0) - (issue.range?.start.line ?? 0)
+
 const clean = (name: string) => name.replace(/\\/g, '/').replace(/^\.\//, '')
 
 /**
@@ -98,6 +101,8 @@ export function parseJscpdReport(report: unknown, large: LargeClone = {}): Parse
     }
   })
 
+  // Reports are cut to their first findings, so the largest clones come first.
+  issues.sort((a, b) => lineCount(b) - lineCount(a))
   const { total } = statistics
   return {
     duplication: {

@@ -6,6 +6,7 @@ import type { CommandRunner } from '@holtkeeper/exec'
 import type { QualityCheck } from '@holtkeeper/quality'
 
 import { knipFindings } from './findings.ts'
+import { refineFindings } from './refine.ts'
 import { parseKnipReport } from './report.ts'
 
 export interface DeadCodeCheckOptions {
@@ -78,7 +79,8 @@ async function declaresDependencies(dir: string): Promise<boolean> {
  * defaults when there is none). Contributes `lint` issues with `deadcode/*` rules and `review`
  * changes; throws when knip exits non-zero (a configuration error) or prints no JSON report.
  * `skipped` when the project declares dependencies but has no `node_modules`: without them knip
- * cannot load plugin configs or see which binaries and packages they provide.
+ * cannot load plugin configs or see which binaries and packages they provide. Findings go through
+ * `refineFindings`.
  */
 export function deadCodeCheck(options: DeadCodeCheckOptions = {}): QualityCheck {
   return {
@@ -98,7 +100,10 @@ export function deadCodeCheck(options: DeadCodeCheckOptions = {}): QualityCheck 
         const output = (result.stderr || result.stdout).trim().split('\n').slice(-5).join(' ')
         throw new Error(`knip exited with ${result.exitCode}${output ? `: ${output}` : ''}`)
       }
-      const findings = await knipFindings(parseKnipReport(result.stdout), diskFiles(dir))
+      const findings = await refineFindings(
+        await knipFindings(parseKnipReport(result.stdout), diskFiles(dir)),
+        dir,
+      )
       return { ...findings, ...(version ? { version: `knip ${version}` } : {}) }
     },
   }

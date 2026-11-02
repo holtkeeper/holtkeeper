@@ -19,6 +19,14 @@ test('single words are compatible, not votes', () => {
   expect(inferConvention(['count', 'value'])?.dominant).toBe('flatcase')
 })
 
+test('single words alone never make a convention', () => {
+  const words = Array.from({ length: 20 }, (_, i) => `word${String.fromCodePoint(97 + i)}`)
+  const result = inferConvention([...words, 'ShapeBase', 'ShapeEdge', 'shapeCorner'])
+  expect(result?.dominant).toBe('camelCase')
+  expect(result?.established).toBe(false)
+  expect(inferConvention(words)?.established).toBe(false)
+})
+
 test('thresholds decide whether a convention is established', () => {
   expect(inferConvention(screaming.slice(0, 9))?.established).toBe(false)
   expect(inferConvention(screaming.slice(0, 9), { minNames: 5 })?.established).toBe(true)

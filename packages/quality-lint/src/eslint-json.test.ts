@@ -68,6 +68,14 @@ function report(dir: string) {
             line: 9,
             column: 1,
           },
+          {
+            ruleId: null,
+            fatal: true,
+            severity: 2,
+            message:
+              'Parsing error: ESLint was configured to run on `<tsconfigRootDir>/src/a.js` using `parserOptions.project`:\n- <tsconfigRootDir>/tsconfig.json',
+            line: 0,
+          },
         ],
         suppressedMessages: [],
         errorCount: 3,
@@ -111,7 +119,11 @@ describe('parseEslintJson', () => {
         ['eqeqeq', 'warning', 'src/a.js'],
         ['prefer-const', 'error', 'src/a.js'],
         ['fatal', 'error', 'src/a.js'],
+        ['eslint/setup', 'warning', 'src/a.js'],
       ])
+      expect(issues.at(-1)?.message).toBe(
+        'ESLint could not lint src/a.js: Parsing error: ESLint was configured to run on `…` using `…`:',
+      )
       expect(issues[0]).toMatchObject({
         tool: 'eslint',
         category: 'lint',

@@ -13,6 +13,8 @@ const lockfiles: [string, LockfileKind][] = [
 ]
 
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000
+const NETWORK_ERROR =
+  /npm (?:ERR!|error) network|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|ERR_SOCKET_TIMEOUT|\b50[234]\b/
 
 /** Command that installs exactly what the lockfile pins; lifecycle scripts only when allowed. */
 export function frozenInstallCommand(manager: PackageManager, scripts: boolean): string[] {
@@ -35,7 +37,8 @@ export type InstallOutcome =
 
 /**
  * Installs a JavaScript project's dependencies from its root lockfile so its test runner and
- * coverage provider exist, unless `node_modules` is already there. Never throws for a failed
+ * coverage provider exist, unless `node_modules` is already there. A failure that looks like a
+ * network error (reset connection, DNS, registry 5xx) is retried once. Never throws for a failed
  * install: tests may still run without it, and the caller decides what a missing report means.
  */
 export async function installDependencies(options: {
@@ -43,6 +46,8 @@ export async function installDependencies(options: {
   runner: CommandRunner
   /** Run lifecycle scripts (`postinstall`, ...). Default false. */
   scripts?: boolean
+  /** Wait before retrying after a network error. Default 5 s. */
+  retryDelayMs?: number
   signal?: AbortSignal
 }): Promise<InstallOutcome> {
   const { dir, runner, signal } = options
@@ -65,6 +70,20 @@ export async function installDependencies(options: {
   const manager = await detectPackageManager(found[1], dir, packageManager)
   const scripts = options.scripts ?? false
   const command = frozenInstallCommand(manager, scripts)
+  const first = await runInstall(runner, dir, command, scripts, signal)
+  if (first.status !== 'failed' || !NETWORK_ERROR.test(first.error)) return first
+  await Bun.sleep(options.retryDelayMs ?? 5000)
+  signal?.throwIfAborted()
+  return runInstall(runner, dir, command, scripts, signal)
+}
+
+async function runInstall(
+  runner: CommandRunner,
+  dir: string,
+  command: string[],
+  scripts: boolean,
+  signal?: AbortSignal,
+): Promise<InstallOutcome> {
   try {
     const result = await runner.run(command, {
       cwd: dir,

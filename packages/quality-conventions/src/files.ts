@@ -66,3 +66,17 @@ export async function* walkFiles(dir: string, prefix = ''): AsyncGenerator<strin
     } else if (entry.isFile()) yield path
   }
 }
+
+const GENERATED_PATH =
+  /(?:^|\/)(?:generated|__generated__)\/|\.pb\.\w+$|_pb2?(?:_grpc)?\.\w+$|\.generated\.\w+$|\.gen\.\w+$/
+const GENERATED_HEADER =
+  /@generated\b|Code generated .* DO NOT EDIT|\bDO NOT EDIT\b|auto-?generated/i
+
+/**
+ * Whether a file is generated code: it lives under `generated/`, has a generator's name
+ * (`*.pb.go`, `*_pb.ts`, `*.generated.ts`) or says so in its first lines (`Code generated ...
+ * DO NOT EDIT.`, `@generated`). Its names follow the generator, not the project.
+ */
+export function isGenerated(path: string, text: string): boolean {
+  return GENERATED_PATH.test(path) || GENERATED_HEADER.test(text.slice(0, 1024))
+}

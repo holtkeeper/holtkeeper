@@ -48,6 +48,10 @@ const reportSchema = z.union([
 
 type EslintFix = z.infer<typeof fixSchema>
 
+/** Parsing errors caused by the project's ESLint setup rather than by the file's code. */
+const SETUP_ERROR =
+  /was configured to run on|parserOptions\.project|TSConfig|No (?:ESLint )?config/i
+
 export interface ParseEslintJsonOptions {
   dir: string
   /** Defaults to the disk under `dir`. */
@@ -70,8 +74,9 @@ function fixEdit(source: SourceText, file: string, fix: EslintFix) {
 /**
  * Converts ESLint's `json` or `json-with-metadata` output into issues and changes. `fix` becomes
  * a `safe` change (what `eslint --fix` would apply), every suggestion a `review` change; the issue
- * points at the fix, or at its first suggestion when there is no fix. Throws when `report` has
- * neither shape.
+ * points at the fix, or at its first suggestion when there is no fix. Parsing errors caused by the
+ * ESLint setup (a file outside every `parserOptions.project` tsconfig) become one `eslint/setup`
+ * warning per distinct error instead of an issue per file. Throws when `report` has neither shape.
  */
 export async function parseEslintJson(
   report: unknown,
@@ -83,12 +88,20 @@ export async function parseEslintJson(
   const files = options.files ?? sourceReader(options.dir)
   const paths = await pathResolver(options.dir)
   const findings: LintFindings = { issues: [], changes: [] }
+  const setup = new Map<string, { message: string; files: string[] }>()
 
   for (const result of results) {
     const file = paths.relative(result.filePath)
     // oxlint-disable-next-line no-await-in-loop
     const source = await files.read(file)
     for (const message of result.messages) {
+      if (message.fatal && !message.ruleId && SETUP_ERROR.test(message.message)) {
+        const first = (message.message.split('\n')[0] ?? '').replaceAll(/`[^`]*`/g, '`…`')
+        const group = setup.get(first) ?? { message: first, files: [] }
+        group.files.push(file)
+        setup.set(first, group)
+        continue
+      }
       const rule = message.ruleId ?? (message.fatal ? 'fatal' : 'unknown')
       const meta = message.ruleId ? rulesMeta[message.ruleId] : undefined
       const range =
@@ -149,6 +162,19 @@ export async function parseEslintJson(
       }
       findings.issues.push(issue)
     }
+  }
+  for (const { message, files: affected } of setup.values()) {
+    const [first] = affected
+    findings.issues.push({
+      id: stableId('eslint', 'eslint/setup', message),
+      tool: 'eslint',
+      rule: 'eslint/setup',
+      category: 'lint',
+      severity: 'warning',
+      message: `ESLint could not lint ${affected.length === 1 ? first : `${affected.length} files, first ${first}`}: ${message}`,
+      ...(first ? { file: first } : {}),
+      help: 'The ESLint setup does not cover these files: add them to a tsconfig, or ignore them in the ESLint config.',
+    })
   }
   return findings
 }

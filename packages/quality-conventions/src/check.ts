@@ -9,7 +9,7 @@ import { fitsCase, toCase } from './case.ts'
 import { type DeclaredName, collectNames } from './collect.ts'
 import { registerLanguages } from './dynamic.ts'
 import { enforcedBy, explicitRules } from './explicit.ts'
-import { walkFiles, listFiles } from './files.ts'
+import { isGenerated, listFiles, walkFiles } from './files.ts'
 import { type ConventionThresholds, inferConvention } from './infer.ts'
 import { defaultLanguages } from './languages/index.ts'
 import type { LanguageSpec, SourceFile } from './languages/types.ts'
@@ -98,7 +98,7 @@ async function readSource(
  * reports names that break an established convention. A file named after a name it declares
  * (`UserCard.tsx` declaring `UserCard`) follows that name's convention and is left out of file
  * names, and so are its companions with the same stem (`UserCard.test.tsx`) and typings named
- * after the module they declare. Outliers that are not visible outside
+ * after the module they declare. Generated files are skipped. Outliers that are not visible outside
  * their file get a rename suggestion (`confidence: review`) covering every reference in scope.
  */
 export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck {
@@ -151,7 +151,7 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
         // Files are parsed one at a time to keep a single syntax tree in memory.
         // oxlint-disable-next-line no-await-in-loop
         const file = await readSource(dir, path, spec, maxFileBytes)
-        if (!file) continue
+        if (!file || isGenerated(path, file.text)) continue
         const declaredNames = collectNames(spec, file)
         declaredNames.forEach((declared, index) => {
           const tool = enforcedBy(rules, path, spec.id, 'identifiers', declared.kind.id)

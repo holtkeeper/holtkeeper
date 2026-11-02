@@ -7,6 +7,7 @@ import { duplicationCheck, jscpdCommand } from './check.ts'
 
 const captured = await Bun.file(join(import.meta.dir, '../test/jscpd-report.json')).text()
 
+const ignoreOf = (command: readonly string[]) => command[command.indexOf('--ignore') + 1] ?? ''
 const outputOf = (command: readonly string[]) => command[command.indexOf('--output') + 1] ?? ''
 
 describe('duplicationCheck', () => {
@@ -41,6 +42,22 @@ describe('duplicationCheck', () => {
       '.',
     ])
     expect(command).not.toContain('--no-gitignore')
+  })
+
+  test('skips tests unless asked and defaults the clone size', () => {
+    const plain = jscpdCommand({ bin: 'jscpd' }, '/out')
+    expect(ignoreOf(plain)).toContain('**/*.test.*')
+    expect(ignoreOf(plain)).toContain('**/*.md')
+    expect(plain[plain.indexOf('--min-tokens') + 1]).toBe('100')
+    expect(ignoreOf(jscpdCommand({ bin: 'jscpd', tests: true }, '/out'))).not.toContain(
+      '**/*.test.*',
+    )
+  })
+
+  test('runs the native jscpd binary, not the Node.js launcher', () => {
+    const [bin] = jscpdCommand({}, '/out')
+    expect(bin).not.toEndWith('.bin/jscpd')
+    expect(bin).toMatch(/jscpd-[\w-]+\/bin\/jscpd(?:\.exe)?$/)
   })
 
   test('runs jscpd and reads its report', async () => {
