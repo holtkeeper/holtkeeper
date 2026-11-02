@@ -307,6 +307,32 @@ describe('client and surface', () => {
     expect(failure).toBeInstanceOf(SlackApiError)
   })
 
+  test('reads channels with a form, private ones included, page by page', async () => {
+    const forms: { url: string; type: string | null; body: string }[] = []
+    const fetch: SlackFetch = async (url, init) => {
+      const body = typeof init.body === 'string' ? init.body : ''
+      forms.push({ url, type: new Headers(init.headers).get('content-type'), body })
+      const cursor = new URLSearchParams(body).get('cursor')
+      return Response.json(
+        cursor
+          ? { ok: true, channels: [{ id: 'G1', name: 'alpha', is_private: true, is_member: true }] }
+          : {
+              ok: true,
+              channels: [{ id: 'C1', name: 'zeta' }],
+              response_metadata: { next_cursor: 'next' },
+            },
+      )
+    }
+    const channels = await slackClient({ token: () => 'xoxb-1', fetch }).channels()
+    expect(channels).toEqual([
+      { id: 'G1', name: 'alpha', private: true, member: true },
+      { id: 'C1', name: 'zeta', private: false, member: false },
+    ])
+    expect(forms[0]?.type).toBe('application/x-www-form-urlencoded')
+    expect(new URLSearchParams(forms[0]?.body).get('types')).toBe('public_channel,private_channel')
+    expect(new URLSearchParams(forms[1]?.body).get('cursor')).toBe('next')
+  })
+
   test('errors name the method and code, never the token', async () => {
     const { client } = fakeSlack({ 'views.open': { ok: false, error: 'expired_trigger_id' } })
     const error = await client

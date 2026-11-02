@@ -1,20 +1,11 @@
 import type { Action, SlackChannelBinding, SlackSettingsView } from '@holtkeeper/api'
-import { Hash, Lock } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { messageOf } from '../../api/client.ts'
-import { useGroups, useRepos, useSlackChannels } from '../../api/queries.ts'
+import { useGroups, useRepos } from '../../api/queries.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { channelActionLabels, cleanBinding, newBinding, reposInScope } from '../../lib/slack.ts'
-import {
-  Button,
-  Checkbox,
-  Dialog,
-  MultiToggle,
-  Segmented,
-  Select,
-  TextField,
-} from '../../ui/index.ts'
+import { Button, Checkbox, Dialog, MultiToggle, Segmented, Select } from '../../ui/index.ts'
+import { ChannelPicker } from './ChannelPicker.tsx'
 
 const NO_REPO = '__none'
 
@@ -32,7 +23,6 @@ export function ChannelDialog({
   onClose: () => void
   saving: boolean
 }) {
-  const channels = useSlackChannels(true)
   const groups = useGroups()
   const repos = useRepos()
   const [binding, setBinding] = useState<SlackChannelBinding>(() => initial ?? newBinding('', ''))
@@ -40,9 +30,6 @@ export function ChannelDialog({
     setBinding((current) => ({ ...current, ...patch }))
 
   const taken = new Set(settings.policy.channels.map((entry) => entry.channel))
-  const available = (channels.data?.channels ?? []).filter(
-    (channel) => channel.id === initial?.channel || !taken.has(channel.id),
-  )
   const groupIds = useMemo(
     () => (groups.data?.entries ?? []).map((group) => group.id).toSorted(),
     [groups.data],
@@ -82,43 +69,11 @@ export function ChannelDialog({
         </>
       }
     >
-      {initial ? null : channels.isError ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-danger">{messageOf(channels.error)}</p>
-          <TextField
-            label="Channel id"
-            value={binding.channel}
-            onChange={(channel) => set({ channel: channel.trim(), name: binding.name || channel })}
-            placeholder="C0123ABCD"
-            description="In Slack: channel name → About → the id at the bottom."
-            mono
-          />
-        </div>
-      ) : (
-        <Select
-          label="Channel"
-          placeholder={channels.isPending ? 'Loading channels…' : 'Pick a channel'}
-          options={available.map((channel) => ({
-            id: channel.id,
-            text: channel.name,
-            label: (
-              <span className="inline-flex items-center gap-1.5">
-                {channel.private ? (
-                  <Lock className="size-3.5 text-muted" aria-hidden />
-                ) : (
-                  <Hash className="size-3.5 text-muted" aria-hidden />
-                )}
-                {channel.name}
-                {channel.member ? null : (
-                  <span className="text-xs text-muted">· bot not invited</span>
-                )}
-              </span>
-            ),
-          }))}
-          value={binding.channel || undefined}
-          onChange={(id) =>
-            set({ channel: id, name: available.find((channel) => channel.id === id)?.name ?? id })
-          }
+      {initial ? null : (
+        <ChannelPicker
+          value={binding.channel}
+          taken={taken}
+          onPick={({ id, name }) => set({ channel: id, name })}
         />
       )}
 

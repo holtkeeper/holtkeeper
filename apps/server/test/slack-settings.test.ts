@@ -38,10 +38,11 @@ let background: Promise<unknown>[]
 let slackCalls: { method: string; body: Record<string, unknown>; auth: string | null }[]
 
 const slackFetch: SlackFetch = async (url, init) => {
-  const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}') as Record<
-    string,
-    unknown
-  >
+  const text = typeof init.body === 'string' ? init.body : '{}'
+  const form = new Headers(init.headers).get('content-type')?.startsWith('application/x-www-form')
+  const body: Record<string, unknown> = form
+    ? Object.fromEntries(new URLSearchParams(text))
+    : (JSON.parse(text) as Record<string, unknown>)
   const method = url.split('/').at(-1) ?? ''
   const authorization = new Headers(init.headers).get('authorization')
   slackCalls.push({ method, body, auth: authorization })
@@ -56,7 +57,9 @@ const slackFetch: SlackFetch = async (url, init) => {
       ok: true,
       channels: [
         { id: 'C2', name: 'releases', is_private: false, is_member: true },
-        { id: 'G1', name: 'secret-team', is_private: true, is_member: true },
+        ...(String(body['types']).includes('private_channel')
+          ? [{ id: 'G1', name: 'secret-team', is_private: true, is_member: true }]
+          : []),
       ],
     })
   return Response.json({ ok: true, channel: body['channel'], ts: `1.${slackCalls.length}` })

@@ -108,14 +108,28 @@ export function slackClient(options: SlackClientOptions): SlackClient {
   const token = async () =>
     typeof options.token === 'function' ? options.token() : resolveSecret(options.token)
 
-  const raw = async (method: string, body: Record<string, unknown>): Promise<unknown> => {
+  /**
+   * Write methods take JSON; read methods (`auth.test`, `conversations.list`) ignore JSON
+   * arguments, so they get a form instead.
+   */
+  const raw = async (
+    method: string,
+    body: Record<string, unknown>,
+    encoding: 'json' | 'form' = 'json',
+  ): Promise<unknown> => {
+    const form = new URLSearchParams(
+      Object.entries(body).map(([key, value]): [string, string] => [key, String(value)]),
+    )
     const response = await fetch(`${base}/${method}`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${await token()}`,
-        'content-type': 'application/json; charset=utf-8',
+        'content-type':
+          encoding === 'json'
+            ? 'application/json; charset=utf-8'
+            : 'application/x-www-form-urlencoded',
       },
-      body: JSON.stringify(body),
+      body: encoding === 'json' ? JSON.stringify(body) : form.toString(),
     })
     if (!response.ok) throw new SlackApiError(method, `http_${response.status}`)
     const json: unknown = await response.json().catch(() => undefined)
@@ -144,7 +158,7 @@ export function slackClient(options: SlackClientOptions): SlackClient {
       await call('chat.update', { channel, ts, text, blocks })
     },
     async identity() {
-      const answer = identitySchema.safeParse(await raw('auth.test', {}))
+      const answer = identitySchema.safeParse(await raw('auth.test', {}, 'form'))
       if (!answer.success) throw new SlackApiError('auth.test', 'invalid_response')
       const { team_id: teamId, team, user_id: botUserId, user: bot, url } = answer.data
       return { teamId, team, botUserId, bot, ...(url && { url }) }
@@ -155,12 +169,16 @@ export function slackClient(options: SlackClientOptions): SlackClient {
       for (let page = 0; page < 20; page++) {
         // oxlint-disable-next-line no-await-in-loop -- cursor pages one after another
         const answer = channelsSchema.safeParse(
-          await raw('conversations.list', {
-            types: 'public_channel,private_channel',
-            exclude_archived: true,
-            limit: 200,
-            ...(cursor && { cursor }),
-          }),
+          await raw(
+            'conversations.list',
+            {
+              types: 'public_channel,private_channel',
+              exclude_archived: true,
+              limit: 200,
+              ...(cursor && { cursor }),
+            },
+            'form',
+          ),
         )
         if (!answer.success) throw new SlackApiError('conversations.list', 'invalid_response')
         for (const channel of answer.data.channels)

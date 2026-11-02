@@ -1,4 +1,10 @@
-import type { Action, RepoSummary, Scope, SlackChannelBinding } from '@holtkeeper/api'
+import type {
+  Action,
+  RepoSummary,
+  Scope,
+  SlackChannelBinding,
+  SlackChannelView,
+} from '@holtkeeper/api'
 
 import { repoKey } from './repo.ts'
 
@@ -64,3 +70,20 @@ export const withBinding = (
   [...bindings.filter((entry) => entry.channel !== binding.channel), binding].toSorted((a, b) =>
     a.name.localeCompare(b.name),
   )
+
+/**
+ * Channels whose name or id contains every word of `query` (case-insensitive, a leading `#`
+ * ignored), the ones the bot is in first, then by name.
+ */
+export function channelMatches(
+  channels: readonly SlackChannelView[],
+  query: string,
+): SlackChannelView[] {
+  const words = query.toLowerCase().replaceAll('#', ' ').split(/\s+/).filter(Boolean)
+  return channels
+    .filter((channel) => {
+      const text = `${channel.name} ${channel.id}`.toLowerCase()
+      return words.every((word) => text.includes(word))
+    })
+    .toSorted((a, b) => Number(b.member) - Number(a.member) || a.name.localeCompare(b.name))
+}
