@@ -63,6 +63,18 @@ beforeEach(async () => {
     slackFetch,
     onBackground: (work) => void background.push(work),
   })
+  await store.kv?.set('chat:slack:policy', {
+    channels: [
+      {
+        channel: 'C1',
+        name: 'releases',
+        scope: { all: true },
+        actions: ['releases:read', 'releases:run'],
+      },
+    ],
+    unboundChannels: 'deny',
+    directMessages: true,
+  })
   await store.settings.put({
     id: 'releases',
     key: 'releases',
@@ -139,7 +151,7 @@ describe('slack routes', () => {
   test('tell unlinked people how to link their account', async () => {
     expect((await slash('release repo=work:g/app')).status).toBe(200)
     expect(slackCalls[0]?.method).toBe('chat.postMessage')
-    expect(posted()).toContain('provider `slack:T1`, id `U1`')
+    expect(posted()).toContain('Send me `link` in a direct message')
   })
 
   test('show the release state and deploy from a button, updating the message', async () => {

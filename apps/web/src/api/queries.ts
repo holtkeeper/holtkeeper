@@ -1,5 +1,6 @@
 import type {
   DigestInput,
+  SlackSettingsView,
   DeployState,
   ReleaseAcceptInput,
   ReleaseBatchInput,
@@ -77,6 +78,7 @@ export const keys = {
   chat: ['chat'] as const,
   digests: ['digests'] as const,
   users: ['users'] as const,
+  slack: ['slack'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
   releases: ['releases'] as const,
@@ -785,6 +787,42 @@ export function useReindexLibraries() {
 
 /** External accounts (GitLab, GitHub, Slack, ...) linked to the signed-in principal. */
 /** Every digest, the analysis kinds sections can read and the presets. */
+/** How Slack is connected, what to set up there, and the channel policy. */
+export const useSlackSettings = () => useQuery({ queryKey: keys.slack, queryFn: api.slackSettings })
+
+/** Channels the bot can see; asks Slack, so only while `enabled`. */
+export const useSlackChannels = (enabled: boolean) =>
+  useQuery({
+    queryKey: [...keys.slack, 'channels'],
+    queryFn: api.slackChannels,
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  })
+
+/** Connect, disconnect and change the channel policy; each answers with the new settings. */
+export function useSlackMutations() {
+  const client = useQueryClient()
+  const onSuccess = (view: SlackSettingsView) => {
+    client.setQueryData(keys.slack, view)
+    void client.invalidateQueries({ queryKey: [...keys.slack, 'channels'] })
+  }
+  return {
+    connect: useMutation({ mutationFn: api.connectSlack, onSuccess }),
+    disconnect: useMutation({ mutationFn: api.disconnectSlack, onSuccess }),
+    savePolicy: useMutation({ mutationFn: api.saveSlackPolicy, onSuccess }),
+  }
+}
+
+/** Links the chat account a bot's link names to the signed-in person. */
+export function useClaimAccount() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: api.claimAccount,
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.accounts }),
+  })
+}
+
 export const useDigests = () => useQuery({ queryKey: keys.digests, queryFn: api.digests })
 
 /** What a digest being edited would send now; previous previews stay while a new one loads. */

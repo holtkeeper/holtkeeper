@@ -71,7 +71,8 @@ export function liveMessage(surface: ChatSurface, posted: PostedMessage): LiveMe
 
 /**
  * Whether an actor may perform an action. `reason` explains a refusal with the codes of
- * `@holtkeeper/identities`: `not-linked`, `unverified`, `no-principal`, `forbidden`.
+ * `@holtkeeper/identities` (`not-linked`, `unverified`, `no-principal`, `forbidden`), or
+ * `outside-scope` when the conversation itself may not do it, e.g. a Slack channel's binding.
  */
 export type ChatAuthorization =
   | { allowed: true; principal: Principal }

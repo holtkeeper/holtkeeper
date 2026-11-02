@@ -375,8 +375,9 @@ const repoSchema = z.object({
 /** Where people talk to Holtkeeper besides merge request comments. */
 const chatSchema = z.object({
   /**
-   * A Slack app: its bot token (`xoxb-…`, scopes `chat:write`, `commands`, `app_mentions:read`,
-   * `im:history`) and signing secret. Requests reach `/api/chat/slack/{events,commands,interactions}`.
+   * A Slack app: its bot token (`xoxb-…`) and signing secret. Requests reach
+   * `/api/chat/slack/{events,commands,interactions}`. Optional: the panel can connect one too;
+   * this one wins when both are set.
    */
   slack: z.object({ botToken: secretSchema, signingSecret: secretSchema }).optional(),
 })

@@ -3,8 +3,10 @@ import { type Identities, IdentityError, createIdentities } from '@holtkeeper/id
 import type { ExternalAccount } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import { z } from 'zod'
 
-import { type Env, type ServerDeps, principalOf } from '../context.ts'
+import { claimKey, claimSchema } from '../claims.ts'
+import { type Env, type ServerDeps, principalOf, readBody } from '../context.ts'
 
 const statusOf = { invalid: 400, forbidden: 403, 'not-found': 404, conflict: 409 } as const
 
@@ -89,6 +91,32 @@ export function accountRoutes(deps: ServerDeps) {
     await attempt(() => service().unlink(principal, c.req.param('id')))
     c.set('audit', { action: 'account.unlink', target: { type: 'account', id: c.req.param('id') } })
     return c.body(null, 204)
+  })
+
+  app.post('/accounts/claim', async (c) => {
+    const principal = principalOf(c)
+    const { token } = await readBody(c, z.object({ token: z.string().min(20).max(200) }))
+    const kv = deps.store.kv
+    if (!kv) throw new HTTPException(503, { message: 'this server keeps no link tokens' })
+    const key = claimKey(token)
+    const claim = claimSchema.safeParse(await kv.get(key))
+    if (!claim.success)
+      throw new HTTPException(410, {
+        message: 'the link expired or was used; ask the bot for a new one',
+      })
+    await kv.delete(key)
+    const accounts = service()
+    const linked = await attempt(() => accounts.link(principal, claim.data))
+    const { code } = await attempt(() => accounts.issueChallenge(principal, linked.id))
+    const result = await accounts.completeChallenge({ ...claim.data, code, via: 'ui' })
+    if (!result.ok)
+      throw new HTTPException(409, { message: `verification failed: ${result.reason}` })
+    c.set('audit', {
+      action: 'account.claim',
+      target: { type: 'account', id: result.account.id },
+      details: { provider: result.account.provider },
+    })
+    return c.json<ExternalAccountView>(toAccountView(result.account), 201)
   })
 
   app.post('/accounts/:id/challenge', async (c) => {

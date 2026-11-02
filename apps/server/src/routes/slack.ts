@@ -1,25 +1,36 @@
+import { textCard } from '@holtkeeper/chat'
 import {
   type SlackInbound,
   formModal,
   parseEvent,
   parseInteraction,
   parseSlashCommand,
-  slackClient,
   verifySlackRequest,
 } from '@holtkeeper/chat-slack'
-import { resolveSecret } from '@holtkeeper/forge'
 import { slackProvider } from '@holtkeeper/identities'
 import { Hono } from 'hono'
 
-import { chatFor } from '../chat.ts'
+import { type ChatLimit, chatFor } from '../chat.ts'
 import type { Env, ServerDeps } from '../context.ts'
+import { slackServiceFor } from '../slack.ts'
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+const parseRepoKey = (key: string) => {
+  const separator = key.indexOf(':')
+  return { forge: key.slice(0, separator), path: key.slice(separator + 1) }
+}
 
 /**
  * The Slack app's request URLs: `POST /chat/slack/events` (Events API), `/chat/slack/commands`
  * (the `/holtkeeper` slash command) and `/chat/slack/interactions` (buttons and modals). Each
- * answers 404 while `chat.slack` is not configured and 401 without a valid Slack signature.
+ * answers 404 while Slack is not connected (neither `chat.slack` nor the panel) and 401 without a
+ * valid Slack signature.
+ *
+ * Where a command runs decides what it reaches: in a connected channel the channel's scope and
+ * actions narrow the person's grants and its default repository is the conversation's; in direct
+ * messages the person's grants apply when the policy allows them; other channels are refused or
+ * use the person's grants, as the policy says.
  *
  * Slack wants an answer within three seconds, so commands run after the answer (through
  * `deps.onBackground` when given) and reply with new messages; form buttons open their modal
@@ -28,35 +39,62 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
  */
 export function slackRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
+  const slack = slackServiceFor(deps)
 
-  const run = (inbound: Extract<SlackInbound, { kind: 'command' }>) => {
+  const answer = async (inbound: Extract<SlackInbound, { kind: 'command' }>) => {
     const chat = chatFor(deps)
     const surface = chat.surface('slack')
     if (!surface) return
-    const router = chat.router()
-    const line = router.parse(inbound.text, true)
-    const work = router
-      .handle(
-        {
-          surface: surface.id,
-          thread: { ...inbound.thread },
-          actor: { provider: slackProvider(inbound.teamId), externalId: inbound.userId },
-          text: inbound.text,
-        },
-        surface,
-        line,
+    const policy = await slack.policy()
+    const { channel } = inbound.thread
+    const direct = channel.startsWith('D')
+    const binding = policy.channels.find((entry) => entry.channel === channel)
+    const refuse = (text: string) =>
+      surface.post({ ...inbound.thread }, textCard('', text, 'warning'))
+
+    if (direct && !policy.directMessages) {
+      await refuse(
+        'Commands in direct messages are off on this Holtkeeper. Use a connected channel.',
       )
-      .catch((error: unknown) => console.error(`slack: answering failed: ${messageOf(error)}`))
+      return
+    }
+    if (!direct && !binding && policy.unboundChannels === 'deny') {
+      await refuse(
+        `This channel is not connected to Holtkeeper. An admin can connect it under **Slack** in the panel (channel id \`${channel}\`).`,
+      )
+      return
+    }
+    const limit: ChatLimit | undefined = binding
+      ? { scope: binding.scope, actions: binding.actions }
+      : undefined
+    const router = chat.router([], limit ? { limit } : {})
+    await router.handle(
+      {
+        surface: surface.id,
+        thread: { ...inbound.thread },
+        actor: { provider: slackProvider(inbound.teamId), externalId: inbound.userId },
+        text: inbound.text,
+        ...(binding?.defaultRepo && { repo: parseRepoKey(binding.defaultRepo) }),
+      },
+      surface,
+      router.parse(inbound.text, true),
+    )
+  }
+
+  const run = (inbound: Extract<SlackInbound, { kind: 'command' }>) => {
+    const work = answer(inbound).catch((error: unknown) =>
+      console.error(`slack: answering failed: ${messageOf(error)}`),
+    )
     if (deps.onBackground) deps.onBackground(work)
   }
 
   const receive = (path: string, parse: (body: string) => SlackInbound) =>
     app.post(path, async (c) => {
-      const slack = deps.config.chat?.slack
-      if (!slack) return c.json({ error: 'Slack is not configured' }, 404)
+      const secrets = await slack.secrets()
+      if (!secrets) return c.json({ error: 'Slack is not connected' }, 404)
       const body = await c.req.text()
       const signed = verifySlackRequest({
-        signingSecret: resolveSecret(slack.signingSecret),
+        signingSecret: secrets.signingSecret,
         timestamp: c.req.header('x-slack-request-timestamp'),
         signature: c.req.header('x-slack-signature'),
         body,
@@ -69,10 +107,7 @@ export function slackRoutes(deps: ServerDeps) {
       if (inbound.kind === 'challenge') return c.json({ challenge: inbound.challenge })
       if (inbound.kind === 'open-form') {
         try {
-          await slackClient({
-            token: slack.botToken,
-            ...(deps.slackFetch && { fetch: deps.slackFetch }),
-          }).openView(inbound.triggerId, formModal(inbound.form, inbound.thread))
+          await slack.client.openView(inbound.triggerId, formModal(inbound.form, inbound.thread))
         } catch (error) {
           console.error(`slack: opening a form failed: ${messageOf(error)}`)
         }

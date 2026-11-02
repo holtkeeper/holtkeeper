@@ -51,12 +51,16 @@ export interface ChatRouter {
 const denialText = (action: Action, reason: string, prefix: string, actor: ChatActor) => {
   const where = actor.provider.split(':')[0] ?? actor.provider
   if (reason === 'not-linked')
-    return `Your ${where} account is not linked to Holtkeeper. Link it under **Account → Linked accounts**${
-      actor.externalId ? ` (provider \`${actor.provider}\`, id \`${actor.externalId}\`)` : ''
-    }, then post \`/${prefix} verify <code>\` with the code shown there.`
+    return where === 'slack'
+      ? `Your Slack account is not linked to Holtkeeper yet. Send me \`link\` in a direct message and open the link I answer with.`
+      : `Your ${where} account is not linked to Holtkeeper. Link it under **Account → Linked accounts**${
+          actor.externalId ? ` (provider \`${actor.provider}\`, id \`${actor.externalId}\`)` : ''
+        }, then post \`/${prefix} verify <code>\` with the code shown there.`
   if (reason === 'unverified')
     return `Your linked ${where} account is not verified yet. Get a code under **Account → Linked accounts** and post \`/${prefix} verify <code>\`.`
   if (reason === 'no-principal') return 'The Holtkeeper user of your linked account is disabled.'
+  if (reason === 'outside-scope')
+    return `This conversation may not do this here (\`${action}\`). An admin can widen what it reaches in Holtkeeper.`
   return `You are not allowed to do this here (\`${action}\`).`
 }
 

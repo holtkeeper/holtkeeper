@@ -1,14 +1,15 @@
-import { can, type Principal } from '@holtkeeper/access'
+import { type Action, can, type Principal, type Scope, scopeCoversRepo } from '@holtkeeper/access'
 import {
   type ChatCommand,
   type ChatRouter,
   type ChatSurface,
+  ChatUserError,
   createChatRouter,
   defineCommand,
   mergeRequestSurface,
   textCard,
 } from '@holtkeeper/chat'
-import { slackClient, slackSurface } from '@holtkeeper/chat-slack'
+import { slackSurface } from '@holtkeeper/chat-slack'
 import type { RepoRef } from '@holtkeeper/forge'
 import { parseVerifyCommand } from '@holtkeeper/identities'
 import type { ReleaseEvent } from '@holtkeeper/release'
@@ -16,9 +17,11 @@ import { z } from 'zod'
 
 import { deployCard, type LiveDeploy, releaseCommand } from './chat-release.ts'
 import { type WebChatStore, webChatStore, webSurface } from './chat-web.ts'
+import { CLAIM_TTL_SECONDS, claimKey } from './claims.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
 import { identitiesFor } from './routes/accounts.ts'
+import { slackServiceFor } from './slack.ts'
 
 /** Hidden marker of every chat note, so events skip them and review replies leave them alone. */
 export const CHAT_MARKER = 'holtkeeper:chat'
@@ -41,18 +44,28 @@ const liveDeploySchema = z.array(
   }),
 )
 
+/** What one conversation may reach, whoever writes there. */
+export interface ChatLimit {
+  scope: Scope
+  actions: readonly Action[]
+}
+
 /** The chat side of a server: surfaces, the router and live cards that follow release events. */
 export interface ServerChat {
-  /** `merge-requests`, `web`, and `slack` while `chat.slack` is configured. */
+  /** `merge-requests`, `web` and `slack` (whose posts fail while Slack is not connected). */
   surface(id: string): ChatSurface | undefined
   /** The panel conversations. */
   readonly conversations: WebChatStore
   /**
    * A router with the built-in commands plus `extra` (e.g. commands that queue analyzers). With
    * `principal` (the panel's signed-in person) actions are checked against its grants; otherwise
-   * the actor's linked account decides.
+   * the actor's linked account decides. `limit` narrows both to what a conversation may do, e.g.
+   * a connected Slack channel.
    */
-  router(extra?: readonly ChatCommand<unknown>[], options?: { principal?: Principal }): ChatRouter
+  router(
+    extra?: readonly ChatCommand<unknown>[],
+    options?: { principal?: Principal; limit?: ChatLimit },
+  ): ChatRouter
 }
 
 function createServerChat(deps: ServerDeps): ServerChat {
@@ -73,14 +86,7 @@ function createServerChat(deps: ServerDeps): ServerChat {
   const surface = (id: string): ChatSurface | undefined => {
     if (id === mergeRequests.id) return mergeRequests
     if (id === web.id) return web
-    const slack = config.chat?.slack
-    if (id === 'slack' && slack)
-      return slackSurface({
-        client: slackClient({
-          token: slack.botToken,
-          ...(deps.slackFetch && { fetch: deps.slackFetch }),
-        }),
-      })
+    if (id === 'slack') return slackSurface({ client: slackServiceFor(deps).client })
     return undefined
   }
 
@@ -155,15 +161,61 @@ function createServerChat(deps: ServerDeps): ServerChat {
     },
   })
 
+  const link = defineCommand({
+    name: 'link',
+    summary: 'Sends you a private link that connects this chat account to your Holtkeeper user.',
+    options: z.object({}).loose(),
+    async run({ message, reply }) {
+      const direct =
+        message.surface === 'slack' &&
+        typeof message.thread['channel'] === 'string' &&
+        message.thread['channel'].startsWith('D')
+      if (!direct)
+        throw new ChatUserError(
+          'Send `link` to me in a direct message in Slack: the link must stay private.',
+        )
+      const base = config.server?.publicUrl?.replace(/\/$/, '')
+      if (!base)
+        throw new ChatUserError('This server has no public URL (server.publicUrl) to link from.')
+      const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url')
+      await kv.set(
+        claimKey(token),
+        {
+          provider: message.actor.provider,
+          externalId: message.actor.externalId,
+          ...(message.actor.username && { username: message.actor.username }),
+        },
+        CLAIM_TTL_SECONDS,
+      )
+      await reply({
+        title: 'Link your account',
+        tone: 'info',
+        url: `${base}/accounts/claim?token=${token}`,
+        blocks: [
+          {
+            type: 'text',
+            text: 'Open the link below while signed in to Holtkeeper, within 15 minutes. It works once; anyone who opens it links your account to theirs, so keep it to yourself.',
+          },
+        ],
+      })
+    },
+  })
+
   const release = releaseCommand({ deps, pageOf, follow })
 
   const router = (
     extra: readonly ChatCommand<unknown>[] = [],
-    options: { principal?: Principal } = {},
+    options: { principal?: Principal; limit?: ChatLimit } = {},
   ) =>
     createChatRouter({
-      commands: [...extra, verify, release],
+      commands: [...extra, verify, link, release],
       authorize: async (actor, action, repo) => {
+        const { limit } = options
+        if (limit) {
+          if (!limit.actions.includes(action)) return { allowed: false, reason: 'outside-scope' }
+          if (repo && !scopeCoversRepo(limit.scope, repoTarget(config, repo)))
+            return { allowed: false, reason: 'outside-scope' }
+        }
         const signedIn = options.principal
         if (signedIn)
           return can(

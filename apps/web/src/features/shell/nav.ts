@@ -11,6 +11,7 @@ import {
   FlaskConical,
   FolderGit2,
   GitBranch,
+  Hash,
   Gauge,
   HardDrive,
   Images,
@@ -95,6 +96,7 @@ export interface NavItem {
     | '/activity'
     | '/chat'
     | '/digests'
+    | '/slack'
   /** Sidebar heading the entry is listed under. */
   section: NavSection
   label: string
@@ -327,6 +329,14 @@ const navItems: readonly NavItem[] = [
     label: 'Libraries',
     icon: LibraryBig,
     requires: 'analyses:read',
+  },
+  {
+    section: 'Admin',
+    to: '/slack',
+    brand: 'slack',
+    label: 'Slack',
+    icon: Hash,
+    requires: 'settings:read',
   },
   {
     section: 'Admin',

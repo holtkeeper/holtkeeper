@@ -1,5 +1,6 @@
 export * from './blocks.ts'
 export * from './client.ts'
 export * from './inbound.ts'
+export * from './manifest.ts'
 export * from './signature.ts'
 export * from './surface.ts'

@@ -33,6 +33,7 @@ import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
+import { slackSettingsRoutes } from './routes/slack-settings.ts'
 import { slackRoutes } from './routes/slack.ts'
 import { storageRoutes } from './routes/storage.ts'
 import { trackerRoutes } from './routes/trackers.ts'
@@ -114,6 +115,7 @@ export function createApp(deps: ServerDeps) {
     updateRoutes(deps, { ...(poller && { poller }), ...(hooks && { repoHooks: hooks }) }),
   )
   api.route('/', slackRoutes(deps))
+  api.route('/', slackSettingsRoutes(deps))
   api.route('/', chatRoutes(deps))
   api.route('/', digestRoutes(deps))
   api.route('/', configRoutes(deps))

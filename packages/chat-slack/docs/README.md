@@ -6,42 +6,9 @@ It talks to the Slack Web API with `fetch` and keeps no state; the server checks
 
 ## Setting up the Slack app
 
-Create an app from this manifest (replace the host), install it to the workspace, and put its **Bot User OAuth Token** and **Signing Secret** into the config:
+The server's **Slack** page in the panel walks through it and builds everything from the server's address: `slackManifest({ baseUrl, name? })` is the app manifest (a bot user, the `/holtkeeper` slash command, `app_mention` and `message.im` events, interactivity, all pointing at `slackRequestUrls(baseUrl)`), and `slackCreateAppUrl(manifest)` opens Slack's "create an app" dialog with it filled in. `slackScopes` lists the bot scopes with what each is for: `chat:write`, `chat:write.public` (digests to public channels without an invite), `commands`, `app_mentions:read`, `im:history`, `channels:read` and `groups:read` (listing channels to connect).
 
-```yaml
-display_information:
-  name: Holtkeeper
-features:
-  bot_user:
-    display_name: holtkeeper
-    always_online: true
-  app_home:
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-  slash_commands:
-    - command: /holtkeeper
-      url: https://holtkeeper.example.com/api/chat/slack/commands
-      description: Releases and other Holtkeeper commands
-      usage_hint: release repo=work:games/app-x
-oauth_config:
-  scopes:
-    bot: [chat:write, commands, app_mentions:read, im:history]
-settings:
-  event_subscriptions:
-    request_url: https://holtkeeper.example.com/api/chat/slack/events
-    bot_events: [app_mention, message.im]
-  interactivity:
-    is_enabled: true
-    request_url: https://holtkeeper.example.com/api/chat/slack/interactions
-```
-
-```ts
-chat: {
-  slack: { botToken: env('SLACK_BOT_TOKEN'), signingSecret: env('SLACK_SIGNING_SECRET') },
-}
-```
-
-The bot answers in channels it was invited to; elsewhere a slash command is answered privately to the person who ran it. People link their Slack account under **Account → Linked accounts** (provider `slack:<team id>`, their member id, both shown when the bot refuses an action) and prove it by sending `/holtkeeper verify <code>`.
+After installing the app, its **Bot User OAuth Token** and **Signing Secret** are pasted in the panel (or set as `chat.slack` in the config file, which then wins). People link their Slack account by sending the bot `link` in a direct message.
 
 ## Requests
 
@@ -79,4 +46,4 @@ At most 50 blocks; `text` (the title, else the first text) is the notification f
 
 `slackSurface({ client, id = 'slack', prefix? })` posts cards with `chat.postMessage` in the thread's channel (and thread), returning `<channel>/<ts>` as the message id, and updates them with `chat.update`. When the bot may not post there (`not_in_channel`, `channel_not_found`, `is_archived`) and the thread has a `response_url`, the card goes privately through it instead; such answers cannot be updated.
 
-`slackClient({ token, fetch?, baseUrl? })` — `sendMessage` (`chat.postMessage`), `updateMessage`, `openView`, `respond` (only to `https://hooks.slack.com/`). Failures are `SlackApiError` with Slack's `code` (`not_in_channel`, `expired_trigger_id`, `http_429`, …); the token is resolved per call and never part of an error.
+`slackClient({ token, fetch?, baseUrl? })` — `sendMessage` (`chat.postMessage`), `updateMessage`, `openView`, `respond` (only to `https://hooks.slack.com/`), `identity()` (`auth.test`: team, bot and their ids) and `channels()` (`conversations.list`: public channels and private ones the bot is in, by name, up to 20 pages). `token` is a secret or a function called on every request, so a token changed elsewhere applies at once. Failures are `SlackApiError` with Slack's `code` (`not_in_channel`, `expired_trigger_id`, `http_429`, …); the token is resolved per call and never part of an error.

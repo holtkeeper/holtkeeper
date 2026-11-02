@@ -31,7 +31,7 @@ export function chatRoutes(deps: ServerDeps) {
       messages: await chat.conversations.list(userId),
       commands: chat
         .router()
-        .commands.filter((command) => !command.hidden && command.name !== 'verify')
+        .commands.filter((command) => !command.hidden && !['verify', 'link'].includes(command.name))
         .map((command) => ({
           name: command.name,
           summary: command.summary,

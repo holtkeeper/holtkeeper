@@ -1,4 +1,4 @@
-import type { Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
+import type { Action, Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
 import type { ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
 import type { AuthInfo } from '@holtkeeper/auth'
 import type { BundlePoint, BundleSeries } from '@holtkeeper/bundles'
@@ -278,6 +278,59 @@ export interface DigestPreview {
 }
 
 /** `POST /api/chat/messages`: a command line, optionally about one repository (`forge:path`). */
+/** What one connected Slack channel may do. */
+export interface SlackChannelBinding {
+  channel: string
+  name: string
+  scope: Scope
+  actions: Action[]
+  /** `forge:path` commands there use when they name no repository. */
+  defaultRepo?: string
+}
+
+/** Connected channels and what happens in other channels and direct messages. */
+export interface SlackPolicy {
+  channels: SlackChannelBinding[]
+  unboundChannels: 'deny' | 'user'
+  directMessages: boolean
+}
+
+/** `GET /api/slack`: how Slack is connected, what to set up in Slack, and the channel policy. */
+export interface SlackSettingsView {
+  /** `file`: `chat.slack` of the config; `panel`: connected here; `none`: not connected. */
+  source: 'file' | 'panel' | 'none'
+  workspace?: { teamId: string; team: string; botUserId: string; bot: string; url?: string }
+  connectedAt?: string
+  connectedBy?: string
+  urls: { events: string; commands: string; interactions: string }
+  manifest: unknown
+  /** Opens Slack's "create an app" dialog with the manifest filled in. */
+  createAppUrl: string
+  scopes: { scope: string; why: string }[]
+  policy: SlackPolicy
+  /** Actions a channel may be allowed. */
+  actions: Action[]
+}
+
+/** `GET /api/slack/channels`: a channel the bot can see. */
+export interface SlackChannelView {
+  id: string
+  name: string
+  private: boolean
+  member: boolean
+}
+
+/** `PUT /api/slack/connection` */
+export interface SlackConnectInput {
+  botToken: string
+  signingSecret: string
+}
+
+/** `POST /api/accounts/claim`: the token of a link the chat bot sent. */
+export interface AccountClaimInput {
+  token: string
+}
+
 export interface ChatSendInput {
   text: string
   repo?: string

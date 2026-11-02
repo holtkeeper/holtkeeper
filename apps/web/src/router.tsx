@@ -35,6 +35,8 @@ const page = <P extends string>(path: P, component: ReturnType<typeof lazyRouteC
   createRoute({ getParentRoute: () => appRoute, path, component })
 
 const ChatPage = lazyRouteComponent(() => import('./features/chat/ChatPage.tsx'), 'ChatPage')
+const SlackPage = lazyRouteComponent(() => import('./features/slack/SlackPage.tsx'), 'SlackPage')
+const ClaimPage = lazyRouteComponent(() => import('./features/account/ClaimPage.tsx'), 'ClaimPage')
 const DigestsPage = lazyRouteComponent(
   () => import('./features/digests/DigestsPage.tsx'),
   'DigestsPage',
@@ -385,6 +387,8 @@ const routeTree = rootRoute.addChildren([
     page('activity', ActivityPage),
     page('chat', ChatPage),
     page('digests', DigestsPage),
+    page('slack', SlackPage),
+    page('accounts/claim', ClaimPage),
   ]),
 ])
 

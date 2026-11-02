@@ -1,5 +1,10 @@
 import type {
+  AccountClaimInput,
   ChatConversation,
+  SlackChannelView,
+  SlackConnectInput,
+  SlackPolicy,
+  SlackSettingsView,
   DigestInput,
   DigestList,
   DigestPreview,
@@ -481,6 +486,16 @@ export const api = {
   digests: () => request<DigestList>('GET', '/api/digests'),
   createDigest: (input: DigestInput) =>
     request<DigestView>('POST', '/api/digests', { body: input }),
+  slackSettings: () => request<SlackSettingsView>('GET', '/api/slack'),
+  connectSlack: (input: SlackConnectInput) =>
+    request<SlackSettingsView>('PUT', '/api/slack/connection', { body: input }),
+  disconnectSlack: () => request<SlackSettingsView>('DELETE', '/api/slack/connection'),
+  slackChannels: () => request<{ channels: SlackChannelView[] }>('GET', '/api/slack/channels'),
+  saveSlackPolicy: (policy: SlackPolicy) =>
+    request<SlackSettingsView>('PUT', '/api/slack/policy', { body: policy }),
+  claimAccount: (input: AccountClaimInput) =>
+    request<ExternalAccountView>('POST', '/api/accounts/claim', { body: input }),
+
   updateDigest: (digestId: string, input: DigestInput) =>
     request<DigestView>('PUT', `/api/digests/${id(digestId)}`, { body: input }),
   deleteDigest: (digestId: string) => request<void>('DELETE', `/api/digests/${id(digestId)}`),

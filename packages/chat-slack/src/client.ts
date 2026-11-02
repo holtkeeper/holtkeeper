@@ -30,6 +30,10 @@ export interface SlackClient {
   ): Promise<{ channel: string; ts: string }>
   updateMessage(input: SlackMessage & { channel: string; ts: string }): Promise<void>
   openView(triggerId: string, view: SlackView): Promise<void>
+  /** The workspace and bot of the token; rejects with `invalid_auth` for a bad token. */
+  identity(): Promise<SlackIdentity>
+  /** Public channels and the private ones the bot is in, by name; up to 4000. */
+  channels(): Promise<SlackChannel[]>
   /** Answers through a slash command's or interaction's `response_url`. */
   respond(
     responseUrl: string,
@@ -37,9 +41,28 @@ export interface SlackClient {
   ): Promise<void>
 }
 
+/** Who a bot token belongs to (`auth.test`). */
+export interface SlackIdentity {
+  teamId: string
+  team: string
+  botUserId: string
+  bot: string
+  /** The workspace's web address, e.g. `https://acme.slack.com/`. */
+  url?: string
+}
+
+/** A channel the bot can see (`conversations.list`). */
+export interface SlackChannel {
+  id: string
+  name: string
+  private: boolean
+  /** The bot was invited, so it can read mentions and post without `chat:write.public`. */
+  member: boolean
+}
+
 export interface SlackClientOptions {
-  /** Bot token (`xoxb-…`), resolved on every call. */
-  token: Secret
+  /** Bot token (`xoxb-…`), resolved on every call; a function is called on every call too. */
+  token: Secret | (() => string | Promise<string>)
   fetch?: SlackFetch
   /** Default `https://slack.com/api`. */
   baseUrl?: string
@@ -52,6 +75,26 @@ const answerSchema = z.object({
   ts: z.string().optional(),
 })
 
+const identitySchema = z.object({
+  team_id: z.string(),
+  team: z.string(),
+  user_id: z.string(),
+  user: z.string(),
+  url: z.string().optional(),
+})
+
+const channelsSchema = z.object({
+  channels: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      is_private: z.boolean().optional(),
+      is_member: z.boolean().optional(),
+    }),
+  ),
+  response_metadata: z.object({ next_cursor: z.string().optional() }).optional(),
+})
+
 const responseUrlHost = /^https:\/\/hooks\.slack\.com\//
 
 /**
@@ -62,21 +105,28 @@ export function slackClient(options: SlackClientOptions): SlackClient {
   const fetch = options.fetch ?? globalThis.fetch
   const base = (options.baseUrl ?? 'https://slack.com/api').replace(/\/$/, '')
 
-  const call = async (method: string, body: Record<string, unknown>) => {
+  const token = async () =>
+    typeof options.token === 'function' ? options.token() : resolveSecret(options.token)
+
+  const raw = async (method: string, body: Record<string, unknown>): Promise<unknown> => {
     const response = await fetch(`${base}/${method}`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${resolveSecret(options.token)}`,
+        authorization: `Bearer ${await token()}`,
         'content-type': 'application/json; charset=utf-8',
       },
       body: JSON.stringify(body),
     })
     if (!response.ok) throw new SlackApiError(method, `http_${response.status}`)
-    const answer = answerSchema.safeParse(await response.json().catch(() => undefined))
+    const json: unknown = await response.json().catch(() => undefined)
+    const answer = answerSchema.safeParse(json)
     if (!answer.success) throw new SlackApiError(method, 'invalid_response')
     if (!answer.data.ok) throw new SlackApiError(method, answer.data.error ?? 'unknown_error')
-    return answer.data
+    return json
   }
+
+  const call = async (method: string, body: Record<string, unknown>) =>
+    answerSchema.parse(await raw(method, body))
 
   return {
     async sendMessage({ channel, threadTs, text, blocks }) {
@@ -92,6 +142,38 @@ export function slackClient(options: SlackClientOptions): SlackClient {
     },
     async updateMessage({ channel, ts, text, blocks }) {
       await call('chat.update', { channel, ts, text, blocks })
+    },
+    async identity() {
+      const answer = identitySchema.safeParse(await raw('auth.test', {}))
+      if (!answer.success) throw new SlackApiError('auth.test', 'invalid_response')
+      const { team_id: teamId, team, user_id: botUserId, user: bot, url } = answer.data
+      return { teamId, team, botUserId, bot, ...(url && { url }) }
+    },
+    async channels() {
+      const found: SlackChannel[] = []
+      let cursor: string | undefined
+      for (let page = 0; page < 20; page++) {
+        // oxlint-disable-next-line no-await-in-loop -- cursor pages one after another
+        const answer = channelsSchema.safeParse(
+          await raw('conversations.list', {
+            types: 'public_channel,private_channel',
+            exclude_archived: true,
+            limit: 200,
+            ...(cursor && { cursor }),
+          }),
+        )
+        if (!answer.success) throw new SlackApiError('conversations.list', 'invalid_response')
+        for (const channel of answer.data.channels)
+          found.push({
+            id: channel.id,
+            name: channel.name,
+            private: channel.is_private ?? false,
+            member: channel.is_member ?? false,
+          })
+        cursor = answer.data.response_metadata?.next_cursor || undefined
+        if (!cursor) break
+      }
+      return found.toSorted((a, b) => a.name.localeCompare(b.name))
     },
     async openView(triggerId, view) {
       await call('views.open', { trigger_id: triggerId, view })
