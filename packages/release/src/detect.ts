@@ -24,8 +24,9 @@ export interface DetectionInput {
 
 /**
  * Suggests a release flow from what a repository already does: a release tool's files mean
- * `external`, merge requests from a long-lived development branch into the default branch mean
- * the merge request flow, otherwise trunk. The tag format and scheme follow the existing tags.
+ * `external`, merge requests from a long-lived development branch into another branch mean the
+ * merge request flow into the branch it is merged into most (`flow.target` when that is not the
+ * default branch, which may be the development branch itself), otherwise trunk. The tag format and scheme follow the existing tags.
  * Pure; `reasons` say what the guess rests on.
  */
 export function detectFlow(input: DetectionInput): FlowDetection {
@@ -43,23 +44,36 @@ export function detectFlow(input: DetectionInput): FlowDetection {
     return { preset: 'external', settings: { flow: { mode: 'external' } }, reasons }
   }
 
-  const source = sourceNames.find(
-    (name) => name !== input.defaultBranch && input.branches.some((b) => b.name === name),
-  )
-  const merges = source
-    ? input.merged.filter(
-        (mr) => mr.sourceBranch === source && mr.targetBranch === input.defaultBranch,
-      ).length
-    : 0
-  if (source && merges > 0) {
+  const branches = new Set(input.branches.map((branch) => branch.name))
+  const pairs = new Map<string, { source: string; target: string; merges: number }>()
+  for (const mr of input.merged) {
+    if (
+      !sourceNames.includes(mr.sourceBranch) ||
+      sourceNames.includes(mr.targetBranch) ||
+      !branches.has(mr.sourceBranch) ||
+      !branches.has(mr.targetBranch)
+    )
+      continue
+    const key = `${mr.sourceBranch}\0${mr.targetBranch}`
+    const pair = pairs.get(key) ?? { source: mr.sourceBranch, target: mr.targetBranch, merges: 0 }
+    pair.merges += 1
+    pairs.set(key, pair)
+  }
+  const release = [...pairs.values()].toSorted((a, b) => b.merges - a.merges)[0]
+  const source = release?.source ?? sourceNames.find((name) => branches.has(name))
+  if (release) {
     preset = 'merge-request-deferred-version'
-    settings['flow'] = { mode: 'merge-request', source }
-    reasons.push(`${merges} merge request(s) from ${source} into ${input.defaultBranch}`)
+    settings['flow'] = {
+      mode: 'merge-request',
+      source: release.source,
+      ...(release.target === input.defaultBranch ? {} : { target: release.target }),
+    }
+    reasons.push(`${release.merges} merge request(s) from ${release.source} into ${release.target}`)
   } else {
     settings['flow'] = { mode: 'trunk' }
     reasons.push(
       source
-        ? `${source} exists but is not merged into ${input.defaultBranch} through merge requests`
+        ? `${source} exists but is not merged into another branch through merge requests`
         : `no long-lived development branch next to ${input.defaultBranch}`,
     )
   }
@@ -93,13 +107,7 @@ export async function detectRepositoryFlow(forge: GitForge, repo: RepoRef): Prom
   const [branches, tags, merged, files] = await Promise.all([
     forge.listBranches?.(repo.path).catch(() => []) ?? [],
     forge.listTags?.(repo.path, { limit: 100 }).catch(() => []) ?? [],
-    forge
-      .listMergeRequests?.(repo.path, {
-        state: 'merged',
-        targetBranch: repository.defaultBranch,
-        limit: 50,
-      })
-      .catch(() => []) ?? [],
+    forge.listMergeRequests?.(repo.path, { state: 'merged', limit: 100 }).catch(() => []) ?? [],
     forge.listFiles?.(repo.path).catch(() => []) ?? [],
   ])
   return detectFlow({

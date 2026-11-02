@@ -64,6 +64,29 @@ describe('flow detection', () => {
     })
   })
 
+  test('release target next to a development default branch', () => {
+    const detected = detectFlow({
+      defaultBranch: 'development',
+      branches: [{ name: 'development' }, { name: 'main' }, { name: 'feature/ABC-1' }],
+      tags: [{ name: 'v1.1.0' }, { name: 'v1.0.0' }],
+      merged: [
+        { sourceBranch: 'feature/ABC-1', targetBranch: 'development' },
+        { sourceBranch: 'feature/ABC-2', targetBranch: 'development' },
+        { sourceBranch: 'development', targetBranch: 'main' },
+        { sourceBranch: 'development', targetBranch: 'main' },
+        { sourceBranch: 'development', targetBranch: 'release/old' },
+      ],
+      files: [],
+    })
+    expect(detected.preset).toBe('merge-request-deferred-version')
+    expect(detected.settings['flow']).toEqual({
+      mode: 'merge-request',
+      source: 'development',
+      target: 'main',
+    })
+    expect(detected.reasons[0]).toBe('2 merge request(s) from development into main')
+  })
+
   test('trunk with calendar tags, and external release tools', () => {
     expect(
       detectFlow({
