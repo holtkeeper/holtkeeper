@@ -199,7 +199,7 @@ export function DigestsPage() {
   return (
     <Page
       title="Digests"
-      icon="activity"
+      icon="digests"
       description="What the analyses found, collected on a schedule and sent where your team reads."
       actions={
         editable && list ? (

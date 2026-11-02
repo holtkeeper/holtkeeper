@@ -180,7 +180,7 @@ export function ReleaseBoardPage() {
   return (
     <Page
       title="Release board"
-      icon="release"
+      icon="releaseboard"
       description="Release candidates, versions waiting for acceptance and deploys across repositories"
       actions={
         <div className="flex flex-wrap items-center gap-2">

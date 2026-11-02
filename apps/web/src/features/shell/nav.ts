@@ -45,6 +45,7 @@ import type { BrandIconName } from '../../ui/BrandIcon.tsx'
 /** Sidebar headings in display order. */
 const navSections = [
   'Overview',
+  'Assistant',
   'Security',
   'Code',
   'Packages',
@@ -146,16 +147,16 @@ const navItems: readonly NavItem[] = [
     icon: Activity,
   },
   {
-    section: 'Overview',
+    section: 'Assistant',
     to: '/chat',
-    brand: 'holtkeeper',
+    brand: 'chat',
     label: 'Chat',
     icon: MessagesSquare,
   },
   {
-    section: 'Overview',
+    section: 'Assistant',
     to: '/digests',
-    brand: 'activity',
+    brand: 'digests',
     label: 'Digests',
     icon: Newspaper,
     requires: 'settings:read',
@@ -243,7 +244,7 @@ const navItems: readonly NavItem[] = [
   {
     section: 'Delivery',
     to: '/release-board',
-    brand: 'release',
+    brand: 'releaseboard',
     label: 'Release board',
     icon: Rocket,
     requires: 'releases:read',
@@ -315,7 +316,7 @@ const navItems: readonly NavItem[] = [
   {
     section: 'MCP',
     to: '/mcp-server',
-    brand: 'api',
+    brand: 'mcp',
     label: 'MCP server',
     icon: Plug,
   },
@@ -371,7 +372,7 @@ const navItems: readonly NavItem[] = [
   {
     section: 'System',
     to: '/database',
-    brand: 'storage',
+    brand: 'database',
     label: 'Database',
     icon: Database,
     requires: 'settings:read',
@@ -379,6 +380,7 @@ const navItems: readonly NavItem[] = [
   {
     section: 'System',
     to: '/caches',
+    brand: 'caches',
     label: 'Caches',
     icon: DatabaseZap,
     requires: 'settings:read',

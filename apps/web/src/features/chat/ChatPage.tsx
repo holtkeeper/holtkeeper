@@ -151,7 +151,7 @@ export function ChatPage() {
   return (
     <Page
       title="Chat"
-      icon="holtkeeper"
+      icon="chat"
       description="Run Holtkeeper commands here, in merge request comments or in Slack: the same commands and answers everywhere."
       actions={
         messages.length ? (

@@ -50,7 +50,7 @@ export function McpPage() {
   return (
     <Page
       title="MCP server"
-      icon="api"
+      icon="mcp"
       description="Give AI agents read-only access to your packages and the libraries you use"
     >
       <Tabs

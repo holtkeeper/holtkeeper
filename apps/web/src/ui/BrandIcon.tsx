@@ -9,22 +9,27 @@ import branches from '@holtkeeper/brand/branches.svg'
 import browserslist from '@holtkeeper/brand/browserslist.svg'
 import bundles from '@holtkeeper/brand/bundles.svg'
 import caches from '@holtkeeper/brand/caches.svg'
+import chat from '@holtkeeper/brand/chat.svg'
 import ci from '@holtkeeper/brand/ci.svg'
 import coverage from '@holtkeeper/brand/coverage.svg'
 import credentials from '@holtkeeper/brand/credentials.svg'
 import database from '@holtkeeper/brand/database.svg'
 import dependencies from '@holtkeeper/brand/dependencies.svg'
+import digests from '@holtkeeper/brand/digests.svg'
 import fleet from '@holtkeeper/brand/fleet.svg'
 import holtkeeper from '@holtkeeper/brand/holtkeeper.svg'
 import jobs from '@holtkeeper/brand/jobs.svg'
 import knowledge from '@holtkeeper/brand/knowledge.svg'
 import libraries from '@holtkeeper/brand/libraries.svg'
 import licenses from '@holtkeeper/brand/licenses.svg'
+import mcp from '@holtkeeper/brand/mcp.svg'
 import quality from '@holtkeeper/brand/quality.svg'
 import release from '@holtkeeper/brand/release.svg'
+import releaseboard from '@holtkeeper/brand/releaseboard.svg'
 import repos from '@holtkeeper/brand/repos.svg'
 import review from '@holtkeeper/brand/review.svg'
 import settings from '@holtkeeper/brand/settings.svg'
+import slack from '@holtkeeper/brand/slack.svg'
 import stack from '@holtkeeper/brand/stack.svg'
 import storage from '@holtkeeper/brand/storage.svg'
 import testids from '@holtkeeper/brand/testids.svg'
@@ -44,22 +49,27 @@ const icons = {
   browserslist,
   bundles,
   caches,
+  chat,
   ci,
   coverage,
   credentials,
   database,
   dependencies,
+  digests,
   fleet,
   holtkeeper,
   jobs,
   knowledge,
   libraries,
   licenses,
+  mcp,
   quality,
   release,
+  releaseboard,
   repos,
   review,
   settings,
+  slack,
   stack,
   storage,
   testids,
