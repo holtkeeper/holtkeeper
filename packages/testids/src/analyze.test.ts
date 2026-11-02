@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
 
 import { analyzeTestIds, componentName, findUntagged, tsconfigAliases } from './analyze.ts'
 import { testIdsCheck } from './check.ts'
-import { testIdsReport } from './report.ts'
+import type { TestIdsData } from './model.ts'
+import { testIdsAnalysis, testIdsReport } from './report.ts'
 
 let dir: string
 
@@ -96,6 +97,18 @@ test('lists test attributes per component with static and runtime values', async
     type: 'table',
     rows: [{ component: 'Menu · src/Menu.vue', selector: '[data-test="toggle"]' }],
   })
+})
+
+test('asks to run analyses stored before the catalog again', () => {
+  const report = testIdsAnalysis.toReport({
+    id: 'a1',
+    repo: { forge: 'work', path: 'shop/web' },
+    kind: 'testids',
+    createdAt: '2026-10-28T00:00:00.000Z',
+    data: { attributes: ['data-testid'], untagged: [] } as unknown as TestIdsData,
+  })
+  expect(report.metrics.map((m) => m.value)).toEqual([0, 0, 0])
+  expect(report.sections.map((s) => s.id)).toEqual(['stale'])
 })
 
 test('names components after files, or their folder for index files', () => {

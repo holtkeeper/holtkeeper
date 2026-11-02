@@ -188,9 +188,22 @@ export function testIdsReport(
   }
 }
 
+const isCatalog = (data: TestIdsData) => Array.isArray(data.components)
+
 /** Analyses stored before the catalog have no `components`; they read as empty. */
 const catalogOf = (data: TestIdsData): TestIdsData =>
-  Array.isArray(data.components) ? data : { attributes: data.attributes ?? [], components: [] }
+  isCatalog(data) ? data : { attributes: data.attributes ?? [], components: [] }
+
+const staleSection: Section = {
+  id: 'stale',
+  title: 'Outdated analysis',
+  blocks: [
+    {
+      type: 'markdown',
+      text: 'This analysis was stored in an older format that did not list test attributes. Run the analysis again to see them.',
+    },
+  ],
+}
 
 /**
  * The `testids` analysis kind: the test attributes a repository's templates expose, per
@@ -202,13 +215,15 @@ export const testIdsAnalysis = defineAnalysis<TestIdsData>({
   schema: testIdsDataSchema,
   summarize: (data) => metrics(catalogOf(data)),
   toReport(current, previous) {
-    const prior = previous && Array.isArray(previous.data.components) ? previous : undefined
+    const prior = previous && isCatalog(previous.data) ? previous : undefined
+    const report = testIdsReport(catalogOf(current.data), {
+      previous: prior?.data,
+      ref: current.ref,
+      compareTo: prior?.ref,
+    })
     return {
-      ...testIdsReport(catalogOf(current.data), {
-        previous: prior?.data,
-        ref: current.ref,
-        compareTo: prior?.ref,
-      }),
+      ...report,
+      ...(isCatalog(current.data) ? {} : { sections: [staleSection] }),
       subject: {
         repo: current.repo,
         ...(current.ref ? { ref: current.ref } : {}),

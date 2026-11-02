@@ -62,7 +62,7 @@ interface TestIdsData {
 }
 ```
 
-Only files with at least one test attribute are kept. Analyses stored before the catalog read as empty.
+Only files with at least one test attribute are kept. Analyses stored before the catalog read as empty, and their report asks to run the analysis again.
 
 ## Report
 
