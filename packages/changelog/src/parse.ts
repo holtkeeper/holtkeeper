@@ -40,12 +40,14 @@ export function findTickets(text: string): string[] {
   return unique(found.toSorted((a, b) => a.at - b.at).map((item) => item.id))
 }
 
-function cleanDescription(text: string): string {
+function stripTicketPrefix(text: string): string {
   return text
-    .replace(prSuffix, '')
     .replace(/^(?:\[[A-Z][A-Z0-9]+-\d+\]\s*)+/u, '')
     .replace(/^(?:[A-Z][A-Z0-9]+-\d+[:\s]\s*)+/u, '')
-    .trim()
+}
+
+function cleanDescription(text: string): string {
+  return stripTicketPrefix(text.replace(prSuffix, '')).trim()
 }
 
 function mergeTitle(body: string): string | undefined {
@@ -103,7 +105,7 @@ export function parseCommit(subject: string, body = ''): ParsedCommit {
     wip,
   }
 
-  const conv = revertMatch ? undefined : conventional.exec(headline)?.groups
+  const conv = revertMatch ? undefined : conventional.exec(stripTicketPrefix(headline))?.groups
   if (conv?.type && conv.rest !== undefined) {
     const raw = conv.type.toLowerCase()
     parsed.type = typeAliases[raw] ?? raw

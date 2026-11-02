@@ -47,6 +47,20 @@ describe('parseCommit', () => {
     expect(parsed.description).toBe('Обновил README')
   })
 
+  test('ticket before the conventional type', () => {
+    expect(parseCommit('[ABC-12] feat(ui): add dark theme')).toMatchObject({
+      type: 'feat',
+      scope: 'ui',
+      description: 'add dark theme',
+      tickets: ['ABC-12'],
+    })
+    expect(parseCommit('ABC-13: fix!: drop the old cache')).toMatchObject({
+      type: 'fix',
+      breaking: true,
+      description: 'drop the old cache',
+    })
+  })
+
   test('ticket key prefix without brackets', () => {
     expect(parseCommit('GTW-77: Поправить вёрстку')).toMatchObject({
       description: 'Поправить вёрстку',
