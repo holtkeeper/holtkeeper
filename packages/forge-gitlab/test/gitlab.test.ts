@@ -47,6 +47,23 @@ describe('definition', () => {
 })
 
 describe('repositories', () => {
+  test('lists member repositories, newest activity first, filtered by search', async () => {
+    const { server, forge } = setup({ perPage: 2 })
+    server.addProject('games/a')
+    server.addProject('games/b', { archived: true })
+    server.addProject('games/c', { member: false })
+    server.addProject('tools/d')
+    server.addProject('games/e')
+
+    const all = await forge.listMemberRepositories?.()
+    expect(all?.map((r) => r.path)).toEqual(['games/e', 'tools/d', 'games/a'])
+    const found = await forge.listMemberRepositories?.({ search: ' games ', limit: 1 })
+    expect(found?.map((r) => r.path)).toEqual(['games/e'])
+    const last = server.calls.at(-1)
+    expect(last?.url).toContain('search=games')
+    expect(last?.url).toContain('membership=true')
+  })
+
   test('lists group projects including subgroups across pages', async () => {
     const { server, forge } = setup({ perPage: 2 })
     server.addProject('games/a')

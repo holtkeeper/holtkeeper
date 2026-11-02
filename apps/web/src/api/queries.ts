@@ -384,6 +384,17 @@ export function useForgeMutations() {
   }
 }
 
+/** Repositories the forge's token is a member of, matching `search`; off without a forge. */
+export const useForgeRepositories = (forgeId: string | undefined, search: string) =>
+  useQuery({
+    queryKey: ['forge-repositories', forgeId ?? '', search],
+    queryFn: () => api.forgeRepositories(forgeId ?? '', search),
+    enabled: forgeId !== undefined,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    retry: false,
+  })
+
 /** Whether the forge's token can read `path`; off until both are given. */
 export const useRepoAccess = (forgeId: string | undefined, path: string | undefined) =>
   useQuery({

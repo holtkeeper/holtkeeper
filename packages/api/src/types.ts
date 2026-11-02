@@ -1375,6 +1375,14 @@ export interface ForgeSshKeyResult {
 }
 
 /**
+ * `GET /api/forges/:id/repositories?search=&limit=`: repositories the forge's token is a member
+ * of, most recently active first, for picking one to add. Archived ones are left out.
+ */
+export interface ForgeRepositoryList {
+  entries: { path: string; name: string; webUrl: string }[]
+}
+
+/**
  * `GET /api/forges/:id/repositories/access?path=team/app`: whether the forge's token can read a
  * repository before it is added. `ok`: readable and not archived. `not-found`: the path does not
  * exist or the token's account is not a member (GitLab answers 404 for both). `unauthorized`: the

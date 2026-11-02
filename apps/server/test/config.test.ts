@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import type {
   ConfigEntryDetail,
   ConfigEntryList,
+  ForgeRepositoryList,
   ForgeWebhookResult,
   RepoAccessView,
   SchedulePreview,
@@ -75,6 +76,19 @@ const cloudForge = {
       cloneUrl: `https://gitlab.com/${path}.git`,
       archived: path === 'old/app',
     }
+  },
+  async listMemberRepositories(query: { search?: string; limit?: number } = {}) {
+    return ['studio/game', 'tools/cli']
+      .filter((path) => !query.search || path.includes(query.search))
+      .slice(0, query.limit)
+      .map((path) => ({
+        path,
+        name: path.split('/').at(-1),
+        defaultBranch: 'main',
+        webUrl: `https://gitlab.com/${path}`,
+        cloneUrl: `https://gitlab.com/${path}.git`,
+        archived: false,
+      }))
   },
 } as unknown as GitForge
 
@@ -311,6 +325,17 @@ describe('config routes', () => {
     const actions = (await store.activity.list()).map((e) => e.action)
     expect(actions).toContain('config.forge.webhook_created')
     expect(actions).toContain('config.forge.webhook_rotated')
+  })
+
+  test('member repositories of a forge', async () => {
+    await putForge()
+    const response = await call('GET', '/forges/cloud/repositories?search=tools&limit=5')
+    expect(response.status).toBe(200)
+    expect(((await response.json()) as ForgeRepositoryList).entries).toEqual([
+      { path: 'tools/cli', name: 'cli', webUrl: 'https://gitlab.com/tools/cli' },
+    ])
+    expect((await call('GET', '/forges/work/repositories')).status).toBe(409)
+    expect((await call('GET', '/forges/missing/repositories')).status).toBe(409)
   })
 
   test('access to a repository before it is added', async () => {

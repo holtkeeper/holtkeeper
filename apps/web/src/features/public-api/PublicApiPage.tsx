@@ -6,7 +6,7 @@ import type {
 } from '@holtkeeper/api'
 import { Link, Navigate, useNavigate, useSearch } from '@tanstack/react-router'
 import { ArrowLeft, FileText, Library, RefreshCw, Search } from 'lucide-react'
-import { useDeferredValue, useState } from 'react'
+import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { api } from '../../api/endpoints.ts'
@@ -27,6 +27,7 @@ import {
   versionLabel,
 } from '../../lib/public-api.ts'
 import { repoKey } from '../../lib/repo.ts'
+import { useDebounced } from '../../lib/use-debounced.ts'
 import {
   Button,
   Chip,
@@ -142,8 +143,8 @@ function DocumentedBar({ documented, exports }: { documented: number; exports: n
 
 function PackagesTab() {
   const [query, setQuery] = useState('')
-  const deferred = useDeferredValue(query)
-  const packages = usePublicApiPackages(deferred.trim() || undefined)
+  const debounced = useDebounced(query, 300)
+  const packages = usePublicApiPackages(debounced.trim() || undefined)
 
   if (packages.isPending) return <Placeholder className="h-96" />
   if (packages.isError) return <ErrorState error={packages.error} />
@@ -734,8 +735,8 @@ function ChangesTab({ data }: { data: PublicApiPackageDetail }) {
 function SearchTab() {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState('*')
-  const deferred = useDeferredValue(query)
-  const results = usePublicApiSearch({ q: deferred, ...(kind !== '*' ? { kind } : {}) })
+  const debounced = useDebounced(query, 300)
+  const results = usePublicApiSearch({ q: debounced, ...(kind !== '*' ? { kind } : {}) })
   return (
     <Panel
       title="Find an export"
@@ -762,7 +763,7 @@ function SearchTab() {
         </div>
       }
     >
-      {!deferred.trim() ? (
+      {!debounced.trim() ? (
         <EmptyState
           icon={<Search />}
           title="Search the catalog"

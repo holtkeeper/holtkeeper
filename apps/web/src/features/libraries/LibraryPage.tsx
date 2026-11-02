@@ -1,7 +1,7 @@
 import type { LibraryDetail } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ArrowLeft, ArrowUpRight, FileText, LibraryBig, Search } from 'lucide-react'
-import { useDeferredValue, useState } from 'react'
+import { useState } from 'react'
 
 import { useLibrary, useLibrarySearch } from '../../api/queries.ts'
 import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
@@ -23,6 +23,7 @@ import {
   toneOfRole,
   toneOfStatus,
 } from '../../lib/libraries.ts'
+import { useDebounced } from '../../lib/use-debounced.ts'
 import {
   Chip,
   EmptyState,
@@ -387,10 +388,10 @@ function DocsSearch({
   onVersion: (version: string | undefined) => void
 }) {
   const [query, setQuery] = useState('')
-  const deferred = useDeferredValue(query)
+  const debounced = useDebounced(query, 300)
   const results = useLibrarySearch(
     librarySearchQuery({
-      q: deferred,
+      q: debounced,
       ecosystem,
       name,
       ...(version ? { version } : {}),
@@ -423,7 +424,7 @@ function DocsSearch({
         </div>
       }
     >
-      {!deferred.trim() ? (
+      {!debounced.trim() ? (
         <EmptyState
           icon={<Search />}
           title="Search this library"

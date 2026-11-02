@@ -1,7 +1,7 @@
 import type { LibraryIndexRun, LibrarySummary } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { AlertTriangle, Bot, LibraryBig, RefreshCw } from 'lucide-react'
-import { useDeferredValue, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useLibraries, useReindexLibraries } from '../../api/queries.ts'
@@ -15,6 +15,7 @@ import {
   sourceLabel,
 } from '../../lib/libraries.ts'
 import { libraryTools } from '../../lib/mcp.ts'
+import { useDebounced } from '../../lib/use-debounced.ts'
 import {
   Button,
   Chip,
@@ -68,14 +69,14 @@ export function LibrariesPage() {
   const navigate = useNavigate()
   const { can } = useSession()
   const [query, setQuery] = useState(search.q ?? '')
-  const deferred = useDeferredValue(query)
+  const debounced = useDebounced(query, 300)
   const ecosystem = parseEcosystem(search.ecosystem) ?? 'all'
-  const filter = libraryListQuery({ q: deferred, ecosystem })
+  const filter = libraryListQuery({ q: debounced, ecosystem })
   const libraries = useLibraries(filter)
   const reindex = useReindexLibraries()
 
   useEffect(() => {
-    const q = deferred.trim()
+    const q = debounced.trim()
     if (q !== (search.q ?? ''))
       void navigate({
         to: '/libraries',
@@ -85,7 +86,7 @@ export function LibrariesPage() {
         },
         replace: true,
       })
-  }, [deferred, navigate, search.q, search.ecosystem])
+  }, [debounced, navigate, search.q, search.ecosystem])
 
   const setEcosystem = (next: LibraryEcosystem | 'all') =>
     void navigate({

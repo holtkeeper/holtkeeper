@@ -14,6 +14,7 @@ import {
   TextField,
   notify,
 } from '../../ui/index.ts'
+import { RepoExplorer } from './RepoExplorer.tsx'
 
 /**
  * Adds a repository by including its exact path in a group of the panel config, an existing one or
@@ -126,7 +127,11 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
           placeholder="team/app"
           mono
           error={pathError}
-          description="As in the forge URL, without the host"
+          description={
+            selectedForge
+              ? 'Type to search the projects below, or paste the path from the forge URL'
+              : 'As in the forge URL, without the host'
+          }
           autoFocus
         />
         {advice ? (
@@ -137,6 +142,9 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
           <Notice tone="warning" title="Access could not be checked">
             {messageOf(access.error)}
           </Notice>
+        ) : null}
+        {selectedForge ? (
+          <RepoExplorer forge={selectedForge} search={path} value={path} onPick={setPath} />
         ) : null}
         {forgeGroups.length ? (
           <Segmented

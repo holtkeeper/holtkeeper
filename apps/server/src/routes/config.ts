@@ -4,6 +4,7 @@ import type {
   ConfigEntryList,
   ConfigEntryView,
   ConfigViewData,
+  ForgeRepositoryList,
   ForgeSshKeyInput,
   ForgeSshKeyResult,
   ForgeWebhookInput,
@@ -596,6 +597,26 @@ export function configRoutes(deps: ServerDeps) {
       },
     )
     return c.json<ForgeWebhookResult>(result, 201)
+  })
+
+  app.get('/forges/:id/repositories', async (c) => {
+    authorize(c, 'settings:write', GLOBAL)
+    const id = c.req.param('id')
+    const forge = forgeFor(deps.config, id)
+    if (!forge.listMemberRepositories)
+      throw new HTTPException(409, { message: `forge ${id} cannot list its repositories` })
+    let repositories: Awaited<ReturnType<typeof forge.listMemberRepositories>>
+    try {
+      repositories = await forge.listMemberRepositories({
+        search: c.req.query('search'),
+        limit: Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 100),
+      })
+    } catch (error) {
+      throw new HTTPException(502, { message: `repositories not listed: ${messageOf(error)}` })
+    }
+    return c.json<ForgeRepositoryList>({
+      entries: repositories.map(({ path, name, webUrl }) => ({ path, name, webUrl })),
+    })
   })
 
   app.get('/forges/:id/repositories/access', async (c) => {

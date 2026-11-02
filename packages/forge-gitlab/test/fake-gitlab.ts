@@ -141,6 +141,7 @@ interface FakeProject {
   path: string
   name: string
   archived: boolean
+  member: boolean
   defaultBranch: string
   branches: Map<string, Branch>
   mergeRequests: FakeMergeRequest[]
@@ -239,7 +240,7 @@ export class FakeGitLab {
 
   addProject(
     path: string,
-    options: { archived?: boolean; files?: Record<string, string> } = {},
+    options: { archived?: boolean; member?: boolean; files?: Record<string, string> } = {},
   ): FakeProject {
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) this.groups.add(parts.slice(0, i).join('/'))
@@ -248,6 +249,7 @@ export class FakeGitLab {
       path,
       name: parts.at(-1) ?? path,
       archived: options.archived ?? false,
+      member: options.member ?? true,
       defaultBranch: 'main',
       branches: new Map([
         ['main', { sha: this.sha(), files: new Map(Object.entries(options.files ?? {})) }],
@@ -617,6 +619,17 @@ export class FakeGitLab {
       return this.page(
         url,
         this.projectsUnder(s[1] ?? '').map((p) => this.projectJson(p)),
+      )
+    }
+    if (method === 'GET' && s[0] === 'projects' && s.length === 1) {
+      const search = q.get('search')?.toLowerCase()
+      const listed = [...this.projects.values()]
+        .filter((p) => q.get('membership') !== 'true' || p.member)
+        .filter((p) => q.get('archived') !== 'false' || !p.archived)
+        .filter((p) => !search || p.path.toLowerCase().includes(search))
+      return this.page(
+        url,
+        (q.get('sort') === 'desc' ? listed.toReversed() : listed).map((p) => this.projectJson(p)),
       )
     }
     if (s[0] !== 'projects') return json(404, { error: '404 Not Found' })

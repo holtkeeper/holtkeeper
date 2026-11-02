@@ -16,6 +16,12 @@ export interface Repository {
   archived: boolean
 }
 
+/** Filters for `GitForge.listMemberRepositories`. */
+export interface MemberRepositoryQuery {
+  search?: string
+  limit?: number
+}
+
 /** One file operation inside an API commit. */
 export type FileChange =
   | {
@@ -513,6 +519,12 @@ export interface GitForge {
    * has one. `contentType` is a raster or SVG image type.
    */
   getRepositoryAvatar?(repo: string): Promise<ForgeImage | undefined>
+  /**
+   * Repositories the forge's credentials are a member of, directly or through a group: the ones
+   * Holtkeeper is related to, not everything the forge lets it see. Unarchived only, most recently
+   * active first, at most `limit` (default 50). `search` matches names and paths.
+   */
+  listMemberRepositories?(query?: MemberRepositoryQuery): Promise<Repository[]>
 
   // CI/CD settings. Optional so forges can add them one by one.
 

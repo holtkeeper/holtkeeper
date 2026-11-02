@@ -668,6 +668,17 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         yield toRepository(item.value)
     },
 
+    async listMemberRepositories(query = {}) {
+      const projects = client.paginate('projects', projectSchema, {
+        membership: true,
+        archived: false,
+        order_by: 'last_activity_at',
+        sort: 'desc',
+        ...(query.search?.trim() && { search: query.search.trim(), search_namespaces: true }),
+      })
+      return (await take(projects, query.limit ?? 50)).map(toRepository)
+    },
+
     async getCurrentUser() {
       const user = await client.json('GET', 'user', currentUserSchema)
       const email = user.commit_email || user.email

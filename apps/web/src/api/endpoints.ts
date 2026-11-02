@@ -73,6 +73,7 @@ import type {
   ConfigEntryList,
   ConfigEntryView,
   CreateKnowledgeInput,
+  ForgeRepositoryList,
   ForgeSshKeyInput,
   ForgeSshKeyResult,
   GitHubTokenUsage,
@@ -324,6 +325,10 @@ export const api = {
     request<ForgeSshKeyResult>('POST', `/api/forges/${id(forgeId)}/ssh-key`, { body: input }),
   removeForgeSshKey: (forgeId: string) =>
     request<void>('DELETE', `/api/forges/${id(forgeId)}/ssh-key`),
+  forgeRepositories: (forgeId: string, search: string) =>
+    request<ForgeRepositoryList>('GET', `/api/forges/${id(forgeId)}/repositories`, {
+      query: { search: search || undefined, limit: 30 },
+    }),
   repoAccess: (forgeId: string, path: string) =>
     request<RepoAccessView>('GET', `/api/forges/${id(forgeId)}/repositories/access`, {
       query: { path },
