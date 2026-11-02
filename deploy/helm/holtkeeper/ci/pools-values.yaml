@@ -4,6 +4,7 @@ worker:
       replicas: 3
       concurrency: 2
       spread: true
+      claimDelay: 15s
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

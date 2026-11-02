@@ -14,7 +14,7 @@ import type {
   StoredCredential,
   User,
 } from '@holtkeeper/store'
-import { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
+import { claimDueBy, DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
 
 import { sqliteExternalAccounts } from './accounts.ts'
 import { sqliteAiUsage } from './ai-usage.ts'
@@ -656,12 +656,12 @@ function sqliteJobs(db: Database): JobStore {
        RETURNING *`,
     ),
     // One statement, so picking and taking the job is atomic even across processes.
-    claim: db.query<JobRow, [string, string, string, string]>(
+    claim: db.query<JobRow, [string, string, string, string, string]>(
       `UPDATE jobs SET status = 'running', attempts = attempts + 1, worker_id = ?1, started_at = ?2,
          heartbeat_at = ?2, finished_at = NULL
        WHERE id = (
          SELECT j.id FROM jobs j
-         WHERE j.status = 'queued' AND j.run_after <= ?2
+         WHERE j.status = 'queued' AND j.run_after <= ?5
            AND NOT EXISTS (
              SELECT 1 FROM jobs r
              WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
@@ -769,8 +769,16 @@ function sqliteJobs(db: Database): JobStore {
       if (!row) throw new Error('job insert returned nothing')
       return toJob(row)
     },
-    async claim(workerId, now, { exclusive = [], after = {} } = {}) {
-      return one(sql.claim.get(workerId, now, JSON.stringify(exclusive), JSON.stringify(after)))
+    async claim(workerId, now, { exclusive = [], after = {}, delayMs } = {}) {
+      return one(
+        sql.claim.get(
+          workerId,
+          now,
+          JSON.stringify(exclusive),
+          JSON.stringify(after),
+          claimDueBy(now, delayMs),
+        ),
+      )
     },
     async heartbeat(id, workerId, now) {
       return sql.heartbeat.get(id, workerId, now) !== null

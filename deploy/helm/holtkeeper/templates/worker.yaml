@@ -15,6 +15,7 @@
   "topologyKey" "kubernetes.io/hostname"
   "whenUnsatisfiable" "DoNotSchedule"
   "labelSelector" (dict "matchLabels" (merge (dict "holtkeeper.dev/worker-pool" $name) (include "holtkeeper.selectorLabels" $component | fromYaml)))
+  "matchLabelKeys" (list "pod-template-hash")
 )) }}
 {{- end }}
 {{- if $index }}

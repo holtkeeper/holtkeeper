@@ -231,6 +231,10 @@
           "type": ["integer", "null"],
           "minimum": 1
         },
+        "claimDelay": {
+          "type": "string",
+          "pattern": "^([0-9]+(ms|s|m|h)?)?$"
+        },
         "maxJobs": {
           "type": "integer",
           "minimum": 0
@@ -334,6 +338,10 @@
               "concurrency": {
                 "type": ["integer", "null"],
                 "minimum": 1
+              },
+              "claimDelay": {
+                "type": "string",
+                "pattern": "^([0-9]+(ms|s|m|h)?)?$"
               },
               "maxJobs": {
                 "type": "integer",

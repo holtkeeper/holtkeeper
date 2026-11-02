@@ -1,5 +1,5 @@
 import type { JobStore } from '@holtkeeper/store'
-import { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
+import { claimDueBy, DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
 import { SQL } from 'bun'
 
 import { type JobRow, toJob } from './rows.ts'
@@ -49,8 +49,9 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       if (!stored) throw new Error('job insert returned nothing')
       return stored
     },
-    async claim(workerId, now, { exclusive = [], after = {} } = {}) {
+    async claim(workerId, now, { exclusive = [], after = {}, delayMs } = {}) {
       const { sql, t } = await db()
+      const dueBy = claimDueBy(now, delayMs)
       const startable = () => sql`
         NOT EXISTS (
           SELECT 1 FROM ${t.jobs} r
@@ -73,7 +74,7 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
           return await sql.begin(async (tx) => {
             const [next]: { id: string; repo_forge: string; repo_path: string }[] = await tx`
               SELECT j.id, j.repo_forge, j.repo_path FROM ${t.jobs} j
-              WHERE j.status = 'queued' AND j.run_after <= ${now}::timestamptz AND ${startable()}
+              WHERE j.status = 'queued' AND j.run_after <= ${dueBy}::timestamptz AND ${startable()}
               ORDER BY j.run_after, j.seq
               LIMIT 1
               FOR UPDATE SKIP LOCKED`

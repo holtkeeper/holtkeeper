@@ -131,8 +131,11 @@ export interface ServerOptions {
   auditRetentionDays?: number
   /** What this process runs, see `Role`. Default `['all']`. */
   roles?: Role[]
-  /** Worker overrides for this process: `concurrency`, `maxJobs` (exit after that many jobs). */
-  worker?: { concurrency?: number; maxJobs?: number }
+  /**
+   * Worker overrides for this process: `concurrency`, `claimDelayMs` (take only jobs queued that
+   * long), `maxJobs` (exit after that many jobs).
+   */
+  worker?: { concurrency?: number; claimDelayMs?: number; maxJobs?: number }
   /** On `stop`, running jobs get this long to finish before they are requeued. Default 30 s. */
   drainTimeoutMs?: number
   log?: (line: string) => void

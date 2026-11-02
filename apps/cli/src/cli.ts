@@ -45,6 +45,8 @@ Serve options:
   --role <roles>            web, worker, scheduler or all (default; also HOLTKEEPER_ROLE);
                             combine with commas, e.g. web,scheduler
   --concurrency <n>         Jobs this worker runs at once (default: jobs.concurrency)
+  --claim-delay <time>      Take only jobs queued this long, e.g. 15s, so workers without one
+                            get new jobs first (also HOLTKEEPER_CLAIM_DELAY)
   --max-jobs <n>            Exit 0 after running n jobs (one job per container or pod)
   --drain-timeout <time>    On SIGTERM, let running jobs finish this long, e.g. 30s (default)
 
@@ -128,6 +130,7 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
       model: { type: 'string' },
       role: { type: 'string' },
       concurrency: { type: 'string' },
+      'claim-delay': { type: 'string' },
       'max-jobs': { type: 'string' },
       'drain-timeout': { type: 'string' },
       admin: { type: 'boolean', default: false },

@@ -17,6 +17,11 @@ export interface WorkerOptions {
   settingOptions?: (job: Job, analyzer: AnyAnalyzer) => Promise<Record<string, unknown> | undefined>
   /** Jobs run at the same time. Default 2. */
   concurrency?: number
+  /**
+   * Claims only jobs queued for at least this long, so workers without a delay get new jobs first
+   * (`ClaimRules.delayMs`). Keep it above their `pollMs`. Default 0.
+   */
+  claimDelayMs?: number
   /** A run is aborted after this long. Default 30 minutes. */
   timeoutMs?: number
   now?: () => Date
@@ -156,6 +161,7 @@ export function createWorker(options: WorkerOptions): Worker {
         analyzer.after ? [[analyzer.kind, analyzer.after]] : [],
       ),
     ),
+    ...(options.claimDelayMs && { delayMs: options.claimDelayMs }),
   }
   const now = options.now ?? (() => new Date())
   const at = () => now().toISOString()

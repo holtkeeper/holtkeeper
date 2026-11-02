@@ -1,5 +1,5 @@
 export type * from './types.ts'
-export { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from './jobs.ts'
+export { claimDueBy, DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from './jobs.ts'
 export { knowledgeWords, matchesKnowledgeFilter } from './knowledge.ts'
 export {
   aggregateAiUsage,

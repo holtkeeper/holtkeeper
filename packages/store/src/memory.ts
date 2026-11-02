@@ -3,7 +3,7 @@ import { memoryAiUsage } from './ai-usage.ts'
 import { memoryAudit } from './audit.ts'
 import { memoryCiJobs } from './ci-jobs.ts'
 import { memoryConfig, memoryKv } from './config.ts'
-import { DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from './jobs.ts'
+import { claimDueBy, DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from './jobs.ts'
 import { memoryKnowledge } from './knowledge.ts'
 import { memoryLibraries } from './libraries.ts'
 import type {
@@ -206,7 +206,8 @@ function memoryJobs(): JobStore {
       order.set(job.id, seq++)
       return clone(job)
     },
-    async claim(workerId, now, { exclusive = [], after = {} } = {}) {
+    async claim(workerId, now, { exclusive = [], after = {}, delayMs } = {}) {
+      const dueBy = claimDueBy(now, delayMs)
       const all = [...jobs.values()]
       const blocked = (job: Job) =>
         all.some(
@@ -221,7 +222,7 @@ function memoryJobs(): JobStore {
                   (other.status === 'queued' && ahead(other, job) < 0)))),
         )
       const next = all
-        .filter((job) => job.status === 'queued' && job.runAfter <= now && !blocked(job))
+        .filter((job) => job.status === 'queued' && job.runAfter <= dueBy && !blocked(job))
         .toSorted(ahead)[0]
       if (!next) return undefined
       next.status = 'running'

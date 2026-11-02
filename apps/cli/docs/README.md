@@ -76,6 +76,7 @@ Starts the web server described by the config's `server` section (see [@holtkeep
 
 - `--role web|worker|scheduler|all` (or `HOLTKEEPER_ROLE`; default `all`; combine with commas, e.g. `web,scheduler`).
 - `--concurrency <n>` (`HOLTKEEPER_CONCURRENCY`): jobs this worker runs at once.
+- `--claim-delay <time>` (`HOLTKEEPER_CLAIM_DELAY`): take only jobs queued at least this long, e.g. `15s`, so workers without a delay get new jobs first and this one takes the overflow.
 - `--max-jobs <n>` (`HOLTKEEPER_MAX_JOBS`): exit 0 after running `n` jobs, for a fresh container or pod per job.
 - `--drain-timeout <time>` (`HOLTKEEPER_DRAIN_TIMEOUT`, default `30s`): how long running jobs may finish on shutdown before they are requeued.
 

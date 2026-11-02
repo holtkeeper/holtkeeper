@@ -22,6 +22,7 @@ Worker flags:
 | Flag                     | Environment                | Meaning                                                                     |
 | ------------------------ | -------------------------- | --------------------------------------------------------------------------- |
 | `--concurrency <n>`      | `HOLTKEEPER_CONCURRENCY`   | Jobs at once in this process (default `jobs.concurrency`)                   |
+| `--claim-delay <time>`   | `HOLTKEEPER_CLAIM_DELAY`   | Take only jobs queued this long, e.g. `15s`: workers without one go first   |
 | `--max-jobs <n>`         | `HOLTKEEPER_MAX_JOBS`      | Claim `n` jobs, finish them, exit 0: a fresh process or pod per job         |
 | `--drain-timeout <time>` | `HOLTKEEPER_DRAIN_TIMEOUT` | On SIGTERM, how long running jobs may finish (`30s` default, `2m`, `500ms`) |
 
@@ -97,7 +98,7 @@ The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 - a ConfigMap with `holtkeeper.config.ts` (`config.content`, default the chart's `files/holtkeeper.config.ts`; or `config.existingConfigMap`), mounted read-only; pods restart when it changes;
 - `existingSecret` → environment of every container (`HOLTKEEPER_VAULT_KEY`, `HOLTKEEPER_DATABASE_URL`, `HOLTKEEPER_S3_*`, `HOLTKEEPER_ROOT_PASSWORD`, `HOLTKEEPER_SESSION_SECRET`, `HOLTKEEPER_WEBHOOK_SECRET`, `GITLAB_TOKEN`, ...); `env` for plain values (`HOLTKEEPER_AUTH=users` switches the default config from the `root` password to accounts with passkeys: the first start logs the admin's setup link, `HOLTKEEPER_ADMIN_NAME`/`HOLTKEEPER_ADMIN_EMAIL` name that admin, `HOLTKEEPER_PUBLIC_URL` is required; accounts for AI agents: [Agent access](agent-access.md));
 - `web` Deployment + Service (+ Ingress, + HPA on CPU, + PodDisruptionBudget), roles `web,scheduler`;
-- `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB; or, with `worker.pools`, one Deployment per pool (`<release>-worker-<name>`, label `holtkeeper.dev/worker-pool`), each `worker` with the pool's own fields on top, e.g. 2 jobs per small node and 4 on a big one; `spread: true` keeps a pool's pods on different nodes;
+- `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB; or, with `worker.pools`, one Deployment per pool (`<release>-worker-<name>`, label `holtkeeper.dev/worker-pool`), each `worker` with the pool's own fields on top, e.g. 2 jobs per small node and 4 on a big one; `claimDelay: 15s` makes a pool take only jobs no other pool claimed within that time, so the pools without one fill first; `spread: true` keeps a pool's pods on different nodes, counting only the current ReplicaSet so pods of a finishing rollout do not push two onto one node;
 - optional `scheduler` Deployment (`scheduler.enabled`; the web pods then run `web` only);
 - optional ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies;
 - optional egress proxy (`egressProxy.enabled`, see below) with a download cache;

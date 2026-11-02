@@ -300,6 +300,11 @@ export interface ClaimRules {
    * of its repository is running, or queued ahead of it in claim order.
    */
   after?: Record<string, string[]>
+  /**
+   * Only jobs due for at least this long, so workers without a delay get new jobs first and this
+   * one takes what they leave. Default 0.
+   */
+  delayMs?: number
 }
 
 /**

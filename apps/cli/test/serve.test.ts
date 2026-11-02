@@ -23,11 +23,16 @@ describe('serve options', () => {
         { HOLTKEEPER_ROLE: 'worker' },
       ),
     ).toEqual({ roles: ['web', 'scheduler'], worker: { concurrency: 4 }, drainTimeoutMs: 120_000 })
+    expect(await serveOptions({ 'claim-delay': '15s' }, { HOLTKEEPER_CLAIM_DELAY: '1m' })).toEqual({
+      roles: ['all'],
+      worker: { claimDelayMs: 15_000 },
+    })
   })
 
   test('rejects bad values as usage errors', async () => {
     expect(await failure(serveOptions({ role: 'boss' }, {}))).toBeInstanceOf(UsageError)
     expect(await failure(serveOptions({ 'max-jobs': '0' }, {}))).toBeInstanceOf(UsageError)
+    expect(await failure(serveOptions({ 'claim-delay': 'later' }, {}))).toBeInstanceOf(UsageError)
     expect(() => parseDuration('drain-timeout', 'soon')).toThrow(UsageError)
     expect(parseDuration('drain-timeout', '45')).toBe(45_000)
     expect(parseDuration('drain-timeout', '500ms')).toBe(500)

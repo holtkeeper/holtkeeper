@@ -523,6 +523,19 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       })
     })
 
+    test('jobs: a claim with delayMs takes only jobs due for at least that long', async () => {
+      const old = await store.jobs.enqueue(job('games/a', t(1)))
+      await store.jobs.enqueue(job('games/b', t(9)))
+      const rules = { delayMs: 2 * 60_000 }
+
+      expect(await store.jobs.claim('w1', t(10), rules)).toMatchObject({
+        id: old.id,
+        startedAt: t(10),
+      })
+      expect(await store.jobs.claim('w1', t(10), rules)).toBeUndefined()
+      expect((await store.jobs.claim('w1', t(11), rules))?.id).toBeDefined()
+    })
+
     test('jobs: read-only jobs of one repository run side by side', async () => {
       const bundle = await store.jobs.enqueue(job('games/a', t(1)))
       const changelog = await store.jobs.enqueue(job('games/a', t(2), { analyzer: 'changelog' }))

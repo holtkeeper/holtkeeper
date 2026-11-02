@@ -172,6 +172,10 @@ securityContext:
     - --concurrency
     - {{ . | quote }}
     {{- end }}
+    {{- with .worker.claimDelay }}
+    - --claim-delay
+    - {{ . | quote }}
+    {{- end }}
     {{- if .maxJobs }}
     - --max-jobs
     - {{ .maxJobs | quote }}

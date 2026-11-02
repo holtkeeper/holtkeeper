@@ -13,6 +13,7 @@ export type StartServer = (
 export interface ServeFlags {
   role?: string | undefined
   concurrency?: string | undefined
+  'claim-delay'?: string | undefined
   'max-jobs'?: string | undefined
   'drain-timeout'?: string | undefined
 }
@@ -36,7 +37,8 @@ export function parseDuration(flag: string, value: string): number {
 
 /**
  * Server options from `serve` flags and the environment: `--role` (else `HOLTKEEPER_ROLE`, else
- * `all`), `--concurrency`, `--max-jobs`, `--drain-timeout` (else `HOLTKEEPER_DRAIN_TIMEOUT`).
+ * `all`), `--concurrency`, `--claim-delay` (else `HOLTKEEPER_CLAIM_DELAY`), `--max-jobs`,
+ * `--drain-timeout` (else `HOLTKEEPER_DRAIN_TIMEOUT`).
  */
 export async function serveOptions(
   flags: ServeFlags,
@@ -51,12 +53,15 @@ export async function serveOptions(
   }
   const concurrency = positiveInt('concurrency', flags.concurrency ?? env.HOLTKEEPER_CONCURRENCY)
   const maxJobs = positiveInt('max-jobs', flags['max-jobs'] ?? env.HOLTKEEPER_MAX_JOBS)
+  const delay = flags['claim-delay'] ?? env.HOLTKEEPER_CLAIM_DELAY
+  const claimDelayMs = delay === undefined ? undefined : parseDuration('claim-delay', delay)
   const drain = flags['drain-timeout'] ?? env.HOLTKEEPER_DRAIN_TIMEOUT
   return {
     roles,
-    ...((concurrency !== undefined || maxJobs !== undefined) && {
+    ...((concurrency !== undefined || claimDelayMs !== undefined || maxJobs !== undefined) && {
       worker: {
         ...(concurrency !== undefined && { concurrency }),
+        ...(claimDelayMs !== undefined && { claimDelayMs }),
         ...(maxJobs !== undefined && { maxJobs }),
       },
     }),

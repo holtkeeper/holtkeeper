@@ -88,6 +88,9 @@ worker:
   replicas: 2
   # Jobs one pod runs at once. Default: jobs.concurrency from the config.
   concurrency: null
+  # Take only jobs queued at least this long, e.g. 15s, so pools without a delay fill first. Keep it
+  # above their 5 s poll. Empty: no delay.
+  claimDelay: ''
   # Exit after this many jobs, so the next ones get a fresh pod (see keda.scaledJob). 0: unlimited.
   maxJobs: 0
   # On SIGTERM running jobs get this long before they are requeued; keep below the grace period.
@@ -126,9 +129,10 @@ worker:
   # Several worker Deployments instead of one, e.g. per node class. Each pool is `worker` with its
   # own fields on top (replicas, concurrency, resources, nodeSelector, tolerations, affinity, ...),
   # named `<release>-worker-<name>` and labelled `holtkeeper.dev/worker-pool: <name>`.
-  # `spread: true` places its pods on different nodes (at most one more on any node). Not with KEDA.
+  # `spread: true` places its pods on different nodes (at most one more on any node, counting only
+  # the current ReplicaSet, so a rollout cannot stack them). Not with KEDA.
   #   pools:
-  #     - { name: small, replicas: 3, concurrency: 2, spread: true }
+  #     - { name: small, replicas: 3, concurrency: 2, spread: true, claimDelay: 15s }
   #     - { name: big, replicas: 1, concurrency: 4, nodeSelector: { kubernetes.io/hostname: big } }
   pools: []
 

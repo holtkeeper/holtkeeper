@@ -41,8 +41,8 @@ export interface JobEngineOptions {
   persistArtifacts?: WorkerOptions['persistArtifacts']
   /** Cache shared between runs; see `ContextFactoryOptions.cache`. */
   cache?: ContextFactoryOptions['cache']
-  /** Overrides for this process's worker, e.g. from `serve --concurrency` / `--max-jobs`. */
-  worker?: Pick<WorkerOptions, 'concurrency' | 'maxJobs' | 'workerId'>
+  /** Overrides for this process's worker, e.g. from `serve --concurrency` / `--claim-delay`. */
+  worker?: Pick<WorkerOptions, 'concurrency' | 'claimDelayMs' | 'maxJobs' | 'workerId'>
   now?: () => Date
   onFinished?: (job: Job, record?: AnalysisRecord) => void | Promise<void>
   log?: (line: string) => void
