@@ -100,6 +100,7 @@ function triggerKeys(jobs: Jobs | undefined): string[] {
     ...(jobs.onTag ? ['tag'] : []),
     ...(jobs.onPush ? ['push'] : []),
     ...(jobs.onMergeRequest ? ['merge-request'] : []),
+    ...(jobs.onNewRepo ? ['new-repo'] : []),
     ...Object.keys(jobs.onLabel ?? {}).map((label) => `label:${label}`),
     ...Object.keys(jobs.commands ?? {}).map((name) => `command:${name}`),
   ].map((id) => provenanceKey('trigger', id))
@@ -216,6 +217,12 @@ export function effectiveConfig(
             analyzers: data.analyzers,
             actions: data.actions,
             draft: data.draft ?? false,
+            groups: data.groups,
+          })
+        else if (data.on === 'newRepo')
+          jobs.onNewRepo = without({
+            analyzers: data.analyzers,
+            exclude: data.exclude,
             groups: data.groups,
           })
         else if (data.on === 'label')

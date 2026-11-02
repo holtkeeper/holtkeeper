@@ -58,7 +58,10 @@ type TriggerEntry = ConfigEntryView<'trigger'>
 
 const kindLabel = (kind: TriggerKind) => triggerKinds.find((k) => k.id === kind)?.label ?? kind
 
-/** Event triggers of the effective config: tags, merge requests, labels and comment commands. */
+/**
+ * Event triggers of the effective config: tags, pushes, merge requests, new repositories, labels
+ * and comment commands.
+ */
 export function TriggersTab() {
   const { can } = useSession()
   const writable = can('settings:write')
@@ -106,7 +109,8 @@ export function TriggersTab() {
               const groups =
                 entry.data.on === 'tag' ||
                 entry.data.on === 'push' ||
-                entry.data.on === 'mergeRequest'
+                entry.data.on === 'mergeRequest' ||
+                entry.data.on === 'newRepo'
                   ? (entry.data.groups ?? [])
                   : undefined
               return (
@@ -127,7 +131,11 @@ export function TriggersTab() {
                     </span>
                   </Td>
                   <Td>
-                    <ChipList values={triggerAnalyzers(entry.data)} />
+                    {entry.data.on === 'newRepo' && !entry.data.analyzers ? (
+                      <span className="text-sm text-muted">Every read-only analyzer</span>
+                    ) : (
+                      <ChipList values={triggerAnalyzers(entry.data)} />
+                    )}
                   </Td>
                   <Td>
                     {groups === undefined ? (
@@ -345,6 +353,24 @@ export function TriggerDialog({
               description="Option names filled in order; the last one takes the rest as a list. key=value arguments always work."
             />
           </>
+        ) : draft.on === 'newRepo' ? (
+          <>
+            <AnalyzerPicker
+              label="Analyzers"
+              value={draft.analyzers}
+              onChange={(v) => set('analyzers', v)}
+              readOnly
+              description="Runs once when a group listing finds a repository for the first time. None selected: every analyzer that only reads; analyzers that push or open merge requests never run here."
+            />
+            {draft.analyzers.length === 0 ? (
+              <AnalyzerPicker
+                label="Except"
+                value={draft.exclude}
+                onChange={(v) => set('exclude', v)}
+                readOnly
+              />
+            ) : null}
+          </>
         ) : (
           <AnalyzerPicker
             label="Analyzers"
@@ -380,7 +406,10 @@ export function TriggerDialog({
           />
         ) : null}
 
-        {draft.on === 'tag' || draft.on === 'push' || draft.on === 'mergeRequest' ? (
+        {draft.on === 'tag' ||
+        draft.on === 'push' ||
+        draft.on === 'mergeRequest' ||
+        draft.on === 'newRepo' ? (
           <GroupPicker
             value={draft.groups}
             onChange={(v) => set('groups', v)}

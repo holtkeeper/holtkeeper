@@ -220,7 +220,7 @@ export interface ActivityStore {
   list(query?: { before?: Timestamp; limit?: number }): Promise<ActivityEvent[]>
 }
 
-export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag' | 'push' | 'poll'
+export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag' | 'push' | 'poll' | 'new-repo'
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
 
@@ -720,8 +720,8 @@ export interface ScheduleDocumentData {
 }
 
 /**
- * An event trigger managed in the panel. Document ids are fixed per entry: `tag`,
- * `merge-request`, `label:<label>` and `command:<name>`.
+ * An event trigger managed in the panel. Document ids are fixed per entry: `tag`, `push`,
+ * `merge-request`, `new-repo`, `label:<label>` and `command:<name>`.
  */
 export type TriggerDocumentData =
   | { on: 'tag'; analyzers: string[]; groups?: GroupMatch[] }
@@ -733,6 +733,7 @@ export type TriggerDocumentData =
       draft?: boolean
       groups?: GroupMatch[]
     }
+  | { on: 'newRepo'; analyzers?: string[]; exclude?: string[]; groups?: GroupMatch[] }
   | { on: 'label'; label: string; analyzers: string[] }
   | { on: 'command'; command: string; analyzer: string; args?: string[] }
 

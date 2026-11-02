@@ -134,7 +134,14 @@ export function automationMap(
       enabled: true,
     }
     events.push(event)
-    link(event, triggerAnalyzers(data), 'groups' in data ? data.groups : undefined)
+    const kinds =
+      data.on === 'newRepo' && !data.analyzers
+        ? known
+            .filter((analyzer) => analyzer.scope === 'repo' && !analyzer.exclusive)
+            .map((analyzer) => analyzer.kind)
+            .filter((kind) => !data.exclude?.includes(kind))
+        : triggerAnalyzers(data)
+    link(event, kinds, 'groups' in data ? data.groups : undefined)
   }
 
   const idle = known
@@ -169,6 +176,11 @@ type AutomationData = ScheduleDocumentData | TriggerDocumentData
 /** `data` that also queues `kind`; a command trigger runs one analyzer, so `kind` replaces it. */
 export function withAnalyzer<T extends AutomationData>(data: T, kind: string): T {
   if ('on' in data && data.on === 'command') return { ...data, analyzer: kind }
+  if ('on' in data && data.on === 'newRepo' && !data.analyzers) {
+    const exclude = (data.exclude ?? []).filter((excluded) => excluded !== kind)
+    return { ...data, exclude: exclude.length ? exclude : undefined }
+  }
+  if (!data.analyzers) return data
   if (data.analyzers.includes(kind)) return data
   return { ...data, analyzers: [...data.analyzers, kind] }
 }
@@ -190,6 +202,11 @@ export function withoutAnalyzer(
 export function withoutAnalyzer(data: AutomationData, kind: string): Unlinked<AutomationData> {
   if ('on' in data && data.on === 'command')
     return { error: 'A command runs exactly one analyzer; link another one to replace it.' }
+  if ('on' in data && data.on === 'newRepo' && !data.analyzers) {
+    const exclude = data.exclude ?? []
+    return exclude.includes(kind) ? { data } : { data: { ...data, exclude: [...exclude, kind] } }
+  }
+  if (!data.analyzers) return { data }
   const analyzers = data.analyzers.filter((analyzer) => analyzer !== kind)
   if (analyzers.length === data.analyzers.length) return { data }
   if (analyzers.length === 0)

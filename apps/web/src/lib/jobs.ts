@@ -37,6 +37,7 @@ const triggerLabels: Record<JobTrigger, string> = {
   tag: 'Tag',
   push: 'Push',
   poll: 'Poll',
+  'new-repo': 'New repository',
 }
 
 /** Human label of a status. */

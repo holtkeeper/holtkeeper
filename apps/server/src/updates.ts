@@ -20,6 +20,7 @@ import { type ServerDeps, repoTarget } from './context.ts'
 import type { EventDispatcher } from './events.ts'
 import { librariesConfigOf, librariesEnabled } from './libraries.ts'
 import { fileForgeKey, globalLimits } from './limits.ts'
+import { queueNewRepoJobs } from './new-repos.ts'
 
 const seenKey = (repo: RepoRef) => `webhook-seen:${repo.forge}:${repo.path}`
 const stateKey = (repo: RepoRef) => `poll:${repo.forge}:${repo.path}`
@@ -128,6 +129,8 @@ interface PollerOptions {
   now: () => Date
   /** How often due repositories are looked for. Default 15 s. */
   tickMs?: number
+  /** Receives repositories a group listing found that no stored listing had. */
+  onNewRepos?: (repos: RepoRef[]) => Promise<unknown>
   log: (line: string) => void
 }
 
@@ -160,7 +163,8 @@ const estimateCost = (config: PollingConfig) =>
  * slowed down evenly per forge credential when the credential's polling budget (`pollShare` of
  * its `requestsPerMinute`) cannot keep up, and held back while the credential is saturated. One
  * poll per credential runs at a time; a store lease keeps two processes from polling the same
- * repository at once.
+ * repository at once. A group listing that finds repositories no stored listing of any group had
+ * hands them to `onNewRepos`.
  */
 function createPoller(options: PollerOptions) {
   const { config, store, kv, limiter } = options
@@ -183,8 +187,18 @@ function createPoller(options: PollerOptions) {
       ...result,
     })
     let listing: GroupListing
+    let added: RepoRef[] = []
     try {
       const repos = await groupRepositories(config)(group)
+      if (options.onNewRepos) {
+        const known = new Set<string>()
+        for (const name of Object.keys(config.groups)) {
+          // oxlint-disable-next-line no-await-in-loop -- one store read per group
+          const stored = name === group ? previous : await readListing(name)
+          for (const repo of stored?.repos ?? []) known.add(repoId(repo))
+        }
+        added = repos.filter((repo) => !known.has(repoId(repo)))
+      }
       listing = {
         repos,
         listedAt: started.toISOString(),
@@ -199,6 +213,12 @@ function createPoller(options: PollerOptions) {
       }
     }
     await kv.set(groupKey(group), listing)
+    if (added.length && options.onNewRepos)
+      try {
+        await options.onNewRepos(added)
+      } catch (error) {
+        options.log(`polling: new repositories of group ${group}: ${messageOf(error)}`)
+      }
     return listing
   }
 
@@ -464,6 +484,7 @@ export function serverPoller(
     keyOf: (forgeId) =>
       deps.configSource?.effective().forges[forgeId]?.credentialId ?? fileForgeKey(forgeId),
     now: deps.now,
+    onNewRepos: (repos) => queueNewRepoJobs(deps, repos, { log }),
     log,
   })
 }

@@ -121,6 +121,25 @@ describe('effectiveConfig', () => {
     })
   })
 
+  test('a new repository trigger becomes jobs.onNewRepo', () => {
+    const { config, provenance } = effectiveConfig(
+      file,
+      [
+        doc({
+          type: 'trigger',
+          id: 'new-repo',
+          data: { on: 'newRepo', exclude: ['quality'], groups: ['games'] },
+        }),
+      ],
+      {
+        forgeFactories: { gitlab: factory },
+        tokens: {},
+      },
+    )
+    expect(config.jobs?.onNewRepo).toEqual({ exclude: ['quality'], groups: ['games'] })
+    expect(provenance['trigger:new-repo']).toBe('panel')
+  })
+
   test('validates with the file config rules', () => {
     const broken = [
       ...documents,
@@ -335,6 +354,7 @@ test('document schemas check cron with croner and trigger ids are fixed', async 
   ).toBeFalse()
   expect(triggerId({ on: 'command', command: 'port', analyzer: 'port' })).toBe('command:port')
   expect(triggerId({ on: 'mergeRequest', analyzers: ['review'] })).toBe('merge-request')
+  expect(triggerId({ on: 'newRepo' })).toBe('new-repo')
 })
 
 test('gitlabForgeFactory builds a GitLab forge with the given fetch', async () => {

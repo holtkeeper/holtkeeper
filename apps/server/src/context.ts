@@ -8,6 +8,7 @@ import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import type { AnyAnalyzer } from '@holtkeeper/jobs'
 import type { Limiter } from '@holtkeeper/limits'
 import type { ConfigSource } from '@holtkeeper/managed-config'
 import type { AnalysisKind } from '@holtkeeper/report'
@@ -81,6 +82,9 @@ export interface JobAnalyzerInfo {
   analysis?: { label: string }
   needs?: JobAnalyzerView['needs']
   presets?: { id: string; label: string; description?: string; options: unknown }[]
+  /** The run changes repositories; `jobs.onNewRepo` never queues it. */
+  exclusive?: boolean
+  appliesTo?: AnyAnalyzer['appliesTo']
 }
 
 export interface Env {

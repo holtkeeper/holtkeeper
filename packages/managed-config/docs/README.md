@@ -18,7 +18,7 @@ Every document has `version` (1, 2, …), `updatedAt`, `updatedBy`; earlier vers
 
 `effectiveConfig(file, documents, { forgeFactories, tokens?, webhookSecrets?, reuse? })`:
 
-- A document **replaces** the file entry with the same key — forges and groups by id, schedules by name, repo traits by pattern, triggers by trigger id (`onTag`, `onPush`, `onMergeRequest`, `onLabel[label]`, `commands[name]`) — or **adds** a new one. Panel documents cannot delete file entries; a panel schedule with `enabled: false` switches a file schedule off.
+- A document **replaces** the file entry with the same key — forges and groups by id, schedules by name, repo traits by pattern, triggers by trigger id (`onTag`, `onPush`, `onMergeRequest`, `onNewRepo`, `onLabel[label]`, `commands[name]`) — or **adds** a new one. Panel documents cannot delete file entries; a panel schedule with `enabled: false` switches a file schedule off.
 - Panel forges are built by `forgeFactories[kind](doc, token)` with the credential's plaintext token from `tokens`. A missing token or adapter gives a forge whose `create()` throws, so only tasks using it fail.
 - A panel forge with a webhook secret (opened, in `webhookSecrets`) becomes `jobs.webhooks.<id>.secret`.
 - Panel schedules, triggers and webhook secrets create a `jobs` section with defaults when the file has none (the server only starts its job engine for a config that has `jobs` at start).
@@ -51,7 +51,7 @@ A rebuild that fails validation keeps the previous config (`lastError()`). Panel
 
 ## Defaults
 
-`seedDefaults({ store, file, analyzers })` writes each of `defaultSchedules` and `defaultTriggers` as a panel document the first time a store sees it, so a release that adds defaults adds them to existing installs too. Each document is considered once (marker `config:default-seeded:<type>:<id>` in `Store.kv`, taken atomically when the store supports `compareAndSet`): removing it later does not bring it back, and a panel document with the same id stays as it is. Stores seeded by the first version (marker `config:default-schedules-seeded`) count its three schedules as considered. Schedules are skipped while the file has its own, the tag trigger while the file sets `jobs.onTag`; analyzers the server lacks are dropped. Logged as `config.defaults.seeded`.
+`seedDefaults({ store, file, analyzers })` writes each of `defaultSchedules` and `defaultTriggers` as a panel document the first time a store sees it, so a release that adds defaults adds them to existing installs too. Each document is considered once (marker `config:default-seeded:<type>:<id>` in `Store.kv`, taken atomically when the store supports `compareAndSet`): removing it later does not bring it back, and a panel document with the same id stays as it is. Stores seeded by the first version (marker `config:default-schedules-seeded`) count its three schedules as considered. Schedules are skipped while the file has its own, the tag trigger while the file sets `jobs.onTag`, the new repository trigger while it sets `jobs.onNewRepo`; analyzers the server lacks are dropped. Logged as `config.defaults.seeded`.
 
 Every default schedule covers all groups and spreads its repository jobs over 01:00–07:00 (server time zone):
 
@@ -70,7 +70,7 @@ Every default schedule covers all groups and spreads its repository jobs over 01
 | `browserslist-weekly` | `browserslist` (only repositories whose lockfile has `caniuse-lite`) | Tuesday nights   |
 | `renovate-nightly`    | `renovate` (report only unless `analyzers.renovate` says otherwise)  | weekday nights   |
 
-The default trigger `tag` queues `changelog`, `release-risk` and `api-surface` for every new or moved tag, from webhooks or polling. `defaultTriggerAdditions` bring analyzers added to a default trigger later to installs that already have it: each addition appends its missing analyzers to the existing document once (marker `config:default-seeded:trigger:<id>`, e.g. `tag+api-surface`), so taking one out again in the panel sticks.
+The default trigger `tag` queues `changelog`, `release-risk` and `api-surface` for every new or moved tag, from webhooks or polling. The default trigger `new-repo` (`{ on: 'newRepo' }`) runs every analyzer that only reads, once, for each repository a group listing finds for the first time; it is skipped while the file sets `jobs.onNewRepo`. `defaultTriggerAdditions` bring analyzers added to a default trigger later to installs that already have it: each addition appends its missing analyzers to the existing document once (marker `config:default-seeded:trigger:<id>`, e.g. `tag+api-surface`), so taking one out again in the panel sticks.
 
 ## Export
 

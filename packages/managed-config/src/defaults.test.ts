@@ -45,6 +45,7 @@ describe('seedDefaults', () => {
       'schedule:branches-weekly',
       'schedule:assets-weekly',
       'trigger:tag',
+      'trigger:new-repo',
     ])
     expect(await store.config?.get('schedule', 'security-weekly')).toMatchObject({
       updatedBy: 'system',
@@ -74,6 +75,7 @@ describe('seedDefaults', () => {
       'schedule:branches-weekly',
       'schedule:assets-weekly',
       'trigger:tag',
+      'trigger:new-repo',
     ])
   })
 
@@ -87,7 +89,9 @@ describe('seedDefaults', () => {
       'schedule:tests-weekly',
       'schedule:branches-weekly',
       'schedule:assets-weekly',
+      'trigger:new-repo',
     ])
+    expect((await store.config?.get('trigger', 'new-repo'))?.data).toEqual({ on: 'newRepo' })
     expect((await store.config?.get('schedule', 'tests-weekly'))?.data).toMatchObject({
       analyzers: ['coverage', 'testids'],
       cron: '0 1 * * 3',
@@ -113,6 +117,7 @@ describe('seedDefaults', () => {
       jobs: {
         schedules: [{ name: 'mine', cron: '0 3 * * *', analyzers: ['delivery'] }],
         onTag: { analyzers: ['changelog'] },
+        onNewRepo: { exclude: ['quality'] },
       },
     })
     expect(await seedDefaults({ store, file: withFile, analyzers: kinds, now })).toEqual([])
@@ -129,6 +134,7 @@ describe('seedDefaults', () => {
       updatedAt: now().toISOString(),
     })
     expect(await seedDefaults({ store, file, analyzers, now, schedules: [] })).toEqual([
+      'trigger:new-repo',
       'trigger:tag+api-surface',
     ])
     expect((await store.config?.get('trigger', 'tag'))?.data).toEqual({
@@ -146,6 +152,7 @@ describe('seedDefaults', () => {
     const fresh = memoryStore()
     expect(await seedDefaults({ store: fresh, file, analyzers, now, schedules: [] })).toEqual([
       'trigger:tag',
+      'trigger:new-repo',
     ])
   })
 })

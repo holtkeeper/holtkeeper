@@ -279,6 +279,7 @@ export const triggerKinds: readonly { id: TriggerKind; label: string }[] = [
   { id: 'tag', label: 'Tag pushed' },
   { id: 'push', label: 'Branch push' },
   { id: 'mergeRequest', label: 'Merge request' },
+  { id: 'newRepo', label: 'New repository' },
   { id: 'label', label: 'Label added' },
   { id: 'command', label: 'Comment command' },
 ]
@@ -287,14 +288,15 @@ export const triggerKinds: readonly { id: TriggerKind; label: string }[] = [
 export const mergeRequestActions = ['open', 'update', 'reopen'] as const
 
 /**
- * The fixed document id of a trigger: `tag`, `push`, `merge-request`, `label:<label>`,
- * `command:<name>`.
+ * The fixed document id of a trigger: `tag`, `push`, `merge-request`, `new-repo`,
+ * `label:<label>`, `command:<name>`.
  */
 export function triggerId(
   trigger:
     | { on: 'tag' }
     | { on: 'push' }
     | { on: 'mergeRequest' }
+    | { on: 'newRepo' }
     | { on: 'label'; label: string }
     | { on: 'command'; command: string },
 ): string {
@@ -305,6 +307,8 @@ export function triggerId(
       return 'push'
     case 'mergeRequest':
       return 'merge-request'
+    case 'newRepo':
+      return 'new-repo'
     case 'label':
       return `label:${trigger.label.trim()}`
   }
@@ -315,6 +319,8 @@ export function triggerId(
 export interface TriggerDraft {
   on: TriggerKind
   analyzers: string[]
+  /** Analyzers a new repository trigger leaves out. */
+  exclude: string[]
   groups: string[]
   /** Branch globs of a push trigger; empty means every branch. */
   branches: string[]
@@ -339,6 +345,7 @@ export function toTriggerDraft(
   const draft: TriggerDraft = {
     on: data?.on ?? kind,
     analyzers: [],
+    exclude: [],
     groups: [],
     branches: [],
     actions: [],
@@ -371,6 +378,13 @@ export function toTriggerDraft(
         actions: [...(data.actions ?? [])],
         draft: data.draft ?? false,
       }
+    case 'newRepo':
+      return {
+        ...draft,
+        analyzers: [...(data.analyzers ?? [])],
+        exclude: [...(data.exclude ?? [])],
+        groups: (data.groups ?? []).map(formatGroupMatch),
+      }
     case 'label':
       return { ...draft, analyzers: [...data.analyzers], label: data.label }
   }
@@ -392,7 +406,8 @@ export function validateTriggerDraft(
     if (!/^[a-z][\w-]*$/.test(draft.command.trim()))
       errors.command = 'Lowercase letters, digits, _ and -'
     if (!draft.analyzer) errors.analyzer = 'Pick the analyzer to run'
-  } else if (draft.analyzers.length === 0) errors.analyzers = 'Pick at least one analyzer'
+  } else if (draft.on !== 'newRepo' && draft.analyzers.length === 0)
+    errors.analyzers = 'Pick at least one analyzer'
   if (draft.on === 'label' && !draft.label.trim()) errors.label = 'Enter the label'
   if (!errors.command && !errors.label && taken.includes(triggerId(toTriggerInput(draft))))
     errors.id = 'This trigger exists; edit it instead'
@@ -425,6 +440,13 @@ export function toTriggerInput(draft: TriggerDraft): TriggerDocumentData {
         ...(draft.draft ? { draft: true } : {}),
         ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
       }
+    case 'newRepo':
+      return {
+        on: 'newRepo',
+        ...(draft.analyzers.length ? { analyzers: [...draft.analyzers] } : {}),
+        ...(draft.exclude.length ? { exclude: [...draft.exclude] } : {}),
+        ...(draft.groups.length ? { groups: draft.groups.map(parseGroupMatch) } : {}),
+      }
     case 'label':
       return { on: 'label', label: draft.label.trim(), analyzers: [...draft.analyzers] }
   }
@@ -449,15 +471,19 @@ export function describeTrigger(trigger: TriggerDocumentData): string {
       const actions = trigger.actions?.length ? trigger.actions : mergeRequestActions
       return `Merge request ${actions.join(', ')}${trigger.draft ? ', drafts included' : ''}`
     }
+    case 'newRepo':
+      return trigger.exclude?.length
+        ? `A repository is found for the first time; skips ${trigger.exclude.join(', ')}`
+        : 'A repository is found for the first time'
     case 'label':
       return `Label "${trigger.label}" is added to a merge request`
   }
   return [`/holtkeeper ${trigger.command}`, ...(trigger.args ?? []).map((a) => `<${a}>`)].join(' ')
 }
 
-/** Analyzers a trigger queues. */
+/** Analyzers a trigger queues; empty for a new repository trigger that runs every read-only one. */
 export const triggerAnalyzers = (trigger: TriggerDocumentData): string[] =>
-  trigger.on === 'command' ? [trigger.analyzer] : trigger.analyzers
+  trigger.on === 'command' ? [trigger.analyzer] : (trigger.analyzers ?? [])
 
 /** Value types a repository trait can have. */
 export type TraitType = 'string' | 'number' | 'boolean'

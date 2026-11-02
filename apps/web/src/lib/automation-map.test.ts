@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { ConfigEntryView, JobAnalyzerView } from '@holtkeeper/api'
+import type { ConfigEntryView, JobAnalyzerView, TriggerDocumentData } from '@holtkeeper/api'
 
 import {
   automationMap,
@@ -208,6 +208,20 @@ describe('linking analyzers', () => {
     })
     expect(withoutAnalyzer({ on: 'mergeRequest', analyzers: ['a', 'b'] }, 'a')).toEqual({
       data: { on: 'mergeRequest', analyzers: ['b'] },
+    })
+  })
+})
+
+describe('new repository trigger', () => {
+  test('without a list it runs every read-only analyzer, so links edit its exclusions', () => {
+    expect(withoutAnalyzer({ on: 'newRepo' }, 'quality')).toEqual({
+      data: { on: 'newRepo', exclude: ['quality'] },
+    })
+    const excluding: TriggerDocumentData = { on: 'newRepo', exclude: ['quality'] }
+    expect(withAnalyzer(excluding, 'quality')).toEqual({ on: 'newRepo' })
+    expect(withAnalyzer({ on: 'newRepo', analyzers: ['audit'] }, 'quality')).toEqual({
+      on: 'newRepo',
+      analyzers: ['audit', 'quality'],
     })
   })
 })

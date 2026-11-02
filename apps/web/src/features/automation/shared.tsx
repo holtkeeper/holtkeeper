@@ -90,14 +90,21 @@ export function AnalyzerPicker({
   value,
   onChange,
   error,
+  description,
+  readOnly = false,
 }: {
   label: string
   value: readonly string[]
   onChange: (value: string[]) => void
   error?: string | undefined
+  description?: string
+  /** Offer only repository analyzers that do not change repositories. */
+  readOnly?: boolean
 }) {
   const analyzers = useJobAnalyzers()
-  const known = analyzers.data?.analyzers ?? []
+  const known = (analyzers.data?.analyzers ?? []).filter(
+    (a) => !readOnly || (a.scope === 'repo' && !a.exclusive),
+  )
   const options = [
     ...known.map((a) => ({ id: a.kind, label: a.label })),
     ...value
@@ -114,6 +121,7 @@ export function AnalyzerPicker({
       ) : (
         <TagInput label={label} values={value} onChange={onChange} placeholder="quality" />
       )}
+      {description ? <span className="text-xs text-muted">{description}</span> : null}
       {error ? <span className="text-xs text-danger">{error}</span> : null}
     </div>
   )

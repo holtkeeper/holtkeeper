@@ -772,6 +772,8 @@ export interface JobAnalyzerView {
     agent?: 'required' | 'optional'
     history?: boolean | 'optional'
   }
+  /** The run changes repositories (branches, commits, merge requests). */
+  exclusive?: boolean
   schema: unknown
   presets?: SettingPresetView[]
 }

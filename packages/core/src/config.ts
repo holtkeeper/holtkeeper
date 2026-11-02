@@ -301,6 +301,21 @@ const jobsSchema = z.object({
       groups: z.array(groupMatchSchema).optional(),
     })
     .optional(),
+  /**
+   * Analyzers run once for a repository the first time a group listing finds it (a new
+   * repository, or one a new or widened group brings in). Only repository analyzers that do not
+   * change repositories (not `exclusive`) are queued, and only where their `appliesTo` matches.
+   */
+  onNewRepo: z
+    .object({
+      /** Default: every analyzer that only reads. */
+      analyzers: z.array(z.string().min(1)).min(1).optional(),
+      /** Analyzer kinds left out. */
+      exclude: z.array(z.string().min(1)).optional(),
+      /** Only repositories matching these groups (`GroupMatch`); every repository when omitted. */
+      groups: z.array(groupMatchSchema).optional(),
+    })
+    .optional(),
   /** Analyzers run when a label is added to a merge request, by label. */
   onLabel: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
   /**
@@ -445,6 +460,7 @@ export const configSchema = z
     unknownGroups(config.jobs?.onTag?.groups, ['jobs', 'onTag', 'groups'])
     unknownGroups(config.jobs?.onPush?.groups, ['jobs', 'onPush', 'groups'])
     unknownGroups(config.jobs?.onMergeRequest?.groups, ['jobs', 'onMergeRequest', 'groups'])
+    unknownGroups(config.jobs?.onNewRepo?.groups, ['jobs', 'onNewRepo', 'groups'])
 
     const names = new Set<string>()
     for (const [index, use] of config.plugins.entries()) {

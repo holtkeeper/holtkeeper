@@ -184,6 +184,7 @@ describe('triggers', () => {
   test('ids are fixed per kind', () => {
     expect(triggerId({ on: 'tag' })).toBe('tag')
     expect(triggerId({ on: 'mergeRequest' })).toBe('merge-request')
+    expect(triggerId({ on: 'newRepo' })).toBe('new-repo')
     expect(triggerId({ on: 'label', label: ' needs-port ' })).toBe('label:needs-port')
     expect(triggerId({ on: 'command', command: 'port' })).toBe('command:port')
   })
@@ -196,6 +197,7 @@ describe('triggers', () => {
       analyzers: 'Pick at least one analyzer',
       label: 'Enter the label',
     })
+    expect(validateTriggerDraft(toTriggerDraft(undefined, 'newRepo'))).toEqual({})
     expect(validateTriggerDraft(toTriggerDraft(undefined, 'command'))).toEqual({
       command: 'Lowercase letters, digits, _ and -',
       analyzer: 'Pick the analyzer to run',
@@ -217,6 +219,9 @@ describe('triggers', () => {
         draft: true,
         groups: [['frontend', 'admin-panel']],
       },
+      { on: 'newRepo' },
+      { on: 'newRepo', exclude: ['quality'], groups: ['games'] },
+      { on: 'newRepo', analyzers: ['audit', 'licenses'] },
       { on: 'label', label: 'needs-port', analyzers: ['port'] },
       { on: 'command', command: 'port', analyzer: 'port', args: ['targets'] },
     ]

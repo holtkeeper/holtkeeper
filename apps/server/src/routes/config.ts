@@ -54,6 +54,7 @@ import {
   readBody,
   repoTarget,
 } from '../context.ts'
+import { newRepoAnalyzers } from '../new-repos.ts'
 import { issueForgeSshKey, removeForgeSshKey, sshKeyView } from '../ssh-keys.ts'
 
 /** URL segment of each document type. */
@@ -98,6 +99,7 @@ const triggersOf = (config: HoltkeeperConfig): [string, TriggerDocumentData][] =
     ...(jobs.onTag ? [{ on: 'tag' as const, ...jobs.onTag }] : []),
     ...(jobs.onPush ? [{ on: 'push' as const, ...jobs.onPush }] : []),
     ...(jobs.onMergeRequest ? [{ on: 'mergeRequest' as const, ...jobs.onMergeRequest }] : []),
+    ...(jobs.onNewRepo ? [{ on: 'newRepo' as const, ...jobs.onNewRepo }] : []),
     ...Object.entries(jobs.onLabel ?? {}).map(([label, analyzers]) => ({
       on: 'label' as const,
       label,
@@ -377,7 +379,12 @@ export function configRoutes(deps: ServerDeps) {
         .filter(([, data]) => !('groups' in data) || inGroups(data.groups))
         .map(([id, data]) => ({
           id,
-          analyzers: data.on === 'command' ? [data.analyzer] : data.analyzers,
+          analyzers:
+            data.on === 'command'
+              ? [data.analyzer]
+              : data.on === 'newRepo'
+                ? newRepoAnalyzers(data, deps.analyzers ?? [])
+                : data.analyzers,
         })),
     })
   })

@@ -88,6 +88,7 @@ function jobsOf(jobs: Jobs) {
       ...jobs.onMergeRequest,
       draft: jobs.onMergeRequest.draft ? true : undefined,
     },
+    onNewRepo: jobs.onNewRepo,
     onLabel: jobs.onLabel && sortedRecord(jobs.onLabel),
     commands: jobs.commands && sortedRecord(jobs.commands),
     botUsername: jobs.botUsername,

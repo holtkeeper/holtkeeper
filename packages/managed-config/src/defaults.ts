@@ -164,10 +164,12 @@ export const defaultSchedules: DefaultSchedule[] = [
 
 /**
  * Triggers an install starts with: every new or moved tag gets a changelog, a risk assessment and
- * a snapshot of the public API of its packages.
+ * a snapshot of the public API of its packages; every new repository gets every analyzer that only
+ * reads.
  */
 export const defaultTriggers: DefaultTrigger[] = [
   { id: 'tag', data: { on: 'tag', analyzers: ['changelog', 'release-risk', 'api-surface'] } },
+  { id: 'new-repo', data: { on: 'newRepo' } },
 ]
 
 /**
@@ -213,7 +215,7 @@ export interface SeedDefaultsOptions {
  * marker per document in `Store.kv`, taken atomically when the store supports `compareAndSet`):
  * removing one later does not bring it back, and a panel document with the same id is kept as
  * it is. Schedules are skipped while the config file has its own; the tag trigger while the file
- * sets `jobs.onTag`. Analyzers the server lacks are dropped. Each of `additions` then appends its
+ * sets `jobs.onTag`, the new repository trigger while it sets `jobs.onNewRepo`. Analyzers the server lacks are dropped. Each of `additions` then appends its
  * analyzers to an existing trigger document once, unless they are there already (written as
  * `trigger:<id>+<kinds>`). Does nothing without `config` or
  * `kv`. Logs a `config.defaults.seeded` activity event and resolves with `<type>:<id>` of what
@@ -270,15 +272,16 @@ export async function seedDefaults({
   }
   for (const trigger of triggers) {
     if (trigger.data.on === 'tag' && file.jobs?.onTag) continue
+    if (trigger.data.on === 'newRepo' && file.jobs?.onNewRepo) continue
     // oxlint-disable-next-line no-await-in-loop -- a handful of writes, in a stable order
     if (!(await claim('trigger', trigger.id))) continue
     // oxlint-disable-next-line no-await-in-loop -- see above
     if (await config.get('trigger', trigger.id)) continue
     const data =
-      'analyzers' in trigger.data
+      'analyzers' in trigger.data && trigger.data.analyzers
         ? { ...trigger.data, analyzers: trigger.data.analyzers.filter((kind) => known.has(kind)) }
         : trigger.data
-    if ('analyzers' in data && !data.analyzers.length) continue
+    if ('analyzers' in data && data.analyzers && !data.analyzers.length) continue
     if ('analyzer' in data && !known.has(data.analyzer)) continue
     // oxlint-disable-next-line no-await-in-loop -- see above
     await config.put({ type: 'trigger', id: trigger.id, data, updatedAt: at, updatedBy: 'system' })
@@ -290,7 +293,7 @@ export async function seedDefaults({
     if (!(await claim('trigger', addition.id))) continue
     // oxlint-disable-next-line no-await-in-loop -- see above
     const existing = await config.get('trigger', addition.trigger)
-    if (!existing || !('analyzers' in existing.data)) continue
+    if (!existing || !('analyzers' in existing.data) || !existing.data.analyzers) continue
     const present = existing.data.analyzers
     const missing = addition.analyzers.filter((kind) => known.has(kind) && !present.includes(kind))
     if (!missing.length) continue

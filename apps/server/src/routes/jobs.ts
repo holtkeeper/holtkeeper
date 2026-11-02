@@ -46,6 +46,7 @@ export function jobRoutes(deps: ServerDeps) {
     label: analyzer.analysis?.label ?? analyzer.kind,
     scope: analyzer.scope,
     needs: analyzer.needs ?? {},
+    ...(analyzer.exclusive && { exclusive: true }),
     schema: z.toJSONSchema(analyzer.options, { unrepresentable: 'any', io: 'input' }),
     ...(analyzer.presets?.length && {
       presets: analyzer.presets.map(({ options, ...preset }) => ({ ...preset, value: options })),
