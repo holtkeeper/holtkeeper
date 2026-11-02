@@ -65,6 +65,7 @@
 | `@holtkeeper/quality-deadcode`    | Dead code: unused files, exports, dependencies (knip)                         | [packages/quality-deadcode/docs](../packages/quality-deadcode/docs/README.md)       |
 | `@holtkeeper/quality-secrets`     | Leaked secrets (gitleaks)                                                     | [packages/quality-secrets/docs](../packages/quality-secrets/docs/README.md)         |
 | `@holtkeeper/review`              | AI review of merge requests, thread replies                                   | [packages/review/docs](../packages/review/docs/README.md)                           |
+| `@holtkeeper/review-tests`        | Tests for merge request code, written by the agent and run by Holtkeeper      | [packages/review-tests/docs](../packages/review-tests/docs/README.md)               |
 | `@holtkeeper/coverage`            | Test coverage per source file, folder treemap and trend                       | [packages/coverage/docs](../packages/coverage/docs/README.md)                       |
 | `@holtkeeper/testids`             | Catalog of test attributes per component; the review's test id check          | [packages/testids/docs](../packages/testids/docs/README.md)                         |
 | `@holtkeeper/api-surface`         | Public API of packages per version, diffs, Markdown for agents                | [packages/api-surface/docs](../packages/api-surface/docs/README.md)                 |

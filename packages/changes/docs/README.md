@@ -11,6 +11,8 @@ interface CodeChange {
   description?: string
   confidence: 'safe' | 'review'
   source: string // 'oxlint', 'conventions', 'claude', ...
+  target?: RepoRef // repository of the edits, when not the analyzed one
+  base?: string // branch the edits apply to, when not the default branch
   edits: Edit[]
 }
 
@@ -39,4 +41,4 @@ Edits carry the text they expect to replace. Applying a suggestion to a file tha
 
 `sha256Hex(bytes)` gives the hash `previousSha256` is compared with.
 
-The server exposes accepting as `POST /api/analyses/:id/changes { ids, mode: 'patch' | 'merge-request' }`.
+The server exposes accepting as `POST /api/analyses/:id/changes { ids, mode: 'patch' | 'merge-request' }`. Changes are grouped by `target` and `base`: a patch is computed against `base` (default: the default branch), and a merge request is opened per group into its `base`.

@@ -53,6 +53,11 @@ export interface CodeChange {
    * that suggest changes in many repositories. Accepting opens one merge request per target.
    */
   target?: RepoRef
+  /**
+   * Branch the edits apply to, when it is not the default branch — e.g. tests for code that only
+   * exists in a merge request's source branch. Accepting reads files from it and targets it.
+   */
+  base?: string
   edits: Edit[]
 }
 

@@ -17,6 +17,8 @@ import {
 } from './pipeline.ts'
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
+import { DEFAULT_RELEASE_BRANCHES, skipReason, skippedReview } from './skip.ts'
+import { type MergeRequestTester, defaultReviewTestOptions } from './tests.ts'
 import { type ThreadLearning, type ThreadReplyResult, replyToThread } from './thread.ts'
 
 const flag = z.preprocess(
@@ -50,6 +52,14 @@ export const reviewOptionsSchema = z.object({
   instructions: z.string().optional(),
   replyTo: z.string().min(1).optional(),
   media: flag.default(true),
+  tests: flag.default(false),
+  maxTests: z.coerce.number().int().min(1).default(defaultReviewTestOptions.maxTests),
+  testRepeat: z.coerce.number().int().min(1).default(defaultReviewTestOptions.repeat),
+  testTimeoutMs: z.coerce.number().int().positive().default(defaultReviewTestOptions.timeoutMs),
+  testAttempts: z.coerce.number().int().min(1).default(defaultReviewTestOptions.attempts),
+  releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
+  reviewOwn: flag.default(false),
+  force: flag.default(false),
 })
 
 /** What the host provides besides the analyzer context. All optional. */
@@ -69,6 +79,8 @@ export interface ReviewAnalyzerDeps {
    */
   toolsetsFor?: (context: { repo: RepoRef; dir: string }) => readonly Toolset[]
   mediaReviewer?: MediaReviewer
+  /** Writes and runs tests for changed functions when the `tests` option is on. */
+  tester?: MergeRequestTester
   /** Username Holtkeeper posts as; markers in note bodies identify our notes either way. */
   botUsername?: string
   steps?: Partial<ReviewSteps>
@@ -125,6 +137,11 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       },
       { flag: 'approve', option: 'approve', description: 'never or when-clean (default never)' },
       {
+        flag: 'tests',
+        option: 'tests',
+        description: 'write and run tests for changed functions (default false)',
+      },
+      {
         flag: 'language',
         option: 'language',
         description: 'language of comments (default: the MR description)',
@@ -135,8 +152,23 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       const forge = requireReviewForge(context.forge)
       const { options, repo } = context
       const mr = await forge.getMergeRequest(repo.path, options.mergeRequest)
-      const dir = await headCheckout(context, mr.headSha)
       const botUsername = deps.botUsername
+      const skip =
+        options.replyTo || options.force
+          ? undefined
+          : skipReason(
+              mr,
+              {
+                releaseBranches: options.releaseBranches ?? DEFAULT_RELEASE_BRANCHES,
+                reviewOwn: options.reviewOwn ?? false,
+              },
+              botUsername,
+            )
+      if (skip) {
+        context.log?.(`not reviewing: ${skip}`)
+        return { data: skippedReview(mr, skip), ref: reviewRef(mr.id) }
+      }
+      const dir = await headCheckout(context, mr.headSha)
       const knowledge = deps.knowledge
       const knowledgeRepo = { ...repo, groups: knowledge?.groupsOf?.(repo) ?? [] }
       const toolsets =
@@ -249,6 +281,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         ...(toolsets ? { toolsets } : {}),
         ...(botUsername ? { botUsername } : {}),
         ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),
+        ...(deps.tester ? { tester: deps.tester } : {}),
         ...(deps.steps ? { steps: deps.steps } : {}),
         ...(context.log ? { log: context.log } : {}),
         ...(context.signal ? { signal: context.signal } : {}),

@@ -25,6 +25,7 @@ import { testGapsCheck } from '@holtkeeper/quality-tests'
 import { releaseRiskAnalyzer } from '@holtkeeper/release-risk'
 import { renovateAnalyzer } from '@holtkeeper/renovate'
 import { createReviewAnalyzer } from '@holtkeeper/review'
+import { createMergeRequestTester } from '@holtkeeper/review-tests'
 import { stackAnalyzer } from '@holtkeeper/stack'
 import { testIdsAnalyzer, testIdsCheck } from '@holtkeeper/testids'
 import { trackerAnalyzer } from '@holtkeeper/tracker'
@@ -150,6 +151,9 @@ export const reviewChecks = () => ({
   testids: testIdsCheck(),
 })
 
+/** Writes and runs tests for the functions a merge request changes, for the review's `tests` option. */
+export const reviewTester = () => createMergeRequestTester()
+
 /** Every analyzer Holtkeeper ships, in the order help texts list them. */
 export const builtinAnalyzers: AnyAnalyzer[] = [
   changelogAnalyzer,
@@ -171,7 +175,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   i18nAnalyzer,
   propagateAnalyzer,
   portAnalyzer,
-  createReviewAnalyzer({ checks: reviewChecks() }),
+  createReviewAnalyzer({ checks: reviewChecks(), tester: reviewTester() }),
   trackerAnalyzer,
   warmupAnalyzer,
   browserslistAnalyzer,

@@ -37,6 +37,7 @@
     "@holtkeeper/renovate": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/review": "workspace:*",
+    "@holtkeeper/review-tests": "workspace:*",
     "@holtkeeper/stack": "workspace:*",
     "@holtkeeper/testids": "workspace:*",
     "@holtkeeper/tracker": "workspace:*",

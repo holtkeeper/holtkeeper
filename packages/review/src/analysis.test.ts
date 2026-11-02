@@ -6,6 +6,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { HEAD, addedFile, fakeAgent, fakeForge } from '../test/fakes.ts'
 import { reviewAnalysis } from './analysis.ts'
 import { createReviewAnalyzer, reviewOptionsSchema } from './analyzer.ts'
+import { requireReviewForge } from './pipeline.ts'
 import type { ReviewData } from './schema.ts'
 
 const repo = { forge: 'work', path: 'games/a' }
@@ -72,6 +73,51 @@ const record = (d: ReviewData, createdAt = '2026-10-30T00:00:00Z') => ({
   data: d,
 })
 
+const reviewTest = (verdict: 'passes' | 'flaky') => ({
+  id: `t-${verdict}`,
+  target: { path: 'src/p.ts', symbol: 'price', startLine: 1, endLine: 3, hash: 'h' },
+  testFile: `src/p.${verdict}.test.ts`,
+  framework: 'bun:test',
+  command: ['bun', 'test'],
+  cwd: '.',
+  verdict,
+  head: { passed: 1, runs: 2, durationMs: 10 },
+  attempts: 1,
+  content: 'x\n',
+  ranAt: HEAD,
+})
+
+const reviewWith = async (
+  change: { sourceBranch?: string; targetBranch?: string; author?: string },
+  options: Record<string, unknown> = {},
+) => {
+  const { forge, submissions } = fakeForge({
+    files: [{ oldPath: 'a.ts', newPath: 'a.ts', status: 'added', diff: addedFile(['x']) }],
+    discussions: [],
+  })
+  const review = requireReviewForge(forge)
+  const changed = {
+    ...review,
+    getMergeRequest: async (path: string, id: number) => ({
+      ...(await review.getMergeRequest(path, id)),
+      ...change,
+    }),
+  }
+  const { agent, tasks } = fakeAgent({
+    review: [{ comments: [], summary: 'Fine.', verdict: 'looks-good' }],
+  })
+  const { runner, calls } = createFakeRunner(() => ({ stdout: `${HEAD}\n` }))
+  const result = await createReviewAnalyzer({ botUsername: 'holtkeeper' }).run({
+    repo,
+    dir: '/nonexistent',
+    forge: changed,
+    agent,
+    runner,
+    options: reviewOptionsSchema.parse({ mergeRequest: 7, ...options }),
+  })
+  return { data: result.data, submissions, tasks, calls }
+}
+
 describe('reviewAnalysis', () => {
   test('validates its data', () => {
     expect(reviewAnalysis.schema.safeParse(data()).success).toBe(true)
@@ -107,6 +153,29 @@ describe('reviewAnalysis', () => {
     expect(report.metrics.find((m) => m.id === 'cost')?.value).toBe('$0.12')
   })
 
+  test('passing tests become applicable changes into the source branch', () => {
+    const d = data({ tests: { items: [reviewTest('passes'), reviewTest('flaky')], notTested: [] } })
+    expect(reviewAnalysis.schema.safeParse(d).success).toBe(true)
+    expect(reviewAnalysis.changes?.(d)).toEqual([
+      {
+        id: 't-passes',
+        title: 'Add a test for price',
+        confidence: 'review',
+        source: 'review-tests',
+        base: 'f',
+        edits: [{ kind: 'create', file: 'src/p.passes.test.ts', newText: 'x\n' }],
+      },
+    ])
+    const report = reviewAnalysis.toReport(record(d))
+    const section = report.sections.find((s) => s.id === 'tests')
+    const changes = section?.blocks.find((b) => b.type === 'changes')
+    expect(changes?.type === 'changes' && changes.applicable).toBe(true)
+    expect(report.metrics.find((m) => m.id === 'tests')?.value).toBe(1)
+    expect(reviewAnalysis.toReport(record(data())).sections.some((s) => s.id === 'tests')).toBe(
+      false,
+    )
+  })
+
   test('does not compare with another merge request', () => {
     const other = data({ mergeRequest: { ...data().mergeRequest, id: 8 } })
     const report = reviewAnalysis.toReport(record(data()), record(other))
@@ -130,7 +199,10 @@ describe('review analyzer', () => {
       approve: 'never',
       includeChecks: ['lint', 'secrets'],
       media: false,
+      tests: false,
+      maxTests: 2,
     })
+    expect(reviewOptionsSchema.parse({ mergeRequest: 1, tests: 'true' }).tests).toBe(true)
     expect(parsed.ignore).toContain('**/*.lock')
     expect(
       reviewOptionsSchema.parse({ mergeRequest: 1, includeChecks: 'true' }).includeChecks,
@@ -161,6 +233,33 @@ describe('review analyzer', () => {
     expect(result.data.verdict).toBe('looks-good')
     expect(tasks[0]?.context).toContain('Team rule.')
     expect(submissions).toHaveLength(1)
+  })
+
+  test('release and own merge requests are not reviewed unless forced', async () => {
+    const release = await reviewWith({ sourceBranch: 'develop', targetBranch: 'main' })
+    expect(release.data).toMatchObject({ mode: 'skipped', verdict: 'skipped' })
+    expect(release.data.summary).toContain('release merge request develop → main')
+    expect([release.submissions, release.tasks, release.calls]).toEqual([[], [], []])
+
+    const own = await reviewWith({ author: 'holtkeeper' })
+    expect(own.data.summary).toContain('merge request by Holtkeeper')
+    expect(own.submissions).toEqual([])
+
+    const forced = await reviewWith(
+      { sourceBranch: 'develop', targetBranch: 'main' },
+      { force: 'true' },
+    )
+    expect(forced.data.verdict).toBe('looks-good')
+    expect(forced.submissions).toHaveLength(1)
+
+    const configured = await reviewWith(
+      { sourceBranch: 'develop', targetBranch: 'main' },
+      { releaseBranches: 'release/*:main' },
+    )
+    expect(configured.data.verdict).toBe('looks-good')
+    expect((await reviewWith({ author: 'holtkeeper' }, { reviewOwn: 'true' })).data.verdict).toBe(
+      'looks-good',
+    )
   })
 
   test('replyTo answers the thread instead of reviewing', async () => {

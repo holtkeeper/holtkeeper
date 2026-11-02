@@ -76,6 +76,56 @@ const walkthroughSchema = z.array(
 /** How hard the change is for a human to review: 1 trivial … 5 needs a long careful look. */
 const effortSchema = z.number().int().min(1).max(5)
 
+/**
+ * What a test written for the merge request proved: `passes` passed every run on the head,
+ * `flaky` passed only some runs, `unfinished` never passed (or the agent judged the code wrong).
+ */
+export const reviewTestVerdicts = ['passes', 'flaky', 'unfinished'] as const
+export type ReviewTestVerdict = (typeof reviewTestVerdicts)[number]
+
+const reviewTestSchema = z.object({
+  /** Stable for the same function across runs. */
+  id: z.string(),
+  target: z.object({
+    path: z.string(),
+    symbol: z.string(),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    /** Hash of the function's text at `head`; an unchanged hash lets later runs reuse the test. */
+    hash: z.string(),
+  }),
+  testFile: z.string(),
+  framework: z.string(),
+  /** The command Holtkeeper ran the test with, from `cwd`. */
+  command: z.array(z.string()),
+  cwd: z.string(),
+  verdict: z.enum(reviewTestVerdicts),
+  head: z.object({
+    passed: z.number().int(),
+    runs: z.number().int(),
+    durationMs: z.number(),
+  }),
+  /** Rounds of writing and running. */
+  attempts: z.number().int(),
+  /** The test file as it was last run. */
+  content: z.string(),
+  notes: z.string().optional(),
+  /** Why the test is `unfinished` or `flaky`. */
+  reason: z.string().optional(),
+  /** Tail of the last failing run. */
+  output: z.string().optional(),
+  /** Head the test last ran on; differs from the review's head for tests carried over. */
+  ranAt: z.string(),
+})
+
+const testRunSchema = z.object({
+  /** Why no test was written at all, e.g. no test framework or a failed install. */
+  skipped: z.string().optional(),
+  items: z.array(reviewTestSchema),
+  /** Functions that were candidates but got no test, and why. */
+  notTested: z.array(z.object({ path: z.string(), symbol: z.string(), reason: z.string() })),
+})
+
 /** What one review run did; stored as the `review` analysis with `ref` `!<iid>`. */
 export const reviewDataSchema = z.object({
   mergeRequest: z.object({
@@ -113,6 +163,8 @@ export const reviewDataSchema = z.object({
   }),
   approved: z.boolean(),
   checks: z.array(z.object({ name: z.string(), ok: z.boolean(), error: z.string().optional() })),
+  /** Tests written and run for the changed code; present when the `tests` option was on. */
+  tests: testRunSchema.optional(),
   usage: z
     .object({
       turns: z.number(),
@@ -129,6 +181,8 @@ export type ThreadAction = z.infer<typeof threadSchema>
 export type SkippedFile = z.infer<typeof skippedSchema>
 export type ReviewUsage = NonNullable<ReviewData['usage']>
 export type ReviewWalkthrough = NonNullable<ReviewData['walkthrough']>
+export type ReviewTest = z.infer<typeof reviewTestSchema>
+export type ReviewTestRun = z.infer<typeof testRunSchema>
 
 /** The answer the review agent must give. */
 export const agentReviewSchema = z.object({

@@ -7,7 +7,7 @@ import {
   modelsDevCatalog,
   withPluginCatalogs,
 } from '@holtkeeper/agent'
-import { builtinAnalyzers, reviewChecks } from '@holtkeeper/analyzers'
+import { builtinAnalyzers, reviewChecks, reviewTester } from '@holtkeeper/analyzers'
 import {
   type ArtifactStore,
   type StorageProvider,
@@ -245,6 +245,7 @@ export async function startServer(
   // The review analyzer needs server state: scoped review instructions and the knowledge base.
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
+    tester: reviewTester(),
     ...(config.jobs?.botUsername ? { botUsername: config.jobs.botUsername } : {}),
     mediaReviewer: createMediaReviewer({
       cache: mediaCache,

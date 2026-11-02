@@ -17,8 +17,9 @@ import {
   requireReviewForge,
   reviewMergeRequest,
 } from './pipeline.ts'
-import type { AgentReview, ReviewData } from './schema.ts'
+import type { AgentReview, ReviewData, ReviewTest } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
+import type { MergeRequestTestInput, MergeRequestTester } from './tests.ts'
 
 const repo = { forge: 'work', path: 'games/a' }
 const options: ReviewOptions = {
@@ -66,6 +67,20 @@ const finding = (line: number, source: string) => ({
   title: `${source}: rule`,
   body: `found on ${line}`,
   source,
+})
+
+const testOf = (verdict: ReviewTest['verdict']): ReviewTest => ({
+  id: 't1',
+  target: { path: 'src/price.ts', symbol: 'price', startLine: 1, endLine: 3, hash: 'h' },
+  testFile: 'src/price.test.ts',
+  framework: 'bun:test',
+  command: ['bun', 'test', './src/price.test.ts'],
+  cwd: '.',
+  verdict,
+  head: { passed: 2, runs: 2, durationMs: 40 },
+  attempts: 1,
+  content: "test('price', () => {})\n",
+  ranAt: HEAD,
 })
 
 const runOf = (extra: Partial<ReviewRun> & Pick<ReviewRun, 'forge'>): ReviewRun => ({
@@ -552,6 +567,52 @@ describe('reviewMergeRequest', () => {
       ['agent', 1],
       ['oxlint', 4],
     ])
+  })
+
+  test('tests: the tester gets the scope and usage-tracking agent; its run lands in data and summary', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: [] })
+    const { agent } = fakeAgent({ review: [review([])] })
+    const seen: MergeRequestTestInput[] = []
+    const tester: MergeRequestTester = {
+      async test(input) {
+        seen.push(input)
+        await input.agent.run({ dir: input.dir, prompt: 'write' })
+        return {
+          items: [testOf('passes')],
+          notTested: [{ path: 'src/price.ts', symbol: 'tax', reason: 'over the limit' }],
+        }
+      },
+    }
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        tester,
+        options: { ...options, tests: true, maxTests: 1 },
+      }),
+    )
+    expect(seen[0]?.files.map((f) => f.path)).toEqual(['src/price.ts'])
+    expect(seen[0]?.options).toEqual({ maxTests: 1, repeat: 2, timeoutMs: 120_000, attempts: 3 })
+    expect(seen[0]?.mergeRequest.title).toBe('Add pricing')
+    expect(data.tests?.items.map((t) => t.verdict)).toEqual(['passes'])
+    expect(data.usage?.turns).toBe(4)
+    expect(data.summary).toContain('#### Tests')
+    expect(submissions[0]?.summary).toContain('<code>src/price.test.ts</code>')
+    expect(submissions[0]?.summary).toContain('over the limit')
+  })
+
+  test('tests: off by default, skipped with a reason without a tester', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const off = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge) }))
+    expect(off.tests).toBeUndefined()
+    const missing = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(fakeForge({ files, discussions: [] }).forge),
+        agent: fakeAgent({ review: [review([])] }).agent,
+        options: { ...options, tests: true },
+      }),
+    )
+    expect(missing.tests).toEqual({ skipped: 'no tester is configured', items: [], notTested: [] })
   })
 
   test('requireReviewForge names missing methods', () => {

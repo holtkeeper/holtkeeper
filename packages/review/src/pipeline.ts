@@ -19,6 +19,7 @@ import {
   type RecheckVerdict,
   recheckThreads,
   runAgentReview,
+  runTracked,
 } from './agent.ts'
 import {
   type ReviewCheckName,
@@ -28,7 +29,7 @@ import {
   reviewCheckNames,
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
-import { commentBody, summaryNote, threadNote } from './format.ts'
+import { commentBody, summaryNote, testsSummary, threadNote } from './format.ts'
 import {
   type Guideline,
   type PathInstruction,
@@ -41,12 +42,14 @@ import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
+  type ReviewTestRun,
   type ReviewUsage,
   type ReviewWalkthrough,
   type ThreadAction,
   reviewDataSchema,
 } from './schema.ts'
 import { type FileScope, type ReviewScope, matchesAny, scopeDiff } from './scope.ts'
+import { type MergeRequestTester, defaultReviewTestOptions } from './tests.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
@@ -64,6 +67,18 @@ export interface ReviewOptions {
   replyTo?: string
   /** Reviews added or changed images with the injected `MediaReviewer`. */
   media: boolean
+  /** Writes and runs tests for changed functions with the injected `MergeRequestTester`. */
+  tests?: boolean
+  maxTests?: number
+  testRepeat?: number
+  testTimeoutMs?: number
+  testAttempts?: number
+  /** `source:target` branch globs of release merge requests the analyzer does not review. */
+  releaseBranches?: string[]
+  /** Review merge requests Holtkeeper authored. */
+  reviewOwn?: boolean
+  /** Review even what `releaseBranches` and `reviewOwn` would skip. */
+  force?: boolean
 }
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
@@ -111,6 +126,8 @@ export interface ReviewRun {
   botUsername?: string
   /** Reviews images when `options.media` is on. Default: a reviewer that reports nothing. */
   mediaReviewer?: MediaReviewer
+  /** Writes and runs tests when `options.tests` is on; without it the option does nothing. */
+  tester?: MergeRequestTester
   /** Replaces pipeline steps, e.g. in tests or for another review strategy. */
   steps?: Partial<ReviewSteps>
   log?: (line: string) => void
@@ -167,6 +184,12 @@ export interface ReviewSteps {
     run: ReviewRun,
     loaded: LoadedReview,
   ): Promise<{ candidates: Candidate[]; summary?: string } | undefined>
+  tests(
+    run: ReviewRun,
+    loaded: LoadedReview,
+    plan: ReviewPlan,
+    usage: ReviewUsage,
+  ): Promise<ReviewTestRun | undefined>
   recheck(
     run: ReviewRun,
     loaded: LoadedReview,
@@ -341,6 +364,39 @@ const media: ReviewSteps['media'] = async (run, loaded) => {
   })
 }
 
+const tests: ReviewSteps['tests'] = async (run, loaded, planned, usage) => {
+  if (!run.options.tests) return undefined
+  if (!run.tester || !run.agent || !run.dir)
+    return {
+      skipped: !run.dir
+        ? 'no checkout'
+        : !run.agent
+          ? 'no agent is configured'
+          : 'no tester is configured',
+      items: [],
+      notTested: [],
+    }
+  const agent = run.agent
+  return run.tester.test({
+    dir: run.dir,
+    runner: run.runner,
+    agent: { name: agent.name, run: (task) => runTracked(agent, task, usage) },
+    files: planned.scope.files,
+    headSha: loaded.diff.refs.headSha,
+    mergeRequest: { title: loaded.mr.title, description: loaded.mr.description },
+    ...(loaded.previous?.tests ? { previous: loaded.previous.tests.items } : {}),
+    options: {
+      maxTests: run.options.maxTests ?? defaultReviewTestOptions.maxTests,
+      repeat: run.options.testRepeat ?? defaultReviewTestOptions.repeat,
+      timeoutMs: run.options.testTimeoutMs ?? defaultReviewTestOptions.timeoutMs,
+      attempts: run.options.testAttempts ?? defaultReviewTestOptions.attempts,
+    },
+    ...(run.toolsets ? { toolsets: run.toolsets } : {}),
+    ...(run.log ? { log: run.log } : {}),
+    ...(run.signal ? { signal: run.signal } : {}),
+  })
+}
+
 /** Most threads re-checked per run, to bound the triage cost. */
 export const MAX_RECHECKS = 10
 
@@ -445,6 +501,7 @@ export const defaultSteps: ReviewSteps = {
   deterministic,
   agentReview,
   media,
+  tests,
   recheck,
   post,
 }
@@ -526,6 +583,7 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
       : []
   const agentOutcome = await steps.agentReview(run, loaded, planned, usage, requests)
   const mediaOutcome = await steps.media(run, loaded)
+  const testRun = await steps.tests(run, loaded, planned, usage)
 
   const validate = (candidates: readonly Candidate[]) =>
     candidates.flatMap((candidate) => {
@@ -610,6 +668,7 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
     summary: [
       agentOutcome?.summary ?? (comments.length ? '' : 'No problems found on the changed lines.'),
       mediaOutcome?.summary ? `#### Images\n\n${mediaOutcome.summary}` : '',
+      testRun ? `#### Tests\n\n${testsSummary(testRun)}` : '',
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -621,6 +680,7 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
     stats,
     approved: run.options.approve === 'when-clean' && verdict === 'looks-good' && !stillOpen,
     checks: found.checks,
+    ...(testRun ? { tests: testRun } : {}),
     ...(usage.turns > 0 || usage.costUsd !== undefined ? { usage } : {}),
   }
   return steps.post(run, loaded, data)

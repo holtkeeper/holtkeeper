@@ -176,19 +176,24 @@ export function analysisRoutes(deps: ServerDeps) {
         }),
       })
     }
+    const groups = [...byTarget].flatMap(([key, changes]) =>
+      [...Map.groupBy(changes, (change) => change.base ?? '')].map(
+        ([base, group]) => [key, base || undefined, group] as const,
+      ),
+    )
 
     const result: ApplyChangesResult = { applied: [], conflicts: [] }
     const patches: string[] = []
     const mergeRequests: { id: number; url: string }[] = []
 
-    for (const [key, changes] of byTarget) {
+    for (const [key, branch, changes] of groups) {
       const separator = key.indexOf(':')
       const forgeId = key.slice(0, separator)
       const repo = key.slice(separator + 1)
       const forge = forgeFor(forgeId)
 
       if (input.mode === 'patch') {
-        const base = (await forge.getRepository(repo)).defaultBranch
+        const base = branch ?? (await forge.getRepository(repo)).defaultBranch
         const before = new Map<string, string | undefined>()
         const plan = await planChanges(
           changes,
@@ -213,7 +218,7 @@ export function analysisRoutes(deps: ServerDeps) {
         result.applied.push(...plan.applied)
         result.conflicts.push(...plan.conflicts)
         if (plan.files.length) {
-          const header = byTarget.size > 1 ? `# ${key}\n` : ''
+          const header = groups.length > 1 ? `# ${key}${branch ? ` (${branch})` : ''}\n` : ''
           patches.push(
             header +
               unifiedDiff(
@@ -229,7 +234,14 @@ export function analysisRoutes(deps: ServerDeps) {
         continue
       }
 
-      const outcome = await openMergeRequest({ forge, repo, changes, title, resolveArtifact })
+      const outcome = await openMergeRequest({
+        forge,
+        repo,
+        changes,
+        title,
+        resolveArtifact,
+        ...(branch ? { base: branch } : {}),
+      })
       result.applied.push(...outcome.plan.applied)
       result.conflicts.push(...outcome.plan.conflicts)
       if (outcome.mergeRequest) {
