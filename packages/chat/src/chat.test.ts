@@ -145,7 +145,7 @@ describe('cards', () => {
         '#### 🟢 Release games/app-x',
         'Ping @​lead, mail a@b.example',
         '- **Next:** 1.3.0',
-        '- ✅ [**qa**](https://ci.example/1)\n- 🔄 **prod** — deploy-prod',
+        '- ✅ **qa** · [Open](https://ci.example/1)\n- 🔄 **prod** — deploy-prod',
         '- 🔴 gate',
         'Reply with:\n- `/hk release deploy prod --yes` — Deploy ⚠️',
         '**Deploy** — reply with `/hk release deploy environment=<environment>`\n- `environment` — Environment: `qa`',

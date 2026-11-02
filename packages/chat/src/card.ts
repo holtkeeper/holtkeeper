@@ -3,15 +3,28 @@ import { z } from 'zod'
 /** How good or bad something is; surfaces turn it into a color or an icon. */
 export type CardTone = 'neutral' | 'info' | 'good' | 'warning' | 'bad'
 
-/** Where one step of a longer operation stands. */
-export type StepStatus = 'pending' | 'waiting' | 'running' | 'done' | 'failed' | 'skipped'
+/**
+ * Where one step of a longer operation stands. `active` is where things are now without anything
+ * running (a stage waiting for people), `running` is work in progress.
+ */
+export type StepStatus =
+  | 'pending'
+  | 'waiting'
+  | 'active'
+  | 'running'
+  | 'done'
+  | 'failed'
+  | 'skipped'
 
 /** One step of an operation, e.g. a deploy to one environment. */
 export interface CardStep {
   label: string
   status: StepStatus
   detail?: string
+  /** Where to follow it, e.g. the job; surfaces show a small link or button. */
   url?: string
+  /** The link's label; default `Open`. */
+  urlLabel?: string
 }
 
 /**
@@ -108,8 +121,12 @@ export const formSchema: z.ZodType<Form> = z.object({
 /** One part of a card. Surfaces render the kinds they support and fall back to text for the rest. */
 export type CardBlock =
   | { type: 'text'; text: string }
+  /** Starts a part of the card: a short label, optional detail (counts) and tone. */
+  | { type: 'heading'; text: string; detail?: string; tone?: CardTone }
+  | { type: 'divider' }
   | { type: 'fields'; fields: { label: string; value: string }[] }
-  | { type: 'steps'; steps: CardStep[] }
+  /** `list` shows a step per line; `flow` shows short stages in a row, like a progress bar. */
+  | { type: 'steps'; steps: CardStep[]; layout?: 'list' | 'flow' }
   | { type: 'list'; items: { text: string; url?: string; tone?: CardTone }[] }
   | { type: 'actions'; actions: CardAction[] }
   | { type: 'form'; form: Form }
@@ -123,6 +140,8 @@ export type CardBlock =
 export interface Card {
   /** Heading; short acknowledgements go without one. */
   title?: string
+  /** One line under the title: what the card is about, e.g. the repository and version. */
+  subtitle?: string
   tone?: CardTone
   /** Where to read more, e.g. the page of the repository in the panel. */
   url?: string

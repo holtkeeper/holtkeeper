@@ -10,17 +10,19 @@ surface (MR notes, Slack, web) ──ChatMessage──▶ router ──▶ comma
 
 ## Cards
 
-`Card` is plain JSON (`title?`, `tone?`, `url?`, `blocks`), so it can be stored and sent to the panel as it is. Blocks:
+`Card` is plain JSON (`title?`, `subtitle?` — one line under the title, `tone?`, `url?`, `blocks`), so it can be stored and sent to the panel as it is. Blocks:
 
-| Block     | Shows                                                                                                                     |
-| --------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `text`    | Markdown-ish text: `**bold**`, `` `code` ``, `[label](url)`                                                               |
-| `fields`  | Label/value pairs                                                                                                         |
-| `steps`   | Steps of an operation with a `StepStatus` (`pending`, `waiting`, `running`, `done`, `failed`, `skipped`), detail and link |
-| `list`    | Items with an optional link and tone                                                                                      |
-| `actions` | Buttons; each is a full command line (`release deploy prod tag=v1.2.0 --yes`)                                             |
-| `form`    | Fields (`text`, `select` with `multiple`, `toggle`) and the command a submit runs                                         |
-| `context` | Small print                                                                                                               |
+| Block     | Shows                                                                                                                                                                                                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text`    | Markdown-ish text: `**bold**`, `` `code` ``, `[label](url)`                                                                                                                                                                                                             |
+| `fields`  | Label/value pairs                                                                                                                                                                                                                                                       |
+| `heading` | Starts a part of the card: a short label, a `detail` (counts) and an optional tone                                                                                                                                                                                      |
+| `divider` | A line between parts                                                                                                                                                                                                                                                    |
+| `steps`   | Steps with a `StepStatus` (`pending`, `waiting`, `active` — where things stand without work running, `running`, `done`, `failed`, `skipped`), detail and a link with its `urlLabel` (default `Open`); `layout: 'flow'` shows short stages in a row, like a progress bar |
+| `list`    | Items with an optional link and tone                                                                                                                                                                                                                                    |
+| `actions` | Buttons; each is a full command line (`release deploy prod tag=v1.2.0 --yes`)                                                                                                                                                                                           |
+| `form`    | Fields (`text`, `select` with `multiple`, `toggle`) and the command a submit runs                                                                                                                                                                                       |
+| `context` | Small print                                                                                                                                                                                                                                                             |
 
 Buttons and forms are command lines on purpose: a surface with buttons sends the line when clicked, one without shows the line to reply with. Whoever clicks is authorized again when the command runs, so a button carries no authority. `formCommand(form, values)` builds the line a submitted form runs (`name=value`, quoted when needed, multiple values joined with commas).
 

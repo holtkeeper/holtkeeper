@@ -34,6 +34,11 @@ export interface SlackClient {
   identity(): Promise<SlackIdentity>
   /** Public channels and the private ones the bot is in, by name; up to 4000. */
   channels(): Promise<SlackChannel[]>
+  /**
+   * One channel by id (`conversations.info`); rejects with `channel_not_found` for private
+   * channels the bot is not in.
+   */
+  channel(id: string): Promise<SlackChannel>
   /** Answers through a slash command's or interaction's `response_url`. */
   respond(
     responseUrl: string,
@@ -68,6 +73,8 @@ export interface SlackClientOptions {
   baseUrl?: string
 }
 
+const statusSchema = z.object({ ok: z.boolean(), error: z.string().optional() })
+
 const answerSchema = z.object({
   ok: z.boolean(),
   error: z.string().optional(),
@@ -83,15 +90,17 @@ const identitySchema = z.object({
   url: z.string().optional(),
 })
 
+const channelEntrySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  is_private: z.boolean().optional(),
+  is_member: z.boolean().optional(),
+})
+
+const channelSchema = z.object({ channel: channelEntrySchema })
+
 const channelsSchema = z.object({
-  channels: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      is_private: z.boolean().optional(),
-      is_member: z.boolean().optional(),
-    }),
-  ),
+  channels: z.array(channelEntrySchema),
   response_metadata: z.object({ next_cursor: z.string().optional() }).optional(),
 })
 
@@ -133,14 +142,17 @@ export function slackClient(options: SlackClientOptions): SlackClient {
     })
     if (!response.ok) throw new SlackApiError(method, `http_${response.status}`)
     const json: unknown = await response.json().catch(() => undefined)
-    const answer = answerSchema.safeParse(json)
+    const answer = statusSchema.safeParse(json)
     if (!answer.success) throw new SlackApiError(method, 'invalid_response')
     if (!answer.data.ok) throw new SlackApiError(method, answer.data.error ?? 'unknown_error')
     return json
   }
 
-  const call = async (method: string, body: Record<string, unknown>) =>
-    answerSchema.parse(await raw(method, body))
+  const call = async (method: string, body: Record<string, unknown>) => {
+    const answer = answerSchema.safeParse(await raw(method, body))
+    if (!answer.success) throw new SlackApiError(method, 'invalid_response')
+    return answer.data
+  }
 
   return {
     async sendMessage({ channel, threadTs, text, blocks }) {
@@ -192,6 +204,19 @@ export function slackClient(options: SlackClientOptions): SlackClient {
         if (!cursor) break
       }
       return found.toSorted((a, b) => a.name.localeCompare(b.name))
+    },
+    async channel(id) {
+      const answer = channelSchema.safeParse(
+        await raw('conversations.info', { channel: id }, 'form'),
+      )
+      if (!answer.success) throw new SlackApiError('conversations.info', 'invalid_response')
+      const { channel } = answer.data
+      return {
+        id: channel.id,
+        name: channel.name,
+        private: channel.is_private ?? false,
+        member: channel.is_member ?? false,
+      }
     },
     async openView(triggerId, view) {
       await call('views.open', { trigger_id: triggerId, view })

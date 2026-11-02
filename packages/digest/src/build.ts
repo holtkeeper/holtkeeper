@@ -144,6 +144,11 @@ export function buildDigest(input: BuildDigestInput): DigestResult {
   }
 }
 
+const sectionTone = (section: DigestSectionResult): CardTone => {
+  const tones = section.items.map((item) => item.tone)
+  return tones.includes('bad') ? 'bad' : tones.includes('warning') ? 'warning' : 'info'
+}
+
 const worst = (result: DigestResult): CardTone => {
   const tones = result.sections.flatMap((section) => section.items.map((item) => item.tone))
   if (tones.includes('bad')) return 'bad'
@@ -152,9 +157,10 @@ const worst = (result: DigestResult): CardTone => {
 }
 
 /**
- * The digest as a chat card: the name with the most serious tone, a line on what it covers, then
- * per section a heading with its counts and the items (`path · title — detail`, linked) and how
- * many more there are. Sections without items are listed in one line at the end.
+ * The digest as a chat card: the name with the most serious tone and the subtitle under it, then
+ * per section with items (divided from each other) a heading with its tone and counts, the items
+ * (`path · title — detail`, linked) and how many more there are. Sections without items are
+ * listed in one line at the end.
  */
 export function digestCard(
   digest: Pick<Digest, 'name' | 'onlyNew'>,
@@ -164,19 +170,21 @@ export function digestCard(
   const filled = result.sections.filter((section) => section.total > 0)
   const quiet = result.sections.filter((section) => section.total === 0)
   const blocks: CardBlock[] = []
-  if (options.subtitle) blocks.push({ type: 'context', text: options.subtitle })
   if (filled.length === 0)
     blocks.push({
       type: 'text',
       text: digest.onlyNew ? 'Nothing new needs attention.' : 'Nothing needs attention.',
     })
-  for (const section of filled) {
+  for (const [index, section] of filled.entries()) {
     const repos = new Set(section.items.map((item) => repoKeyOf(item.repo))).size
+    if (index > 0) blocks.push({ type: 'divider' })
     blocks.push({
-      type: 'text',
-      text: `**${section.label}** · ${section.total} ${digest.onlyNew ? 'new ' : ''}${
+      type: 'heading',
+      text: section.label,
+      detail: `${section.total} ${digest.onlyNew ? 'new ' : ''}${
         section.total === 1 ? 'item' : 'items'
-      } in ${repos} ${repos === 1 ? 'repository' : 'repositories'}`,
+      } · ${repos} ${repos === 1 ? 'repository' : 'repositories'}`,
+      tone: sectionTone(section),
     })
     blocks.push({
       type: 'list',
@@ -196,6 +204,7 @@ export function digestCard(
     })
   return {
     title: digest.name,
+    ...(options.subtitle && { subtitle: options.subtitle }),
     tone: worst(result),
     ...(options.url && { url: options.url }),
     blocks,

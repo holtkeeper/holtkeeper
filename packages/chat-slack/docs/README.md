@@ -26,17 +26,19 @@ Each answers a `SlackInbound`: `challenge`, `command` (`teamId`, `userId`, `text
 
 `renderSlackMessage(card, { prefix })` → `{ text, blocks }`:
 
-| Card part | Block Kit                                                                                                  |
-| --------- | ---------------------------------------------------------------------------------------------------------- |
-| title     | `header` with the tone icon                                                                                |
-| `text`    | `section` in mrkdwn (`toMrkdwn` of `@holtkeeper/notify`: converted and escaped, so no mentions)            |
-| `fields`  | `section` fields, ten per section, twenty at most                                                          |
-| `steps`   | one `section`, a line per step with its status icon and link                                               |
-| `list`    | one `section` with bullets                                                                                 |
-| `actions` | `actions` with a button per command (its line is the `value`); `danger` buttons ask for confirmation first |
-| `form`    | a button that opens the form as a modal (the form is its `value`); too large forms show the command        |
-| `context` | `context`                                                                                                  |
-| `url`     | a link button **Open in Holtkeeper**                                                                       |
+| Card part | Block Kit                                                                                                                                                                                |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| title     | `header` with the tone icon, the subtitle as a `context` under it                                                                                                                        |
+| `text`    | `section` in mrkdwn (`toMrkdwn` of `@holtkeeper/notify`: converted and escaped, so no mentions)                                                                                          |
+| `fields`  | `section` fields, ten per section, twenty at most                                                                                                                                        |
+| `heading` | `section` with the tone icon, the label in bold and the detail                                                                                                                           |
+| `divider` | `divider`                                                                                                                                                                                |
+| `steps`   | up to ten steps with links: a `section` each with a button to the link (`urlLabel`); otherwise one `section` with a line per step; `flow`: one `context` line of stages joined by arrows |
+| `list`    | one `section` with bullets                                                                                                                                                               |
+| `actions` | `actions` with a button per command (its line is the `value`); `danger` buttons ask for confirmation first                                                                               |
+| `form`    | a button that opens the form as a modal (the form is its `value`); too large forms show the command                                                                                      |
+| `context` | `context`                                                                                                                                                                                |
+| `url`     | a link button **Open in Holtkeeper**, in the last `actions` block when the card ends with one                                                                                            |
 
 At most 50 blocks; `text` (the title, else the first text) is the notification fallback.
 
@@ -46,4 +48,4 @@ At most 50 blocks; `text` (the title, else the first text) is the notification f
 
 `slackSurface({ client, id = 'slack', prefix? })` posts cards with `chat.postMessage` in the thread's channel (and thread), returning `<channel>/<ts>` as the message id, and updates them with `chat.update`. When the bot may not post there (`not_in_channel`, `channel_not_found`, `is_archived`) and the thread has a `response_url`, the card goes privately through it instead; such answers cannot be updated.
 
-`slackClient({ token, fetch?, baseUrl? })` — `sendMessage` (`chat.postMessage`), `updateMessage`, `openView`, `respond` (only to `https://hooks.slack.com/`), `identity()` (`auth.test`: team, bot and their ids) and `channels()` (`conversations.list`: public channels and private ones the bot is in, by name, up to 20 pages). `token` is a secret or a function called on every request, so a token changed elsewhere applies at once. Write methods send JSON; `auth.test` and `conversations.list` send a form, since Slack ignores JSON arguments of read methods (with JSON, `types` was dropped and private channels never came back). Failures are `SlackApiError` with Slack's `code` (`not_in_channel`, `expired_trigger_id`, `http_429`, …); the token is resolved per call and never part of an error.
+`slackClient({ token, fetch?, baseUrl? })` — `sendMessage` (`chat.postMessage`), `updateMessage`, `openView`, `respond` (only to `https://hooks.slack.com/`), `identity()` (`auth.test`: team, bot and their ids), `channel(id)` (`conversations.info`) and `channels()` (`conversations.list`: public channels and private ones the bot is in, by name, up to 20 pages). `token` is a secret or a function called on every request, so a token changed elsewhere applies at once. Write methods send JSON; `auth.test`, `conversations.info` and `conversations.list` send a form, since Slack ignores JSON arguments of read methods (with JSON, `types` was dropped and private channels never came back). Failures are `SlackApiError` with Slack's `code` (`not_in_channel`, `expired_trigger_id`, `http_429`, …); the token is resolved per call and never part of an error.

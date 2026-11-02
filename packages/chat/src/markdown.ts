@@ -11,6 +11,7 @@ const toneIcons: Record<CardTone, string> = {
 const stepIcons: Record<StepStatus, string> = {
   pending: '⚪',
   waiting: '⏸️',
+  active: '🔵',
   running: '🔄',
   done: '✅',
   failed: '❌',
@@ -52,13 +53,25 @@ const block = (part: CardBlock, prefix: string): string => {
       return part.fields
         .map((field) => `- **${field.label}:** ${muteMentions(field.value)}`)
         .join('\n')
+    case 'heading': {
+      const icon = part.tone ? toneIcons[part.tone] : ''
+      return `${icon ? `${icon} ` : ''}**${muteMentions(part.text)}**${
+        part.detail ? ` · ${muteMentions(part.detail)}` : ''
+      }`
+    }
+    case 'divider':
+      return '---'
     case 'steps':
+      if (part.layout === 'flow')
+        return part.steps
+          .map((step) => `${stepIcons[step.status]} ${muteMentions(step.label)}`)
+          .join(' → ')
       return part.steps
         .map(
           (step) =>
-            `- ${stepIcons[step.status]} ${link(`**${muteMentions(step.label)}**`, step.url)}${
+            `- ${stepIcons[step.status]} **${muteMentions(step.label)}**${
               step.detail ? ` — ${muteMentions(step.detail)}` : ''
-            }`,
+            }${step.url ? ` · [${step.urlLabel ?? 'Open'}](${step.url})` : ''}`,
         )
         .join('\n')
     case 'list':
@@ -93,6 +106,7 @@ export function renderMarkdown(card: Card, options: { prefix?: string } = {}): s
   const icon = card.tone ? toneIcons[card.tone] : ''
   return [
     ...(card.title ? [`#### ${icon ? `${icon} ` : ''}${muteMentions(card.title)}`] : []),
+    ...(card.subtitle ? [`<sub>${muteMentions(card.subtitle)}</sub>`] : []),
     ...card.blocks.map((part) => block(part, prefix)).filter((text) => text !== ''),
     ...(card.url ? [`[Open in Holtkeeper](${card.url})`] : []),
   ].join('\n\n')

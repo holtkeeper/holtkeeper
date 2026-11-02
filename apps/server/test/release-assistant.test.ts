@@ -297,6 +297,8 @@ describe('release chat command', () => {
     await linkJane()
     expect(await say('/holtkeeper release')).toEqual({ enqueued: [] })
     expect(lastNote()).toContain('#### 🔵 Release · g/app')
+    expect(lastNote()).toContain('✅ Changes → 🔵 Candidate → ⚪ Version → ⚪ Deploy')
+    expect(lastNote()).toContain('<sub>Changes wait for a release candidate</sub>')
     expect(lastNote()).toContain('- **Next:** `1.1.0` (minor)')
     expect(lastNote()).toContain('`/holtkeeper release propose` — Open the release candidate')
   })
@@ -321,14 +323,14 @@ describe('release chat command', () => {
     await say('/holtkeeper release deploy preprod tag=v1.0.0 --yes')
     const noteId = fake.notes.size
     expect(fake.notes.get(noteId)?.body).toContain(
-      '- 🔄 [**preprod**](https://forge/j/100) — queued',
+      '- 🔄 **preprod** — queued · [View job](https://forge/j/100)',
     )
     fake.jobs.get(1)![0]!.status = 'success'
     await Promise.all(background)
     expect(fake.notes.size).toBe(noteId)
     expect(fake.notes.get(noteId)?.body).toContain('#### 🟢 Deploy v1.0.0 · g/app')
     expect(fake.notes.get(noteId)?.body).toContain(
-      '- ✅ [**preprod**](https://forge/j/100) — deployed',
+      '- ✅ **preprod** — deployed · [View job](https://forge/j/100)',
     )
   })
 })

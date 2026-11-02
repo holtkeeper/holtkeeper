@@ -203,9 +203,9 @@ describe('build', () => {
       subtitle: 'games',
     })
     expect(card.tone).toBe('bad')
+    expect(card.subtitle).toBe('games')
     expect(card.blocks).toEqual([
-      { type: 'context', text: 'games' },
-      { type: 'text', text: '**Licenses** · 2 items in 1 repository' },
+      { type: 'heading', text: 'Licenses', detail: '2 items · 1 repository', tone: 'bad' },
       {
         type: 'list',
         items: [

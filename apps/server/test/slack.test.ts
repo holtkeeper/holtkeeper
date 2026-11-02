@@ -167,13 +167,14 @@ describe('slack routes', () => {
 
     await click('release deploy preprod tag=v1.0.0 --yes repo=work:g/app')
     const deployMessage = slackCalls.length
-    expect(posted()).toContain('🔄 <https://forge/j/100|preprod>')
+    expect(posted()).toContain('🔄  *preprod*  —  queued')
+    expect(posted()).toContain('"url":"https://forge/j/100"')
     fake.jobs.get(1)![0]!.status = 'success'
     await Promise.all(background)
     const update = slackCalls.at(-1)
     expect(update?.method).toBe('chat.update')
     expect(update?.body['ts']).toBe(`1.${deployMessage}`)
-    expect(JSON.stringify(update?.body)).toContain('✅ <https://forge/j/100|preprod>')
+    expect(JSON.stringify(update?.body)).toContain('✅  *preprod*  —  deployed')
   })
 
   test('record who accepted from Slack', async () => {

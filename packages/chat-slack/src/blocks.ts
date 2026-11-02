@@ -1,4 +1,12 @@
-import type { Card, CardBlock, CardTone, Form, FormField, StepStatus } from '@holtkeeper/chat'
+import type {
+  Card,
+  CardBlock,
+  CardStep,
+  CardTone,
+  Form,
+  FormField,
+  StepStatus,
+} from '@holtkeeper/chat'
 import { fit, slackLimits, toMrkdwn } from '@holtkeeper/notify'
 
 /** A Block Kit block; kept loose, Slack validates the rest. */
@@ -45,11 +53,15 @@ const toneIcons: Record<CardTone, string> = {
 const stepIcons: Record<StepStatus, string> = {
   pending: '⚪',
   waiting: '⏸️',
+  active: '🔵',
   running: '🔄',
   done: '✅',
   failed: '❌',
   skipped: '⏭️',
 }
+
+/** Steps with links get a section and a button each up to this many; more share one section. */
+const STEP_BUTTONS = 10
 
 const plain = (text: string, max: number) => ({
   type: 'plain_text',
@@ -90,19 +102,46 @@ const blocksOf = (part: CardBlock, prefix: string): SlackBlock[] => {
         })
       return out
     }
-    case 'steps':
+    case 'heading': {
+      const icon = part.tone ? toneIcons[part.tone] : ''
       return [
         section(
-          part.steps
-            .map(
-              (step) =>
-                `${stepIcons[step.status]} ${step.url ? link(step.label, step.url) : `**${step.label}**`}${
-                  step.detail ? ` — ${step.detail}` : ''
-                }`,
-            )
-            .join('\n'),
+          `${icon ? `${icon} ` : ''}**${part.text}**${part.detail ? `   ·   ${part.detail}` : ''}`,
         ),
       ]
+    }
+    case 'divider':
+      return [{ type: 'divider' }]
+    case 'steps': {
+      const line = (step: CardStep) =>
+        `${stepIcons[step.status]}  **${step.label}**${step.detail ? `  —  ${step.detail}` : ''}`
+      if (part.layout === 'flow')
+        return [
+          {
+            type: 'context',
+            elements: [
+              mrkdwn(
+                part.steps.map((step) => `${stepIcons[step.status]} ${step.label}`).join('   →   '),
+              ),
+            ],
+          },
+        ]
+      if (part.steps.some((step) => step.url) && part.steps.length <= STEP_BUTTONS)
+        return part.steps.map((step) => ({
+          type: 'section',
+          text: mrkdwn(line(step)),
+          ...(step.url &&
+            step.url.length <= slackLimits.url && {
+              accessory: {
+                type: 'button',
+                action_id: `${LINK_ACTION}:${step.label}`.slice(0, 255),
+                text: plain(step.urlLabel ?? 'Open', slackLimits.button),
+                url: step.url,
+              },
+            }),
+        }))
+      return [section(part.steps.map(line).join('\n'))]
+    }
     case 'list':
       return [
         section(
@@ -185,23 +224,21 @@ export function renderSlackMessage(
           },
         ]
       : []),
+    ...(card.subtitle ? [{ type: 'context', elements: [mrkdwn(card.subtitle)] }] : []),
     ...card.blocks.flatMap((part) => blocksOf(part, prefix)),
-    ...(card.url && card.url.length <= slackLimits.url
-      ? [
-          {
-            type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                action_id: LINK_ACTION,
-                text: plain('Open in Holtkeeper', slackLimits.button),
-                url: card.url,
-              },
-            ],
-          },
-        ]
-      : []),
   ]
+  if (card.url && card.url.length <= slackLimits.url) {
+    const open = {
+      type: 'button',
+      action_id: LINK_ACTION,
+      text: plain('Open in Holtkeeper', slackLimits.button),
+      url: card.url,
+    }
+    const last = blocks.at(-1)
+    const elements = last?.['type'] === 'actions' ? last['elements'] : undefined
+    if (Array.isArray(elements) && elements.length < limits.actions) elements.push(open)
+    else blocks.push({ type: 'actions', elements: [open] })
+  }
   const firstText = card.blocks.find((part) => part.type === 'text')
   const text = card.title ?? (firstText?.type === 'text' ? firstText.text : 'Holtkeeper')
   return { text: fit(text, slackLimits.section), blocks: blocks.slice(0, limits.blocks) }

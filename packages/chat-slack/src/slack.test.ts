@@ -117,6 +117,7 @@ describe('blocks', () => {
       'section',
       'section',
       'section',
+      'section',
       'actions',
       'actions',
       'context',
@@ -127,10 +128,15 @@ describe('blocks', () => {
       text: { type: 'plain_text', text: '🟠 Release games/app-x', emoji: true },
     })
     expect(JSON.stringify(blocks[1])).toContain('Hi &lt;!channel&gt; *now*')
-    expect(JSON.stringify(blocks[3])).toContain(
-      '✅ <https://ci.example/1|qa>\\n🔄 *prod* — deploying',
-    )
-    const [create, deploy] = (blocks[5]?.['elements'] ?? []) as Record<string, unknown>[]
+    expect(blocks[3]).toMatchObject({
+      text: { text: '✅  *qa*' },
+      accessory: { type: 'button', text: { text: 'Open' }, url: 'https://ci.example/1' },
+    })
+    expect(blocks[4]).toEqual({
+      type: 'section',
+      text: { type: 'mrkdwn', text: '🔄  *prod*  —  deploying' },
+    })
+    const [create, deploy] = (blocks[6]?.['elements'] ?? []) as Record<string, unknown>[]
     expect(create).toMatchObject({
       action_id: `${COMMAND_ACTION}:0`,
       value: 'release version',
@@ -139,10 +145,44 @@ describe('blocks', () => {
     expect(create?.['confirm']).toBeUndefined()
     expect(deploy).toMatchObject({ value: 'release deploy prod --yes', style: 'danger' })
     expect(deploy?.['confirm']).toBeDefined()
-    const [open] = (blocks[6]?.['elements'] ?? []) as Record<string, unknown>[]
+    const [open] = (blocks[7]?.['elements'] ?? []) as Record<string, unknown>[]
     expect(open).toMatchObject({ action_id: FORM_ACTION })
     expect(JSON.parse(String(open?.['value']))).toEqual(form)
-    expect(JSON.stringify(blocks[8])).toContain(card.url ?? '')
+    expect(JSON.stringify(blocks[9])).toContain(card.url ?? '')
+  })
+
+  test('subtitles, headings, dividers, flows and the link beside the buttons', () => {
+    const { blocks } = renderSlackMessage({
+      title: 'Release · games/app-x',
+      subtitle: 'Merged changes wait for a version',
+      url: 'https://holt.example/r',
+      blocks: [
+        {
+          type: 'steps',
+          layout: 'flow',
+          steps: [
+            { label: 'Changes', status: 'done' },
+            { label: 'Version', status: 'active' },
+            { label: 'Deploy', status: 'pending' },
+          ],
+        },
+        { type: 'heading', text: 'Gates', detail: '1 failing', tone: 'bad' },
+        { type: 'divider' },
+        { type: 'actions', actions: [{ label: 'Create v1.3.0', command: 'release version' }] },
+      ],
+    })
+    expect(blocks.map((block) => block['type'])).toEqual([
+      'header',
+      'context',
+      'context',
+      'section',
+      'divider',
+      'actions',
+    ])
+    expect(JSON.stringify(blocks[1])).toContain('Merged changes wait for a version')
+    expect(JSON.stringify(blocks[2])).toContain('✅ Changes   →   🔵 Version   →   ⚪ Deploy')
+    expect(JSON.stringify(blocks[3])).toContain('🔴 *Gates*   ·   1 failing')
+    expect(blocks[5]?.['elements']).toHaveLength(2)
   })
 
   test('forms become modals and their state becomes values', () => {

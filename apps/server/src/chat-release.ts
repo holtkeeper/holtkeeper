@@ -10,7 +10,13 @@ import {
   defineCommand,
 } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
-import { type DeployState, type DeployStatus, GateError, actorLabel } from '@holtkeeper/release'
+import {
+  type DeployState,
+  type DeployStatus,
+  GateError,
+  type ReleaseBoardRow,
+  actorLabel,
+} from '@holtkeeper/release'
 import { z } from 'zod'
 
 import type { ServerDeps } from './context.ts'
@@ -40,7 +46,7 @@ function deploySteps(state: DeployState): CardStep[] {
       label: environment.name,
       status: shown.status,
       detail: `${shown.text}${environment.auto ? ', automatic' : ''}`,
-      ...(url && { url }),
+      ...(url && { url, urlLabel: 'View job' }),
     }
   })
 }
@@ -50,12 +56,74 @@ export function deployCard(repo: RepoRef, state: DeployState, url?: string): Car
   const steps = deploySteps(state)
   const failed = steps.some((step) => step.status === 'failed')
   const busy = steps.some((step) => step.status === 'running')
+  const done = steps.filter((step) => step.status === 'done').length
   return {
     title: `Deploy ${state.tag} · ${repo.path}`,
+    subtitle: failed
+      ? 'A deploy failed'
+      : busy
+        ? `Deploying · ${done} of ${steps.length} environments done`
+        : `${done} of ${steps.length} environments deployed`,
     tone: failed ? 'bad' : busy ? 'info' : 'good',
     ...(url && { url }),
     blocks: [{ type: 'steps', steps }],
   }
+}
+
+const deployOverall = (state: DeployState | undefined): StepStatus => {
+  const statuses = deploySteps(state ?? { tag: '', environments: [] }).map((step) => step.status)
+  if (statuses.length === 0) return 'active'
+  if (statuses.includes('failed')) return 'failed'
+  if (statuses.includes('running')) return 'running'
+  return statuses.every((status) => status === 'done' || status === 'skipped') ? 'done' : 'active'
+}
+
+/**
+ * Where a repository is in its release flow as stages in a row: changes waiting, the candidate
+ * merge request (merge request flow only), the version and its deploy. Stages before the
+ * repository's stage are done, its own is active.
+ */
+function releaseFlow(row: ReleaseBoardRow, deploy?: DeployState): CardStep[] {
+  if (row.mode === 'external') return []
+  const stages = [
+    { id: 'changes', label: 'Changes' },
+    ...(row.mode === 'merge-request' ? [{ id: 'candidate', label: 'Candidate' }] : []),
+    { id: 'version', label: 'Version' },
+    { id: 'deploy', label: 'Deploy' },
+  ]
+  const current =
+    row.stage === 'candidate'
+      ? 'candidate'
+      : row.stage === 'proposed'
+        ? 'candidate'
+        : row.stage === 'awaiting-version'
+          ? 'version'
+          : row.stage === 'released'
+            ? 'deploy'
+            : undefined
+  const at = current ? stages.findIndex((stage) => stage.id === current) : -1
+  return stages.map((stage, index) => ({
+    label: stage.label,
+    status:
+      row.stage === 'idle'
+        ? 'pending'
+        : index < at
+          ? 'done'
+          : index > at
+            ? 'pending'
+            : stage.id === 'deploy'
+              ? deployOverall(deploy)
+              : 'active',
+  }))
+}
+
+const stageText: Record<ReleaseBoardRow['stage'], string> = {
+  candidate: 'Changes wait for a release candidate',
+  proposed: 'The release candidate is open',
+  'awaiting-version': 'Merged changes wait for a version',
+  released: 'Released; nothing waits',
+  idle: 'Nothing released yet',
+  external: 'Released by another tool',
 }
 
 /** A live card that follows the deploys of one version. */
@@ -137,7 +205,6 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
     const { row } = view
     const page = pageOf(repo)
     const fields = [
-      { label: 'Stage', value: row.stage },
       ...(row.latest ? [{ label: 'Latest', value: `\`${row.latest.tag}\`` }] : []),
       ...(row.next
         ? [{ label: 'Next', value: `\`${row.next}\`${row.bump ? ` (${row.bump})` : ''}` }]
@@ -191,15 +258,24 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
             style: 'danger',
           })
     }
+    const flow = releaseFlow(row, view.deploy)
     return {
       title: `Release · ${repo.path}`,
+      subtitle: stageText[row.stage],
       tone: row.error ? 'bad' : failing.length ? 'warning' : 'info',
       ...(page && { url: page }),
       blocks: [
         ...(row.error ? [{ type: 'text' as const, text: row.error }] : []),
+        ...(flow.length ? [{ type: 'steps' as const, steps: flow, layout: 'flow' as const }] : []),
         { type: 'fields', fields },
         ...(failing.length
           ? [
+              {
+                type: 'heading' as const,
+                text: 'Gates',
+                detail: `${failing.length} failing`,
+                tone: 'bad' as const,
+              },
               {
                 type: 'list' as const,
                 items: failing.map((gate) => ({ text: gate.message, tone: 'bad' as const })),
@@ -207,7 +283,10 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
             ]
           : []),
         ...(view.deploy && view.deploy.environments.length
-          ? [{ type: 'steps' as const, steps: deploySteps(view.deploy) }]
+          ? [
+              { type: 'heading' as const, text: `Deploy ${view.deploy.tag}` },
+              { type: 'steps' as const, steps: deploySteps(view.deploy) },
+            ]
           : []),
         ...(actions.length ? [{ type: 'actions' as const, actions }] : []),
         ...(view.dryRun

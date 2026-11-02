@@ -51,6 +51,26 @@ export function slackSettingsRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
   const slack = slackServiceFor(deps)
 
+  /**
+   * Bindings named by their id (connected by id, or before names were read) get the channel's
+   * name from Slack; channels Slack will not describe keep their id.
+   */
+  const named = async <T extends { channel: string; name: string }>(
+    bindings: readonly T[],
+  ): Promise<{ bindings: T[]; changed: boolean }> => {
+    let changed = false
+    const next = await Promise.all(
+      bindings.map(async (binding) => {
+        if (binding.name !== binding.channel) return binding
+        const found = await slack.client.channel(binding.channel).catch(() => undefined)
+        if (!found || found.name === binding.name) return binding
+        changed = true
+        return { ...binding, name: found.name }
+      }),
+    )
+    return { bindings: next, changed }
+  }
+
   const view = async (c: AppContext): Promise<SlackSettingsView> => {
     const base = publicUrlOf(deps, c)
     const manifest = slackManifest({ baseUrl: base })
@@ -59,11 +79,19 @@ export function slackSettingsRoutes(deps: ServerDeps) {
       : (await slack.configured())
         ? ('panel' as const)
         : ('none' as const)
-    const [workspace, connection, policy] = await Promise.all([
+    const [workspace, connection, stored] = await Promise.all([
       source === 'none' ? undefined : slack.identity(),
       slack.connection(),
       slack.policy(),
     ])
+    let policy = stored
+    if (source !== 'none') {
+      const { bindings, changed } = await named(stored.channels)
+      if (changed) {
+        policy = { ...stored, channels: bindings }
+        await slack.savePolicy(policy)
+      }
+    }
     return {
       source,
       ...(workspace && { workspace }),
@@ -141,7 +169,7 @@ export function slackSettingsRoutes(deps: ServerDeps) {
           })
       }
     }
-    await slack.savePolicy(policy)
+    await slack.savePolicy({ ...policy, channels: (await named(policy.channels)).bindings })
     c.set('audit', {
       action: 'slack.policy',
       target: { type: 'slack', id: 'policy' },

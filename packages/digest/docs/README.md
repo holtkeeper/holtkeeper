@@ -47,7 +47,7 @@ interface Digest {
 - `resolveUrl` turns report links (often relative to the panel) into absolute ones; a link it cannot resolve is dropped.
 - Unknown kinds and reports that fail to build give empty sections. `empty` is true when no section has items.
 
-`digestCard(digest, result, { url?, subtitle? })` renders it: the digest's name with the most serious tone (`good` when nothing was found), the subtitle as small print, per section with items a line `**Label** · N items in M repositories` (`N new items` with `onlyNew`), the items as `` `path` · title — detail `` with their tone and link, `and K more` when cut, then `All clear: …` for the sections without items. A digest with nothing says `Nothing needs attention.` (or `Nothing new …`).
+`digestCard(digest, result, { url?, subtitle? })` renders it: the digest's name with the most serious tone (`good` when nothing was found), the subtitle under it, per section with items (divided from each other) a `heading` with the label, the section's most serious tone and `N items · M repositories` (`N new items` with `onlyNew`), the items as `` `path` · title — detail `` with their tone and link, `and K more` when cut, then `All clear: …` for the sections without items. A digest with nothing says `Nothing needs attention.` (or `Nothing new …`).
 
 ## Presets
 

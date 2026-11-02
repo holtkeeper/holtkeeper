@@ -52,6 +52,15 @@ const slackFetch: SlackFetch = async (url, init) => {
         ? { ok: true, team_id: 'T1', team: 'Acme', user_id: 'UBOT', user: 'holtkeeper' }
         : { ok: false, error: 'invalid_auth' },
     )
+  if (method === 'conversations.info')
+    return Response.json(
+      body['channel'] === 'G9'
+        ? {
+            ok: true,
+            channel: { id: 'G9', name: 'private-team', is_private: true, is_member: true },
+          }
+        : { ok: false, error: 'channel_not_found' },
+    )
   if (method === 'conversations.list')
     return Response.json({
       ok: true,
@@ -201,6 +210,23 @@ describe('slack settings', () => {
     const outside = policy()
     outside.channels[0] = { ...outside.channels[0]!, defaultRepo: 'work:t/cli' }
     expect((await call('PUT', '/slack/policy', outside)).status).toBe(400)
+    const byId: { channels: Record<string, unknown>[] } = policy()
+    byId.channels.push(
+      { channel: 'G9', name: 'G9', scope: { all: true }, actions: ['releases:read'] },
+      { channel: 'C77', name: 'C77', scope: { all: true }, actions: [] },
+    )
+    expect((await call('PUT', '/slack/policy', byId)).status).toBe(200)
+    expect((await settings()).policy.channels.map((binding) => binding.name)).toEqual([
+      'releases',
+      'private-team',
+      'C77',
+    ])
+    await store.kv?.set('chat:slack:policy', {
+      ...byId,
+      channels: [{ channel: 'G9', name: 'G9', scope: { all: true }, actions: [] }],
+    })
+    expect((await settings()).policy.channels[0]?.name).toBe('private-team')
+    expect(JSON.stringify(await store.kv?.get('chat:slack:policy'))).toContain('private-team')
     const twice = policy()
     twice.channels.push(twice.channels[0]!)
     expect((await call('PUT', '/slack/policy', twice)).status).toBe(400)

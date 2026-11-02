@@ -8,7 +8,9 @@ import type {
   ChatStepStatus,
 } from '@holtkeeper/api'
 import {
+  Check,
   CircleCheck,
+  CircleDot,
   CircleDashed,
   CircleX,
   ExternalLink,
@@ -50,6 +52,7 @@ const toneText: Record<ChatCardTone, string> = {
 const steps: Record<ChatStepStatus, { icon: LucideIcon; className: string }> = {
   pending: { icon: CircleDashed, className: 'text-muted' },
   waiting: { icon: PauseCircle, className: 'text-muted' },
+  active: { icon: CircleDot, className: 'text-accent' },
   running: { icon: LoaderCircle, className: 'animate-spin text-accent' },
   done: { icon: CircleCheck, className: 'text-success' },
   failed: { icon: CircleX, className: 'text-danger' },
@@ -68,21 +71,73 @@ function Steps({ items }: { items: readonly ChatCardStep[] }) {
               <span aria-hidden className="absolute top-6 bottom-0 left-[9px] w-px bg-default" />
             )}
             <Icon className={`relative mt-0.5 size-[19px] shrink-0 ${className}`} aria-hidden />
-            <div className="min-w-0 text-sm">
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-3 text-sm">
+              <div className="min-w-0">
+                <span className="font-medium">{step.label}</span>
+                {step.detail ? <span className="text-muted"> — {step.detail}</span> : null}
+              </div>
               {step.url ? (
                 <a
                   href={step.url}
                   target="_blank"
                   rel="noreferrer noopener"
-                  className="font-medium hover:underline"
+                  className="inline-flex shrink-0 items-center gap-1 text-xs text-accent hover:underline"
                 >
-                  {step.label}
+                  {step.urlLabel ?? 'Open'} <ExternalLink className="size-3" aria-hidden />
                 </a>
-              ) : (
-                <span className="font-medium">{step.label}</span>
-              )}
-              {step.detail ? <span className="text-muted"> — {step.detail}</span> : null}
+              ) : null}
             </div>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+const flowDot: Record<ChatStepStatus, string> = {
+  pending: 'bg-default text-muted',
+  waiting: 'bg-default text-muted',
+  skipped: 'bg-default text-muted',
+  active: 'bg-accent text-accent-foreground ring-4 ring-accent/20',
+  running: 'bg-accent text-accent-foreground',
+  done: 'bg-success text-white',
+  failed: 'bg-danger text-white',
+}
+
+/** Short stages in a row: dots joined by lines, the current one ringed. */
+function Flow({ items }: { items: readonly ChatCardStep[] }) {
+  return (
+    <ol className="flex items-start">
+      {items.map((step, index) => {
+        const reached = step.status === 'done'
+        return (
+          <li
+            key={`${step.label}-${index}`}
+            className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+          >
+            <div className="flex w-full items-center">
+              <span
+                aria-hidden
+                className={`h-0.5 flex-1 ${index === 0 ? 'invisible' : reached || step.status === 'active' ? 'bg-success' : 'bg-default'}`}
+              />
+              <span
+                className={`grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${flowDot[step.status]}`}
+              >
+                {step.status === 'done' ? <Check className="size-3" aria-hidden /> : index + 1}
+              </span>
+              <span
+                aria-hidden
+                className={`h-0.5 flex-1 ${index === items.length - 1 ? 'invisible' : reached ? 'bg-success' : 'bg-default'}`}
+              />
+            </div>
+            <span
+              className={`max-w-full truncate px-1 text-center text-xs ${
+                step.status === 'active' ? 'font-semibold text-foreground' : 'text-muted'
+              }`}
+              title={step.detail ?? step.label}
+            >
+              {step.label}
+            </span>
           </li>
         )
       })}
@@ -250,8 +305,22 @@ function Block({
           ))}
         </dl>
       )
+    case 'heading':
+      return (
+        <div className="flex items-baseline justify-between gap-3 pt-1">
+          <h4 className="flex items-center gap-2 text-[13px] font-semibold tracking-wide uppercase">
+            {block.tone ? (
+              <span aria-hidden className={`size-1.5 rounded-full ${toneBar[block.tone]}`} />
+            ) : null}
+            {block.text}
+          </h4>
+          {block.detail ? <span className="text-xs text-muted">{block.detail}</span> : null}
+        </div>
+      )
+    case 'divider':
+      return <hr className="border-default/70" />
     case 'steps':
-      return <Steps items={block.steps} />
+      return block.layout === 'flow' ? <Flow items={block.steps} /> : <Steps items={block.steps} />
     case 'list':
       return (
         <ul className="flex flex-col gap-1.5">
@@ -311,6 +380,9 @@ export function ChatCard({
                 className={`mr-2 inline-block size-2 rounded-full align-middle ${toneBar[tone]}`}
               />
               {card.title}
+              {card.subtitle ? (
+                <span className="mt-0.5 block text-xs font-normal text-muted">{card.subtitle}</span>
+              ) : null}
             </h3>
             {card.url ? (
               <a
