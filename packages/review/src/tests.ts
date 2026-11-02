@@ -14,6 +14,8 @@ export interface ReviewTestOptions {
   timeoutMs: number
   /** Rounds of writing and running before a test is `unfinished`. */
   attempts: number
+  /** Write tests for functions in component files (`.tsx`, `.jsx`) too. Default false. */
+  components?: boolean
 }
 
 export const defaultReviewTestOptions: ReviewTestOptions = {

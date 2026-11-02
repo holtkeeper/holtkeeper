@@ -36,6 +36,7 @@ const files: Record<string, string> = {
   'src/b.ts': 'export function b() {\n  return 1\n}\n',
   'src/types.ts': 'export interface T {\n  a: string\n}\n',
   'src/gen/api.ts': 'export const api = 1\n',
+  'src/Badge.tsx': 'export function Badge() {\n  return <b />\n}\n',
 }
 
 beforeAll(async () => {
@@ -80,6 +81,17 @@ test('reads a coverage file per source file and adds files no test loaded', asyn
     untested: false,
   })
   expect(withoutUntested.files.map((file) => file.file)).toEqual(['src/a.ts', 'src/gen/api.ts'])
+})
+
+test('counts component files only with components', async () => {
+  const { runner } = createFakeRunner(() => ({ exitCode: 1 }))
+  const options = { dir, runner, file: 'coverage/lcov.info', exclude: ['src/gen/**'] }
+  expect((await analyzeCoverage(options)).files.map((file) => file.file)).not.toContain(
+    'src/Badge.tsx',
+  )
+  expect(
+    (await analyzeCoverage({ ...options, components: true })).files.map((file) => file.file),
+  ).toEqual(['src/a.ts', 'src/b.ts', 'src/Badge.tsx'])
 })
 
 test('throws when no collector produced a report', async () => {

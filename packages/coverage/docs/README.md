@@ -8,6 +8,7 @@ The `coverage` analyzer and analysis kind: runs a checkout's tests with coverage
   - `file?: string` (`--file`) — an lcov tracefile or Go cover profile in the checkout to read instead of running the tests, e.g. a report CI left behind.
   - `exclude: string[]` (`--exclude`, comma-separated) — glob patterns of files to leave out, e.g. `src/generated/**`.
   - `untested: boolean` — default true: source files no test loaded count as fully uncovered.
+  - `components: boolean` — default false: component files (`.tsx`, `.jsx`) are left out, so components need no tests; turn it on per repository or group through the `analyzers.coverage` setting.
   - `install: boolean` — default true: install JavaScript dependencies first when `node_modules` is missing (see below).
   - `installScripts: boolean` (`--install-scripts`) — default false: let that install run lifecycle scripts, for projects whose tests need `postinstall` output (Prisma clients, generated code).
   - `build: boolean` — default true: build workspace packages whose entry files are missing before the tests (see below).
@@ -27,7 +28,7 @@ Then the same collectors as the `tests` quality check (`@holtkeeper/quality-test
 
 Then, per file:
 
-- Test files, configs, declarations and generated files by name, paths outside the checkout and `exclude` matches are dropped.
+- Test files, configs, declarations and generated files by name, component files unless `components`, paths outside the checkout and `exclude` matches are dropped.
 - Lines are `DA` records (Go: statements' lines), functions `FN`/`FNDA` (Go: `go tool cover -func`), branches `BRDA` with a taken count above zero.
 - With `untested`, source files of the report's languages that the report does not mention (and that are not generated or type-only) are added with every code line (non-blank, non-comment) uncovered and `loaded: false`. That count includes lines the tools would not call executable, such as imports, so it errs on the side of more uncovered lines.
 

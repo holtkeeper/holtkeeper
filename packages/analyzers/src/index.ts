@@ -97,6 +97,8 @@ export const qualityAnalyzer = defineAnalyzer({
   options: z.object({
     examples: z.coerce.number().int().nonnegative().default(3),
     coverage: z.enum(['run', 'skip']).default('run'),
+    /** Suggest tests for component files (`.tsx`, `.jsx`) too. */
+    components: z.boolean().default(false),
     /** Install dependencies from the lockfile first, so the project's linters and knip can run. */
     install: z.boolean().default(true),
   }),
@@ -136,7 +138,9 @@ export const qualityAnalyzer = defineAnalyzer({
         duplicationCheck(),
         deadCodeCheck(),
         secretsCheck(),
-        ...(options.coverage === 'run' ? [testGapsCheck({ examples: options.examples })] : []),
+        ...(options.coverage === 'run'
+          ? [testGapsCheck({ examples: options.examples, components: options.components })]
+          : []),
       ],
     })
     return { data, ...(ref ? { ref } : {}) }

@@ -9,6 +9,7 @@ import {
   type TestSetup,
   findFunctions,
   frameworkFor,
+  isComponentFile,
   isExcludedByName,
   isGeneratedSource,
   isTestFile,
@@ -75,14 +76,16 @@ async function readText(path: string): Promise<string | undefined> {
 
 /**
  * The outermost functions of source files in scope that contain at least `minLines` in-scope added
- * lines, most added lines first, then most branches. Test, generated, excluded and type-only files
- * are left out silently; functions in a language without a detected framework are `notTested`.
+ * lines, most added lines first, then most branches. Test, generated, excluded, type-only and,
+ * unless `components`, component files are left out silently; functions in a language without a detected framework are `notTested`.
  */
 export async function findTargets(options: {
   dir: string
   files: readonly Pick<FileScope, 'path' | 'status' | 'lines'>[]
   setup: TestSetup
   minLines: number
+  /** Consider component files (`.tsx`, `.jsx`) too. Default false. */
+  components?: boolean
 }): Promise<{ targets: TestTarget[]; notTested: NotTested[] }> {
   const targets: TestTarget[] = []
   const notTested: NotTested[] = []
@@ -90,6 +93,7 @@ export async function findTargets(options: {
     const language = languageOf(file.path)
     if (!language || file.status === 'deleted' || file.lines.size === 0) continue
     if (isTestFile(file.path) || isExcludedByName(file.path)) continue
+    if (!options.components && isComponentFile(file.path)) continue
     // oxlint-disable-next-line no-await-in-loop
     const text = await readText(join(options.dir, file.path))
     if (text === undefined || isGeneratedSource(text)) continue

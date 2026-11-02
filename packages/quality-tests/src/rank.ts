@@ -3,7 +3,14 @@ import { join } from 'node:path'
 
 import { stableId, type TestSuggestion } from '@holtkeeper/quality'
 
-import { isExcludedByName, isGeneratedSource, isTestFile, languageOf, listFiles } from './files.ts'
+import {
+  isComponentFile,
+  isExcludedByName,
+  isGeneratedSource,
+  isTestFile,
+  languageOf,
+  listFiles,
+} from './files.ts'
 import { codeLines, findFunctions, isTypeOnlySource, type SourceFunction } from './symbols.ts'
 import type {
   CoverageReport,
@@ -30,6 +37,8 @@ export interface RankOptions {
   minLines?: number
   /** Source files to consider (relative); default: every source file of the report's languages. */
   files?: readonly string[]
+  /** Rank functions in component files (`.tsx`, `.jsx`) too. Default false. */
+  components?: boolean
 }
 
 /** A function worth testing, before it becomes a `TestSuggestion`. */
@@ -119,8 +128,8 @@ function measure(
 /**
  * Finds functions with no or low coverage and orders them by how much a test would help:
  * uncovered share, size, decision points (lcov `BRDA` when present, else counted in source) and
- * churn. Test files, generated files, declaration and config files, and type-only modules are
- * skipped. Source files of the report's languages that no test loaded count as uncovered.
+ * churn. Test files, generated files, declaration and config files, type-only modules and,
+ * unless `components`, component files are skipped. Source files of the report's languages that no test loaded count as uncovered.
  * Returns at most `top` targets, best first.
  */
 export async function findTestTargets(options: RankOptions): Promise<RankedTarget[]> {
@@ -142,6 +151,7 @@ export async function findTestTargets(options: RankOptions): Promise<RankedTarge
     if (!language || !languages.has(language) || isTestFile(file) || isExcludedByName(file))
       continue
     if (file.startsWith('/') || file.split('/').includes('node_modules')) continue
+    if (!options.components && isComponentFile(file)) continue
     let text: string
     try {
       // oxlint-disable-next-line no-await-in-loop

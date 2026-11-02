@@ -19,13 +19,13 @@ const review = createReviewAnalyzer({ tester: createMergeRequestTester() })
 | `build`          | `true`  | build workspace packages whose entry files are missing         |
 | `minLines`       | 3       | in-scope added lines a function needs to get a test            |
 
-The limits per run (`maxTests`, `repeat`, `timeoutMs`, `attempts`) come from the review options.
+The limits per run (`maxTests`, `repeat`, `timeoutMs`, `attempts`) and `components` (the review's `testComponents`) come from the review options.
 
 ## Steps
 
 1. **Setup** — `detectTestSetup` (from `@holtkeeper/quality-tests`) finds the framework and the project's test conventions. No framework: the run is `skipped`.
 2. **Carry-over** — tests of the previous review whose function still has the same text (`functionHash`) and whose test file is still not in the repository are kept as they were, with their `ranAt`.
-3. **Targets** — `findTargets`: the outermost functions (`findFunctions`, `outermost`) of changed source files with at least `minLines` in-scope added lines; test files, generated and excluded files and type-only TypeScript are left out. Ranked by added lines, then branches; the first `maxTests` are tested, the rest are `notTested`. Functions in a language without a detected framework are `notTested` too.
+3. **Targets** — `findTargets`: the outermost functions (`findFunctions`, `outermost`) of changed source files with at least `minLines` in-scope added lines; test files, generated and excluded files, type-only TypeScript and, unless `components`, component files (`.tsx`, `.jsx`) are left out. Ranked by added lines, then branches; the first `maxTests` are tested, the rest are `notTested`. Functions in a language without a detected framework are `notTested` too.
 4. **Preparation** — for JavaScript targets, `installDependencies` and `buildWorkspaces` from `@holtkeeper/coverage`. A failure makes the run `skipped` with its last output lines.
 5. **Baseline** — when the conventional test file of a target's source already exists, it is run once; a target whose existing test fails on the head gets no new test (`notTested`), since nothing could be concluded from it.
 6. **Writing** — the agent (`taskKind: 'tests'`, `read` and `search` only, never `run` or `edit`) answers with `{ path, content, notes }` to `writePrompt`: the `quality-tests` example prompt plus the MR title, description and the numbered diff of the function. The path must follow the project's convention (`testPathProblem`), must not exist and must not be taken by another test of the run.

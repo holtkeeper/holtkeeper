@@ -26,6 +26,8 @@ export interface TestGapsOptions {
   verify?: boolean
   /** Churn window in days. Default 90. */
   churnDays?: number
+  /** Suggest tests for component files (`.tsx`, `.jsx`) too. Default false. */
+  components?: boolean
 }
 
 /** The best framework per language, which is also the one whose coverage is collected. */
@@ -119,6 +121,7 @@ export function testGapsCheck(options: TestGapsOptions = {}): QualityCheck {
         churnDays,
         frameworks,
         top: options.top ?? 10,
+        components: options.components ?? false,
       })
 
       const examples = options.examples ?? 3

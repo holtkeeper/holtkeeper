@@ -73,6 +73,8 @@ export interface ReviewOptions {
   testRepeat?: number
   testTimeoutMs?: number
   testAttempts?: number
+  /** Write tests for functions in component files (`.tsx`, `.jsx`) too. */
+  testComponents?: boolean
   /** `source:target` branch globs of release merge requests the analyzer does not review. */
   releaseBranches?: string[]
   /** Review merge requests Holtkeeper authored. */
@@ -390,6 +392,7 @@ const tests: ReviewSteps['tests'] = async (run, loaded, planned, usage) => {
       repeat: run.options.testRepeat ?? defaultReviewTestOptions.repeat,
       timeoutMs: run.options.testTimeoutMs ?? defaultReviewTestOptions.timeoutMs,
       attempts: run.options.testAttempts ?? defaultReviewTestOptions.attempts,
+      components: run.options.testComponents ?? false,
     },
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
     ...(run.log ? { log: run.log } : {}),

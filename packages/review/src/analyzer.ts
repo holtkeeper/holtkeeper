@@ -57,6 +57,7 @@ export const reviewOptionsSchema = z.object({
   testRepeat: z.coerce.number().int().min(1).default(defaultReviewTestOptions.repeat),
   testTimeoutMs: z.coerce.number().int().positive().default(defaultReviewTestOptions.timeoutMs),
   testAttempts: z.coerce.number().int().min(1).default(defaultReviewTestOptions.attempts),
+  testComponents: flag.default(false),
   releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
   reviewOwn: flag.default(false),
   force: flag.default(false),

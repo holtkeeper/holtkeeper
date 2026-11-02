@@ -22,6 +22,8 @@ export const coverageOptionsSchema = z.object({
   ),
   /** Count source files no test loaded as uncovered. */
   untested: z.boolean().default(true),
+  /** Count component files (`.tsx`, `.jsx`) too; by default components need no tests. */
+  components: z.boolean().default(false),
   /** Install JavaScript dependencies from the lockfile when `node_modules` is missing. */
   install: z.boolean().default(true),
   /** Let that install run lifecycle scripts such as `postinstall`. */
@@ -63,6 +65,7 @@ export const coverageAnalyzer = defineAnalyzer<CoverageData, CoverageOptions>({
       runner,
       exclude: options.exclude,
       untested: options.untested,
+      components: options.components,
       install: options.install,
       installScripts: options.installScripts,
       build: options.build,

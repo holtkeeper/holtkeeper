@@ -592,7 +592,13 @@ describe('reviewMergeRequest', () => {
       }),
     )
     expect(seen[0]?.files.map((f) => f.path)).toEqual(['src/price.ts'])
-    expect(seen[0]?.options).toEqual({ maxTests: 1, repeat: 2, timeoutMs: 120_000, attempts: 3 })
+    expect(seen[0]?.options).toEqual({
+      maxTests: 1,
+      repeat: 2,
+      timeoutMs: 120_000,
+      attempts: 3,
+      components: false,
+    })
     expect(seen[0]?.mergeRequest.title).toBe('Add pricing')
     expect(data.tests?.items.map((t) => t.verdict)).toEqual(['passes'])
     expect(data.usage?.turns).toBe(4)

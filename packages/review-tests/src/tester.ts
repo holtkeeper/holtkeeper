@@ -257,6 +257,7 @@ export function createMergeRequestTester(
         files: input.files,
         setup,
         minLines: testerOptions.minLines ?? 3,
+        components: options.components ?? false,
       })
       const carriedIds = new Set(carried.map((test) => test.id))
       const fresh = found.targets.filter((target) => !carriedIds.has(target.id))

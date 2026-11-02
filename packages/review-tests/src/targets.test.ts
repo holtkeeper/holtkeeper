@@ -76,6 +76,19 @@ describe('findTargets', () => {
     })
   })
 
+  test('component files are targets only with components', async () => {
+    const card =
+      'export function Card() {\n  const title = "card"\n  const size = 2\n  return <h1>{title}</h1>\n}\n'
+    const { dir } = await project({ 'src/Card.tsx': card })
+    dirs.push(dir)
+    const setup = await detectTestSetup(dir)
+    const find = (components: boolean) =>
+      findTargets({ dir, setup, minLines: 3, components, files: addedScope('src/Card.tsx', card) })
+
+    expect((await find(false)).targets).toEqual([])
+    expect((await find(true)).targets.map((target) => target.symbol)).toEqual(['Card'])
+  })
+
   test('functions in a language without a framework are not tested', async () => {
     const { dir } = await project({
       'tool/main.py': 'def run(x):\n    y = x + 1\n    z = y * 2\n    return z\n',

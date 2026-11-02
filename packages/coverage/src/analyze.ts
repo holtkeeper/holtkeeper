@@ -8,6 +8,7 @@ import {
   coverageCollectors,
   type CoverageCollector,
   type FileCoverage,
+  isComponentFile,
   isExcludedByName,
   isGeneratedSource,
   isTestFile,
@@ -31,6 +32,8 @@ export interface AnalyzeCoverageOptions {
   exclude?: readonly string[]
   /** Count source files no test loaded as uncovered. Default true. */
   untested?: boolean
+  /** Count component files (`.tsx`, `.jsx`) too. Default false: components need no tests. */
+  components?: boolean
   /**
    * Install JavaScript dependencies from the lockfile before running tests, when `node_modules` is
    * missing. Default true; never applies when `file` is given.
@@ -94,7 +97,8 @@ async function untestedFiles(
 /**
  * Collects line, function and branch coverage of a checkout per source file: installs JavaScript
  * dependencies when they are missing, builds workspace packages whose entry files are missing, runs the tests of every detected framework with coverage
- * (or reads `file`), leaves out tests, configs, generated and excluded files, and adds source
+ * (or reads `file`), leaves out tests, configs, generated and excluded files and, unless `components`, component
+ * files, and adds source
  * files no test loaded as fully uncovered. Throws when no collector produced a report, naming a
  * failed install.
  */
@@ -143,6 +147,7 @@ export async function analyzeCoverage(options: AnalyzeCoverageOptions): Promise<
     !file.startsWith('../') &&
     !isTestFile(file) &&
     !isExcludedByName(file) &&
+    (options.components || !isComponentFile(file)) &&
     !excluded.some((glob) => glob.match(file))
 
   const byFile = new Map<string, FileCoverageData>()

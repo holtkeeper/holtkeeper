@@ -46,6 +46,7 @@ Every note carries a hidden marker (`<!-- holtkeeper:review id=<finding> -->`); 
 | `testRepeat`      | 2                                        | runs on the head a test must pass                                                                                                    |
 | `testTimeoutMs`   | 120000                                   | per test run                                                                                                                         |
 | `testAttempts`    | 3                                        | rounds of writing and running before a test is `unfinished`                                                                          |
+| `testComponents`  | `false`                                  | write tests for functions in component files (`.tsx`, `.jsx`) too                                                                    |
 
 **Not reviewed by default.** Before any checkout, a merge request between `releaseBranches` (release candidates like `develop → main`, back-merges like `main → develop`: their code was reviewed on the way into the integration branch) or authored by `botUsername` (Holtkeeper's own update, propagation and test merge requests; compared case-insensitively, so it needs `jobs.botUsername`) is stored as `mode: 'skipped'` with the reason and nothing is posted. `force` overrides both; thread replies (`replyTo`) are never skipped. Set the options per repository or group through the `analyzers.review` setting.
 

@@ -49,6 +49,11 @@ export function isExcludedByName(file: string): boolean {
   return false
 }
 
+/** Whether a file holds UI components by its extension (`.tsx`, `.jsx`). */
+export function isComponentFile(file: string): boolean {
+  return /\.[jt]sx$/.test(file)
+}
+
 /** Whether the file announces itself as generated in its first lines. */
 export function isGeneratedSource(text: string): boolean {
   const head = text.slice(0, 1000)

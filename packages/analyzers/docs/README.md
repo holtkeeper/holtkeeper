@@ -33,6 +33,8 @@ import { builtinAnalyzers } from '@holtkeeper/analyzers'
 
 `reviewChecks()` returns the quality checks the review analyzer runs on changed lines.
 
+`quality` options: `coverage` (`run` or `skip` the `tests` check), `examples` (agent-written example tests, default 3), `components` (default false: the `tests` check suggests no tests for component files, `.tsx` and `.jsx`), `install` (default true).
+
 ## bundle
 
 Measures what a repository ships as targets of one record ([@holtkeeper/bundles](../../bundles/docs/README.md#targets)): app builds and the versions of packages it publishes. It needs a checkout; the forge (`npmRegistry`), forge access (the token and rate-limited `fetch` for the forge's own registry) and history are `optional`, so the CLI runs it too: there packages are read anonymously and versions measured before are not skipped.
