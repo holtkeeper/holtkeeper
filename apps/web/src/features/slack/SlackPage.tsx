@@ -14,7 +14,7 @@ import { motion } from 'motion/react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useSlackMutations, useSlackSettings } from '../../api/queries.ts'
+import { useAccounts, useSlackMutations, useSlackSettings } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
 import { channelActionLabel, scopeSummary, withBinding } from '../../lib/slack.ts'
 import {
@@ -103,15 +103,58 @@ function Manifest({ manifest }: { manifest: unknown }) {
   )
 }
 
+function Check({ done, children }: { done: boolean; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${done ? 'text-success' : ''}`}>
+      {done ? (
+        <CircleCheck className="size-3.5" aria-hidden />
+      ) : (
+        <span aria-hidden className="size-3.5 rounded-full border border-current" />
+      )}
+      {children}
+    </span>
+  )
+}
+
 function SetupGuide({ settings, editable }: { settings: SlackSettingsView; editable: boolean }) {
   const { connect } = useSlackMutations()
+  const accounts = useAccounts()
   const [botToken, setBotToken] = useState('')
   const [signingSecret, setSigningSecret] = useState('')
   const connected = settings.source !== 'none'
+  const channelsConnected = settings.policy.channels.length > 0
+  const linked = (accounts.data?.accounts ?? []).some(
+    (account) =>
+      account.provider === `slack:${settings.workspace?.teamId ?? ''}` &&
+      account.verification !== 'unverified',
+  )
+  const finished = connected && channelsConnected && linked
+  const [open, setOpen] = useState(!finished)
+  if (!open)
+    return (
+      <Panel>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="inline-flex items-center gap-2 text-sm">
+            <CircleCheck className="size-4 text-success" aria-hidden /> Slack is set up: the app is
+            connected, channels are connected and your account is linked.
+          </span>
+          <Button size="sm" variant="ghost" onPress={() => setOpen(true)}>
+            Show the setup steps
+          </Button>
+        </div>
+      </Panel>
+    )
   return (
     <Panel
       title="Set up the Slack app"
       description="Once per workspace; then connect channels below."
+      {...(finished && {
+        actions: (
+          <Button size="sm" variant="ghost" onPress={() => setOpen(false)}>
+            Hide
+          </Button>
+        ),
+      })}
     >
       <motion.ol {...stagger} className="flex flex-col">
         <Step index={1} title="Create the app from our manifest" done={connected}>
@@ -200,7 +243,11 @@ function SetupGuide({ settings, editable }: { settings: SlackSettingsView; edita
             <p>Someone with settings:write connects it.</p>
           )}
         </Step>
-        <Step index={5} title="Invite the bot and link accounts">
+        <Step
+          index={5}
+          title="Invite the bot and link accounts"
+          done={connected && channelsConnected && linked}
+        >
           <p>
             In each channel the bot should answer in, run{' '}
             <code className="font-mono">/invite @{settings.workspace?.bot ?? 'holtkeeper'}</code>{' '}
@@ -208,6 +255,18 @@ function SetupGuide({ settings, editable }: { settings: SlackSettingsView; edita
             <code className="font-mono">link</code> in a direct message once: it answers with a
             private link that ties their Slack account to their Holtkeeper user.
           </p>
+          {connected ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              <Check done={channelsConnected}>
+                {channelsConnected
+                  ? `${settings.policy.channels.length} ${settings.policy.channels.length === 1 ? 'channel' : 'channels'} connected`
+                  : 'No channel connected yet'}
+              </Check>
+              <Check done={linked}>
+                {linked ? 'Your Slack account is linked' : 'Your Slack account is not linked yet'}
+              </Check>
+            </div>
+          ) : null}
         </Step>
       </motion.ol>
     </Panel>
