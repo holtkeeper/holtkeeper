@@ -53,6 +53,7 @@ const analyzers = [
   }),
   analyzer('renovate', { exclusive: true }),
   analyzer('fleet', { scope: 'group' }),
+  analyzer('build', { options: z.object({ command: z.string(), branch: z.string().optional() }) }),
 ]
 
 const configWith = (jobs: Record<string, unknown>) =>
@@ -150,6 +151,57 @@ describe('jobs.onNewRepo', () => {
     expect(await queued()).toEqual(['games/a quality new-repo'])
   })
 
+  test('skips analyzers whose required options are not set up for the repository', async () => {
+    await store.settings.put({
+      id: 's1',
+      key: 'analyzers.build',
+      value: { command: 'make' },
+      secret: false,
+      scope: { repos: ['work:games/b'] },
+      updatedBy: 'u1',
+      updatedAt: '2026-10-30T00:00:00.000Z',
+    })
+    const p = poller(configWith({ onNewRepo: { analyzers: ['quality', 'build'] } }))
+    listed = ['games/a', 'games/b']
+    await p.listGroup('games')
+    expect(await queued()).toEqual([
+      'games/a quality new-repo',
+      'games/b build new-repo',
+      'games/b quality new-repo',
+    ])
+  })
+
+  test('push jobs skip analyzers not set up for the repository', async () => {
+    await store.settings.put({
+      id: 's1',
+      key: 'analyzers.build',
+      value: { command: 'make' },
+      secret: false,
+      scope: { repos: ['work:games/b'] },
+      updatedBy: 'u1',
+      updatedAt: '2026-10-30T00:00:00.000Z',
+    })
+    const dispatch = createEventDispatcher(
+      deps(configWith({ onPush: { analyzers: ['quality', 'build'] } })),
+    )
+    for (const path of ['games/a', 'games/b'])
+      await dispatch(
+        {
+          kind: 'push',
+          repo: { forge: 'work', path },
+          branch: 'feature/x',
+          sha: 'abc123',
+          actor: '',
+        },
+        { actor: 'poll', via: 'poll' },
+      )
+    expect(await queued()).toEqual([
+      'games/a quality poll',
+      'games/b build poll',
+      'games/b quality poll',
+    ])
+  })
+
   test('queues nothing without the trigger', async () => {
     const p = poller(configWith({}))
     listed = ['games/a']
@@ -190,8 +242,12 @@ describe('running the trigger on known repositories', () => {
 })
 
 test('newRepoAnalyzers: never group-scope or exclusive ones', () => {
-  expect(newRepoAnalyzers({}, analyzers)).toEqual(['quality', 'licenses', 'go-only'])
-  expect(newRepoAnalyzers({ exclude: ['quality'] }, analyzers)).toEqual(['licenses', 'go-only'])
+  expect(newRepoAnalyzers({}, analyzers)).toEqual(['quality', 'licenses', 'go-only', 'build'])
+  expect(newRepoAnalyzers({ exclude: ['quality'] }, analyzers)).toEqual([
+    'licenses',
+    'go-only',
+    'build',
+  ])
   expect(newRepoAnalyzers({ analyzers: ['renovate', 'fleet', 'licenses'] }, analyzers)).toEqual([
     'licenses',
   ])

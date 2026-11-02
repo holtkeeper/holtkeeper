@@ -136,7 +136,7 @@ async function scopedToolchain(
 export async function scopedAnalyzerOptions(
   config: HoltkeeperConfig,
   store: Store,
-  job: Job,
+  job: Pick<Job, 'analyzer' | 'repo' | 'group'>,
 ): Promise<Record<string, unknown> | undefined> {
   const key = `analyzers.${job.analyzer}`
   const target = jobTarget(config, job)
@@ -155,6 +155,22 @@ export async function scopedAnalyzerOptions(
     traits: resolveRepo(config, job.repo).traits,
     ...scoped,
   }
+}
+
+/**
+ * Whether an automatically queued job would get valid options: its own merged with the
+ * `analyzers.<kind>` setting that applies to it, as the worker merges them for non-manual jobs.
+ * False when an analyzer with required options (e.g. `warmup`'s `command`) is not set up for
+ * the repository, so triggers can leave it out instead of queuing a job bound to fail.
+ */
+export async function automaticJobReady(
+  config: HoltkeeperConfig,
+  store: Store,
+  analyzer: { options: z.ZodType },
+  request: Pick<Job, 'analyzer' | 'repo'> & { group?: string; options?: Record<string, unknown> },
+): Promise<boolean> {
+  const scoped = (await scopedAnalyzerOptions(config, store, request)) ?? {}
+  return analyzer.options.safeParse({ ...request.options, ...scoped }).success
 }
 
 const auditTriggers: Partial<Record<Job['trigger'], AuditTrigger>> = {

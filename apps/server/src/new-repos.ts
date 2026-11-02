@@ -8,6 +8,7 @@ import {
 } from '@holtkeeper/jobs'
 
 import type { ServerDeps } from './context.ts'
+import { automaticJobReady } from './jobs.ts'
 
 type OnNewRepo = NonNullable<NonNullable<HoltkeeperConfig['jobs']>['onNewRepo']>
 
@@ -31,7 +32,8 @@ export function newRepoAnalyzers(
 
 /**
  * Queues the `jobs.onNewRepo` analyzers for `repos`, limited to its `groups` and to analyzers
- * whose `appliesTo` matches (a failing check counts as applying). Jobs get trigger `new-repo`;
+ * whose `appliesTo` matches (a failing check counts as applying) and whose options are valid with
+ * the repository's `analyzers.<kind>` setting (so `warmup` waits for a command). Jobs get trigger `new-repo`;
  * one already queued or running for the same analyzer and repository is skipped. Without `actor`
  * (repositories polling found for the first time) it logs `job.new_repo` per repository that got
  * jobs; with `actor` (a run by hand) the jobs carry it and the caller logs the run. Does nothing
@@ -59,14 +61,23 @@ export async function queueNewRepoJobs(
       ...(options.log && { log: options.log }),
     },
   )
+  const byKind = new Map((deps.analyzers ?? []).map((analyzer) => [analyzer.kind, analyzer]))
+  const ready = await Promise.all(
+    requests.map(async (request) => {
+      const analyzer = byKind.get(request.analyzer)
+      return !analyzer || automaticJobReady(config, store, analyzer, request)
+    }),
+  )
   const at = deps.now().toISOString()
   const { enqueued, skipped } = await enqueueUnique(
     store.jobs,
-    requests.map((request) => ({
-      ...request,
-      trigger: 'new-repo' as const,
-      ...(options.actor && { actor: options.actor }),
-    })),
+    requests
+      .filter((_, index) => ready[index])
+      .map((request) => ({
+        ...request,
+        trigger: 'new-repo' as const,
+        ...(options.actor && { actor: options.actor }),
+      })),
     at,
   )
   const result = { queued: enqueued.length, skipped: skipped.length }

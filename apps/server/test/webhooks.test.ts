@@ -66,7 +66,7 @@ const analyzers: JobAnalyzerInfo[] = [
     scope: 'repo',
     options: z.object({
       mergeRequest: z.coerce.number(),
-      targets: z.union([z.string(), z.array(z.string())]),
+      targets: z.union([z.string(), z.array(z.string())]).optional(),
     }),
   },
   { kind: 'fleet', scope: 'group', options: z.object({}) },

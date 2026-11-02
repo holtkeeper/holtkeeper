@@ -36,6 +36,7 @@ import { z } from 'zod'
 import { CHAT_MARKER, chatFor } from './chat.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { defaultBranchOf, pushChangesDependencies } from './dependency-refresh.ts'
+import { automaticJobReady } from './jobs.ts'
 import { librariesConfigOf, librariesEnabled } from './libraries.ts'
 import { releaseServiceFor } from './releases.ts'
 
@@ -143,6 +144,10 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
+ * Tag, push and merge request jobs whose options stay invalid with the repository's
+ * `analyzers.<kind>` setting (an analyzer not set up there, e.g. `warmup` without a command) are
+ * left out rather than queued to fail.
+ *
  * Pushes and merge request changes also go to the release assistant, in the background.
  * Events of repositories `deps.readOnly` marks read-only are ignored, except tags and pushes. Events by
  * `jobs.botUsername` or carrying Holtkeeper's note marker are ignored. A job already
@@ -175,6 +180,16 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       enqueued.push(job.id)
     }
     return enqueued
+  }
+
+  const setUp = async (requests: JobRequest[]) => {
+    const ready = await Promise.all(
+      requests.map(async (request) => {
+        const analyzer = analyzers.get(request.analyzer)
+        return !analyzer || automaticJobReady(config, store, analyzer, request)
+      }),
+    )
+    return requests.filter((_, index) => ready[index])
   }
 
   const botUsername = () => config.jobs?.botUsername
@@ -304,7 +319,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
           ? groups.map((group) => ({ analyzer, repo: { forge: repo.forge, path: group }, group }))
           : [{ analyzer, repo, ref: releaseTarget({ name: tag, sha }) }],
       )
-      const enqueued = await enqueue(requests, trigger('tag'))
+      const enqueued = await enqueue(await setUp(requests), trigger('tag'))
       await activity('job.tag_pushed', repo, { tag, jobs: enqueued })
       return { enqueued }
     }
@@ -366,18 +381,22 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         return ignore('branch is not in jobs.onPush.branches')
       if (onPush.groups && !groupsMatch(onPush.groups, resolveRepo(config, repo).groups))
         return ignore('repository is not in jobs.onPush.groups')
-      const kinds = repoAnalyzers(onPush.analyzers)
-      for (const analyzer of kinds) {
+      const requests = await setUp(
+        repoAnalyzers(onPush.analyzers).map((analyzer) => ({
+          analyzer,
+          repo,
+          ref: sha,
+          options: { branch },
+        })),
+      )
+      for (const { analyzer } of requests) {
         const stale = await store.jobs.list({ status: ['queued'], repo, analyzer, limit: 500 })
         for (const job of stale)
           if (job.options.branch === branch && job.ref !== sha)
             // oxlint-disable-next-line no-await-in-loop -- few jobs, and order does not matter
             await store.jobs.cancel(job.id, deps.now().toISOString())
       }
-      const enqueued = await enqueue(
-        kinds.map((analyzer) => ({ analyzer, repo, ref: sha, options: { branch } })),
-        trigger('push'),
-      )
+      const enqueued = await enqueue(requests, trigger('push'))
       await activity('job.branch_pushed', repo, { branch, sha, jobs: enqueued })
       return { enqueued }
     }
@@ -433,12 +452,14 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
             : reasons.join('; ') || 'no analyzers configured for this event',
         )
       const enqueued = await enqueue(
-        planned.map(({ analyzer, options }) => ({
-          analyzer,
-          repo,
-          ...(head ? { ref: head } : {}),
-          options: { ...options, mergeRequest: mr.id },
-        })),
+        await setUp(
+          planned.map(({ analyzer, options }) => ({
+            analyzer,
+            repo,
+            ...(head ? { ref: head } : {}),
+            options: { ...options, mergeRequest: mr.id },
+          })),
+        ),
         trigger('webhook'),
       )
       await activity('job.merge_request', repo, {

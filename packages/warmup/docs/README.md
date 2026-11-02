@@ -34,4 +34,6 @@ A failing command is a result, not a job failure: the job succeeds and the recor
 3. **Trigger.** Automation → Triggers → **Branch push**: analyzer `warmup`, branches (e.g. `main`, `release/*`; none for every branch), optionally groups. Pushes arrive by webhook (registered hooks include push events) or by polling.
 4. **Runtime.** The egress proxy must be on (`jobs.execution.egress` with `mode: 'mise'` or `'container'`, and `server.egress` so the proxy reads rules from the server; see [docs/deployment.md](../../../docs/deployment.md#egress-proxy)). In `container` mode the build needs the network for its whole run: set `network: full` for the repository in the scoped `toolchain` setting.
 
+Repositories without a `command` in `analyzers.warmup` are skipped by push, merge request and new repository triggers, so a trigger for every branch or group runs only where warm-up is set up.
+
 A newer push to the same branch cancels the warm-up still queued for the older commit; one analyzer never runs twice at once on one repository.
