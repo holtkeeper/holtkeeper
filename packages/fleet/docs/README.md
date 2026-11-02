@@ -11,7 +11,7 @@ Options (`fleetOptionsSchema`):
 | Option          | Default | Meaning                                                                                                                                                                    |
 | --------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `libraries`     | `[]`    | Names or globs always tracked: `react`, `@company/*`, `github.com/company/**` (`*` stays within a path segment, `**` crosses them). The flag takes a comma-separated list. |
-| `minRepos`      | `3`     | Also track every library used directly by at least this many repositories; `0` disables.                                                                                   |
+| `minRepos`      | `3`     | Also track every library used directly by at least this many repositories (capped at the group's repositories with direct usages); `0` disables.                           |
 | `maxWorkspaces` | `20`    | Workspace manifests read per repository besides the root.                                                                                                                  |
 | `maxLibraries`  | `100`   | Cap for automatically tracked libraries, most used first.                                                                                                                  |
 | `templates`     | `[]`    | Golden files, see below.                                                                                                                                                   |

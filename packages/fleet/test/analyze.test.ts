@@ -254,15 +254,22 @@ test('expands workspace globs through listFiles when the forge has it', async ()
 })
 
 test('selectLibraries ignores indirect usages when counting repositories', () => {
+  const net = (repo: string) => ({ ...usage(repo, 'prod'), name: 'golang.org/x/net' })
   expect(
     selectLibraries(
-      [usage('a', 'indirect'), usage('b', 'indirect'), usage('c', 'prod')],
+      [usage('a', 'indirect'), usage('b', 'indirect'), usage('c', 'prod'), net('a'), net('b')],
       [],
       2,
       10,
-    ),
-  ).toEqual([])
+    ).map((library) => library.name),
+  ).toEqual(['golang.org/x/net'])
   expect(selectLibraries([usage('a', 'prod'), usage('b', 'prod')], [], 2, 10)).toHaveLength(1)
+})
+
+test('selectLibraries caps minRepos at the repositories with direct usages', () => {
+  expect(selectLibraries([usage('a', 'prod'), usage('b', 'prod')], [], 3, 10)).toHaveLength(1)
+  expect(selectLibraries([usage('a', 'prod'), usage('b', 'indirect')], [], 3, 10)).toHaveLength(1)
+  expect(selectLibraries([usage('a', 'prod')], [], 0, 10)).toEqual([])
 })
 
 test('the analyzer runs through the forge with an injected registry', async () => {

@@ -282,6 +282,8 @@ const libraryKey = (ecosystem: Ecosystem, name: string) => `${ecosystem}:${name}
 /**
  * Which libraries to track: those matching `patterns`, plus those used directly (not `indirect`)
  * by at least `minRepos` repositories, at most `maxLibraries` of the latter, most used first.
+ * `minRepos` is capped at the number of repositories with direct usages, so a small group still
+ * tracks the libraries all of its repositories share.
  */
 export function selectLibraries(
   found: Found[],
@@ -302,11 +304,15 @@ export function selectLibraries(
     repos.set(key, entry)
   }
   const all = [...repos.values()]
+  const threshold = Math.min(
+    minRepos,
+    new Set(found.flatMap(({ usage }) => (usage.kind === 'indirect' ? [] : [usage.repo]))).size,
+  )
   const option = all.filter((entry) => listed(entry.name))
   const auto =
     minRepos > 0
       ? all
-          .filter((entry) => !listed(entry.name) && entry.repos.size >= minRepos)
+          .filter((entry) => !listed(entry.name) && entry.repos.size >= threshold)
           .toSorted((a, b) => b.repos.size - a.repos.size || a.name.localeCompare(b.name))
           .slice(0, maxLibraries)
       : []
