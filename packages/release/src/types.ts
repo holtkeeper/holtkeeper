@@ -46,13 +46,30 @@ export interface PipelineState {
   webUrl: string
 }
 
+/**
+ * Where a person ran a release step: `ui` (the panel), `api`, `cli`, `forge` (a merge or a label)
+ * or the id of the chat surface (`slack`, `web` for the panel's chat).
+ */
+export type ReleaseChannel = string
+
+/** Who runs a release step: a principal or forge user id, its display name and where they were. */
+export interface ReleaseActor {
+  id: string
+  name?: string
+  channel?: ReleaseChannel
+}
+
 /** Someone or something said the changes on the target branch may become a version. */
 export interface Acceptance {
   /** Head of the target branch that was accepted. */
   sha: string
+  /** Principal id of the person, or the forge username for merges and labels. */
   by: string
+  /** Display name of `by` when it was accepted. */
+  name?: string
   at: string
   via: 'manual' | 'label' | 'merge'
+  channel?: ReleaseChannel
   note?: string
 }
 
@@ -243,6 +260,9 @@ export interface ReleaseEvent {
   repo: RepoRef
   at: string
   actor: string
+  /** Display name of `actor` when it differs from the id. */
+  actorName?: string
+  channel?: ReleaseChannel
   version?: string
   tag?: string
   environment?: string

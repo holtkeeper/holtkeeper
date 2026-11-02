@@ -262,6 +262,7 @@ export async function releaseCommand(
           by: 'cli',
           at: now().toISOString(),
           via: 'manual',
+          channel: 'cli',
           ...(flags.note ? { note: flags.note } : {}),
         }
         if (!dryRun) {

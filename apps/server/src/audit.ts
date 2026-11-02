@@ -192,7 +192,8 @@ function authRoute(path: string): { route: string; params: Record<string, string
 const outcomeOf = (status: number): AuditOutcome =>
   status === 401 || status === 403 ? 'denied' : status >= 400 ? 'error' : 'ok'
 
-function viaOf(c: AppContext, path: string): AuditVia {
+/** How a request reached the server: `webhook`, `ui` (a browser) or `api`. */
+export function viaOf(c: AppContext, path: string): AuditVia {
   if (path.startsWith('/api/webhooks') || path.startsWith('/api/chat/slack')) return 'webhook'
   return c.req.header('sec-fetch-site') !== undefined ? 'ui' : 'api'
 }

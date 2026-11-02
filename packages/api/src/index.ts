@@ -83,6 +83,8 @@ export type {
   ReleaseEntry,
   ReleaseEvent,
   ReleaseEventKind,
+  ReleaseLink,
+  ReleaseLinkKind,
   ReleasePlan,
   ReleaseSettings,
   ReleaseStage,

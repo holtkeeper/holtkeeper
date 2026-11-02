@@ -126,7 +126,7 @@ const linkSlackUser = async () => {
   const identities = createIdentities({ accounts, now: () => new Date() })
   const jane: Principal = {
     id: 'jane',
-    name: 'jane',
+    name: 'Jane Doe',
     provider: 'header',
     grants: [{ scope: { all: true }, actions: ['releases:read', 'releases:run'] }],
   }
@@ -174,5 +174,22 @@ describe('slack routes', () => {
     expect(update?.method).toBe('chat.update')
     expect(update?.body['ts']).toBe(`1.${deployMessage}`)
     expect(JSON.stringify(update?.body)).toContain('✅ <https://forge/j/100|preprod>')
+  })
+
+  test('record who accepted from Slack', async () => {
+    await linkSlackUser()
+    fake.commitTo('main', 'fix: [ABC-3] crash on load')
+    await slash('release accept note=QA repo=work:g/app')
+    expect(posted()).toContain('Jane Doe (Slack)')
+    expect(await store.kv?.get('release:acceptance:work:g/app')).toMatchObject({
+      by: 'jane',
+      name: 'Jane Doe',
+      channel: 'slack',
+      note: 'QA',
+    })
+    const accepted = (await store.activity.list()).find(
+      (entry) => entry.action === 'release.accepted',
+    )
+    expect(accepted).toMatchObject({ actor: 'jane', details: { channel: 'slack' } })
   })
 })

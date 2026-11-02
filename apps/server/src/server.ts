@@ -78,6 +78,7 @@ import { startManagedConfig } from './managed.ts'
 import type { MediaEngine } from './media/engine.ts'
 import { createMediaReviewer } from './media/reviewer.ts'
 import { startOperations } from './operations.ts'
+import { releaseServiceFor } from './releases.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { startStorageReports } from './storage-reports.ts'
@@ -423,6 +424,7 @@ export async function startServer(
       () => startLibraryIndex(deps, log),
       () => startDatabaseSnapshots(server.store, { log }),
       () => digestServiceFor(deps).start(log),
+      () => releaseServiceFor(deps).startBoardRefresh(),
     ],
   })
   metrics = ops.metrics

@@ -9,6 +9,7 @@ import type {
   ReleaseDeployInput,
   ReleaseEditsInput,
   ReleaseGateError,
+  ReleaseHiddenInput,
   ReleaseRepoView,
   ReleaseStepInput,
   ReleaseStepResult,
@@ -22,12 +23,14 @@ import {
   DeployError,
   GateError,
   UnsupportedForgeError,
+  type ReleaseActor,
   releaseEditsSchema,
 } from '@holtkeeper/release'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
+import { viaOf } from '../audit.ts'
 import {
   type AppContext,
   type Env,
@@ -89,6 +92,7 @@ const editsSchema = z.object({
 })
 const summarySchema = z.object({ repo: z.string().min(1), step })
 const stepSchema = z.object({ repo: z.string().min(1), force: z.boolean().optional() })
+const hiddenSchema = z.object({ repo: z.string().min(1), hidden: z.boolean() })
 const acceptSchema = z.object({ repo: z.string().min(1), note: z.string().max(500).optional() })
 const deploySchema = z.object({
   repo: z.string().min(1),
@@ -226,11 +230,11 @@ export function releaseRoutes(deps: ServerDeps) {
 
   const releases = releaseServiceFor(deps)
 
-  const runnable = async (c: AppContext, repo: RepoRef) => {
+  const runnable = async (c: AppContext, repo: RepoRef): Promise<ReleaseActor> => {
     const principal = authorize(c, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) })
     if (await releases.isReadOnly(repo))
       throw new HTTPException(403, { message: `${repo.path} is read-only for Holtkeeper` })
-    return principal
+    return { id: principal.id, name: principal.name, channel: viaOf(c, c.req.path) }
   }
 
   app.get('/releases/board', async (c) => {
@@ -276,17 +280,17 @@ export function releaseRoutes(deps: ServerDeps) {
   app.put('/releases/edits', async (c) => {
     const input: ReleaseEditsInput = await readBody(c, editsSchema)
     const repo = requireRepo(input.repo)
-    const principal = await runnable(c, repo)
-    await releases.saveEdits(repo, input.step, input.edits, principal.id)
+    const actor = await runnable(c, repo)
+    await releases.saveEdits(repo, input.step, input.edits, actor)
     return c.json({ ok: true })
   })
 
   app.post('/releases/summary', async (c) => {
     const input: ReleaseSummaryInput = await readBody(c, summarySchema)
     const repo = requireRepo(input.repo)
-    const principal = await runnable(c, repo)
+    const actor = await runnable(c, repo)
     try {
-      return c.json({ markdown: await releases.summarize(repo, input.step, principal.id) })
+      return c.json({ markdown: await releases.summarize(repo, input.step, actor) })
     } catch (error) {
       return stepError(c, error)
     }
@@ -296,9 +300,9 @@ export function releaseRoutes(deps: ServerDeps) {
     app.post(`/releases/${name}`, async (c) => {
       const input: ReleaseStepInput = await readBody(c, stepSchema)
       const repo = requireRepo(input.repo)
-      const principal = await runnable(c, repo)
+      const actor = await runnable(c, repo)
       try {
-        return c.json<ReleaseStepResult>(await releases[name](repo, principal.id, input.force))
+        return c.json<ReleaseStepResult>(await releases[name](repo, actor, input.force))
       } catch (error) {
         return stepError(c, error)
       }
@@ -307,9 +311,9 @@ export function releaseRoutes(deps: ServerDeps) {
   app.post('/releases/accept', async (c) => {
     const input: ReleaseAcceptInput = await readBody(c, acceptSchema)
     const repo = requireRepo(input.repo)
-    const principal = await runnable(c, repo)
+    const actor = await runnable(c, repo)
     try {
-      return c.json<ReleaseStepResult>(await releases.accept(repo, principal.id, input.note))
+      return c.json<ReleaseStepResult>(await releases.accept(repo, actor, input.note))
     } catch (error) {
       return stepError(c, error)
     }
@@ -317,15 +321,30 @@ export function releaseRoutes(deps: ServerDeps) {
 
   app.delete('/releases/accept', async (c) => {
     const repo = requireRepo(c.req.query('repo'))
-    const principal = await runnable(c, repo)
-    await releases.withdraw(repo, principal.id)
+    const actor = await runnable(c, repo)
+    await releases.withdraw(repo, actor)
+    return c.json({ ok: true })
+  })
+
+  app.put('/releases/hidden', async (c) => {
+    const input: ReleaseHiddenInput = await readBody(c, hiddenSchema)
+    const repo = requireRepo(input.repo)
+    const principal = authorize(c, 'settings:write', {
+      kind: 'repo',
+      repo: repoTarget(config, repo),
+    })
+    await releases.setHidden(repo, input.hidden, {
+      id: principal.id,
+      name: principal.name,
+      channel: viaOf(c, c.req.path),
+    })
     return c.json({ ok: true })
   })
 
   app.post('/releases/deploy', async (c) => {
     const input: ReleaseDeployInput = await readBody(c, deploySchema)
     const repo = requireRepo(input.repo)
-    const principal = await runnable(c, repo)
+    const actor = await runnable(c, repo)
     try {
       return c.json<ReleaseStepResult>(
         await releases.deploy(
@@ -336,7 +355,7 @@ export function releaseRoutes(deps: ServerDeps) {
             ...(input.redeploy ? { redeploy: true } : {}),
             ...(input.force ? { force: true } : {}),
           },
-          principal.id,
+          actor,
         ),
       )
     } catch (error) {
@@ -351,9 +370,9 @@ export function releaseRoutes(deps: ServerDeps) {
       try {
         const repo = requireRepo(key)
         // oxlint-disable-next-line no-await-in-loop -- one repository at a time keeps forge limits
-        const principal = await runnable(c, repo)
+        const actor = await runnable(c, repo)
         // oxlint-disable-next-line no-await-in-loop -- same
-        const result = await releases[input.step](repo, principal.id, input.force)
+        const result = await releases[input.step](repo, actor, input.force)
         results.push({ repo: key, ok: true, result })
       } catch (error) {
         results.push({

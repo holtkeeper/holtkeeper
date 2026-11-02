@@ -26,7 +26,7 @@ An abstract "these changes may become a version" signal, so teams tie it to thei
 - `label` — `acceptance.label` (default `release-accepted`) on the merged release merge request.
 - `merge` — merging the candidate.
 
-An acceptance holds for one head of the target branch; new changes need a new one. With `acceptance.required` the version step refuses without it; with `autoVersion` the version is created as soon as it arrives.
+An acceptance records who gave it (`by`, the principal id or forge username, and `name`) and where (`channel`: `ui`, `api`, `cli`, `forge` or a chat surface such as `slack`). It holds for one head of the target branch; new changes need a new one. With `acceptance.required` the version step refuses without it; with `autoVersion` the version is created as soon as it arrives.
 
 ## Settings
 
@@ -50,12 +50,13 @@ Templates fill `{date}` (or `{date:DD.MM.YYYY}`), `{version}`, `{tag}`, `{next}`
 
 Presets (`releasePresets`) set only their own fields, so they combine: `merge-request-deferred-version`, `merge-request-version-on-merge`, `trunk`, `calver`, `external`, `preprod-prod`, `agent-summary`, `changelog-file`.
 
-`releases.notify` (`releaseNotifyDefinition`, secret) lists Slack or webhook `targets`, each with the `events` it wants (`proposed`, `merged`, `accepted`, `versioned`, `deploy-started`, `deploy-succeeded`, `deploy-failed`; all when empty). `announce(settings, event)` sends through `@holtkeeper/notify` and returns failures instead of throwing.
+`releases.notify` (`releaseNotifyDefinition`, secret) lists Slack or webhook `targets`, each with the `events` it wants (`proposed`, `merged`, `accepted`, `versioned`, `deploy-started`, `deploy-succeeded`, `deploy-failed`; all when empty). Events carry the `actor` id and, for people, `actorName` and `channel`; `actorLabel(event)` renders them as `Jane Doe (Slack)` for the `By` field. `announce(settings, event)` sends through `@holtkeeper/notify` and returns failures instead of throwing.
 
 ## Reading
 
 - `collectFacts({ forge, repo, settings, recorded? })` → `ReleaseFacts`: branch heads, version tags (`versionTags`, only tags that follow `tagFormat` and the scheme, newest first), commits on the source not on the target (`ahead`) and on the target since the latest version (`unreleased`), each capped at `commitCap` (300), the open and the last merged candidate, latest pipelines, blocking merge requests and the acceptance (`recorded`, else the label or merge signal). Needs `GitForge.listCommits`; throws `UnsupportedForgeError` without it.
 - `boardRow(settings, facts, now, deploy?)` → `ReleaseBoardRow` for the board: stage, latest and next version, counts, tickets, candidate, pipelines, acceptance, since when a version waits, deploy state.
+- `releaseLinks(kind, facts, deploy?)` → `ReleaseLink[]` on GitLab or GitHub: `current` links to the candidate, merged and blocking merge requests, the latest tag, the unreleased and candidate diffs and the pipelines (with status), then `pages` of the project (repository, merge requests, branches, tags, releases, pipelines, environments).
 - `detectFlow(input)` / `detectRepositoryFlow(forge, repo)` → `FlowDetection`: a suggested preset and settings from what the repository already does (a `.changeset` folder or package tags → `external`; merged merge requests from `development`/`develop`/`dev` → the merge request flow; else trunk; tag prefix and calendar or semantic versions from the tags), with reasons.
 
 ## Planning

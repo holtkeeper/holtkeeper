@@ -14,6 +14,7 @@ import type {
   ReleaseBoardRow,
   ReleaseEdits,
   ReleaseEvent,
+  ReleaseLink,
   ReleasePlan,
   ReleaseSettings,
   VersionTag,
@@ -277,7 +278,6 @@ export interface DigestPreview {
   nextRun?: string
 }
 
-/** `POST /api/chat/messages`: a command line, optionally about one repository (`forge:path`). */
 /** What one connected Slack channel may do. */
 export interface SlackChannelBinding {
   channel: string
@@ -331,6 +331,7 @@ export interface AccountClaimInput {
   token: string
 }
 
+/** `POST /api/chat/messages`: a command line, optionally about one repository (`forge:path`). */
 export interface ChatSendInput {
   text: string
   repo?: string
@@ -787,9 +788,33 @@ export type { BundlePoint, BundleSeries }
 /** `GET /api/releases/board?group=&repo=&refresh=`: release state of every repository the caller may read. */
 export interface ReleaseBoardView {
   rows: ReleaseBoardRow[]
-  /** When the rows were read from the forges; rows are cached for a minute without `refresh`. */
+  /**
+   * When the last full read of the forges finished. Rows come from a snapshot the server refreshes
+   * in the background every few minutes and after release events; `refresh` starts a read.
+   */
   readAt: string
+  /** A full read is running; the rows change when it finishes. */
+  refreshing: boolean
+  /** Repositories hidden from the board, which the server does not read. */
+  hidden: ReleaseHiddenRepo[]
   dryRun: boolean
+  /** Users among the rows' acceptances and who hid repositories, by id. */
+  people: Record<string, ActivityPerson>
+}
+
+/** A repository someone hid from the release board, e.g. a monorepo with its own release flow. */
+export interface ReleaseHiddenRepo {
+  repo: RepoRef
+  /** Principal id of who hid it. */
+  by: string
+  name?: string
+  at: string
+}
+
+/** `PUT /api/releases/hidden`: hides a repository from the board or shows it again. */
+export interface ReleaseHiddenInput {
+  repo: string
+  hidden: boolean
 }
 
 /** `GET /api/releases/repo?repo=`: everything the release page of one repository shows. */
@@ -808,6 +833,10 @@ export interface ReleaseRepoView {
   /** Suggested flow when no setting names this repository or its groups. */
   detection?: FlowDetection
   history: ReleaseEvent[]
+  /** Forge pages of the release: merge requests, tags, diffs, pipelines, project lists. */
+  links: ReleaseLink[]
+  /** Users among the history's actors and the acceptance, by id. */
+  people: Record<string, ActivityPerson>
   /** What the caller may do here. */
   can: { run: boolean; configure: boolean }
   readOnly: boolean

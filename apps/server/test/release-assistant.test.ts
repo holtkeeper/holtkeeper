@@ -101,6 +101,9 @@ const run = async (path: string, body: unknown) => {
   }
 }
 
+const boardOf = async (query = '') =>
+  (await (await call('GET', `/releases/board${query}`)).json()) as ReleaseBoardView
+
 describe('release assistant routes', () => {
   test('shows the board and the plans of a repository', async () => {
     const board = (await (await call('GET', '/releases/board')).json()) as ReleaseBoardView
@@ -116,6 +119,46 @@ describe('release assistant routes', () => {
 
     expect((await viewOf(asViewer)).can.run).toBe(false)
     expect((await call('POST', '/releases/propose', { repo }, asViewer)).status).toBe(403)
+  })
+
+  test('serves the board from a snapshot and rereads it in the background', async () => {
+    expect((await boardOf()).rows[0]).toMatchObject({ ahead: 2 })
+
+    fake.commitTo('development', 'feat: [GTW-4] settings')
+    const reads = fake.listedCommits
+    expect((await boardOf()).rows[0]).toMatchObject({ ahead: 2 })
+    expect(fake.listedCommits).toBe(reads)
+
+    expect((await boardOf('?refresh=1')).refreshing).toBe(true)
+    await Promise.all(background)
+    const fresh = await boardOf()
+    expect(fresh).toMatchObject({
+      refreshing: false,
+      rows: [expect.objectContaining({ ahead: 3 })],
+    })
+  })
+
+  test('hides a repository from the board and stops reading it', async () => {
+    expect((await call('PUT', '/releases/hidden', { repo, hidden: true }, asViewer)).status).toBe(
+      403,
+    )
+    expect((await call('PUT', '/releases/hidden', { repo, hidden: true })).status).toBe(200)
+    const reads = fake.listedCommits
+    const hidden = (await (
+      await call('GET', '/releases/board?refresh=1')
+    ).json()) as ReleaseBoardView
+    await Promise.all(background)
+    expect(hidden.rows).toEqual([])
+    expect(hidden.hidden).toEqual([
+      expect.objectContaining({ repo: { forge: 'work', path: 'g/app' }, by: 'header:jane' }),
+    ])
+    expect(fake.listedCommits).toBe(reads)
+
+    expect((await call('PUT', '/releases/hidden', { repo, hidden: false })).status).toBe(200)
+    await Promise.all(background)
+    const shown = (await (await call('GET', '/releases/board')).json()) as ReleaseBoardView
+    expect(shown.rows.map((row) => row.repo.path)).toEqual(['g/app'])
+    expect(shown.hidden).toEqual([])
   })
 
   test('proposes, accepts after the merge and creates the version with edits', async () => {
@@ -157,7 +200,21 @@ describe('release assistant routes', () => {
 
     expect((await call('POST', '/releases/accept', { repo, note: 'QA passed' })).status).toBe(200)
     view = await viewOf()
-    expect(view.row.acceptance).toMatchObject({ by: 'header:jane', via: 'manual' })
+    expect(view.row.acceptance).toMatchObject({
+      by: 'header:jane',
+      name: 'jane',
+      via: 'manual',
+      channel: 'api',
+    })
+    expect(view.history[0]).toMatchObject({
+      kind: 'accepted',
+      actor: 'header:jane',
+      actorName: 'jane',
+      channel: 'api',
+    })
+    expect(view.links).toContainEqual(
+      expect.objectContaining({ kind: 'merge-request', label: 'Merged !1' }),
+    )
     expect(view.version?.tag).toBe('v2.0.0')
 
     const versioned = await run('/releases/version', { repo })

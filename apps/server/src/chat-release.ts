@@ -10,7 +10,7 @@ import {
   defineCommand,
 } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
-import { type DeployState, type DeployStatus, GateError } from '@holtkeeper/release'
+import { type DeployState, type DeployStatus, GateError, actorLabel } from '@holtkeeper/release'
 import { z } from 'zod'
 
 import type { ServerDeps } from './context.ts'
@@ -151,7 +151,18 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
       ...(row.request
         ? [{ label: 'Candidate', value: `[!${row.request.id}](${row.request.webUrl})` }]
         : []),
-      ...(row.acceptance ? [{ label: 'Accepted by', value: row.acceptance.by }] : []),
+      ...(row.acceptance
+        ? [
+            {
+              label: 'Accepted by',
+              value: actorLabel({
+                actor: row.acceptance.by,
+                actorName: row.acceptance.name ?? view.people[row.acceptance.by]?.name,
+                channel: row.acceptance.channel,
+              }),
+            },
+          ]
+        : []),
     ]
     const failing = [...(view.proposal?.gates ?? []), ...(view.version?.gates ?? [])].filter(
       (gate) => !gate.ok,
@@ -227,9 +238,14 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
       const principal = await context.require('releases:run', repo)
       if (await releases.isReadOnly(repo))
         throw new ChatUserError(`${repo.path} is read-only for Holtkeeper.`)
+      const actor = {
+        id: principal.id,
+        name: principal.name,
+        channel: context.message.surface,
+      }
 
       if (step === 'propose') {
-        const result = await releases.propose(repo, principal.id).catch(stepFailure)
+        const result = await releases.propose(repo, actor).catch(stepFailure)
         await context.reply({
           title: `Release candidate · ${repo.path}`,
           tone: 'good',
@@ -240,14 +256,28 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
       }
 
       if (step === 'accept') {
-        const result = await releases
-          .accept(repo, principal.id, context.options.note)
-          .catch(stepFailure)
+        const result = await releases.accept(repo, actor, context.options.note).catch(stepFailure)
         await context.reply({
           title: `Accepted · ${repo.path}`,
           tone: 'good',
           ...(result.url && { url: result.url }),
-          blocks: [{ type: 'text', text: result.detail }],
+          blocks: [
+            {
+              type: 'fields',
+              fields: [
+                {
+                  label: 'Accepted by',
+                  value: actorLabel({
+                    actor: actor.id,
+                    actorName: actor.name,
+                    channel: actor.channel,
+                  }),
+                },
+                ...(context.options.note ? [{ label: 'Note', value: context.options.note }] : []),
+              ],
+            },
+            { type: 'text', text: result.detail },
+          ],
         })
         return
       }
@@ -297,7 +327,7 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
           })
           return
         }
-        const result = await releases.version(repo, principal.id).catch(stepFailure)
+        const result = await releases.version(repo, actor).catch(stepFailure)
         const posted = await context.reply({
           title: `${result.tag ?? 'Version'} · ${repo.path}`,
           tone: 'good',
@@ -337,9 +367,7 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
         })
         return
       }
-      const result = await releases
-        .deploy(repo, { tag, environment }, principal.id)
-        .catch(stepFailure)
+      const result = await releases.deploy(repo, { tag, environment }, actor).catch(stepFailure)
       if (result.dryRun) {
         await context.reply({
           title: `Deploy ${tag} · ${repo.path}`,

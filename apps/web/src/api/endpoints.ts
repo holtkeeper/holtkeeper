@@ -64,6 +64,7 @@ import type {
   ReleaseBoardView,
   ReleaseDeployInput,
   ReleaseEditsInput,
+  ReleaseHiddenInput,
   ReleaseRepoView,
   ReleaseStepInput,
   ReleaseStepResult,
@@ -397,6 +398,8 @@ export const api = {
     request<ReleaseStepResult>('POST', `/api/releases/${step}`, { body: input }),
   acceptRelease: (input: ReleaseAcceptInput) =>
     request<ReleaseStepResult>('POST', '/api/releases/accept', { body: input }),
+  setReleaseHidden: (input: ReleaseHiddenInput) =>
+    request<{ ok: true }>('PUT', '/api/releases/hidden', { body: input }),
   withdrawRelease: (repo: RepoRef) =>
     request<{ ok: true }>('DELETE', '/api/releases/accept', { query: { repo: repoKey(repo) } }),
   startReleaseDeploy: (input: ReleaseDeployInput) =>
@@ -483,9 +486,6 @@ export const api = {
   deleteEgressCache: (input: DeleteEgressCacheInput = {}) =>
     request<DeleteEgressCacheResult>('POST', '/api/egress/cache/delete', { body: input }),
 
-  digests: () => request<DigestList>('GET', '/api/digests'),
-  createDigest: (input: DigestInput) =>
-    request<DigestView>('POST', '/api/digests', { body: input }),
   slackSettings: () => request<SlackSettingsView>('GET', '/api/slack'),
   connectSlack: (input: SlackConnectInput) =>
     request<SlackSettingsView>('PUT', '/api/slack/connection', { body: input }),
@@ -496,6 +496,9 @@ export const api = {
   claimAccount: (input: AccountClaimInput) =>
     request<ExternalAccountView>('POST', '/api/accounts/claim', { body: input }),
 
+  digests: () => request<DigestList>('GET', '/api/digests'),
+  createDigest: (input: DigestInput) =>
+    request<DigestView>('POST', '/api/digests', { body: input }),
   updateDigest: (digestId: string, input: DigestInput) =>
     request<DigestView>('PUT', `/api/digests/${id(digestId)}`, { body: input }),
   deleteDigest: (digestId: string) => request<void>('DELETE', `/api/digests/${id(digestId)}`),

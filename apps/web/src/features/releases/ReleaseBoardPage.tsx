@@ -1,12 +1,18 @@
-import type { ReleaseBatchResult, ReleaseBoardRow } from '@holtkeeper/api'
+import type { ActivityPerson, ReleaseBatchResult, ReleaseBoardRow, RepoRef } from '@holtkeeper/api'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { GitPullRequestArrow, RefreshCw, Rocket, Tag } from 'lucide-react'
+import { Eye, EyeOff, GitPullRequestArrow, RefreshCw, Rocket, Tag } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useReleaseActions, useReleaseBoard, useRepos } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
-import { countLabel, needsAttention, sortRows } from '../../lib/releases.ts'
+import {
+  actorName,
+  channelLabel,
+  countLabel,
+  needsAttention,
+  sortRows,
+} from '../../lib/releases.ts'
 import { repoKey } from '../../lib/repo.ts'
 import {
   Button,
@@ -23,6 +29,7 @@ import {
   Table,
   Td,
   Th,
+  Tooltip,
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
@@ -34,14 +41,18 @@ type Batch = 'propose' | 'version'
 
 function Row({
   row,
+  people,
   selected,
   onSelect,
   selectable,
+  onHide,
 }: {
   row: ReleaseBoardRow
+  people: Record<string, ActivityPerson>
   selected: boolean
   onSelect: (selected: boolean) => void
   selectable: boolean
+  onHide?: (() => void) | undefined
 }) {
   return (
     <tr className="transition-colors hover:bg-default-soft">
@@ -61,7 +72,10 @@ function Row({
       <Td>
         <StageChip stage={row.stage} />
         {row.acceptance ? (
-          <div className="mt-1 text-xs text-success">accepted by {row.acceptance.by}</div>
+          <div className="mt-1 text-xs text-success">
+            accepted by {actorName(people, row.acceptance.by, row.acceptance.name)}
+            {row.acceptance.channel ? ` ${channelLabel(row.acceptance.channel)}` : ''}
+          </div>
         ) : null}
       </Td>
       <Td className="whitespace-nowrap">
@@ -122,6 +136,21 @@ function Row({
       <Td>
         <DeployChips deploy={row.deploy} />
       </Td>
+      {onHide ? (
+        <Td className="w-10">
+          <Tooltip content="Hide from the board and stop reading it">
+            <Button
+              size="sm"
+              variant="tertiary"
+              isIconOnly
+              aria-label={`Hide ${row.repo.path}`}
+              onPress={onHide}
+            >
+              <EyeOff className="size-3.5" />
+            </Button>
+          </Tooltip>
+        </Td>
+      ) : null}
     </tr>
   )
 }
@@ -150,6 +179,16 @@ export function ReleaseBoardPage() {
     return filter === 'attention' ? all.filter(needsAttention) : all
   }, [board.data, filter])
   const runnable = can('releases:run')
+  const hideable = can('settings:write')
+  const setHidden = (repo: RepoRef, hidden: boolean) =>
+    actions.hide.mutate(
+      { repo: repoKey(repo), hidden },
+      {
+        onSuccess: () =>
+          notify.success(hidden ? `${repo.path} hidden` : `${repo.path} is back on the board`),
+        onError: (error) => notify.error('Not changed', messageOf(error)),
+      },
+    )
   const chosen = rows.filter((row) => selected.has(repoKey(row.repo)))
   const eligible = (step: Batch) =>
     chosen.filter((row) =>
@@ -199,7 +238,7 @@ export function ReleaseBoardPage() {
           <Button
             variant="secondary"
             onPress={() => actions.refreshBoard.mutate(group)}
-            isPending={actions.refreshBoard.isPending}
+            isPending={actions.refreshBoard.isPending || board.data?.refreshing === true}
           >
             <RefreshCw className="size-3.5" />
             Refresh
@@ -215,7 +254,9 @@ export function ReleaseBoardPage() {
       <Panel
         title={board.data ? `${rows.length} repositories` : 'Repositories'}
         description={
-          board.data ? `Read from the forges ${formatRelative(board.data.readAt)}` : undefined
+          board.data
+            ? `Read from the forges ${formatRelative(board.data.readAt)}${board.data.refreshing ? ' · reading again…' : ''}`
+            : undefined
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -264,7 +305,7 @@ export function ReleaseBoardPage() {
             description={
               filter === 'attention'
                 ? 'No version waits, no candidate is open and no deploy failed.'
-                : 'Repositories of the config groups appear here; the Release flow setting can hide some.'
+                : 'Repositories of the config groups appear here; hidden ones and those the Release flow setting turns off do not.'
             }
           />
         ) : (
@@ -289,6 +330,7 @@ export function ReleaseBoardPage() {
                 <Th>Candidate</Th>
                 <Th>Pipelines</Th>
                 <Th>Deploy</Th>
+                {hideable ? <Th>{''}</Th> : null}
               </tr>
             </thead>
             <tbody>
@@ -296,7 +338,9 @@ export function ReleaseBoardPage() {
                 <Row
                   key={repoKey(row.repo)}
                   row={row}
+                  people={board.data?.people ?? {}}
                   selectable={runnable}
+                  onHide={hideable ? () => setHidden(row.repo, true) : undefined}
                   selected={selected.has(repoKey(row.repo))}
                   onSelect={(on) =>
                     setSelected((current) => {
@@ -312,6 +356,35 @@ export function ReleaseBoardPage() {
           </Table>
         )}
       </Panel>
+      {board.data?.hidden.length ? (
+        <Panel
+          title={`${board.data.hidden.length} hidden`}
+          description="Not read from the forges and left out of the board, e.g. monorepos with their own release flow"
+        >
+          <ul className="flex flex-col divide-y divide-separator text-sm">
+            {board.data.hidden.map((entry) => (
+              <li key={repoKey(entry.repo)} className="flex flex-wrap items-center gap-3 py-2">
+                <ReleaseRepoLink repo={entry.repo} />
+                <span className="text-xs text-muted">
+                  hidden by {actorName(board.data.people, entry.by, entry.name)}{' '}
+                  {formatRelative(entry.at)}
+                </span>
+                {hideable ? (
+                  <Button
+                    size="sm"
+                    variant="tertiary"
+                    className="ml-auto"
+                    onPress={() => setHidden(entry.repo, false)}
+                  >
+                    <Eye className="size-3.5" />
+                    Show
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
       <Dialog
         isOpen={batch !== undefined}
         onOpenChange={(open) => {

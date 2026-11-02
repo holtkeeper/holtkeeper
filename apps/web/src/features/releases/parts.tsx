@@ -1,12 +1,31 @@
 import type {
   DeployState,
   PipelineState,
+  ReleaseLink,
+  ReleaseLinkKind,
   ReleaseBoardRow,
   ReleaseBump,
   RepoRef,
 } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
-import { CircleCheck, CircleDashed, CircleX, LoaderCircle } from 'lucide-react'
+import {
+  CircleCheck,
+  CircleDashed,
+  CircleX,
+  FolderGit2,
+  GitBranch,
+  GitCompare,
+  GitMerge,
+  GitPullRequest,
+  LoaderCircle,
+  OctagonAlert,
+  Package,
+  Server,
+  Tag,
+  Tags,
+  Workflow,
+} from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import {
   bumpTones,
@@ -103,5 +122,58 @@ export function DeployChips({ deploy }: { deploy?: DeployState | undefined }) {
         </Tooltip>
       ))}
     </div>
+  )
+}
+
+const linkIcons: Record<ReleaseLinkKind, ReactNode> = {
+  'merge-request': <GitMerge className="size-3.5" />,
+  blocker: <OctagonAlert className="size-3.5 text-danger" />,
+  tag: <Tag className="size-3.5" />,
+  compare: <GitCompare className="size-3.5" />,
+  pipeline: <Workflow className="size-3.5" />,
+  repository: <FolderGit2 className="size-3.5" />,
+  'merge-requests': <GitPullRequest className="size-3.5" />,
+  branches: <GitBranch className="size-3.5" />,
+  tags: <Tags className="size-3.5" />,
+  releases: <Package className="size-3.5" />,
+  pipelines: <Workflow className="size-3.5" />,
+  environments: <Server className="size-3.5" />,
+}
+
+function ReleaseLinkItem({ link }: { link: ReleaseLink }) {
+  return (
+    <a
+      href={link.url}
+      target="_blank"
+      rel="noreferrer"
+      title={link.status ? `${link.label}: ${link.status}` : link.url}
+      className={`inline-flex items-center gap-1.5 rounded-full border border-separator px-2.5 py-1 text-xs hover:bg-default ${link.group === 'pages' ? 'text-muted' : ''}`}
+    >
+      {link.status ? pipelineIcon(link.status) : linkIcons[link.kind]}
+      {link.label}
+    </a>
+  )
+}
+
+/** Forge links of a release: its merge requests, tags, diffs and pipelines, then project pages. */
+export function ReleaseLinks({ links }: { links: readonly ReleaseLink[] }) {
+  if (!links.length) return null
+  const current = links.filter((link) => link.group === 'current')
+  const pages = links.filter((link) => link.group === 'pages')
+  return (
+    <nav aria-label="Forge links" className="flex flex-col gap-2">
+      {current.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {current.map((link) => (
+            <ReleaseLinkItem key={`${link.kind}-${link.url}`} link={link} />
+          ))}
+        </div>
+      ) : null}
+      <div className="flex flex-wrap gap-1.5">
+        {pages.map((link) => (
+          <ReleaseLinkItem key={link.kind} link={link} />
+        ))}
+      </div>
+    </nav>
   )
 }

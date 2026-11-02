@@ -6,8 +6,10 @@ import { releaseEventKinds } from './settings.ts'
 export const acceptanceSchema = z.object({
   sha: z.string(),
   by: z.string(),
+  name: z.string().optional(),
   at: z.string(),
   via: z.enum(['manual', 'label', 'merge']),
+  channel: z.string().optional(),
   note: z.string().optional(),
 })
 
@@ -35,6 +37,8 @@ export const releaseEventSchema = z.object({
   repo: z.object({ forge: z.string(), path: z.string() }),
   at: z.string(),
   actor: z.string(),
+  actorName: z.string().optional(),
+  channel: z.string().optional(),
   version: z.string().optional(),
   tag: z.string().optional(),
   environment: z.string().optional(),

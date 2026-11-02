@@ -158,9 +158,21 @@ export async function collectFacts({
     recorded && signals.includes('manual')
       ? recorded
       : merged && signals.includes('label') && merged.labels.includes(settings.acceptance.label)
-        ? { sha: target.sha, by: merged.author, at: merged.mergedAt ?? '', via: 'label' }
+        ? {
+            sha: target.sha,
+            by: merged.author,
+            at: merged.mergedAt ?? '',
+            via: 'label',
+            channel: 'forge',
+          }
         : merged && signals.includes('merge')
-          ? { sha: target.sha, by: merged.author, at: merged.mergedAt ?? '', via: 'merge' }
+          ? {
+              sha: target.sha,
+              by: merged.author,
+              at: merged.mergedAt ?? '',
+              via: 'merge',
+              channel: 'forge',
+            }
           : undefined
 
   const blocking = settings.gates.blockingLabels

@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { keys, useReleaseActions, useReleaseRepo, useSettingMutations } from '../../api/queries.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { countLabel } from '../../lib/releases.ts'
+import { actorName, channelLabel, countLabel } from '../../lib/releases.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import {
   Button,
@@ -24,7 +24,7 @@ import {
 } from '../../ui/index.ts'
 import { RepoAvatar } from '../repos/RepoAvatar.tsx'
 import { DeployPanel } from './DeployPanel.tsx'
-import { StageChip } from './parts.tsx'
+import { ReleaseLinks, StageChip } from './parts.tsx'
 import { PlanWorkspace } from './PlanWorkspace.tsx'
 
 const eventLabels: Record<ReleaseEvent['kind'], string> = {
@@ -67,7 +67,11 @@ function AcceptancePanel({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
           <div className="flex items-start gap-2 text-success">
             <BadgeCheck className="mt-0.5 size-4 shrink-0" />
             <span>
-              Accepted by <b>{accepted.by}</b> {formatRelative(accepted.at)} ({accepted.via})
+              Accepted by <b>{actorName(view.people, accepted.by, accepted.name)}</b>{' '}
+              {[channelLabel(accepted.channel), formatRelative(accepted.at)]
+                .filter(Boolean)
+                .join(' ')}
+              {accepted.via === 'manual' ? '' : ` (${accepted.via})`}
               {accepted.note ? `: ${accepted.note}` : ''}
             </span>
           </div>
@@ -152,7 +156,13 @@ function HistoryPanel({ view }: { view: ReleaseRepoView }) {
               </a>
             ) : null}
             <span className="ml-auto text-xs text-muted" title={formatDateTime(event.at)}>
-              {event.actor} · {formatRelative(event.at)}
+              {[
+                actorName(view.people, event.actor, event.actorName),
+                channelLabel(event.channel),
+                formatRelative(event.at),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </span>
           </li>
         ))}
@@ -302,6 +312,7 @@ export function ReleaseRepoPage() {
             </Notice>
           ) : null}
           <DetectionNotice repo={repo} view={data} />
+          <ReleaseLinks links={data.links} />
           {data.settings.flow.mode === 'external' ? (
             <Notice title="Released by another tool">
               The release flow marks this repository as released elsewhere (changesets,

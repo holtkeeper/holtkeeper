@@ -24,13 +24,34 @@ const tones: Record<ReleaseEvent['kind'], Notification['tone']> = {
   'deploy-failed': 'bad',
 }
 
+/** Who caused an event and where, e.g. `Jane Doe (Slack)`. */
+export function actorLabel(event: {
+  actor: string
+  actorName?: string | undefined
+  channel?: string | undefined
+}): string {
+  const name = event.actorName ?? event.actor
+  const where = event.channel ? (channelLabels[event.channel] ?? event.channel) : undefined
+  return where ? `${name} (${where})` : name
+}
+
+/** Human names of the channels `ReleaseChannel` knows. */
+export const channelLabels: Readonly<Record<string, string>> = {
+  ui: 'panel',
+  api: 'API',
+  cli: 'CLI',
+  forge: 'forge',
+  slack: 'Slack',
+  web: 'panel chat',
+}
+
 /** A channel-independent message for a release event. */
 export function releaseNotification(event: ReleaseEvent): Notification {
   const fields = [
     { label: 'Repository', value: event.repo.path },
     ...(event.tag ? [{ label: 'Version', value: event.tag }] : []),
     ...(event.environment ? [{ label: 'Environment', value: event.environment }] : []),
-    { label: 'By', value: event.actor },
+    { label: 'By', value: actorLabel(event) },
   ]
   return {
     title: titles[event.kind](event),

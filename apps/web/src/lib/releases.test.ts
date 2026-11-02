@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import type { ReleaseBoardRow, ReleaseEntry, ReleasePlan } from '@holtkeeper/api'
 
 import {
+  actorName,
   bumpChoices,
+  channelLabel,
   countLabel,
   entrySections,
   failingGates,
@@ -102,5 +104,15 @@ describe('helpers', () => {
         (r) => r.repo.path,
       ),
     ).toEqual(['c', 'a', 'b'])
+  })
+
+  test('names who ran a step and where', () => {
+    const people = { u1: { name: 'Jane Doe', avatarUrl: '/a.svg' } }
+    expect(actorName(people, 'u1', 'Old name')).toBe('Jane Doe')
+    expect(actorName(people, 'u2', 'Sam Roe')).toBe('Sam Roe')
+    expect(actorName(people, 'lead')).toBe('lead')
+    expect(channelLabel('slack')).toBe('in Slack')
+    expect(channelLabel('teams')).toBe('in teams')
+    expect(channelLabel(undefined)).toBeUndefined()
   })
 })

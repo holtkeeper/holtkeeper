@@ -32,6 +32,8 @@ export class FakeForge {
   readonly releases = new Map<string, ForgeRelease>()
   readonly files = new Map<string, string>()
   readonly calls: string[] = []
+  /** How many times `listCommits` was called: how often the release state was read. */
+  listedCommits = 0
   /** Merge request notes by id, as last written. */
   readonly notes = new Map<number, { mergeRequest: number; body: string }>()
   private counter = 0
@@ -227,6 +229,7 @@ export class FakeForge {
       ),
     listTags: async () => this.tags,
     listCommits: async (_repo, query) => {
+      this.listedCommits++
       const head = this.resolve(query.ref)
       if (!head) throw new Error(`unknown ref ${query.ref}`)
       const excluded = new Set(query.since ? this.reachable(this.resolve(query.since)!) : [])

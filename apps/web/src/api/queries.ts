@@ -6,6 +6,7 @@ import type {
   ReleaseBatchInput,
   ReleaseDeployInput,
   ReleaseEditsInput,
+  ReleaseHiddenInput,
   ReleaseRepoView,
   ReleaseStepInput,
   ReleaseSummaryInput,
@@ -77,8 +78,8 @@ export const keys = {
   accounts: ['accounts'] as const,
   chat: ['chat'] as const,
   digests: ['digests'] as const,
-  users: ['users'] as const,
   slack: ['slack'] as const,
+  users: ['users'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
   releases: ['releases'] as const,
@@ -786,7 +787,6 @@ export function useReindexLibraries() {
 }
 
 /** External accounts (GitLab, GitHub, Slack, ...) linked to the signed-in principal. */
-/** Every digest, the analysis kinds sections can read and the presets. */
 /** How Slack is connected, what to set up there, and the channel policy. */
 export const useSlackSettings = () => useQuery({ queryKey: keys.slack, queryFn: api.slackSettings })
 
@@ -823,6 +823,7 @@ export function useClaimAccount() {
   })
 }
 
+/** Every digest, the analysis kinds sections can read and the presets. */
 export const useDigests = () => useQuery({ queryKey: keys.digests, queryFn: api.digests })
 
 /** What a digest being edited would send now; previous previews stay while a new one loads. */
@@ -1190,13 +1191,16 @@ export const useMcpUsage = (days: number) =>
 const deployActive = (state: DeployState | undefined) =>
   state?.environments.some((env) => env.status === 'pending' || env.status === 'running') ?? false
 
-/** Release state of every repository; refreshes every minute, `refresh` reads the forges again. */
+/**
+ * Release state of every repository from the server's snapshot; refetches every minute, every
+ * 3 s while the server reads the forges.
+ */
 export const useReleaseBoard = (group?: string) =>
   useQuery({
     queryKey: keys.releaseBoard(group),
     queryFn: () => api.releaseBoard(group ? { group } : {}),
     placeholderData: keepPreviousData,
-    refetchInterval: 60_000,
+    refetchInterval: (query) => (query.state.data?.refreshing ? 3_000 : 60_000),
   })
 
 /** Release page data of one repository; polls while a deploy of the latest version runs. */
@@ -1247,6 +1251,10 @@ export function useReleaseActions() {
       onSettled,
     }),
     withdraw: useMutation({ mutationFn: (repo: RepoRef) => api.withdrawRelease(repo), onSettled }),
+    hide: useMutation({
+      mutationFn: (input: ReleaseHiddenInput) => api.setReleaseHidden(input),
+      onSettled,
+    }),
     deploy: useMutation({
       mutationFn: (input: ReleaseDeployInput) => api.startReleaseDeploy(input),
       onSettled,

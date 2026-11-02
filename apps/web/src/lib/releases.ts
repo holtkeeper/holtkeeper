@@ -1,4 +1,5 @@
 import type {
+  ActivityPerson,
   DeployStatus,
   GateResult,
   ReleaseBoardRow,
@@ -188,3 +189,23 @@ export const sortRows = (rows: readonly ReleaseBoardRow[]) =>
       stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage) ||
       a.repo.path.localeCompare(b.repo.path),
   )
+
+const channelLabels: Readonly<Record<string, string>> = {
+  ui: 'in the panel',
+  api: 'through the API',
+  cli: 'from the CLI',
+  forge: 'on the forge',
+  slack: 'in Slack',
+  web: 'in the panel chat',
+}
+
+/** Where a release step was run, e.g. `in Slack`; unknown chat surfaces show their id. */
+export const channelLabel = (channel: string | undefined): string | undefined =>
+  channel ? (channelLabels[channel] ?? `in ${channel}`) : undefined
+
+/** The name of who ran a step: the user's current name, the name recorded with it, else the id. */
+export const actorName = (
+  people: Readonly<Record<string, ActivityPerson>>,
+  id: string,
+  recorded?: string,
+): string => people[id]?.name ?? recorded ?? id
