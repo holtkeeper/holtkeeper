@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
 import {
   auditFreshness,
   parseRepoKey,
+  repoAccessAdvice,
   repoInitials,
   repoKey,
   repoName,
@@ -70,4 +71,27 @@ test('repoInitials match the server-generated avatar', () => {
   expect(repoInitials('acme/data-tools/dealer-frontend')).toBe('DD')
   expect(repoInitials('game-frontend')).toBe('GF')
   expect(repoInitials('api')).toBe('AP')
+})
+
+const account = { username: 'holtkeeper-bot', name: 'Holtkeeper' }
+const addable = (status: Parameters<typeof repoAccessAdvice>[0]['status']) =>
+  repoAccessAdvice({ status, account }, 'team/app').addable
+
+describe('repoAccessAdvice', () => {
+  test('names the account to invite when the repository is not visible', () => {
+    const advice = repoAccessAdvice({ status: 'not-found', account }, 'team/app')
+    expect(advice).toMatchObject({ tone: 'danger', addable: false })
+    expect(advice.text).toContain('invite @holtkeeper-bot')
+    expect(repoAccessAdvice({ status: 'not-found' }, 'team/app').text).toContain(
+      'the account of the forge token',
+    )
+  })
+
+  test('only readable repositories and unanswered checks can be added', () => {
+    expect(addable('ok')).toBe(true)
+    expect(addable('error')).toBe(true)
+    expect(addable('unauthorized')).toBe(false)
+    expect(addable('forbidden')).toBe(false)
+    expect(addable('archived')).toBe(false)
+  })
 })

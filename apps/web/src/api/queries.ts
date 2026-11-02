@@ -384,6 +384,16 @@ export function useForgeMutations() {
   }
 }
 
+/** Whether the forge's token can read `path`; off until both are given. */
+export const useRepoAccess = (forgeId: string | undefined, path: string | undefined) =>
+  useQuery({
+    queryKey: ['repo-access', forgeId ?? '', path ?? ''],
+    queryFn: () => api.repoAccess(forgeId ?? '', path ?? ''),
+    enabled: forgeId !== undefined && path !== undefined,
+    staleTime: 30_000,
+    retry: false,
+  })
+
 /** Repository groups of the effective config; needs global `settings:read`. */
 export const useGroups = (enabled = true) =>
   useQuery({ queryKey: [...keys.config, 'groups'], queryFn: api.groups, enabled })

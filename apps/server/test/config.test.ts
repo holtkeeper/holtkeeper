@@ -4,6 +4,7 @@ import type {
   ConfigEntryDetail,
   ConfigEntryList,
   ForgeWebhookResult,
+  RepoAccessView,
   SchedulePreview,
 } from '@holtkeeper/api'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -38,6 +39,8 @@ let credentialId: string
 let registrations: { target: WebhookTarget; hook: WebhookSpec }[]
 let removed: unknown[]
 
+const forgeError = (status: number) => Object.assign(new Error(`${status} failed`), { status })
+
 const cloudForge = {
   kind: 'gitlab',
   async ensureWebhook(target: WebhookTarget, hook: WebhookSpec) {
@@ -56,6 +59,22 @@ const cloudForge = {
   },
   async removeWebhook(hooks: unknown[]) {
     removed.push(...hooks)
+  },
+  async getCurrentUser() {
+    return { username: 'holtkeeper-bot', name: 'Holtkeeper' }
+  },
+  async getRepository(path: string) {
+    if (path === 'hidden/app') throw forgeError(404)
+    if (path === 'locked/app') throw forgeError(403)
+    if (path === 'flaky/app') throw new Error('socket hang up')
+    return {
+      path,
+      name: path.split('/').at(-1),
+      defaultBranch: 'main',
+      webUrl: `https://gitlab.com/${path}`,
+      cloneUrl: `https://gitlab.com/${path}.git`,
+      archived: path === 'old/app',
+    }
   },
 } as unknown as GitForge
 
@@ -292,6 +311,25 @@ describe('config routes', () => {
     const actions = (await store.activity.list()).map((e) => e.action)
     expect(actions).toContain('config.forge.webhook_created')
     expect(actions).toContain('config.forge.webhook_rotated')
+  })
+
+  test('access to a repository before it is added', async () => {
+    await putForge()
+    const check = async (path: string) =>
+      (await (
+        await call('GET', `/forges/cloud/repositories/access?path=${encodeURIComponent(path)}`)
+      ).json()) as RepoAccessView
+    const account = { username: 'holtkeeper-bot', name: 'Holtkeeper' }
+    expect(await check('studio/game')).toEqual({
+      status: 'ok',
+      account,
+      repository: { path: 'studio/game', name: 'game', webUrl: 'https://gitlab.com/studio/game' },
+    })
+    expect(await check('hidden/app')).toMatchObject({ status: 'not-found', account })
+    expect(await check('locked/app')).toMatchObject({ status: 'forbidden' })
+    expect(await check('old/app')).toMatchObject({ status: 'archived' })
+    expect(await check('flaky/app')).toMatchObject({ status: 'error', message: 'socket hang up' })
+    expect((await call('GET', '/forges/cloud/repositories/access')).status).toBe(400)
   })
 
   test('defaultWebhookTargets', () => {

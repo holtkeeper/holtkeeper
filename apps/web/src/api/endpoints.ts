@@ -102,6 +102,7 @@ import type {
   MeResponse,
   ProviderModelList,
   PutSettingInput,
+  RepoAccessView,
   RepoList,
   RepoPollResult,
   RepoRef,
@@ -323,6 +324,10 @@ export const api = {
     request<ForgeSshKeyResult>('POST', `/api/forges/${id(forgeId)}/ssh-key`, { body: input }),
   removeForgeSshKey: (forgeId: string) =>
     request<void>('DELETE', `/api/forges/${id(forgeId)}/ssh-key`),
+  repoAccess: (forgeId: string, path: string) =>
+    request<RepoAccessView>('GET', `/api/forges/${id(forgeId)}/repositories/access`, {
+      query: { path },
+    }),
   groups: () => request<ConfigEntryList<'group'>>('GET', '/api/config/groups'),
   putGroup: (groupId: string, data: GroupDocumentData) =>
     request<ConfigEntryView<'group'>>('PUT', `/api/config/groups/${id(groupId)}`, { body: data }),

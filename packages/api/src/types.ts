@@ -1374,6 +1374,21 @@ export interface ForgeSshKeyResult {
   notes: string[]
 }
 
+/**
+ * `GET /api/forges/:id/repositories/access?path=team/app`: whether the forge's token can read a
+ * repository before it is added. `ok`: readable and not archived. `not-found`: the path does not
+ * exist or the token's account is not a member (GitLab answers 404 for both). `unauthorized`: the
+ * token is invalid or expired. `forbidden`: the token lacks a scope. `archived`: Holtkeeper skips
+ * archived repositories. `error`: the forge could not be asked. `account` is the token's account
+ * when the forge tells it, the one to invite.
+ */
+export interface RepoAccessView {
+  status: 'ok' | 'not-found' | 'unauthorized' | 'forbidden' | 'archived' | 'error'
+  message?: string
+  account?: { username: string; name: string }
+  repository?: { path: string; name: string; webUrl: string }
+}
+
 /** `GET /api/schedules/:id/preview?count=10`: upcoming run times. */
 export interface SchedulePreview {
   id: string

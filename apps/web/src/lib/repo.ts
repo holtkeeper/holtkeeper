@@ -1,4 +1,4 @@
-import type { GroupDocumentData, RepoRef } from '@holtkeeper/api'
+import type { GroupDocumentData, RepoAccessView, RepoRef } from '@holtkeeper/api'
 
 /** `forge:path`, the form the API uses in query strings and activity subjects. */
 export const repoKey = (repo: RepoRef): string => `${repo.forge}:${repo.path}`
@@ -77,4 +77,65 @@ export function repoInitials(path: string): string {
       ? `${firstLetter(words[0])}${firstLetter(words[1])}`
       : name.slice(0, 2).toUpperCase()) || '?'
   )
+}
+
+/** What the add dialog says about a repository access check. */
+export interface RepoAccessAdvice {
+  tone: 'success' | 'warning' | 'danger'
+  title: string
+  text: string
+  /** Whether the repository may be added. */
+  addable: boolean
+}
+
+/**
+ * Advice for an access check of `path`: who to invite when the token cannot see it, what to fix
+ * when the token itself is wrong. A check the forge could not answer still lets the repository be
+ * added.
+ */
+export function repoAccessAdvice(view: RepoAccessView, path: string): RepoAccessAdvice {
+  const who = view.account ? `@${view.account.username}` : 'the account of the forge token'
+  switch (view.status) {
+    case 'ok':
+      return {
+        tone: 'success',
+        title: 'Holtkeeper can read this repository',
+        text: view.account ? `Through ${who}.` : '',
+        addable: true,
+      }
+    case 'not-found':
+      return {
+        tone: 'danger',
+        title: 'Repository not found',
+        text: `Either ${path} does not exist, or ${who} is not a member of it. Check the path, then invite ${who} to the project or its group: Reporter is enough for analyses, Developer lets it open merge requests.`,
+        addable: false,
+      }
+    case 'unauthorized':
+      return {
+        tone: 'danger',
+        title: 'The forge token is not accepted',
+        text: 'It is invalid, revoked or expired. Replace it in Credentials.',
+        addable: false,
+      }
+    case 'forbidden':
+      return {
+        tone: 'danger',
+        title: 'The forge token may not read this repository',
+        text: `Give the token the api or read_api scope, or ${who} a role in the project.`,
+        addable: false,
+      }
+    case 'archived':
+      return {
+        tone: 'warning',
+        title: 'The repository is archived',
+        text: 'Holtkeeper skips archived repositories; unarchive it on the forge first.',
+        addable: false,
+      }
+  }
+  return {
+    tone: 'warning',
+    title: 'Access could not be checked',
+    text: view.message ?? 'The forge did not answer.',
+    addable: true,
+  }
 }

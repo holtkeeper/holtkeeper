@@ -8,6 +8,7 @@ import type {
   ForgeSshKeyResult,
   ForgeWebhookInput,
   ForgeWebhookResult,
+  RepoAccessView,
   RepoExplain,
   RuntimeConfigView,
   SchedulePreview,
@@ -15,7 +16,7 @@ import type {
 import { ConfigError, type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
-import { type WebhookTarget, webhookEvents } from '@holtkeeper/forge'
+import { type WebhookTarget, forgeErrorStatus, webhookEvents } from '@holtkeeper/forge'
 import { nextRuns, staticPrefix, systemTimeZone } from '@holtkeeper/jobs'
 import {
   type ConfigSource,
@@ -595,6 +596,43 @@ export function configRoutes(deps: ServerDeps) {
       },
     )
     return c.json<ForgeWebhookResult>(result, 201)
+  })
+
+  app.get('/forges/:id/repositories/access', async (c) => {
+    authorize(c, 'settings:write', GLOBAL)
+    const path = c.req.query('path')?.trim()
+    if (!path) throw new HTTPException(400, { message: 'path is required' })
+    const forge = forgeFor(deps.config, c.req.param('id'))
+    const account = await forge.getCurrentUser?.().then(
+      ({ username, name }) => ({ username, name }),
+      () => undefined,
+    )
+    const withAccount = (answer: RepoAccessView): RepoAccessView =>
+      account ? { ...answer, account } : answer
+    try {
+      const repository = await forge.getRepository(path)
+      return c.json(
+        withAccount({
+          status: repository.archived ? 'archived' : 'ok',
+          repository: { path: repository.path, name: repository.name, webUrl: repository.webUrl },
+        }),
+      )
+    } catch (error) {
+      const status = forgeErrorStatus(error)
+      return c.json(
+        withAccount({
+          status:
+            status === 404
+              ? 'not-found'
+              : status === 401
+                ? 'unauthorized'
+                : status === 403
+                  ? 'forbidden'
+                  : 'error',
+          message: messageOf(error),
+        }),
+      )
+    }
   })
 
   const panelForge = async (id: string) => {

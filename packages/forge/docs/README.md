@@ -78,6 +78,10 @@ Optional: `ensureWebhook(target, { url, secret, events })` makes sure a hook wit
 | `note`         | `repo`, `mergeRequest`, `mergeRequestState`, `headSha?`, `author`, `body`, `discussionId?`, `inThread` (a diff or discussion note rather than a standalone comment)                                                                    |
 | `pipeline`     | `repo`, `mergeRequest`, `pipelineId`, `status`, `sha`, `actor`; only finished merge request pipelines                                                                                                                                  |
 
+## Errors
+
+Adapters throw errors that carry the forge's HTTP status as a numeric `status` (`GitLabApiError` of forge-gitlab). `forgeErrorStatus(error)` reads it, `undefined` for anything else, so callers tell a missing repository (404) from a rejected token (401) or a missing scope (403) without knowing the adapter.
+
 ## Read-only repositories
 
 `readOnlyForge(forge, isReadOnly)` returns `forge` with every change to a repository for which `isReadOnly(path)` (sync or async) is true rejected with `ReadOnlyRepositoryError` (`repo`, `operation`) before anything reaches the forge: `createBranch`, `deleteBranch`, `commit`, `createTag`, `createRelease`, `updateRelease`, the merge request writes (`createMergeRequest`, `updateMergeRequest`, `mergeMergeRequest`, `commentOnMergeRequest`), `submitReview`, `replyToDiscussion`, `resolveDiscussion`, `playJob`, `retryJob`, deploy keys (`registerSshKey` with a deploy scope, `enableDeployKey`) and project webhooks (`ensureWebhook` with `{ project }`). Reads, user keys, group webhooks and removing keys and hooks pass through; optional methods stay absent when the forge lacks them. `readOnlyDefinition(definition, isReadOnly)` does the same for every client a `ForgeDefinition` creates, including those of its `withFetch` copies.

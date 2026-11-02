@@ -1,8 +1,9 @@
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useForges, useGroups, usePutGroup } from '../../api/queries.ts'
-import { validateGroupId, validateRepoPath, withRepo } from '../../lib/repo.ts'
+import { useForges, useGroups, usePutGroup, useRepoAccess } from '../../api/queries.ts'
+import { repoAccessAdvice, validateGroupId, validateRepoPath, withRepo } from '../../lib/repo.ts'
+import { useDebounced } from '../../lib/use-debounced.ts'
 import {
   Button,
   Dialog,
@@ -16,7 +17,8 @@ import {
 
 /**
  * Adds a repository by including its exact path in a group of the panel config, an existing one or
- * a new one. The group decides which settings, schedules and access apply to it.
+ * a new one. The group decides which settings, schedules and access apply to it. The forge token
+ * must be able to read the repository first.
  */
 export function AddRepoDialog({ onClose }: { onClose: () => void }) {
   const forges = useForges()
@@ -44,8 +46,19 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
           ? 'A group with this id exists'
           : undefined))
       : undefined
+  const checkedPath = useDebounced(path.trim(), 400)
+  const access = useRepoAccess(
+    selectedForge,
+    checkedPath && validateRepoPath(checkedPath) === undefined ? checkedPath : undefined,
+  )
+  const current = checkedPath === path.trim() && access.data ? access.data : undefined
+  const advice = current ? repoAccessAdvice(current, checkedPath) : undefined
   const invalid =
-    !selectedForge || !target || validateRepoPath(path) !== undefined || groupError !== undefined
+    !selectedForge ||
+    !target ||
+    validateRepoPath(path) !== undefined ||
+    groupError !== undefined ||
+    !(advice ? advice.addable : access.isError && checkedPath === path.trim())
 
   const save = () => {
     if (!selectedForge || !target) return
@@ -116,6 +129,15 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
           description="As in the forge URL, without the host"
           autoFocus
         />
+        {advice ? (
+          <Notice tone={advice.tone} title={advice.title}>
+            {advice.text || undefined}
+          </Notice>
+        ) : access.isError ? (
+          <Notice tone="warning" title="Access could not be checked">
+            {messageOf(access.error)}
+          </Notice>
+        ) : null}
         {forgeGroups.length ? (
           <Segmented
             aria-label="Group"
