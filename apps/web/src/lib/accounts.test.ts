@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { ExternalAccountView } from '@holtkeeper/api'
 
 import {
+  accountName,
   challengePending,
   forgeProviders,
   numericIdProvider,
@@ -98,4 +99,12 @@ test('toLinkInput trims and drops an empty username', () => {
     externalId: '42',
     username: 'jane',
   })
+})
+
+test('accounts are named as people see them', () => {
+  expect(accountName({ provider: 'slack:T1', username: 'Jane Doe', externalId: 'U1' })).toBe(
+    'Jane Doe',
+  )
+  expect(accountName({ provider: 'gitlab:work', username: 'jdoe', externalId: '42' })).toBe('@jdoe')
+  expect(accountName({ provider: 'slack:T1', externalId: 'U1' })).toBe('U1')
 })

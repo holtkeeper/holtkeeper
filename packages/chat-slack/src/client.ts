@@ -39,6 +39,8 @@ export interface SlackClient {
    * channels the bot is not in.
    */
   channel(id: string): Promise<SlackChannel>
+  /** A member by id (`users.info`, scope `users:read`): the name people see, then the real name. */
+  user(id: string): Promise<SlackUser>
   /** Answers through a slash command's or interaction's `response_url`. */
   respond(
     responseUrl: string,
@@ -54,6 +56,16 @@ export interface SlackIdentity {
   bot: string
   /** The workspace's web address, e.g. `https://acme.slack.com/`. */
   url?: string
+  /** Scopes the token was granted (`X-OAuth-Scopes`), when Slack reports them. */
+  scopes?: string[]
+}
+
+/** A member of the workspace. */
+export interface SlackUser {
+  id: string
+  /** The display name, else the real name, else the handle. */
+  name: string
+  realName?: string
 }
 
 /** A channel the bot can see (`conversations.list`). */
@@ -99,6 +111,17 @@ const channelEntrySchema = z.object({
 
 const channelSchema = z.object({ channel: channelEntrySchema })
 
+const userSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    name: z.string(),
+    real_name: z.string().optional(),
+    profile: z
+      .object({ display_name: z.string().optional(), real_name: z.string().optional() })
+      .optional(),
+  }),
+})
+
 const channelsSchema = z.object({
   channels: z.array(channelEntrySchema),
   response_metadata: z.object({ next_cursor: z.string().optional() }).optional(),
@@ -118,14 +141,14 @@ export function slackClient(options: SlackClientOptions): SlackClient {
     typeof options.token === 'function' ? options.token() : resolveSecret(options.token)
 
   /**
-   * Write methods take JSON; read methods (`auth.test`, `conversations.list`) ignore JSON
+   * Write methods take JSON; read methods (`auth.test`, `conversations.*`, `users.info`) ignore JSON
    * arguments, so they get a form instead.
    */
-  const raw = async (
+  const send = async (
     method: string,
     body: Record<string, unknown>,
-    encoding: 'json' | 'form' = 'json',
-  ): Promise<unknown> => {
+    encoding: 'json' | 'form',
+  ): Promise<{ json: unknown; scopes: string | null }> => {
     const form = new URLSearchParams(
       Object.entries(body).map(([key, value]): [string, string] => [key, String(value)]),
     )
@@ -145,8 +168,14 @@ export function slackClient(options: SlackClientOptions): SlackClient {
     const answer = statusSchema.safeParse(json)
     if (!answer.success) throw new SlackApiError(method, 'invalid_response')
     if (!answer.data.ok) throw new SlackApiError(method, answer.data.error ?? 'unknown_error')
-    return json
+    return { json, scopes: response.headers.get('x-oauth-scopes') }
   }
+
+  const raw = async (
+    method: string,
+    body: Record<string, unknown>,
+    encoding: 'json' | 'form' = 'json',
+  ): Promise<unknown> => (await send(method, body, encoding)).json
 
   const call = async (method: string, body: Record<string, unknown>) => {
     const answer = answerSchema.safeParse(await raw(method, body))
@@ -170,10 +199,23 @@ export function slackClient(options: SlackClientOptions): SlackClient {
       await call('chat.update', { channel, ts, text, blocks })
     },
     async identity() {
-      const answer = identitySchema.safeParse(await raw('auth.test', {}, 'form'))
+      const { json, scopes } = await send('auth.test', {}, 'form')
+      const answer = identitySchema.safeParse(json)
       if (!answer.success) throw new SlackApiError('auth.test', 'invalid_response')
       const { team_id: teamId, team, user_id: botUserId, user: bot, url } = answer.data
-      return { teamId, team, botUserId, bot, ...(url && { url }) }
+      return {
+        teamId,
+        team,
+        botUserId,
+        bot,
+        ...(url && { url }),
+        ...(scopes !== null && {
+          scopes: scopes
+            .split(',')
+            .map((scope) => scope.trim())
+            .filter(Boolean),
+        }),
+      }
     },
     async channels() {
       const found: SlackChannel[] = []
@@ -204,6 +246,17 @@ export function slackClient(options: SlackClientOptions): SlackClient {
         if (!cursor) break
       }
       return found.toSorted((a, b) => a.name.localeCompare(b.name))
+    },
+    async user(id) {
+      const answer = userSchema.safeParse(await raw('users.info', { user: id }, 'form'))
+      if (!answer.success) throw new SlackApiError('users.info', 'invalid_response')
+      const { user } = answer.data
+      const realName = user.profile?.real_name || user.real_name || undefined
+      return {
+        id: user.id,
+        name: user.profile?.display_name || realName || user.name,
+        ...(realName && { realName }),
+      }
     },
     async channel(id) {
       const answer = channelSchema.safeParse(

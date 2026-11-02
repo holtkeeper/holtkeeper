@@ -7,6 +7,7 @@ import { z } from 'zod'
 
 import { claimKey, claimSchema } from '../claims.ts'
 import { type Env, type ServerDeps, principalOf, readBody } from '../context.ts'
+import { describeAccounts } from '../slack.ts'
 
 const statusOf = { invalid: 400, forbidden: 403, 'not-found': 404, conflict: 409 } as const
 
@@ -66,8 +67,13 @@ export function accountRoutes(deps: ServerDeps) {
 
   app.get('/accounts', async (c) => {
     const principal = principalOf(c)
-    const accounts = await service().list(principal)
-    return c.json<ExternalAccountList>({ accounts: accounts.map(toAccountView) })
+    const accounts = await describeAccounts(deps, await service().list(principal))
+    return c.json<ExternalAccountList>({
+      accounts: accounts.map((account) => ({
+        ...toAccountView(account),
+        ...(account.providerName && { providerName: account.providerName }),
+      })),
+    })
   })
 
   app.post('/accounts', async (c) => {
@@ -116,7 +122,14 @@ export function accountRoutes(deps: ServerDeps) {
       target: { type: 'account', id: result.account.id },
       details: { provider: result.account.provider },
     })
-    return c.json<ExternalAccountView>(toAccountView(result.account), 201)
+    const [described] = await describeAccounts(deps, [result.account])
+    return c.json<ExternalAccountView>(
+      {
+        ...toAccountView(result.account),
+        ...(described?.providerName && { providerName: described.providerName }),
+      },
+      201,
+    )
   })
 
   app.post('/accounts/:id/challenge', async (c) => {

@@ -1,6 +1,7 @@
 import { type Action, scopeSchema } from '@holtkeeper/access'
 import { type SlackClient, type SlackIdentity, slackClient } from '@holtkeeper/chat-slack'
 import { resolveSecret } from '@holtkeeper/forge'
+import type { ExternalAccount } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import type { ServerDeps } from './context.ts'
@@ -23,6 +24,7 @@ const identitySchema = z.object({
   botUserId: z.string(),
   bot: z.string(),
   url: z.string().optional(),
+  scopes: z.array(z.string()).optional(),
 })
 
 const connectionSchema = z.object({
@@ -81,7 +83,7 @@ function createSlackService(deps: ServerDeps) {
     set: async (key: string, value: unknown) => void memory.set(key, value),
     delete: async (key: string) => void memory.delete(key),
   }
-  let fileIdentity: { at: number; identity: SlackIdentity | undefined } | undefined
+  let liveIdentity: { at: number; identity: SlackIdentity | undefined } | undefined
 
   const stored = async () => {
     const parsed = connectionSchema.safeParse(await kv.get(CONNECTION_KEY))
@@ -118,14 +120,20 @@ function createSlackService(deps: ServerDeps) {
   const configured = async () =>
     deps.config.chat?.slack !== undefined || (await stored()) !== undefined
 
-  /** The workspace and bot; for the file config asked from Slack and kept ten minutes. */
+  /**
+   * The workspace, bot and granted scopes, asked from Slack and kept ten minutes (so a reinstall
+   * with new scopes shows up); a panel connection falls back to what `auth.test` said when it was
+   * made.
+   */
   const identity = async (): Promise<SlackIdentity | undefined> => {
-    if (!deps.config.chat?.slack) return (await stored())?.identity
     const now = Date.now()
-    if (fileIdentity && now - fileIdentity.at < IDENTITY_TTL_MS) return fileIdentity.identity
-    const found = await client.identity().catch(() => undefined)
-    fileIdentity = { at: now, identity: found }
-    return found
+    if (!liveIdentity || now - liveIdentity.at >= IDENTITY_TTL_MS) {
+      const found = (await configured())
+        ? await client.identity().catch(() => undefined)
+        : undefined
+      liveIdentity = { at: now, identity: found }
+    }
+    return liveIdentity.identity ?? (await stored())?.identity
   }
 
   const connect = async (
@@ -146,6 +154,7 @@ function createSlackService(deps: ServerDeps) {
         `Slack refused the token: ${error instanceof Error ? error.message : String(error)}`,
       )
     }
+    liveIdentity = undefined
     await kv.set(CONNECTION_KEY, {
       botToken: await deps.vault.seal(input.botToken),
       signingSecret: await deps.vault.seal(input.signingSecret),
@@ -156,7 +165,10 @@ function createSlackService(deps: ServerDeps) {
     return found
   }
 
-  const disconnect = () => kv.delete(CONNECTION_KEY)
+  const disconnect = async () => {
+    liveIdentity = undefined
+    await kv.delete(CONNECTION_KEY)
+  }
 
   const policy = async (): Promise<SlackPolicy> => {
     const parsed = slackPolicySchema.safeParse((await kv.get(POLICY_KEY)) ?? {})
@@ -184,6 +196,43 @@ function createSlackService(deps: ServerDeps) {
 }
 
 export type SlackService = ReturnType<typeof createSlackService>
+
+/** Slack accounts named per request at most; the rest wait for the next listing. */
+const NAME_LOOKUPS = 10
+
+/**
+ * Account views for the panel: accounts of the connected workspace get `Slack · <workspace>`, and
+ * those stored without a username get the member's Slack name, which is kept on the account. Name
+ * lookups need the `users:read` scope; without it, or for other workspaces, accounts stay as they
+ * are.
+ */
+export async function describeAccounts<T extends ExternalAccount>(
+  deps: ServerDeps,
+  accounts: readonly T[],
+): Promise<(T & { providerName?: string })[]> {
+  const slack = slackServiceFor(deps)
+  const workspace = accounts.some((account) => account.provider.startsWith('slack:'))
+    ? await slack.identity().catch(() => undefined)
+    : undefined
+  if (!workspace) return [...accounts]
+  const provider = `slack:${workspace.teamId}`
+  let lookups = 0
+  return Promise.all(
+    accounts.map(async (account) => {
+      if (account.provider !== provider) return account
+      let named = account
+      if (!account.username && lookups < NAME_LOOKUPS) {
+        lookups++
+        const user = await slack.client.user(account.externalId).catch(() => undefined)
+        if (user) {
+          named = { ...account, username: user.name }
+          await deps.store.externalAccounts?.put(named).catch(() => undefined)
+        }
+      }
+      return { ...named, providerName: `Slack · ${workspace.team}` }
+    }),
+  )
+}
 
 const services = new WeakMap<ServerDeps, SlackService>()
 

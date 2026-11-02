@@ -178,12 +178,18 @@ function createServerChat(deps: ServerDeps): ServerChat {
       if (!base)
         throw new ChatUserError('This server has no public URL (server.publicUrl) to link from.')
       const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url')
+      const username =
+        message.actor.username ??
+        (await slackServiceFor(deps)
+          .client.user(message.actor.externalId)
+          .then((user) => user.name)
+          .catch(() => undefined))
       await kv.set(
         claimKey(token),
         {
           provider: message.actor.provider,
           externalId: message.actor.externalId,
-          ...(message.actor.username && { username: message.actor.username }),
+          ...(username && { username }),
         },
         CLAIM_TTL_SECONDS,
       )

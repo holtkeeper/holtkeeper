@@ -51,7 +51,18 @@ const slackFetch: SlackFetch = async (url, init) => {
       authorization === 'Bearer xoxb-good'
         ? { ok: true, team_id: 'T1', team: 'Acme', user_id: 'UBOT', user: 'holtkeeper' }
         : { ok: false, error: 'invalid_auth' },
+      {
+        headers: {
+          'x-oauth-scopes':
+            'chat:write,chat:write.public,commands,app_mentions:read,im:history,channels:read,groups:read',
+        },
+      },
     )
+  if (method === 'users.info')
+    return Response.json({
+      ok: true,
+      user: { id: body['user'], name: 'jdoe', profile: { display_name: 'Jane Doe' } },
+    })
   if (method === 'conversations.info')
     return Response.json(
       body['channel'] === 'G9'
@@ -188,6 +199,7 @@ describe('slack settings', () => {
     expect((await connect()).status).toBe(200)
     expect((await connect()).status).toBe(200)
     const view = await settings()
+    expect(view.missingScopes).toEqual(['users:read'])
     expect(view).toMatchObject({
       source: 'panel',
       workspace: { teamId: 'T1', team: 'Acme', bot: 'holtkeeper' },
@@ -260,6 +272,11 @@ describe('slack channels', () => {
       verification: 'challenge',
     } satisfies Partial<ExternalAccountView>)
     expect((await call('POST', '/accounts/claim', { token })).status).toBe(410)
+    expect(claimed.body).toMatchObject({ username: 'Jane Doe', providerName: 'Slack · Acme' })
+    const accounts = (await call('GET', '/accounts')).body as { accounts: ExternalAccountView[] }
+    expect(accounts.accounts).toEqual([
+      expect.objectContaining({ providerName: 'Slack · Acme', username: 'Jane Doe' }),
+    ])
   })
 
   test('narrow what people can do to the channel and use its default repository', async () => {

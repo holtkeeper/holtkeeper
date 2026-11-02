@@ -103,6 +103,8 @@ export interface ExternalAccountView {
   id: string
   userId: string
   provider: string
+  /** The provider in words when the server knows it, e.g. `Slack · Acme` for the connected workspace. */
+  providerName?: string
   externalId: string
   username?: string
   verification: ExternalVerification
@@ -299,7 +301,16 @@ export interface SlackPolicy {
 export interface SlackSettingsView {
   /** `file`: `chat.slack` of the config; `panel`: connected here; `none`: not connected. */
   source: 'file' | 'panel' | 'none'
-  workspace?: { teamId: string; team: string; botUserId: string; bot: string; url?: string }
+  workspace?: {
+    teamId: string
+    team: string
+    botUserId: string
+    bot: string
+    url?: string
+    scopes?: string[]
+  }
+  /** Scopes of the manifest the app was not granted; empty when Slack does not report them. */
+  missingScopes: string[]
   connectedAt?: string
   connectedBy?: string
   urls: { events: string; commands: string; interactions: string }

@@ -40,6 +40,17 @@ export function forgeProviders(
     })
 }
 
+/**
+ * How an account is named: chat accounts by their name as people see it, forge accounts as
+ * `@username`; the external id when no name is known.
+ */
+export function accountName(
+  account: Pick<ExternalAccountView, 'provider' | 'username' | 'externalId'>,
+): string {
+  if (!account.username) return account.externalId
+  return numericIdProvider(account.provider) ? `@${account.username}` : account.username
+}
+
 /** Label, tone and meaning of a verification level. */
 export function verificationLabel(verification: ExternalAccountView['verification']): {
   text: string

@@ -24,6 +24,7 @@ export const slackScopes: readonly { scope: string; why: string }[] = [
   { scope: 'im:history', why: 'commands in direct messages' },
   { scope: 'channels:read', why: 'list public channels to connect' },
   { scope: 'groups:read', why: 'list private channels the bot was invited to' },
+  { scope: 'users:read', why: 'show linked people by their Slack name' },
 ]
 
 /**

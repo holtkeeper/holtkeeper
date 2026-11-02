@@ -36,7 +36,7 @@ export function ClaimPage() {
           <EmptyState
             icon={<BadgeCheck aria-hidden className="text-success" />}
             title="Linked"
-            description={`Your ${providerLabel(claim.data.provider)} account now acts as you. Commands there follow your access.`}
+            description={`Your ${claim.data.providerName ?? providerLabel(claim.data.provider)} account now acts as you. Commands there follow your access.`}
             action={
               <LinkButton to="/account" variant="secondary">
                 See linked accounts

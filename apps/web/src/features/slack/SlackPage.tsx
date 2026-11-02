@@ -314,6 +314,33 @@ function Connection({ settings, editable }: { settings: SlackSettingsView; edita
           </Button>
         ) : null}
       </div>
+      {settings.missingScopes.length ? (
+        <div className="mt-4">
+          <Notice
+            tone="warning"
+            title={`The Slack app lacks ${settings.missingScopes.length === 1 ? 'a scope' : `${settings.missingScopes.length} scopes`}`}
+          >
+            <div className="flex flex-col gap-2 text-sm">
+              <div className="flex flex-wrap gap-1.5">
+                {settings.missingScopes.map((scope) => (
+                  <span
+                    key={scope}
+                    title={settings.scopes.find((entry) => entry.scope === scope)?.why}
+                    className="rounded-full bg-default/60 px-2.5 py-0.5 font-mono text-[11px]"
+                  >
+                    {scope}
+                  </span>
+                ))}
+              </div>
+              <p className="text-muted">
+                In the app: <b>OAuth &amp; Permissions → Bot Token Scopes</b>, add them, then{' '}
+                <b>Reinstall to Workspace</b>. Holtkeeper notices the new scopes within ten minutes;
+                if Slack shows a new bot token, disconnect and connect again with it.
+              </p>
+            </div>
+          </Notice>
+        </div>
+      ) : null}
       <ConfirmDialog
         isOpen={confirming}
         onOpenChange={setConfirming}

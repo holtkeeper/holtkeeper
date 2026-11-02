@@ -100,6 +100,11 @@ export function slackSettingsRoutes(deps: ServerDeps) {
       manifest,
       createAppUrl: slackCreateAppUrl(manifest),
       scopes: [...slackScopes],
+      missingScopes: workspace?.scopes
+        ? slackScopes
+            .map((entry) => entry.scope)
+            .filter((scope) => !workspace.scopes?.includes(scope))
+        : [],
       policy,
       actions: [...channelActions],
     }

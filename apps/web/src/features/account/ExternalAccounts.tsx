@@ -7,6 +7,7 @@ import { ApiError, messageOf } from '../../api/client.ts'
 import { useAccountMutations, useAccounts, useForges } from '../../api/queries.ts'
 import {
   type LinkDraft,
+  accountName,
   challengePending,
   forgeProviders,
   numericIdProvider,
@@ -101,7 +102,7 @@ export function ExternalAccounts() {
               const state = verificationLabel(account.verification)
               const verified = account.verification !== 'unverified'
               const pending = challengePending(account, now)
-              const name = account.username ? `@${account.username}` : account.externalId
+              const name = accountName(account)
               return (
                 <motion.li
                   key={account.id}
@@ -122,13 +123,15 @@ export function ExternalAccounts() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="font-medium">{providerLabel(account.provider)}</span>
-                      <span className="truncate font-mono text-xs">{name}</span>
-                      {account.username ? (
-                        <span className="font-mono text-xs text-muted">
-                          id {account.externalId}
-                        </span>
-                      ) : null}
+                      <span className="font-medium">
+                        {account.providerName ?? providerLabel(account.provider)}
+                      </span>
+                      <span
+                        className={`truncate ${account.username ? '' : 'font-mono text-xs'}`}
+                        title={`id ${account.externalId}`}
+                      >
+                        {name}
+                      </span>
                       <span title={state.description}>
                         <Chip tone={state.tone} size="sm">
                           {state.text}
@@ -172,7 +175,7 @@ export function ExternalAccounts() {
                       variant="ghost"
                       size="sm"
                       isIconOnly
-                      aria-label={`Unlink ${providerLabel(account.provider)} ${name}`}
+                      aria-label={`Unlink ${account.providerName ?? providerLabel(account.provider)} ${name}`}
                       onPress={() => setRemoving(account)}
                     >
                       <Trash2 className="size-3.5" />
