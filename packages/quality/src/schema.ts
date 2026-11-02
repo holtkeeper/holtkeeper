@@ -105,6 +105,7 @@ export const qualityDataSchema: z.ZodType<QualityData> = z.object({
       total: z.number().int().nonnegative(),
       outliers: z.number().int().nonnegative(),
       established: z.boolean().optional(),
+      enforcedBy: z.array(z.string()).optional(),
     }),
   ),
   coverage: z.object({ lines: counts.optional(), functions: counts.optional() }).optional(),

@@ -143,13 +143,16 @@ describe('typescript', () => {
   test('files named after what they declare are not file name outliers', async () => {
     const files = Object.fromEntries(
       Array.from({ length: 10 }, (_, i) => [
-        `src/roadUtil${String.fromCodePoint(65 + i)}.ts`,
+        `src/shapeUtil${String.fromCodePoint(65 + i)}.ts`,
         `export const x${i} = ${i}\n`,
       ]),
     )
     const dir = await project({
       ...files,
-      'src/BaseRoadLogic.ts': 'export class BaseRoadLogic {}\n',
+      'src/ShapeBase.ts': 'export class ShapeBase {}\n',
+      'src/ShapeBase.test.ts': "import { ShapeBase } from './ShapeBase.ts'\n",
+      'src/__tests__/ShapeBase.test.ts': 'export {}\n',
+      'typings/tiny-shape-kit.d.ts': "declare module 'tiny-shape-kit'\n",
       'src/app-info.ts': 'export const info = 1\n',
     })
     const result = await analyze(dir)
@@ -159,6 +162,60 @@ describe('typescript', () => {
     })
     expect(result.issues?.map((i) => i.file)).toEqual(['src/app-info.ts'])
     expect(result.issues?.[0]?.message).toContain('of 11 file names)')
+  })
+
+  test('names an explicit linter rule covers are left to that linter', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 10 }, (_, i) => [
+        `src/shapeUtil${String.fromCodePoint(65 + i)}.ts`,
+        `export const x${i} = ${i}\n`,
+      ]),
+    )
+    const shared = {
+      ...files,
+      'src/app-info.ts': 'export const info = 1\n',
+      'tools/app-tool.ts': 'export const tool = 1\n',
+    }
+    const scoped = await project({
+      ...shared,
+      'src/.oxlintrc.json':
+        '{ "rules": { "unicorn/filename-case": ["error", { "case": "camelCase" }] } }\n',
+    })
+    const result = await analyze(scoped)
+    expect(result.issues?.map((i) => i.file)).toEqual(['tools/app-tool.ts'])
+    expect(result.conventions?.find((c) => c.kind === 'file name')).toMatchObject({
+      outliers: 1,
+      enforcedBy: ['oxlint'],
+    })
+
+    const off = await project({
+      ...shared,
+      'eslint.config.js': "export default [{ rules: { 'unicorn/filename-case': 'off' } }]\n",
+      'biome.json': '{ "linter": { "rules": { "style": { "useNamingConvention": "error" } } } }\n',
+    })
+    expect((await analyze(off)).issues?.map((i) => i.file)).toEqual([
+      'src/app-info.ts',
+      'tools/app-tool.ts',
+    ])
+
+    const lsLint = await project({ ...shared, '.ls-lint.yml': 'ls:\n  .ts: camelCase\n' })
+    expect((await analyze(lsLint)).issues).toEqual([])
+  })
+
+  test('naming-convention selectors leave other kinds to inference', async () => {
+    const dir = await project({
+      'src/limits.ts': `${constants(twelve)}export const all = [${twelve.join(', ')}]\n`,
+      'src/odd.ts': 'const oddLimit = 1\nexport const odd = oddLimit\n',
+      'src/shapes.ts': `${Array.from({ length: 10 }, (_, i) => `export class Shape${i} {}\n`).join('')}export class widget_box {}\n`,
+      'eslint.config.js':
+        "export default [{ rules: { '@typescript-eslint/naming-convention': ['error', { selector: 'class', format: ['PascalCase'] }] } }]\n",
+    })
+    const result = await analyze(dir)
+    expect(result.issues?.map((i) => i.rule)).toEqual(['naming/module-constant'])
+    expect(result.conventions?.find((c) => c.kind === 'class')?.enforcedBy).toEqual(['eslint'])
+    expect(result.conventions?.find((c) => c.kind === 'module constant')?.enforcedBy).toBe(
+      undefined,
+    )
   })
 
   test('components, locals and skipped directories', async () => {

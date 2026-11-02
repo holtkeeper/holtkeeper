@@ -55,4 +55,29 @@ describe('qualityAnalysis', () => {
     expect(result.metrics.find((m) => m.id === 'naming')?.value).toBe(90)
     expect(JSON.stringify(result.sections[0])).toContain('none (mostly PascalCase)')
   })
+
+  test('names the linters that enforce a convention', () => {
+    const conventions = [
+      {
+        language: 'ts',
+        kind: 'file name',
+        dominant: 'camelCase',
+        share: 1,
+        total: 12,
+        outliers: 0,
+      },
+      {
+        language: 'ts',
+        kind: 'type',
+        dominant: 'PascalCase',
+        share: 0.9,
+        total: 20,
+        outliers: 0,
+        enforcedBy: ['biome', 'eslint'],
+      },
+    ]
+    const table = JSON.stringify(report({ conventions }).sections[0])
+    expect(table).toContain('"label":"Enforced by"')
+    expect(table).toContain('"enforcedBy":"biome, eslint"')
+  })
 })

@@ -66,6 +66,11 @@ export interface ConventionStat {
    * are reported. Absent in older data, read as true.
    */
   established?: boolean
+  /**
+   * Linters whose explicit naming rules cover some of these names (`eslint`, `biome`, ...).
+   * Covered names count in `share` but are never outliers: the linter reports them instead.
+   */
+  enforcedBy?: string[]
 }
 
 export interface CoverageSummary {

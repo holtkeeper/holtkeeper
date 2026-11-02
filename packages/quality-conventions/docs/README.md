@@ -26,6 +26,22 @@ const data = await analyzeQuality({ dir, checks: [conventionsCheck()] })
 
    References that need a different rewrite are expanded: `{ foo }` becomes `{ foo: FOO }`, and Rust `S { foo }` becomes `S { foo: FOO }`. Property keys, member accesses, keyword arguments and named arguments are not references and stay as they are.
 
+## Explicit linter rules
+
+Inference is a fallback for projects that do not state their naming rules. When a linter config does, the names it covers are left to that linter: they still count towards the convention's share, but they are never reported as outliers here, and the `ConventionStat` lists the linters in `enforcedBy`. A config covers the files under its own directory.
+
+| Tool    | Config files                                                   | Identifiers (TS/JS unless noted)             | File names (TS/JS unless noted)                                  |
+| ------- | -------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| ESLint  | `eslint.config.*`, `.eslintrc*`, `package.json`                | `@typescript-eslint/naming-convention`       | `unicorn/filename-case`, `check-file/filename-naming-convention` |
+| oxlint  | `.oxlintrc.json`, `oxlint.json`, `oxlint.config.ts`            | `naming-convention`                          | `unicorn/filename-case`, `filename-naming-convention`            |
+| Biome   | `biome.json`, `biome.jsonc`                                    | `useNamingConvention`                        | `useFilenamingConvention`                                        |
+| ls-lint | `.ls-lint.yml`, `.ls-lint.yaml`                                |                                              | every language                                                   |
+| Ruff    | `ruff.toml`, `.ruff.toml`, `pyproject.toml` with `[tool.ruff]` | Python, when `select` includes `N…` or `ALL` |                                                                  |
+
+`naming-convention` decides only the kinds its `selector`s name: `default` covers every kind, `variableLike` the variables, functions and components, `variable` the module constants, module variables, locals and components, `function` the functions and components, `typeLike` the classes, types and enums, `class`, `interface` and `typeAlias`, `enum` and `enumMember` their own kind, `memberLike` the methods and enum members, and `method`, `classMethod`, `objectLiteralMethod` and `typeMethod` the methods. Other selectors (`parameter`, `property`, `typeParameter`, ...) match no kind here. When the rule has no options, or its selectors cannot be read from the text (built in code or spread from a shared config), its defaults are assumed to cover every kind. Biome's `useNamingConvention` and Ruff's `N` rules always cover every kind of their language.
+
+Configs are matched by text, not evaluated: a rule counts when it is mentioned with a value other than `off` or `0`. Configs inside `node_modules` are ignored.
+
 ## Kinds per language
 
 | Language                                                     | Kinds                                                                                                                                                                                                                                                                                                                                                                                                                                        | Renames suggested for                                                                                                                                                                                    |
@@ -38,13 +54,14 @@ const data = await analyzeQuality({ dir, checks: [conventionsCheck()] })
 | Kotlin (`kt kts`)                                            | `constant` (`const val`), `property`, `function`, `method`, `type`, `enum entry`, `local variable`, `file name`                                                                                                                                                                                                                                                                                                                              | Locals only.                                                                                                                                                                                             |
 | PHP                                                          | `constant`, `function`, `method`, `type`, `property`, `local variable`, `file name`                                                                                                                                                                                                                                                                                                                                                          | None: variables can also be reached through strings (`compact`, `$$name`, interpolation).                                                                                                                |
 
-A file name is the base name up to its first dot, so `user-card.test.ts` counts as `user-card`. A file named after a name it declares (`BaseRoadLogic.ts` declaring `class BaseRoadLogic`) follows that name's convention and is not counted among file names. File names are reported but never renamed. Each `ConventionStat` says whether it is `established` (the `minNames` and `minShare` thresholds); only established conventions report outliers.
+A file name is the base name up to its first dot, so `user-card.test.ts` counts as `user-card`. A file named after a name it declares (`ShapeBase.ts` declaring `class ShapeBase`) follows that name's convention and is not counted among file names. Neither are its companions anywhere in the project that share the stem (`ShapeBase.test.ts`, `__tests__/ShapeBase.test.ts`, `ShapeBase.stories.tsx`), nor typings named after the module they declare (`typings/some-lib.d.ts` with `declare module 'some-lib'`). File names are reported but never renamed. Each `ConventionStat` says whether it is `established` (the `minNames` and `minShare` thresholds); only established conventions report outliers.
 
 ## API
 
 - `conventionsCheck(options?)` returns the `QualityCheck` named `conventions`. Its options are `minNames`, `minShare`, `warningShare`, `languages` (default `defaultLanguages`), `fileNames` (default `true`), `maxFileBytes` and `maxFiles`.
 - `classifyCase`, `compatibleStyles`, `fitsCase`, `isAmbiguousCase`, `splitWords` and `toCase` are the naming utilities.
 - `inferConvention(names, thresholds)` returns the dominant style, its share and the outliers of a list of names.
+- `explicitRules(dir, paths)` returns the naming rules linter configs among `paths` enforce, and `enforcedBy(rules, path, language, scope, kind?)` the tool covering one name.
 - `collectNames(spec, file)` and `renameEdits(spec, file, declared, newName)` are the building blocks for other tools.
 - The language specs are `typescript`, `javascript`, `go`, `python`, `rust`, `java`, `kotlin` and `php`, collected in `defaultLanguages`.
 

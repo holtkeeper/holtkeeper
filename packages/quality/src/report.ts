@@ -152,9 +152,12 @@ export const qualityAnalysis = defineAnalysis<QualityData>({
               { key: 'dominant', label: 'Convention', format: 'code' as const },
               { key: 'share', label: 'Follow it', unit: 'percent' as const, align: 'end' as const },
               { key: 'outliers', label: 'Outliers', align: 'end' as const },
+              ...(data.conventions.some((c) => c.enforcedBy?.length)
+                ? [{ key: 'enforcedBy', label: 'Enforced by' }]
+                : []),
             ],
-            rows: data.conventions.map((c) =>
-              c.established === false
+            rows: data.conventions.map((c) => ({
+              ...(c.established === false
                 ? {
                     language: c.language,
                     kind: c.kind,
@@ -171,8 +174,9 @@ export const qualityAnalysis = defineAnalysis<QualityData>({
                       tone: c.share >= 0.95 ? 'good' : c.share >= 0.8 ? 'warning' : 'bad',
                     },
                     outliers: c.outliers,
-                  },
-            ),
+                  }),
+              ...(c.enforcedBy?.length ? { enforcedBy: c.enforcedBy.join(', ') } : {}),
+            })),
           },
           ...(conventionIssues.length
             ? [{ type: 'issues' as const, items: issueItems(conventionIssues) }]

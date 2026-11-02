@@ -8,6 +8,7 @@ import type { ConventionStat, QualityCheck, QualityIssue, QualityResult } from '
 import { fitsCase, toCase } from './case.ts'
 import { type DeclaredName, collectNames } from './collect.ts'
 import { registerLanguages } from './dynamic.ts'
+import { enforcedBy, explicitRules } from './explicit.ts'
 import { walkFiles, listFiles } from './files.ts'
 import { type ConventionThresholds, inferConvention } from './infer.ts'
 import { defaultLanguages } from './languages/index.ts'
@@ -37,6 +38,8 @@ interface Sample {
   /** Index into `collectNames` of the file; absent for file names. */
   index?: number
   renamable: boolean
+  /** Tool whose explicit rule decides this name; it is then never reported here. */
+  enforcedBy?: string
 }
 
 interface Group {
@@ -65,6 +68,9 @@ function toRange({
   }
 }
 
+const declaresModule = (text: string, stem: string) =>
+  text.includes(`declare module '${stem}'`) || text.includes(`declare module "${stem}"`)
+
 const capitalize = (text: string) => (text[0]?.toUpperCase() ?? '') + text.slice(1)
 const kebab = (label: string) => label.replaceAll(/\s+/g, '-')
 const plural = (label: string) => (label.endsWith(' name') ? `${label}s` : `${label} names`)
@@ -91,7 +97,8 @@ async function readSource(
  * variables, components, types, file names, ... per language) is written in the project and
  * reports names that break an established convention. A file named after a name it declares
  * (`UserCard.tsx` declaring `UserCard`) follows that name's convention and is left out of file
- * names. Outliers that are not visible outside
+ * names, and so are its companions with the same stem (`UserCard.test.tsx`) and typings named
+ * after the module they declare. Outliers that are not visible outside
  * their file get a rename suggestion (`confidence: review`) covering every reference in scope.
  */
 export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck {
@@ -116,7 +123,9 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
     },
 
     async run({ dir, runner, signal }): Promise<QualityResult> {
-      const paths = (await listFiles(dir, runner, signal))
+      const files = await listFiles(dir, runner, signal)
+      const rules = await explicitRules(dir, files)
+      const paths = files
         .filter((path) => specFor(languages, path))
         .toSorted()
         .slice(0, maxFiles)
@@ -133,6 +142,8 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
         return group
       }
 
+      const declaredStems = new Set<string>()
+      const fileSamples: { group: Group; stem: string; path: string; enforcedBy?: string }[] = []
       for (const path of paths) {
         signal?.throwIfAborted()
         const spec = specFor(languages, path)
@@ -143,24 +154,36 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
         if (!file) continue
         const declaredNames = collectNames(spec, file)
         declaredNames.forEach((declared, index) => {
+          const tool = enforcedBy(rules, path, spec.id, 'identifiers', declared.kind.id)
           groupOf(spec.id, declared.kind.id, declared.kind.label, spec).samples.push({
             path,
             name: declared.name,
             range: toRange(declared.node.range()),
             index,
             renamable: declared.scope !== 'none',
+            ...(tool ? { enforcedBy: tool } : {}),
           })
         })
         const fileKind = fileNames ? (spec.fileNameKind?.(path) ?? 'file name') : undefined
         const stem = /(?:^|\/)([^./][^./]*)[^/]*$/.exec(path)?.[1]
-        const namedAfterDeclaration = declaredNames.some((declared) => declared.name === stem)
-        if (fileKind && stem && !namedAfterDeclaration)
-          groupOf(spec.id, kebab(fileKind), fileKind).samples.push({
+        if (!fileKind || !stem) continue
+        if (declaredNames.some((declared) => declared.name === stem)) declaredStems.add(stem)
+        else if (!declaresModule(file.text, stem))
+          fileSamples.push({
+            group: groupOf(spec.id, kebab(fileKind), fileKind),
+            stem,
+            path,
+            enforcedBy: enforcedBy(rules, path, spec.id, 'file names'),
+          })
+      }
+      for (const { group, stem, path, enforcedBy: tool } of fileSamples)
+        if (!declaredStems.has(stem))
+          group.samples.push({
             path,
             name: stem,
             renamable: false,
+            ...(tool ? { enforcedBy: tool } : {}),
           })
-      }
 
       const conventions: ConventionStat[] = []
       const issues: QualityIssue[] = []
@@ -172,7 +195,11 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
           options,
         )
         if (!inferred) continue
-        const { dominant, share, total, outliers, established } = inferred
+        const { dominant, share, total, established } = inferred
+        const outliers = inferred.outliers.filter((index) => !group.samples[index]?.enforcedBy)
+        const tools = [
+          ...new Set(group.samples.flatMap((sample) => sample.enforcedBy ?? [])),
+        ].toSorted()
         conventions.push({
           language: group.language,
           kind: group.label,
@@ -181,6 +208,7 @@ export function conventionsCheck(options: ConventionsOptions = {}): QualityCheck
           total,
           outliers: outliers.length,
           established,
+          ...(tools.length ? { enforcedBy: tools } : {}),
         })
         if (!established) continue
 
