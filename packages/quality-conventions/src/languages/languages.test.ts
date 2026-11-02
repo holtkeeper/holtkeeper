@@ -74,6 +74,8 @@ describe('name kinds', () => {
       '}',
       'export function renderRow() { const filter = 1; return <svg><filter /></svg> }',
       'export const Tile = withTheme(() => <div />)',
+      'export const Plate = withTheme(Tile)',
+      'function Sheet() { const cell = useMemo(() => <td />, []); const size = withUnit(2); return <table>{cell}{size}</table> }',
       '',
     ].join('\n')
     expect(names(typescript, 'shapes.tsx', text)).toEqual([
@@ -83,6 +85,10 @@ describe('name kinds', () => {
       'function:renderRow:none',
       'local-constant:filter:local',
       'component:Tile:none',
+      'component:Plate:none',
+      'component:Sheet:module',
+      'local-variable:cell:local',
+      'local-variable:size:local',
     ])
   })
 

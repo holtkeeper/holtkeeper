@@ -48,6 +48,7 @@ describe('duplicationCheck', () => {
     const plain = jscpdCommand({ bin: 'jscpd' }, '/out')
     expect(ignoreOf(plain)).toContain('**/*.test.*')
     expect(ignoreOf(plain)).toContain('**/*.md')
+    expect(ignoreOf(plain)).toContain('**/*.html')
     expect(plain[plain.indexOf('--min-tokens') + 1]).toBe('100')
     expect(ignoreOf(jscpdCommand({ bin: 'jscpd', tests: true }, '/out'))).not.toContain(
       '**/*.test.*',

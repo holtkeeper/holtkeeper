@@ -11,7 +11,8 @@ import { type LargeClone, parseJscpdReport } from './report.ts'
 /**
  * Paths skipped on top of `.gitignore`: dependencies, build output, lockfiles, data and asset
  * files (JSON, SVG, source maps, snapshots), prose and configuration (Markdown such as generated
- * changelogs, YAML such as Helm charts and CI) and generated code, whose repetition is not
+ * changelogs, YAML and templates such as Helm charts and CI, HTML such as generated API docs) and
+ * generated code, whose repetition is not
  * copy-pasted code.
  */
 export const defaultIgnore: readonly string[] = [
@@ -39,6 +40,10 @@ export const defaultIgnore: readonly string[] = [
   '**/*.mdx',
   '**/*.yml',
   '**/*.yaml',
+  '**/*.tpl',
+  '**/*.gotmpl',
+  '**/*.html',
+  '**/*.htm',
   '**/generated/**',
   '**/__generated__/**',
   '**/*.pb.*',

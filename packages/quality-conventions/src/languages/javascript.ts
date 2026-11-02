@@ -68,14 +68,16 @@ function returnsJsx(fn: SgNode): boolean {
 }
 
 const COMPONENT_FACTORY = /(?:^|\.)(?:lazy\w*|memo|forwardRef|createContext|styled|\w*Component)$/
-const HOC = /^(?:observer|inject|connect|with[A-Z]\w*)$/
+const HOC = /^(?:observer|inject|connect)$/
+const WRAPPER = /^with[A-Z]\w*$/
 const isJsxFile = (file: SourceFile) => /\.[jt]sx$/.test(file.path)
 const capitalized = (name: string) => /^[_$]*[A-Z]/.test(name)
 
 /**
  * Whether `value` builds a component: a component factory (`memo`, `lazy`, `styled.div`...``,
- * `styled(Button).attrs()`), a higher-order component (`observer`, `withRouter`, `connect(a)(B)`)
- * or any call that wraps a function returning JSX.
+ * `styled(Button).attrs()`), `observer`, `inject` or `connect(a)(B)`, or a `with*` wrapper given a
+ * component (`withTheme(Card)`, `withRouter(() => <div />)`). Hooks such as `useMemo(() => <a />)`
+ * build elements, not components, and `withUnit(2)` is no wrapper.
  */
 function isComponentValue(value: SgNode | null, file: SourceFile): boolean {
   if (value?.kind() !== 'call_expression') return false
@@ -83,17 +85,21 @@ function isComponentValue(value: SgNode | null, file: SourceFile): boolean {
   if (!callee) return false
   const text = callee.text()
   if (COMPONENT_FACTORY.test(text) || /^styled\b/.test(text)) return true
-  if (HOC.test(text.split('.').at(-1) ?? '')) return true
+  const name = text.split('.').at(-1) ?? ''
+  if (HOC.test(name)) return true
   if (isComponentValue(callee, file)) return true
   return (
-    isJsxFile(file) &&
-    (value.field('arguments')?.children() ?? []).some(
+    WRAPPER.test(name) &&
+    (value.field('arguments')?.namedChildren() ?? []).some(
       (arg) =>
-        (arg.kind() === 'arrow_function' || arg.kind() === 'function_expression') &&
-        returnsJsx(arg),
+        (arg.kind() === 'identifier' && capitalized(arg.text())) ||
+        (isJsxFile(file) &&
+          (arg.kind() === 'arrow_function' || arg.kind() === 'function_expression') &&
+          returnsJsx(arg)),
     )
   )
 }
+
 const tags = new WeakMap<SourceFile, Set<string>>()
 
 /** Names used as JSX tags (`<Icon />`, `<Context.Provider>`): values that are components. */
