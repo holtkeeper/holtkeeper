@@ -366,6 +366,7 @@ export const api = {
     request<ScheduleRunList>('GET', '/api/schedules/runs', { query: { limit } }),
   runSchedule: (scheduleId: string) =>
     request<ScheduleRunStarted>('POST', `/api/schedules/${id(scheduleId)}/run`),
+  runNewRepoTrigger: () => request<ScheduleRunStarted>('POST', '/api/triggers/new-repo/run'),
   backfillReleases: (input: ReleaseBackfillInput) =>
     request<ReleaseBackfillStarted>('POST', '/api/releases/backfill', { body: input }),
   releaseBoard: (filter: { group?: string; refresh?: boolean }) =>

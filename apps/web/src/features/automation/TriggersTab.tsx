@@ -1,5 +1,5 @@
 import type { ConfigEntryView } from '@holtkeeper/api'
-import { Pencil, Plus, Trash2, Undo2, Zap } from 'lucide-react'
+import { Pencil, Play, Plus, Trash2, Undo2, Zap } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -8,6 +8,7 @@ import {
   useConfigEntry,
   useConfigMutations,
   useJobAnalyzers,
+  useRunNewRepoTrigger,
 } from '../../api/queries.ts'
 import {
   type TriggerDraft,
@@ -25,6 +26,7 @@ import { formatGroupMatch } from '../../lib/scope.ts'
 import {
   Button,
   Chip,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   ErrorState,
@@ -65,6 +67,9 @@ const kindLabel = (kind: TriggerKind) => triggerKinds.find((k) => k.id === kind)
 export function TriggersTab() {
   const { can } = useSession()
   const writable = can('settings:write')
+  const runnable = can('analyses:run')
+  const [backfilling, setBackfilling] = useState(false)
+  const backfill = useRunNewRepoTrigger()
   const triggers = useConfigEntries('triggers')
   const [editing, setEditing] = useState<TriggerEntry | 'new' | null>(null)
   const [removing, setRemoving] = useState<TriggerEntry | null>(null)
@@ -101,7 +106,7 @@ export function TriggersTab() {
               <Th>When</Th>
               <Th>Analyzers</Th>
               <Th>Groups</Th>
-              {writable ? <Th /> : null}
+              {writable || runnable ? <Th /> : null}
             </tr>
           </thead>
           <tbody>
@@ -146,19 +151,32 @@ export function TriggersTab() {
                       <span className="text-sm text-muted">All groups</span>
                     )}
                   </Td>
-                  {writable ? (
+                  {writable || runnable ? (
                     <Td align="right">
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          isIconOnly
-                          aria-label={`Edit ${entry.id}`}
-                          onPress={() => setEditing(entry)}
-                        >
-                          <Pencil className="size-3.5" />
-                        </Button>
-                        {entry.provenance !== 'file' ? (
+                        {runnable && entry.data.on === 'newRepo' ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            aria-label="Run on every known repository"
+                            onPress={() => setBackfilling(true)}
+                          >
+                            <Play className="size-3.5" />
+                          </Button>
+                        ) : null}
+                        {writable ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            isIconOnly
+                            aria-label={`Edit ${entry.id}`}
+                            onPress={() => setEditing(entry)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                        ) : null}
+                        {writable && entry.provenance !== 'file' ? (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -195,6 +213,25 @@ export function TriggersTab() {
           onClose={() => setEditing(null)}
         />
       ) : null}
+      <ConfirmDialog
+        isOpen={backfilling}
+        onOpenChange={setBackfilling}
+        title="Run on every known repository?"
+        confirmLabel="Run"
+        isPending={backfill.isPending}
+        onConfirm={() =>
+          backfill.mutate(undefined, {
+            onSuccess: () => {
+              setBackfilling(false)
+              notify.success('Started', 'Jobs appear on the Jobs page as they are queued')
+            },
+            onError: (error) => notify.error('Not started', messageOf(error)),
+          })
+        }
+      >
+        Queues the trigger's analyzers for every repository of every group, as if each were new.
+        Jobs already waiting or running are not queued twice.
+      </ConfirmDialog>
       <RemoveEntryDialog
         collection="triggers"
         entry={removing}

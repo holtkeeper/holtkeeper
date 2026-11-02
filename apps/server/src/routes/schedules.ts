@@ -4,13 +4,17 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import { type Env, type ServerDeps, authorize } from '../context.ts'
+import { knownRepos, queueNewRepoJobs } from '../new-repos.ts'
 
 const GLOBAL = { kind: 'global' } as const
 
 /** Jobs read per schedule to build its recent runs. */
 const RUN_JOBS = 500
 
-/** Recent runs of every schedule and running one by hand. */
+/**
+ * Recent runs of every schedule, running one by hand, and running the new repository trigger on
+ * every repository Holtkeeper already knows.
+ */
 export function scheduleRoutes(deps: ServerDeps) {
   const { store, config } = deps
   const app = new Hono<Env>()
@@ -70,6 +74,36 @@ export function scheduleRoutes(deps: ServerDeps) {
       .catch((error: unknown) => console.error('schedules: logging a run failed', error))
     deps.onBackground?.(done)
     return c.json<ScheduleRunStarted>({ id, startedAt }, 202)
+  })
+
+  app.post('/triggers/new-repo/run', async (c) => {
+    const principal = authorize(c, 'analyses:run', GLOBAL)
+    if (!config.jobs?.onNewRepo)
+      throw new HTTPException(409, { message: 'the new repository trigger is not configured' })
+    const startedAt = deps.now().toISOString()
+    const run = async (): Promise<ScheduleRunResult> => {
+      const { repos, failed } = await knownRepos(config)
+      const result = await queueNewRepoJobs(deps, repos, { actor: principal.id })
+      return failed.length ? { ...result, error: `not listed: ${failed.join('; ')}` } : result
+    }
+    const done = run()
+      .catch((error: unknown): ScheduleRunResult => ({
+        queued: 0,
+        skipped: 0,
+        error: error instanceof Error ? error.message : String(error),
+      }))
+      .then((details) =>
+        store.activity.append({
+          at: deps.now().toISOString(),
+          actor: principal.id,
+          action: 'trigger.new_repo.run',
+          subject: 'new-repo',
+          details: { ...details },
+        }),
+      )
+      .catch((error: unknown) => console.error('triggers: logging a new-repo run failed', error))
+    deps.onBackground?.(done)
+    return c.json<ScheduleRunStarted>({ id: 'new-repo', startedAt }, 202)
   })
 
   return app

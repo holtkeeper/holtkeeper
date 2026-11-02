@@ -1,6 +1,11 @@
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
-import { type ForgeReaderFor, enqueueUnique, planSchedule } from '@holtkeeper/jobs'
+import {
+  type ForgeReaderFor,
+  enqueueUnique,
+  groupRepositories,
+  planSchedule,
+} from '@holtkeeper/jobs'
 
 import type { ServerDeps } from './context.ts'
 
@@ -25,22 +30,24 @@ export function newRepoAnalyzers(
 }
 
 /**
- * Queues the `jobs.onNewRepo` analyzers for repositories seen for the first time, limited to its
- * `groups` and to analyzers whose `appliesTo` matches (a failing check counts as applying). Jobs
- * get trigger `new-repo`; one already queued or running for the same analyzer and repository is
- * not queued again. Logs `job.new_repo` per repository that got jobs and resolves with how many
- * were queued. Does nothing without `jobs.onNewRepo`.
+ * Queues the `jobs.onNewRepo` analyzers for `repos`, limited to its `groups` and to analyzers
+ * whose `appliesTo` matches (a failing check counts as applying). Jobs get trigger `new-repo`;
+ * one already queued or running for the same analyzer and repository is skipped. Without `actor`
+ * (repositories polling found for the first time) it logs `job.new_repo` per repository that got
+ * jobs; with `actor` (a run by hand) the jobs carry it and the caller logs the run. Does nothing
+ * without `jobs.onNewRepo`.
  */
 export async function queueNewRepoJobs(
   deps: Pick<ServerDeps, 'config' | 'store' | 'analyzers' | 'now'>,
   repos: readonly RepoRef[],
-  options: { forgeFor?: ForgeReaderFor; log?: (line: string) => void } = {},
-): Promise<number> {
+  options: { forgeFor?: ForgeReaderFor; log?: (line: string) => void; actor?: string } = {},
+): Promise<{ queued: number; skipped: number }> {
   const { config, store } = deps
   const onNewRepo = config.jobs?.onNewRepo
-  if (!onNewRepo || repos.length === 0) return 0
+  const none = { queued: 0, skipped: 0 }
+  if (!onNewRepo || repos.length === 0) return none
   const kinds = newRepoAnalyzers(onNewRepo, deps.analyzers ?? [])
-  if (kinds.length === 0) return 0
+  if (kinds.length === 0) return none
   const requests = await planSchedule(
     { analyzers: kinds, ...(onNewRepo.groups && { groups: onNewRepo.groups }) },
     {
@@ -53,11 +60,17 @@ export async function queueNewRepoJobs(
     },
   )
   const at = deps.now().toISOString()
-  const { enqueued } = await enqueueUnique(
+  const { enqueued, skipped } = await enqueueUnique(
     store.jobs,
-    requests.map((request) => ({ ...request, trigger: 'new-repo' as const })),
+    requests.map((request) => ({
+      ...request,
+      trigger: 'new-repo' as const,
+      ...(options.actor && { actor: options.actor }),
+    })),
     at,
   )
+  const result = { queued: enqueued.length, skipped: skipped.length }
+  if (options.actor) return result
   const byRepo = new Map<string, string[]>()
   for (const job of enqueued) {
     const subject = `${job.repo.forge}:${job.repo.path}`
@@ -72,5 +85,27 @@ export async function queueNewRepoJobs(
       subject,
       details: { jobs },
     })
-  return enqueued.length
+  return result
+}
+
+/**
+ * Every repository of the config's groups, listed on their forges now, for running
+ * `jobs.onNewRepo` on repositories Holtkeeper already knows. A group that cannot be listed is
+ * reported in `failed` and left out.
+ */
+export async function knownRepos(
+  config: HoltkeeperConfig,
+): Promise<{ repos: RepoRef[]; failed: string[] }> {
+  const found = new Map<string, RepoRef>()
+  const failed: string[] = []
+  const list = groupRepositories(config)
+  for (const group of Object.keys(config.groups)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one group after another keeps rate limits
+      for (const repo of await list(group)) found.set(`${repo.forge}:${repo.path}`, repo)
+    } catch (error) {
+      failed.push(`${group}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  return { repos: [...found.values()], failed }
 }

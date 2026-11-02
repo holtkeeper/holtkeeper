@@ -10,6 +10,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 import { z } from 'zod'
 
+import { createApp } from '../src/app.ts'
 import type { JobAnalyzerInfo, ServerDeps } from '../src/context.ts'
 import { createEventDispatcher } from '../src/events.ts'
 import { newRepoAnalyzers } from '../src/new-repos.ts'
@@ -154,6 +155,37 @@ describe('jobs.onNewRepo', () => {
     listed = ['games/a']
     await p.listGroup('games')
     expect(await queued()).toEqual([])
+  })
+})
+
+describe('running the trigger on known repositories', () => {
+  test('queues for every repository of every group, once, and logs the run', async () => {
+    const background: Promise<unknown>[] = []
+    const app = createApp({
+      ...deps(configWith({ onNewRepo: { analyzers: ['quality'] } })),
+      onBackground: (work) => background.push(work),
+    })
+    listed = ['games/a', 'shop/b']
+    const response = await app.request('/api/triggers/new-repo/run', { method: 'POST' })
+    expect(response.status).toBe(202)
+    await Promise.all(background)
+    expect(await queued()).toEqual(['games/a quality new-repo', 'shop/b quality new-repo'])
+
+    await app.request('/api/triggers/new-repo/run', { method: 'POST' })
+    await Promise.all(background)
+    expect(await queued()).toHaveLength(2)
+    const runs = (await store.activity.list()).filter((a) => a.action === 'trigger.new_repo.run')
+    expect(runs.map((a) => a.details)).toEqual(
+      expect.arrayContaining([
+        { queued: 2, skipped: 0 },
+        { queued: 0, skipped: 2 },
+      ]),
+    )
+  })
+
+  test('answers 409 without the trigger', async () => {
+    const app = createApp(deps(configWith({})))
+    expect((await app.request('/api/triggers/new-repo/run', { method: 'POST' })).status).toBe(409)
   })
 })
 

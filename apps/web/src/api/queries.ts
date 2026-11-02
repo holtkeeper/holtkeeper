@@ -581,6 +581,15 @@ export function useRunSchedule() {
   })
 }
 
+/** Runs the new repository trigger on every repository Holtkeeper already knows. */
+export function useRunNewRepoTrigger() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.runNewRepoTrigger(),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs }),
+  })
+}
+
 /** One job with its log; refreshes while it is queued or running. */
 export const useJob = (jobId: string | undefined) =>
   useQuery({
