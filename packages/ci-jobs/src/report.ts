@@ -10,12 +10,12 @@ import type { CiJobsData, CiProblemKind, JobTrend } from './types.ts'
 const ms = (seconds: number | undefined) =>
   seconds === undefined ? undefined : Math.round(seconds * 1000)
 
-const weekLabel = (week: string) =>
-  new Date(`${week}T00:00:00Z`).toLocaleDateString('en', {
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  })
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+const weekLabel = (week: string) => {
+  const date = new Date(`${week}T00:00:00Z`)
+  return `${MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`
+}
 
 const signed = (value: number) => `${value > 0 ? '+' : value < 0 ? '−' : '±'}${Math.abs(value)}%`
 

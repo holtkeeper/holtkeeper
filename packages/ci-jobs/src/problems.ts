@@ -6,8 +6,12 @@ const FAILING_RATE = 10
 /** Pipelines that passed only on retry from which a job counts as flaky. */
 const FLAKY_PIPELINES = 2
 
-const dayLabel = (at: string) =>
-  new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+const dayLabel = (at: string) => {
+  const date = new Date(at)
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`
+}
 
 /**
  * The problems of one job: `slower` when its trend is, `failing` when at least 10% of its final
