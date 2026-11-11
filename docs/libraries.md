@@ -30,11 +30,11 @@ Libraries your own repositories publish are left out: their API already comes fr
 
 - **A store and an artifact store.** Every store (SQLite, Postgres) supports the index; the artifact store is `.holtkeeper/artifacts` by default or S3 (`server.artifacts`). Nothing else to deploy.
 - **Outbound HTTPS from the server process** (the scheduler leader runs the index, not the job workers): `registry.npmjs.org`, `proxy.golang.org`, `api.github.com`, `codeload.github.com`, and, for Go modules on vanity paths such as `golang.org/x/…`, those hosts. Bun honours `HTTPS_PROXY`/`HTTP_PROXY`, so a forward proxy works.
-- **Usage records.** The index starts from what repositories use:
-  - `usages` records (npm, exact versions): the **Package usage, weekly** schedule runs it on Thursday nights;
-  - `fleet` records (npm and Go): the **Quality, licenses and fleet, weekly** schedule runs it on Sunday nights.
+- **Dependency records.** The index starts from what repositories use:
+  - `depgraph` records (npm and Go, the resolved version of every direct dependency);
+  - `usages` records (npm, exact versions of the packages the code imports).
 
-  On a fresh install, run them once instead of waiting: **Jobs → Run analyzer → `usages`** for your repositories, and **Fleet → Run now** for each group. Go modules only come from `fleet`.
+  Freshness keeps both current. On a fresh install, run them once instead of waiting: **Jobs → Run analyzer → `depgraph`** (and `usages`) for your repositories. Go modules come from `depgraph`.
 
 ## Setup
 
@@ -51,13 +51,13 @@ The token is only used to read public repositories. It never reaches agents or j
 
 **What a run costs.** Requests are conditional: Holtkeeper keeps each answer's `ETag` and asks again with `If-None-Match`, and GitHub does not count the `304 Not Modified` it answers when nothing changed, so later runs spend requests only on what is new. When every token is used up, the run pauses until GitHub resets the limit (at most an hour), then continues where it stopped; it does not fail its sources. The first run of a few hundred libraries takes roughly 30–40 requests per library.
 
-**Watching the tokens.** The **Credentials** page (global `settings:read`) shows, in the card of every `github` credential, its GitHub account, requests, how many were answered `304` from the cache and how many hit a limit, and the live `core` limit; **Usage details** opens the other limits (`search`, `graphql` for issues) and the counts per resource. A token of an account that is already in the pool is marked as a duplicate. Below the cards, **GitHub API usage** sums the pool: how much of each limit is used across the distinct accounts and when it resets, waits for a reset, and requests per day by token over 7, 30 or 90 days.
+**Watching the tokens.** **Settings → Integrations** (credentials list, global `settings:read` for the usage) shows, in the card of every `github` credential, its GitHub account, requests, how many were answered `304` from the cache and how many hit a limit, and the live `core` limit; **Usage details** opens the other limits (`search`, `graphql` for issues) and the counts per resource. A token of an account that is already in the pool is marked as a duplicate. The pool as a whole is under **Settings → System** (Library index, global `settings:read`): **GitHub API usage** sums how much of each limit is used across the distinct accounts and when it resets, waits for a reset, and requests per day by token over 7, 30 or 90 days. The Credentials cards keep only each token's own line.
 
 ### 2. Nothing else to set
 
 The index is on by default and uses every credential of kind `github` it finds: once the credential from step 1 is saved, a new run starts with it (a running one is restarted with the new token). Without any token it reads GitHub anonymously and does not wait for GitHub's limit to reset; sources that hit it are retried on the next run.
 
-The **Settings → Libraries → Library docs** setting is only needed to change the defaults. Only its entry for **All repositories** counts. For example, to use just some of the tokens and skip packages you do not need:
+The **Library docs** setting (**Settings → System**) is only needed to change the defaults. Only its entry for **All repositories** counts. For example, to use just some of the tokens and skip packages you do not need:
 
 ```json
 {
@@ -68,28 +68,27 @@ The **Settings → Libraries → Library docs** setting is only needed to change
 
 Everything else has defaults:
 
-| Field           | Default                                           | Meaning                                                                                                                                    |
-| --------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enabled`       | `true`                                            | `false` stops indexing; what is indexed stays readable                                                                                     |
-| `interval`      | `1d`                                              | How often to look for new releases and uses, `<n>m`, `<n>h` or `<n>d`, at least `1h`                                                       |
-| `github`        | every `github` credential                         | Ids or names of the GitHub token credentials to use; `[]` reads GitHub anonymously                                                         |
-| `digests`       | `false`                                           | Summarize issue threads agents hit with the configured LLM (see [Issue digests](#issue-digests))                                           |
-| `refreshOnPush` | `true`                                            | Queue `usages` and `fleet` when a push to a default branch changes a manifest or lockfile                                                  |
-| `exclude`       | `["@types/*"]`                                    | Globs of library names never indexed; `Go:` limits a glob to Go, e.g. `Go:github.com/acme/**`                                              |
-| `include`       | `[]`                                              | Globs indexed even when no repository uses them                                                                                            |
-| `maxVersions`   | `8`                                               | Versions kept per library (1–50); the ones in use are always kept                                                                          |
-| `firstOfMajor`  | `true`                                            | Also index the `x.0.0` release of each crossed major                                                                                       |
-| `sources`       | `repository`, `releases`, `issues` on; `site` off | Turn single sources off, or docs sites on                                                                                                  |
-| `graceDays`     | `28`                                              | Days a version (or library) stays after nothing needs it any more                                                                          |
-| `concurrency`   | `3`                                               | Libraries indexed at the same time (1–8); a run mostly waits for the network, so a few at once make it faster while the GitHub limit lasts |
+| Field          | Default                                           | Meaning                                                                                                                                    |
+| -------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`      | `true`                                            | `false` stops indexing; what is indexed stays readable                                                                                     |
+| `interval`     | `1d`                                              | How often to look for new releases and uses, `<n>m`, `<n>h` or `<n>d`, at least `1h`                                                       |
+| `github`       | every `github` credential                         | Ids or names of the GitHub token credentials to use; `[]` reads GitHub anonymously                                                         |
+| `digests`      | `false`                                           | Summarize issue threads agents hit with the configured LLM (see [Issue digests](#issue-digests))                                           |
+| `exclude`      | `["@types/*"]`                                    | Globs of library names never indexed; `Go:` limits a glob to Go, e.g. `Go:github.com/acme/**`                                              |
+| `include`      | `[]`                                              | Globs indexed even when no repository uses them                                                                                            |
+| `maxVersions`  | `8`                                               | Versions kept per library (1–50); the ones in use are always kept                                                                          |
+| `firstOfMajor` | `true`                                            | Also index the `x.0.0` release of each crossed major                                                                                       |
+| `sources`      | `repository`, `releases`, `issues` on; `site` off | Turn single sources off, or docs sites on                                                                                                  |
+| `graceDays`    | `28`                                              | Days a version (or library) stays after nothing needs it any more                                                                          |
+| `concurrency`  | `3`                                               | Libraries indexed at the same time (1–8); a run mostly waits for the network, so a few at once make it faster while the GitHub limit lasts |
 
 ### 3. Watch the first run
 
-The first run starts about two minutes after the server starts; the server rereads the setting every 30 seconds, so changes need no restart. Later runs come every `interval`, about ten minutes after new `usages` or `fleet` records arrive, and on **Libraries → Reindex now** (needs global `analyses:run`).
+The first run starts about two minutes after the server starts; the server rereads the setting every 30 seconds, so changes need no restart. Later runs come every `interval`, about ten minutes after new `depgraph` or `usages` records arrive, and on **Settings → System → Reindex now** (needs global `analyses:run`).
 
-**Keeping up with the repositories.** Nobody maintains the list of libraries: every run takes it from the newest `usages` and `fleet` records, so packages added to a repository join the index, upgraded ones get their new versions, and dropped ones leave after `graceDays`. Those records are refreshed by the weekly schedules and, with `refreshOnPush` (on by default), right after a push to a repository's default branch that changes a manifest or lockfile (`package.json`, `bun.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `go.mod`, `go.sum`, ...): Holtkeeper queues `usages` for the repository and `fleet` for its groups, and the index runs about ten minutes after they finish. A version bump is in the index some 15–20 minutes after the merge. This needs the push to reach Holtkeeper: through the forge webhook, or through polling, which then also lists branches.
+**Keeping up with the repositories.** Nobody maintains the list of libraries: every run takes it from the newest `depgraph` and `usages` records, so packages added to a repository join the index, upgraded ones get their new versions, and dropped ones leave after `graceDays`. Freshness keeps those records current: `usages` reruns at most every 6 hours once the default branch moved past the commit its record describes (after the head stayed put for 30 minutes), and `depgraph` the same way. The index runs about ten minutes after new records arrive. Pushes reach freshness through the forge webhook at once; without one, freshness reads each default-branch head every 30 minutes.
 
-The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it on the **Libraries** page (sidebar **MCP → Libraries**): **Indexing now** shows how many libraries the running run has done of all, the ones it works on (`concurrency` at a time), the time so far with a rough estimate of the rest and, when every GitHub token is used up, until when it waits; **Coverage** shows per source (package archive, API, repository docs, release notes, issues) how many versions are indexed, have nothing to index, failed (fetched again on the next run) or are not fetched yet; **Last indexing run** shows the counts and failures of the run before. Or read the server log:
+The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it in **Settings → System** (global `settings:read`): **Indexing now** shows how many libraries the running run has done of all, the ones it works on (`concurrency` at a time), the time so far with a rough estimate of the rest and, when every GitHub token is used up, until when it waits; **Coverage** shows per source (package archive, API, repository docs, release notes, issues) how many versions are indexed, have nothing to index, failed (fetched again on the next run) or are not fetched yet; **Last indexing run** shows the counts and failures of the run before. Or read the server log:
 
 ```bash
 kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
@@ -99,11 +98,11 @@ kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
 
 ### In the web UI
 
-**MCP → Libraries** lists the indexed libraries that repositories you can read use, with their versions, how many repositories use them, document sections, issues and sources whose last fetch failed. A library's page shows every version with why it is kept (`used`, `patch`, `minor`, `major`, `first`, `latest`), who uses it, the status of each source, its documents and a search over them.
+**Dependencies** shows every library the repositories you can read use, your team's first, with the latest version the index found, how far behind each repository is, advisories and Renovate merge requests; a library opens in a side sheet (Overview, Upgrade, Docs) that answers from the index: what changed between your version and the latest, which uses an upgrade breaks, a **Copy as prompt** button that hands the plan to a coding agent, and a search over its docs. **Settings → System** (global `settings:read`) lists everything indexed with versions, document sections, issues and sources whose last fetch failed, and the GitHub API usage.
 
 ### From an agent over MCP
 
-1. Open **MCP server** in the sidebar and create a token. It acts as you, read-only, and sees only libraries your repositories use.
+1. Open **Settings → Access → MCP server** and create a token. It acts as you, read-only, and sees only libraries your repositories use.
 2. Add the server to your agent, e.g. Claude Code:
 
    ```bash
@@ -138,9 +137,9 @@ Review, port, propagate and other agent tasks get the same tools as `libraries.v
 
 ## Issue digests
 
-With `"digests": true`, the first time an issue thread comes up in a search it is summarized by the configured LLM into problem, symptoms, affected versions, fixed-in version and workaround, and the summary is stored, so later searches show it directly. At most three threads are summarized per search. Runs are charged to `llm.budget` under task kind `library-digest` and show up in **AI usage**. Over MCP they only happen when the call passes a `repo` you can read, since the repository decides which model and budget apply.
+With `"digests": true`, the first time an issue thread comes up in a search it is summarized by the configured LLM into problem, symptoms, affected versions, fixed-in version and workaround, and the summary is stored, so later searches show it directly. At most three threads are summarized per search. Runs are charged to `llm.budget` under task kind `library-digest` and show up under **Settings → AI**. Over MCP they only happen when the call passes a `repo` you can read, since the repository decides which provider credential and budget apply.
 
-The model is the `library-digest` entry of **Settings → AI → Models per task** (`llm.models`). Every preset there sets it to `claude-haiku@latest`; without an entry Holtkeeper still picks `claude-haiku@latest` when your provider lists it and falls back to **Model** (`llm.model`) otherwise. A summary is a short structured extraction, so a small model does it well; set another entry, e.g. `"library-digest": "claude-sonnet@latest"`, if you want more careful summaries.
+Digests run on the `fast` model tier, the newest Haiku your provider lists: a summary is a short structured extraction, so a small model does it well. There is no model setting.
 
 ## Tuning
 
@@ -154,8 +153,8 @@ The model is the `library-digest` entry of **Settings → AI → Models per task
 
 | Symptom                                                                           | Cause and fix                                                                                                                                                                                                              |
 | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The Libraries page says indexing is off                                           | The `libraries` entry for **All repositories** has `enabled: false`, or its value does not parse (an `interval` under `1h`, for example)                                                                                   |
-| The page is empty after a run                                                     | No `usages` or `fleet` records yet: run those analyses first                                                                                                                                                               |
+| Settings → System says indexing is off                                            | The `libraries` entry for **All repositories** has `enabled: false`, or its value does not parse (an `interval` under `1h`, for example)                                                                                   |
+| The page is empty after a run                                                     | No `depgraph` or `usages` records yet: run those analyses first                                                                                                                                                            |
 | `libraries: no GitHub token could be read; reading GitHub anonymously` in the log | None of the credentials the `github` field lists exists or can be read: check their names or ids, or remove the field to use every `github` credential. A single missing one is logged as `no credential "…"` and left out |
 | Runs take long and the log shows `github: core rate limit exhausted; waiting …`   | Every token is used up; the run waits for the reset and goes on. Add a token of another account to share the load                                                                                                          |
 | `github: two tokens belong to …` in the log                                       | Both tokens are of one GitHub account and share its limit; one of them is not used                                                                                                                                         |

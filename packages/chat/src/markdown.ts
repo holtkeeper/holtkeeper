@@ -91,6 +91,15 @@ const block = (part: CardBlock, prefix: string): string => {
       ].join('\n')
     case 'form':
       return formText(part.form, prefix)
+    case 'task':
+      return [
+        `**Change** (${part.status})`,
+        muteMentions(part.summary),
+        ...part.repos.map((repo) => {
+          const mr = part.mergeRequests?.find((each) => each.repo === repo)
+          return mr ? `- \`${repo}\`: [!${mr.id}](${mr.url})` : `- \`${repo}\``
+        }),
+      ].join('\n')
     default:
       return ''
   }

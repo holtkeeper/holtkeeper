@@ -160,6 +160,7 @@ export function createBrowserslistAnalyzer(
     kind: 'browserslist',
     analysis: browserslistAnalysis,
     scope: 'repo',
+    refresh: { on: 'time', cadence: '7d' },
     exclusive: true,
     needs: { forge: true },
     options: browserslistOptionsSchema,
@@ -202,7 +203,7 @@ export function createBrowserslistAnalyzer(
       const lockfile = await findLockfile(tree.dir)
       if (!lockfile) {
         log?.('browserslist: no root lockfile resolves caniuse-lite')
-        return { data: { status: 'not-applicable', ...empty }, ref: tree.sha }
+        return { data: { status: 'not-applicable', ...empty }, ref: tree.sha, sha: tree.sha }
       }
       const packageJson = Bun.file(join(tree.dir, 'package.json'))
       const manifest: { packageManager?: unknown } = (await packageJson.exists())
@@ -253,7 +254,11 @@ export function createBrowserslistAnalyzer(
       const files = await changedFiles(tree.dir, hostRunner)
       if (!files.length) {
         log?.(`browserslist: caniuse-lite ${after.join(', ')} is current`)
-        return { data: { status: 'up-to-date', ...empty, ...base, output }, ref: tree.sha }
+        return {
+          data: { status: 'up-to-date', ...empty, ...base, output },
+          ref: tree.sha,
+          sha: tree.sha,
+        }
       }
 
       if (targets.length && (await install()))
@@ -272,7 +277,7 @@ export function createBrowserslistAnalyzer(
       }
       if (options.dryRun) {
         log?.(`browserslist: dry run, ${files.length} changed file(s) not published`)
-        return { data, ref: tree.sha }
+        return { data, ref: tree.sha, sha: tree.sha }
       }
       const mergeRequest = await publishChanges({
         forge,
@@ -301,7 +306,7 @@ export function createBrowserslistAnalyzer(
           log?.(`browserslist: auto-merge ${error ? `not set: ${error}` : 'set'}`)
         }
       }
-      return { data, ref: tree.sha }
+      return { data, ref: tree.sha, sha: tree.sha }
     },
   })
 }

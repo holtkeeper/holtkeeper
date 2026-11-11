@@ -1,5 +1,5 @@
 import type { HoltkeeperConfig } from '@holtkeeper/core'
-import type { ForgeDefinition, ForgeFetch, RepoRef } from '@holtkeeper/forge'
+import type { ForgeFetch, RepoRef } from '@holtkeeper/forge'
 import {
   type LimitPolicy,
   type LimitedCredential,
@@ -10,14 +10,13 @@ import {
   limitJobs,
   resolveLimitPolicy,
 } from '@holtkeeper/limits'
-import { resolveSetting } from '@holtkeeper/settings'
 import type { Job, SettingEntry, Store } from '@holtkeeper/store'
 
-import { findProviderCredential } from './agent.ts'
+import { findProviderCredential, providerReference } from './agent.ts'
 import { repoTarget } from './context.ts'
 
-/** Limiter key of a file-config forge that has no stored credential. */
-export const fileForgeKey = (forgeId: string) => `forge:${forgeId}`
+/** Limiter key of a forge that has no stored credential. */
+export const forgeLimitKey = (forgeId: string) => `forge:${forgeId}`
 
 /** The `limits.credentials` value for everything (the entry with `scope.all`), if any. */
 export function globalLimits(
@@ -45,24 +44,6 @@ export function limitedFetch(
   return limitFetch(base, limiter, credential.id, policy)
 }
 
-/** File-config forges whose HTTP calls go through the limiter under `forge:<id>`. */
-export function limitFileForges(
-  forges: Record<string, ForgeDefinition>,
-  limiter: Limiter,
-  entries: readonly SettingEntry[],
-): Record<string, ForgeDefinition> {
-  return Object.fromEntries(
-    Object.entries(forges).map(([id, forge]) => [
-      id,
-      forge.withFetch
-        ? forge.withFetch((base) =>
-            limitedFetch(limiter, { id: fileForgeKey(id), kind: forge.kind }, entries, base),
-          )
-        : forge,
-    ]),
-  )
-}
-
 export interface JobKeysOptions {
   config: HoltkeeperConfig
   store: Store
@@ -73,22 +54,17 @@ export interface JobKeysOptions {
 }
 
 /**
- * Limiter keys a job uses: its forge's credential (or `forge:<id>` for file forges) and, for
- * analyzers that use an agent, the AI provider credential `llm.provider` resolves to for the
- * repository (or `ai:anthropic` for the legacy key).
+ * Limiter keys a job uses: its forge's credential (or `forge:<id>` without one) and, for
+ * analyzers that use an agent, the AI provider credential the global `llm.provider` names when its
+ * scope covers the repository.
  */
 export function jobLimitKeys(options: JobKeysOptions) {
   return async (job: Job): Promise<string[]> => {
-    const keys = [options.forgeCredential(job.repo.forge) ?? fileForgeKey(job.repo.forge)]
+    const keys = [options.forgeCredential(job.repo.forge) ?? forgeLimitKey(job.repo.forge)]
     if (!options.needsAgent(job.analyzer)) return keys
     const repo: RepoRef = job.repo
     const target = repoTarget(options.config, repo)
-    const entry = resolveSetting(
-      await options.store.settings.list('llm.provider'),
-      'llm.provider',
-      target,
-    )
-    const reference = typeof entry?.value === 'string' ? entry.value : undefined
+    const reference = providerReference(await options.store.settings.list('llm.provider'))
     if (!reference) return keys
     const credential = findProviderCredential(
       await options.store.credentials.list(),

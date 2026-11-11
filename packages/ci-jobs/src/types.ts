@@ -1,5 +1,3 @@
-import type { RefGroup } from './refs.ts'
-
 /** Tunables of the CI jobs analysis. */
 export interface CiJobsOptions {
   /** Length of the analyzed window, ending now. */
@@ -14,14 +12,11 @@ export interface CiJobsOptions {
   minChangeSeconds: number
 }
 
-/** Quantiles of durations in seconds over `samples` values. */
+/** Median and p90 of durations in seconds over `samples` values. */
 export interface Spread {
   samples: number
-  p25?: number
   median?: number
-  p75?: number
-  p95?: number
-  max?: number
+  p90?: number
 }
 
 /**
@@ -38,20 +33,7 @@ export interface ChangePoint {
   after: number
   /** First successful run at the new level. */
   sha?: string
-  ref?: string
   href?: string
-}
-
-export interface JobWeek {
-  week: string
-  /** Attempts, retried ones included. */
-  runs: number
-  p25?: number
-  median?: number
-  p75?: number
-  p95?: number
-  /** Percent of final attempts that failed; absent without any. */
-  failureRate?: number
 }
 
 export interface JobStats {
@@ -72,57 +54,30 @@ export interface JobStats {
   allowFailure: boolean
   /** Successful attempts. */
   duration: Spread
-  queueMedian?: number
-  /** Run time of every attempt, seconds. */
-  computeSeconds: number
-  /** Percent of the window's total run time. */
-  computeShare: number
   recentMedian?: number
   baselineMedian?: number
   /** Percent change of `recentMedian` over `baselineMedian`. */
   change?: number
   trend: JobTrend
   changePoint?: ChangePoint
-  weeks: JobWeek[]
-  last: { at: string; status: string; href: string; ref?: string }
+  /** Median of successful attempts per week of `CiJobsData.weeks`; `null` for weeks without one. */
+  weeks: (number | null)[]
+  last: { at: string; status: string; href: string }
 }
 
-export interface PipelineWeek {
-  week: string
-  pipelines: number
-  runs: number
-  failures: number
-  /** Percent of final attempts that failed. */
-  failureRate?: number
-  /** Pipeline time: seconds any job of the pipeline was running, gaps left out. */
-  p25?: number
-  median?: number
-  p75?: number
-  p95?: number
-  queueMedian?: number
-  computeSeconds: number
-}
-
-/** Pipelines of one kind of ref, e.g. every feature branch. */
-export interface RefGroupStats {
-  group: RefGroup
-  label: string
-  /** The forge's default branch belongs to this group. */
-  hasDefault: boolean
-  pipelines: number
-  /** Distinct refs, e.g. how many feature branches ran. */
-  refs: number
-  /** Percent of pipelines with a failed job (jobs allowed to fail left out). */
-  failureRate?: number
-  /** Pipeline time of pipelines without failures, seconds. */
+/** Pipelines the headline numbers describe. */
+export interface PipelineStats {
+  /** The branch they ran on: the default branch when it has pipelines; every ref when absent. */
+  ref?: string
+  count: number
+  /** Percent of pipelines where every final attempt of a job not allowed to fail passed. */
+  successRate?: number
+  /** Pipeline time of passing pipelines: seconds any of their jobs ran, gaps left out. */
   duration: Spread
-  recentMedian?: number
-  baselineMedian?: number
-  /** Percent change of `recentMedian` over `baselineMedian`. */
+  /** Queue time of their job attempts. */
+  queue: Spread
+  /** Percent change of the median pipeline time over the last 7 days against the 7 days before. */
   change?: number
-  weeks: { week: string; pipelines: number; median?: number; p95?: number }[]
-  /** Busiest refs of the group with their median pipeline time, at most five. */
-  topRefs: { ref: string; pipelines: number; median?: number }[]
 }
 
 /** Output of the `ci-jobs` analyzer: plain JSON, validated on ingest by `ciJobsDataSchema`. */
@@ -139,33 +94,26 @@ export interface CiJobsData {
     /** Earliest time a full sync asked the forge for; later runs fetch only what is new. */
     syncedFrom?: string
   }
-  sync: {
-    mode: 'full' | 'incremental' | 'none'
-    after?: string
-    fetched: number
-    stored: number
-  }
-  notes: string[]
-  totals: {
-    runs: number
-    pipelines: number
-    jobs: number
-    failures: number
-    failureRate?: number
-    retryRate: number
-    flakyJobs: number
-    slowerJobs: number
-    fasterJobs: number
-    computeSeconds: number
-    /** Pipeline wall time, seconds. */
-    wallTime: Spread
-    queue: Spread
-  }
-  weeks: PipelineWeek[]
-  /** Pipeline time by kind of ref, in `refGroups` order; groups without pipelines left out. */
-  refGroups: RefGroupStats[]
-  /** Compute seconds per stage, largest first. */
-  stages: { stage: string; computeSeconds: number }[]
-  /** Every job of the window, by compute time descending. */
+  /** Newest job attempt of the window. */
+  lastRunAt?: string
+  pipelines: PipelineStats
+  /** Pipeline time of passing `pipelines` per week (Monday, UTC), oldest first. */
+  weeks: { week: string; pipelines: number; median?: number; p90?: number }[]
+  /** Stages in the order pipelines run them. */
+  stages: string[]
+  /** Every job of the window, in stage order, then by name. */
   jobs: JobStats[]
+}
+
+/** Why a job made the problem list: it got slower, passes only on retry or keeps failing. */
+export type CiProblemKind = 'slower' | 'flaky' | 'failing'
+
+/** One row of the short problem list: a job, its problem and a one-line reason. */
+export interface CiProblem {
+  job: string
+  stage: string
+  kind: CiProblemKind
+  reason: string
+  /** Where to look: the run where a slowdown started, otherwise the job's last run. */
+  href: string
 }

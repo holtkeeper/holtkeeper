@@ -1,18 +1,27 @@
 import type {
-  DigestInput,
+  AcceptLearningInput,
+  AgentTaskStatus,
+  EditLearningInput,
+  FamilyInput,
+  GuideScopeKey,
+  GuideSectionName,
+  GuideTask,
+  LearningStatus,
+  PutGuideSectionInput,
+  RegenerateGuideInput,
+  AnalysisBackfillInput,
+  ChatMessageList,
+  ChatPostInput,
+  ChatThreadPatchInput,
   SlackSettingsView,
   DeployState,
   ReleaseAcceptInput,
-  ReleaseBatchInput,
   ReleaseDeployInput,
   ReleaseEditsInput,
-  ReleaseHiddenInput,
   ReleaseRepoView,
   ReleaseStepInput,
   ReleaseSummaryInput,
-  ReleaseBackfillInput,
   ApplyChangesInput,
-  AuditRunSummary,
   ClearStorageInput,
   DatabaseQuerySort,
   DeleteEgressCacheInput,
@@ -34,24 +43,32 @@ import type {
   UpdateCredentialInput,
   UpdateKnowledgeInput,
   UpdateUserInput,
+  UserPreferencesInput,
 } from '@holtkeeper/api'
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser'
 import {
   keepPreviousData,
   useInfiniteQuery,
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
 
-import { hasLiveCards } from '../lib/chat.ts'
+import { hasLiveCards, mergeMessages, withNewer, withOlder } from '../lib/chat.ts'
 import { repoKey } from '../lib/repo.ts'
-import { type AiUsageQuery, type AuditLogQuery, type ConfigCollections, api } from './endpoints.ts'
+import {
+  type AiUsageQuery,
+  type ConfigCollections,
+  type HistoryQuery,
+  type JobQuery,
+  api,
+} from './endpoints.ts'
 
 /** Query keys; invalidating a prefix refreshes everything below it. */
 export const keys = {
   me: ['me'] as const,
+  preferences: ['me', 'preferences'] as const,
+  home: ['home'] as const,
   repos: ['repos'] as const,
   repoUpdates: (repo: RepoRef) => ['repos', 'updates', repoKey(repo)] as const,
   groupListing: (group: string) => ['repos', 'updates', 'group', group] as const,
@@ -66,24 +83,33 @@ export const keys = {
   settings: ['settings'] as const,
   resolved: (repo: RepoRef) => ['settings', 'resolve', repoKey(repo)] as const,
   knowledge: ['knowledge'] as const,
+  guide: ['guide'] as const,
+  guideScope: (scope: GuideScopeKey) => ['guide', 'scope', scope] as const,
+  guideSection: (scope: GuideScopeKey, section: GuideSectionName) =>
+    ['guide', 'section', scope, section] as const,
+  guidePreview: (repo: RepoRef, task: GuideTask) =>
+    ['guide', 'preview', repoKey(repo), task] as const,
+  families: ['families'] as const,
+  learnings: ['learnings'] as const,
   config: ['config'] as const,
-  activity: ['activity'] as const,
   jobs: ['jobs'] as const,
   ai: ['ai'] as const,
-  auditLog: ['audit-log'] as const,
+  history: ['history'] as const,
   storage: ['storage'] as const,
   database: ['database'] as const,
   egressCache: ['egress-cache'] as const,
   libraries: ['libraries'] as const,
   accounts: ['accounts'] as const,
   chat: ['chat'] as const,
-  digests: ['digests'] as const,
   slack: ['slack'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
   link: (token: string) => ['link', token] as const,
   releases: ['releases'] as const,
-  releaseBoard: (group?: string) => ['releases', 'board', group ?? '*'] as const,
+  releaseOverview: ['releases', 'overview'] as const,
+  releaseTimeline: (repo: RepoRef) => ['releases', 'timeline', repoKey(repo)] as const,
+  releaseVersion: (repo: RepoRef, tag: string) =>
+    ['releases', 'version', repoKey(repo), tag] as const,
   releaseRepo: (repo: RepoRef) => ['releases', 'repo', repoKey(repo)] as const,
   releaseDeploy: (repo: RepoRef, tag: string) =>
     ['releases', 'deploy', repoKey(repo), tag] as const,
@@ -92,6 +118,10 @@ export const keys = {
 /** The signed-in principal and the login methods. */
 export const useMe = () =>
   useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 60_000 })
+
+/** The Home page in one read; refreshed every minute while it is open. */
+export const useHome = () =>
+  useQuery({ queryKey: keys.home, queryFn: api.home, refetchInterval: 60_000 })
 
 export const useRepos = (enabled = true) =>
   useQuery({ queryKey: keys.repos, queryFn: api.repos, enabled })
@@ -112,17 +142,6 @@ export const useAuditRun = (runId: string) =>
     staleTime: Infinity,
   })
 
-/** Full details of several runs at once (runs never change once stored). */
-export function useAuditRunDetails(runs: readonly AuditRunSummary[]) {
-  return useQueries({
-    queries: runs.map((run) => ({
-      queryKey: keys.auditRun(run.id),
-      queryFn: () => api.auditRun(run.id),
-      staleTime: Infinity,
-    })),
-  })
-}
-
 /** Analysis kinds the server understands. */
 export const useAnalysisKinds = () =>
   useQuery({ queryKey: ['analyses', 'kinds'], queryFn: api.analysisKinds, staleTime: Infinity })
@@ -136,6 +155,44 @@ export const useAnalyses = (kind: string, repo?: RepoRef, limit = 100, enabled =
     enabled,
   })
 
+/** Repositories with CI runs in the last 30 days, one card each, from their newest `ci-jobs` record. */
+export const useCiOverview = () =>
+  useQuery({ queryKey: ['ci', 'overview'], queryFn: api.ciOverview, staleTime: 60_000 })
+
+/** One repository's newest `ci-jobs` record with its problem jobs. */
+export const useCiRepo = (repo: RepoRef | undefined) =>
+  useQuery({
+    queryKey: ['ci', 'repo', repo ? repoKey(repo) : 'none'],
+    queryFn: () => api.ciRepo(repo!),
+    enabled: repo !== undefined,
+    staleTime: 60_000,
+  })
+
+/** Coverage cards of every readable repository with a coverage record. */
+export const useCoverageOverview = () =>
+  useQuery({
+    queryKey: ['coverage', 'overview'],
+    queryFn: () => api.coverageOverview(),
+    staleTime: 60_000,
+  })
+
+/** One repository's coverage card with its breakdown; disabled without a repository. */
+export const useRepoCoverage = (repo: RepoRef | undefined) =>
+  useQuery({
+    queryKey: ['coverage', 'repo', repo ? repoKey(repo) : 'none'],
+    queryFn: () => api.repoCoverage(repo!),
+    enabled: repo !== undefined,
+    staleTime: 60_000,
+  })
+
+/** A repository's effective asset policy and its newest assets record. */
+export const useRepoAssets = (repo: RepoRef) =>
+  useQuery({
+    queryKey: ['assets', 'repo', repoKey(repo)],
+    queryFn: () => api.repoAssets(repo),
+    staleTime: 60_000,
+  })
+
 /** Direct dependencies of every readable repository, joined per library. */
 export const useDependencies = (enabled = true) =>
   useQuery({
@@ -145,13 +202,53 @@ export const useDependencies = (enabled = true) =>
     enabled,
   })
 
-/** Update state of every readable repository from its newest Renovate, browserslist and propagation records. */
-export const useDependencyUpdates = (enabled = true) =>
+/** The newest stack record of every readable group: runtimes, end of life and conventions. */
+export const useStack = () =>
+  useQuery({ queryKey: ['stack'], queryFn: api.stack, staleTime: 60_000 })
+
+/** One library: who uses it, advisories, licenses, decisions, update MRs and its documents. */
+export const useDependency = (library: { ecosystem: string; name: string } | undefined) =>
   useQuery({
-    queryKey: ['dependency-updates'],
-    queryFn: api.dependencyUpdates,
+    queryKey: ['dependencies', 'library', library?.ecosystem ?? '', library?.name ?? ''],
+    queryFn: () => api.dependency(library!.ecosystem, library!.name),
+    enabled: library !== undefined,
     staleTime: 60_000,
+  })
+
+/** Changelog, API changes and affected uses of upgrading a library between two versions. */
+export const useDependencyUpgrade = (
+  query: { ecosystem: string; name: string; from?: string; to?: string },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      'dependencies',
+      'upgrade',
+      query.ecosystem,
+      query.name,
+      query.from ?? '',
+      query.to ?? '',
+    ],
+    queryFn: () => api.dependencyUpgrade(query),
+    placeholderData: keepPreviousData,
     enabled,
+    staleTime: 60_000,
+  })
+
+/** Library doc sections matching a query, best first; nothing is fetched for a blank query. */
+export const useDependencyDocs = (query: {
+  q: string
+  ecosystem?: string
+  name?: string
+  version?: string
+  limit?: number
+}) =>
+  useQuery({
+    queryKey: ['dependencies', 'docs', query],
+    queryFn: () => api.dependencyDocs(query),
+    placeholderData: keepPreviousData,
+    enabled: query.q.trim().length > 0,
+    staleTime: 60_000,
   })
 
 /** A rendered report, compared with `compare` or, by default, the previous record. */
@@ -218,20 +315,18 @@ export const useAiProviders = (enabled = true) =>
     enabled,
   })
 
-/** Models of a catalog provider; idle without one. */
-export const useAiProviderModels = (providerId: string | undefined) =>
-  useQuery({
-    queryKey: ['ai', 'providers', providerId, 'models'],
-    queryFn: () => api.aiProviderModels(providerId ?? ''),
-    staleTime: 3_600_000,
-    enabled: providerId !== undefined,
-  })
-
-/** Asks an `ai-sdk` credential's model for a one-word reply. */
-export const useTestCredential = () =>
-  useMutation({
+/**
+ * Tests an AI credential: a one-word reply for `ai-sdk`, the agent-loop probe for Anthropic kinds,
+ * whose stored result refreshes the credential list.
+ */
+export const useTestCredential = () => {
+  const client = useQueryClient()
+  return useMutation({
     mutationFn: ({ id, model }: { id: string; model?: string }) => api.testCredential(id, model),
+    onSuccess: (result) =>
+      result.capabilities ? client.invalidateQueries({ queryKey: keys.credentials }) : undefined,
   })
+}
 
 /** Create, update, rotate and delete credentials; each refreshes the list. */
 export function useCredentialMutations() {
@@ -299,7 +394,8 @@ export function useListGroup(group: string) {
   })
 }
 
-export const useSettings = () => useQuery({ queryKey: keys.settings, queryFn: api.settings })
+export const useSettings = (enabled = true) =>
+  useQuery({ queryKey: keys.settings, queryFn: api.settings, enabled })
 
 export const useResolvedSettings = (repo: RepoRef | undefined) =>
   useQuery({
@@ -310,7 +406,11 @@ export const useResolvedSettings = (repo: RepoRef | undefined) =>
 
 export function useSettingMutations() {
   const client = useQueryClient()
-  const onSuccess = () => client.invalidateQueries({ queryKey: keys.settings })
+  const onSuccess = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: keys.settings }),
+      client.invalidateQueries({ queryKey: ['assets'] }),
+    ])
   return {
     put: useMutation({ mutationFn: (input: PutSettingInput) => api.putSetting(input), onSuccess }),
     remove: useMutation({ mutationFn: (id: string) => api.deleteSetting(id), onSuccess }),
@@ -353,6 +453,162 @@ export function useKnowledgeMutations() {
       onSuccess,
     }),
     remove: useMutation({ mutationFn: (id: string) => api.deleteKnowledge(id), onSuccess }),
+  }
+}
+
+/** One scope's Guide: every section with its layers, whether the caller may edit it, and people. */
+export const useGuide = (scope: GuideScopeKey | undefined) =>
+  useQuery({
+    queryKey: scope ? keys.guideScope(scope) : ['guide', 'scope', 'none'],
+    queryFn: () => api.guide(scope!),
+    enabled: scope !== undefined,
+  })
+
+/** A section with the revisions of its human layer, loaded while the history sheet is open. */
+export const useGuideSection = (scope: GuideScopeKey, section: GuideSectionName | undefined) =>
+  useQuery({
+    queryKey: section ? keys.guideSection(scope, section) : ['guide', 'section', 'none'],
+    queryFn: () => api.guideSection(scope, section!),
+    enabled: section !== undefined,
+  })
+
+/** The effective Guide a task of `repo` gets, with its budget and warnings. */
+export const useGuidePreview = (repo: RepoRef | undefined, task: GuideTask) =>
+  useQuery({
+    queryKey: repo ? keys.guidePreview(repo, task) : ['guide', 'preview', 'none'],
+    queryFn: () => api.guidePreview(repo!, task),
+    enabled: repo !== undefined,
+  })
+
+/** Edit, restore and accept Guide sections, and queue regeneration; each refreshes every Guide query. */
+export function useGuideMutations() {
+  const client = useQueryClient()
+  const onSuccess = () => client.invalidateQueries({ queryKey: keys.guide })
+  return {
+    save: useMutation({
+      mutationFn: ({
+        scope,
+        section,
+        input,
+      }: {
+        scope: GuideScopeKey
+        section: GuideSectionName
+        input: PutGuideSectionInput
+      }) => api.putGuideSection(scope, section, input),
+      onSuccess,
+    }),
+    restore: useMutation({
+      mutationFn: ({
+        scope,
+        section,
+        version,
+      }: {
+        scope: GuideScopeKey
+        section: GuideSectionName
+        version: number
+      }) => api.restoreGuideSection(scope, section, version),
+      onSuccess,
+    }),
+    accept: useMutation({
+      mutationFn: ({
+        scope,
+        section,
+        inputHash,
+      }: {
+        scope: GuideScopeKey
+        section: GuideSectionName
+        inputHash?: string
+      }) => api.acceptGuideSection(scope, section, inputHash ? { inputHash } : {}),
+      onSuccess,
+    }),
+    regenerate: useMutation({
+      mutationFn: ({ repo, input }: { repo: RepoRef; input: RegenerateGuideInput }) =>
+        api.regenerateGuide(repo, input),
+      onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs }),
+    }),
+  }
+}
+
+/** Confirmed families the caller can see a member of. */
+export const useFamilies = (enabled = true) =>
+  useQuery({ queryKey: keys.families, queryFn: api.families, enabled })
+
+/** Suggested families the caller could confirm. */
+export const useFamilySuggestions = (enabled = true) =>
+  useQuery({
+    queryKey: [...keys.families, 'suggestions'],
+    queryFn: api.familySuggestions,
+    enabled,
+  })
+
+/** Create, edit and delete families; each refreshes families and every Guide. */
+export function useFamilyMutations() {
+  const client = useQueryClient()
+  const onSuccess = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: keys.families }),
+      client.invalidateQueries({ queryKey: keys.guide }),
+    ])
+  return {
+    create: useMutation({ mutationFn: (input: FamilyInput) => api.createFamily(input), onSuccess }),
+    update: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: FamilyInput }) =>
+        api.updateFamily(id, input),
+      onSuccess,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.deleteFamily(id), onSuccess }),
+    dismiss: useMutation({
+      mutationFn: (members: string[]) => api.dismissFamilySuggestion({ members }),
+      onSuccess: () => client.invalidateQueries({ queryKey: [...keys.families, 'suggestions'] }),
+    }),
+  }
+}
+
+/** Learning candidates the caller may read; `repo` keeps one repository's. */
+export const useLearnings = (
+  query: { repo?: RepoRef; status?: readonly LearningStatus[] },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [
+      ...keys.learnings,
+      query.repo ? repoKey(query.repo) : '*',
+      (query.status ?? []).join(','),
+    ],
+    queryFn: () => api.learnings(query),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
+
+/** 👍/👎 totals per finding category; without `repo` it needs a global `knowledge:read` grant. */
+export const useReactionTotals = (repo: RepoRef | undefined, enabled = true) =>
+  useQuery({
+    queryKey: [...keys.learnings, 'reactions', repo ? repoKey(repo) : '*'],
+    queryFn: () => api.reactions(repo),
+    enabled,
+    retry: false,
+  })
+
+/** Accept, edit and reject learning candidates; each refreshes learnings and every Guide. */
+export function useLearningMutations() {
+  const client = useQueryClient()
+  const onSuccess = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: keys.learnings }),
+      client.invalidateQueries({ queryKey: keys.guide }),
+    ])
+  return {
+    accept: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: AcceptLearningInput }) =>
+        api.acceptLearning(id, input),
+      onSuccess,
+    }),
+    edit: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: EditLearningInput }) =>
+        api.editLearning(id, input),
+      onSuccess,
+    }),
+    reject: useMutation({ mutationFn: (id: string) => api.rejectLearning(id), onSuccess }),
   }
 }
 
@@ -429,7 +685,7 @@ export function usePutGroup() {
   })
 }
 
-/** Entries of one config collection with their provenance; needs global `settings:read`. */
+/** Entries of one config collection; needs global `settings:read`. */
 export const useConfigEntries = <C extends keyof ConfigCollections>(
   collection: C,
   enabled = true,
@@ -438,17 +694,6 @@ export const useConfigEntries = <C extends keyof ConfigCollections>(
     queryKey: [...keys.config, collection],
     queryFn: () => api.configEntries(collection),
     enabled,
-  })
-
-/** One config entry and the earlier versions of its panel document. */
-export const useConfigEntry = <C extends keyof ConfigCollections>(
-  collection: C,
-  entryId: string | undefined,
-) =>
-  useQuery({
-    queryKey: [...keys.config, collection, 'detail', entryId ?? ''],
-    queryFn: () => api.configEntry(collection, entryId ?? ''),
-    enabled: entryId !== undefined,
   })
 
 /**
@@ -483,10 +728,6 @@ export const useSchedulePreview = (scheduleId: string | undefined, count = 10) =
     enabled: scheduleId !== undefined,
   })
 
-/** The file-only parts of the config: execution, storage, limits, plugins. */
-export const useRuntimeConfig = (enabled = true) =>
-  useQuery({ queryKey: [...keys.config, 'runtime'], queryFn: api.runtimeConfig, enabled })
-
 /**
  * A counter bumped after the avatar of `repo` changed, so `<img>`s showing it reload; 0 until then.
  * Lives only in the query cache.
@@ -519,9 +760,21 @@ export function useRepoAvatarMutations(repo: RepoRef) {
   }
 }
 
-/** What the config applies to a repository: groups, traits, plugins, schedules and triggers. */
-export const useExplainRepo = (repo: RepoRef) =>
-  useQuery({ queryKey: ['explain', repoKey(repo)], queryFn: () => api.explainRepo(repo) })
+/** The repository page's Overview: newest records, head, audit, dependencies and stack. */
+export const useRepoOverview = (repo: RepoRef) =>
+  useQuery({
+    queryKey: ['repo-page', 'overview', repoKey(repo)],
+    queryFn: () => api.repoOverview(repo),
+    staleTime: 60_000,
+  })
+
+/** The newest review runs of a repository with cost and reactions. */
+export const useRepoReviews = (repo: RepoRef) =>
+  useQuery({
+    queryKey: ['repo-page', 'reviews', repoKey(repo)],
+    queryFn: () => api.repoReviews(repo),
+    staleTime: 60_000,
+  })
 
 /** Analyzers jobs can run, with their option schemas; `enabled` is false without jobs. */
 export const useJobAnalyzers = () =>
@@ -533,37 +786,78 @@ export const useJobAnalyzers = () =>
 
 const activeStatus = (status: string) => status === 'queued' || status === 'running'
 
-/** Jobs, newest first; refreshes every few seconds while some are queued or running. */
-export const useJobs = (
-  filter: {
-    status?: string
-    repo?: RepoRef
-    analyzer?: string
-    schedule?: string
-    limit?: number
-  } = {},
-) =>
-  useQuery({
+/**
+ * Jobs, newest first, a page at a time (paged by `before`); refreshes every few seconds while
+ * some are queued or running. Off while `enabled` is false.
+ */
+export function useJobs(filter: JobQuery = {}, enabled = true, pageSize = 50) {
+  return useInfiniteQuery({
     queryKey: [
       ...keys.jobs,
       'list',
-      filter.status ?? '',
-      filter.repo ? repoKey(filter.repo) : '*',
-      filter.analyzer ?? '*',
-      filter.schedule ?? '*',
-      filter.limit ?? 100,
+      { ...filter, ...(filter.repo && { repo: repoKey(filter.repo) }) },
+      pageSize,
     ],
-    queryFn: () => api.jobs({ limit: 100, ...filter }),
+    queryFn: ({ pageParam }) =>
+      api.jobs({ ...filter, limit: pageSize, ...(pageParam ? { before: pageParam } : {}) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) =>
+      last.jobs.length < pageSize ? undefined : last.jobs.at(-1)?.createdAt,
     placeholderData: keepPreviousData,
+    enabled,
     refetchInterval: (query) =>
-      query.state.data?.jobs.some((job) => activeStatus(job.status)) ? 3_000 : 30_000,
+      query.state.data?.pages.some((page) => page.jobs.some((job) => activeStatus(job.status)))
+        ? 3_000
+        : 30_000,
+  })
+}
+
+/** Repositories and groups with jobs the viewer may read, with their groups, for the scope switch. */
+export const useJobTargets = () =>
+  useQuery({ queryKey: [...keys.jobs, 'targets'], queryFn: api.jobTargets, staleTime: 60_000 })
+
+/** Failed jobs of the last `days` grouped by analyzer and failure signature. */
+export const useJobFailures = (
+  filter: { days?: number; analyzer?: string; repos?: readonly string[] },
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'failures', filter],
+    queryFn: () => api.jobFailures(filter),
+    placeholderData: keepPreviousData,
+    enabled,
   })
 
-/** Queues changelogs (and risk assessments) for past releases; refreshes job lists. */
-export function useBackfillReleases() {
+/** Why a job ran and, while queued, what it waits for; refreshes with the job. */
+export const useJobWhy = (jobId: string, status: string) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'why', jobId, status],
+    queryFn: () => api.jobWhy(jobId),
+    refetchInterval: status === 'queued' ? 5_000 : false,
+  })
+
+/** The agent runs of a job with their cost; refreshes while the job runs. */
+export const useJobRuns = (jobId: string, live: boolean) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'runs', jobId],
+    queryFn: () => api.jobRuns(jobId),
+    refetchInterval: live ? 5_000 : false,
+  })
+
+/** One agent run's transcript of a job, loaded when opened. */
+export const useJobTranscript = (jobId: string, ref: string | undefined) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'transcript', jobId, ref ?? ''],
+    queryFn: () => api.jobTranscript(jobId, ref ?? ''),
+    enabled: ref !== undefined,
+    staleTime: Infinity,
+  })
+
+/** Queues one analyzer for past releases; refreshes job lists. */
+export function useBackfillAnalyses() {
   const client = useQueryClient()
   return useMutation({
-    mutationFn: (input: ReleaseBackfillInput) => api.backfillReleases(input),
+    mutationFn: (input: AnalysisBackfillInput) => api.backfillAnalyses(input),
     onSuccess: () => client.invalidateQueries({ queryKey: keys.jobs }),
   })
 }
@@ -597,7 +891,15 @@ export function useRunNewRepoTrigger() {
   })
 }
 
-/** One job with its log; refreshes while it is queued or running. */
+/** The last freshness sweep summed per team; refreshes every minute. */
+export const useFreshnessOverview = () =>
+  useQuery({
+    queryKey: [...keys.jobs, 'freshness'],
+    queryFn: api.freshnessOverview,
+    refetchInterval: 60_000,
+  })
+
+/** One job with its attempts; refreshes while it is queued or running. */
 export const useJob = (jobId: string | undefined) =>
   useQuery({
     queryKey: [...keys.jobs, 'detail', jobId ?? ''],
@@ -605,6 +907,19 @@ export const useJob = (jobId: string | undefined) =>
     enabled: jobId !== undefined,
     refetchInterval: (query) =>
       query.state.data && activeStatus(query.state.data.status) ? 2_000 : false,
+  })
+
+/**
+ * The last `tail` lines of one attempt's log; while `live` (the attempt is running) it refreshes
+ * every 2 seconds until the worker closed the log, and once more when `live` turns off.
+ */
+export const useJobLog = (jobId: string, attempt: number, live: boolean, tail = 1000) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'log', jobId, attempt, tail, live],
+    queryFn: () => api.jobLog(jobId, { attempt, tail }),
+    enabled: attempt > 0,
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) => (live && !query.state.data?.complete ? 2_000 : false),
   })
 
 /** Queue and cancel jobs; each refreshes every job list. */
@@ -640,24 +955,21 @@ export function useAiRuns(filter: AiUsageQuery, pageSize = 50) {
   })
 }
 
-/** Audit log events, newest first, paged by cursor; needs global `audit:read`. */
-export function useAuditLog(filter: AuditLogQuery, pageSize = 50) {
+/** History events the caller may see, newest first, paged by cursor; off while `enabled` is false. */
+export function useHistory(filter: HistoryQuery, enabled = true, pageSize = 50) {
   return useInfiniteQuery({
-    queryKey: [...keys.auditLog, 'list', filter],
+    queryKey: [...keys.history, 'list', filter],
     queryFn: ({ pageParam }) =>
-      api.auditLog({ ...filter, limit: pageSize, ...(pageParam ? { cursor: pageParam } : {}) }),
+      api.history({ ...filter, limit: pageSize, ...(pageParam ? { cursor: pageParam } : {}) }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
+    enabled,
   })
 }
 
-/** How many audit log events match the filter. */
-export const useAuditLogCount = (filter: AuditLogQuery) =>
-  useQuery({
-    queryKey: [...keys.auditLog, 'count', filter],
-    queryFn: () => api.auditLogCount(filter),
-    placeholderData: keepPreviousData,
-  })
+/** The repositories the caller's History covers and whether it sees instance-level events. */
+export const useHistoryScope = () =>
+  useQuery({ queryKey: [...keys.history, 'scope'], queryFn: api.historyScope })
 
 /** Checks the audit log's hash chain. */
 export const useVerifyAuditLog = () =>
@@ -723,47 +1035,14 @@ export function useDeleteEgressCache() {
   })
 }
 
-/** Indexed third-party libraries used by readable repositories, with the last indexing run. */
-export const useLibraries = (query: { q?: string; ecosystem?: string }) =>
+/** What the library index holds, its last run and the run going on; global `settings:read`. */
+export const useLibraryIndex = (query: { q?: string; ecosystem?: string }) =>
   useQuery({
-    queryKey: [...keys.libraries, 'list', query.q ?? '', query.ecosystem ?? ''],
-    queryFn: () => api.libraries(query),
+    queryKey: [...keys.libraries, 'index', query.q ?? '', query.ecosystem ?? ''],
+    queryFn: () => api.libraryIndex(query),
     placeholderData: keepPreviousData,
     staleTime: 30_000,
     refetchInterval: (state) => (state.state.data?.progress ? 10_000 : false),
-  })
-
-/** One library with its indexed versions and documents. */
-export const useLibrary = (ecosystem: string, name: string) =>
-  useQuery({
-    queryKey: [...keys.libraries, 'detail', ecosystem, name],
-    queryFn: () => api.library(ecosystem, name),
-    staleTime: 30_000,
-    retry: false,
-  })
-
-/** Library document sections matching `q`, best first; idle while `q` is blank. */
-export const useLibrarySearch = (query: {
-  q: string
-  ecosystem?: string
-  name?: string
-  version?: string
-  limit?: number
-}) =>
-  useQuery({
-    queryKey: [
-      ...keys.libraries,
-      'search',
-      query.q,
-      query.ecosystem ?? '',
-      query.name ?? '',
-      query.version ?? '',
-      query.limit ?? 0,
-    ],
-    queryFn: () => api.librarySearch(query),
-    placeholderData: keepPreviousData,
-    enabled: query.q.trim().length > 0,
-    staleTime: 30_000,
   })
 
 /** Use and live limits of the GitHub tokens over the last `days`; refreshed every minute. */
@@ -786,93 +1065,207 @@ export function useReindexLibraries() {
   })
 }
 
-/** External accounts (GitLab, GitHub, Slack, ...) linked to the signed-in principal. */
-/** How Slack is connected, what to set up there, and the channel policy. */
-export const useSlackSettings = () => useQuery({ queryKey: keys.slack, queryFn: api.slackSettings })
+/** Whether Slack app tokens are stored. */
+export const useSlackSettings = (enabled: boolean) =>
+  useQuery({ queryKey: keys.slack, queryFn: api.slackSettings, enabled })
 
-/** Channels the bot can see; asks Slack, so only while `enabled`. */
-export const useSlackChannels = (enabled: boolean) =>
-  useQuery({
-    queryKey: [...keys.slack, 'channels'],
-    queryFn: api.slackChannels,
-    enabled,
-    staleTime: 60_000,
-    retry: false,
-  })
-
-/** Connect, disconnect and change the channel policy; each answers with the new settings. */
+/** Store or forget the Slack app tokens; each answers with the new settings. */
 export function useSlackMutations() {
   const client = useQueryClient()
-  const onSuccess = (view: SlackSettingsView) => {
-    client.setQueryData(keys.slack, view)
-    void client.invalidateQueries({ queryKey: [...keys.slack, 'channels'] })
-  }
+  const onSuccess = (view: SlackSettingsView) => client.setQueryData(keys.slack, view)
   return {
     connect: useMutation({ mutationFn: api.connectSlack, onSuccess }),
     disconnect: useMutation({ mutationFn: api.disconnectSlack, onSuccess }),
-    savePolicy: useMutation({ mutationFn: api.saveSlackPolicy, onSuccess }),
   }
 }
 
-/** Links the chat account a bot's link names to the signed-in person. */
-export function useClaimAccount() {
-  const client = useQueryClient()
-  return useMutation({
-    mutationFn: api.claimAccount,
-    onSuccess: () => client.invalidateQueries({ queryKey: keys.accounts }),
+/** Team chat threads the caller can see; polls every 10 s for new activity and unread counts. */
+export const useChatThreads = (archived = false) =>
+  useQuery({
+    queryKey: [...keys.chat, 'threads', archived],
+    queryFn: () => api.chatThreads(archived),
+    refetchInterval: 10_000,
   })
+
+/** Unread chat messages across visible threads, for the rail badge; polls every 30 s. */
+export const useChatUnread = (enabled = true) =>
+  useQuery({
+    queryKey: [...keys.chat, 'unread'],
+    queryFn: api.chatUnread,
+    enabled,
+    refetchInterval: 30_000,
+  })
+
+const chatMessagesKey = (threadId: string | undefined) => [...keys.chat, 'messages', threadId]
+
+/**
+ * The messages of an open thread: the newest page once, then a poll every few seconds (faster
+ * while the agent writes or a card is live) that folds in new and changed messages with `after`
+ * and `changedSince`. `loadOlder` puts the page before the first message in front.
+ */
+export function useChatThread(threadId: string | undefined) {
+  const client = useQueryClient()
+  const key = chatMessagesKey(threadId)
+  const messages = useQuery({
+    queryKey: key,
+    queryFn: () => api.chatMessages(threadId ?? '', { limit: 50 }),
+    enabled: threadId !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const data = messages.data
+  useQuery({
+    queryKey: [...keys.chat, 'poll', threadId],
+    enabled: data !== undefined,
+    queryFn: async () => {
+      const current = client.getQueryData<ChatMessageList>(key)
+      if (!current || !threadId) return null
+      const poll = await api.chatMessages(threadId, {
+        after: current.cursor,
+        changedSince: current.serverTime,
+        limit: 200,
+      })
+      client.setQueryData<ChatMessageList>(key, (now) => now && withNewer(now, poll))
+      return poll.serverTime
+    },
+    refetchInterval:
+      data?.thread.replying || hasLiveCards(data?.messages ?? [], new Date()) ? 1_500 : 3_000,
+  })
+  const loadOlder = useMutation({
+    mutationFn: async () => {
+      const current = client.getQueryData<ChatMessageList>(key)
+      const first = current?.messages[0]
+      if (!threadId || !first) return
+      const older = await api.chatMessages(threadId, { before: first.seq, limit: 50 })
+      client.setQueryData<ChatMessageList>(key, (now) => now && withOlder(now, older))
+    },
+  })
+  return { messages, loadOlder }
 }
 
-/** Every digest, the analysis kinds sections can read and the presets. */
-export const useDigests = () => useQuery({ queryKey: keys.digests, queryFn: api.digests })
-
-/** What a digest being edited would send now; previous previews stay while a new one loads. */
-export const useDigestPreview = (input: DigestInput | undefined, digestId?: string) =>
+/** People who can be mentioned in a thread. */
+export const useChatPeople = (threadId: string | undefined) =>
   useQuery({
-    queryKey: [...keys.digests, 'preview', digestId, input],
-    queryFn: ({ signal }) =>
-      api.previewDigest({ ...input!, ...(digestId && { id: digestId }) }, signal),
-    enabled: input !== undefined,
-    placeholderData: keepPreviousData,
+    queryKey: [...keys.chat, 'people', threadId],
+    queryFn: () => api.chatPeople(threadId ?? ''),
+    enabled: threadId !== undefined,
+    staleTime: 60_000,
+  })
+
+/** The transcript of an agent reply, loaded when its tool trace is opened. */
+export const useChatTranscript = (messageId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: [...keys.chat, 'transcript', messageId],
+    queryFn: () => api.chatTranscript(messageId),
+    enabled,
+    staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })
 
-/** Create, change, delete and send digests; each refreshes the list. */
-export function useDigestMutations() {
+/**
+ * Creates and changes threads, posts messages and moves read markers. A posted message goes
+ * straight into the open thread and the next poll runs at once; thread lists and unread counts
+ * refresh after each change.
+ */
+export function useChatMutations() {
   const client = useQueryClient()
-  const onSuccess = () => client.invalidateQueries({ queryKey: keys.digests })
+  const refreshLists = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: [...keys.chat, 'threads'] }),
+      client.invalidateQueries({ queryKey: [...keys.chat, 'unread'] }),
+    ])
   return {
-    create: useMutation({ mutationFn: api.createDigest, onSuccess }),
+    create: useMutation({ mutationFn: api.createChatThread, onSuccess: refreshLists }),
     update: useMutation({
-      mutationFn: ({ id, input }: { id: string; input: DigestInput }) =>
-        api.updateDigest(id, input),
-      onSuccess,
+      mutationFn: ({ id, ...input }: { id: string } & ChatThreadPatchInput) =>
+        api.updateChatThread(id, input),
+      onSuccess: (thread) => {
+        client.setQueryData<ChatMessageList>(
+          chatMessagesKey(thread.id),
+          (now) => now && { ...now, thread },
+        )
+        return refreshLists()
+      },
     }),
-    remove: useMutation({ mutationFn: api.deleteDigest, onSuccess }),
-    send: useMutation({ mutationFn: api.sendDigest, onSuccess }),
+    post: useMutation({
+      mutationFn: ({ id, ...input }: { id: string } & ChatPostInput) => api.postChat(id, input),
+      onSuccess: (result, { id }) => {
+        client.setQueryData<ChatMessageList>(
+          chatMessagesKey(id),
+          (now) =>
+            now && {
+              ...now,
+              thread: { ...now.thread, replying: now.thread.replying || result.replying },
+              messages: mergeMessages(now.messages, [result.message]),
+            },
+        )
+        void client.invalidateQueries({ queryKey: [...keys.chat, 'poll', id] })
+        return refreshLists()
+      },
+    }),
+    read: useMutation({
+      mutationFn: ({ id, messageId }: { id: string; messageId: string }) =>
+        api.markChatRead(id, { messageId }),
+      onSuccess: (_, { id }) => {
+        client.setQueryData<ChatMessageList>(
+          chatMessagesKey(id),
+          (now) => now && { ...now, thread: { ...now.thread, unread: 0 } },
+        )
+        return refreshLists()
+      },
+    }),
   }
 }
 
-/** The signed-in person's chat; polls every 3 s while a card shows unfinished steps, else 20 s. */
-export const useChat = () =>
+const tasksKey = ['tasks'] as const
+
+const taskActive = (status: AgentTaskStatus) =>
+  status === 'approved' || status === 'queued' || status === 'running'
+
+/** Task groups the caller may see, newest first; polls every 5 seconds while one works. */
+export const useTaskGroups = (enabled = true, limit = 100) =>
   useQuery({
-    queryKey: keys.chat,
-    queryFn: api.chat,
+    queryKey: [...tasksKey, 'groups', limit],
+    queryFn: () => api.taskGroups({ limit }),
+    enabled,
     refetchInterval: (query) =>
-      hasLiveCards(query.state.data?.messages ?? [], new Date()) ? 3_000 : 20_000,
+      query.state.data?.groups.some((group) => taskActive(group.status)) ? 5_000 : false,
   })
 
-/** Sends a command to the chat, or forgets the conversation; both refresh it. */
-export function useChatMutations() {
+/** One task group with its people; polls every 3 seconds while it works. */
+export const useTaskGroup = (groupId: string | undefined) =>
+  useQuery({
+    queryKey: [...tasksKey, 'group', groupId ?? ''],
+    queryFn: () => api.taskGroup(groupId ?? ''),
+    enabled: groupId !== undefined,
+    refetchInterval: (query) =>
+      query.state.data && taskActive(query.state.data.status) ? 3_000 : false,
+  })
+
+/** The `tasks.write` switch and caps with the write pool's status. */
+export const useWriteTasks = (enabled = true) =>
+  useQuery({ queryKey: [...tasksKey, 'write'], queryFn: api.writeTasks, enabled })
+
+/**
+ * Proposes, approves, cancels and retries agent tasks and decides repositories a task asked for.
+ * Task lists and open chat threads load again afterwards, so cards show the new status at once.
+ */
+export function useTaskGroupMutations() {
   const client = useQueryClient()
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: [...keys.chat, 'poll'] }),
+      client.invalidateQueries({ queryKey: tasksKey }),
+    ])
   return {
-    send: useMutation({
-      mutationFn: api.sendChat,
-      onSuccess: (conversation) => client.setQueryData(keys.chat, conversation),
-    }),
-    clear: useMutation({
-      mutationFn: api.clearChat,
-      onSuccess: () => client.invalidateQueries({ queryKey: keys.chat }),
+    create: useMutation({ mutationFn: api.createTaskGroup, onSuccess: refresh }),
+    approve: useMutation({ mutationFn: api.approveTaskGroup, onSuccess: refresh }),
+    cancel: useMutation({ mutationFn: api.cancelTaskGroup, onSuccess: refresh }),
+    retryTask: useMutation({ mutationFn: api.retryTask, onSuccess: refresh }),
+    cancelTask: useMutation({ mutationFn: api.cancelTask, onSuccess: refresh }),
+    decide: useMutation({
+      mutationFn: ({ groupId, ...input }: { groupId: string; repo: string; approve: boolean }) =>
+        api.decideTaskRepo(groupId, input),
+      onSuccess: refresh,
     }),
   }
 }
@@ -905,18 +1298,6 @@ export function useMediaMutations() {
       mutationFn: (input: MediaApplyInput & { mode: 'zip' }) => api.mediaZip(input),
     }),
   }
-}
-
-/** Activity events, newest first, paged by the oldest event's time. */
-export function useActivity(pageSize = 50) {
-  return useInfiniteQuery({
-    queryKey: keys.activity,
-    queryFn: ({ pageParam }) =>
-      api.activity({ limit: pageSize, ...(pageParam ? { before: pageParam } : {}) }),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (last) =>
-      last.events.length < pageSize ? undefined : last.events.at(-1)?.at,
-  })
 }
 
 export const useUsers = (enabled = true) =>
@@ -956,8 +1337,21 @@ export function useSetAvatar() {
       await client.invalidateQueries({ queryKey: keys.me })
       await client.invalidateQueries({ queryKey: keys.account })
       await client.invalidateQueries({ queryKey: keys.users })
-      await client.invalidateQueries({ queryKey: keys.activity })
+      await client.invalidateQueries({ queryKey: keys.history })
     },
+  })
+}
+
+/** The signed-in principal's own UI preferences, such as its home groups. */
+export const usePreferences = () =>
+  useQuery({ queryKey: keys.preferences, queryFn: api.preferences, staleTime: 5 * 60_000 })
+
+/** Saves the signed-in principal's preferences; `homeGroups: null` goes back to its grants. */
+export function useSetPreferences() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: UserPreferencesInput) => api.setPreferences(input),
+    onSuccess: (saved) => client.setQueryData(keys.preferences, saved),
   })
 }
 
@@ -1110,23 +1504,6 @@ export const useUsageSites = (
     enabled,
   })
 
-/** Packages one repository uses, from its newest usage record. */
-export const useRepoUsage = (repo: string) =>
-  useQuery({
-    queryKey: ['public-api', 'usages', 'repo', repo],
-    queryFn: () => api.repoUsage(repo),
-    staleTime: 60_000,
-    retry: false,
-  })
-
-/** Packages one repository defines, with how many repositories use each. */
-export const usePublishedPackages = (repo: string) =>
-  useQuery({
-    queryKey: ['public-api', 'usages', 'published', repo],
-    queryFn: () => api.publishedPackages(repo),
-    staleTime: 60_000,
-  })
-
 /** The uses an upgrade between two recorded versions affects. */
 export const useUpgradeImpact = (
   query: { package: string; from?: string; to?: string; repo?: string },
@@ -1192,15 +1569,34 @@ const deployActive = (state: DeployState | undefined) =>
   state?.environments.some((env) => env.status === 'pending' || env.status === 'running') ?? false
 
 /**
- * Release state of every repository from the server's snapshot; refetches every minute, every
- * 3 s while the server reads the forges.
+ * Release cards of every repository with releases on, from the server's snapshot; refetches every
+ * minute, every 3 s while the server reads the forges.
  */
-export const useReleaseBoard = (group?: string) =>
+export const useReleaseOverview = () =>
   useQuery({
-    queryKey: keys.releaseBoard(group),
-    queryFn: () => api.releaseBoard(group ? { group } : {}),
+    queryKey: keys.releaseOverview,
+    queryFn: () => api.releaseOverview(),
     placeholderData: keepPreviousData,
     refetchInterval: (query) => (query.state.data?.refreshing ? 3_000 : 60_000),
+  })
+
+/** Past versions of one repository, newest first, a page at a time; the first page carries `next`. */
+export const useReleaseTimeline = (repo: RepoRef | undefined, pageSize = 10) =>
+  useInfiniteQuery({
+    queryKey: repo ? keys.releaseTimeline(repo) : ['releases', 'timeline', 'none'],
+    queryFn: ({ pageParam }) => api.releaseTimeline(repo!, pageParam, pageSize),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.nextOffset,
+    enabled: repo !== undefined,
+  })
+
+/** One version in full (entries, changelog, tasks, deploys); off while `tag` is unknown. */
+export const useReleaseVersion = (repo: RepoRef, tag: string | undefined) =>
+  useQuery({
+    queryKey: keys.releaseVersion(repo, tag ?? ''),
+    queryFn: () => api.releaseVersion(repo, tag!),
+    enabled: tag !== undefined,
+    staleTime: 5 * 60_000,
   })
 
 /** Release page data of one repository; polls while a deploy of the latest version runs. */
@@ -1228,10 +1624,9 @@ export function useReleaseActions() {
   const client = useQueryClient()
   const onSettled = () => client.invalidateQueries({ queryKey: keys.releases })
   return {
-    refreshBoard: useMutation({
-      mutationFn: (group?: string) =>
-        api.releaseBoard({ ...(group ? { group } : {}), refresh: true }),
-      onSuccess: (data, group) => client.setQueryData(keys.releaseBoard(group), data),
+    refresh: useMutation({
+      mutationFn: () => api.releaseOverview(true),
+      onSuccess: (data) => client.setQueryData(keys.releaseOverview, data),
     }),
     edits: useMutation({
       mutationFn: (input: ReleaseEditsInput) => api.saveReleaseEdits(input),
@@ -1251,16 +1646,8 @@ export function useReleaseActions() {
       onSettled,
     }),
     withdraw: useMutation({ mutationFn: (repo: RepoRef) => api.withdrawRelease(repo), onSettled }),
-    hide: useMutation({
-      mutationFn: (input: ReleaseHiddenInput) => api.setReleaseHidden(input),
-      onSettled,
-    }),
     deploy: useMutation({
       mutationFn: (input: ReleaseDeployInput) => api.startReleaseDeploy(input),
-      onSettled,
-    }),
-    batch: useMutation({
-      mutationFn: (input: ReleaseBatchInput) => api.releaseBatch(input),
       onSettled,
     }),
   }

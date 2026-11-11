@@ -15,14 +15,14 @@ import {
 
 test('providerLabel', () => {
   expect(providerLabel('gitlab:work')).toBe('GitLab · work')
-  expect(providerLabel('slack:T123')).toBe('Slack · T123')
+  expect(providerLabel('chat:T123')).toBe('Chat · T123')
   expect(providerLabel('matrix')).toBe('Matrix')
 })
 
 test('numericIdProvider', () => {
   expect(numericIdProvider('gitlab:work')).toBe(true)
   expect(numericIdProvider('github:gh')).toBe(true)
-  expect(numericIdProvider('slack:T1')).toBe(false)
+  expect(numericIdProvider('chat:T1')).toBe(false)
 })
 
 test('forgeProviders keeps GitLab and GitHub forges', () => {
@@ -73,8 +73,8 @@ describe('validateLinkDraft', () => {
     )
   })
 
-  test('Slack ids may be anything', () => {
-    expect(validateLinkDraft({ provider: 'slack:T1', externalId: 'U0ABC', username: '' })).toEqual(
+  test('Other ids may be anything', () => {
+    expect(validateLinkDraft({ provider: 'chat:T1', externalId: 'U0ABC', username: '' })).toEqual(
       {},
     )
   })
@@ -102,9 +102,9 @@ test('toLinkInput trims and drops an empty username', () => {
 })
 
 test('accounts are named as people see them', () => {
-  expect(accountName({ provider: 'slack:T1', username: 'Jane Doe', externalId: 'U1' })).toBe(
+  expect(accountName({ provider: 'chat:T1', username: 'Jane Doe', externalId: 'U1' })).toBe(
     'Jane Doe',
   )
   expect(accountName({ provider: 'gitlab:work', username: 'jdoe', externalId: '42' })).toBe('@jdoe')
-  expect(accountName({ provider: 'slack:T1', externalId: 'U1' })).toBe('U1')
+  expect(accountName({ provider: 'chat:T1', externalId: 'U1' })).toBe('U1')
 })

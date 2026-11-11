@@ -2,7 +2,7 @@
 
 Version-exact documentation of the third-party libraries the fleet depends on, for agents: a server-side indexer keeps, per library, a small matrix of versions (the ones in use and the ones an upgrade would land on) with their docs, release notes, API surface and, on demand, a source snapshot; `libraryDocs` answers questions about them as compact Markdown. The design is [docs/library-docs.md](../../../docs/library-docs.md).
 
-The server wires it up (setting `libraries`, the indexing duty, `/api/libraries` routes, MCP tools and the agents' `libraries` toolset): see [Libraries](../../../apps/server/docs/README.md#libraries) in the server docs.
+The server wires it up (setting `libraries`, the indexing duty, the Dependencies and library index admin routes, MCP tools and the agents' `libraries` toolset): see [Libraries](../../../apps/server/docs/README.md#libraries) in the server docs.
 
 Everything lives in a `LibraryStore` (`@holtkeeper/store`) and an `ArtifactStore` (`@holtkeeper/artifacts`); registries and GitHub are injected, so tests run without network.
 
@@ -21,8 +21,10 @@ Everything lives in a `LibraryStore` (`@holtkeeper/store`) and an `ArtifactStore
   - `issueIndexer?: LibraryHook` — default `indexIssues` from `src/issues` when `github` is given; runs with `sources.issues`;
   - `onProgress?(progress)` — `{ total, done, library?, libraries? }` whenever a library starts (`libraries` are the ones in work, `<ecosystem>:<name>`, `library` the first of them; `done` counts finished ones) and once with `done = total` at the end;
   - `siteSource?: SiteSource` — runs with `sources.site`;
+  - `latest?: LatestVersions` — receives the registry's newest release of every third-party library in use at the end of the run: indexed ones from the registry metadata the run fetches, libraries `exclude` leaves out from a registry lookup of their own (never internal ones); entries of libraries no longer used are dropped, a failed lookup keeps the previous entry;
   - `maxRepositoryKb?` (default 500 000), `now?`, `signal?`, `log?`.
   - The summary is `{ libraries, versionsAdded, versionsRemoved, librariesRemoved, failures: { library, version?, source, message }[] }`.
+- `latestVersions(kv): LatestVersions` — the one place that knows the newest published version per library, by `<ecosystem>:<name>` (Go by module path without `/vN`), kept as one document (`libraries:latest`) in a `KvStore` and written atomically where it has `compareAndSet`: `get(ref)`, `all()` and `record(entries, keep?)`, each entry `{ latest, checkedAt }`. `majorsBehind(version, latest)` — breaking releases between them: majors, and minors below 1.0; 0 when not older or unparsable.
 - `LibraryHook = (library, { versions, oldestUsedReleaseAt?, now, signal? }) => Promise<unknown>` — a library-wide source; it records its own status, and the indexer records `failed` when it throws.
 - `parseLibraryName('npm:x' | 'Go:x' | 'x')` — a setting entry as a `LibraryRef` (a bare name is Go when its first segment contains a dot).
 - `versionMatrix(uses, published, settings): MatrixVersion[]` and `rolePriority` — see [Version matrix](#version-matrix).

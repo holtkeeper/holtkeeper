@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 
 import type { Principal } from '@holtkeeper/access'
 import type {
   AccountChallenge,
-  AuditList,
+  HistoryList,
+  HistoryScope,
   AuditVerifyResponse,
   CredentialView,
   ExternalAccountList,
@@ -40,6 +41,13 @@ const tokenSetting = defineSetting({
   schema: z.string().min(1),
   secret: true,
 })
+const noteSetting = defineSetting({
+  key: 'test.note',
+  label: 'Note',
+  description: 'A plain text setting',
+  section: 'Test',
+  schema: z.string(),
+})
 
 const setup = (auth: AuthProvider = noAuth()) => {
   const vault = aesVault('v'.repeat(32))
@@ -50,10 +58,9 @@ const setup = (auth: AuthProvider = noAuth()) => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
-    settings: [...builtinSettings, tokenSetting],
+    settings: [...builtinSettings, tokenSetting, noteSetting],
     analyses: [],
     now: () => now,
   })
@@ -79,7 +86,7 @@ const send = (
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   })
 
-const events = async () => (await store.audit?.list({ limit: 100 }))?.events ?? []
+const events = async () => (await store.audit.list({ limit: 100 })).events
 
 beforeEach(() => {
   store = memoryStore()
@@ -150,7 +157,7 @@ describe('audit helpers', () => {
     ).toEqual({ action: 'account.create', target: { type: 'user', id: 'u1' } })
   })
 
-  test('appendAudit records webhook and job events and tolerates stores without a log', async () => {
+  test('appendAudit records webhook and job events and tolerates a failing log', async () => {
     const event = await appendAudit(store, {
       actor: { id: 'gitlab:work:42', name: 'jane', provider: 'gitlab:work' },
       via: 'webhook',
@@ -160,9 +167,10 @@ describe('audit helpers', () => {
     })
     expect(event).toMatchObject({ seq: 1, via: 'webhook' })
     expect(event?.at).toBeString()
+    const logged = spyOn(console, 'error').mockImplementation(() => {})
     expect(
       await appendAudit(
-        { audit: undefined },
+        { audit: { append: () => Promise.reject(new Error('disk full')) } as never },
         {
           actor: { id: 'system', name: 'scheduler', provider: 'job' },
           via: 'job',
@@ -172,6 +180,8 @@ describe('audit helpers', () => {
         },
       ),
     ).toBeUndefined()
+    expect(logged).toHaveBeenCalledTimes(1)
+    logged.mockRestore()
   })
 })
 
@@ -257,7 +267,11 @@ describe('audit middleware', () => {
       scope: { all: true },
       value: 'sk-1',
     })
-    await send(app, 'PUT', '/api/settings', { key: 'llm.model', scope: { all: true }, value: 'm1' })
+    await send(app, 'PUT', '/api/settings', {
+      key: 'test.note',
+      scope: { all: true },
+      value: 'm1',
+    })
     const [model, key] = await events()
     expect(key?.changes).toContainEqual({ field: 'value', after: REDACTED })
     expect(model?.changes).toContainEqual({ field: 'value', after: 'm1' })
@@ -309,29 +323,30 @@ describe('audit middleware', () => {
   })
 })
 
-describe('audit routes', () => {
-  test('list, page, filter, count, export and verify need global audit:read', async () => {
+const history = async (app: ReturnType<typeof setup>, query = '', headers = {}) =>
+  (await (await app.request(`/api/history${query}`, { headers })).json()) as HistoryList
+
+describe('history and audit routes', () => {
+  test('history pages and filters everything with audit:read; export and verify need it', async () => {
     const app = setup()
     for (const name of ['a', 'b', 'c'])
       await send(app, 'PUT', '/api/settings', {
-        key: 'llm.model',
+        key: 'test.note',
         scope: { all: true },
         value: name,
       })
     await send(app, 'DELETE', '/api/settings/missing')
 
-    const first = (await (await app.request('/api/audit?limit=2')).json()) as AuditList
+    const first = await history(app, '?limit=2')
     expect(first.events.map((e) => e.seq)).toEqual([4, 3])
-    const second = (await (
-      await app.request(`/api/audit?limit=2&cursor=${first.nextCursor}`)
-    ).json()) as AuditList
+    const second = await history(app, `?limit=2&cursor=${first.nextCursor}`)
     expect(second.events.map((e) => e.seq)).toEqual([2, 1])
-    const errors = (await (await app.request('/api/audit?outcome=error')).json()) as AuditList
-    expect(errors.events.map((e) => e.action)).toEqual(['setting.delete'])
-    expect((await app.request('/api/audit?outcome=nope')).status).toBe(400)
-    expect(await (await app.request('/api/audit/count?action=setting.create')).json()).toEqual({
-      count: 3,
-    })
+    expect((await history(app, '?outcome=error')).events.map((e) => e.action)).toEqual([
+      'setting.delete',
+    ])
+    expect((await history(app, '?action=setting.create&actor=root')).events).toHaveLength(3)
+    expect((await history(app, '?from=2026-10-31T00:00:00.000Z')).events).toEqual([])
+    expect((await app.request('/api/history?outcome=nope')).status).toBe(400)
 
     const ndjson = await app.request('/api/audit/export?format=ndjson&action=setting')
     expect(ndjson.headers.get('content-type')).toBe('application/x-ndjson')
@@ -340,18 +355,122 @@ describe('audit routes', () => {
     const csv = await (await app.request('/api/audit/export?format=csv')).text()
     expect(csv.split('\n')[0]).toStartWith('seq,at,actor.id')
     expect((await app.request('/api/audit/export?format=xml')).status).toBe(400)
-    const exports = (await (
-      await app.request('/api/audit?action=audit.export')
-    ).json()) as AuditList
-    expect(exports.events).toHaveLength(2)
+    expect((await history(app, '?action=audit.export')).events).toHaveLength(2)
 
     const verified = (await (await app.request('/api/audit/verify')).json()) as AuditVerifyResponse
     expect(verified).toMatchObject({ ok: true, checked: 6 })
     expect((await app.request('/api/audit/verify?fromSeq=x')).status).toBe(400)
 
     const jane = setup(games)
-    expect((await jane.request('/api/audit', { headers: asGames })).status).toBe(403)
+    expect((await jane.request('/api/history', { headers: asGames })).status).toBe(403)
     expect((await jane.request('/api/audit/export', { headers: asGames })).status).toBe(403)
+  })
+
+  test('?repo= names the event repository only after a permission check allowed it', async () => {
+    const config2 = parseConfig({
+      forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
+      groups: {
+        games: { forge: 'work', include: ['games/*'] },
+        shop: { forge: 'work', include: ['shop/*'] },
+      },
+    })
+    const vault = aesVault('v'.repeat(32))
+    const app = createApp({
+      config: config2,
+      auth: headerAuth({
+        roles: { games: [{ scope: { groups: ['games'] }, actions: ['settings:write'] }] },
+      }),
+      store,
+      vault,
+      credentials: createCredentialService({ credentials: store.credentials, vault }),
+      settings: builtinSettings,
+      analyses: [],
+      now: () => now,
+    })
+    const denied = await send(
+      app,
+      'DELETE',
+      '/api/repos/avatar?repo=work:shop/b',
+      undefined,
+      asGames,
+    )
+    expect(denied.status).toBe(403)
+    const allowed = await send(
+      app,
+      'DELETE',
+      '/api/repos/avatar?repo=work:games/a',
+      undefined,
+      asGames,
+    )
+    expect(allowed.status).toBe(204)
+    await send(app, 'PUT', '/api/settings?repo=work:shop/b', { key: 'x' }, asGames)
+    const [third, second, first] = await events()
+    expect(first).toMatchObject({ outcome: 'denied', target: { type: 'repo' } })
+    expect(first?.target.repo).toBeUndefined()
+    expect(second).toMatchObject({ outcome: 'ok', target: { repo: 'work:games/a' } })
+    expect(third?.target.repo).toBeUndefined()
+    expect(await store.audit.count({ repo: 'work:shop/b' })).toBe(0)
+  })
+
+  test('history shows repos:read callers only events of repositories they can see', async () => {
+    const append = (repo: string | undefined, actor = 'u1') =>
+      appendAudit(store, {
+        actor: { id: actor, name: actor, provider: 'users' },
+        via: 'ui',
+        action: 'release.cut',
+        target: { type: 'release', ...(repo && { repo }) },
+        outcome: 'ok',
+      })
+    await store.users.putUser({
+      id: 'u1',
+      name: 'Ann',
+      grants: [],
+      disabled: false,
+      sessionVersion: 0,
+      createdAt: '2026-10-30T00:00:00.000Z',
+      avatarSeed: 'fox',
+    })
+    await append('work:games/a')
+    await append('work:shop/b')
+    await append(undefined)
+    await append('work:games/c', 'bot')
+
+    const reader = setup(
+      headerAuth({
+        roles: { games: [{ scope: { groups: ['games'] }, actions: ['repos:read'] }] },
+      }),
+    )
+    const seen = await history(reader, '', asGames)
+    expect(seen.events.map((e) => e.target.repo)).toEqual(['work:games/c', 'work:games/a'])
+    expect(seen.people).toEqual({ u1: { name: 'Ann', avatarUrl: '/api/avatars/fox.svg' } })
+    expect(
+      (await history(reader, '?repos=work:games/a,work:shop/b', asGames)).events.map(
+        (e) => e.target.repo,
+      ),
+    ).toEqual(['work:games/a'])
+    expect((await history(reader, '?repo=work:shop/b', asGames)).events).toEqual([])
+    expect((await history(reader, '?actor=bot', asGames)).events).toHaveLength(1)
+    const scope = (await (
+      await reader.request('/api/history/scope', { headers: asGames })
+    ).json()) as HistoryScope
+    expect(scope).toEqual({
+      repos: [
+        { repo: 'work:games/a', groups: ['games'] },
+        { repo: 'work:games/c', groups: ['games'] },
+      ],
+      instance: false,
+    })
+
+    const admin = setup()
+    expect((await history(admin)).events).toHaveLength(4)
+    expect((await history(admin, '?repos=work:shop/b')).events).toHaveLength(1)
+    const full = (await (await admin.request('/api/history/scope')).json()) as HistoryScope
+    expect(full.instance).toBeTrue()
+    expect(full.repos.map((entry) => entry.repo)).toEqual([
+      'work:games/a',
+      'work:games/c',
+      'work:shop/b',
+    ])
   })
 })
 

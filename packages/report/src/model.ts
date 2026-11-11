@@ -32,8 +32,11 @@ export interface Report {
 export interface ReportExclude {
   /** Setting key holding the analyzer options, e.g. `analyzers.assets`. */
   setting: string
-  /** List options of that setting to choose from, the first being the usual one. */
-  options: { option: string; label: string; description?: string }[]
+  /**
+   * List options of that setting to choose from, the first being the usual one. `defaults` is the
+   * option's value when no entry sets it; a new glob is added to it rather than replacing it.
+   */
+  options: { option: string; label: string; description?: string; defaults?: string[] }[]
 }
 
 export interface Section {

@@ -107,8 +107,8 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
           <Notice tone="warning" title="No forge configured">
             <span className="flex flex-col items-start gap-2">
               Add a GitLab forge with its token first.
-              <LinkButton to="/credentials" size="sm">
-                Open Credentials
+              <LinkButton to="/settings" search={{ tab: 'integrations' }} size="sm">
+                Open Integrations
               </LinkButton>
             </span>
           </Notice>
@@ -186,12 +186,6 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
             error={groupError}
           />
         )}
-        {existing?.provenance === 'file' ? (
-          <p className="text-xs text-muted">
-            This group comes from the config file; saving it here makes a panel copy that replaces
-            the file entry.
-          </p>
-        ) : null}
       </div>
     </Dialog>
   )

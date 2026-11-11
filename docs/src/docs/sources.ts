@@ -50,7 +50,7 @@ const moduleTableOrder = (root: string) => {
   if (!existsSync(index)) return []
   return [
     ...readFileSync(index, 'utf8').matchAll(
-      /\]\(\.\.\/(?:apps|packages|plugins)\/([^/]+)\/docs\/README\.md\)/g,
+      /\]\(\.\.\/(?:apps|packages)\/([^/]+)\/docs\/README\.md\)/g,
     ),
   ].map((m) => m[1] ?? '')
 }
@@ -87,7 +87,7 @@ export function discoverDocs(root: string): DocSource[] {
   }
 
   const tableOrder = moduleTableOrder(root)
-  for (const area of ['apps', 'packages', 'plugins']) {
+  for (const area of ['apps', 'packages']) {
     const areaDir = join(root, area)
     if (!existsSync(areaDir)) continue
     for (const dir of readdirSync(areaDir).toSorted()) {

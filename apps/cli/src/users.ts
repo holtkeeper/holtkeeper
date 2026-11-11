@@ -5,11 +5,10 @@ import {
   issueUserLink,
   type ManageOptions,
 } from '@holtkeeper/auth-users'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { HoltkeeperFileConfig } from '@holtkeeper/core'
 import type { User } from '@holtkeeper/store'
 
-import { UsageError } from './audit.ts'
-import { parseDuration } from './serve.ts'
+import { UsageError, parseDuration } from './serve.ts'
 
 /** Raw `users` flags as `parseArgs` returns them. */
 export interface UsersFlags {
@@ -39,11 +38,11 @@ const describe = (user: User) =>
 
 /**
  * `holtkeeper users <list | add <name> | login-link <user> | enroll-link <user> |
- * recover-link <user>>` against the config's store, as `cli` in the activity log. Links point at
+ * recover-link <user>>` against the config's store, as `cli` in the audit log. Links point at
  * `server.publicUrl`; a login link signs its holder in once without a passkey.
  */
 export async function usersCommand(
-  config: HoltkeeperConfig,
+  config: HoltkeeperFileConfig,
   args: string[],
   flags: UsersFlags,
   out: (line: string) => void,
@@ -51,7 +50,7 @@ export async function usersCommand(
   const server = config.server
   if (!server) throw new UsageError('users needs a config with a server section')
   const store = server.store
-  const manage: ManageOptions = { store: store.users, activity: store.activity, actor: 'cli' }
+  const manage: ManageOptions = { store: store.users, audit: store.audit, actor: 'cli' }
   const [action, target] = args
   try {
     switch (action) {

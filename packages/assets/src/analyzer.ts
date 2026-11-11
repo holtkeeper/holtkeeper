@@ -3,7 +3,8 @@ import { z } from 'zod'
 
 import { assetsAnalysis } from './analysis.ts'
 import { analyzeAssets, collectArtifacts } from './analyze.ts'
-import { type AssetsData, budgetSchema, totalBudgetsSchema } from './data.ts'
+import { type AssetsData, assetsPolicySchema } from './data.ts'
+import { defaultAssetsPolicy, requiredFormats } from './policy.ts'
 
 const contentTypes: Record<string, string> = {
   avif: 'image/avif',
@@ -30,27 +31,22 @@ export function runArtifacts(data: AssetsData): AnalyzerArtifact[] {
   })
 }
 
-/** Options of the `assets` analyzer, from config or flags. */
+/**
+ * Options of the `assets` analyzer. `policy` is filled from the `assets.policy` setting by the
+ * server; the default policy applies without it.
+ */
 export const assetsOptionsSchema = z.object({
   /** Globs to scan; default `defaultRoots`. */
   roots: z.array(z.string()).optional(),
   /** Build output folder to scan as well, e.g. `dist`. */
   dist: z.string().optional(),
-  /** Globs of files left out entirely. */
-  ignore: z.array(z.string()).default([]),
-  /** Globs of files still counted in totals and budgets but never flagged or optimized. */
-  optimizeIgnore: z.array(z.string()).default([]),
-  budgets: z.array(budgetSchema).default([]),
-  /** Maximum total bytes per kind, e.g. `{ audio: 5000000 }`. */
-  total: totalBudgetsSchema.default({}),
+  policy: assetsPolicySchema.optional(),
   /** Default `sharp` when sharp loads on the runner, else `estimate`. */
   convert: z.enum(['sharp', 'estimate', 'tools', 'off']).optional(),
   /** With `sharp`: how many images (largest first) get real variants. */
   optimizeTop: z.coerce.number().int().nonnegative().default(20),
   /** With `sharp`: svgo preset of SVG changes. */
   svgPreset: z.enum(['safe', 'default', 'aggressive']).default('safe'),
-  /** Expect, suggest and encode AVIF next to WebP. */
-  avif: z.coerce.boolean().default(false),
   /** With `sharp`: variant file name templates. */
   naming: z.object({ width: z.string().optional(), density: z.string().optional() }).optional(),
   /** Check inline `<svg>`/`<path>` elements of markup and components. */
@@ -60,7 +56,7 @@ export const assetsOptionsSchema = z.object({
 export type AssetsOptions = z.infer<typeof assetsOptionsSchema>
 
 /**
- * Inventories shipped assets of a checkout and checks them against budgets. With `convert:
+ * Inventories shipped assets of a checkout and checks them against the asset policy. With `convert:
  * 'sharp'` the returned data carries proposed changes whose binary variants are available through
  * `collectArtifacts(data)` until the data is serialized.
  */
@@ -68,6 +64,7 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
   kind: 'assets',
   analysis: assetsAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '1d', heavy: true },
   needs: { checkout: true },
   options: assetsOptionsSchema,
   flags: [
@@ -90,12 +87,6 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
       type: 'boolean',
     },
     {
-      flag: 'avif',
-      option: 'avif',
-      description: 'expect, suggest and encode AVIF next to WebP (default false)',
-      type: 'boolean',
-    },
-    {
       flag: 'svg-preset',
       option: 'svgPreset',
       description: 'svgo preset: safe (default), default or aggressive',
@@ -103,18 +94,18 @@ export const assetsAnalyzer = defineAnalyzer<AssetsData, AssetsOptions>({
   ],
   async run({ dir, ref, runner, cache, options, signal, log }) {
     if (!dir) throw new Error('the assets analyzer needs a checkout')
+    const policy = options.policy ?? defaultAssetsPolicy
     const data = await analyzeAssets({
       dir,
       ...(options.roots ? { roots: options.roots } : {}),
       ...(options.dist ? { dist: options.dist } : {}),
-      ignore: options.ignore,
-      optimizeIgnore: options.optimizeIgnore,
-      budgets: options.budgets,
-      total: options.total,
+      ignore: policy.ignore,
+      policy,
+      minSaving: policy.minSaving.bytes,
       ...(options.convert ? { convert: options.convert } : {}),
       optimizeTop: options.optimizeTop,
       svgPreset: options.svgPreset,
-      avif: options.avif,
+      avif: requiredFormats(policy.formats.raster).includes('avif'),
       ...(options.naming ? { naming: options.naming } : {}),
       inlineSvg: options.inlineSvg,
       ...(cache ? { cache } : {}),

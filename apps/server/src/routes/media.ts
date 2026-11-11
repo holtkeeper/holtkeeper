@@ -262,7 +262,7 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
 
   app.post('/media/apply', async (c) => {
     const input = await readBody(c, applySchema)
-    const { repo, principal } = repoOf(c, input.repo, 'analyses:run')
+    const { repo } = repoOf(c, input.repo, 'analyses:run')
     const store = artifactsOf(deps)
     const ids = [
       ...new Set([...input.variants, ...(input.replaceOriginal ? [input.replaceOriginal] : [])]),
@@ -361,11 +361,9 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
     }
     if (outcome.mergeRequest) {
       result.mergeRequest = { id: outcome.mergeRequest.id, url: outcome.mergeRequest.webUrl }
-      await deps.store.activity.append({
-        at: deps.now().toISOString(),
-        actor: principal.id,
-        action: 'media.merge_request_opened',
-        subject: repoKey(repo),
+      c.set('audit', {
+        action: 'media.merge_request',
+        target: { type: 'media', repo: repoKey(repo) },
         details: {
           file: input.file,
           files: edits.map((e) => e.file),

@@ -2,10 +2,20 @@ import { describe, expect, test } from 'bun:test'
 
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { MockLanguageModelV4 } from 'ai/test'
+import { z } from 'zod'
 
 import type { ClaudeQuery } from './claude.ts'
-import { createAgent, limitConcurrency, pingAiSdkProvider } from './factory.ts'
-import type { Agent, AgentResult } from './types.ts'
+import {
+  anthropicMessagesConnection,
+  createAgent,
+  limitConcurrency,
+  needsToolLoop,
+  pingAiSdkProvider,
+  runtimeFor,
+} from './factory.ts'
+import { parseProviderOptions } from './provider.ts'
+import { createTranscript } from './transcript.ts'
+import type { Agent, AgentResult, Toolset } from './types.ts'
 
 async function failure(promise: Promise<unknown>): Promise<string> {
   try {
@@ -35,7 +45,7 @@ function recordingQuery() {
 }
 
 describe('createAgent', () => {
-  test('anthropic-compatible: endpoint from the credential, headers rendered, models routed and mapped', async () => {
+  test('anthropic-compatible: endpoint from the credential, headers rendered, tier models mapped', async () => {
     const { query, calls } = recordingQuery()
     const agent = createAgent(
       {
@@ -45,65 +55,36 @@ describe('createAgent', () => {
         options: {
           authHeader: 'bearer',
           headers: { 'X-Api-Key': '{secret}' },
-          models: { triage: 'claude-haiku-5-5' },
           modelMap: { 'claude-haiku-5-5': 'corp-haiku', 'claude-opus-5-5': 'corp-opus' },
         },
       },
-      { query, models: { review: 'claude-opus-5-5' } },
+      { query },
     )
     expect(agent.provider).toBe('anthropic-compatible')
-    expect(agent.modelFor('triage')).toBe('corp-haiku')
-    expect(agent.modelFor('review')).toBe('corp-opus')
-    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'triage' })
+    expect(agent.modelFor('fast')).toBe('corp-haiku')
+    expect(agent.modelFor('deep')).toBe('corp-opus')
+    expect(agent.modelFor()).toBe('claude-sonnet-5-5')
+    await agent.run({ dir: '/r', prompt: 'p', tier: 'fast' })
     const env = calls[0]?.env ?? {}
     expect(calls[0]?.model).toBe('corp-haiku')
+    expect(env['ANTHROPIC_DEFAULT_HAIKU_MODEL']).toBe('corp-haiku')
     expect(env['ANTHROPIC_BASE_URL']).toBe('https://llm.corp.test/anthropic')
     expect(env['ANTHROPIC_AUTH_TOKEN']).toBe('tok')
     expect(env['ANTHROPIC_CUSTOM_HEADERS']).toBe('X-Api-Key: tok')
   })
 
-  test('openai-compatible runs on the tool loop with bearer auth unless headers carry it', async () => {
-    const seen: { url: string; headers: Record<string, string>; model: string }[] = []
-    const fetch = async (url: string, init: RequestInit) => {
-      const body = JSON.parse(typeof init.body === 'string' ? init.body : '{}') as { model: string }
-      seen.push({ url, headers: init.headers as Record<string, string>, model: body.model })
-      return Response.json({ choices: [{ message: { content: 'done' } }] })
-    }
-    const plain = createAgent(
-      {
-        kind: 'openai-compatible',
-        url: 'https://gw.test/v1',
-        secret: 'sk',
-        options: { model: 'gpt-x' },
-      },
-      { fetch },
-    )
-    expect(plain.name).toBe('openai-compatible')
-    expect((await plain.run({ dir: '/r', prompt: 'p' })).text).toBe('done')
-    const custom = createAgent(
-      {
-        kind: 'openai-compatible',
-        url: 'https://gw.test/v1',
-        secret: 'sk',
-        options: {
-          baseUrl: 'https://other.test/api',
-          headers: { Authorization: 'Token {secret}' },
-        },
-      },
-      { fetch },
-    )
-    await custom.run({ dir: '/r', prompt: 'p' })
-    expect(seen[0]).toMatchObject({ url: 'https://gw.test/v1/chat/completions', model: 'gpt-x' })
-    expect(seen[0]?.headers['authorization']).toBe('Bearer sk')
-    expect(seen[1]?.url).toBe('https://other.test/api/chat/completions')
-    expect(seen[1]?.headers['Authorization']).toBe('Token sk')
-    expect(seen[1]?.headers['authorization']).toBeUndefined()
-  })
-
   test('rejects invalid options and kinds', () => {
     expect(() =>
-      createAgent({ kind: 'vertex', url: 'https://x.test', secret: '-', options: { region: 'r' } }),
-    ).toThrow('options.projectId')
+      createAgent({
+        kind: 'anthropic-compatible',
+        url: 'https://x.test',
+        secret: '-',
+        options: { authHeader: 'basic' },
+      }),
+    ).toThrow('options.authHeader')
+    expect(() => createAgent({ kind: 'vertex', url: 'https://x.test', secret: '-' })).toThrow(
+      'not an AI provider kind',
+    )
     expect(() => createAgent({ kind: 'gitlab', url: 'https://x.test', secret: '-' })).toThrow(
       'not an AI provider kind',
     )
@@ -169,7 +150,7 @@ const reply = (text: string) =>
   })
 
 describe('ai-sdk providers', () => {
-  test('routes models, merges catalog prices under the provider pricing and reports the model', async () => {
+  test('runs tier models, merges catalog prices under the provider pricing and reports the model', async () => {
     const ids: string[] = []
     const agent = createAgent(
       {
@@ -179,15 +160,18 @@ describe('ai-sdk providers', () => {
         options: {
           provider: 'openrouter',
           package: '@openrouter/ai-sdk-provider',
-          model: 'openai/gpt-5',
-          models: { triage: 'openai/gpt-5-mini' },
-          pricing: { 'openai/gpt-5': { inputPerMTok: 2, outputPerMTok: 8 } },
+          pricing: { 'vendor/claude-sonnet-5.5': { inputPerMTok: 2, outputPerMTok: 8 } },
         },
       },
       {
+        tierModels: {
+          fast: 'vendor/claude-haiku-5.5',
+          main: 'vendor/claude-sonnet-5.5',
+          deep: 'vendor/claude-opus-5.5',
+        },
         pricing: {
-          'openai/gpt-5': { inputPerMTok: 99, outputPerMTok: 99 },
-          'openai/gpt-5-mini': { inputPerMTok: 0.5, outputPerMTok: 1 },
+          'vendor/claude-sonnet-5.5': { inputPerMTok: 99, outputPerMTok: 99 },
+          'vendor/claude-haiku-5.5': { inputPerMTok: 0.5, outputPerMTok: 1 },
         },
         languageModel: (id) => {
           ids.push(id)
@@ -196,13 +180,13 @@ describe('ai-sdk providers', () => {
       },
     )
     expect(agent.provider).toBe('ai-sdk')
-    expect(agent.modelFor('triage')).toBe('openai/gpt-5-mini')
-    expect(agent.modelFor('review')).toBe('openai/gpt-5')
+    expect(agent.modelFor('fast')).toBe('vendor/claude-haiku-5.5')
+    expect(agent.modelFor('deep')).toBe('vendor/claude-opus-5.5')
     expect((await agent.run({ dir: '/tmp', prompt: 'p', capabilities: [] })).costUsd).toBe(2)
     expect(
-      (await agent.run({ dir: '/tmp', prompt: 'p', capabilities: [], taskKind: 'triage' })).costUsd,
+      (await agent.run({ dir: '/tmp', prompt: 'p', capabilities: [], tier: 'fast' })).costUsd,
     ).toBe(0.5)
-    expect(ids).toEqual(['openai/gpt-5', 'openai/gpt-5-mini'])
+    expect(ids).toEqual(['vendor/claude-sonnet-5.5', 'vendor/claude-haiku-5.5'])
   })
 
   test('options are validated: shipped packages only, OpenAI-compatible by default', () => {
@@ -237,9 +221,145 @@ describe('ai-sdk providers', () => {
     const result = await pingAiSdkProvider(provider, 'm', { languageModel: () => reply(' OK ') })
     expect(result.text).toBe('OK')
     expect(
-      await failure(
-        pingAiSdkProvider({ ...provider, kind: 'openai-compatible', options: {} }, 'm'),
-      ),
+      await failure(pingAiSdkProvider({ ...provider, kind: 'anthropic', options: {} }, 'm')),
     ).toContain('cannot be pinged')
+  })
+})
+
+const toolset: Toolset = {
+  name: 'notes',
+  tools: [
+    { name: 'notes.read', description: 'Reads a note.', input: z.object({}), run: () => 'n' },
+  ],
+}
+
+const messagesConnection = (provider: {
+  kind: string
+  url: string
+  secret: string
+  options?: object
+}) => {
+  const parsed = parseProviderOptions({ ...provider, options: { ...provider.options } })
+  if (parsed.kind === 'ai-sdk') throw new Error('unexpected')
+  return anthropicMessagesConnection(
+    { ...provider, options: { ...provider.options } },
+    parsed,
+    parsed.baseUrl ?? provider.url,
+  )
+}
+
+describe('runtime routing', () => {
+  test('a tool loop is any capability, toolset or MCP server; one-shots have none', () => {
+    expect(needsToolLoop({})).toBeTrue()
+    expect(needsToolLoop({ capabilities: [] })).toBeFalse()
+    expect(needsToolLoop({ capabilities: [], toolsets: [{ name: 'x', tools: [] }] })).toBeFalse()
+    expect(needsToolLoop({ capabilities: [], toolsets: [toolset] })).toBeTrue()
+    expect(
+      needsToolLoop({ capabilities: [], mcpServers: { other: { type: 'http', url: 'http://x' } } }),
+    ).toBeTrue()
+  })
+
+  test('Anthropic kinds run tool loops on the SDK unless the probe failed; ai-sdk never', () => {
+    const loop = { capabilities: ['read' as const] }
+    const oneShot = { capabilities: [] }
+    expect(runtimeFor('anthropic', loop)).toBe('claude-sdk')
+    expect(runtimeFor('anthropic-compatible', loop, 'ok')).toBe('claude-sdk')
+    expect(runtimeFor('anthropic-compatible', loop, 'unknown')).toBe('claude-sdk')
+    expect(runtimeFor('anthropic-compatible', loop, 'failed')).toBe('ai-sdk')
+    expect(runtimeFor('anthropic', oneShot, 'ok')).toBe('ai-sdk')
+    expect(runtimeFor('ai-sdk', loop, 'ok')).toBe('ai-sdk')
+  })
+
+  const gateway = {
+    kind: 'anthropic-compatible',
+    url: 'https://llm.corp.test/anthropic',
+    secret: 'gateway-secret-123',
+    options: { authHeader: 'bearer' },
+  }
+
+  test('createAgent sends tool loops to the SDK and one-shots to the AI SDK', async () => {
+    const { query, calls } = recordingQuery()
+    const models: string[] = []
+    const agent = createAgent(gateway, {
+      query,
+      languageModel: (id) => {
+        models.push(id)
+        return reply('one-shot')
+      },
+    })
+    const loop = await agent.run({ dir: '/r', prompt: 'p', toolsets: [toolset], capabilities: [] })
+    expect(loop.runtime).toBe('claude-sdk')
+    const oneShot = await agent.run({ dir: '/r', prompt: 'p', capabilities: [], tier: 'fast' })
+    expect(oneShot).toMatchObject({ runtime: 'ai-sdk', text: 'one-shot' })
+    expect(calls.length).toBe(1)
+    expect(models).toEqual(['claude-haiku-5-5'])
+    expect(agent.runtimeFor({ dir: '/r', prompt: 'p' })).toBe('claude-sdk')
+  })
+
+  test('a failed probe moves tool loops to the AI SDK loop', async () => {
+    const { query, calls } = recordingQuery()
+    const agent = createAgent(gateway, {
+      query,
+      agentLoop: 'failed',
+      languageModel: () => reply('fallback'),
+    })
+    const result = await agent.run({
+      dir: '/r',
+      prompt: 'p',
+      capabilities: [],
+      toolsets: [toolset],
+    })
+    expect(result).toMatchObject({ runtime: 'ai-sdk', text: 'fallback' })
+    expect(calls).toEqual([])
+    expect(agent.runtimeFor({ dir: '/r', prompt: 'p' })).toBe('ai-sdk')
+  })
+
+  test('transcripts never receive the provider secret or rendered headers', async () => {
+    const leaky = new MockLanguageModelV4({
+      doGenerate: {
+        content: [{ type: 'text', text: 'the key is gateway-secret-123 and team-header-value' }],
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+          outputTokens: { total: 1, text: 1, reasoning: 0 },
+        },
+        warnings: [],
+      },
+    })
+    const agent = createAgent(
+      { ...gateway, options: { headers: { 'X-Team': 'team-header-value' } } },
+      { languageModel: () => leaky },
+    )
+    const transcript = createTranscript()
+    await agent.run({ dir: '/r', prompt: 'p', capabilities: [], transcript })
+    const jsonl = transcript.toJsonl()
+    expect(jsonl).not.toContain('gateway-secret-123')
+    expect(jsonl).not.toContain('team-header-value')
+    expect(transcript.lines().map((line) => line.type)).toEqual(['start', 'assistant', 'end'])
+  })
+
+  test('the AI SDK reaches the same Messages endpoint and auth as Claude Code', () => {
+    expect(
+      messagesConnection({
+        ...gateway,
+        url: 'https://llm.corp.test/anthropic/',
+        options: { authHeader: 'bearer', headers: { 'X-Key': '{secret}' } },
+      }),
+    ).toEqual({
+      package: '@ai-sdk/anthropic',
+      name: 'anthropic-compatible',
+      secret: '',
+      baseUrl: 'https://llm.corp.test/anthropic/v1',
+      headers: { 'X-Key': 'gateway-secret-123' },
+      settings: { authToken: 'gateway-secret-123' },
+    })
+    expect(
+      messagesConnection({ kind: 'anthropic', url: 'https://api.anthropic.com/v1', secret: 'k' }),
+    ).toEqual({
+      package: '@ai-sdk/anthropic',
+      name: 'anthropic',
+      secret: 'k',
+      baseUrl: 'https://api.anthropic.com/v1',
+    })
   })
 })

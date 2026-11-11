@@ -16,7 +16,7 @@ const job = (createdAt: string, overrides: Partial<Job> = {}): Job => ({
   maxAttempts: 3,
   runAfter: createdAt,
   createdAt,
-  log: [],
+  attemptsHistory: [],
   schedule: 'nightly',
   ...overrides,
 })

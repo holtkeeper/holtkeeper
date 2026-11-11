@@ -1,19 +1,20 @@
 # @holtkeeper/stack
 
-The tech stack of a config group: which runtimes, package managers, service and base images and other tools every repository uses, in which versions, how far they are behind the latest release and whether their release line is still supported. Everything is read through the forge API (`getRepository`, `listFiles`, `readFile`); nothing is cloned.
+The tech stack of a config group: which runtimes, package managers, service and base images and other tools every repository uses, in which versions, how far they are behind the latest release and whether their release line is still supported, and whether each repository matches the group's conventions (golden files). Everything is read through the forge API (`getRepository`, `listFiles`, `readFile`); nothing is cloned.
 
 ## Analyzer
 
-`stackAnalyzer` (kind `stack`, scope `group`, needs `forge`) and `createStackAnalyzer({ sources? })` to inject `VersionSources` (called once per run). The record's repo is `{ forge, path: <group> }`. The default `stack-weekly` schedule runs it on Monday nights.
+`stackAnalyzer` (kind `stack`, scope `group`, needs `forge`) and `createStackAnalyzer({ sources? })` to inject `VersionSources` (called once per run). The record's repo is `{ forge, path: <group> }`. Freshness refreshes it daily (`refresh: { on: 'time', cadence: '1d' }`), so convention drift and new end-of-life dates show up within a day.
 
 Options (`stackOptionsSchema`):
 
-| Option     | Default | Meaning                                                                                                                               |
-| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `ignore`   | `[]`    | Component ids or names to leave out, `*` matches anything: `go`, `image:registry.example.com/*`. A flag takes a comma-separated list. |
-| `soonDays` | `180`   | Days before an end of life that count as soon.                                                                                        |
-| `maxFiles` | `50`    | Image, compose, CI and deployment files read per repository, shallowest first; the rest become a note.                                |
-| `lookups`  | `true`  | Look up latest versions and release lines online; `false` only collects what repositories use.                                        |
+| Option        | Default | Meaning                                                                                                                                           |
+| ------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ignore`      | `[]`    | Component ids or names to leave out, `*` matches anything: `go`, `image:registry.example.com/*`. A flag takes a comma-separated list.             |
+| `soonDays`    | `180`   | Days before an end of life that count as soon.                                                                                                    |
+| `maxFiles`    | `50`    | Image, compose, CI and deployment files read per repository, shallowest first; the rest become a note.                                            |
+| `lookups`     | `true`  | Look up latest versions and release lines online; `false` only collects what repositories use.                                                    |
+| `conventions` | `[]`    | Golden files every repository of the group should match (below). Set per group in the `analyzers.stack` setting, which the panel edits as a form. |
 
 ## What is read per repository
 
@@ -26,6 +27,19 @@ The repository's file list comes from one recursive `listFiles`; without it only
 **GitLab pipelines** are read as GitLab assembles them. `.gitlab-ci.yml` and its `include`s (local files, globs such as `packages/*/.gitlab-ci.yml`, and files of other projects on the same forge, at most four levels and 30 files) form one pipeline whose top-level `variables` merge, the including file winning; files of other projects are read once per run and their images count for the including repository (shown as `project:file`). Other GitLab CI files (child pipelines, YAML under `.gitlab/`) are read with their own includes and receive the root pipeline's variables. Remote, template and component includes are noted and skipped. CI/CD variables come from `GitForge.listCiVariables`: every group above the repository from the top down (each group read once per run), then the repository's own, `*`-scoped values first, over GitLab's predefined `CI_PROJECT_PATH`, `CI_PROJECT_NAME`, `CI_PROJECT_NAMESPACE`, `CI_PROJECT_ROOT_NAMESPACE` and `CI_DEFAULT_BRANCH`. They are only used to expand references; no value is stored except the image references they expand into.
 
 Directories named `node_modules`, `vendor`, `target`, `dist`, `build`, `out`, `fixtures`, `__fixtures__`, `testdata` and dot directories other than `.github` and `.gitlab` are skipped.
+
+## Conventions
+
+A convention (`ConventionSpec`, validated by `conventionSpecSchema`) is `{ path, mode, content, create }`: the file path in each repository, how to compare it, the golden content and whether to suggest creating the file where it is missing (default `true`). Every readable, non-archived repository is checked against every convention in the same pass; the results land in `conventions`.
+
+| Mode            | The file matches when                                                                                   | Suggested fix                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `exact`         | it equals the golden content, ignoring CRLF and trailing blank lines                                    | replace the whole file                                                       |
+| `json-subset`   | every key and array item of the golden JSON (comments and trailing commas allowed) is present and equal | in-place edits that keep comments and formatting; none for unexpected shapes |
+| `yaml-subset`   | the same for YAML                                                                                       | in-place edits in block style; none for flow collections                     |
+| `lines-present` | every non-blank line of the golden content appears (trimmed), in any order                              | append the missing lines                                                     |
+
+`compareWithConvention(spec, actual)` is pure and gives `matches`, `drifts`, `missing` or `error` (the file could not be read, or it or the golden content does not parse) with readable problems such as `engines.node: expected ">=22", found ">=18"`. `conventionChange(repo, spec, comparison)` turns the edits into a `CodeChange` targeting the repository (`source: 'stack'`, `confidence: 'review'`, id stable for the same edits); the analysis lists them as its `changes`, so accepting a fix opens a merge request in that repository. Conventions are exact files on purpose: no model writes or judges them.
 
 ## Components
 
@@ -82,6 +96,14 @@ interface StackData {
       image?
     }[]
   }[]
+  conventions: {
+    repo
+    file
+    mode: 'exact' | 'json-subset' | 'yaml-subset' | 'lines-present'
+    status: 'matches' | 'drifts' | 'missing' | 'error'
+    problems: string[]
+    change?: CodeChange
+  }[] // records without it read back as []
   notes: { repo?; message }[]
 }
 ```
@@ -97,6 +119,7 @@ interface StackData {
 - **Versions**: one matrix of repositories × components per kind (the 40 most used components; only repositories that use one; image columns are shortened to the trailing path segments that keep them apart, with the full name as the header hint; the tone is end of life first, then lag) and a stacked chart of the spread per component.
 - **Components**: latest, latest LTS, versions and release lines in use, counts per status, grouped by kind.
 - **Map**: a grouped graph linking repositories to the release lines they use, so repositories on the same line meet at one node that lists its support and the versions written; above 300 links it keeps components several repositories share.
+- **Conventions** (when the group has any): status per repository × file, differences with `new` and `resolved` against the previous record, and the suggested fixes, applicable.
 - **Where versions are set**: every usage with its file and source (first 1000).
 - **Notes**: unreadable or archived repositories, unparsable files, unexpanded variables, unknown latest versions.
 

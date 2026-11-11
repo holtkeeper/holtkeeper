@@ -54,7 +54,8 @@ const dimensionValue = (
 
 /** Whether a record passes every given field of `filter`. */
 export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilter = {}): boolean {
-  const { from, to, repo, group, model, provider, taskKind, analyzer, outcome, scopes } = filter
+  const { from, to, repo, group, model, provider, taskKind, analyzer, outcome, jobId, scopes } =
+    filter
   return (
     (from === undefined || record.at >= from) &&
     (to === undefined || record.at < to) &&
@@ -65,6 +66,7 @@ export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilte
     (taskKind === undefined || record.taskKind === taskKind) &&
     (analyzer === undefined || record.analyzer === analyzer) &&
     (outcome === undefined || record.outcome === outcome) &&
+    (jobId === undefined || record.jobId === jobId) &&
     (scopes === undefined ||
       scopes.some((scope) => scopeCoversRepo(scope, { ...record.repo, groups: record.groups })))
   )

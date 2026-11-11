@@ -1,38 +1,14 @@
 import { parseArgs } from 'node:util'
 
-import { claudeAgent } from '@holtkeeper/agent'
-import { builtinAnalyzers } from '@holtkeeper/analyzers'
-import { ConfigError, loadConfig, resolveRepo } from '@holtkeeper/core'
+import { ConfigError, loadConfig } from '@holtkeeper/core'
 
-import {
-  analyzeUsage,
-  analyzerArgOptions,
-  formatReportText,
-  runAnalyzer,
-  uploadAnalysis,
-} from './analyze.ts'
-import {
-  type AuditServices,
-  UsageError,
-  auditCommand,
-  defaultAuditServices,
-  formatReport,
-  parseTraits,
-  uploadReport,
-} from './audit.ts'
-import { releaseCommand } from './release.ts'
-import { type StartServer, serve, serveOptions } from './serve.ts'
+import { type StartServer, UsageError, serve, serveOptions } from './serve.ts'
 import { usersCommand } from './users.ts'
 
 const usage = `Usage: holtkeeper <command> [options]
 
 Commands:
-  validate-config           Check the config file
-  explain <forge>:<path>    Show groups, traits and plugin options for a repository
-  audit [dir]               Scan a checkout for vulnerable dependencies (default: .)
-  analyze <kind> [dir]      Run an analysis (see "Analyze options") and print its report
-  release <action>          Release assistant: status, plan, propose, accept, version, deploy
-  serve                     Start the web server from the config's \`server\` section
+  serve                     Start the server from the config's \`server\` section
   users <action>            Manage accounts of \`users\` sign-in in the config's store:
                             list, add <name>, login-link <user>, enroll-link <user>,
                             recover-link <user> (user is an id, email or name)
@@ -47,6 +23,8 @@ Serve options:
   --concurrency <n>         Jobs this worker runs at once (default: jobs.concurrency)
   --claim-delay <time>      Take only jobs queued this long, e.g. 15s, so workers without one
                             get new jobs first (also HOLTKEEPER_CLAIM_DELAY)
+  --pool <pools>            Worker pools this worker serves, e.g. write (default: default; also
+                            HOLTKEEPER_WORKER_POOL); combine with commas, e.g. default,write
   --max-jobs <n>            Exit 0 after running n jobs (one job per container or pod)
   --drain-timeout <time>    On SIGTERM, let running jobs finish this long, e.g. 30s (default)
 
@@ -57,39 +35,7 @@ Users options:
   --json                    Print JSON
 
 A login link signs its holder in once, without a passkey: hand it to an AI agent that drives
-the web UI. Treat it like a password until it expires.
-
-Release options:
-  --repo <forge>:<path>     Repository (status without it covers every group, or --group)
-  --group <name>            status: one config group
-  --step <propose|version>  plan: which step (default: what waits)
-  --version <x.y.z>         plan, version: use this version instead of the suggestion
-  --tag <tag>               deploy: version to deploy (default: the latest)
-  --env <name>              deploy: environment from the settings
-  --preset <ids>            Release presets laid over the stored setting, comma-separated
-  --settings <file>         JSON release settings laid over presets and the stored setting
-  --note <text>             accept: why the changes are accepted
-  --force                   Override failing gates (or the deploy order)
-  --redeploy                deploy: run again although the environment succeeded
-  --dry-run                 Show what would happen without changing the forge
-
-release plan exits with 2 while a gate fails. Settings come from the config's store when it
-has a server section; accept needs that store.
-
-Audit options:
-  --fix                     Try to fix findings and rescan
-  --allowlist <file>        JSON array of allowlist entries
-  --trait <key=value>       Repository trait for conditional allowlist entries (repeatable)
-  --json                    Print the full report as JSON
-  --upload <url>            Send the report to a Holtkeeper server, e.g. http://localhost:7420
-  --repo <forge>:<path>     Repository the report belongs to (required with --upload)
-
-audit exits with 1 while unfixed, non-allowlisted findings remain.
-
-Analyze options (--json prints the data, --upload/--repo send it to a server):
-  --ref <name>              Release or tag the result belongs to
-  --model <id>              LLM for analyzers that use one (needs ANTHROPIC_API_KEY)
-${analyzeUsage(builtinAnalyzers)}`
+the web UI. Treat it like a password until it expires.`
 
 /** Where the CLI writes; tests capture it. */
 export interface Io {
@@ -98,8 +44,6 @@ export interface Io {
 }
 
 export interface CliServices {
-  audit?: () => AuditServices
-  fetch?: typeof fetch
   /** Replaces `startServer` from `@holtkeeper/server` (tests). */
   startServer?: StartServer
   /** Resolves when `serve` should stop; default SIGINT or SIGTERM. */
@@ -120,34 +64,16 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
     options: {
       config: { type: 'string', short: 'c', default: 'holtkeeper.config.ts' },
       help: { type: 'boolean', short: 'h', default: false },
-      fix: { type: 'boolean', default: false },
-      allowlist: { type: 'string' },
-      trait: { type: 'string', multiple: true, default: [] },
       json: { type: 'boolean', default: false },
-      upload: { type: 'string' },
-      repo: { type: 'string' },
-      ref: { type: 'string' },
-      model: { type: 'string' },
       role: { type: 'string' },
       concurrency: { type: 'string' },
       'claim-delay': { type: 'string' },
+      pool: { type: 'string' },
       'max-jobs': { type: 'string' },
       'drain-timeout': { type: 'string' },
       admin: { type: 'boolean', default: false },
       email: { type: 'string' },
       ttl: { type: 'string' },
-      group: { type: 'string' },
-      step: { type: 'string' },
-      version: { type: 'string' },
-      tag: { type: 'string' },
-      env: { type: 'string' },
-      preset: { type: 'string' },
-      settings: { type: 'string' },
-      note: { type: 'string' },
-      force: { type: 'boolean', default: false },
-      redeploy: { type: 'boolean', default: false },
-      'dry-run': { type: 'boolean', default: false },
-      ...analyzerArgOptions(builtinAnalyzers),
     },
   })
   const [command, ...args] = positionals
@@ -159,119 +85,6 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
 
   try {
     switch (command) {
-      case 'validate-config': {
-        const config = await loadConfig(values.config)
-        io.out(
-          `config is valid: ${Object.keys(config.forges).length} forge(s), ` +
-            `${Object.keys(config.groups).length} group(s), ${config.plugins.length} plugin(s)`,
-        )
-        return 0
-      }
-      case 'explain': {
-        const target = args[0]
-        const separator = target?.indexOf(':') ?? -1
-        if (!target || separator < 1) {
-          throw new UsageError(
-            'explain expects a repository as <forge>:<path>, e.g. work:games/app-x',
-          )
-        }
-        const config = await loadConfig(values.config)
-        const forge = target.slice(0, separator)
-        const resolved = resolveRepo(config, { forge, path: target.slice(separator + 1) })
-        io.out(
-          JSON.stringify(
-            {
-              ...resolved,
-              plugins: resolved.plugins.map(({ plugin, options }) => ({
-                name: plugin.name,
-                options,
-              })),
-            },
-            null,
-            2,
-          ),
-        )
-        return 0
-      }
-      case 'audit': {
-        if (values.upload && !values.repo)
-          throw new UsageError('--upload needs --repo <forge>:<path>')
-        const startedAt = new Date().toISOString()
-        const report = await auditCommand(
-          {
-            dir: args[0] ?? '.',
-            fix: values.fix,
-            allowlist: values.allowlist,
-            traits: parseTraits(values.trait),
-          },
-          (services.audit ?? defaultAuditServices)(),
-        )
-        io.out(values.json ? JSON.stringify(report, null, 2) : formatReport(report))
-        if (values.upload && values.repo) {
-          const url = await uploadReport(
-            values.upload,
-            values.repo,
-            report,
-            startedAt,
-            services.fetch ?? fetch,
-          )
-          io.err(`uploaded: ${url}`)
-        }
-        return report.findings.length ? 1 : 0
-      }
-      case 'analyze': {
-        const [kind, dir = '.'] = args
-        const analyzer = builtinAnalyzers.find((candidate) => candidate.kind === kind)
-        if (!analyzer) {
-          throw new UsageError(
-            `analyze expects one of: ${builtinAnalyzers.map((a) => a.kind).join(', ')}`,
-          )
-        }
-        if (values.upload && !values.repo)
-          throw new UsageError('--upload needs --repo <forge>:<path>')
-        const apiKey = Bun.env.ANTHROPIC_API_KEY
-        const agent =
-          analyzer.needs.agent && apiKey
-            ? claudeAgent({
-                apiKey,
-                ...(typeof values.model === 'string' ? { model: values.model } : {}),
-              })
-            : undefined
-        const { data, ref, artifacts } = await runAnalyzer({
-          analyzer,
-          dir,
-          values,
-          ...(agent ? { agent } : {}),
-          ...(typeof values.ref === 'string' ? { ref: values.ref } : {}),
-        })
-        if (values.json) io.out(JSON.stringify(data, null, 2))
-        else {
-          const record = {
-            id: 'local',
-            repo: { forge: 'local', path: dir },
-            kind: analyzer.kind,
-            ...(ref ? { ref } : {}),
-            createdAt: new Date().toISOString(),
-            data,
-          }
-          io.out(formatReportText(analyzer.analysis.toReport(record)))
-        }
-        if (values.upload && values.repo) {
-          const url = await uploadAnalysis(
-            values.upload,
-            values.repo,
-            {
-              kind: analyzer.kind,
-              ...(ref ? { ref } : {}),
-              data,
-              ...(artifacts?.length ? { artifacts } : {}),
-            },
-            services.fetch ?? fetch,
-          )
-          io.err(`uploaded: ${url}`)
-        }
-        return 0
-      }
       case 'serve': {
         const options = await serveOptions(values)
         const config = await loadConfig(values.config)
@@ -284,10 +97,6 @@ export async function cli(argv: string[], io: Io, services: CliServices = {}): P
           (line) => io.out(line),
         )
       }
-      case 'release':
-        return await releaseCommand(await loadConfig(values.config), args, values, (line) =>
-          io.out(line),
-        )
       case 'users':
         return await usersCommand(await loadConfig(values.config), args, values, (line) =>
           io.out(line),

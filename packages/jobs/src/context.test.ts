@@ -55,7 +55,7 @@ const job = (overrides: Partial<Job> = {}): Job => ({
   maxAttempts: 3,
   runAfter: 'now',
   createdAt: 'now',
-  log: [],
+  attemptsHistory: [],
   ...overrides,
 })
 
@@ -85,8 +85,9 @@ describe('createContextFactory', () => {
   })
 
   test('provides only what the analyzer needs', async () => {
-    const { context } = await contextFor(job(), analyzer({}), io)
-    expect(Object.keys(context).toSorted()).toEqual(['checkout', 'repo', 'runner'])
+    const prepared = await contextFor(job(), analyzer({}), io)
+    expect(Object.keys(prepared.context).toSorted()).toEqual(['checkout', 'repo', 'runner'])
+    expect(prepared).not.toHaveProperty('sha')
   })
 
   test('checks out the default branch with forge credentials and cleans up', async () => {
@@ -107,8 +108,34 @@ describe('createContextFactory', () => {
       credentials: { username: 'oauth2', password: 'tok' },
       cacheDir: '/cache',
     })
+    expect(prepared.sha).toBe('abc')
     await prepared.cleanup()
     expect(cleaned).toBe(1)
+  })
+
+  test('tells the agent factory whether a person asked for the job', async () => {
+    const seen: { trigger: Job['trigger']; interactive?: boolean }[] = []
+    const factory = createContextFactory({
+      config,
+      store,
+      cacheDir: '/cache',
+      runner: createFakeRunner().runner,
+      agentFor: (_repo, info) => {
+        seen.push({ trigger: current, ...(info && { interactive: info.interactive }) })
+        return agent
+      },
+    })
+    let current: Job['trigger'] = 'manual'
+    for (const trigger of ['manual', 'command', 'schedule', 'webhook'] as const) {
+      current = trigger
+      await factory(job({ trigger }), analyzer({ agent: 'optional' }), io)
+    }
+    expect(seen).toEqual([
+      { trigger: 'manual', interactive: true },
+      { trigger: 'command', interactive: true },
+      { trigger: 'schedule', interactive: false },
+      { trigger: 'webhook', interactive: false },
+    ])
   })
 
   test('uses the job ref and passes it on', async () => {

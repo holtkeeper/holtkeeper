@@ -1,34 +1,20 @@
-import { groupsMatch } from '@holtkeeper/access'
 import type { RepoRef } from '@holtkeeper/forge'
 
 import type { HoltkeeperConfig } from './config.ts'
-import type { Plugin, PluginUse, Traits } from './plugin.ts'
 
-export interface ResolvedPlugin {
-  plugin: Plugin
-  options: unknown
-}
+/** Facts about a repository from the config's `repos`, such as `{ ssr: false }`. */
+export type Traits = Record<string, string | number | boolean>
 
 export interface ResolvedRepo {
   repo: RepoRef
   groups: string[]
   traits: Traits
-  plugins: ResolvedPlugin[]
 }
 
 const matches = (pattern: string, path: string) => new Bun.Glob(pattern).match(path)
 const matchesAny = (patterns: string[], path: string) => patterns.some((p) => matches(p, path))
 
-/** A plugin's options for one repository path: base options, then matching overrides in order. */
-export function resolveOptions(use: PluginUse, path: string): unknown {
-  const merged = { ...use.options }
-  for (const [pattern, override] of Object.entries(use.overrides ?? {})) {
-    if (matches(pattern, path)) Object.assign(merged, override)
-  }
-  return use.plugin.options.parse(merged)
-}
-
-/** What applies to a repository: its groups, merged traits and plugins with final options. */
+/** What applies to a repository: the groups it belongs to and its merged traits. */
 export function resolveRepo(config: HoltkeeperConfig, repo: RepoRef): ResolvedRepo {
   const groups = Object.entries(config.groups)
     .filter(
@@ -46,9 +32,5 @@ export function resolveRepo(config: HoltkeeperConfig, repo: RepoRef): ResolvedRe
     }
   }
 
-  const plugins = config.plugins
-    .filter((use) => groupsMatch(use.groups, groups) && !matchesAny(use.exclude ?? [], repo.path))
-    .map((use) => ({ plugin: use.plugin, options: resolveOptions(use, repo.path) }))
-
-  return { repo, groups, traits, plugins }
+  return { repo, groups, traits }
 }

@@ -1,11 +1,11 @@
 # @holtkeeper/chat
 
-One conversation model for every place people talk to Holtkeeper: merge request comments today, Slack and the web panel next. Commands are written once and answered with surface-independent cards; each surface renders them as well as it can.
+One conversation model for every place people talk to Holtkeeper: merge request comments and the web panel. Commands are written once and answered with surface-independent cards; each surface renders them as well as it can.
 
 ```
-surface (MR notes, Slack, web) ──ChatMessage──▶ router ──▶ command.run(context)
-          ▲                                                    │
-          └──────────── render(Card) ◀── reply / LiveMessage ◀─┘
+surface (MR notes, web) ──ChatMessage──▶ router ──▶ command.run(context)
+          ▲                                             │
+          └───── render(Card) ◀── reply / LiveMessage ◀─┘
 ```
 
 ## Cards
@@ -23,10 +23,11 @@ surface (MR notes, Slack, web) ──ChatMessage──▶ router ──▶ comma
 | `actions` | Buttons; each is a full command line (`release deploy prod tag=v1.2.0 --yes`)                                                                                                                                                                                           |
 | `form`    | Fields (`text`, `select` with `multiple`, `toggle`) and the command a submit runs                                                                                                                                                                                       |
 | `context` | Small print                                                                                                                                                                                                                                                             |
+| `task`    | A code change the agent proposes: target `repos` (`forge:path`), a `summary` and a `status`. Only `proposed` exists until write tasks run; surfaces show that it cannot be started yet                                                                                  |
 
 Buttons and forms are command lines on purpose: a surface with buttons sends the line when clicked, one without shows the line to reply with. Whoever clicks is authorized again when the command runs, so a button carries no authority. `formCommand(form, values)` builds the line a submitted form runs (`name=value`, quoted when needed, multiple values joined with commas).
 
-`textCard(title, text, tone?)` is a card with one text block; an empty title leaves the heading out.
+`textCard(title, text, tone?)` is a card with one text block; an empty title leaves the heading out. `taskCard(repos, summary, { status?, groupId?, budgetUsd?, mergeRequests? })` is a card with one `task` block: a code change, its targets, the task group people approve or cancel from it, the group's spend cap and the merge requests its tasks opened; title and tone follow `status` (`TaskCardStatus`, the task group statuses, default `proposed`). The server rewrites the card in place as the group moves on.
 
 ## Commands
 
@@ -80,7 +81,7 @@ interface ChatSurface {
 }
 ```
 
-`actor.externalId` is the stable id on the surface (numeric forge user id, Slack member id), never a username. `liveMessage(surface, posted)` updates in place when the surface can, and posts a new message otherwise.
+`actor.externalId` is the stable id on the surface (e.g. a numeric forge user id), never a username. `liveMessage(surface, posted)` updates in place when the surface can, and posts a new message otherwise.
 
 ### Merge request notes
 

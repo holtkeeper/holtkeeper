@@ -256,6 +256,82 @@ test('reports end of life with new and resolved lines against the previous recor
   ])
 })
 
+test('checks every readable repository against the conventions in the same pass', async () => {
+  const conventions = [
+    { path: '.nvmrc', mode: 'exact' as const, content: '22\n', create: true },
+    {
+      path: 'package.json',
+      mode: 'json-subset' as const,
+      content: '{"packageManager":"pnpm@9.12.0"}',
+      create: false,
+    },
+  ]
+  const data = await analyzeStack({
+    group: 'acme',
+    repos,
+    forge: fakeForge(files, ['acme/old']),
+    conventions,
+    now,
+  })
+  expect(
+    data.conventions.map((result) => [result.repo, result.file, result.status, result.problems]),
+  ).toEqual([
+    ['acme/web', '.nvmrc', 'matches', []],
+    ['acme/legacy', '.nvmrc', 'drifts', ['1 of 1 lines differ from the golden file']],
+    ['acme/tools', '.nvmrc', 'missing', ['file is missing']],
+    ['acme/web', 'package.json', 'matches', []],
+    ['acme/legacy', 'package.json', 'drifts', ['packageManager: missing, expected "pnpm@9.12.0"']],
+    ['acme/tools', 'package.json', 'missing', ['file is missing']],
+  ])
+  const legacy = data.conventions.find(
+    (result) => result.repo === 'acme/legacy' && result.file === '.nvmrc',
+  )
+  expect(legacy?.change).toMatchObject({
+    source: 'stack',
+    target: { forge: 'work', path: 'acme/legacy' },
+    edits: [{ kind: 'replace', oldText: 'v18.19.0\n', newText: '22\n' }],
+  })
+  expect(
+    data.conventions.find((result) => result.repo === 'acme/tools' && result.file === '.nvmrc')
+      ?.change?.edits,
+  ).toEqual([{ kind: 'create', file: '.nvmrc', newText: '22\n' }])
+  expect(stackAnalysis.schema.parse(data)).toEqual(data)
+  expect(stackAnalysis.changes?.(data).map((change) => change.target?.path)).toEqual([
+    'acme/legacy',
+    'acme/tools',
+    'acme/legacy',
+  ])
+
+  const previous: StackData = {
+    ...data,
+    conventions: data.conventions.map((result) =>
+      result.repo === 'acme/tools' && result.file === '.nvmrc'
+        ? { ...result, status: 'matches', problems: [] }
+        : result.repo === 'acme/web' && result.file === '.nvmrc'
+          ? { ...result, status: 'drifts', problems: ['old'] }
+          : result,
+    ),
+  }
+  const report = stackAnalysis.toReport(
+    record(data, '2026-10-30T00:00:00Z'),
+    record(previous, '2026-10-23T00:00:00Z'),
+  )
+  const issues = blocksOf(report, 'conventions').find((block) => block.type === 'issues')
+  expect(issues?.type === 'issues' && issues.items.map((item) => [item.title, item.tags])).toEqual([
+    ['acme/legacy: .nvmrc drifts', ['exact']],
+    ['acme/tools: .nvmrc missing', ['exact', 'new']],
+    ['acme/legacy: package.json drifts', ['json-subset']],
+    ['acme/tools: package.json missing', ['json-subset']],
+    ['acme/web: .nvmrc matches the convention again', ['exact', 'resolved']],
+  ])
+  expect(blocksOf(report, 'conventions').some((block) => block.type === 'changes')).toBe(true)
+})
+
+test('records read back without conventions get an empty list', async () => {
+  const { conventions: _, ...old } = await analyze()
+  expect(stackAnalysis.schema.parse(old).conventions).toEqual([])
+})
+
 test('skips lookups without sources', async () => {
   const data = await analyzeStack({
     group: 'acme',

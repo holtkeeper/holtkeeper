@@ -223,6 +223,7 @@ export const i18nAnalyzer = defineAnalyzer<I18nData, I18nOptions>({
   kind: 'i18n',
   analysis: i18nAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '6h' },
   needs: { checkout: true },
   options: i18nOptions,
   requiredCheckouts: (options, repo) => requiredCheckouts(options, repo),

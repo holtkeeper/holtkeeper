@@ -1,6 +1,11 @@
 import { type Scope, can, scopeCoversRepo } from '@holtkeeper/access'
 import type { KnowledgeDetail, KnowledgeEntryView, KnowledgeList } from '@holtkeeper/api'
-import { knowledgeKinds, knowledgeStatuses, validateEntry } from '@holtkeeper/knowledge'
+import {
+  knowledgeKinds,
+  knowledgeStatuses,
+  sharingDefaults,
+  validateEntry,
+} from '@holtkeeper/knowledge'
 import type {
   KnowledgeEntry,
   KnowledgeFilter,
@@ -21,11 +26,16 @@ import {
   principalOf,
   repoTarget,
 } from '../context.ts'
+import { canReadShared, crossTeamPolicy, scopeOwner } from '../visibility.ts'
+import { peopleOf } from './avatars.ts'
 
 const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
 
 /** Candidates ranked before the repository filter, so filtering does not starve `limit`. */
 const pool = 500
+
+const isShared = (entry: KnowledgeEntry) =>
+  entry.visibility === 'shared' && entry.status === 'accepted'
 
 const statusFor = { accept: 'accepted', reject: 'rejected', archive: 'archived' } as const
 
@@ -51,6 +61,8 @@ const contentOf = (entry: KnowledgeEntry | undefined) =>
     topics: entry.topics,
     appliesTo: entry.appliesTo,
     packages: entry.packages,
+    visibility: entry.visibility,
+    subject: entry.subject,
     status: entry.status,
     evidence: entry.evidence,
     supersedes: entry.supersedes,
@@ -85,7 +97,8 @@ async function readDraft(c: AppContext) {
  * propose and people curate. Permissions are checked against the entry's scope like credentials;
  * listing by repository needs `knowledge:read` on that repository instead.
  */
-export function knowledgeRoutes({ store, config, now }: ServerDeps) {
+export function knowledgeRoutes(deps: ServerDeps) {
+  const { store, config, now } = deps
   const app = new Hono<Env>()
 
   const existing = async (c: AppContext, action: 'knowledge:read' | 'knowledge:write') => {
@@ -95,14 +108,8 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
     return { entry, principal }
   }
 
-  const record = (actor: string, action: string, entry: KnowledgeEntry, details = {}) =>
-    store.activity.append({
-      at: entry.updatedAt,
-      actor,
-      action,
-      subject: entry.id,
-      details: { title: entry.title, kind: entry.kind, scope: entry.scope, ...details },
-    })
+  const ownerOf = (entry: KnowledgeEntry) =>
+    scopeOwner(entry.scope, (repo) => repoTarget(config, repo).groups)
 
   app.get('/knowledge', async (c) => {
     const principal = principalOf(c)
@@ -113,11 +120,12 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
       ...(kind && { kind }),
       ...(c.req.query('topic') && { topic: c.req.query('topic') }),
       ...(c.req.query('package') && { package: c.req.query('package') }),
+      ...(c.req.query('subject') && { subject: c.req.query('subject') }),
       ...(c.req.query('scope') && { scope: c.req.query('scope') }),
     }
     const limit = limitParam(c.req.query('limit'))
     const query = c.req.query('q')?.trim()
-    const hits: KnowledgeEntryView[] = query
+    const hits: (KnowledgeEntry & { score?: number })[] = query
       ? (await store.knowledge.search(query, filter, pool)).map(({ entry, score }) => ({
           ...entry,
           score,
@@ -125,20 +133,48 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
       : await store.knowledge.list(filter)
 
     const repo = parseRepo(c.req.query('repo'))
-    let visible: KnowledgeEntryView[]
+    let visible: typeof hits
     if (repo) {
       const target = repoTarget(config, repo)
       authorize(c, 'knowledge:read', { kind: 'repo', repo: target })
       visible = hits.filter((entry) => scopeCoversRepo(entry.scope, target))
     } else {
-      visible = hits.filter((entry) => can(principal, 'knowledge:read', scopeTarget(entry.scope)))
+      const policy = await crossTeamPolicy(store.settings)
+      visible = hits.filter(
+        (entry) =>
+          can(principal, 'knowledge:read', scopeTarget(entry.scope)) ||
+          (isShared(entry) && canReadShared(principal, entry.scope, policy)),
+      )
     }
-    return c.json<KnowledgeList>({ entries: visible.slice(0, limit) })
+    const entries: KnowledgeEntryView[] = visible
+      .slice(0, limit)
+      .map((entry) => ({ ...entry, owner: ownerOf(entry) }))
+    return c.json<KnowledgeList>({
+      entries,
+      people: await peopleOf(
+        deps,
+        entries.flatMap((entry) => [entry.author, ...(entry.updatedBy ? [entry.updatedBy] : [])]),
+      ),
+    })
   })
 
   app.get('/knowledge/:id', async (c) => {
-    const { entry } = await existing(c, 'knowledge:read')
-    return c.json<KnowledgeDetail>({ entry, history: await store.knowledge.history(entry.id) })
+    const principal = principalOf(c)
+    const entry = await store.knowledge.get(c.req.param('id'))
+    const own = entry && can(principal, 'knowledge:read', scopeTarget(entry.scope))
+    const readable =
+      own ||
+      (entry &&
+        isShared(entry) &&
+        canReadShared(principal, entry.scope, await crossTeamPolicy(store.settings)))
+    if (!entry || !readable)
+      throw new HTTPException(entry ? 403 : 404, {
+        message: entry ? 'missing permission knowledge:read' : 'knowledge entry not found',
+      })
+    return c.json<KnowledgeDetail>({
+      entry,
+      history: own ? await store.knowledge.history(entry.id) : [],
+    })
   })
 
   app.post('/knowledge', async (c) => {
@@ -149,6 +185,7 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
     const at = now().toISOString()
     const entry = await store.knowledge.put({
       ...draft,
+      ...sharingDefaults(draft),
       id: crypto.randomUUID(),
       status: draft.status ?? 'accepted',
       source: 'human',
@@ -156,7 +193,6 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
       createdAt: at,
       updatedAt: at,
     })
-    await record(principal.id, 'knowledge.created', entry, { status: entry.status })
     audit(c, 'knowledge.create', undefined, entry)
     return c.json<KnowledgeEntry>(entry, 201)
   })
@@ -181,7 +217,6 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
       updatedAt: now().toISOString(),
       updatedBy: principal.id,
     })
-    await record(principal.id, 'knowledge.updated', entry, { version: entry.version })
     audit(c, 'knowledge.update', previous, entry)
     return c.json<KnowledgeEntry>(entry)
   })
@@ -203,7 +238,6 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
       updatedAt: at,
       updatedBy: principal.id,
     })
-    await record(principal.id, `knowledge.${status}`, entry)
     audit(c, `knowledge.${action}`, previous, entry)
 
     if (status === 'accepted' && entry.supersedes) {
@@ -214,29 +248,21 @@ export function knowledgeRoutes({ store, config, now }: ServerDeps) {
         can(principal, 'knowledge:write', scopeTarget(replaced.scope))
       ) {
         const { version: _old, ...replacedRest } = replaced
-        const archived = await store.knowledge.put({
+        await store.knowledge.put({
           ...replacedRest,
           status: 'archived',
           updatedAt: at,
           updatedBy: principal.id,
         })
-        await record(principal.id, 'knowledge.archived', archived, { supersededBy: entry.id })
       }
     }
     return c.json<KnowledgeEntry>(entry)
   })
 
   app.delete('/knowledge/:id', async (c) => {
-    const { entry, principal } = await existing(c, 'knowledge:write')
+    const { entry } = await existing(c, 'knowledge:write')
     await store.knowledge.remove(entry.id)
     audit(c, 'knowledge.delete', entry, undefined)
-    await store.activity.append({
-      at: now().toISOString(),
-      actor: principal.id,
-      action: 'knowledge.removed',
-      subject: entry.id,
-      details: { title: entry.title, kind: entry.kind, scope: entry.scope },
-    })
     return c.body(null, 204)
   })
 

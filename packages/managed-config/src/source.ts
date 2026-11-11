@@ -1,4 +1,4 @@
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { HoltkeeperConfig, HoltkeeperFileConfig } from '@holtkeeper/core'
 import type { ForgeDefinition } from '@holtkeeper/forge'
 import type {
   AnyConfigDocument,
@@ -18,7 +18,7 @@ import {
 export interface ConfigSource {
   /** The latest valid effective config. */
   current(): HoltkeeperConfig
-  /** `current()` with provenance and forge origins. */
+  /** `current()` with the forge origins. */
   effective(): EffectiveConfig
   /** Called after every rebuild that changed something; returns an unsubscribe function. */
   subscribe(listener: (effective: EffectiveConfig) => void): () => void
@@ -42,9 +42,9 @@ export interface ConfigSource {
 }
 
 export interface ConfigSourceOptions {
-  /** The validated file config; panel documents are applied on top of it. */
-  file: HoltkeeperConfig
-  /** Without a store the source serves the file config and never changes. */
+  /** The validated config file; panel documents are applied on top of it. */
+  file: HoltkeeperFileConfig
+  /** Without a store the source serves the file config alone and never changes. */
   store?: ConfigStore
   forgeFactories: EffectiveConfigOptions['forgeFactories']
   /** The plaintext token of a credential; a rejection makes that forge unavailable. */

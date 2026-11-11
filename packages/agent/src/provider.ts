@@ -3,14 +3,7 @@ import { z } from 'zod'
 import type { AgentUsage } from './types.ts'
 
 /** Provider kinds an AI provider credential may have. */
-export const AI_PROVIDER_KINDS = [
-  'anthropic',
-  'anthropic-compatible',
-  'bedrock',
-  'vertex',
-  'openai-compatible',
-  'ai-sdk',
-] as const
+export const AI_PROVIDER_KINDS = ['anthropic', 'anthropic-compatible', 'ai-sdk'] as const
 
 export type AiProviderKind = (typeof AI_PROVIDER_KINDS)[number]
 
@@ -33,10 +26,6 @@ const headerName = z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, 'invalid he
 const headerValue = z.string().refine((value) => !/[\r\n]/.test(value), 'no line breaks')
 
 const common = {
-  /** Default model for tasks whose kind has no entry in `models`. */
-  model: z.string().min(1).optional(),
-  /** Model per task kind, e.g. `{ review: 'claude-opus-5-5', triage: 'claude-haiku-5-5' }`. */
-  models: z.record(z.string().min(1), z.string().min(1)).optional(),
   /** Logical model id → the name the provider knows it by, e.g. `{ 'claude-opus-5-5': 'opus' }`. */
   modelMap: z.record(z.string().min(1), z.string().min(1)).optional(),
   /** Prices per model (logical or provider name) for cost when the provider reports none. */
@@ -46,8 +35,6 @@ const common = {
   /** Tasks this provider runs at the same time; more wait in line. */
   maxConcurrency: z.number().int().positive().optional(),
 }
-
-const credentialsSource = z.enum(['env', 'secret']).default('env')
 
 /** Vercel AI SDK provider packages the `ai-sdk` kind can use. */
 export const AI_SDK_PACKAGE_NAMES = [
@@ -94,40 +81,6 @@ export const providerOptionsSchema = z.discriminatedUnion('kind', [
     authHeader: z.enum(['x-api-key', 'bearer']).default('x-api-key'),
     /** Extra request headers; `{secret}` in a value is replaced by the credential secret. */
     headers: z.record(headerName, headerValue).optional(),
-  }),
-  z.object({
-    kind: z.literal('bedrock'),
-    ...common,
-    region: z.string().min(1),
-    baseUrl: httpUrl.optional(),
-    /**
-     * `env` (default): AWS credentials from the server environment. `secret`: the secret is a
-     * Bedrock API key, or JSON `{ accessKeyId, secretAccessKey, sessionToken? }`.
-     */
-    credentials: credentialsSource,
-  }),
-  z.object({
-    kind: z.literal('vertex'),
-    ...common,
-    region: z.string().min(1),
-    projectId: z.string().min(1),
-    baseUrl: httpUrl.optional(),
-    /** `env` (default): Google application default credentials. `secret`: a service account key JSON. */
-    credentials: credentialsSource,
-  }),
-  z.object({
-    kind: z.literal('openai-compatible'),
-    ...common,
-    baseUrl: httpUrl.optional(),
-    /** Extra request headers; `{secret}` in a value is replaced by the credential secret. */
-    headers: z.record(headerName, headerValue).optional(),
-    /** The endpoint must support tool calling; agents cannot work without it. */
-    supportsTools: z
-      .boolean()
-      .default(true)
-      .refine((value) => value, 'the provider must support tool calling'),
-    /** Send `response_format: { type: 'json_object' }` for tasks with structured output. */
-    jsonMode: z.boolean().optional(),
   }),
   z.object({
     kind: z.literal('ai-sdk'),

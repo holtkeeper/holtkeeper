@@ -20,7 +20,7 @@ import {
   updateUser,
 } from './admin.ts'
 import { bootstrapUsers } from './bootstrap.ts'
-import { type Context, activityLogger } from './context.ts'
+import { type Context, auditLogger } from './context.ts'
 import { signedCookie } from './cookies.ts'
 import { HttpError, readBody } from './errors.ts'
 import { linkInfo, markLinkUsed, openLink } from './links.ts'
@@ -118,7 +118,7 @@ function buildContext(options: UsersAuthOptions, deps: UsersAuthDeps): Context {
       const oidc = options.oidc?.find((o) => o.id === id)
       return oidc && accountProviderFor(oidc, options.forges)
     },
-    log: activityLogger(options.activity, now),
+    log: auditLogger(options.audit, options.store, now),
   }
 }
 

@@ -76,15 +76,6 @@ export interface CheckResult {
   /** Last 200 lines of stdout and stderr, trimmed. */
   output: string
   durationMs: number
-  /** Fix attempt after which the check ran; 0 is the first run after the bump. */
-  attempt: number
-}
-
-/** What the agent reported after its last fix attempt. */
-export interface AgentReport {
-  summary: string
-  changes: string[]
-  remainingProblems: string[]
 }
 
 /** Release notes found for one package between its old and new version. */
@@ -98,7 +89,7 @@ export interface ReleaseNotes {
   text: string
 }
 
-export type RepoStatus = 'unchanged' | 'skipped' | 'updated' | 'fixed' | 'failed' | 'error'
+export type RepoStatus = 'unchanged' | 'skipped' | 'updated' | 'failed' | 'error'
 
 /** Result of rolling the wave out to one repository. */
 export interface RepoOutcome {
@@ -108,15 +99,12 @@ export interface RepoOutcome {
   /** Every target declaration found, bumped or not. */
   usages: Usage[]
   bumps: Bump[]
-  /** Latest result of every check. */
+  /** Result of every check after the bump. */
   checks: CheckResult[]
-  /** Fix attempts made. */
-  attempts: number
-  agent?: AgentReport
   /** Files changed in the checkout, published or not. */
   changedFiles: string[]
-  /** Files the fixer changed besides the bump. */
-  fixedFiles: string[]
+  /** The write task proposed to make the failing checks pass (`PropagationData.fixGroup`). */
+  fixTask?: string
   mergeRequest?: { id: number; url: string; draft: boolean }
   notes: string[]
   error?: string
@@ -129,6 +117,8 @@ export interface PropagationData {
   dryRun: boolean
   repos: RepoOutcome[]
   releaseNotes: ReleaseNotes[]
+  /** Task group of the write tasks proposed for repositories whose checks fail after the bump. */
+  fixGroup?: string
 }
 
 /** A shell command run as one check; `env` is merged over the process environment. */
@@ -172,7 +162,6 @@ export interface Verifier {
     dir: string
     checks: CheckSpec[]
     runner: CommandRunner
-    attempt: number
     signal?: AbortSignal
   }): Promise<CheckResult[]>
 }
@@ -188,28 +177,27 @@ export interface ReleaseNotesSource {
   }): Promise<ReleaseNotes | undefined>
 }
 
-/** Free-form material a fixer gets besides the failing checks: release notes, a source diff, a ticket. */
-export interface FixContext {
-  title: string
-  /** Markdown or plain text; fixers may trim it. */
-  text: string
+/** A write task for one repository whose checks fail after the bump. */
+export interface FixRequest {
+  /** `forge:path`. */
+  repo: string
+  /** What the agent must do: the bumps, the failing output and the release notes. */
+  prompt: string
+  /** The bump as a binary-safe unified diff against the default branch, applied before the agent runs. */
+  patch: string
 }
 
-/** One fix attempt's input. Nothing in it is specific to package updates. */
-export interface FixInput {
-  /** Checkout the fixer may change; nothing outside it. */
-  dir: string
-  /** 1-based. */
-  attempt: number
-  failing: CheckResult[]
-  context: FixContext[]
-  /** Task-specific goal and rules, e.g. "do not touch the lockfile". */
-  instructions?: string
-  signal?: AbortSignal
-}
-
-/** Makes failing checks pass. */
-export interface Fixer {
-  /** `undefined` when the fixer cannot attempt anything; it then is not called again. */
-  fix(input: FixInput): Promise<AgentReport | undefined>
+/** Proposes write tasks for repositories whose checks fail after the bump. */
+export interface FixProposer {
+  /**
+   * Proposes one task group with a task per request; returns the group id and each repository's
+   * (`forge:path`) task id, or `undefined` when nothing was proposed.
+   */
+  propose(input: {
+    /** Config group of the rollout. */
+    group: string
+    /** Merge request title, the same for every repository. */
+    title: string
+    fixes: FixRequest[]
+  }): Promise<{ groupId: string; tasks: Record<string, string> } | undefined>
 }

@@ -4,88 +4,19 @@ import { join } from 'node:path'
 import { isTestFile, listFiles } from '@holtkeeper/quality-tests'
 
 import { bareName, createAttributeMatcher, createClassifier } from './classify.ts'
+import {
+  defaultAttributes,
+  defaultEvents,
+  defaultFactories,
+  defaultMarkers,
+  defaultRoles,
+  defaultTags,
+} from './defaults.ts'
+import { type TestIdNaming, suggestTestId } from './learn.ts'
 import type { TestAttribute, TestIdComponent, TestIdElement, TestIdsData } from './model.ts'
 import { createResolver } from './resolve.ts'
 import { builtinSources, type TemplateSource } from './sources.ts'
-import type { TagAttribute } from './tags.ts'
-
-/**
- * Test attributes and props of common setups: Testing Library, Cypress, QA teams, React Native.
- * Each also covers names extending it with `-`: `data-test` covers `data-test-id`, `data-test-state`.
- */
-export const defaultAttributes: readonly string[] = [
-  'data-testid',
-  'data-test',
-  'data-qa',
-  'data-cy',
-  'testID',
-  'testId',
-]
-
-/** Native tags users act on. */
-export const defaultTags: readonly string[] = [
-  'a',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  'summary',
-]
-
-/** Events whose handlers turn any element or component into something a test clicks or types into. */
-export const defaultEvents: readonly string[] = [
-  'click',
-  'dblclick',
-  'doubleclick',
-  'press',
-  'longpress',
-  'tap',
-  'change',
-  'input',
-  'submit',
-  'select',
-  'toggle',
-  'keydown',
-  'keyup',
-  'mousedown',
-  'pointerdown',
-]
-
-/** ARIA roles of widgets. */
-export const defaultRoles: readonly string[] = [
-  'button',
-  'link',
-  'checkbox',
-  'radio',
-  'switch',
-  'tab',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'option',
-  'textbox',
-  'searchbox',
-  'combobox',
-  'slider',
-  'spinbutton',
-  'treeitem',
-]
-
-/** Link targets and two-way bindings that make a component interactive. */
-export const defaultMarkers: readonly string[] = [
-  'href',
-  'to',
-  'routerLink',
-  '[routerLink]',
-  'v-model',
-  '[(ngModel)]',
-  'bind:value',
-  'bind:checked',
-  'bind:group',
-]
-
-/** Factories of styled components: linaria, styled-components, emotion, MUI, chakra, tailwind, framer-motion. */
-export const defaultFactories: readonly string[] = ['styled', 'tw', 'chakra', 'motion']
+import type { ScannedTag, TagAttribute } from './tags.ts'
 
 /** Story, mock and fixture files hold no product UI. */
 const SKIPPED =
@@ -220,6 +151,8 @@ export interface UntaggedElement {
   reason: string
   /** `unverified`: it spreads props that may carry a test id. */
   status: 'missing' | 'unverified'
+  /** A test id in the repository's style, when `naming` was given. */
+  suggestion?: string
 }
 
 export interface FindUntaggedOptions extends AnalyzeTestIdsOptions {
@@ -234,6 +167,56 @@ export interface FindUntaggedOptions extends AnalyzeTestIdsOptions {
   factories?: readonly string[]
   /** Import prefix → folder; merged over `compilerOptions.paths` of the root `tsconfig.json`. */
   aliases?: Readonly<Record<string, string>>
+  /** How test ids are named; with it every element gets a `suggestion`. */
+  naming?: TestIdNaming
+}
+
+type UntaggedRules = Omit<FindUntaggedOptions, 'dir' | 'signal' | 'exclude'>
+
+const classifierOf = (options: UntaggedRules) =>
+  createClassifier({
+    attributes: options.attributes ?? defaultAttributes,
+    tags: options.tags ?? defaultTags,
+    events: options.events ?? defaultEvents,
+    roles: options.roles ?? defaultRoles,
+    markers: options.markers ?? defaultMarkers,
+    ignore: options.ignore ?? [],
+  })
+
+async function untaggedIn(
+  file: string,
+  tags: readonly ScannedTag[],
+  resolve: (name: string, from: string) => Promise<string | undefined>,
+  classify: ReturnType<typeof createClassifier>,
+  naming: TestIdNaming | undefined,
+): Promise<UntaggedElement[]> {
+  const found: UntaggedElement[] = []
+  const component = componentName(file)
+  for (const tag of tags) {
+    // oxlint-disable-next-line no-await-in-loop
+    const native = await resolve(tag.name, file)
+    const result = classify(tag, native)
+    if (!result || result.status === 'tagged') continue
+    const as = native && native !== tag.name ? native : undefined
+    found.push({
+      file,
+      line: tag.line,
+      tag: tag.name,
+      ...(as ? { as } : {}),
+      reason: result.reason,
+      status: result.status,
+      ...(naming
+        ? {
+            suggestion: suggestTestId(
+              { tag: tag.name, ...(native ? { as: native } : {}), attributes: tag.attributes },
+              component,
+              naming,
+            ),
+          }
+        : {}),
+    })
+  }
+  return found
 }
 
 /**
@@ -244,14 +227,7 @@ export interface FindUntaggedOptions extends AnalyzeTestIdsOptions {
  */
 export async function findUntagged(options: FindUntaggedOptions): Promise<UntaggedElement[]> {
   const { dir, signal } = options
-  const classify = createClassifier({
-    attributes: options.attributes ?? defaultAttributes,
-    tags: options.tags ?? defaultTags,
-    events: options.events ?? defaultEvents,
-    roles: options.roles ?? defaultRoles,
-    markers: options.markers ?? defaultMarkers,
-    ignore: options.ignore ?? [],
-  })
+  const classify = classifierOf(options)
   const { all, templates } = await templateFiles(options)
   const texts = new Map<string, Promise<string | undefined>>()
   const read = (file: string) => {
@@ -276,21 +252,33 @@ export async function findUntagged(options: FindUntaggedOptions): Promise<Untagg
     // oxlint-disable-next-line no-await-in-loop
     const text = await read(file)
     if (text === undefined) continue
-    for (const tag of source.scan(text, file)) {
-      // oxlint-disable-next-line no-await-in-loop
-      const native = await resolve(tag.name, file)
-      const result = classify(tag, native)
-      if (!result || result.status === 'tagged') continue
-      found.push({
-        file,
-        line: tag.line,
-        tag: tag.name,
-        ...(native && native !== tag.name ? { as: native } : {}),
-        reason: result.reason,
-        status: result.status,
-      })
-    }
+    // oxlint-disable-next-line no-await-in-loop
+    found.push(
+      ...(await untaggedIn(file, source.scan(text, file), resolve, classify, options.naming)),
+    )
   }
   texts.clear()
   return found
+}
+
+/**
+ * `findUntagged` for one file's text, e.g. unsaved content: styled components defined in the same
+ * file are followed, imports are not. Empty when no source reads the file.
+ */
+export async function findUntaggedInText(
+  options: UntaggedRules & { file: string; text: string },
+): Promise<UntaggedElement[]> {
+  const { file, text } = options
+  const source = (options.sources ?? Object.values(builtinSources)).find((candidate) =>
+    candidate.matches(file),
+  )
+  if (!source) return []
+  const resolve = createResolver({
+    files: new Set([file]),
+    read: async (name) => (name === file ? text : undefined),
+    factories: options.factories ?? defaultFactories,
+    components: options.components ?? {},
+    aliases: options.aliases ?? {},
+  })
+  return untaggedIn(file, source.scan(text, file), resolve, classifierOf(options), options.naming)
 }

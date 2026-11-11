@@ -12,6 +12,8 @@ export interface JobRequest {
   actor?: string
   /** Schedule that asked for the job. */
   schedule?: string
+  /** Why the automation asked for it; see `Job.reason`. */
+  reason?: string
   /** Not claimed before this time; default: at once. */
   runAfter?: Timestamp
 }

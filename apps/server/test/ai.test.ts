@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
+import { weekRange } from '@holtkeeper/ai-usage'
 import type { AiRunList, AiUsageBuckets, AiUsageOverview } from '@holtkeeper/api'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { headerAuth } from '@holtkeeper/auth-header'
@@ -31,7 +32,6 @@ const setup = (auth: AuthProvider = noAuth()) => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -124,7 +124,7 @@ beforeEach(async () => {
     id: 'games-budget',
     key: 'llm.budget',
     scope: { groups: ['games'] },
-    value: { monthlyUsd: 3, action: 'block' },
+    value: { weeklyUsd: 3, reserveUsd: 1, action: 'block' },
     secret: false,
     updatedAt: '2026-11-01T00:00:00.000Z',
   })
@@ -132,7 +132,7 @@ beforeEach(async () => {
     id: 'global-budget',
     key: 'llm.budget',
     scope: { all: true },
-    value: { monthlyUsd: 100, action: 'warn' },
+    value: { weeklyUsd: 100, action: 'warn' },
     secret: false,
     updatedAt: '2026-11-01T00:00:00.000Z',
   })
@@ -197,10 +197,33 @@ describe('ai routes', () => {
     expect(body.cacheHitRatio).toBeCloseTo(0.75)
     expect(body.errorRate).toBeCloseTo(1 / 3)
     const games = body.budgets.find((b) => b.id === 'games-budget')
-    expect(games?.limits).toEqual([
-      { period: 'month', limitUsd: 3, spentUsd: 1.5, percent: 50, projectedUsd: 3 },
-    ])
+    expect(games).toEqual({
+      id: 'games-budget',
+      scope: { groups: ['games'] },
+      action: 'block',
+      weeklyUsd: 3,
+      reserveUsd: 1,
+      spentUsd: 0,
+      percent: 0,
+      projectedUsd: 0,
+      week: weekRange(new Date('2026-11-16T00:00:00.000Z')),
+    })
     expect(body.budgets.map((b) => b.id).toSorted()).toEqual(['games-budget', 'global-budget'])
+  })
+
+  test('overview: the default budget stands in for a missing global one', async () => {
+    await store.settings.remove('global-budget')
+    const { body } = await getOverview(setup(), '/api/ai/overview')
+    expect(
+      body.budgets
+        .map((b) => [b.id, b.weeklyUsd, b.reserveUsd])
+        .toSorted((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      ['default', 150, 25],
+      ['games-budget', 3, 1],
+    ])
+    const scoped = await getOverview(setup(teams), '/api/ai/overview', as('games-ai'))
+    expect(scoped.body.budgets.map((b) => b.id)).toEqual(['games-budget'])
   })
 
   test('rows and budgets are limited to the caller’s ai:read scopes', async () => {

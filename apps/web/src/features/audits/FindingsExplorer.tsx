@@ -155,7 +155,7 @@ export function FindingsExplorer({ findings }: { findings: readonly Finding[] })
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-3 shadow-surface">
+      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-3">
         <div className="flex flex-wrap items-center gap-3">
           <SearchInput
             aria-label="Search findings"
@@ -278,7 +278,7 @@ function LanguageSection({ group }: { group: LanguageGroup }) {
       {group.tools.map((tool) => (
         <div
           key={tool.label}
-          className="overflow-hidden rounded-2xl border border-border bg-surface shadow-surface"
+          className="overflow-hidden rounded-2xl border border-border bg-surface"
         >
           <div className="flex items-center justify-between gap-2 border-b border-separator bg-default-soft px-4 py-2.5">
             <span className="text-sm font-medium">{tool.label}</span>

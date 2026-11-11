@@ -40,6 +40,10 @@ const ingestSchema = z.object({
   repo: z.object({ forge: z.string().min(1), path: z.string().min(1) }),
   kind: z.string().min(1),
   ref: z.string().min(1).optional(),
+  sha: z
+    .string()
+    .regex(/^[0-9a-f]{7,64}$/, 'expected a hex commit sha')
+    .optional(),
   createdAt: z.iso.datetime().optional(),
   data: z.unknown(),
   artifacts: z
@@ -147,7 +151,7 @@ export function analysisRoutes(deps: ServerDeps) {
   app.post('/analyses/:id/changes', async (c) => {
     const record = await readable(c, c.req.param('id'))
     const input = await readBody(c, applySchema)
-    const principal = authorize(c, 'analyses:run', {
+    authorize(c, 'analyses:run', {
       kind: 'repo',
       repo: repoTarget(config, record.repo),
     })
@@ -246,20 +250,21 @@ export function analysisRoutes(deps: ServerDeps) {
       result.conflicts.push(...outcome.plan.conflicts)
       if (outcome.mergeRequest) {
         mergeRequests.push({ id: outcome.mergeRequest.id, url: outcome.mergeRequest.webUrl })
-        await store.activity.append({
-          at: deps.now().toISOString(),
-          actor: principal.id,
-          action: 'changes.merge_request_opened',
-          subject: key,
-          details: {
-            analysis: record.id,
-            changes: outcome.plan.applied,
-            mergeRequest: outcome.mergeRequest.webUrl,
-          },
-        })
       }
     }
 
+    c.set('audit', {
+      action: input.mode === 'patch' ? 'analysis.patch' : 'analysis.merge_request',
+      target: {
+        type: 'analysis',
+        id: record.id,
+        repo: `${record.repo.forge}:${record.repo.path}`,
+      },
+      details: {
+        changes: result.applied,
+        ...(mergeRequests.length && { mergeRequests: mergeRequests.map((mr) => mr.url) }),
+      },
+    })
     if (input.mode === 'patch') result.patch = patches.join('\n')
     if (mergeRequests[0]) result.mergeRequest = mergeRequests[0]
     if (mergeRequests.length > 1) result.mergeRequests = mergeRequests
@@ -290,6 +295,7 @@ export function analysisRoutes(deps: ServerDeps) {
       repo: input.repo,
       kind: input.kind,
       ...(input.ref ? { ref: input.ref } : {}),
+      ...(input.sha ? { sha: input.sha } : {}),
       createdAt: input.createdAt ?? deps.now().toISOString(),
       actor: principal.id,
       data: parsed.data,
@@ -306,12 +312,14 @@ export function analysisRoutes(deps: ServerDeps) {
         },
       })
     }
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'analysis.ingested',
-      subject: `${record.repo.forge}:${record.repo.path}`,
-      details: { id: record.id, kind: record.kind, ...(record.ref ? { ref: record.ref } : {}) },
+    c.set('audit', {
+      action: 'analysis.ingest',
+      target: {
+        type: 'analysis',
+        id: record.id,
+        repo: `${record.repo.forge}:${record.repo.path}`,
+      },
+      details: { kind: record.kind, ...(record.ref ? { ref: record.ref } : {}) },
     })
     return c.json<AnalysisSummary>(summarize(record), 201)
   })

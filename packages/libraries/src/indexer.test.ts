@@ -7,6 +7,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { fakeGitHub, tarball } from '../test/fixtures.ts'
 import { libraryApi } from './api.ts'
 import { type LibraryIndexProgress, indexLibraries } from './indexer.ts'
+import { latestVersions } from './latest.ts'
 import type { SiteSource } from './sources/site.ts'
 import {
   type ArchiveFiles,
@@ -509,5 +510,30 @@ describe('indexLibraries', () => {
       (reason: unknown) => reason,
     )
     expect(error).toBeInstanceOf(Error)
+  })
+
+  test('records the newest release of indexed and excluded libraries, never of internal ones', async () => {
+    const kv = memoryStore().kv
+    if (!kv) throw new Error('memory store has no kv')
+    const latest = latestVersions(kv)
+    await latest.record([{ ecosystem: 'npm', name: 'gone', latest: '1.0.0', checkedAt: 'x' }])
+    const { registry } = fakeRegistry()
+    await indexLibraries({
+      store: librariesOf(),
+      artifacts: memoryArtifactStore(),
+      registries: { npm: registry },
+      uses: uses(['lib', '1.0.0'], ['@types/lib', '1.0.0'], ['own-widget', '1.0.0']),
+      settings: {
+        ...settings,
+        sources: { ...settings.sources, repository: false, releases: false },
+      },
+      isInternal: (item) => item.name === 'own-widget',
+      latest,
+      now: at(0),
+    })
+    expect(Object.fromEntries(await latest.all())).toEqual({
+      'npm:lib': { latest: '2.0.0', checkedAt: '2026-01-01T00:00:00.000Z' },
+      'npm:@types/lib': { latest: '2.0.0', checkedAt: '2026-01-01T00:00:00.000Z' },
+    })
   })
 })

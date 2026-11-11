@@ -27,6 +27,7 @@ import {
   Page,
   Panel,
   Placeholder,
+  ScopeSwitch,
   SearchInput,
   Segmented,
   SeverityBar,
@@ -38,6 +39,7 @@ import {
   stagger,
 } from '../../ui/index.ts'
 import { MetricChips } from '../analyses/MetricChips.tsx'
+import { useScope } from '../shell/scope.ts'
 import { useSession } from '../shell/session.ts'
 import { AddRepoDialog } from './AddRepoDialog.tsx'
 import { RepoAvatar } from './RepoAvatar.tsx'
@@ -56,6 +58,8 @@ export function ReposPage() {
   const [query, setQuery] = useState('')
   const [order, setOrder] = useState<(typeof orders)[number]['id']>('attention')
   const [adding, setAdding] = useState(false)
+  const { view, setView, scope } = useScope()
+  const scoped = scope(repos.data?.repos ?? [])
   const configGroups = useGroups(can('settings:read'))
   const groupIds = [
     ...new Set([
@@ -67,7 +71,7 @@ export function ReposPage() {
     (repos.data?.repos ?? []).filter((r) => r.groups.includes(group)).length
 
   const needle = query.trim().toLowerCase()
-  const list = (repos.data?.repos ?? [])
+  const list = scoped.shown
     .filter(
       (r) =>
         !needle ||
@@ -99,6 +103,7 @@ export function ReposPage() {
             onChange={setQuery}
             className="w-64"
           />
+          <ScopeSwitch value={view} onChange={setView} counts={scoped.counts} />
           <Segmented aria-label="Order" options={orders} value={order} onChange={setOrder} />
           {can('settings:write') ? (
             <Button variant="primary" onPress={() => setAdding(true)}>
@@ -132,6 +137,8 @@ export function ReposPage() {
           </div>
         ) : repos.isError ? (
           <ErrorState error={repos.error} />
+        ) : view === 'others' ? (
+          <OtherTeams others={scoped.others} onShow={() => setView('all')} />
         ) : list.length === 0 ? (
           <EmptyState
             icon={<FolderGit2 />}
@@ -168,9 +175,33 @@ export function ReposPage() {
             </tbody>
           </Table>
         )}
+        {view === 'mine' && scoped.others.items > 0 && repos.data ? (
+          <OtherTeams others={scoped.others} onShow={() => setView('all')} />
+        ) : null}
       </Panel>
       {adding ? <AddRepoDialog onClose={() => setAdding(false)} /> : null}
     </Page>
+  )
+}
+
+function OtherTeams({
+  others,
+  onShow,
+}: {
+  others: { items: number; teams: number }
+  onShow: () => void
+}) {
+  if (!others.items) return <p className="p-4 text-sm text-muted">No repositories of other teams</p>
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-muted">
+      <span>
+        {plural(others.items, 'repository', 'repositories')} of{' '}
+        {others.teams ? plural(others.teams, 'other team', 'other teams') : 'no team'}
+      </span>
+      <Button variant="ghost" size="sm" onPress={onShow}>
+        Show all
+      </Button>
+    </div>
   )
 }
 

@@ -25,6 +25,7 @@ import {
   type LanguageModel,
   type LanguageModelUsage,
   type ModelMessage,
+  type SystemModelMessage,
   type ToolSet,
   generateText,
   jsonSchema,
@@ -34,12 +35,28 @@ import {
 import { createOllama } from 'ollama-ai-provider-v2'
 import { z } from 'zod'
 
-import { DEFAULT_LOCAL_TOOL_LIMITS, type LocalToolLimits, clipOutput } from './local-tools.ts'
-import { openAISystemPrompt, openAITools } from './openai.ts'
+import { BudgetExceededError, budgetExceededFrom } from './errors.ts'
+import {
+  DEFAULT_LOCAL_TOOL_LIMITS,
+  type LocalToolLimits,
+  clipOutput,
+  localTools,
+} from './local-tools.ts'
+import { mcpToolName } from './mcp.ts'
 import { AgentOutputError, parseAgentOutput } from './output.ts'
 import type { AiProviderPlugin } from './plugin.ts'
 import { type AiSdkPackage, costFromPricing, mapModel, type ModelPricing } from './provider.ts'
-import type { Agent, AgentResult, AgentTask, AgentTool, AgentUsage, ToolContext } from './types.ts'
+import { DEFAULT_TIER, TIERS, type TierModels } from './tiers.ts'
+import type { TranscriptSink } from './transcript.ts'
+import type {
+  Agent,
+  AgentCapability,
+  AgentResult,
+  AgentTask,
+  AgentTool,
+  AgentUsage,
+  ToolContext,
+} from './types.ts'
 
 /** How to reach a provider through its AI SDK package. */
 export interface AiSdkConnection {
@@ -176,10 +193,9 @@ export const DEFAULT_AI_SDK_MAX_TURNS = 40
 export interface AiSdkAgentOptions {
   /** The language model for a provider model name, e.g. `(id) => aiSdkLanguageModel(connection, id)`. */
   languageModel: (modelId: string) => LanguageModel
-  /** Default model; `models[taskKind]` wins. There is no built-in default. */
-  model?: string
-  models?: Record<string, string>
-  /** Logical model id → the provider's name for it; applied after routing. */
+  /** Model of each tier, e.g. from `resolveTierModels`. */
+  tierModels: TierModels
+  /** Logical model id → the provider's name for it; applied after tier resolution. */
   modelMap?: Record<string, string>
   /** Prices per model for cost. */
   pricing?: Record<string, ModelPricing>
@@ -193,6 +209,66 @@ export interface AiSdkAgentOptions {
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+const DEFAULT_CAPABILITIES: readonly AgentCapability[] = ['read', 'search']
+
+function outputSchemaText(schema: z.ZodType): string {
+  try {
+    return JSON.stringify(z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' }))
+  } catch {
+    return ''
+  }
+}
+
+/** System prompt of the tool loop: instructions, context, confinement, tools and answer format. */
+function toolLoopSystemPrompt(task: AgentTask, tools: readonly string[]): string {
+  const parts: string[] = []
+  if (task.system?.trim()) parts.push(task.system.trim())
+  if (task.context?.trim()) parts.push(task.context.trim())
+  parts.push(
+    [
+      'You work in a repository checkout. Paths are relative to its root; nothing outside it can be read, written or run.',
+      `Available tools: ${tools.join(', ') || 'none'}. Call tools to inspect the code instead of guessing. Do not ask for user input; nobody will answer.`,
+      tools.includes('edit_file') ? '' : 'Do not modify files.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  )
+  if (task.output) {
+    const schema = outputSchemaText(task.output)
+    parts.push(
+      [
+        'Your final message must be a single JSON value matching the format the task describes, with no prose around it.',
+        schema ? `JSON schema of the answer: ${schema}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+  }
+  return parts.join('\n\n')
+}
+
+/** Built-in and toolset tools by their function name; throws on duplicate names. */
+function toolLoopTools(
+  task: AgentTask,
+  options: Pick<AiSdkAgentOptions, 'runner' | 'limits'>,
+): Map<string, AgentTool> {
+  const tools = new Map<string, AgentTool>()
+  const all = [
+    ...localTools(task.capabilities ?? DEFAULT_CAPABILITIES, {
+      ...options,
+      ...(task.commands && { commands: task.commands }),
+      ...(task.env && { env: task.env }),
+    }),
+    ...(task.toolsets ?? []).flatMap((toolset) => toolset.tools),
+  ]
+  for (const agentTool of all) {
+    const name = mcpToolName(agentTool.name).slice(0, 64)
+    if (tools.has(name)) throw new Error(`duplicate agent tool ${agentTool.name}`)
+    tools.set(name, agentTool)
+  }
+  return tools
+}
 
 async function runTool(agentTool: AgentTool, input: unknown, ctx: ToolContext, maxChars: number) {
   try {
@@ -225,6 +301,45 @@ function toolSet(tools: Map<string, AgentTool>, ctx: ToolContext, maxChars: numb
   )
 }
 
+interface TranscribedStep {
+  text: string
+  toolCalls: readonly { toolCallId: string; toolName: string; input: unknown }[]
+  toolResults: readonly { toolCallId: string; toolName: string; output: unknown }[]
+}
+
+/** Writes one tool-loop step (model text, tool calls, their results) to `sink`. */
+function transcribeStep(step: TranscribedStep, sink: TranscriptSink): void {
+  const toolCalls = step.toolCalls.map((call) => ({
+    id: call.toolCallId,
+    name: call.toolName,
+    input: call.input,
+  }))
+  if (step.text || toolCalls.length)
+    sink.write({
+      type: 'assistant',
+      ...(step.text && { text: step.text }),
+      ...(toolCalls.length && { toolCalls }),
+    })
+  for (const result of step.toolResults) {
+    const output =
+      typeof result.output === 'string' ? result.output : JSON.stringify(result.output ?? null)
+    sink.write({
+      type: 'tool-result',
+      id: result.toolCallId,
+      name: result.toolName,
+      output,
+      ...(output.startsWith('error: ') && { isError: true }),
+    })
+  }
+}
+
+const emptyUsage = (): AgentUsage => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+})
+
 const addUsage = (sum: AgentUsage, usage: LanguageModelUsage): AgentUsage => {
   const cacheRead = usage.inputTokenDetails.cacheReadTokens ?? 0
   const cacheWrite = usage.inputTokenDetails.cacheWriteTokens ?? 0
@@ -239,18 +354,52 @@ const addUsage = (sum: AgentUsage, usage: LanguageModelUsage): AgentUsage => {
   }
 }
 
-/** The model name for a task kind: `models[taskKind]`, then `model`; throws without either. */
-function routedModel(options: Pick<AiSdkAgentOptions, 'model' | 'models'>, taskKind?: string) {
-  const model = (taskKind !== undefined && options.models?.[taskKind]) || options.model
-  if (!model) throw new Error('no model configured: set llm.model or the provider model')
-  return model
+const CACHE_BREAKPOINT = { anthropic: { cacheControl: { type: 'ephemeral' } } }
+
+const withBreakpoint = <Message extends ModelMessage>(message: Message): Message => ({
+  ...message,
+  providerOptions: {
+    ...message.providerOptions,
+    anthropic: { ...message.providerOptions?.['anthropic'], ...CACHE_BREAKPOINT.anthropic },
+  },
+})
+
+/**
+ * Moves one Anthropic cache breakpoint to the newest message of each step, so a step reads the
+ * previous step's prefix from the cache. Earlier marks are undone because overrides carry forward
+ * and Anthropic allows only four breakpoints per request.
+ */
+function movingBreakpoint() {
+  const originals = new WeakMap<ModelMessage, ModelMessage>()
+  return (messages: ModelMessage[]): ModelMessage[] => {
+    const plain = messages.map((message) => originals.get(message) ?? message)
+    const last = plain.at(-1)
+    if (!last) return plain
+    const marked = withBreakpoint(last)
+    originals.set(marked, last)
+    return [...plain.slice(0, -1), marked]
+  }
+}
+
+/** Per-MTok prices assumed for a model without any, kept above every Claude tier's real prices. */
+const UNPRICED_FALLBACK = {
+  inputPerMTok: 15,
+  outputPerMTok: 75,
+  cacheReadPerMTok: 1.5,
+  cacheWritePerMTok: 18.75,
 }
 
 /**
  * An `Agent` on the Vercel AI SDK: any provider with an AI SDK package, or any OpenAI-compatible
- * API. It runs the same bounded tool loop as the OpenAI-compatible adapter (file tools confined to
- * `task.dir`, `run_command` through `runner`, every `task.toolsets` tool; `task.mcpServers` are not
- * mounted), with tool calls executed one at a time. Cost comes from `pricing`.
+ * API. It runs a bounded tool loop (file tools confined to `task.dir`, `run_command` through `runner`, every `task.toolsets` tool; `task.mcpServers` are not
+ * mounted), with tool calls executed one at a time, on `task.tier`'s model at the tier's reasoning
+ * effort (providers without effort support ignore it). Cost comes from `pricing`. Anthropic models
+ * (including routers and gateways on `@ai-sdk/anthropic`) get prompt-cache breakpoints on the
+ * system prompt, which covers the tool definitions before it, and on the newest message of every
+ * step. Structured output is parsed from the answer text, never forced through a tool. A spent
+ * budget or quota fails the run with `BudgetExceededError`, and so does reaching
+ * `task.maxCostUsd`: the loop stops after the step that reached it. A model `pricing` does not
+ * price is costed at `UNPRICED_FALLBACK`, so caps and budgets still hold.
  */
 export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
   const maxChars = options.limits?.maxOutputChars ?? DEFAULT_LOCAL_TOOL_LIMITS.maxOutputChars
@@ -259,59 +408,125 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
     async run<Output>(task: AgentTask<Output>): Promise<AgentResult<Output>> {
       const signal = task.signal ?? new AbortController().signal
       signal.throwIfAborted()
-      const logical = routedModel(options, task.taskKind)
+      const tier = task.tier ?? DEFAULT_TIER
+      const logical = options.tierModels[tier]
       const modelId = mapModel(logical, options.modelMap)
       const model = options.languageModel(modelId)
       const ctx: ToolContext = { dir: resolve(task.dir), signal }
-      const tools = openAITools(task, options)
+      const tools = toolLoopTools(task, options)
       const maxTurns = task.maxTurns ?? options.maxTurns ?? DEFAULT_AI_SDK_MAX_TURNS
-      const system = openAISystemPrompt(task, [...tools.keys()])
+      const system: SystemModelMessage = withBreakpoint({
+        role: 'system',
+        content: toolLoopSystemPrompt(task, [...tools.keys()]),
+      })
+      const mark = movingBreakpoint()
       const set = toolSet(tools, ctx, maxChars)
-      let messages: ModelMessage[] = [{ role: 'user', content: task.prompt }]
-      let usage: AgentUsage = {
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      }
-      let turns = 0
-
-      for (let attempt = 0; attempt < 2; attempt++) {
-        // oxlint-disable-next-line no-await-in-loop -- a retry continues the same conversation
-        const result = await generateText({
-          model,
-          system,
-          messages,
-          ...(tools.size && { tools: set, toolCallConcurrency: 1 }),
-          stopWhen: stepCountIs(Math.max(maxTurns - turns, 1)),
-          abortSignal: signal,
-          ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
+      const sink = task.transcript
+      const costOf = (sum: AgentUsage) =>
+        costFromPricing(sum, options.pricing, modelId, logical) ??
+        costFromPricing(sum, { [modelId]: UNPRICED_FALLBACK }, modelId)
+      sink?.write({
+        type: 'start',
+        runtime: 'ai-sdk',
+        model: modelId,
+        tier,
+        ...(task.taskKind && { taskKind: task.taskKind }),
+        tools: [...tools.keys()],
+        system: system.content,
+        prompt: task.prompt,
+      })
+      try {
+        const answer = await loop()
+        sink?.write({
+          type: 'end',
+          outcome: 'ok',
+          turns: answer.turns,
+          ...(answer.usage && { usage: answer.usage }),
+          ...(answer.costUsd !== undefined && { costUsd: answer.costUsd }),
         })
-        signal.throwIfAborted()
-        turns += result.steps.length
-        usage = addUsage(usage, result.totalUsage)
-        if (result.finishReason === 'tool-calls') {
-          throw new Error(
-            `ai-sdk agent failed (error_max_turns): no answer within ${maxTurns} turns`,
-          )
-        }
-        const answer: AgentResult<Output> = { text: result.text, turns, usage }
-        const cost = costFromPricing(usage, options.pricing, modelId, logical)
-        if (cost !== undefined) answer.costUsd = cost
-        if (!task.output) return answer
-        try {
-          answer.output = parseAgentOutput(result.text, task.output)
-          return answer
-        } catch (error) {
-          if (attempt > 0 || turns >= maxTurns || !(error instanceof AgentOutputError)) throw error
-          messages = [
-            ...messages,
-            ...result.responseMessages,
-            { role: 'user', content: `${error.message}. Answer again with only the JSON value.` },
-          ]
-        }
+        return answer
+      } catch (error) {
+        sink?.write({
+          type: 'end',
+          outcome: 'error',
+          error: errorText(error),
+          ...(error instanceof BudgetExceededError && {
+            ...(error.turns !== undefined && { turns: error.turns }),
+            ...(error.usage && { usage: error.usage }),
+            ...(error.costUsd !== undefined && { costUsd: error.costUsd }),
+          }),
+        })
+        throw error
       }
-      throw new Error('ai-sdk agent failed: no valid answer')
+
+      async function loop(): Promise<AgentResult<Output>> {
+        let messages: ModelMessage[] = [{ role: 'user', content: task.prompt }]
+        let usage = emptyUsage()
+        let turns = 0
+        const cap = task.maxCostUsd
+        const overCap = ({ steps }: { steps: { usage: LanguageModelUsage }[] }) => {
+          if (cap === undefined) return false
+          const cost = costOf(steps.reduce((sum, step) => addUsage(sum, step.usage), usage))
+          return cost !== undefined && cost >= cap
+        }
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          // oxlint-disable-next-line no-await-in-loop -- a retry continues the same conversation
+          const result = await generateText({
+            model,
+            system,
+            messages,
+            ...(tools.size && { tools: set, toolCallConcurrency: 1 }),
+            prepareStep: ({ messages: current }) => ({ messages: mark(current) }),
+            stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap],
+            reasoning: TIERS[tier].effort,
+            abortSignal: signal,
+            ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
+          }).catch((error: unknown) => {
+            throw budgetExceededFrom(error) ?? error
+          })
+          signal.throwIfAborted()
+          if (sink) for (const step of result.steps) transcribeStep(step, sink)
+          turns += result.steps.length
+          usage = addUsage(usage, result.totalUsage)
+          const spent = costOf(usage)
+          const capped = cap !== undefined && spent !== undefined && spent >= cap
+          const overBudget = () =>
+            new BudgetExceededError(
+              `AI budget exceeded: the run spent $${spent?.toFixed(2)} of its $${cap?.toFixed(2)} cap`,
+              { usage, ...(spent !== undefined && { costUsd: spent }), turns },
+            )
+          if (result.finishReason === 'tool-calls' && capped) throw overBudget()
+          if (result.finishReason === 'tool-calls') {
+            throw new Error(
+              `ai-sdk agent failed (error_max_turns): no answer within ${maxTurns} turns`,
+            )
+          }
+          const answer: AgentResult<Output> = {
+            text: result.text,
+            turns,
+            usage,
+            model: modelId,
+            runtime: 'ai-sdk',
+          }
+          if (spent !== undefined) answer.costUsd = spent
+          if (!task.output) return answer
+          try {
+            answer.output = parseAgentOutput(result.text, task.output)
+            return answer
+          } catch (error) {
+            if (attempt > 0 || turns >= maxTurns || !(error instanceof AgentOutputError))
+              throw error
+            if (capped) throw overBudget()
+            messages = [
+              ...messages,
+              ...result.responseMessages,
+              { role: 'user', content: `${error.message}. Answer again with only the JSON value.` },
+            ]
+          }
+        }
+        throw new Error('ai-sdk agent failed: no valid answer')
+      }
     },
   }
 }

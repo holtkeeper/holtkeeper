@@ -5,7 +5,7 @@ import { Button, Tooltip, useTheme } from '../../ui/index.ts'
 
 const labels = { system: 'System theme', light: 'Light theme', dark: 'Dark theme' } as const
 
-/** Cycles system → light → dark. */
+/** Cycles dark → light → system; dark is the default. */
 export function ThemeToggle() {
   const { preference, setPreference } = useTheme()
   const Icon = preference === 'system' ? Monitor : preference === 'light' ? Sun : Moon

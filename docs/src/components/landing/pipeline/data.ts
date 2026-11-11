@@ -1,12 +1,9 @@
 import {
-  Activity,
   BookOpen,
   Box,
   CalendarClock,
   FileText,
   Flag,
-  Gauge,
-  GitFork,
   GitMerge,
   GitPullRequest,
   Image,
@@ -20,9 +17,6 @@ import {
   Network,
   Package,
   Scale,
-  ScanSearch,
-  ScrollText,
-  Send,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -40,7 +34,7 @@ export interface Node<Id extends string> {
 
 export type TriggerId = 'webhook' | 'tag' | 'schedule' | 'comment' | 'panel'
 export type StageId = 'policies' | 'queue' | 'checkout' | 'tools'
-export type OutputId = 'comments' | 'mrs' | 'reports' | 'slack' | 'confluence'
+export type OutputId = 'comments' | 'mrs' | 'reports' | 'confluence'
 
 export const triggers: Node<TriggerId>[] = [
   {
@@ -60,7 +54,7 @@ export const triggers: Node<TriggerId>[] = [
     id: 'comment',
     icon: MessageSquare,
     label: 'Comment command',
-    detail: '/holtkeeper port games',
+    detail: '/holtkeeper release',
   },
   { id: 'panel', icon: MousePointerClick, label: 'Panel button', detail: 'Run propagate' },
 ]
@@ -90,18 +84,13 @@ export const stages: Node<StageId>[] = [
 export const analyzers: { id: string; icon: LucideIcon }[] = [
   { id: 'review', icon: Sparkles },
   { id: 'audit', icon: ShieldAlert },
-  { id: 'changelog', icon: ScrollText },
   { id: 'bundle', icon: Package },
   { id: 'depgraph', icon: Network },
-  { id: 'quality', icon: ScanSearch },
   { id: 'licenses', icon: Scale },
   { id: 'assets', icon: Image },
   { id: 'i18n', icon: Languages },
-  { id: 'delivery', icon: Activity },
-  { id: 'fleet', icon: Telescope },
-  { id: 'release-risk', icon: Gauge },
+  { id: 'stack', icon: Telescope },
   { id: 'propagate', icon: Waves },
-  { id: 'port', icon: GitFork },
   { id: 'tracker', icon: Flag },
 ]
 
@@ -114,7 +103,6 @@ export const outputs: Node<OutputId>[] = [
   },
   { id: 'mrs', icon: GitMerge, label: 'Merge requests', detail: 'one per repository' },
   { id: 'reports', icon: LayoutDashboard, label: 'Panel reports', detail: 'compare any two runs' },
-  { id: 'slack', icon: Send, label: 'Slack', detail: 'summaries, webhooks' },
   { id: 'confluence', icon: FileText, label: 'Confluence', detail: 'one marked section' },
 ]
 
@@ -139,7 +127,7 @@ export const scenarios: Scenario[] = [
       checkout: 'node + pnpm from the repo',
       tools: '3 decisions in scope',
     },
-    analyzers: ['review', 'quality'],
+    analyzers: ['review'],
     results: { comments: '3 suggestions · 1 major', reports: 'verdict: changes requested' },
     caption:
       'MR !482 opened. Policies let it through, review reads the diff with the team’s decisions and posts three inline suggestions and a summary.',
@@ -154,7 +142,7 @@ export const scenarios: Scenario[] = [
       tools: 'release notes 2.9 → 3.0',
     },
     analyzers: ['propagate'],
-    results: { mrs: '8 opened · 2 fixed · 1 draft', slack: 'wave summary posted' },
+    results: { mrs: '8 opened · 2 fixed · 1 draft' },
     caption:
       '@company/ui 3.0 released. Eight merge requests, one per game: five pass after the bump, two break and the agent fixes them from the release notes, one stays a draft labeled needs-attention.',
   },
@@ -163,38 +151,23 @@ export const scenarios: Scenario[] = [
     pill: 'tag v2.4.0',
     trigger: 'tag',
     stages: { queue: 'one job per analyzer', checkout: 'tag v2.4.0, history to v2.3.0' },
-    analyzers: ['changelog', 'bundle', 'depgraph', 'quality', 'release-risk'],
-    results: { reports: 'risk 34/100 · medium', slack: 'what to test, for QA' },
+    analyzers: ['bundle', 'depgraph'],
+    results: { reports: 'bundle +2.6% · 1 new cycle' },
     caption:
-      'Tag v2.4.0 pushed. Changelog, bundle diff against v2.3.0, dependency and quality deltas, then a release risk of 34/100 with what to test.',
+      'Tag v2.4.0 pushed. Bundle diff and dependency deltas, each compared with the previous release.',
   },
   {
     id: 'nightly',
     pill: 'nightly',
     trigger: 'schedule',
     stages: { queue: 'spread until 07:00', checkout: 'mirror cache, shallow' },
-    analyzers: ['audit', 'licenses', 'fleet', 'tracker'],
+    analyzers: ['audit', 'licenses', 'stack', 'tracker'],
     results: {
       mrs: 'audit fixes · lockfiles only',
       confluence: 'flags table updated',
       reports: 'drift, licenses',
     },
     caption:
-      'Weekdays at 03:00. Audits fix vulnerable dependencies in merge requests, fleet drift and licenses are recorded, and the feature-flag table in Confluence is rewritten.',
-  },
-  {
-    id: 'port',
-    pill: '/holtkeeper port',
-    trigger: 'comment',
-    stages: {
-      policies: 'command event · enqueue port',
-      queue: 'group games · 7 targets',
-      checkout: 'source patch + targets',
-      tools: 'path remaps, outlines',
-    },
-    analyzers: ['port'],
-    results: { mrs: '7 targets · 1 re-implemented', comments: 'results table on !311' },
-    caption:
-      '/holtkeeper port games on !311. The patch goes to every sibling repository; where it does not apply, the agent re-implements it, and the source MR gets a table of results.',
+      'Weekdays at 03:00. Audits fix vulnerable dependencies in merge requests, stack drift and licenses are recorded, and the feature-flag table in Confluence is rewritten.',
   },
 ]

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { Principal } from '@holtkeeper/api'
 
-import { actions, can, summarizeGrants } from './access.ts'
+import { actions, can, canCatalog, canGlobal, summarizeGrants } from './access.ts'
 
 const principal = (grants: Principal['grants']): Principal => ({
   id: 'u',
@@ -46,7 +46,42 @@ describe('summarizeGrants', () => {
     ).toBe('2 grants, 2 actions')
   })
 
-  test('lists all twenty actions', () => {
-    expect(actions).toHaveLength(20)
+  test('lists all twenty-two actions', () => {
+    expect(actions).toHaveLength(22)
+  })
+})
+
+describe('canGlobal', () => {
+  test('needs a grant over everything that allows the action', () => {
+    expect(canGlobal(null, 'settings:read')).toBe(false)
+    const scoped = principal([{ scope: { groups: ['games'] }, actions: ['settings:read'] }])
+    expect(canGlobal(scoped, 'settings:read')).toBe(false)
+    expect(canGlobal(principal([{ scope: { all: true }, actions: ['*'] }]), 'settings:read')).toBe(
+      true,
+    )
+    const all = principal([{ scope: { all: true }, actions: ['settings:read'] }])
+    expect(canGlobal(all, 'settings:read')).toBe(true)
+    expect(canGlobal(all, 'settings:write')).toBe(false)
+  })
+})
+
+const holder = (action: Principal['grants'][number]['actions'][number]): Principal => ({
+  id: 'p',
+  name: 'P',
+  provider: 'users',
+  grants: [{ scope: { groups: ['games'] }, actions: [action] }],
+})
+
+describe('canCatalog', () => {
+  test('catalog and analyses grants reach the catalog under every level', () => {
+    expect(canCatalog(holder('catalog:read'), 'off')).toBe(true)
+    expect(canCatalog(holder('analyses:read'), 'off')).toBe(true)
+  })
+
+  test('a plain read grant reaches it only while cross-team reach is on', () => {
+    expect(canCatalog(holder('repos:read'), 'metadata')).toBe(true)
+    expect(canCatalog(holder('repos:read'), 'off')).toBe(false)
+    expect(canCatalog(holder('audits:read'), 'snippets')).toBe(false)
+    expect(canCatalog(null, 'snippets')).toBe(false)
   })
 })

@@ -64,7 +64,7 @@ const job: Job = {
   maxAttempts: 3,
   runAfter: 'now',
   createdAt: 'now',
-  log: [],
+  attemptsHistory: [],
 }
 
 const detected = {

@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import type { AiUsageBucket } from '@holtkeeper/api'
 
 import {
+  automaticLimit,
+  budgetBar,
   budgetTone,
   costItems,
   fillDays,
@@ -104,17 +106,27 @@ describe('fillDays', () => {
   })
 })
 
-describe('budgetTone', () => {
-  const limit = { period: 'month' as const, limitUsd: 100, spentUsd: 0, percent: 0 }
+describe('weekly budgets', () => {
+  const budget = { weeklyUsd: 150, reserveUsd: 25, spentUsd: 0, projectedUsd: 0 }
 
-  test('rates spend against the limit', () => {
-    expect(budgetTone({ ...limit, percent: 40 })).toBe('success')
-    expect(budgetTone({ ...limit, percent: 85 })).toBe('warning')
-    expect(budgetTone({ ...limit, percent: 100 })).toBe('danger')
+  test('rates spend against the reserve and the weekly limit', () => {
+    expect(budgetTone({ ...budget, spentUsd: 60, projectedUsd: 100 })).toBe('success')
+    expect(budgetTone({ ...budget, spentUsd: 125, projectedUsd: 125 })).toBe('warning')
+    expect(budgetTone({ ...budget, spentUsd: 150, projectedUsd: 150 })).toBe('danger')
   })
 
-  test('warns when the projection exceeds the limit', () => {
-    expect(budgetTone({ ...limit, percent: 40, projectedUsd: 120 })).toBe('warning')
+  test('warns when the projection goes over the weekly limit', () => {
+    expect(budgetTone({ ...budget, spentUsd: 40, projectedUsd: 160 })).toBe('warning')
+  })
+
+  test('places spend, projection and the reserve marker on the bar', () => {
+    expect(automaticLimit(budget)).toBe(125)
+    expect(automaticLimit({ weeklyUsd: 10, reserveUsd: 25 })).toBe(0)
+    expect(budgetBar({ ...budget, spentUsd: 75, projectedUsd: 300 })).toEqual({
+      spent: 50,
+      projected: 100,
+      reserve: (125 / 150) * 100,
+    })
   })
 })
 

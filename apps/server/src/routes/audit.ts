@@ -1,8 +1,8 @@
-import type { AuditList, AuditVerifyResponse } from '@holtkeeper/api'
+import { type Principal, can } from '@holtkeeper/access'
+import type { AuditVerifyResponse, HistoryList, HistoryScope } from '@holtkeeper/api'
 import {
   type AuditFilter,
   type AuditOutcome,
-  type AuditStore,
   type AuditVia,
   formatAuditEvents,
 } from '@holtkeeper/store'
@@ -10,7 +10,18 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import { appendAudit, auditActorOf } from '../audit.ts'
-import { type AppContext, type Env, type ServerDeps, authorize, limitParam } from '../context.ts'
+import {
+  type AppContext,
+  type Env,
+  type ServerDeps,
+  authorize,
+  limitParam,
+  parseRepo,
+  principalOf,
+  repoTarget,
+} from '../context.ts'
+import { canSee } from '../visibility.ts'
+import { peopleOf } from './avatars.ts'
 
 const outcomes: readonly AuditOutcome[] = ['ok', 'denied', 'error']
 const vias: readonly AuditVia[] = ['ui', 'api', 'webhook', 'job', 'system']
@@ -37,18 +48,28 @@ function seqParam(value: string | undefined, name: string) {
   return Number(value)
 }
 
+const reposParam = (value: string | undefined) =>
+  value === undefined
+    ? undefined
+    : value
+        .split(',')
+        .map((repo) => repo.trim())
+        .filter(Boolean)
+
 function filterOf(c: AppContext): AuditFilter {
   const q = (name: string) => c.req.query(name) || undefined
   const outcome = oneOf(q('outcome'), outcomes, 'outcome')
   const via = oneOf(q('via'), vias, 'via')
   const from = timestamp(q('from'), 'from')
   const to = timestamp(q('to'), 'to')
+  const repos = reposParam(c.req.query('repos'))
   return {
     ...(q('actor') && { actor: q('actor') }),
     ...(q('action') && { action: q('action') }),
     ...(q('targetType') && { targetType: q('targetType') }),
     ...(q('targetId') && { targetId: q('targetId') }),
     ...(q('repo') && { repo: q('repo') }),
+    ...(repos && { repos }),
     ...(outcome && { outcome }),
     ...(via && { via }),
     ...(from && { from }),
@@ -56,33 +77,72 @@ function filterOf(c: AppContext): AuditFilter {
   }
 }
 
+const GLOBAL = { kind: 'global' } as const
+
+const readAll = (principal: Principal) => can(principal, 'audit:read', GLOBAL)
+
+const reachable = (principal: Principal) =>
+  readAll(principal) ||
+  principal.grants.some((grant) =>
+    grant.actions.some((action) => action === '*' || action === 'repos:read'),
+  )
+
 /**
- * The audit log, readable with global `audit:read`: paged listing with filters, CSV/NDJSON export
- * (itself audited as `audit.export`) and hash chain verification. 503 without an audit store.
+ * The audit log as the History page reads it, plus the compliance tools. `GET /history` pages
+ * through the events the caller may see: everything with global `audit:read`; otherwise only events
+ * about repositories it can `repos:read`, never instance-level ones. `GET /history/scope` lists those
+ * repositories with their groups. CSV/NDJSON export (itself audited as `audit.export`) and hash
+ * chain verification need global `audit:read`.
  */
 export function auditLogRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
+  const audit = deps.store.audit
 
-  const auditOf = (c: AppContext): AuditStore => {
-    authorize(c, 'audit:read', { kind: 'global' })
-    if (!deps.store.audit) throw new HTTPException(503, { message: 'no audit log is configured' })
-    return deps.store.audit
-  }
+  const visibleRepos = async (principal: Principal) =>
+    (await audit.repos()).flatMap((key) => {
+      const ref = parseRepo(key)
+      if (!ref) return []
+      const target = repoTarget(deps.config, ref)
+      return canSee(principal, 'repos:read', target) ? [{ repo: key, groups: target.groups }] : []
+    })
 
-  app.get('/audit', async (c) => {
-    const audit = auditOf(c)
+  app.get('/history', async (c) => {
+    const principal = principalOf(c)
+    if (!reachable(principal))
+      throw new HTTPException(403, { message: 'missing permission repos:read' })
+    const { repos: requested, ...filter } = filterOf(c)
+    let repos = requested
+    if (!readAll(principal)) {
+      const visible = new Set((await visibleRepos(principal)).map((entry) => entry.repo))
+      repos = (requested ?? [...visible]).filter((repo) => visible.has(repo))
+    }
     const page = await audit.list({
-      ...filterOf(c),
+      ...filter,
+      ...(repos && { repos }),
       ...(c.req.query('cursor') && { cursor: c.req.query('cursor') }),
       limit: limitParam(c.req.query('limit')),
     })
-    return c.json<AuditList>(page)
+    return c.json<HistoryList>({
+      ...page,
+      people: await peopleOf(
+        deps,
+        page.events.map((event) => event.actor.id),
+      ),
+    })
   })
 
-  app.get('/audit/count', async (c) => c.json({ count: await auditOf(c).count(filterOf(c)) }))
+  app.get('/history/scope', async (c) => {
+    const principal = principalOf(c)
+    if (!reachable(principal))
+      throw new HTTPException(403, { message: 'missing permission repos:read' })
+    return c.json<HistoryScope>({
+      repos: await visibleRepos(principal),
+      instance: readAll(principal),
+    })
+  })
 
   app.get('/audit/export', async (c) => {
-    const audit = auditOf(c)
+    authorize(c, 'audit:read', GLOBAL)
     const format = oneOf(c.req.query('format') ?? 'ndjson', ['csv', 'ndjson'] as const, 'format')
     const filter = filterOf(c)
     await appendAudit(deps.store, {
@@ -119,7 +179,7 @@ export function auditLogRoutes(deps: ServerDeps) {
   })
 
   app.get('/audit/verify', async (c) => {
-    const audit = auditOf(c)
+    authorize(c, 'audit:read', GLOBAL)
     const fromSeq = seqParam(c.req.query('fromSeq'), 'fromSeq')
     const toSeq = seqParam(c.req.query('toSeq'), 'toSeq')
     return c.json<AuditVerifyResponse>(

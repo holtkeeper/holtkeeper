@@ -37,6 +37,7 @@ export const apiSurfaceAnalyzer = defineAnalyzer<ApiSurfaceData, ApiSurfaceOptio
   kind: 'api-surface',
   analysis: apiSurfaceAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '6h' },
   needs: { checkout: true },
   options: apiSurfaceOptionsSchema,
   flags: [

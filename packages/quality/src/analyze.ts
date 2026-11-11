@@ -1,4 +1,3 @@
-import type { Agent } from '@holtkeeper/agent'
 import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 
 import type { QualityCheck, QualityData } from './types.ts'
@@ -7,7 +6,6 @@ export interface AnalyzeQualityOptions {
   dir: string
   checks: readonly QualityCheck[]
   runner?: CommandRunner
-  agent?: Agent
   signal?: AbortSignal
 }
 
@@ -27,10 +25,9 @@ export async function analyzeQuality({
   dir,
   checks,
   runner = localRunner,
-  agent,
   signal,
 }: AnalyzeQualityOptions): Promise<QualityData> {
-  const data: QualityData = { tools: [], issues: [], tests: [], conventions: [], changes: [] }
+  const data: QualityData = { tools: [], issues: [], changes: [] }
 
   for (const check of checks) {
     signal?.throwIfAborted()
@@ -43,15 +40,10 @@ export async function analyzeQuality({
       const result = await check.run({
         dir,
         runner,
-        ...(agent ? { agent } : {}),
         ...(signal ? { signal } : {}),
       })
       data.issues.push(...(result.issues ?? []))
-      data.tests.push(...(result.tests ?? []))
-      data.conventions.push(...(result.conventions ?? []))
       data.changes.push(...(result.changes ?? []))
-      if (result.coverage) data.coverage = { ...data.coverage, ...result.coverage }
-      if (result.duplication) data.duplication = result.duplication
       data.tools.push({
         name: check.name,
         ...(result.version ? { version: result.version } : {}),

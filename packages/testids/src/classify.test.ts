@@ -1,13 +1,13 @@
 import { expect, test } from 'bun:test'
 
+import { bareName, createAttributeMatcher, createClassifier, eventOf } from './classify.ts'
 import {
   defaultAttributes,
   defaultEvents,
   defaultMarkers,
   defaultRoles,
   defaultTags,
-} from './analyze.ts'
-import { bareName, createAttributeMatcher, createClassifier, eventOf } from './classify.ts'
+} from './defaults.ts'
 import { scanTags } from './tags.ts'
 
 const classify = createClassifier({

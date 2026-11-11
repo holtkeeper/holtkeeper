@@ -84,7 +84,7 @@ const optionSchema = z.object({
   description: z.string().optional(),
 })
 
-/** Validates a `Form` that came back from a surface, e.g. inside a Slack button. */
+/** Validates a `Form` that came back from a surface, e.g. inside a button. */
 export const formSchema: z.ZodType<Form> = z.object({
   command: z.string().min(1),
   submitLabel: z.string().min(1),
@@ -118,6 +118,26 @@ export const formSchema: z.ZodType<Form> = z.object({
   ),
 })
 
+/** Where a proposed code change stands; the same values as a task group's status. */
+export type TaskCardStatus =
+  | 'proposed'
+  | 'approved'
+  | 'queued'
+  | 'running'
+  | 'mr-open'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+/** A merge request a task opened, shown on its card. */
+export interface TaskCardMergeRequest {
+  /** `forge:path`. */
+  repo: string
+  id: number
+  url: string
+  draft: boolean
+}
+
 /** One part of a card. Surfaces render the kinds they support and fall back to text for the rest. */
 export type CardBlock =
   | { type: 'text'; text: string }
@@ -131,6 +151,21 @@ export type CardBlock =
   | { type: 'actions'; actions: CardAction[] }
   | { type: 'form'; form: Form }
   | { type: 'context'; text: string }
+  /**
+   * A code change: the repositories (`forge:path`) it touches, what it does, and the task group
+   * (`groupId`) people approve or cancel from the card; the server keeps `status` and
+   * `mergeRequests` current.
+   */
+  | {
+      type: 'task'
+      repos: string[]
+      summary: string
+      status: TaskCardStatus
+      groupId?: string
+      /** Spend cap of the whole group in USD, shown before approval. */
+      budgetUsd?: number
+      mergeRequests?: TaskCardMergeRequest[]
+    }
 
 /**
  * A message from Holtkeeper, independent of where it is shown. Text is markdown-ish: `**bold**`,
@@ -154,6 +189,58 @@ export const textCard = (title: string, text: string, tone?: CardTone): Card => 
   ...(tone && { tone }),
   blocks: [{ type: 'text', text }],
 })
+
+const taskTitles: Record<TaskCardStatus, string> = {
+  proposed: 'Proposed change',
+  approved: 'Approved change',
+  queued: 'Change queued',
+  running: 'Change in progress',
+  'mr-open': 'Merge requests open',
+  done: 'Change done',
+  failed: 'Change failed',
+  cancelled: 'Change cancelled',
+}
+
+const taskTones: Record<TaskCardStatus, CardTone> = {
+  proposed: 'info',
+  approved: 'info',
+  queued: 'info',
+  running: 'info',
+  'mr-open': 'good',
+  done: 'good',
+  failed: 'bad',
+  cancelled: 'neutral',
+}
+
+/** A card for a code change in `repos`: proposed until its group (`groupId`) is approved. */
+export const taskCard = (
+  repos: readonly string[],
+  summary: string,
+  task: {
+    status?: TaskCardStatus
+    groupId?: string
+    budgetUsd?: number
+    mergeRequests?: TaskCardMergeRequest[]
+  } = {},
+): Card => {
+  const status = task.status ?? 'proposed'
+  return {
+    title: taskTitles[status],
+    subtitle: repos.join(', '),
+    tone: taskTones[status],
+    blocks: [
+      {
+        type: 'task',
+        repos: [...repos],
+        summary,
+        status,
+        ...(task.groupId && { groupId: task.groupId }),
+        ...(task.budgetUsd !== undefined && { budgetUsd: task.budgetUsd }),
+        ...(task.mergeRequests?.length && { mergeRequests: task.mergeRequests }),
+      },
+    ],
+  }
+}
 
 const quote = (value: string) =>
   value === '' || /[\s"']/.test(value) ? `"${value.replaceAll('"', '\\"')}"` : value

@@ -1,11 +1,13 @@
 import type { Grant, GroupMatch, Scope } from '@holtkeeper/access'
+import type { Card } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AuditReport } from '@holtkeeper/vuln'
 
 /** ISO 8601 timestamp, e.g. `2026-10-29T12:00:00.000Z`. */
 export type Timestamp = string
 
-export type AuditTrigger = 'cli' | 'schedule' | 'manual' | 'webhook'
+/** What started an audit run; `freshness` is the server's sweeper keeping results current. */
+export type AuditTrigger = 'cli' | 'schedule' | 'freshness' | 'manual' | 'webhook'
 
 /** One finished audit of one repository. */
 export interface AuditRun {
@@ -63,8 +65,26 @@ export interface StoredCredential {
    * model map. Stored as given; the service that owns the kind validates it.
    */
   options?: Record<string, unknown>
+  /**
+   * What a probe found the provider can do, e.g. whether its Messages API runs an agent tool loop.
+   * Cleared when the endpoint, secret, kind or options change.
+   */
+  capabilities?: CredentialCapabilities
   createdAt: Timestamp
   updatedAt: Timestamp
+}
+
+/** Outcome of one capability probe: `unknown` until a probe ran. */
+export type CapabilityStatus = 'ok' | 'failed' | 'unknown'
+
+/** Probed capabilities of a credential. */
+export interface CredentialCapabilities {
+  /** Messages tool use, which the Claude Agent SDK loop needs. */
+  agentLoop: CapabilityStatus
+  /** When the probe ran. */
+  checkedAt: Timestamp
+  /** Why the probe failed, without secrets. */
+  error?: string
 }
 
 export interface CredentialStore {
@@ -171,6 +191,8 @@ export interface AnalysisRecord<Data = unknown> {
   kind: string
   /** Release, tag or commit the analysis describes, e.g. `v1.4.0`. */
   ref?: string
+  /** Commit the analysis ran on: the checked-out HEAD, or the default-branch head it read. */
+  sha?: string
   createdAt: Timestamp
   actor?: string
   data: Data
@@ -200,29 +222,32 @@ export interface AnalysisStore {
    * of `kind` when given. Among records created at the same time the last added wins.
    */
   latest(query?: Pick<AnalysisQuery, 'repo' | 'kind'>): Promise<AnalysisRecord[]>
+  /** What `latest` returns for the same query, without reading the records' data. */
+  latestHeads(query?: Pick<AnalysisQuery, 'repo' | 'kind'>): Promise<AnalysisHead[]>
+  /**
+   * Deletes the records of `kind` for `repo` except the newest `keep` (by creation time, the last
+   * added first among equal times) and returns how many it deleted.
+   */
+  prune(query: { repo: RepoRef; kind: string; keep: number }): Promise<number>
 }
 
-/** Something a person or the system did, for the activity log. */
-export interface ActivityEvent {
-  id: string
-  at: Timestamp
-  actor: string
-  /** Dotted verb, e.g. `credential.created`, `user.invited`, `audit.ingested`. */
-  action: string
-  /** Object the action was about, e.g. a credential id or `work:games/app-x`. */
-  subject?: string
-  details?: Record<string, unknown>
-}
+/**
+ * What queued a job. `manual` (the panel or API) and `command` (a command in a merge request
+ * comment) mean a person asked for it; the others are automatic.
+ */
+export type JobTrigger =
+  | 'schedule'
+  | 'manual'
+  | 'command'
+  | 'webhook'
+  | 'tag'
+  | 'push'
+  | 'poll'
+  | 'new-repo'
+  | 'freshness'
 
-export interface ActivityStore {
-  append(event: Omit<ActivityEvent, 'id'>): Promise<ActivityEvent>
-  /** Newest first. */
-  list(query?: { before?: Timestamp; limit?: number }): Promise<ActivityEvent[]>
-}
-
-export type JobTrigger = 'schedule' | 'manual' | 'webhook' | 'tag' | 'push' | 'poll' | 'new-repo'
-
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled'
+/** `blocked`: an AI budget refused or stopped the run; it is not retried and is not a failure. */
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked' | 'canceled'
 
 /**
  * One run of one analyzer for one repository, or for one config group when the analyzer has
@@ -253,14 +278,40 @@ export interface Job {
   heartbeatAt?: Timestamp
   /** Error of the latest failed attempt. */
   error?: string
+  /**
+   * `errorSignature(error)` of the latest failed attempt, so equal failures of different jobs
+   * compare equal; cleared when the job succeeds or is blocked.
+   */
+  errorSignature?: string
+  /** One entry per attempt started, oldest first; the last one is the current or latest attempt. */
+  attemptsHistory: JobAttempt[]
   /** The stored result, once the job succeeded. */
   analysisId?: string
-  /** The last `JOB_LOG_LIMIT` log lines, oldest first. */
-  log: string[]
   /** Principal id that requested the job, when a person did. */
   actor?: string
   /** Name of the schedule that queued the job, also for its manual runs. */
   schedule?: string
+  /** Why the automation that queued the job did, e.g. `sha 1a2b3c4 != head 5d6e7f8`. */
+  reason?: string
+}
+
+/** How one attempt of a job ended; `running` while it still runs. */
+export type JobAttemptStatus = 'running' | 'succeeded' | 'failed' | 'blocked' | 'canceled'
+
+/**
+ * One attempt of a job: `claim` starts it; `complete`, `fail`, `block`, `cancel` or
+ * `recoverStale` ends it.
+ */
+export interface JobAttempt {
+  /** 1-based, equal to `Job.attempts` when the attempt started. */
+  n: number
+  status: JobAttemptStatus
+  startedAt: Timestamp
+  finishedAt?: Timestamp
+  workerId?: string
+  error?: string
+  /** The step that failed (see `JobStore.fail`), when the worker knew it. */
+  step?: string
 }
 
 export interface NewJob {
@@ -277,6 +328,7 @@ export interface NewJob {
   createdAt: Timestamp
   actor?: string
   schedule?: string
+  reason?: string
 }
 
 export interface JobQuery {
@@ -285,10 +337,50 @@ export interface JobQuery {
   analyzer?: string
   /** Only jobs queued by this schedule. */
   schedule?: string
+  /** Only jobs queued by this kind of event. */
+  trigger?: JobTrigger
   /** Only jobs created before this time; used for paging. */
   before?: Timestamp
+  /** Only jobs whose `errorSignature` is exactly this. */
+  errorSignature?: string
+  /**
+   * Only jobs of these repositories (group jobs by `{ forge, path: <group name> }`); an empty list
+   * matches nothing. Lets callers apply visibility before `limit`.
+   */
+  repos?: RepoRef[]
   /** Default 50. */
   limit?: number
+}
+
+/** Which failed jobs `JobStore.failures` groups. */
+export interface JobFailureQuery {
+  /** Only jobs that failed for good at or after this time. */
+  since: Timestamp
+  analyzer?: string
+  /** As `JobQuery.repos`. */
+  repos?: RepoRef[]
+  /** Groups returned at most. Default 50. */
+  limit?: number
+}
+
+/** Jobs that failed for good with the same analyzer and `errorSignature`. */
+export interface JobFailureGroup {
+  analyzer: string
+  errorSignature: string
+  count: number
+  /** Distinct repositories (or groups) among them. */
+  repos: number
+  firstAt: Timestamp
+  lastAt: Timestamp
+  /** The job that failed last, and its raw error. */
+  latestJobId: string
+  error: string
+}
+
+/** A repository or group that has jobs, as `JobStore.targets` lists it. */
+export interface JobTarget {
+  repo: RepoRef
+  group?: string
 }
 
 /** How jobs of one repository may run side by side, by analyzer kind; see `JobStore.claim`. */
@@ -305,6 +397,10 @@ export interface ClaimRules {
    * one takes what they leave. Default 0.
    */
   delayMs?: number
+  /** Only jobs of these kinds (a dedicated worker pool). Absent: every kind. */
+  only?: string[]
+  /** Never jobs of these kinds (they belong to another worker pool). */
+  except?: string[]
 }
 
 /**
@@ -329,13 +425,16 @@ export interface JobStore {
   /** Marks a running job succeeded. */
   complete(id: string, result: { at: Timestamp; analysisId?: string }): Promise<Job | undefined>
   /**
-   * Records a failed attempt of a running job. With `retryAt` and attempts left it goes back to
-   * the queue to run after `retryAt`; otherwise it is failed for good.
+   * Records a failed attempt of a running job, with `step` as the step that failed, and sets
+   * `errorSignature` from `error`. With `retryAt` and attempts left it goes back to the queue to
+   * run after `retryAt`; otherwise it is failed for good.
    */
   fail(
     id: string,
-    failure: { at: Timestamp; error: string; retryAt?: Timestamp },
+    failure: { at: Timestamp; error: string; retryAt?: Timestamp; step?: string },
   ): Promise<Job | undefined>
+  /** Marks a running job `blocked` for good with the reason in `error`; it is not retried. */
+  block(id: string, blocked: { at: Timestamp; error: string }): Promise<Job | undefined>
   /** Cancels a queued or running job; finished jobs are returned unchanged. */
   cancel(id: string, at: Timestamp): Promise<Job | undefined>
   /**
@@ -346,13 +445,21 @@ export interface JobStore {
   get(id: string): Promise<Job | undefined>
   /** Newest first. */
   list(query?: JobQuery): Promise<Job[]>
-  /** Appends lines and keeps only the last `JOB_LOG_LIMIT`. */
-  appendLog(id: string, lines: string[]): Promise<void>
+  /** Failed jobs grouped by analyzer and `errorSignature`, the group that failed last first. */
+  failures(query: JobFailureQuery): Promise<JobFailureGroup[]>
+  /** Every distinct repository or group that has jobs, in no particular order. */
+  targets(): Promise<JobTarget[]>
 }
 
 export type KnowledgeKind = 'decision' | 'convention' | 'migration' | 'quirk' | 'howto'
 
 export type KnowledgeStatus = 'proposed' | 'accepted' | 'rejected' | 'archived'
+
+/**
+ * Who reads an entry: `team` (default) the people its scope covers; `shared` also everyone with
+ * cross-team catalog reach, so a team's decision about a library reaches other teams.
+ */
+export type KnowledgeVisibility = 'team' | 'shared'
 
 /**
  * A package a knowledge entry is about. `from` and `to` are semver ranges: the versions a
@@ -386,6 +493,13 @@ export interface KnowledgeContent {
   appliesTo: string[]
   /** Required for `migration` entries. */
   packages?: KnowledgePackage[]
+  /** Absent means `team`. */
+  visibility?: KnowledgeVisibility
+  /**
+   * What the entry is about, as a join key for pages and tools: a library or package
+   * (`npm:react`, `Go:github.com/acme/kit`) or a stack tool (`tool:node`).
+   */
+  subject?: string
   status: KnowledgeStatus
   evidence: KnowledgeLink[]
   /** Id of the entry this one replaces. */
@@ -431,6 +545,8 @@ export interface KnowledgeFilter {
   scope?: string
   /** Package name, optionally with its ecosystem: `react` or `npm:react`. */
   package?: string
+  /** Exact `subject`. */
+  subject?: string
 }
 
 /** A search result; higher `score` is more relevant. */
@@ -460,6 +576,254 @@ export interface KnowledgeStore {
    * returns nothing. `limit` defaults to 20.
    */
   search(text: string, filter?: KnowledgeFilter, limit?: number): Promise<KnowledgeHit[]>
+}
+
+/** The fixed sections of a Guide, in the order prompts and the panel show them. */
+export type GuideSectionName =
+  | 'general'
+  | 'review'
+  | 'testing'
+  | 'testids'
+  | 'assets'
+  | 'commits'
+  | 'releases'
+
+/**
+ * Where a Guide section applies, as a key: `all`, `group:<config group>`, `family:<family id>` or
+ * `repo:<forge>:<path>`.
+ */
+export type GuideScopeKey = 'all' | `group:${string}` | `family:${string}` | `repo:${string}`
+
+/** The text a generator proposed for a section from repository signals; humans accept it. */
+export interface GuideGenerated {
+  /** Markdown. */
+  body: string
+  /** Hash of everything the generator read; an unchanged hash means no new LLM call. */
+  inputHash: string
+  model: string
+  costUsd: number
+  status: 'proposed' | 'accepted'
+  generatedAt: Timestamp
+  /** Commit the signals were read at. */
+  sha?: string
+  /** The one-off extra prompt a person gave for this run, kept for traceability. */
+  prompt?: string
+  /** Who accepted the text and when; absent while it is proposed. */
+  acceptedBy?: string
+  acceptedAt?: Timestamp
+}
+
+/** A short rule people accepted from review replies or reactions, with where it came from. */
+export interface GuideLearning {
+  id: string
+  /** One imperative sentence. */
+  rule: string
+  sources: KnowledgeLink[]
+  acceptedBy: string
+  acceptedAt: Timestamp
+}
+
+/** The human-written part of a section, the part revisions track. */
+export interface GuideHumanLayer {
+  /** Team rules in Markdown; empty when nobody wrote any. */
+  rules: string
+  /** A short prompt that steers the generator; never put into task prompts. */
+  steering: string
+}
+
+/**
+ * One section of one scope's Guide. Human rules always outrank the generated layer. `version`
+ * counts edits of the human layer: 0 before the first one, then up by one per change of `rules`
+ * or `steering`.
+ */
+export interface GuideSection extends GuideHumanLayer {
+  scope: GuideScopeKey
+  section: GuideSectionName
+  version: number
+  /** Who made the current human layer and when; absent before the first edit. */
+  editedBy?: string
+  editedAt?: Timestamp
+  /**
+   * The generated text agents see: accepted text, or a first proposal nobody accepted yet (agents
+   * get that one only when no human rules apply).
+   */
+  generated?: GuideGenerated
+  /** A newer proposal waiting for a person while `generated` holds accepted text. */
+  proposal?: GuideGenerated
+  learnings: GuideLearning[]
+}
+
+/** What `GuideStore.put` takes: the section without the version the store assigns. */
+export type GuideSectionInput = Omit<GuideSection, 'version'>
+
+/** A previous human layer of a section, with who made it and when. */
+export interface GuideRevision extends GuideHumanLayer {
+  version: number
+  editedBy: string
+  editedAt: Timestamp
+}
+
+/** Filters for `GuideStore.list`; every given field must match. */
+export interface GuideFilter {
+  scopes?: readonly GuideScopeKey[]
+  sections?: readonly GuideSectionName[]
+}
+
+/** Guide sections, one row per scope and section, with revisions of their human layer. */
+export interface GuideStore {
+  get(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideSection | undefined>
+  /** Sorted by scope, then section name. */
+  list(filter?: GuideFilter): Promise<GuideSection[]>
+  /**
+   * Creates or replaces the section and returns it. When `rules` or `steering` differ from the
+   * stored ones, the previous human layer goes to the history (with its `editedBy`/`editedAt`)
+   * and `version` grows by one; otherwise `version`, `editedBy` and `editedAt` stay as stored, so
+   * writing the generated layer or learnings never makes a revision.
+   */
+  put(section: GuideSectionInput): Promise<GuideSection>
+  /** Previous human layers, newest first; empty for unknown sections. */
+  history(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideRevision[]>
+  /** Removes every section of the scope and their history. */
+  removeScope(scope: GuideScopeKey): Promise<void>
+}
+
+/**
+ * A named set of similar repositories, e.g. near-identical app frontends of one team. A repository
+ * belongs to at most one family.
+ */
+export interface Family {
+  id: string
+  name: string
+  /** Repositories as `forge:path`, sorted. */
+  members: string[]
+  createdBy: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  updatedBy?: string
+}
+
+/** Confirmed families. */
+export interface FamilyStore {
+  /** Sorted by name. */
+  list(): Promise<Family[]>
+  get(id: string): Promise<Family | undefined>
+  /**
+   * Creates or replaces by id. Throws `FamilyConflictError` when a member belongs to another
+   * family; nothing is written then.
+   */
+  put(family: Family): Promise<void>
+  remove(id: string): Promise<void>
+}
+
+/** One merge request note a learning candidate came from. */
+export interface LearningSource {
+  /** `forge:path`. */
+  repo: string
+  mergeRequest: number
+  discussionId: string
+  noteId: string
+  /** The note author's forge username; shown next to the candidate, never put into rule text. */
+  author: string
+  at: Timestamp
+  /** Link to the note, when the forge reported the merge request's URL. */
+  url?: string
+}
+
+export type LearningStatus = 'proposed' | 'accepted' | 'rejected'
+
+/** Where a candidate's rule should apply once accepted. */
+export type LearningScopeKind = 'repo' | 'family' | 'group'
+
+/** Who proposed a rule directly (an MCP client, through `propose_rule_change`) and why. */
+export interface LearningProposal {
+  /** Principal id of the proposer. */
+  by: string
+  reason: string
+}
+
+/**
+ * A rule extracted from replies to Holtkeeper's review comments, or proposed directly. It reaches
+ * prompts only after a person accepts it: it is then a `GuideLearning` (same `id`) of the
+ * `acceptedScope` section.
+ */
+export interface LearningCandidate {
+  id: string
+  /** `forge:path` of the repository the first reply was in. */
+  repo: string
+  /** One imperative sentence, at most 200 characters, without personal names. */
+  rule: string
+  /** `rule` normalized; one repository holds one candidate per key. */
+  key: string
+  section: GuideSectionName
+  suggestedScope: LearningScopeKind
+  status: LearningStatus
+  /** Every reply that taught the rule, oldest first; empty for a direct proposal. */
+  sources: LearningSource[]
+  /** Set for a rule proposed directly rather than learned from a reply. */
+  proposal?: LearningProposal
+  /** Model of the extraction and what it cost. */
+  model: string
+  costUsd: number
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  /** Where the accepted rule lives. */
+  acceptedScope?: GuideScopeKey
+  /** Who accepted or rejected it and when. */
+  decidedBy?: string
+  decidedAt?: Timestamp
+  editedBy?: string
+}
+
+export interface LearningFilter {
+  /** `forge:path` values. */
+  repos?: readonly string[]
+  status?: readonly LearningStatus[]
+}
+
+/** 👍/👎 counts on one of Holtkeeper's review comments, as last read from the forge. */
+export interface ReactionSignal {
+  /** `forge:path`. */
+  repo: string
+  mergeRequest: number
+  noteId: string
+  /** Finding category of the comment, e.g. `bug`, `style`. */
+  category: string
+  findingId?: string
+  up: number
+  down: number
+  updatedAt: Timestamp
+}
+
+/** Reaction counts summed over comments of one category. */
+export interface ReactionTotals {
+  category: string
+  comments: number
+  up: number
+  down: number
+}
+
+/** Learning candidates, the reply notes already looked at, and reaction counts of review comments. */
+export interface LearningStore {
+  get(id: string): Promise<LearningCandidate | undefined>
+  /** Most recently updated first. */
+  list(filter?: LearningFilter): Promise<LearningCandidate[]>
+  /** The candidate of `repo` whose `key` matches. */
+  find(repo: string, key: string): Promise<LearningCandidate | undefined>
+  /** Creates or replaces by id. */
+  put(candidate: LearningCandidate): Promise<void>
+  /**
+   * Marks a source as handled; `true` only for the first caller of `key`, atomically across
+   * processes sharing the store.
+   */
+  claim(key: string, at: Timestamp): Promise<boolean>
+  /** Forgets a claim, so the source may be handled again (e.g. after a failed call). */
+  release(key: string): Promise<void>
+  /** Creates or replaces the counts of one comment (by repo, merge request and note). */
+  putReactions(signal: ReactionSignal): Promise<void>
+  /** Counts per category, sorted by category; `repos` limits them to those repositories. */
+  reactionTotals(filter?: { repos?: readonly string[] }): Promise<ReactionTotals[]>
+  /** The counts of every comment on `repo`'s merge requests, only those of `mergeRequests` when given. */
+  reactions(filter: { repo: string; mergeRequests?: readonly number[] }): Promise<ReactionSignal[]>
 }
 
 /** Where an AI run's `costUsd` came from: the provider's report, our price table, or nowhere. */
@@ -497,6 +861,8 @@ export interface AiUsageRecord {
   turns: number
   outcome: AiRunOutcome
   error?: string
+  /** Artifact id of the run's JSONL transcript, when one was written. */
+  transcriptRef?: string
 }
 
 /** Filters for AI usage. Every given field must match; `from` is inclusive, `to` exclusive. */
@@ -511,6 +877,7 @@ export interface AiUsageFilter {
   taskKind?: string
   analyzer?: string
   outcome?: AiRunOutcome
+  jobId?: string
   /**
    * Records covered by at least one of these scopes (`scopeCoversRepo` with the record's repo and
    * groups). An empty list matches nothing; absent means no restriction.
@@ -669,18 +1036,20 @@ export interface ForgeDocumentData {
    * Default off; needs `packages`.
    */
   cachePackages?: boolean
+  /** Username Holtkeeper posts as on this forge; its own events and merge requests are ignored. */
+  botUsername?: string
   webhook?: ForgeWebhook
   sshKey?: ForgeSshKey
 }
 
-/** A group of repositories, as `groups.<id>` of the file config. */
+/** A group of repositories, as `groups.<id>` of the effective config. */
 export interface GroupDocumentData {
   forge: string
   include: string[]
   exclude: string[]
 }
 
-/** Traits for repositories matching `pattern`, as `repos.<pattern>` of the file config. */
+/** Traits for repositories matching `pattern`, as `repos.<pattern>` of the effective config. */
 export interface RepoTraitsDocumentData {
   pattern: string
   forge?: string
@@ -906,7 +1275,8 @@ export interface AuditEvent extends AuditEventInput {
 
 /**
  * Filters for the audit log; every given field must match. `action` is a prefix (`credential`
- * matches `credential.update`), `actor` an actor id, `repo` exact `forge:path`; `from` is
+ * matches `credential.update`), `actor` an actor id, `repo` exact `forge:path`; `repos` keeps
+ * only events whose `target.repo` is one of the list (an empty list matches nothing); `from` is
  * inclusive, `to` exclusive.
  */
 export interface AuditFilter {
@@ -915,6 +1285,7 @@ export interface AuditFilter {
   targetType?: string
   targetId?: string
   repo?: string
+  repos?: readonly string[]
   outcome?: AuditOutcome
   via?: AuditVia
   from?: Timestamp
@@ -964,6 +1335,8 @@ export interface AuditStore {
   /** Newest first (by `seq`). */
   list(query?: AuditQuery): Promise<AuditPage>
   count(filter?: AuditFilter): Promise<number>
+  /** Every distinct `target.repo` among the kept events, sorted. */
+  repos(): Promise<string[]>
   /** Every matching event, oldest first, read in batches. */
   export(filter?: AuditFilter): AsyncIterable<AuditEvent>
   /**
@@ -998,7 +1371,7 @@ export interface ExternalAccount {
   id: string
   /** Holtkeeper principal id: a user id with the `users` provider, else the provider's principal id. */
   userId: string
-  /** `gitlab:<forgeId>`, `github:<forgeId>`, `slack:<workspaceId>` or free form. */
+  /** `gitlab:<forgeId>`, `github:<forgeId>` or free form. */
   provider: string
   /** The provider's stable user id (numeric for GitLab and GitHub). */
   externalId: string
@@ -1410,6 +1783,316 @@ export interface DatabaseInspector {
   migrations(): Promise<DatabaseMigration[]>
 }
 
+/** Who wrote a chat message: a person, Holtkeeper's agent, or Holtkeeper itself (command answers, notices). */
+export type ChatAuthorType = 'human' | 'agent' | 'system'
+
+/**
+ * The running summary of a thread's older messages. It covers every message up to and including
+ * `uptoMessageId`; prompts use it instead of those messages.
+ */
+export interface ChatThreadSummary {
+  text: string
+  uptoMessageId: string
+  /** Estimated tokens of the messages the summary stands for. */
+  tokens: number
+}
+
+/**
+ * A team chat thread. Scoped to a repository (`repo`, `forge:path`) or a config group (`group`)
+ * it is visible to people who may read that scope; unscoped it is visible to everyone with chat
+ * access. `updatedAt` moves with every new message.
+ */
+export interface ChatThread {
+  id: string
+  title: string
+  repo?: string
+  group?: string
+  createdBy: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  archived: boolean
+  /** The agent answers every human message, not only those that mention it. */
+  autoReply: boolean
+  /** Principal ids of people who wrote or were mentioned, in order of first appearance. */
+  participants: string[]
+  /**
+   * The name and email each poster last wrote under, by principal id, so prompts can scrub them
+   * also for people without a `users` account (header sign-in).
+   */
+  people?: ChatPerson[]
+  summary?: ChatThreadSummary
+  /** Set while the agent writes a reply. */
+  replyingSince?: Timestamp
+  /** Who holds the reply claim (see `ChatThreadPatch.claimReply`); set with `replyingSince`. */
+  replyingBy?: string
+}
+
+/** How a poster of a chat thread signed in: never shown to the model. */
+export interface ChatPerson {
+  id: string
+  name?: string
+  email?: string
+}
+
+/** What `ChatStore.createThread` takes. */
+export type ChatThreadInput = Omit<ChatThread, 'updatedAt' | 'archived' | 'participants'> &
+  Partial<Pick<ChatThread, 'participants'>>
+
+/** Fields of a thread `ChatStore.updateThread` may change; `null` clears an optional one. */
+export interface ChatThreadPatch {
+  title?: string
+  archived?: boolean
+  autoReply?: boolean
+  participants?: string[]
+  /** Appends the ids not yet among `participants`, in order, to the thread as stored. */
+  addParticipants?: string[]
+  /** Replaces the entries of `people` with these ids, or adds them, as stored. */
+  rememberPeople?: ChatPerson[]
+  summary?: ChatThreadSummary | null
+  /**
+   * Takes the reply claim (`replyingSince = at`, `replyingBy = by`) when nobody holds it or the
+   * held claim started before `staleBefore`; otherwise the claim stays as it is.
+   */
+  claimReply?: { by: string; at: Timestamp; staleBefore: Timestamp }
+  /** Drops the reply claim when `by` still holds it. */
+  releaseReply?: string
+}
+
+/** One tool the agent used for a reply and how often. */
+export interface ChatToolUse {
+  tool: string
+  calls: number
+}
+
+/**
+ * One message of a thread. `seq` is assigned by the store, grows with every message of the
+ * store and orders messages; cursors are `seq` values.
+ */
+export interface ChatMessage {
+  id: string
+  threadId: string
+  seq: number
+  authorType: ChatAuthorType
+  /** Principal id of a human author; absent for the agent and system. */
+  authorId?: string
+  /** Markdown. */
+  body: string
+  card?: Card
+  toolTrace?: ChatToolUse[]
+  costUsd?: number
+  transcriptRef?: string
+  /** Lowercased names after `@` in the body, e.g. `holtkeeper`. */
+  mentions: string[]
+  createdAt: Timestamp
+  /** When the card or body was last changed in place. */
+  updatedAt?: Timestamp
+}
+
+/** What `ChatStore.addMessage` takes. */
+export type ChatMessageInput = Omit<ChatMessage, 'seq' | 'updatedAt'>
+
+/** Which messages `ChatStore.listMessages` returns. */
+export interface ChatMessageQuery {
+  /** Only messages with a greater `seq`; the oldest of them first. */
+  after?: number
+  /** Only messages with a smaller `seq`; the newest of them, still returned oldest first. */
+  before?: number
+  /** Also messages changed in place at or after this time, whatever their `seq`. */
+  changedSince?: Timestamp
+  /** Default 50, at most 500. */
+  limit?: number
+}
+
+/** How far one person has read one thread. */
+export interface ChatThreadRead {
+  threadId: string
+  userId: string
+  lastReadMessageId: string
+  lastReadSeq: number
+}
+
+/** Team chat threads, their messages and how far each person has read them. */
+export interface ChatStore {
+  createThread(thread: ChatThreadInput): Promise<ChatThread>
+  getThread(id: string): Promise<ChatThread | undefined>
+  /** Most recently updated first; archived threads only with `archived: true`. */
+  listThreads(filter?: { archived?: boolean }): Promise<ChatThread[]>
+  /** Applies `patch`; `undefined` when the thread does not exist. */
+  updateThread(id: string, patch: ChatThreadPatch): Promise<ChatThread | undefined>
+  /** Stores a message with the next `seq` and moves the thread's `updatedAt` to its `createdAt`. */
+  addMessage(message: ChatMessageInput): Promise<ChatMessage>
+  getMessage(id: string): Promise<ChatMessage | undefined>
+  /** Replaces the card or body of a message and stamps `updatedAt`; `undefined` when it is gone. */
+  updateMessage(
+    id: string,
+    patch: { card?: Card; body?: string; updatedAt: Timestamp },
+  ): Promise<ChatMessage | undefined>
+  /** Messages of a thread, oldest first (see `ChatMessageQuery`). */
+  listMessages(threadId: string, query?: ChatMessageQuery): Promise<ChatMessage[]>
+  /** Moves the person's read marker to `messageId`; never backwards. No-op for unknown messages. */
+  markRead(threadId: string, userId: string, messageId: string): Promise<void>
+  /** The person's read markers. */
+  reads(userId: string): Promise<ChatThreadRead[]>
+  /**
+   * Messages after the person's read marker that others wrote, per thread of `threadIds` with any;
+   * a thread without a marker counts all of them.
+   */
+  unreadCounts(userId: string, threadIds: readonly string[]): Promise<Record<string, number>>
+}
+
+/** What an agent task does; it shapes the agent's instructions and where people see it. */
+export type AgentTaskKind = 'fix' | 'port' | 'upgrade' | 'propagate-fix' | 'chat' | 'tests'
+
+/**
+ * Where an agent task stands: `proposed` until a person approves it, `approved` while its job is
+ * being queued, `queued` and `running` on a write worker, `mr-open` once its merge request is open,
+ * `done` when that merge request is merged or there was nothing to change, `failed` and
+ * `cancelled` at the end.
+ */
+export type AgentTaskStatus =
+  | 'proposed'
+  | 'approved'
+  | 'queued'
+  | 'running'
+  | 'mr-open'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+/** What asked for a task group. */
+export type AgentTaskSource =
+  | { type: 'chat'; threadId: string; messageId?: string }
+  | { type: 'dependency-upgrade'; ecosystem: string; package: string; from?: string; to: string }
+  | { type: 'propagate'; group?: string }
+  | { type: 'mcp'; client?: string }
+  | { type: 'api' }
+
+/** CI of a task's merge request: the latest pipeline of its branch, as the forge reports it. */
+export type AgentTaskCi = 'none' | 'pending' | 'running' | 'success' | 'failed' | 'canceled'
+
+/** The merge request a task opened. */
+export interface AgentTaskMergeRequest {
+  id: number
+  url: string
+  draft: boolean
+  state?: 'open' | 'merged' | 'closed'
+  ci?: AgentTaskCi
+  /** When state and CI were last read from the forge. */
+  checkedAt?: Timestamp
+}
+
+/**
+ * One repository's part of a task group: the change made in `repo`, the job that makes it and the
+ * merge request it opened. Title, prompt and kind are the group's at creation time.
+ */
+export interface AgentTask {
+  id: string
+  groupId: string
+  kind: AgentTaskKind
+  title: string
+  /** What the agent is asked to do. */
+  prompt: string
+  /** The plan people approved, when it differs from the prompt. */
+  plan?: string
+  /** A unified diff tried with `git apply -3` before any agent runs. */
+  patch?: string
+  /** `forge:path` of the repository the task changes. */
+  repo: string
+  /** Principal id the task works for: the proposer, and the approver once approved. */
+  requester: string
+  source: AgentTaskSource
+  status: AgentTaskStatus
+  /** The `write-task` job, once queued. */
+  jobId?: string
+  /** Spend cap of the job in USD. */
+  budgetUsd?: number
+  /** What the job's agent spent, in USD. */
+  costUsd?: number
+  /** Artifact key of the agent's transcript. */
+  transcriptRef?: string
+  mergeRequest?: AgentTaskMergeRequest
+  /** Why the task failed or was cancelled. */
+  error?: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+/** A repository a running task asked to add to its group; a person decides. */
+export interface AgentTaskRepoRequest {
+  repo: string
+  reason: string
+  /** Task that asked. */
+  taskId: string
+  status: 'pending' | 'approved' | 'rejected'
+  at: Timestamp
+  decidedBy?: string
+}
+
+/**
+ * One request to change code (one source, one or more target repositories): a task per
+ * repository, all on the same branch. People approve or cancel the whole group; its status is
+ * derived from its tasks (`agentGroupStatus`).
+ */
+export interface AgentTaskGroup {
+  id: string
+  kind: AgentTaskKind
+  title: string
+  prompt: string
+  plan?: string
+  patch?: string
+  /** Principal id that proposed the group. */
+  proposedBy: string
+  /** Principal id that approved it; tasks then work for this person. */
+  approvedBy?: string
+  approvedAt?: Timestamp
+  cancelledBy?: string
+  source: AgentTaskSource
+  /** `forge:path` of every target, in the order given. */
+  repos: string[]
+  /** Interactive work may use the AI budget reserve; automatic work may not. */
+  budgetClass: 'interactive' | 'automatic'
+  requests?: AgentTaskRepoRequest[]
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+/** Which tasks `AgentTaskStore.list` returns. */
+export interface AgentTaskFilter {
+  groupIds?: readonly string[]
+  repos?: readonly string[]
+  status?: readonly AgentTaskStatus[]
+  requester?: string
+  /** Default: all. */
+  limit?: number
+}
+
+/** Which groups `AgentTaskStore.listGroups` returns. */
+export interface AgentTaskGroupFilter {
+  sourceType?: AgentTaskSource['type']
+  /** Groups with a target among these `forge:path` keys. */
+  repos?: readonly string[]
+  proposedBy?: string
+  /** Default: all. */
+  limit?: number
+}
+
+/** Agent tasks and their groups; newest `updatedAt` first, then by id. */
+export interface AgentTaskStore {
+  get(id: string): Promise<AgentTask | undefined>
+  list(filter?: AgentTaskFilter): Promise<AgentTask[]>
+  /** Inserts or replaces the task. */
+  put(task: AgentTask): Promise<void>
+  /**
+   * Replaces the stored task only while its status is one of `from`, atomically; `false` when it
+   * is missing or another writer changed its status first.
+   */
+  transition(task: AgentTask, from: readonly AgentTaskStatus[]): Promise<boolean>
+  getGroup(id: string): Promise<AgentTaskGroup | undefined>
+  listGroups(filter?: AgentTaskGroupFilter): Promise<AgentTaskGroup[]>
+  /** Inserts or replaces the group. */
+  putGroup(group: AgentTaskGroup): Promise<void>
+}
+
 /** Everything Holtkeeper persists. Implementations: in-memory, SQLite, Postgres. */
 export interface Store {
   auditRuns: AuditRunStore
@@ -1417,17 +2100,22 @@ export interface Store {
   credentials: CredentialStore
   settings: SettingStore
   users: UserStore
-  activity: ActivityStore
   jobs: JobStore
   knowledge: KnowledgeStore
+  guides: GuideStore
+  families: FamilyStore
+  learnings: LearningStore
   aiUsage: AiUsageStore
   ciJobs: CiJobStore
-  /** Panel-managed configuration; servers without it use the file config only. */
+  chat: ChatStore
+  /** Agent tasks (write tasks people or automation asked for) and their groups. */
+  tasks: AgentTaskStore
+  /** Panel-managed configuration; servers without it have no forges, groups or triggers. */
   config?: ConfigStore
   /** Small expiring state; servers without it keep such state in memory. */
   kv?: KvStore
-  /** Tamper-evident audit log; servers without it audit nothing. */
-  audit?: AuditStore
+  /** Tamper-evident audit log of who did what; the History page reads it. */
+  audit: AuditStore
   /** External accounts linked to principals; servers without it cannot link accounts. */
   externalAccounts?: ExternalAccountStore
   /** Third-party library docs; servers without it index no libraries. */

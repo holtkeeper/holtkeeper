@@ -3,21 +3,11 @@ import { defineConfig } from '@holtkeeper/core'
 import { sqliteStore } from '@holtkeeper/store-sqlite'
 // import { postgresStore } from '@holtkeeper/store-postgres'
 
-/** Local development: no sign-in, a SQLite file next to this config, a fixed dev vault key. */
+/**
+ * Local development: no sign-in, a SQLite file next to this config, a fixed dev vault key.
+ * `bun run dev:seed` adds a placeholder forge and groups as panel documents.
+ */
 export default defineConfig({
-  forges: {
-    work: {
-      kind: 'gitlab',
-      url: 'https://gitlab.example.com',
-      create: () => {
-        throw new Error('the dev config has no real forge')
-      },
-    },
-  },
-  groups: {
-    games: { forge: 'work', include: ['games/*'] },
-    tools: { forge: 'work', include: ['tools/*'] },
-  },
   server: {
     auth: noAuth(),
     store: sqliteStore({ path: `${import.meta.dir}/holtkeeper.db` }),

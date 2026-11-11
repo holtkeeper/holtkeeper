@@ -10,7 +10,7 @@ function readPreference(): ThemePreference {
   try {
     return parsePreference(localStorage.getItem(storageKey))
   } catch {
-    return 'system'
+    return 'dark'
   }
 }
 
@@ -52,8 +52,7 @@ export function useTheme(): {
   const setPreference = useCallback((next: ThemePreference) => {
     preference = next
     try {
-      if (next === 'system') localStorage.removeItem(storageKey)
-      else localStorage.setItem(storageKey, next)
+      localStorage.setItem(storageKey, next)
     } catch {
       // Storage can be unavailable (private mode); the choice then lasts for this page only.
     }

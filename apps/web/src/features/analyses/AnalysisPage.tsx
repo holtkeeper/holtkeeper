@@ -2,7 +2,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
 
 import { useAnalyses, useAnalysis } from '../../api/queries.ts'
-import { analysisPages, groupAnalysisPages } from '../../lib/analyses.ts'
+import { analysisPages, recordRepoTab, stackRecords } from '../../lib/analyses.ts'
 import { formatDate } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { ErrorState, Page, Placeholder, Select } from '../../ui/index.ts'
@@ -38,16 +38,24 @@ export function AnalysisPage() {
     )
 
   const { report } = detail.data
-  const page = [...analysisPages, ...groupAnalysisPages].find(
-    (p) => p.kind === detail.data.analysis.kind,
-  )
+  const page = analysisPages.find((p) => p.kind === detail.data.analysis.kind)
+  const stack = detail.data.analysis.kind === stackRecords.kind
   const others = (siblings.data?.analyses ?? []).filter((a) => a.id !== id)
   const key = repoKey(detail.data.analysis.repo)
+  const repoTab = recordRepoTab(detail.data.analysis.kind)
 
   return (
     <Page
       eyebrow={
-        page ? (
+        stack ? (
+          <Link
+            to={stackRecords.to}
+            className="inline-flex items-center gap-1 rounded hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            <ArrowLeft className="size-3.5" />
+            {stackRecords.title}
+          </Link>
+        ) : page ? (
           <Link
             to={page.to}
             search={{ repo: key }}
@@ -57,7 +65,14 @@ export function AnalysisPage() {
             {page.title} of {key}
           </Link>
         ) : (
-          key
+          <Link
+            to="/repos/view"
+            search={{ repo: key, ...(repoTab ? { tab: repoTab } : {}) }}
+            className="inline-flex items-center gap-1 rounded hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            <ArrowLeft className="size-3.5" />
+            {key}
+          </Link>
         )
       }
       title={detail.data.analysis.label}

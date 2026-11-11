@@ -1,13 +1,16 @@
 import { can, type Principal } from '@holtkeeper/access'
 import type {
   ReleaseBoardRow,
-  ReleaseBoardView,
-  ReleaseHiddenRepo,
+  ReleaseCard,
+  ReleaseOverview,
   ReleaseRepoView,
   ReleaseStepResult,
+  ReleaseTimelineView,
+  ReleaseVersionDeploy,
+  ReleaseVersionView,
 } from '@holtkeeper/api'
-import { forgeLinks } from '@holtkeeper/changelog'
 import type { ForgeEvent, GitForge, RepoRef } from '@holtkeeper/forge'
+import { type Issue, issuesByKey } from '@holtkeeper/issues'
 import { groupRepositories } from '@holtkeeper/jobs'
 import {
   type Acceptance,
@@ -17,18 +20,22 @@ import {
   type ReleaseFacts,
   type ReleaseNotifySettings,
   type ReleaseActor,
+  type RangeChanges,
   type ReleasePlan,
   type ReleaseSettings,
+  type VersionTag,
+  acceptanceLabel,
   acceptanceSchema,
   announce,
-  autoEnvironments,
   boardRow,
   collectFacts,
   createVersion,
   deployFinished,
+  deployWatchMinutes,
   detectRepositoryFlow,
   planRelease,
   proposeRelease,
+  rangeChanges,
   readDeployState,
   readStored,
   refreshProposal,
@@ -40,31 +47,57 @@ import {
   releaseSettings,
   releaseSettingsKey,
   startDeploy,
+  timelineVersions,
+  versionDetail,
+  versionTags,
+  versionTimeline,
+  withIssues,
   writeSummary,
+  forgeLinks,
+  isValidVersion,
+  versionOfTag,
 } from '@holtkeeper/release'
 import { resolveSetting } from '@holtkeeper/settings'
 import type { KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
+import { appendAudit } from './audit.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
+import { issueTrackerFor } from './issues.ts'
 import { peopleOf } from './routes/avatars.ts'
 
 const HISTORY = 100
 const BOARD_CONCURRENCY = 4
-const BOARD_REFRESH_MS = 5 * 60_000
+const BOARD_REFRESH_MS = 30 * 60_000
 const BOARD_REFRESHING_SECONDS = 15 * 60
+const REFRESH_DELAY_MS = 30_000
+const TAG_PAGE = 100
+const TAG_MAX = 3200
+const TAGS_TTL_SECONDS = 30 * 60
+const TIMELINE_LIMIT = 30
 
 const BOARD_INDEX = 'release:board:index'
 const BOARD_REFRESHING = 'release:board:refreshing'
-const HIDDEN = 'release:hidden'
 
 type Step = 'propose' | 'version'
+
+/** The changes between two refs of a repository, as `release_changes` shows them. */
+export interface ReleaseChanges extends RangeChanges {
+  repo: RepoRef
+  /** Exclusive start: a version tag, or absent for the whole history. */
+  from?: string
+  /** The end: a version tag, or the target branch for the next release. */
+  to: string
+  /** `to` is the target branch: these changes wait for the next version. */
+  unreleased: boolean
+  compareUrl?: string
+}
 
 const repoKeyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-/** In-memory stand-in for `Store.kv` on servers without one. */
+/** In-memory stand-in for `Store.kv` on servers without one; expiry is ignored. */
 function memoryKv(): Pick<KvStore, 'get' | 'set' | 'delete'> {
   const values = new Map<string, unknown>()
   return {
@@ -73,6 +106,15 @@ function memoryKv(): Pick<KvStore, 'get' | 'set' | 'delete'> {
     delete: async (key) => void values.delete(key),
   }
 }
+
+/** Steps or deploys wait on a person: the most advanced stage is pending, or a deploy failed or waits. */
+const needsAction = (row: ReleaseBoardRow) =>
+  row.error !== undefined ||
+  row.stage === 'awaiting-version' ||
+  row.stage === 'proposed' ||
+  row.stage === 'candidate' ||
+  (row.deploy?.environments.some((env) => env.status === 'failed' || env.status === 'ready') ??
+    false)
 
 async function mapLimited<T, R>(items: readonly T[], limit: number, map: (item: T) => Promise<R>) {
   const results: R[] = Array.from({ length: items.length })
@@ -100,10 +142,54 @@ const storedRowSchema = z.object({
     (value) => typeof value === 'object' && value !== null && 'repo' in value && 'stage' in value,
   ),
 })
-const hiddenSchema = z.record(
-  z.string(),
-  z.object({ repo: repoSchema, by: z.string(), name: z.string().optional(), at: z.string() }),
-)
+const tagsSchema = z.object({
+  tags: z.array(
+    z.object({
+      name: z.string(),
+      sha: z.string(),
+      committedAt: z.string().optional(),
+      createdAt: z.string().optional(),
+    }),
+  ),
+  complete: z.boolean(),
+})
+
+type StoredTags = z.infer<typeof tagsSchema>
+
+/**
+ * Whether `before` is dated no later than `tag`. Tags are read newest commit first, so a partial
+ * list whose version before `tag` is also older by date is unlikely to still miss one between
+ * them; a maintenance tag dated after `tag` is not proof.
+ */
+const datedBefore = (before: VersionTag, tag: VersionTag) =>
+  !before.date || !tag.date || Date.parse(before.date) <= Date.parse(tag.date)
+
+/** Whether `versions` hold `ref` (a version tag or version) and the shown version before it. */
+const knowsBefore = (settings: ReleaseSettings, versions: readonly VersionTag[], ref: string) => {
+  const at = versions.findIndex((tag) => tag.tag === ref || tag.version === ref.replace(/^v/u, ''))
+  if (at === -1) return false
+  const before = timelineVersions(settings, versions).find((tag) => versions.indexOf(tag) > at)
+  return before !== undefined && datedBefore(before, versions[at]!)
+}
+
+/** Whether `versions` hold the timeline page and the version before each version on it. */
+const knowsPage = (
+  settings: ReleaseSettings,
+  versions: readonly VersionTag[],
+  offset: number,
+  limit: number,
+) => {
+  const shown = timelineVersions(settings, versions)
+  if (shown.length <= offset + limit + 1) return false
+  return shown
+    .slice(offset, offset + limit)
+    .every((tag, at) => datedBefore(shown[offset + at + 1]!, tag))
+}
+
+/** Whether `ref` reads as a version tag or version under the settings' tag format. */
+const looksLikeVersion = (settings: ReleaseSettings, ref: string) =>
+  versionOfTag(settings.version.tagFormat, ref) !== undefined ||
+  isValidVersion(settings, ref.replace(/^v/u, ''))
 
 const linksOf = (forge: GitForge, facts: ReleaseFacts, settings: ReleaseSettings) =>
   forgeLinks({
@@ -111,6 +197,37 @@ const linksOf = (forge: GitForge, facts: ReleaseFacts, settings: ReleaseSettings
     webUrl: facts.webUrl,
     ...(settings.changelog.ticketUrl ? { ticketUrl: settings.changelog.ticketUrl } : {}),
   })
+
+const linksFor = (forge: GitForge, webUrl: string, settings: ReleaseSettings) =>
+  forgeLinks({
+    kind: forge.kind === 'github' ? 'github' : 'gitlab',
+    webUrl,
+    ...(settings.changelog.ticketUrl ? { ticketUrl: settings.changelog.ticketUrl } : {}),
+  })
+
+/** Newest outcome per environment of each tag, from the recorded deploy events. */
+const deploysOf = (history: readonly ReleaseEvent[]) => {
+  const byTag = new Map<string, Map<string, ReleaseVersionDeploy>>()
+  for (const event of history) {
+    if (!event.tag || !event.environment || !event.kind.startsWith('deploy-')) continue
+    const environments = byTag.get(event.tag) ?? new Map<string, ReleaseVersionDeploy>()
+    if (!environments.has(event.environment))
+      environments.set(event.environment, {
+        environment: event.environment,
+        status:
+          event.kind === 'deploy-succeeded'
+            ? 'succeeded'
+            : event.kind === 'deploy-failed'
+              ? 'failed'
+              : 'started',
+        at: event.at,
+        actor: event.actor,
+        ...(event.url ? { url: event.url } : {}),
+      })
+    byTag.set(event.tag, environments)
+  }
+  return (tag: string) => [...(byTag.get(tag)?.values() ?? [])]
+}
 
 const latestDeploy = async (
   forge: GitForge,
@@ -124,15 +241,19 @@ const latestDeploy = async (
 
 /**
  * The release assistant on the server: reads release state from the forges with the `releases`
- * setting of each repository, keeps people's edits, acceptances and a history in the store's
- * key-value part, runs steps, follows started deploys until they finish, and reacts to forge
- * events (new commits refresh the candidate, merges and labels accept, acceptance may version).
+ * setting of each repository (only repositories that turned releases on), keeps people's edits,
+ * acceptances and a history in the store's key-value part, runs steps, follows started deploys
+ * until they finish, and reacts to forge events: any event of an enabled repository rereads its
+ * snapshot after a short delay, new commits refresh the candidate, merges and labels accept, tags
+ * drop the cached tag list. Ranges between two version tags are cached in kv for good.
  */
 function createReleaseService(deps: ServerDeps) {
   const { config, store } = deps
   const kv = store.kv ?? memoryKv()
   const pollMs = deps.releasePollMs ?? 15_000
+  const refreshDelayMs = deps.releaseRefreshDelayMs ?? REFRESH_DELAY_MS
   const watching = new Set<string>()
+  const scheduled = new Set<string>()
   const listeners = new Set<(event: ReleaseEvent) => Promise<void> | void>()
   let refreshing: Promise<void> | undefined
 
@@ -193,11 +314,17 @@ function createReleaseService(deps: ServerDeps) {
   const record = async (event: ReleaseEvent) => {
     const history = await historyOf(event.repo)
     await kv.set(key('history', event.repo), [event, ...history].slice(0, HISTORY))
-    await store.activity.append({
+    await appendAudit(store, {
       at: event.at,
-      actor: event.actor,
+      actor: {
+        id: event.actor,
+        name: event.actorName ?? event.actor,
+        provider: event.channel ?? 'release',
+      },
+      via: event.channel === 'forge' ? 'webhook' : event.channel === 'mcp' ? 'api' : 'job',
       action: `release.${event.kind}`,
-      subject: repoKeyOf(event.repo),
+      target: { type: 'release', repo: repoKeyOf(event.repo) },
+      outcome: 'ok',
       details: {
         ...(event.version ? { version: event.version } : {}),
         ...(event.tag ? { tag: event.tag } : {}),
@@ -270,15 +397,21 @@ function createReleaseService(deps: ServerDeps) {
 
   const isReadOnly = async (repo: RepoRef) => (await deps.readOnly?.(repo)) ?? false
 
+  const trackerOf = deps.issueTracker ?? issueTrackerFor(deps)
+
+  /** Tracker issues of `keys`; empty without a tracker or when it fails. */
+  const issuesOf = async (repo: RepoRef, keys: readonly string[]): Promise<Record<string, Issue>> =>
+    keys.length === 0
+      ? {}
+      : issuesByKey(await trackerOf(repo).catch(() => undefined), keys, (error) =>
+          console.error(
+            `releases: reading issues of ${repoKeyOf(repo)} failed: ${messageOf(error)}`,
+          ),
+        )
+
   // Deploys
 
-  const watchDeploy = (
-    repo: RepoRef,
-    tag: string,
-    environment: string,
-    actor: ReleaseActor,
-    start: boolean,
-  ) => {
+  const watchDeploy = (repo: RepoRef, tag: string, environment: string, actor: ReleaseActor) => {
     const id = `${repoKeyOf(repo)}@${tag}#${environment}`
     if (watching.has(id)) return
     watching.add(id)
@@ -286,25 +419,12 @@ function createReleaseService(deps: ServerDeps) {
       try {
         const settings = await settingsOf(repo)
         const forge = forgeOf(repo)
-        const until = Date.now() + settings.deploy.watchMinutes * 60_000
-        let started = !start
+        const until = Date.now() + deployWatchMinutes * 60_000
         while (Date.now() < until) {
           // oxlint-disable-next-line no-await-in-loop -- polling one job until it finishes
           const state = await readDeployState(forge, repo, settings, tag).catch(() => undefined)
           const env = state?.environments.find((candidate) => candidate.name === environment)
-          if (!started && env?.status === 'ready') {
-            // oxlint-disable-next-line no-await-in-loop -- the job became ready on this poll
-            await startDeploy({ forge, repo, settings, tag, environment })
-            started = true
-            // oxlint-disable-next-line no-await-in-loop -- one record per started deploy
-            await record(
-              event('deploy-started', repo, actor, {
-                tag,
-                environment,
-                detail: 'started automatically',
-              }),
-            )
-          } else if (started && env && deployFinished(env.status)) {
+          if (env && deployFinished(env.status)) {
             const attempt = env.attempts[0]
             const ok = env.status === 'success'
             // oxlint-disable-next-line no-await-in-loop -- the deploy finished on this poll
@@ -316,31 +436,18 @@ function createReleaseService(deps: ServerDeps) {
                 detail: ok ? 'deployed' : `deploy job ${env.status}`,
               }),
             )
-            if (ok)
-              for (const next of autoEnvironments(settings, environment))
-                watchDeploy(repo, tag, next.name, actor, true)
-            return
-          } else if (
-            !started &&
-            env &&
-            env.status !== 'no-pipeline' &&
-            env.status !== 'missing' &&
-            env.status !== 'waiting' &&
-            env.status !== 'pending'
-          ) {
             return
           }
           // oxlint-disable-next-line no-await-in-loop -- waiting between polls
           await sleep(pollMs)
         }
-        if (started)
-          await record(
-            event('deploy-failed', repo, actor, {
-              tag,
-              environment,
-              detail: `no outcome after ${settings.deploy.watchMinutes} minutes`,
-            }),
-          )
+        await record(
+          event('deploy-failed', repo, actor, {
+            tag,
+            environment,
+            detail: `no outcome after ${deployWatchMinutes} minutes`,
+          }),
+        )
       } catch (error) {
         console.error(`releases: following ${id} failed: ${messageOf(error)}`)
       } finally {
@@ -352,13 +459,22 @@ function createReleaseService(deps: ServerDeps) {
 
   // Steps
 
+  /**
+   * Opens or updates the release candidate. With `writeNotes` the AI agent writes the notes
+   * first (one cheap call), unless a person already wrote them.
+   */
   const propose = async (
     repo: RepoRef,
     actor: ReleaseActor,
     force = false,
+    writeNotes = false,
   ): Promise<ReleaseStepResult> => {
     const loaded = await load(repo)
-    const plan = await planFor(repo, 'propose', loaded)
+    let plan = await planFor(repo, 'propose', loaded)
+    if (writeNotes && plan.summary.source !== 'person') {
+      await saveNotes(repo, 'propose', await notesFor(repo, plan), actor)
+      plan = await planFor(repo, 'propose', loaded)
+    }
     const result = await proposeRelease(
       {
         forge: loaded.forge,
@@ -431,8 +547,6 @@ function createReleaseService(deps: ServerDeps) {
         detail: `${plan.entries.filter((entry) => entry.included).length} changes${force ? ' (gates overridden)' : ''}`,
       }),
     )
-    for (const environment of autoEnvironments(loaded.settings))
-      watchDeploy(repo, result.tag, environment.name, actor, true)
     return {
       kind: 'versioned',
       url,
@@ -449,7 +563,7 @@ function createReleaseService(deps: ServerDeps) {
     via: Acceptance['via'] = 'manual',
   ) => {
     if (!actor.id.trim()) throw new Error('an acceptance needs the person who accepts')
-    const { settings, facts } = await load(repo)
+    const { facts } = await load(repo)
     if (facts.unreleased.length === 0)
       throw new Error('nothing on the target branch waits for a version')
     const acceptance: Acceptance = {
@@ -463,33 +577,11 @@ function createReleaseService(deps: ServerDeps) {
     }
     await kv.set(key('acceptance', repo), acceptance)
     await record(event('accepted', repo, actor, note ? { detail: note } : {}))
-    if (settings.acceptance.autoVersion) {
-      try {
-        const result = await version(repo, actor)
-        return {
-          kind: 'accepted' as const,
-          detail: `Accepted; ${result.detail}`,
-          ...(result.url ? { url: result.url } : {}),
-        }
-      } catch (error) {
-        return {
-          kind: 'accepted' as const,
-          detail: `Accepted; the version was not created: ${messageOf(error)}`,
-        }
-      }
-    }
     return { kind: 'accepted' as const, detail: 'Accepted' }
   }
 
-  const withdraw = async (repo: RepoRef, actor: ReleaseActor) => {
+  const withdraw = async (repo: RepoRef) => {
     await kv.delete(key('acceptance', repo))
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: actor.id,
-      action: 'release.acceptance_withdrawn',
-      subject: repoKeyOf(repo),
-      ...(actor.channel ? { details: { channel: actor.channel } } : {}),
-    })
     refreshRowLater(repo)
   }
 
@@ -520,7 +612,7 @@ function createReleaseService(deps: ServerDeps) {
             : {}),
       }),
     )
-    watchDeploy(repo, input.tag, input.environment, actor, false)
+    watchDeploy(repo, input.tag, input.environment, actor)
     return {
       kind: 'deploy-started',
       url: job.webUrl,
@@ -567,23 +659,27 @@ function createReleaseService(deps: ServerDeps) {
     return [...found.values()]
   }
 
-  // Board: a snapshot in the key-value store, refreshed in the background
-
-  const hiddenOf = async () => readStored(hiddenSchema, await kv.get(HIDDEN)) ?? {}
+  // Overview: a snapshot in the key-value store, refreshed on forge events and every half hour
 
   const saveRow = async (repo: RepoRef, value: ReleaseBoardRow | undefined) => {
     if (value)
       await kv.set(key('board:row', repo), { readAt: deps.now().toISOString(), row: value })
     else await kv.delete(key('board:row', repo))
+    const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
+    if (!index) return
+    const listed = index.repos.some((entry) => repoKeyOf(entry) === repoKeyOf(repo))
+    if (value && !listed) await kv.set(BOARD_INDEX, { ...index, repos: [...index.repos, repo] })
+    if (!value && listed)
+      await kv.set(BOARD_INDEX, {
+        ...index,
+        repos: index.repos.filter((entry) => repoKeyOf(entry) !== repoKeyOf(repo)),
+      })
   }
 
   const storedRow = async (repo: RepoRef) =>
     readStored(storedRowSchema, await kv.get(key('board:row', repo)))
 
-  const refreshRow = async (repo: RepoRef) => {
-    if ((await hiddenOf())[repoKeyOf(repo)]) return saveRow(repo, undefined)
-    await saveRow(repo, await row(repo))
-  }
+  const refreshRow = async (repo: RepoRef) => saveRow(repo, await row(repo))
 
   const refreshRowLater = (repo: RepoRef) => {
     const work = refreshRow(repo).catch((error: unknown) =>
@@ -592,17 +688,43 @@ function createReleaseService(deps: ServerDeps) {
     deps.onBackground?.(work)
   }
 
-  /** Rereads every repository of the config groups, skipping hidden ones; one run at a time here. */
+  /** Rereads one repository once events stop arriving for `refreshDelayMs`; bursts collapse. */
+  const refreshSoon = (repo: RepoRef) => {
+    const id = repoKeyOf(repo)
+    if (scheduled.has(id)) return
+    scheduled.add(id)
+    const work = sleep(refreshDelayMs)
+      .then(() => {
+        scheduled.delete(id)
+        return refreshRow(repo)
+      })
+      .catch((error: unknown) => {
+        scheduled.delete(id)
+        console.error(`releases: refreshing ${id} failed: ${messageOf(error)}`)
+      })
+    deps.onBackground?.(work)
+  }
+
+  /**
+   * Rereads every repository of the config groups that turned releases on; others cost one
+   * settings read and no forge call. One run at a time here.
+   */
   const refreshBoard = () => {
     refreshing ??= (async () => {
       try {
         await kv.set(BOARD_REFRESHING, deps.now().toISOString(), BOARD_REFRESHING_SECONDS)
-        const hidden = await hiddenOf()
-        const repos = (await repositories()).filter((repo) => !hidden[repoKeyOf(repo)])
-        await mapLimited(repos, BOARD_CONCURRENCY, refreshRow)
-        await kv.set(BOARD_INDEX, { repos, readAt: deps.now().toISOString() })
+        const repos = await repositories()
+        const rows = await mapLimited(repos, BOARD_CONCURRENCY, async (repo) => {
+          const value = await row(repo)
+          await saveRow(repo, value)
+          return value
+        })
+        await kv.set(BOARD_INDEX, {
+          repos: repos.filter((_, at) => rows[at] !== undefined),
+          readAt: deps.now().toISOString(),
+        })
       } catch (error) {
-        console.error(`releases: refreshing the board failed: ${messageOf(error)}`)
+        console.error(`releases: refreshing the overview failed: ${messageOf(error)}`)
       } finally {
         await kv.delete(BOARD_REFRESHING).catch(() => {})
         refreshing = undefined
@@ -616,7 +738,7 @@ function createReleaseService(deps: ServerDeps) {
     deps.onBackground?.(work)
   }
 
-  /** Refreshes the board now when it is older than the interval, then every interval. */
+  /** Refreshes the overview now when it is older than the interval, then every interval. */
   const startBoardRefresh = (intervalMs = BOARD_REFRESH_MS) => {
     void (async () => {
       const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
@@ -627,10 +749,11 @@ function createReleaseService(deps: ServerDeps) {
     return () => clearInterval(timer)
   }
 
-  const board = async (
+  /** One card per readable repository with releases on; `action` keeps those waiting on a person. */
+  const overview = async (
     principal: Principal,
-    filter: { group?: string; repo?: RepoRef; refresh?: boolean },
-  ): Promise<ReleaseBoardView> => {
+    filter: { group?: string; refresh?: boolean; action?: boolean },
+  ): Promise<ReleaseOverview> => {
     let index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
     if (!index) {
       await refreshBoard()
@@ -644,75 +767,237 @@ function createReleaseService(deps: ServerDeps) {
     ) {
       if ((await kv.get(BOARD_REFRESHING)) === undefined) refreshBoardLater()
     }
-    const readable = (repo: RepoRef) =>
-      can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) })
-    const hidden = await hiddenOf()
-    const repos = (filter.repo ? [filter.repo] : index.repos).filter(
+    const repos = index.repos.filter(
       (repo) =>
-        readable(repo) &&
-        !hidden[repoKeyOf(repo)] &&
+        can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) }) &&
         (!filter.group || repoTarget(config, repo).groups.includes(filter.group)),
     )
-    const rows = await Promise.all(
-      repos.map(async (repo) => {
-        const stored = await storedRow(repo)
-        if (stored || !filter.repo) return stored?.row
-        await refreshRow(repo)
-        return (await storedRow(repo))?.row
-      }),
-    )
-    const visible = rows
+    const rows = await Promise.all(repos.map(async (repo) => (await storedRow(repo))?.row))
+    const cards = rows
       .filter((entry) => entry !== undefined)
-      .toSorted((a, b) => repoKeyOf(a.repo).localeCompare(repoKeyOf(b.repo)))
-    const hiddenRepos: ReleaseHiddenRepo[] = Object.values(hidden)
-      .filter(
-        (entry) =>
-          readable(entry.repo) &&
-          (!filter.group || repoTarget(config, entry.repo).groups.includes(filter.group)),
-      )
+      .filter((entry) => !filter.action || needsAction(entry))
       .toSorted((a, b) => repoKeyOf(a.repo).localeCompare(repoKeyOf(b.repo)))
     return {
-      rows: visible,
+      cards: cards.map((card) => ({ ...card, needsAction: needsAction(card) })),
       readAt: index.readAt,
       refreshing: refreshing !== undefined || (await kv.get(BOARD_REFRESHING)) !== undefined,
-      hidden: hiddenRepos,
       dryRun: config.dryRun ?? false,
-      people: await peopleOf(deps, [
-        ...visible.flatMap((entry) => (entry.acceptance ? [entry.acceptance.by] : [])),
-        ...hiddenRepos.map((entry) => entry.by),
-      ]),
+      people: await peopleOf(
+        deps,
+        cards.flatMap((entry) => (entry.acceptance ? [entry.acceptance.by] : [])),
+      ),
     }
   }
 
-  /** Hides a repository from the board and stops reading it, or shows it again. */
-  const setHidden = async (repo: RepoRef, hide: boolean, actor: ReleaseActor) => {
-    const { [repoKeyOf(repo)]: _current, ...rest } = await hiddenOf()
-    await kv.set(
-      HIDDEN,
-      hide
-        ? {
-            ...rest,
-            [repoKeyOf(repo)]: {
-              repo: { forge: repo.forge, path: repo.path },
-              by: actor.id,
-              ...(actor.name && actor.name !== actor.id ? { name: actor.name } : {}),
-              at: deps.now().toISOString(),
-            },
-          }
-        : rest,
+  /** The stored cards the principal may read, as last read; never reads a forge. */
+  const snapshot = async (principal: Principal): Promise<ReleaseCard[]> => {
+    const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
+    if (!index) return []
+    const repos = index.repos.filter((repo) =>
+      can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) }),
     )
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: actor.id,
-      action: hide ? 'release.hidden' : 'release.shown',
-      subject: repoKeyOf(repo),
+    const rows = await Promise.all(repos.map(async (repo) => (await storedRow(repo))?.row))
+    return rows
+      .filter((entry) => entry !== undefined)
+      .map((entry) => ({ ...entry, needsAction: needsAction(entry) }))
+  }
+
+  // Timeline: past versions from tags, ranges between two tags cached for good
+
+  /**
+   * Tags newest first, read in growing pages until `enough` holds for their version tags, every
+   * tag is read or `TAG_MAX` is reached; the list read so far is cached for `TAGS_TTL_SECONDS`.
+   */
+  const tagsOf = async (
+    forge: GitForge,
+    repo: RepoRef,
+    settings: ReleaseSettings,
+    enough: (versions: readonly VersionTag[]) => boolean,
+  ): Promise<StoredTags> => {
+    let stored = readStored(tagsSchema, await kv.get(key('tags', repo)))
+    for (;;) {
+      if (!forge.listTags) return { tags: [], complete: true }
+      if (
+        stored &&
+        (stored.complete ||
+          stored.tags.length >= TAG_MAX ||
+          enough(versionTags(settings, stored.tags)))
+      )
+        return stored
+      const limit = stored ? Math.min(TAG_MAX, stored.tags.length * 2) : TAG_PAGE
+      // oxlint-disable-next-line no-await-in-loop -- each page size depends on the previous read
+      const read = await forge.listTags(repo.path, { limit })
+      stored = {
+        tags: read.map((tag) => ({
+          name: tag.name,
+          sha: tag.sha,
+          ...(tag.committedAt ? { committedAt: tag.committedAt } : {}),
+          ...(tag.createdAt ? { createdAt: tag.createdAt } : {}),
+        })),
+        complete: read.length < limit,
+      }
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await kv.set(key('tags', repo), stored, TAGS_TTL_SECONDS)
+    }
+  }
+
+  const versionSource = async (
+    repo: RepoRef,
+    enough: (settings: ReleaseSettings, versions: readonly VersionTag[]) => boolean,
+  ) => {
+    const settings = await settingsOf(repo)
+    const forge = forgeOf(repo)
+    const [repository, tags, history] = await Promise.all([
+      forge.getRepository(repo.path),
+      tagsOf(forge, repo, settings, (versions) => enough(settings, versions)),
+      historyOf(repo),
+    ])
+    return {
+      forge,
+      repo,
+      settings,
+      versions: versionTags(settings, tags.tags),
+      complete: tags.complete,
+      cache: kv,
+      links: linksFor(forge, repository.webUrl, settings),
+      deploys: deploysOf(history),
+    }
+  }
+
+  /**
+   * One page of the version timeline, newest first. The first page also carries the next,
+   * unreleased version from the overview snapshot (read now when there is none yet).
+   */
+  const timeline = async (
+    repo: RepoRef,
+    page: { offset?: number; limit?: number } = {},
+  ): Promise<ReleaseTimelineView> => {
+    const offset = page.offset ?? 0
+    const limit = Math.min(TIMELINE_LIMIT, Math.max(1, page.limit ?? 10))
+    const source = await versionSource(repo, (settings, versions) =>
+      knowsPage(settings, versions, offset, limit),
+    )
+    const [result, next] = await Promise.all([
+      versionTimeline({ ...source, offset, limit }),
+      offset === 0 && source.settings.enabled
+        ? storedRow(repo).then(async (stored) => {
+            if (stored) return stored.row
+            await refreshRow(repo)
+            return (await storedRow(repo))?.row
+          })
+        : undefined,
+    ])
+    const versions: ReleaseVersionView[] = result.versions.map((entry) => ({
+      ...entry,
+      deploys: source.deploys(entry.tag),
+    }))
+    return {
+      repo,
+      enabled: source.settings.enabled,
+      ...(next ? { next } : {}),
+      versions,
+      total: result.total,
+      ...(result.nextOffset !== undefined ? { nextOffset: result.nextOffset } : {}),
+    }
+  }
+
+  /** One version in full, with recorded deploys and the live deploy state when environments are set. */
+  const versionOf = async (repo: RepoRef, tag: string) => {
+    const source = await versionSource(
+      repo,
+      (settings, versions) =>
+        !looksLikeVersion(settings, tag) || knowsBefore(settings, versions, tag),
+    )
+    const found = await versionDetail({ ...source, tag })
+    if (!found) return undefined
+    const issues = await issuesOf(
+      repo,
+      found.tasks.map((task) => task.key),
+    )
+    const detail = { ...found, tasks: withIssues(found.tasks, issues) }
+    const live =
+      source.settings.deploy.environments.length > 0
+        ? await readDeployState(source.forge, repo, source.settings, tag).catch(() => undefined)
+        : undefined
+    return { ...detail, deploys: source.deploys(tag), ...(live ? { deploy: live } : {}) }
+  }
+
+  /**
+   * Changes between two refs: `from` and `to` name version tags (or versions) or other refs.
+   * Without `to`, the target branch (the next release); without `from`, the version before `to`
+   * (the latest version for the target branch). Tasks carry tracker issues when one answers and
+   * the range ends at a version or the configured target or source branch, so an arbitrary branch
+   * cannot pull issue titles through the repository's tracker credential.
+   */
+  const changes = async (
+    repo: RepoRef,
+    range: { from?: string; to?: string } = {},
+  ): Promise<ReleaseChanges> => {
+    const source = await versionSource(repo, (settings, versions) => {
+      const wanted = (ref: string | undefined) =>
+        ref === undefined ||
+        !looksLikeVersion(settings, ref) ||
+        versions.some((tag) => tag.tag === ref || tag.version === ref.replace(/^v/u, ''))
+      if (!wanted(range.from)) return false
+      if (range.to === undefined)
+        return range.from !== undefined || timelineVersions(settings, versions).length > 0
+      if (!wanted(range.to)) return false
+      return (
+        range.from !== undefined ||
+        !looksLikeVersion(settings, range.to) ||
+        knowsBefore(settings, versions, range.to)
+      )
     })
-    if (hide) await saveRow(repo, undefined)
-    else {
-      const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
-      if (index && !index.repos.some((entry) => repoKeyOf(entry) === repoKeyOf(repo)))
-        await kv.set(BOARD_INDEX, { ...index, repos: [...index.repos, repo] })
-      refreshRowLater(repo)
+    const shown = timelineVersions(source.settings, source.versions)
+    const find = (ref: string) =>
+      source.versions.find((tag) => tag.tag === ref || tag.version === ref.replace(/^v/u, ''))
+    const target = range.to ? find(range.to) : undefined
+    const branch = range.to
+      ? undefined
+      : (source.settings.flow.target ?? (await source.forge.getRepository(repo.path)).defaultBranch)
+    const start = range.from
+      ? find(range.from)
+      : target
+        ? shown.find(
+            (tag) =>
+              tag !== target && source.versions.indexOf(tag) > source.versions.indexOf(target),
+          )
+        : shown[0]
+    const from = start?.tag ?? range.from
+    const to = target?.tag ?? range.to ?? branch!
+    const found = await rangeChanges({
+      forge: source.forge,
+      repo,
+      settings: source.settings,
+      ...(start
+        ? { from: start.sha, current: start.version }
+        : range.from
+          ? { from: range.from }
+          : {}),
+      to: target?.sha ?? to,
+      cache: kv,
+      links: source.links,
+    })
+    const releaseRange =
+      target !== undefined ||
+      branch !== undefined ||
+      range.to === source.settings.flow.target ||
+      range.to === source.settings.flow.source
+    const issues = releaseRange
+      ? await issuesOf(
+          repo,
+          found.tasks.map((task) => task.key),
+        )
+      : {}
+    const compareUrl = from ? source.links.compare(from, to) : undefined
+    return {
+      repo,
+      ...found,
+      tasks: withIssues(found.tasks, issues),
+      ...(from ? { from } : {}),
+      to,
+      unreleased: branch !== undefined,
+      ...(compareUrl ? { compareUrl } : {}),
     }
   }
 
@@ -743,7 +1028,14 @@ function createReleaseService(deps: ServerDeps) {
       ...history.map((entry) => entry.actor),
       ...(rowValue.acceptance ? [rowValue.acceptance.by] : []),
     ])
-    await saveRow(repo, rowValue)
+    await saveRow(repo, settings.enabled ? rowValue : undefined)
+    const issues = await issuesOf(repo, [
+      ...new Set(
+        [...(proposal?.entries ?? []), ...(versionPlan?.entries ?? [])].flatMap(
+          (entry) => entry.tickets,
+        ),
+      ),
+    ])
     return {
       repo,
       row: rowValue,
@@ -763,6 +1055,7 @@ function createReleaseService(deps: ServerDeps) {
       readOnly,
       dryRun: config.dryRun ?? false,
       agent: agent !== undefined,
+      ...(Object.keys(issues).length > 0 ? { issues } : {}),
     }
   }
 
@@ -784,36 +1077,47 @@ function createReleaseService(deps: ServerDeps) {
       })
   }
 
-  const summarize = async (repo: RepoRef, step: Step, actor: ReleaseActor) => {
+  const notesFor = async (repo: RepoRef, plan: ReleasePlan) => {
     const agent = await deps.agentFor?.(repo)
     if (!agent) throw new Error('no AI agent is configured for this repository')
-    const loaded = await load(repo)
-    const plan = await planFor(repo, step, loaded)
-    const markdown = await writeSummary(agent, plan.entries, loaded.settings.summary, {
+    return writeSummary(agent, plan.entries, {
       ...(plan.version ? { version: plan.version } : {}),
       ...(plan.current ? { previous: plan.current.version } : {}),
     })
-    const edits = await editsOf(repo, step)
-    await saveEdits(
+  }
+
+  const saveNotes = async (repo: RepoRef, step: Step, markdown: string, actor: ReleaseActor) =>
+    saveEdits(
       repo,
       step,
-      { ...edits, summary: { markdown, source: 'agent', at: deps.now().toISOString() } },
+      {
+        ...(await editsOf(repo, step)),
+        summary: { markdown, source: 'agent', at: deps.now().toISOString() },
+      },
       actor,
     )
+
+  /** Has the AI agent write the notes of one step's plan, on demand; keeps them as an edit. */
+  const summarize = async (repo: RepoRef, step: Step, actor: ReleaseActor) => {
+    const loaded = await load(repo)
+    const markdown = await notesFor(repo, await planFor(repo, step, loaded))
+    await saveNotes(repo, step, markdown, actor)
     return markdown
   }
 
   // Forge events
 
   const onEvent = async (forgeEvent: ForgeEvent, source: string): Promise<void> => {
-    if (forgeEvent.kind !== 'push' && forgeEvent.kind !== 'mergeRequest') return
+    if (forgeEvent.kind === 'note') return
     const repo = forgeEvent.repo
     const settings = await settingsOf(repo)
-    if (!settings.enabled || settings.flow.mode !== 'merge-request') return
-    refreshRowLater(repo)
+    if (!settings.enabled) return
+    if (forgeEvent.kind === 'tag') await kv.delete(key('tags', repo))
+    refreshSoon(repo)
+    if (settings.flow.mode !== 'merge-request') return
 
     if (forgeEvent.kind === 'push') {
-      if (forgeEvent.branch !== settings.flow.source || !settings.mergeRequest.autoUpdate) return
+      if (forgeEvent.branch !== settings.flow.source) return
       if (await isReadOnly(repo)) return
       const loaded = await load(repo)
       if (!loaded.facts.request) return
@@ -825,6 +1129,7 @@ function createReleaseService(deps: ServerDeps) {
       )
       return
     }
+    if (forgeEvent.kind !== 'mergeRequest') return
 
     const { mr } = forgeEvent
     if (mr.sourceBranch !== settings.flow.source) return
@@ -832,25 +1137,27 @@ function createReleaseService(deps: ServerDeps) {
       settings.flow.target ?? (await forgeOf(repo).getRepository(repo.path)).defaultBranch
     if (mr.targetBranch !== target) return
     const who: ReleaseActor = { id: forgeEvent.actor || source, channel: 'forge' }
-    const signals = settings.acceptance.signals
     if (forgeEvent.action === 'merge') {
       await record(event('merged', repo, who, { url: mr.webUrl, detail: `!${mr.id} ${mr.title}` }))
-      if (signals.includes('merge')) await accept(repo, who, `merged !${mr.id}`, 'merge')
+      if (settings.acceptance === 'merge') await accept(repo, who, `merged !${mr.id}`, 'merge')
       return
     }
     if (
       mr.state === 'merged' &&
-      signals.includes('label') &&
-      forgeEvent.labelsAdded.includes(settings.acceptance.label)
+      settings.acceptance === 'label' &&
+      forgeEvent.labelsAdded.includes(acceptanceLabel)
     )
-      await accept(repo, who, `label ${settings.acceptance.label} on !${mr.id}`, 'label')
+      await accept(repo, who, `label ${acceptanceLabel} on !${mr.id}`, 'label')
   }
 
   return {
     settingsOf,
-    board,
+    overview,
+    snapshot,
     startBoardRefresh,
-    setHidden,
+    timeline,
+    versionOf,
+    changes,
     view,
     deployOf,
     saveEdits,

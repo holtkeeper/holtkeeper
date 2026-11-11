@@ -1,5 +1,4 @@
 import type { CommandRunner } from '@holtkeeper/exec'
-import type { CoverageSummary } from '@holtkeeper/quality'
 
 /** Test frameworks the check recognizes. */
 export type TestFramework =
@@ -92,6 +91,12 @@ export interface FileCoverage {
   lines: LineHit[]
   functions: FunctionHit[]
   branches: BranchHit[]
+}
+
+/** Covered and total lines and functions of a project. */
+export interface CoverageSummary {
+  lines?: { covered: number; total: number }
+  functions?: { covered: number; total: number }
 }
 
 /** Coverage of a project in one shape, whatever tool produced it. */

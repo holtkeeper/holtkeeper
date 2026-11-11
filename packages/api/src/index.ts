@@ -8,6 +8,8 @@ export type * from '@holtkeeper/changes'
 export type * from '@holtkeeper/report'
 export { formatBytes, percentChange } from '@holtkeeper/report'
 export type { RepoRef } from '@holtkeeper/forge'
+export type { FamilySuggestion, GuideBlock, GuideLayer, GuideTask } from '@holtkeeper/guide'
+export type { Issue, IssueCategory } from '@holtkeeper/issues'
 export type {
   ApiChange,
   ApiEntry,
@@ -32,7 +34,12 @@ export type {
   UsedExport,
 } from '@holtkeeper/usages'
 export type {
-  ActivityEvent,
+  AgentTask,
+  AgentTaskCi,
+  AgentTaskGroup,
+  AgentTaskKind,
+  AgentTaskSource,
+  AgentTaskStatus,
   AiUsageBucket,
   AiUsageDimension,
   AiUsageRecord,
@@ -53,12 +60,25 @@ export type {
   DatabaseSession,
   DatabaseTable,
   GroupDocumentData,
+  Family,
+  GuideGenerated,
+  GuideLearning,
+  GuideRevision,
+  GuideScopeKey,
+  GuideSection,
+  GuideSectionName,
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
   KnowledgePackage,
   KnowledgeRevision,
   KnowledgeStatus,
+  KnowledgeVisibility,
+  LearningCandidate,
+  LearningScopeKind,
+  LearningSource,
+  LearningStatus,
+  ReactionTotals,
   RegisteredWebhook,
   RepoTraitsDocumentData,
   RotationPolicy,
@@ -88,7 +108,18 @@ export type {
   ReleasePlan,
   ReleaseSettings,
   ReleaseStage,
+  ReleaseTask,
+  ReleaseVersion,
+  ReleaseVersionDetail,
   VersionTag,
   Bump as ReleaseBump,
 } from '@holtkeeper/release'
+export type {
+  ChangePoint as CiChangePoint,
+  CiJobsData,
+  CiProblem,
+  CiProblemKind,
+  JobStats as CiJobStats,
+  JobTrend as CiJobTrend,
+} from '@holtkeeper/ci-jobs'
 export type { AuditReport, Finding, FixAttempt, IgnoredFinding, Severity } from '@holtkeeper/vuln'

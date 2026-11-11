@@ -24,7 +24,7 @@ Jobs install tools but not a project's dependencies, so first, unless `install` 
 
 Monorepo tests often import sibling workspace packages through their build output (`main: lib/index.js`), which a fresh checkout does not have. So next, unless `build` is off or `file` is given, `buildWorkspaces` finds the workspace packages (`workspaces` in `package.json`, plain or `{ packages }`, and `pnpm-workspace.yaml`) whose `main`, `module`, `types` or `typings` file is missing and that have a `build` script, and runs `<pm> run build` in each, dependencies first, 10 minutes each at most. The first failing build stops the step and is logged; the tests run anyway.
 
-Then the same collectors as the `tests` quality check (`@holtkeeper/quality-tests`): the primary framework of each language is detected and run with lcov or Go coverage through the `CommandRunner` (`bun test`, vitest, jest, c8 + mocha, `node --test`, pytest-cov, `go test -coverprofile`). Failing tests are fine as long as a report is written; collectors that fail are skipped, and the run fails only when none produced a report.
+Then the collectors of `@holtkeeper/quality-tests`: the primary framework of each language is detected and run with lcov or Go coverage through the `CommandRunner` (`bun test`, vitest, jest, c8 + mocha, `node --test`, pytest-cov, `go test -coverprofile`). Failing tests are fine as long as a report is written; collectors that fail are skipped, and the run fails only when none produced a report.
 
 Then, per file:
 
@@ -32,7 +32,7 @@ Then, per file:
 - Lines are `DA` records (Go: statements' lines), functions `FN`/`FNDA` (Go: `go tool cover -func`), branches `BRDA` with a taken count above zero.
 - With `untested`, source files of the report's languages that the report does not mention (and that are not generated or type-only) are added with every code line (non-blank, non-comment) uncovered and `loaded: false`. That count includes lines the tools would not call executable, such as imports, so it errs on the side of more uncovered lines.
 
-`quality` keeps running its own `tests` check; the default `quality-weekly` schedule skips it (`coverage: skip`), so tests run once a week, in the default `tests-weekly` schedule (Wednesday nights, with `testids`).
+Tests run once a week, in the default `tests-weekly` schedule (Wednesday nights, with `testids`).
 
 ## Data
 
@@ -59,7 +59,16 @@ interface Counts {
 
 - **Metrics** — line, function and branch coverage (`percent`, `better: 'up'`, good from 80%, bad below 50%), source files, files without tests (`better: 'down'`).
 - **By folder** — treemap down to three levels, sized by lines to cover and colored by coverage.
-- **Least covered files** — the 50 files with the most uncovered lines: line, function and branch share, `no tests` for files no test loaded.
-- **Changes** (with a previous analysis) — files whose line coverage moved by 1% or more.
+- **Changes** (with a previous analysis) — files whose line coverage moved by 1% or more, new files counted from zero.
 
-The web panel shows it under **Test coverage** (`/coverage`).
+## Summaries
+
+`summary.ts` holds the pure helpers the server's Coverage page and the report share:
+
+- `coverageTotals(data)` — lines, functions, branches, file count, files no test loaded and their lines.
+- `coverageGroupOf(file)` / `coverageGroups(files)` — coverage per workspace package (`packages/<name>`, `apps/<name>`, `libs/<name>`, …) or top-level folder, `ROOT_GROUP` (`.`) for files in the root, most uncovered lines first.
+- `worstFiles(files, limit = 10)` — files with the most uncovered lines.
+- `coverageChanges(data, previous, minPoints = 5)` — files whose line coverage moved by at least `minPoints`, largest move first; new files count from zero.
+- `changedFilesCoverage(data, previous)` — line coverage of the files that are new or whose counts differ: the coverage of what changed between two records.
+
+The web panel shows them on **Coverage** (`/coverage`), one card per repository with a side sheet for the breakdown.

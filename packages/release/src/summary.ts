@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import type { Agent } from '@holtkeeper/agent'
 import { z } from 'zod'
 
-import type { ReleaseSettings } from './settings.ts'
 import type { ReleaseEntry } from './types.ts'
 
 const answerSchema = z.object({
@@ -16,13 +15,6 @@ const answerSchema = z.object({
     .describe('What the audience should look at or test, one sentence each; may be empty'),
 })
 
-const audiences: Record<ReleaseSettings['summary']['audience'], string> = {
-  qa: 'QA engineers who test the release: say what changed in behavior and what to test.',
-  users: 'end users: describe visible changes in plain words, no internals.',
-  developers: 'developers of dependent projects: mention APIs, breaking changes and migrations.',
-  managers: 'managers: business-level impact in plain words, no internals.',
-}
-
 const bullets = (title: string, items: string[]) =>
   items.length ? `**${title}**\n\n${items.map((item) => `- ${item}`).join('\n')}` : ''
 
@@ -30,14 +22,15 @@ const bullets = (title: string, items: string[]) =>
 export const releaseSummaryTaskKind = 'release-notes'
 
 /**
- * A short "what changed" for the included entries, written by the agent for the settings'
- * audience and language. The agent reads nothing but the entries (it runs in an empty temporary
+ * A short "what changed" for the included entries, written by the agent in one cheap call (task
+ * kind `release-notes`, tier `fast`). Audience, language and style come from the team's rules:
+ * the server's agent adds the repository's Guide (sections `releases` and `commits`) as context
+ * to tasks of this kind. The agent reads nothing but the entries (it runs in an empty temporary
  * directory). Rejects when the agent fails, so callers can fall back to the digest.
  */
 export async function writeSummary(
   agent: Agent,
   entries: readonly ReleaseEntry[],
-  settings: ReleaseSettings['summary'],
   options: { previous?: string; version?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
   const included = entries
@@ -56,13 +49,10 @@ export async function writeSummary(
     const result = await agent.run({
       dir: scratch,
       system: [
-        `You write release summaries for ${audiences[settings.audience]}`,
-        `Write in ${settings.language}. Keep every item to one sentence, no commit hashes.`,
-        'Base everything on the changes given.',
-        settings.instructions ?? '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+        'You write release notes for the people who test and ship the release: what changed in behavior and what to check.',
+        'Follow the team rules in the context for audience, language and style; they win over these defaults.',
+        'Keep every item to one sentence, no commit hashes. Base everything on the changes given.',
+      ].join('\n'),
       prompt: [
         `Summarize the release${options.version ? ` ${options.version}` : ''}${options.previous ? ` (previous: ${options.previous})` : ''}.`,
         'Changes as JSON:',
@@ -72,6 +62,7 @@ export async function writeSummary(
       output: answerSchema,
       maxTurns: 3,
       taskKind: releaseSummaryTaskKind,
+      tier: 'fast',
       ...(options.signal ? { signal: options.signal } : {}),
     })
     const answer = result.output
@@ -79,7 +70,7 @@ export async function writeSummary(
     return [
       answer.overview.trim(),
       bullets('Highlights', answer.highlights),
-      bullets(settings.audience === 'qa' ? 'What to test' : 'Worth a look', answer.check),
+      bullets('What to check', answer.check),
     ]
       .filter(Boolean)
       .join('\n\n')

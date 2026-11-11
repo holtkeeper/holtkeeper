@@ -31,14 +31,7 @@ export const knowledgeStatuses = [
 ] as const satisfies readonly KnowledgeStatus[]
 
 /** Task kinds agents run. `appliesTo` may also hold other kinds, or `*` for every task. */
-export const taskKinds = [
-  'review',
-  'port',
-  'propagate',
-  'tests',
-  'quality',
-  'release-risk',
-] as const
+export const taskKinds = ['review', 'port', 'propagate'] as const
 
 /**
  * A package a task works on. `from` and `to` are the versions before and after (a propagation of

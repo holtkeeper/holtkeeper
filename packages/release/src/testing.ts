@@ -227,7 +227,8 @@ export class FakeForge {
           (!query.state || query.state === 'all' || mr.state === query.state) &&
           (!query.targetBranch || mr.targetBranch === query.targetBranch),
       ),
-    listTags: async () => this.tags,
+    listTags: async (_repo, query = {}) =>
+      query.limit === undefined ? this.tags : this.tags.slice(0, query.limit),
     listCommits: async (_repo, query) => {
       this.listedCommits++
       const head = this.resolve(query.ref)

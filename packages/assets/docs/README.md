@@ -4,22 +4,47 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
 
 ## Analyzer
 
-`assetsAnalyzer` — kind `assets`, scope `repo`, needs a checkout; the default `assets-weekly` schedule of `@holtkeeper/managed-config` runs it on Friday nights. Options (`assetsOptionsSchema`):
+`assetsAnalyzer` — kind `assets`, scope `repo`, needs a checkout; refreshed when the default branch changes (at most daily, heavy). Options (`assetsOptionsSchema`):
 
-| Option           | Default                              | Meaning                                                                                                                                                           |
-| ---------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `roots`          | `defaultRoots`                       | Globs to scan: `public/**`, `assets/**`, `static/**`, `src/**/assets/**`, `res/**`                                                                                |
-| `dist`           | —                                    | Build output folder, scanned as well with `origin: 'build'` (flag `--dist`)                                                                                       |
-| `ignore`         | `[]`                                 | Extra globs to skip; `node_modules`, `.git` and dot folders are always skipped                                                                                    |
-| `optimizeIgnore` | `[]`                                 | Globs of files still inventoried and checked against totals and budgets but never flagged, suggested or optimized (inline SVGs of matching files are not scanned) |
-| `budgets`        | `[]`                                 | `{ pattern, maxBytes?, maxWidth?, maxHeight?, kind? }` per-asset limits                                                                                           |
-| `total`          | `{}`                                 | Maximum bytes per kind, e.g. `{ audio: 5000000 }`                                                                                                                 |
-| `convert`        | `sharp` if it loads, else `estimate` | `sharp` (real variants and changes), `estimate` (ratios), `tools` (measure with converters), `off` (flag `--convert`)                                             |
-| `optimizeTop`    | `20`                                 | With `sharp`: images (raster and SVG together) optimized, largest first (flag `--optimize-top`)                                                                   |
-| `svgPreset`      | `safe`                               | With `sharp`: svgo preset of SVG changes (flag `--svg-preset`)                                                                                                    |
-| `avif`           | `false`                              | Expect, suggest and encode AVIF next to WebP (flag `--avif`); off, WebP alone counts as a modern format                                                           |
-| `naming`         | —                                    | With `sharp`: `{ width?, density? }` variant file templates, default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}`                                          |
-| `inlineSvg`      | `true`                               | Check inline `<svg>`/`<path>` in markup and components (flag `--inline-svg`); off with `convert: 'off'`                                                           |
+| Option        | Default                              | Meaning                                                                                                                       |
+| ------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `roots`       | `defaultRoots`                       | Globs to scan: `public/**`, `assets/**`, `static/**`, `src/**/assets/**`, `res/**`                                            |
+| `dist`        | —                                    | Build output folder, scanned as well with `origin: 'build'` (flag `--dist`)                                                   |
+| `policy`      | `defaultAssetsPolicy`                | The asset policy (see [Policy](#policy)); the server fills it from the `assets.policy` setting, never from `analyzers.assets` |
+| `convert`     | `sharp` if it loads, else `estimate` | `sharp` (real variants and changes), `estimate` (ratios), `tools` (measure with converters), `off` (flag `--convert`)         |
+| `optimizeTop` | `20`                                 | With `sharp`: images (raster and SVG together) optimized, largest first (flag `--optimize-top`)                               |
+| `svgPreset`   | `safe`                               | With `sharp`: svgo preset of SVG changes (flag `--svg-preset`)                                                                |
+| `naming`      | —                                    | With `sharp`: `{ width?, density? }` variant file templates, default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}`      |
+| `inlineSvg`   | `true`                               | Check inline `<svg>`/`<path>` in markup and components (flag `--inline-svg`); off with `convert: 'off'`                       |
+
+From the policy the analyzer takes `ignore` (left out of the inventory), `minSaving.bytes` (smallest suggested saving), AVIF when `formats.raster` asks for it, and passes the whole policy to `analyzeAssets`, which records `policy` and its `violations` in the data, drops suggestions below `minSaving` (percent and bytes), drops format changes and `missing-modern-formats` findings under `formats.raster: 'keep'`, and leaves SVG files and inline SVGs alone under `formats.svg: 'keep'`.
+
+## Policy
+
+`assets.policy` is a structured setting (`assetsPolicySetting`, key `assetsPolicyKey`), scoped like every setting (all → group → repository, the most specific entry wins as a whole). `assetsPolicySchema` fills every field:
+
+| Field             | Default                                  | Meaning                                                                                                 |
+| ----------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `formats.raster`  | `webp`                                   | Modern format every PNG, JPEG and GIF from 8 kB needs next to it: `webp`, `avif`, `avif+webp` or `keep` |
+| `formats.svg`     | `optimize`                               | `optimize` suggests svgo rewrites; `keep` leaves SVGs alone                                             |
+| `formats.allowed` | —                                        | Extensions allowed at all; files of others are errors                                                   |
+| `maxBytes`        | `{ warn: 500000, error: 1000000 }`       | Per file; `perKind` replaces `warn`/`error` for one kind                                                |
+| `maxDimension`    | `2560`                                   | Largest width or height of raster images and videos                                                     |
+| `minSaving`       | `{ pct: 5, bytes: 1024 }`                | Conversions saving less than both are not suggested                                                     |
+| `ignore`          | `vendor/**`, `**/*.min.*`, `fixtures/**` | Globs left out of everything                                                                            |
+| `budgets`         | `{}`                                     | `total` bytes of every asset, `perKind` bytes per kind                                                  |
+| `mode`            | `comment`                                | `suggest-mr`: reviews also offer a merge request with the variants from the panel                       |
+
+- `policyViolations(assets, policy)` → `PolicyViolation { id, rule, severity, path?, kind?, format?, actual?, limit?, message }[]`, errors first then by path. Rules: `format` (error), `max-bytes` (warning above `warn`, error above `error`), `max-dimension` (warning; SVGs are not checked), `modern-format` (warning: a source PNG/JPEG/GIF family from 8 kB without the required siblings), `budget` (error, per kind or total). Ignored files are skipped and build files identical to a source file are checked once.
+- `parseAssetsPolicy(value)` — a stored value as a full policy; invalid or missing gives `defaultAssetsPolicy`.
+- `isIgnored`, `byteLimits(policy, kind)`, `formatAllowed`, `kindOfPath`, `requiredFormats(raster)` — single questions the reviewer and agent tools ask.
+- `assetsPolicyFacts(policy)` — the policy as Markdown bullets; the Guide adds them to the Assets section when an entry covers the repository, and `asset_policy` returns them.
+
+Prose rules (which component renders images, where files go) belong in the Guide's Assets section, not in the policy.
+
+## Summary
+
+`assetsSummary(data, limit = 200)` → `AssetsSummary { files, totalBytes, totals, errors, warnings, budgets, savings, duplicateBytes, rows, more }`: per file (`AssetRow { path, kind, format, bytes, width?, height?, severity, problems, suggestion? }`) the policy violations, extra copies (`duplicate`, info) and the best suggestion (a file with only a suggestion gets a `saving` info problem), errors first, then by size. The repository Assets tab and the `repo_assets` tool show it.
 
 `analyzeAssets(options)` runs the same pipeline without the analyzer wrapper; it never writes to the checkout. `options.cache` (the analyzer passes `context.cache`) is handed to `encodeVariants`, so images whose bytes did not change since an earlier run — on any machine sharing the store — are not encoded again.
 
@@ -48,7 +73,7 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
 
 ### Artifacts contract
 
-Analysis data stays JSON-serializable: variants are stored as sizes and hashes only. The encoded bytes of every proposed variant are kept in memory for the returned data object: `collectArtifacts(data)` → `{ sha256, bytes, data }[]`, one per distinct `artifact` of the `write-binary` edits. It works only on the exact object `analyzeAssets` (or `assetsAnalyzer.run`) returned, in the same process — a copy, a parsed record or a run without `sharp` yields `[]`. `assetsAnalyzer.run` returns them as analyzer `artifacts` (`runArtifacts(data)`: `id` = sha256, `contentType`, `name` = target path), which the job engine and `holtkeeper analyze assets --upload` store tagged with the analysis, so the changes can be applied later.
+Analysis data stays JSON-serializable: variants are stored as sizes and hashes only. The encoded bytes of every proposed variant are kept in memory for the returned data object: `collectArtifacts(data)` → `{ sha256, bytes, data }[]`, one per distinct `artifact` of the `write-binary` edits. It works only on the exact object `analyzeAssets` (or `assetsAnalyzer.run`) returned, in the same process — a copy, a parsed record or a run without `sharp` yields `[]`. `assetsAnalyzer.run` returns them as analyzer `artifacts` (`runArtifacts(data)`: `id` = sha256, `contentType`, `name` = target path), which the job engine stores tagged with the analysis, so the changes can be applied later.
 
 Build files with the same hash as a source file are the same shipped asset: they count once in totals, get no suggestion and are not duplicates.
 
@@ -67,9 +92,9 @@ Build files with the same hash as a source file are the same shipped asset: they
 
 `assetsAnalysis` (or `createAssetsAnalysis({ largest, treemapFiles, imageCards })`) reports:
 
-- Metrics: total bytes, bytes per kind, over-budget count, proposed changes (when there are changes), potential savings — each with a delta against the previous record.
+- Metrics: total bytes, bytes per kind, policy violations (with budgets), proposed changes (when there are changes), potential savings — each with a delta against the previous record.
 - Overview: bytes by kind chart, folder → file treemap.
-- Budgets: violations (new ones tagged), resolved ones, huge and non-power-of-two textures.
+- Policy: policy violations (new ones tagged), per-pattern budget violations of `analyzeAssets` callers, resolved ones, huge and non-power-of-two textures.
 - Suggestions: asset, current, suggested format, how, expected size, saving, estimated/measured; possibly unused assets.
 - Image optimization (with `sharp`): per image original, full-size WebP/re-encoded sizes (AVIF too when it was encoded), best saving, Δ of the best size against the previous record, proposed/total variants and usages; per-image cards (`imageCards`, default 10) with every format's widths or densities, full-size and smallest bytes, saving, quality and status; images that could not be decoded; an applicable `changes` block with the variants and image swaps (binary files listed without hunks).
 - SVG optimization: before/after bytes and gzip, saving, Δ against the previous record, what was removed; path data (paths, commands, coordinates, digits, longest path before → after); viewBox/size/embedded-raster issues; an applicable `changes` block.
@@ -78,7 +103,7 @@ Build files with the same hash as a source file are the same shipped asset: they
 - Duplicates: copies and wasted bytes.
 - Image delivery: `missing-modern-formats`, `single-resolution` and `inline-svg` findings, a table of inline SVGs (file, lines, svgo or path-data rewrite, bytes, path digits) and an applicable `changes` block with the inline rewrites.
 
-File columns are `path` columns and the report sets `exclude` to `analyzers.assets` with `optimizeIgnore` (skip optimization) and `ignore` (ignore entirely), so the panel can add a glob for a file or folder from any row.
+File columns are `path` columns and the report sets `exclude` to `assets.policy` with `ignore`, so the panel can add a glob for a file or folder from any row.
 
 ## Limitations
 

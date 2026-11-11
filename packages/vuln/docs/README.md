@@ -77,7 +77,7 @@ The report lists remaining `findings`, `ignored`, `expired`, every `FixAttempt` 
 
 ## JSON schemas
 
-`findingSchema` and `auditReportSchema` validate a `Finding` and an `AuditReport` received as JSON, e.g. reports uploaded by the CLI or CI and the data of `audit` analysis records.
+`findingSchema` and `auditReportSchema` validate a `Finding` and an `AuditReport` received as JSON, e.g. reports uploaded by CI and the data of `audit` analysis records.
 
 ## Adding an ecosystem
 

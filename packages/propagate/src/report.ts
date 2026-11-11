@@ -14,11 +14,10 @@ import { trimText } from './notes.ts'
 import { propagationDataSchema } from './schema.ts'
 import type { PropagationData, RepoOutcome, RepoStatus } from './types.ts'
 
-const statusOrder: RepoStatus[] = ['updated', 'fixed', 'failed', 'error', 'unchanged', 'skipped']
+const statusOrder: RepoStatus[] = ['updated', 'failed', 'error', 'unchanged', 'skipped']
 
 const statusLabels: Record<RepoStatus, string> = {
   updated: 'Updated cleanly',
-  fixed: 'Fixed by agent',
   failed: 'Checks failing',
   error: 'Error',
   unchanged: 'Already on target',
@@ -28,7 +27,6 @@ const statusLabels: Record<RepoStatus, string> = {
 /** Tone of each repository status, shared by tables and charts. */
 export const statusTones: Record<RepoStatus, Tone> = {
   updated: 'good',
-  fixed: 'info',
   failed: 'bad',
   error: 'warning',
   unchanged: 'neutral',
@@ -41,7 +39,7 @@ export function waveTotals(data: PropagationData) {
   return {
     targeted: data.repos.length,
     updated: count('updated'),
-    fixed: count('fixed'),
+    fixTasks: data.repos.filter((repo) => repo.fixTask).length,
     failed: count('failed') + count('error'),
     skipped: count('skipped') + count('unchanged'),
     mergeRequests: data.repos.filter((repo) => repo.mergeRequest).length,
@@ -78,8 +76,8 @@ function metricsOf(data: PropagationData, previous?: PropagationData): Metric[] 
       'good',
     ),
     tone(
-      now.fixed,
-      metric('fixed', 'Fixed by agent', now.fixed, { ...prev(before?.fixed), better: 'up' }),
+      now.fixTasks,
+      metric('fix-tasks', 'Fix tasks', now.fixTasks, prev(before?.fixTasks)),
       'info',
     ),
     tone(
@@ -94,6 +92,9 @@ function metricsOf(data: PropagationData, previous?: PropagationData): Metric[] 
 
 const link = (outcome: RepoOutcome): Cell =>
   outcome.webUrl ? { text: outcome.repo, href: outcome.webUrl } : outcome.repo
+
+const taskHref = (data: PropagationData, task: string) =>
+  `/tasks?${new URLSearchParams({ ...(data.fixGroup && { group: data.fixGroup }), task }).toString()}`
 
 function overview(data: PropagationData, previous?: PropagationData): Section {
   const before = new Map(
@@ -126,7 +127,9 @@ function overview(data: PropagationData, previous?: PropagationData): Section {
           : outcome.checks.length
             ? { text: 'passing', tone: 'good' as const }
             : null,
-        attempts: outcome.attempts,
+        fixTask: outcome.fixTask
+          ? { text: outcome.fixTask, href: taskHref(data, outcome.fixTask), tone: 'info' as const }
+          : null,
         mergeRequest: outcome.mergeRequest
           ? {
               text: `!${outcome.mergeRequest.id}${outcome.mergeRequest.draft ? ' (draft)' : ''}`,
@@ -157,7 +160,7 @@ function overview(data: PropagationData, previous?: PropagationData): Section {
         ...(before.size ? [{ key: 'previous', label: 'Previous wave' }] : []),
         { key: 'bumps', label: 'Bumps', format: 'code' as const },
         { key: 'checks', label: 'Checks' },
-        { key: 'attempts', label: 'Fix attempts', align: 'end' as const },
+        { key: 'fixTask', label: 'Fix task', format: 'code' as const },
         { key: 'mergeRequest', label: 'Merge request' },
       ],
       rows,
@@ -169,28 +172,6 @@ function overview(data: PropagationData, previous?: PropagationData): Section {
     description: `${waveName(data)}${data.dryRun ? ' — dry run, nothing published' : ''}`,
     blocks,
   }
-}
-
-function fixedSection(data: PropagationData): Section | undefined {
-  const fixed = data.repos.filter((repo) => repo.agent)
-  if (fixed.length === 0) return undefined
-  const text = fixed
-    .map((repo) => {
-      const agent = repo.agent!
-      const lines = [`### ${repo.repo} — ${repo.status}`, '', agent.summary]
-      if (agent.changes.length) lines.push('', ...agent.changes.map((change) => `- ${change}`))
-      if (repo.fixedFiles.length)
-        lines.push('', `Files: ${repo.fixedFiles.map((file) => `\`${file}\``).join(', ')}`)
-      if (agent.remainingProblems.length)
-        lines.push(
-          '',
-          '**Remaining problems:**',
-          ...agent.remainingProblems.map((problem) => `- ${problem}`),
-        )
-      return lines.join('\n')
-    })
-    .join('\n\n')
-  return { id: 'fixed', title: 'Breaking changes fixed', blocks: [{ type: 'markdown', text }] }
 }
 
 function failures(data: PropagationData): Section | undefined {
@@ -211,12 +192,14 @@ function failures(data: PropagationData): Section | undefined {
         tone: 'bad',
         title: `${repo.repo}: ${check.name} fails (exit ${check.exitCode})`,
         detail: `\`${check.command}\`\n\n${trimText(check.output.split('\n').slice(-30).join('\n'), 3000)}`,
-        ...(repo.mergeRequest
-          ? { href: repo.mergeRequest.url }
-          : repo.webUrl
-            ? { href: repo.webUrl }
-            : {}),
-        tags: [check.name, ...(repo.attempts ? [`${repo.attempts} fix attempts`] : [])],
+        ...(repo.fixTask
+          ? { href: taskHref(data, repo.fixTask) }
+          : repo.mergeRequest
+            ? { href: repo.mergeRequest.url }
+            : repo.webUrl
+              ? { href: repo.webUrl }
+              : {}),
+        tags: [check.name, ...(repo.fixTask ? ['fix task'] : [])],
       })
   }
   return items.length
@@ -286,7 +269,6 @@ export const propagationAnalysis = defineAnalysis<PropagationData>({
     const data = current.data
     const sections = [
       overview(data, previous?.data),
-      fixedSection(data),
       failures(data),
       releaseNotesSection(data),
       planSection(data),

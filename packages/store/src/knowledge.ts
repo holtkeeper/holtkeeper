@@ -42,6 +42,7 @@ export function matchesKnowledgeFilter(entry: KnowledgeEntry, filter: KnowledgeF
     )
     if (!hit) return false
   }
+  if (filter.subject !== undefined && entry.subject !== filter.subject) return false
   return true
 }
 
@@ -72,6 +73,8 @@ const content = (entry: KnowledgeEntry): KnowledgeContent => ({
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   ...(entry.packages !== undefined && { packages: entry.packages }),
+  ...(entry.visibility !== undefined && { visibility: entry.visibility }),
+  ...(entry.subject !== undefined && { subject: entry.subject }),
   status: entry.status,
   evidence: entry.evidence,
   ...(entry.supersedes !== undefined && { supersedes: entry.supersedes }),

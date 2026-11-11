@@ -38,6 +38,11 @@ const catalog: AiCatalog = {
           pricing: { inputPerMTok: 1.25, outputPerMTok: 10 },
         },
         { id: 'embed', toolCall: false, reasoning: false },
+        ...['haiku', 'sonnet', 'opus'].map((family) => ({
+          id: `anthropic/claude-${family}-5.5`,
+          toolCall: true,
+          reasoning: true,
+        })),
       ],
     },
     {
@@ -55,7 +60,11 @@ const catalog: AiCatalog = {
 let store: Store
 const prompts: string[] = []
 
-const setup = (options: { aiCatalog?: AiCatalog; fail?: boolean } = { aiCatalog: catalog }) => {
+const setup = (
+  options: { aiCatalog?: AiCatalog; fail?: boolean; probeFetch?: typeof fetch } = {
+    aiCatalog: catalog,
+  },
+) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
     config,
@@ -70,6 +79,7 @@ const setup = (options: { aiCatalog?: AiCatalog; fail?: boolean } = { aiCatalog:
     settings: [],
     analyses: [],
     ...(options.aiCatalog && { aiCatalog: options.aiCatalog }),
+    ...(options.probeFetch && { probeFetch: options.probeFetch }),
     languageModel: () =>
       new MockLanguageModelV4({
         doGenerate: async (call) => {
@@ -170,7 +180,7 @@ describe('AI catalog', () => {
         name: 'OpenRouter',
         package: '@openrouter/ai-sdk-provider',
         env: ['OPENROUTER_API_KEY'],
-        toolModels: 1,
+        toolModels: 4,
       },
     ])
     expect(list.packages).toContain('@ai-sdk/openai-compatible')
@@ -181,6 +191,9 @@ describe('AI catalog', () => {
     expect(models.models.map((m) => [m.id, m.toolCall])).toEqual([
       ['openai/gpt-5', true],
       ['embed', false],
+      ['anthropic/claude-haiku-5.5', true],
+      ['anthropic/claude-sonnet-5.5', true],
+      ['anthropic/claude-opus-5.5', true],
     ])
     expect((await setup().request('/api/ai/providers/nope/models')).status).toBe(404)
   })
@@ -196,7 +209,7 @@ describe('AI catalog', () => {
 })
 
 describe('ai-sdk credentials', () => {
-  test('validate options, list catalog models and test a model', async () => {
+  test('validate options, list catalog models and test the main tier model', async () => {
     const app = setup()
     const bad = await send(app, 'POST', '/api/credentials', {
       name: 'x',
@@ -211,7 +224,6 @@ describe('ai-sdk credentials', () => {
     const credential = await createProvider(app, {
       provider: 'openrouter',
       package: '@openrouter/ai-sdk-provider',
-      model: 'openai/gpt-5',
     })
     const models = (await (
       await app.request(`/api/credentials/${credential.id}/models`)
@@ -221,21 +233,84 @@ describe('ai-sdk credentials', () => {
     const tested = (await (
       await send(app, 'POST', `/api/credentials/${credential.id}/test`)
     ).json()) as CredentialTestResult
-    expect(tested).toMatchObject({ ok: true, model: 'openai/gpt-5', reply: 'OK' })
+    expect(tested).toMatchObject({ ok: true, model: 'anthropic/claude-sonnet-5.5', reply: 'OK' })
     expect(prompts[0]).toContain('Reply with the single word OK.')
   })
 
-  test('a failing test reports the error; other kinds and missing models are refused', async () => {
+  test('a failing test reports the error', async () => {
     const app = setup({ aiCatalog: catalog, fail: true })
     const credential = await createProvider(app, {
       provider: 'openrouter',
       package: '@openrouter/ai-sdk-provider',
     })
-    expect((await send(app, 'POST', `/api/credentials/${credential.id}/test`, {})).status).toBe(400)
     const failed = (await (
       await send(app, 'POST', `/api/credentials/${credential.id}/test`, { model: 'openai/gpt-5' })
     ).json()) as CredentialTestResult
     expect(failed).toMatchObject({ ok: false, model: 'openai/gpt-5' })
     expect(failed.error).toContain('401 invalid key')
+  })
+})
+
+describe('Anthropic credential tests', () => {
+  test('probe Messages tool use and store the result on the credential', async () => {
+    let answer: unknown = {
+      content: [{ type: 'tool_use', id: 't', name: 'record_word', input: {} }],
+    }
+    let status = 200
+    const urls: string[] = []
+    const app = setup({
+      probeFetch: (async (url: string | URL | Request) => {
+        urls.push(url instanceof Request ? url.url : url.toString())
+        return new Response(JSON.stringify(answer), { status })
+      }) as typeof fetch,
+    })
+    const credential = (await (
+      await send(app, 'POST', '/api/credentials', {
+        name: 'Gateway',
+        kind: 'anthropic-compatible',
+        url: 'https://llm.corp.test/anthropic',
+        secret: 'gateway-secret-123',
+        scope: { all: true },
+      })
+    ).json()) as CredentialView
+
+    const tested = (await (
+      await send(app, 'POST', `/api/credentials/${credential.id}/test`, { model: 'corp-sonnet' })
+    ).json()) as CredentialTestResult
+    expect(tested).toMatchObject({
+      ok: true,
+      model: 'corp-sonnet',
+      capabilities: { agentLoop: 'ok', checkedAt: '2026-10-30T12:00:00.000Z' },
+    })
+    expect(urls).toEqual(['https://llm.corp.test/anthropic/v1/messages'])
+
+    status = 529
+    answer = { error: { type: 'overloaded_error', message: 'Overloaded' } }
+    const busy = (await (
+      await send(app, 'POST', `/api/credentials/${credential.id}/test`, { model: 'corp-sonnet' })
+    ).json()) as CredentialTestResult
+    expect(busy).toMatchObject({
+      ok: false,
+      error: 'HTTP 529: Overloaded',
+      capabilities: { agentLoop: 'ok' },
+    })
+    status = 200
+
+    answer = { content: [{ type: 'text', text: 'no tools here' }] }
+    const failed = (await (
+      await send(app, 'POST', `/api/credentials/${credential.id}/test`, { model: 'corp-sonnet' })
+    ).json()) as CredentialTestResult
+    expect(failed).toMatchObject({ ok: false, capabilities: { agentLoop: 'failed' } })
+    const listed = (await (await app.request('/api/credentials')).json()) as {
+      credentials: CredentialView[]
+    }
+    expect(listed.credentials[0]?.capabilities?.agentLoop).toBe('failed')
+
+    const moved = (await (
+      await send(app, 'PATCH', `/api/credentials/${credential.id}`, {
+        url: 'https://llm.other.test/anthropic',
+      })
+    ).json()) as CredentialView
+    expect(moved.capabilities).toBeUndefined()
   })
 })

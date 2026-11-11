@@ -1,42 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 
+import { AI_PROVIDER_KINDS } from '@holtkeeper/agent'
 import { parseConfig } from '@holtkeeper/core'
-import { gitlab } from '@holtkeeper/forge-gitlab'
-import { createLimiter } from '@holtkeeper/limits'
+import { defaultLimitPolicy } from '@holtkeeper/limits'
 import type { Job } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
-import { fileForgeKey, globalLimits, jobLimitKeys, limitFileForges } from '../src/limits.ts'
+import { globalLimits, jobLimitKeys } from '../src/limits.ts'
 
 const job = (analyzer: string, forge = 'work') =>
   ({ analyzer, repo: { forge, path: 'games/a' } }) as Job
 
 describe('server limits', () => {
-  test('file forges send requests through the limiter under forge:<id>', async () => {
-    const limiter = createLimiter()
-    const seen: string[] = []
-    const forges = limitFileForges(
-      {
-        work: gitlab({
-          url: 'https://gl.test',
-          token: 't',
-          fetch: async (input) => {
-            seen.push(input)
-            return Response.json({
-              path_with_namespace: 'a/b',
-              name: 'b',
-              web_url: '',
-              http_url_to_repo: '',
-            })
-          },
-        }),
-      },
-      limiter,
-      [],
-    )
-    await forges.work?.create().getRepository('a/b')
-    expect(seen).toHaveLength(1)
-    expect(Object.keys(await limiter.snapshot())).toContain(fileForgeKey('work'))
+  test('every AI provider kind gets the AI defaults', () => {
+    for (const kind of AI_PROVIDER_KINDS)
+      expect(defaultLimitPolicy({ id: kind, kind }).maxConcurrent).toBe(3)
   })
 
   test('globalLimits reads the everything-scope entry', () => {

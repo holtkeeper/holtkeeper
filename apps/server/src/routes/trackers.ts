@@ -51,14 +51,7 @@ export function trackerRoutes(deps: TrackerRouteDeps) {
       })),
     }
     const at = deps.now().toISOString()
-    await store.activity.append({
-      at,
-      actor: principal.id,
-      action: 'tracker.published',
-      subject,
-      details,
-    })
-    await store.audit?.append({
+    await store.audit.append({
       at,
       actor: { id: principal.id, name: principal.name, provider: principal.provider },
       via: 'api',

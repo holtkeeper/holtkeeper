@@ -466,6 +466,195 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX library_issues_search ON library_issues USING gin (search);
     `,
   },
+  {
+    version: 11,
+    sql: `
+      ALTER TABLE analyses ADD COLUMN sha text;
+    `,
+  },
+  {
+    version: 12,
+    sql: `
+      DROP TABLE activity;
+    `,
+  },
+  {
+    version: 13,
+    sql: `
+      ALTER TABLE jobs DROP COLUMN log;
+      ALTER TABLE jobs ADD COLUMN attempts_history jsonb NOT NULL DEFAULT '[]';
+      ALTER TABLE jobs ADD COLUMN error_signature text;
+      CREATE INDEX jobs_error_signature ON jobs (error_signature, created_at DESC)
+        WHERE error_signature IS NOT NULL;
+      CREATE INDEX jobs_failed ON jobs (finished_at DESC) WHERE status = 'failed';
+    `,
+  },
+  {
+    version: 14,
+    sql: `
+      CREATE TABLE guides (
+        scope text NOT NULL,
+        section text NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (scope, section)
+      );
+      CREATE TABLE guide_history (
+        scope text NOT NULL,
+        section text NOT NULL,
+        version integer NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (scope, section, version)
+      );
+      CREATE TABLE families (
+        id text PRIMARY KEY,
+        name text NOT NULL,
+        data jsonb NOT NULL
+      );
+    `,
+  },
+  {
+    version: 15,
+    sql: `
+      CREATE TABLE learnings (
+        id text PRIMARY KEY,
+        repo text NOT NULL,
+        key text NOT NULL,
+        created_at text NOT NULL,
+        updated_at text NOT NULL,
+        data jsonb NOT NULL
+      );
+      CREATE INDEX learnings_repo_key ON learnings (repo, key);
+      CREATE TABLE learning_claims (
+        key text PRIMARY KEY,
+        at text NOT NULL
+      );
+      CREATE TABLE review_reactions (
+        repo text NOT NULL,
+        merge_request integer NOT NULL,
+        note_id text NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (repo, merge_request, note_id)
+      );
+    `,
+  },
+  {
+    version: 16,
+    sql: `
+      ALTER TABLE credentials ADD COLUMN capabilities jsonb;
+      ALTER TABLE ai_usage ADD COLUMN transcript_ref text;
+      CREATE INDEX ai_usage_job ON ai_usage (job_id);
+    `,
+  },
+  {
+    version: 17,
+    sql: `
+      CREATE TABLE chat_threads (
+        id text PRIMARY KEY,
+        updated_at text NOT NULL,
+        archived boolean NOT NULL DEFAULT false,
+        data jsonb NOT NULL
+      );
+      CREATE INDEX chat_threads_updated ON chat_threads (archived, updated_at COLLATE "C");
+      CREATE TABLE chat_messages (
+        seq integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        id text NOT NULL UNIQUE,
+        thread_id text NOT NULL,
+        author_id text,
+        created_at text NOT NULL,
+        updated_at text,
+        data jsonb NOT NULL
+      );
+      CREATE INDEX chat_messages_thread ON chat_messages (thread_id, seq);
+      CREATE INDEX chat_messages_changed ON chat_messages (thread_id, updated_at COLLATE "C")
+        WHERE updated_at IS NOT NULL;
+      CREATE TABLE chat_thread_reads (
+        thread_id text NOT NULL,
+        user_id text NOT NULL,
+        last_read_message_id text NOT NULL,
+        last_read_seq integer NOT NULL,
+        PRIMARY KEY (thread_id, user_id)
+      );
+    `,
+  },
+  {
+    version: 18,
+    sql: `ALTER TABLE jobs ADD COLUMN reason text;`,
+  },
+  {
+    version: 19,
+    sql: `
+      ALTER TABLE knowledge ADD COLUMN visibility text;
+      ALTER TABLE knowledge ADD COLUMN subject text;
+      CREATE INDEX knowledge_subject ON knowledge (subject) WHERE subject IS NOT NULL;
+    `,
+  },
+  {
+    version: 20,
+    sql: `
+      CREATE TABLE agent_task_groups (
+        id text PRIMARY KEY,
+        updated_at text NOT NULL,
+        data jsonb NOT NULL
+      );
+      CREATE INDEX agent_task_groups_updated ON agent_task_groups (updated_at COLLATE "C");
+      CREATE TABLE agent_tasks (
+        id text PRIMARY KEY,
+        group_id text NOT NULL,
+        repo text NOT NULL,
+        status text NOT NULL,
+        updated_at text NOT NULL,
+        data jsonb NOT NULL
+      );
+      CREATE INDEX agent_tasks_group ON agent_tasks (group_id);
+      CREATE INDEX agent_tasks_repo ON agent_tasks (repo, updated_at COLLATE "C");
+    `,
+  },
+  {
+    version: 21,
+    sql: `
+      DELETE FROM analyses WHERE kind IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup');
+      DELETE FROM jobs WHERE analyzer IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup');
+      DELETE FROM settings WHERE key IN (
+        'llm.model', 'llm.models', 'review.instructions', 'agent.instructions',
+        'analyzers.changelog', 'analyzers.delivery', 'analyzers.fleet', 'analyzers.port',
+        'analyzers.quality', 'analyzers.release-risk', 'analyzers.warmup'
+      );
+      DELETE FROM kv WHERE key = 'digests' OR key LIKE 'digest:%' OR key = 'chat:slack:policy';
+      CREATE TEMP TABLE retired_config ON COMMIT DROP AS
+        SELECT type, id, COALESCE(
+          data->>'analyzer' IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')
+          OR (jsonb_typeof(data->'analyzers') = 'array'
+            AND jsonb_array_length(data->'analyzers') > 0
+            AND NOT EXISTS (
+              SELECT 1 FROM jsonb_array_elements_text(data->'analyzers') AS kind
+              WHERE kind NOT IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup'))), false) AS dead
+        FROM config_documents
+        WHERE type IN ('schedule', 'trigger') AND (
+          data->>'analyzer' IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')
+          OR (jsonb_typeof(data->'analyzers') = 'array'
+            AND data->'analyzers' ?| array['changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup'])
+          OR (jsonb_typeof(data->'options') = 'object'
+            AND data->'options' ?| array['changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup']));
+      DELETE FROM config_history WHERE (type, id) IN (SELECT type, id FROM retired_config WHERE dead);
+      DELETE FROM config_documents WHERE (type, id) IN (SELECT type, id FROM retired_config WHERE dead);
+      INSERT INTO config_history (type, id, version, data, updated_at, updated_by)
+        SELECT type, id, version, data, updated_at, updated_by FROM config_documents
+        WHERE (type, id) IN (SELECT type, id FROM retired_config WHERE NOT dead);
+      UPDATE config_documents SET
+        data = (CASE WHEN jsonb_typeof(data->'analyzers') = 'array'
+          THEN jsonb_set(data, '{analyzers}', COALESCE((
+            SELECT jsonb_agg(kind ORDER BY ord)
+            FROM jsonb_array_elements(data->'analyzers') WITH ORDINALITY AS item(kind, ord)
+            WHERE kind #>> '{}' NOT IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')), '[]'::jsonb))
+          ELSE data END)
+          #- '{options,changelog}' #- '{options,quality}' #- '{options,release-risk}' #- '{options,fleet}'
+          #- '{options,delivery}' #- '{options,port}' #- '{options,warmup}',
+        version = version + 1,
+        updated_at = now(),
+        updated_by = 'system'
+        WHERE (type, id) IN (SELECT type, id FROM retired_config WHERE NOT dead);
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

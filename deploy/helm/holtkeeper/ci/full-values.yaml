@@ -12,7 +12,7 @@ env:
 config:
   content: |
     import { defineConfig } from '@holtkeeper/core'
-    export default defineConfig({ forges: {} })
+    export default defineConfig({ limits: { distributed: true } })
 web:
   ingress:
     enabled: true

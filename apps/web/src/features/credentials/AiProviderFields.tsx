@@ -2,21 +2,13 @@ import type { AiCatalogProviderView } from '@holtkeeper/api'
 import { Check, ExternalLink, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { useAiProviderModels, useAiProviders } from '../../api/queries.ts'
+import { useAiProviders } from '../../api/queries.ts'
 import { Notice, Placeholder, SearchInput, Select, TextField } from '../../ui/index.ts'
-import {
-  type AiDraft,
-  type DraftErrors,
-  OPENAI_COMPATIBLE,
-  agentModels,
-  filterProviders,
-} from './form.ts'
+import { type AiDraft, type DraftErrors, OPENAI_COMPATIBLE, filterProviders } from './form.ts'
 
 const shown = 80
 
-const price = (value: number | undefined) => (value === undefined ? '' : `$${value}`)
-
-/** Provider, model, endpoint and options of an `ai-sdk` credential. */
+/** Provider, endpoint and options of an `ai-sdk` credential; models come from the tiers. */
 export function AiProviderFields({
   ai,
   errors,
@@ -33,8 +25,6 @@ export function AiProviderFields({
   const catalog = useAiProviders()
   const providers = catalog.data?.providers ?? []
   const picked = ai.custom ? undefined : providers.find((p) => p.id === ai.provider)
-  const models = useAiProviderModels(picked?.id)
-  const options = agentModels(models.data?.models ?? [])
   const matches = filterProviders(providers, query)
 
   return (
@@ -87,7 +77,6 @@ export function AiProviderFields({
                       custom: false,
                       provider: provider.id,
                       package: provider.package,
-                      model: '',
                     })
                     onPick(provider)
                   }}
@@ -166,38 +155,6 @@ export function AiProviderFields({
         mono
       />
 
-      {picked && options.length ? (
-        <Select
-          label="Default model"
-          options={options.map((model) => ({
-            id: model.id,
-            text: model.name ?? model.id,
-            label: (
-              <span className="flex w-full items-center gap-2">
-                <span className="truncate">{model.name ?? model.id}</span>
-                <span className="ml-auto font-mono text-xs text-muted">
-                  {[price(model.pricing?.inputPerMTok), price(model.pricing?.outputPerMTok)]
-                    .filter(Boolean)
-                    .join(' / ')}
-                </span>
-              </span>
-            ),
-          }))}
-          value={ai.model || undefined}
-          onChange={(model) => onChange({ model })}
-          placeholder="Choose a model…"
-        />
-      ) : (
-        <TextField
-          label="Default model"
-          value={ai.model}
-          onChange={(model) => onChange({ model })}
-          placeholder="e.g. openai/gpt-5"
-          description="Optional here; llm.model in settings can choose per scope."
-          mono
-        />
-      )}
-
       <TextField
         label="Advanced options"
         multiline
@@ -209,7 +166,7 @@ export function AiProviderFields({
         placeholder={
           '{\n  "headers": { "X-Team": "platform" },\n  "settings": { "region": "us-east-1" },\n  "maxConcurrency": 4\n}'
         }
-        description="JSON: headers ({secret} is the key), settings of the AI SDK provider, models per task, modelMap, pricing, timeoutMs, maxConcurrency."
+        description="JSON: headers ({secret} is the key), settings of the AI SDK provider, modelMap, pricing, timeoutMs, maxConcurrency. Agents run on the newest Haiku, Sonnet and Opus the provider lists."
       />
     </div>
   )

@@ -65,10 +65,7 @@ function RunJobForm({
   const repoValue = repo ? repoKey(repo) : selected?.scope === 'repo' ? targetRepo : undefined
   const groupValue = group ?? (selected?.scope === 'group' ? targetGroup : undefined)
   const invalid =
-    !selected ||
-    options === undefined ||
-    (selected.scope === 'repo' ? !repoValue : !groupValue) ||
-    analyzers.data?.enabled === false
+    !selected || options === undefined || (selected.scope === 'repo' ? !repoValue : !groupValue)
 
   const pick = (next: string) => {
     setKind(next)
@@ -127,10 +124,6 @@ function RunJobForm({
       ) : analyzers.isError ? (
         <Notice tone="danger" title="Analyzers not loaded">
           {messageOf(analyzers.error)}
-        </Notice>
-      ) : !analyzers.data.enabled ? (
-        <Notice tone="warning" title="Jobs are off">
-          The config has no jobs section, so nothing can be queued.
         </Notice>
       ) : available.length === 0 ? (
         <Notice title="No analyzers">
@@ -285,7 +278,7 @@ export function RunJobButton({
   const { can } = useSession()
   const analyzers = useJobAnalyzers()
   const [open, setOpen] = useState(false)
-  if (!can('analyses:run') || !analyzers.data?.enabled) return null
+  if (!can('analyses:run') || !analyzers.data) return null
   const available = analyzersFor(analyzers.data.analyzers, { repo, group })
   if (!available.length || (analyzer && !available.some((a) => a.kind === analyzer))) return null
   return (

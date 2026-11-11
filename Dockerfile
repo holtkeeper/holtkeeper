@@ -26,7 +26,7 @@ COPY . .
 RUN bun install --frozen-lockfile --ignore-scripts --production --filter '!@holtkeeper/web' \
  && rm -rf apps/web/src apps/web/node_modules fixtures \
  && mkdir -p node_modules/@holtkeeper \
- && for dir in apps/* packages/* plugins/*; do \
+ && for dir in apps/* packages/*; do \
       [ -f "$dir/package.json" ] || continue; \
       name="$(bun -e "console.log(require('./$dir/package.json').name)")"; \
       case "$name" in @holtkeeper/*) ln -sfn "../../$dir" "node_modules/$name" ;; esac; \

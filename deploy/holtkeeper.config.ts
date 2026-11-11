@@ -1,13 +1,13 @@
 import { passwordAuth } from '@holtkeeper/auth-password'
 import { defineConfig } from '@holtkeeper/core'
 import { env } from '@holtkeeper/forge'
-import { gitlab } from '@holtkeeper/forge-gitlab'
 import { postgresStore } from '@holtkeeper/store-postgres'
 import { sqliteStore } from '@holtkeeper/store-sqlite'
 
 /**
  * Container config shared by `deploy/docker-compose.yml` and the Helm chart. Mounted read-only at
- * /app/config/holtkeeper.config.ts; every secret comes from the environment.
+ * /app/config/holtkeeper.config.ts; every secret comes from the environment. It holds only
+ * infrastructure: forges, groups, triggers, analyzer options and budgets are set in the panel.
  *
  * - `HOLTKEEPER_DATABASE_URL` set: Postgres (required for more than one process), else SQLite in /data.
  * - `HOLTKEEPER_S3_BUCKET` set: artifacts in any S3-compatible storage (required for more than one process), else /data.
@@ -16,10 +16,6 @@ const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
 const port = Number(process.env.HOLTKEEPER_PORT ?? 7420)
 
 export default defineConfig({
-  forges: process.env.GITLAB_URL
-    ? { work: gitlab({ url: process.env.GITLAB_URL, token: env('GITLAB_TOKEN') }) }
-    : {},
-  groups: {},
   server: {
     auth: passwordAuth({
       password: env('HOLTKEEPER_ROOT_PASSWORD'),
@@ -53,7 +49,6 @@ export default defineConfig({
     execution: { mode: 'mise' },
     cacheDir: '/workspace/cache',
     concurrency: 2,
-    schedules: [],
     webhookSecret: env('HOLTKEEPER_WEBHOOK_SECRET'),
   },
   limits: { distributed: multiProcess },

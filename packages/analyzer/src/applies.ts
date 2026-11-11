@@ -69,3 +69,21 @@ export const allOf =
     }
     return true
   }
+
+/**
+ * Globs of the manifests and lockfiles of the JavaScript and Go package managers at any depth,
+ * for `refresh.paths` of analyzers that read only dependencies.
+ */
+export const dependencyPaths: readonly string[] = [
+  '**/package.json',
+  '**/bun.lock',
+  '**/bun.lockb',
+  '**/package-lock.json',
+  '**/npm-shrinkwrap.json',
+  '**/pnpm-lock.yaml',
+  '**/pnpm-workspace.yaml',
+  '**/yarn.lock',
+  '**/go.mod',
+  '**/go.sum',
+  '**/go.work',
+]

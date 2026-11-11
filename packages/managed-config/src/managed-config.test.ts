@@ -1,31 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 
-import { ConfigError, parseConfig } from '@holtkeeper/core'
-import type { ForgeDefinition, GitForge } from '@holtkeeper/forge'
+import { ConfigError, parseConfigFile } from '@holtkeeper/core'
+import type { GitForge } from '@holtkeeper/forge'
 import type { AnyConfigDocument, ConfigDocumentInput } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { effectiveConfig, type ForgeFactory } from './effective.ts'
-import { exportConfig } from './export.ts'
 import { generateWebhookSecret } from './secret.ts'
 import { createConfigSource, liveConfig } from './source.ts'
 
-const fileForge: ForgeDefinition = {
-  kind: 'gitlab',
-  url: 'https://file.test',
-  create: () => ({ kind: 'gitlab' }) as GitForge,
-}
-
-const file = parseConfig({
-  forges: { work: fileForge },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
-  repos: { 'games/app-*': { traits: { webgl: true } } },
-  jobs: {
-    schedules: [{ name: 'nightly', cron: '0 3 * * *', analyzers: ['depgraph'] }],
-    onTag: { analyzers: ['changelog'] },
-    webhookSecret: { env: 'HOOK' },
-  },
-})
+const file = parseConfigFile(
+  { jobs: { webhookSecret: { env: 'HOOK' }, concurrency: 3 } },
+  { warn: () => {} },
+)
 
 const builds: { id: string; token: string }[] = []
 const factory: ForgeFactory = (doc, token) => {
@@ -46,7 +33,12 @@ const documents: AnyConfigDocument[] = [
   doc({
     type: 'forge',
     id: 'cloud',
-    data: { kind: 'gitlab', url: 'https://gitlab.com', credentialId: 'c1' },
+    data: { kind: 'gitlab', url: 'https://gitlab.com', credentialId: 'c1', botUsername: 'keeper' },
+  }),
+  doc({
+    type: 'forge',
+    id: 'work',
+    data: { kind: 'gitlab', url: 'https://work.test', credentialId: 'c3' },
   }),
   doc({ type: 'group', id: 'games', data: { forge: 'cloud', include: ['studio/*'], exclude: [] } }),
   doc({
@@ -82,38 +74,28 @@ const documents: AnyConfigDocument[] = [
 ]
 
 describe('effectiveConfig', () => {
-  test('panel documents override and extend file entries, with provenance', () => {
+  test('panel documents become forges, groups, traits, schedules and triggers', () => {
     const effective = effectiveConfig(file, documents, {
       forgeFactories: { gitlab: factory },
-      tokens: { c1: 'secret-token' },
+      tokens: { c1: 'secret-token', c3: 'work-token' },
       webhookSecrets: { cloud: 'hook-secret' },
     })
-    const { config, provenance } = effective
+    const { config } = effective
     expect(Object.keys(config.forges).toSorted()).toEqual(['cloud', 'work'])
-    expect(config.forges.work).toBe(fileForge)
+    expect(config.forges.work?.url).toBe('https://work.test')
     expect(config.forges.cloud?.url).toBe('https://gitlab.com')
+    expect(config.jobs.botUsernames).toEqual({ cloud: 'keeper' })
+    expect(config.jobs.concurrency).toBe(3)
     expect(config.groups.games).toEqual({ forge: 'cloud', include: ['studio/*'], exclude: [] })
     expect(config.repos['tools/*']).toEqual({ traits: { lang: 'go' } })
     expect(config.jobs?.schedules.map((s) => [s.name, s.enabled, s.title])).toEqual([
       ['nightly', false, 'Nightly'],
       ['office', true, 'Office hours'],
     ])
-    expect(config.jobs?.onTag).toEqual({ analyzers: ['changelog', 'depgraph'] })
+    expect(config.jobs.onTag).toEqual({ analyzers: ['changelog', 'depgraph'] })
     expect(config.jobs?.onLabel).toEqual({ port: ['port'] })
     expect(config.jobs?.webhooks).toEqual({ cloud: { secret: 'hook-secret' } })
     expect(config.jobs?.webhookSecret).toEqual({ env: 'HOOK' })
-    expect(provenance).toEqual({
-      'forge:work': 'file',
-      'forge:cloud': 'panel',
-      'group:games': 'file+panel',
-      'group:tools': 'panel',
-      'repoTraits:games/app-*': 'file',
-      'repoTraits:tools/*': 'panel',
-      'schedule:nightly': 'file+panel',
-      'schedule:office': 'panel',
-      'trigger:tag': 'file+panel',
-      'trigger:label:port': 'panel',
-    })
     expect(effective.forges.cloud).toEqual({
       kind: 'gitlab',
       url: 'https://gitlab.com',
@@ -122,9 +104,10 @@ describe('effectiveConfig', () => {
   })
 
   test('a new repository trigger becomes jobs.onNewRepo', () => {
-    const { config, provenance } = effectiveConfig(
+    const { config } = effectiveConfig(
       file,
       [
+        ...documents.filter((d) => d.type === 'forge' || d.id === 'games'),
         doc({
           type: 'trigger',
           id: 'new-repo',
@@ -137,10 +120,9 @@ describe('effectiveConfig', () => {
       },
     )
     expect(config.jobs?.onNewRepo).toEqual({ exclude: ['quality'], groups: ['games'] })
-    expect(provenance['trigger:new-repo']).toBe('panel')
   })
 
-  test('validates with the file config rules', () => {
+  test('rejects documents that reference each other wrongly', () => {
     const broken = [
       ...documents,
       doc({ type: 'group', id: 'apps', data: { forge: 'nowhere', include: ['a/*'], exclude: [] } }),
@@ -170,75 +152,11 @@ describe('effectiveConfig', () => {
     expect(() => config.forges.hub?.create()).toThrow('no github adapter')
   })
 
-  test('a file without jobs gets one only when the panel adds jobs entries', () => {
-    const bare = parseConfig({ forges: { work: fileForge } })
-    expect(effectiveConfig(bare, [], { forgeFactories: {} }).config.jobs).toBeUndefined()
-    const withSchedule = effectiveConfig(
-      bare,
-      documents.filter((d) => d.id === 'r1' || d.type === 'trigger'),
-      {
-        forgeFactories: {},
-      },
-    )
-    expect(withSchedule.config.jobs?.concurrency).toBe(2)
-  })
-})
-
-describe('exportConfig', () => {
-  test('is deterministic TypeScript with env placeholders', () => {
-    const effective = effectiveConfig(file, documents, {
-      forgeFactories: { gitlab: factory },
-      tokens: { c1: 'secret-token' },
-      webhookSecrets: { cloud: 'hook-secret' },
-    })
-    const source = exportConfig(effective)
-    expect(source).toBe(
-      exportConfig(
-        effectiveConfig(file, [...documents], {
-          forgeFactories: { gitlab: factory },
-          tokens: { c1: 'other-token' },
-          webhookSecrets: { cloud: 'other' },
-        }),
-      ),
-    )
-    expect(source).not.toContain('secret-token')
-    expect(source).not.toContain('hook-secret')
-    expect(source).toStartWith('// holtkeeper.config.ts exported from the Holtkeeper panel.')
-    expect(source).toContain(`import { defineConfig, env } from '@holtkeeper/core'
-import { gitlab } from '@holtkeeper/forge-gitlab'
-
-export default defineConfig({
-  forges: {
-    cloud: gitlab({
-      url: 'https://gitlab.com',
-      token: env('HOLTKEEPER_CLOUD_TOKEN'),
-    }),
-    work: gitlab({
-      url: 'https://file.test',
-      token: env('HOLTKEEPER_WORK_TOKEN'),
-    }),
-  },
-  groups: {
-    games: {
-      forge: 'cloud',
-      include: ['studio/*'],
-    },
-    tools: {
-      forge: 'work',
-      include: ['tools/*'],
-      exclude: ['tools/old'],
-    },
-  },`)
-    expect(source).toContain(`  repos: {
-    'games/app-*': {
-      traits: {
-        webgl: true,
-      },
-    },`)
-    expect(source).toContain("webhookSecret: env('HOOK'),")
-    expect(source).toContain("secret: env('HOLTKEEPER_CLOUD_WEBHOOK_SECRET'),")
-    expect(source).toContain('enabled: false,')
-    expect(source).toContain("days: ['mon', 'fri'],")
+  test('a bare file still has a jobs section and no forges', () => {
+    const bare = parseConfigFile({}, { warn: () => {} })
+    const { config } = effectiveConfig(bare, [], { forgeFactories: {} })
+    expect(config.forges).toEqual({})
+    expect(config.jobs).toMatchObject({ concurrency: 2, schedules: [] })
   })
 })
 
@@ -281,7 +199,7 @@ describe('createConfigSource', () => {
       updatedAt: at,
     })
     await source.refresh()
-    expect(seen).toEqual(['games,tools'])
+    expect(seen).toEqual(['tools'])
     expect(live.groups.tools?.forge).toBe('cloud')
     expect('tools' in live.groups).toBeTrue()
     expect(forges).not.toBe(live.forges)
@@ -328,9 +246,9 @@ describe('createConfigSource', () => {
     source.close()
   })
 
-  test('without a store it serves the file config', async () => {
+  test('without a store it serves the file config alone', async () => {
     const source = await createConfigSource({ file, forgeFactories: {} })
-    expect(source.current()).toEqual(file)
+    expect(source.current()).toMatchObject({ ...file, forges: {}, groups: {} })
     expect((await source.refresh()).config).toBe(source.current())
   })
 })

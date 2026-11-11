@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { HoltkeeperFileConfig } from '@holtkeeper/core'
 import type { ServerOptions } from '@holtkeeper/server'
 
-import { UsageError } from '../src/audit.ts'
-import { parseDuration, serve, serveOptions } from '../src/serve.ts'
+import { UsageError, parseDuration, serve, serveOptions } from '../src/serve.ts'
 
 const failure = (promise: Promise<unknown>) => promise.catch((error: unknown) => error)
 
@@ -27,12 +26,20 @@ describe('serve options', () => {
       roles: ['all'],
       worker: { claimDelayMs: 15_000 },
     })
+    expect(await serveOptions({}, { HOLTKEEPER_WORKER_POOL: 'write' })).toEqual({
+      roles: ['all'],
+      worker: { pools: ['write'] },
+    })
+    expect(await serveOptions({ pool: 'default, write' }, {})).toMatchObject({
+      worker: { pools: ['default', 'write'] },
+    })
   })
 
   test('rejects bad values as usage errors', async () => {
     expect(await failure(serveOptions({ role: 'boss' }, {}))).toBeInstanceOf(UsageError)
     expect(await failure(serveOptions({ 'max-jobs': '0' }, {}))).toBeInstanceOf(UsageError)
     expect(await failure(serveOptions({ 'claim-delay': 'later' }, {}))).toBeInstanceOf(UsageError)
+    expect(await failure(serveOptions({ pool: 'Write Pool' }, {}))).toBeInstanceOf(UsageError)
     expect(() => parseDuration('drain-timeout', 'soon')).toThrow(UsageError)
     expect(parseDuration('drain-timeout', '45')).toBe(45_000)
     expect(parseDuration('drain-timeout', '500ms')).toBe(500)
@@ -40,7 +47,7 @@ describe('serve options', () => {
 })
 
 describe('serve', () => {
-  const config = {} as HoltkeeperConfig
+  const config = {} as HoltkeeperFileConfig
 
   test('exits 0 once the worker reached --max-jobs, after stopping the server', async () => {
     const events: string[] = []

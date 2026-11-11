@@ -32,7 +32,6 @@ const setup = (auth: AuthProvider = noAuth()) => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -131,11 +130,12 @@ describe('knowledge routes', () => {
 
     expect((await send(app, 'DELETE', `/api/knowledge/${created.id}`)).status).toBe(204)
     expect((await app.request(`/api/knowledge/${created.id}`)).status).toBe(404)
-    expect((await store.activity.list()).map((e) => e.action).toReversed()).toEqual([
-      'knowledge.created',
-      'knowledge.updated',
-      'knowledge.archived',
-      'knowledge.removed',
+    const audited = await store.audit.list({ action: 'knowledge', outcome: 'ok' })
+    expect(audited.events.map((e) => e.action).toReversed()).toEqual([
+      'knowledge.create',
+      'knowledge.update',
+      'knowledge.archive',
+      'knowledge.delete',
     ])
   })
 

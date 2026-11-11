@@ -75,12 +75,53 @@ describe('server jobs', () => {
     expect(await scopedAnalyzerOptions(config, store, other)).toEqual({ depth: 2 })
   })
 
-  test('startJobs is off without a jobs section and runs jobs with one', async () => {
+  test('assets jobs get the assets.policy of their repository; the analyzers setting cannot set it', async () => {
+    const store = memoryStore()
+    const config = parseConfig(base)
+    const at = '2026-10-30T10:00:00.000Z'
+    await store.settings.put({
+      id: 'p1',
+      key: 'assets.policy',
+      scope: { groups: ['games'] },
+      value: { maxDimension: 4096 },
+      secret: false,
+      updatedAt: at,
+    })
+    await store.settings.put({
+      id: 'a1',
+      key: 'analyzers.assets',
+      scope: { all: true },
+      value: { optimizeTop: 5 },
+      secret: false,
+      updatedAt: at,
+    })
+    const job = await store.jobs.enqueue({
+      analyzer: 'assets',
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'schedule',
+      createdAt: at,
+    })
+    const options = await scopedAnalyzerOptions(config, store, job)
+    expect(options).toMatchObject({ optimizeTop: 5, policy: { maxDimension: 4096 } })
+    const outside = await scopedAnalyzerOptions(config, store, {
+      ...job,
+      repo: { forge: 'work', path: 'tools/x' },
+    })
+    expect(outside).toMatchObject({ policy: { maxDimension: 2560, formats: { raster: 'webp' } } })
+
+    const assets: AnyAnalyzer = {
+      ...echo,
+      kind: 'assets',
+      options: z.object({ optimizeTop: z.number().optional(), policy: z.object({}).optional() }),
+    }
+    const [setting] = analyzerSettings([assets])
+    expect(setting?.schema.safeParse({ policy: {} }).success).toBeFalse()
+    expect(z.toJSONSchema(setting!.form!, { io: 'input' }).properties).not.toHaveProperty('policy')
+  })
+
+  test('startJobs runs jobs', async () => {
     const store = memoryStore()
     const lines: string[] = []
-    expect(
-      await startJobs({ config: parseConfig(base), store, analyzers: [echo], now, log: () => {} }),
-    ).toBeUndefined()
 
     await store.settings.put({
       id: 's1',
@@ -114,7 +155,7 @@ describe('server jobs', () => {
       depth: 4,
       mode: 'b',
     })
-    expect((await store.activity.list()).map((e) => e.action)).toEqual(['job.succeeded'])
+    expect(await store.audit.count()).toBe(0)
     expect(lines.some((l) => l.startsWith('jobs:'))).toBeTrue()
   })
 
@@ -190,5 +231,40 @@ describe('server jobs', () => {
       actor: 'jane',
       report,
     })
+  })
+
+  test('an audit job the freshness sweeper queued is stored with the freshness trigger', async () => {
+    const store = memoryStore()
+    const config = parseConfig({ ...base, jobs: {} })
+    const report = {
+      scanner: 'osv-scanner',
+      findings: [],
+      ignored: [],
+      expired: [],
+      fixes: [],
+      resolved: [],
+      changedFiles: [],
+    }
+    const audit: AnyAnalyzer = {
+      kind: 'audit',
+      analysis: { kind: 'audit', label: 'Audit' } as AnyAnalyzer['analysis'],
+      scope: 'repo',
+      needs: {},
+      options: z.object({}).loose(),
+      run: async () => ({ data: report }),
+    }
+    const job = await store.jobs.enqueue({
+      analyzer: 'audit',
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'freshness',
+      createdAt: now().toISOString(),
+    })
+    const engine = await startJobs({ config, store, analyzers: [audit], now, log: () => {} })
+    for (let i = 0; i < 50 && (await store.jobs.get(job.id))?.status !== 'succeeded'; i++)
+      await Bun.sleep(10)
+    await engine?.stop()
+
+    const [run] = await store.auditRuns.list({})
+    expect(run?.trigger).toBe('freshness')
   })
 })

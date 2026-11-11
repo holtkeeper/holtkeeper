@@ -27,21 +27,21 @@ export function Page({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="mx-auto flex w-full max-w-7xl flex-col gap-6"
+      className="mx-auto flex w-full max-w-7xl flex-col gap-5"
     >
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-4">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {media ? (
             <span className="shrink-0">{media}</span>
           ) : icon ? (
-            <span className="grid size-13 shrink-0 place-items-center rounded-2xl bg-surface shadow-surface">
-              <BrandIcon name={icon} className="size-10" />
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-panel">
+              <BrandIcon name={icon} className="size-7" />
             </span>
           ) : null}
           <div className="min-w-0">
-            {eyebrow ? <div className="mb-1 text-sm text-muted">{eyebrow}</div> : null}
-            <h1 className="truncate text-[1.65rem] font-semibold leading-tight">{title}</h1>
-            {description ? <p className="mt-1 text-sm text-muted">{description}</p> : null}
+            {eyebrow ? <div className="mb-0.5 text-xs text-muted">{eyebrow}</div> : null}
+            <h1 className="truncate text-lg font-semibold leading-tight">{title}</h1>
+            {description ? <p className="mt-0.5 text-sm text-muted">{description}</p> : null}
           </div>
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}

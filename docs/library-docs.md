@@ -12,30 +12,29 @@ Agents working in a repository should answer "how do I use X", "what changed bet
 - **The versions that matter.** Every version in use, plus the versions an upgrade would land on (latest patch, minor and major), not every release ever published.
 - **Fleet-aware.** Rank and filter by what the fleet actually imports (`usages`), and tell an agent what an upgrade breaks in our code, not in general.
 - **Answers, not pages.** Small, budgeted results like the rest of `/mcp` and `@holtkeeper/agent-tools`.
-- **Self-hosted first.** External services are optional fallbacks behind settings, off by default, like Context7 today.
+- **Self-hosted first.** External services stay out of agent runs; Context7 was wired once and removed in favor of the library index.
 
 Non-goals: a general web search engine; documentation of languages and platforms themselves (Node, Go standard library) beyond what their packages ship; ecosystems without a lockfile reader in `depgraph-*` (npm and Go come first).
 
 ## What already exists
 
-| Piece                                     | Gives us                                                                                                       |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@holtkeeper/usages`, `@holtkeeper/fleet` | Which external packages each repository uses, at which resolved versions, and which exports, members and props |
-| `@holtkeeper/api-surface`                 | API extraction from published `.d.ts` files, diffs between versions, Markdown for agents                       |
-| `/mcp` (`apps/server/src/api-surface`)    | Tokens, access checks, usage counting, `upgrade_impact` over the usage index — today for our own packages only |
-| `docs.package` in `agent-tools`           | Changelog `from..to`, migration sections, readme and `.d.ts` outline parsing — today only from `node_modules`  |
-| `@holtkeeper/changelog`                   | `parsePackageTag` for monorepo tags (`name@1.2.3`, `path/v1.2.3`)                                              |
-| `createHttpRegistry` (`fleet`), `stack`   | Registry lookups for latest versions                                                                           |
-| `Store.knowledge`                         | Full-text search (`tsvector` in Postgres, FTS5 in SQLite) and a place for curated quirks                       |
-| `@holtkeeper/artifacts`                   | Content-addressed blobs on the filesystem or S3                                                                |
-| `docker/egress-proxy`                     | Credentials for private registries and a download cache for immutable archives                                 |
-| `context7Server`                          | An external fallback already wired as an optional MCP server                                                   |
+| Piece                                  | Gives us                                                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `@holtkeeper/usages`, `depgraph`       | Which external packages each repository uses, at which resolved versions, and which exports, members and props |
+| `@holtkeeper/api-surface`              | API extraction from published `.d.ts` files, diffs between versions, Markdown for agents                       |
+| `/mcp` (`apps/server/src/api-surface`) | Tokens, access checks, usage counting, `upgrade_impact` over the usage index — today for our own packages only |
+| `docs.package` in `agent-tools`        | Changelog `from..to`, migration sections, readme and `.d.ts` outline parsing — today only from `node_modules`  |
+| `@holtkeeper/release`                  | `parsePackageTag` for monorepo tags (`name@1.2.3`, `path/v1.2.3`)                                              |
+| `libraries:latest`, `stack`            | Latest versions of libraries (library index runs) and of runtimes and images                                   |
+| `Store.knowledge`                      | Full-text search (`tsvector` in Postgres, FTS5 in SQLite) and a place for curated quirks                       |
+| `@holtkeeper/artifacts`                | Content-addressed blobs on the filesystem or S3                                                                |
+| `docker/egress-proxy`                  | Credentials for private registries and a download cache for immutable archives                                 |
 
 The new work is mostly a fetcher and an index around these.
 
 ## Version matrix
 
-For each library `(ecosystem, name)` the index keeps a small set of versions, recomputed whenever a `usages` or `fleet` record changes:
+For each library `(ecosystem, name)` the index keeps a small set of versions, recomputed whenever a `depgraph` or `usages` record changes:
 
 1. every version some repository resolves to (`used`);
 2. for each used `major.minor`, its newest patch (`patch`);
@@ -47,7 +46,7 @@ Prereleases count only when used. Versions marked deprecated in the registry kee
 
 Example: the fleet resolves `react` to `18.2.0`, `18.3.1` and `19.0.0`, and the newest release is `19.2.1`. The matrix is `18.2.0`, `18.3.1` (used and newest patch of 18.3, newest minor of 18), `19.0.0` (used), the newest 19.0 patch, and `19.2.1` (latest): five versions. Most libraries end up with three to eight.
 
-Libraries the fleet defines itself (`fleet`'s `definedIn`, `depgraph`'s package catalog) are left to `api-surface`, so a public package of the same name never shadows them.
+Libraries the fleet defines itself (workspaces of `depgraph` records, local `usages` packages, the API catalog) are left to `api-surface`, so a public package of the same name never shadows them.
 
 ## Sources
 
@@ -85,7 +84,7 @@ Rough size: a few hundred libraries × five versions × tens of kilobytes of Mar
 
 A server-side job `library-index`, not a repository analyzer, since it works on the fleet as a whole:
 
-- runs after `usages` or `fleet` records change (debounced) and on a weekly schedule for new releases;
+- runs after `depgraph` or `usages` records change (debounced) and on a weekly schedule for new releases;
 - recomputes every matrix, fetches sources for versions it does not have yet, and drops versions that left every matrix after a grace period (four weeks), keeping blobs other versions share;
 - respects per-host request budgets (GitHub REST 5000 requests an hour per token, search 30 a minute) with the existing distributed limiter;
 - writes progress and failures per library and source, so the web UI can show what is indexed and why something is missing.
@@ -125,14 +124,14 @@ Error messages are matched literally (quoted phrases, stack frame names), since 
 
 | Need                                          | Decision                         | Why                                                                                                                                                                               |
 | --------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Version matrix, registry metadata             | Build                            | Small; `fleet` and `stack` already query registries                                                                                                                               |
+| Version matrix, registry metadata             | Build                            | Small; the index and `stack` already query registries                                                                                                                             |
 | API per version, diffs, upgrade impact        | Build                            | `api-surface` and `usages` already do it; no service knows our code                                                                                                               |
 | Docs shipped in packages                      | Build                            | Plain files in archives the egress proxy already caches                                                                                                                           |
 | Docs in repositories at a tag (gitmcp)        | Build                            | Reading files at a tag; nothing to buy                                                                                                                                            |
 | Source at a version (DeepWiki-style)          | Build the snapshot, buy the wiki | Raw source with `code.*` tools is exact and cheap; generated architecture wikis cost many tokens per library and version, so mount DeepWiki's MCP as an optional fallback instead |
 | Issues and discussions                        | Build                            | Forge APIs are enough; the work is filtering and ranking, not access                                                                                                              |
 | Docs sites that need JavaScript or block bots | Buy, or self-host                | Firecrawl (self-hostable under AGPL) or a similar crawler for the long tail; `llms.txt` and sitemap fetching covers static sites                                                  |
-| Curated snippets for popular libraries        | Buy (fallback)                   | Context7, already wired and off by default; queries leave the network                                                                                                             |
+| Curated snippets for popular libraries        | Buy (fallback)                   | Context7 (removed: queries leave the network and the library index covers it)                                                                                                     |
 | Embeddings                                    | Either                           | An embedding API or a local model; only if full-text search proves insufficient                                                                                                   |
 | Stack Overflow                                | Skip                             | API and licence restrictions                                                                                                                                                      |
 
@@ -143,7 +142,7 @@ Error messages are matched literally (quoted phrases, stack frame names), since 
 3. **Go.** Module zips, `go doc`, major paths joined.
 4. **Source snapshots.** `library_source` and `code.*` tools over a snapshot.
 5. **Issues.** Index, live search, optional digests and knowledge proposals.
-6. **Fallbacks.** Docs sites via `llms.txt`/sitemap, a crawler setting for the rest, DeepWiki next to Context7 in `externalServers`.
+6. **Fallbacks.** Docs sites via `llms.txt`/sitemap, a crawler setting for the rest, DeepWiki as an MCP server mounted per task.
 
 Each phase ships its module docs, store contract tests and a web UI view of what is indexed.
 
@@ -159,7 +158,7 @@ Each phase ships its module docs, store contract tests and a web UI view of what
 
 Where the server differs from the design above:
 
-- Indexing runs on an interval (setting `libraries.interval`, default daily, instead of weekly), about two minutes after the server starts, 10 minutes after the last new `usages` or `fleet` record, and on `POST /api/libraries/reindex`.
+- Indexing runs on an interval (setting `libraries.interval`, default daily, instead of weekly), about two minutes after the server starts, 10 minutes after the last new `depgraph` or `usages` record, and on `POST /api/system/library-index/reindex`.
 - The setting is read at global scope only. Without it the index runs with the defaults (on, anonymous GitHub until tokens are added); a change of the GitHub tokens starts a new run at once, aborting a running one, and without readable tokens the client does not wait for rate limit resets.
 - GitHub tokens are every credential of kind `github`, or the ones `libraries.github` lists, pooled by the client: each request goes to the token with the most of its limit left. Tokens of one account share GitHub's limit, so duplicates are dropped.
 - Tarballs are streamed: npm and GitHub downloads stop at a size limit (50 MB npm, 100 MB repository docs, 200 MB source snapshots) and tar entries that are not kept are skipped without being held in memory.

@@ -8,16 +8,15 @@ GitLab adapter: a `GitForge` over the GitLab REST API v4 and token rotation for 
 import { env } from '@holtkeeper/forge'
 import { gitlab } from '@holtkeeper/forge-gitlab'
 
-export default {
-  forges: {
-    gitlab: gitlab({ url: 'https://gitlab.example.com', token: env('GITLAB_TOKEN') }),
-  },
-}
+const definition = gitlab({ url: 'https://gitlab.example.com', token: env('GITLAB_TOKEN') })
+const forge = definition.create()
 ```
+
+The server builds it for every GitLab forge added in the panel, with the token of the forge's credential (`gitlabForgeFactory` of [@holtkeeper/managed-config](../../managed-config/docs/README.md)).
 
 Options: `url` (base URL, with or without a trailing slash, including the path prefix of a self-managed instance such as `https://example.com/gitlab`), `token` (`Secret`, resolved when `create()` is called), `fetch?`, `perPage?` (1 to 100, default 100) and `retries?` (how often a `429` is retried after waiting for `Retry-After`, capped at 60 s; default 1).
 
-The token needs the `api` scope (code review writes — draft notes, publishing, approving, replying, resolving — need it too); `read_api` is enough when only `listRepositories`, `listMemberRepositories`, `getRepository`, `readFile`, `readFileBytes`, `listFiles`, `getMergeRequest`, `getMergeRequestDiff`, `compareCommits`, `listDiscussions`, `findMergeRequest`, `listPipelines`, `listJobs` and the insight reads (`listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `getPushRules`) are used. For the insight reads on private projects, give the user behind the token at least Reporter access; Guests may not see jobs and deployments. `listCiVariables` needs Maintainer on the project or group; without it the variables stay unknown. `git clone` over HTTPS with `gitCredentials()` needs `read_repository` (or `api`). Personal, project, group and service-account tokens work alike; the user behind the token needs Developer access to push, open merge requests and run jobs, and Maintainer access on protected branches and tags.
+The token needs the `api` scope (code review writes — draft notes, publishing, approving, replying, resolving — need it too); `read_api` is enough when only `listRepositories`, `listMemberRepositories`, `getRepository`, `readFile`, `readFileBytes`, `listFiles`, `getMergeRequest`, `getMergeRequestDiff`, `compareCommits`, `listDiscussions`, `listNoteReactions`, `findMergeRequest`, `listPipelines`, `listJobs` and the insight reads (`listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `getPushRules`) are used. For the insight reads on private projects, give the user behind the token at least Reporter access; Guests may not see jobs and deployments. `listCiVariables` needs Maintainer on the project or group; without it the variables stay unknown. `git clone` over HTTPS with `gitCredentials()` needs `read_repository` (or `api`). Personal, project, group and service-account tokens work alike; the user behind the token needs Developer access to push, open merge requests and run jobs, and Maintainer access on protected branches and tags.
 
 Repositories are projects addressed by URL-encoded full path (`games/app-x` → `projects/games%2Fapp-x`); merge request ids are GitLab `iid`s.
 
@@ -61,6 +60,7 @@ Repositories are projects addressed by URL-encoded full path (`games/app-x` → 
 | `getMergeRequestDiff`    | `GET /projects/:id/merge_requests/:iid/versions` (all pages), then `GET .../versions/:version_id` of the latest; without versions `diff_refs` and paginated `GET .../diffs`                                                                      |
 | `compareCommits`         | `GET /projects/:id/repository/compare?from=&to=&straight=true`                                                                                                                                                                                   |
 | `listDiscussions`        | `GET /projects/:id/merge_requests/:iid/discussions`, all pages                                                                                                                                                                                   |
+| `listNoteReactions`      | `GET /projects/:id/merge_requests/:iid/notes/:note_id/award_emoji`, all pages; `name` and `user.username` of each award                                                                                                                          |
 | `submitReview`           | `POST .../approve` (only `approve`), `GET .../versions` + `GET .../versions/:version_id`, `POST .../draft_notes` per comment, `POST .../draft_notes/bulk_publish`; on failure `PUT .../draft_notes/:id/publish` and `DELETE .../draft_notes/:id` |
 | `replyToDiscussion`      | `POST /projects/:id/merge_requests/:iid/discussions/:discussion_id/notes`                                                                                                                                                                        |
 | `postMergeRequestNote`   | `POST /projects/:id/merge_requests/:iid/notes` (a standalone note), or `POST .../discussions/:discussion_id/notes` with `discussionId`                                                                                                           |

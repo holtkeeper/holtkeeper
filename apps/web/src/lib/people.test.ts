@@ -9,7 +9,7 @@ describe('people', () => {
     expect(initialsOf('  ')).toBe('?')
   })
 
-  test('activity ids resolve to people or fall back to the id', () => {
+  test('actor ids resolve to people or fall back to the id', () => {
     const people = { u1: { name: 'Ann', avatarUrl: '/api/avatars/fox.svg' } }
     expect(personOf(people, 'u1')).toEqual({
       name: 'Ann',

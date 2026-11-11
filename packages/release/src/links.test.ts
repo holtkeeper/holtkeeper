@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { releaseLinks } from './links.ts'
+import { forgeLinks, releaseLinks } from './links.ts'
 import { actorLabel } from './notify.ts'
 import type { ReleaseCommit, ReleaseFacts } from './types.ts'
 
@@ -95,9 +95,35 @@ describe('release links', () => {
 
 describe('actor label', () => {
   test('prefers the display name and names the channel', () => {
-    expect(actorLabel({ actor: 'u1', actorName: 'Jane Doe', channel: 'slack' })).toBe(
-      'Jane Doe (Slack)',
+    expect(actorLabel({ actor: 'u1', actorName: 'Jane Doe', channel: 'cli' })).toBe(
+      'Jane Doe (CLI)',
     )
     expect(actorLabel({ actor: 'lead' })).toBe('lead')
+  })
+})
+
+describe('forgeLinks', () => {
+  test('gitlab', () => {
+    const links = forgeLinks({
+      kind: 'gitlab',
+      webUrl: 'https://gitlab.example.com/games/app/',
+      ticketUrl: 'https://tracker.example.com/browse/{id}',
+    })
+    expect(links.commit('abc')).toBe('https://gitlab.example.com/games/app/-/commit/abc')
+    expect(links.compare('v1.0.0', 'v1.1.0')).toBe(
+      'https://gitlab.example.com/games/app/-/compare/v1.0.0...v1.1.0',
+    )
+    expect(links.mergeRequest(12)).toBe('https://gitlab.example.com/games/app/-/merge_requests/12')
+    expect(links.tag('v1.1.0')).toBe('https://gitlab.example.com/games/app/-/tags/v1.1.0')
+    expect(links.ticket('ABC-123')).toBe('https://tracker.example.com/browse/ABC-123')
+    expect(links.ticket('#5')).toBe('https://gitlab.example.com/games/app/-/issues/5')
+  })
+
+  test('github', () => {
+    const links = forgeLinks({ kind: 'github', webUrl: 'https://github.com/o/r' })
+    expect(links.commit('abc')).toBe('https://github.com/o/r/commit/abc')
+    expect(links.compare('a', 'b')).toBe('https://github.com/o/r/compare/a...b')
+    expect(links.mergeRequest(3)).toBe('https://github.com/o/r/pull/3')
+    expect(links.ticket('ABC-1')).toBeUndefined()
   })
 })

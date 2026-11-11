@@ -1,24 +1,21 @@
 import type { SettingDefinitionView, SettingView } from '@holtkeeper/api'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import {
-  useCredentials,
-  useResolvedSettings,
-  useSettingMutations,
-  useSettings,
-} from '../../api/queries.ts'
+import { useCredentials, useSettingMutations, useSettings } from '../../api/queries.ts'
+import { inheritedEntry, inheritedFrom, overriddenKeys } from '../../lib/repo-page.ts'
 import { editorFor, previewValue } from '../../lib/schema.ts'
 import { type ScopeFocus, isSharedScope, namesFocus, scopeOfFocus } from '../../lib/scope.ts'
 import {
   Button,
-  Chip,
   ConfirmDialog,
+  EmptyState,
   ErrorState,
-  Panel,
   Placeholder,
+  Select,
   Table,
+  Tag,
   Td,
   Th,
   notify,
@@ -31,20 +28,22 @@ import { EntryDialog } from './EntryDialog.tsx'
 type Editing = { definition: SettingDefinitionView; entry?: SettingView }
 
 /**
- * Every setting as it applies to one repository or group: entries made for it, and for a
- * repository the value that wins from broader scopes. New entries start scoped to the focus.
+ * The settings made for one repository or group and nothing else: each override with the value it
+ * replaces and where that comes from. New overrides start scoped to the focus.
  */
 export function ScopedSettings({
   focus,
   groups,
+  focusGroups = [],
 }: {
   focus: ScopeFocus
   /** Known groups, offered in the scope editor. */
   groups: readonly string[]
+  /** Config groups of the repository, to find what its overrides replace. */
+  focusGroups?: readonly string[]
 }) {
   const { can } = useSession()
   const settings = useSettings()
-  const resolved = useResolvedSettings(focus.kind === 'repo' ? focus.repo : undefined)
   const credentials = useCredentials(can('credentials:read'))
   const { remove } = useSettingMutations()
   const [editing, setEditing] = useState<Editing | null>(null)
@@ -56,7 +55,9 @@ export function ScopedSettings({
   if (settings.isError) return <ErrorState error={settings.error} />
 
   const { definitions, settings: entries } = settings.data
-  const sections = [...new Set(definitions.map((d) => d.section))]
+  const overridden = new Set(overriddenKeys(definitions, entries, focus))
+  const rows = definitions.filter((definition) => overridden.has(definition.key))
+  const addable = definitions.filter((definition) => !overridden.has(definition.key))
   const display = (definition: SettingDefinitionView, entry: SettingView) =>
     entry.secret && entry.value === null
       ? 'set'
@@ -65,110 +66,126 @@ export function ScopedSettings({
           : undefined) ?? previewValue(entry.value, entry.secret))
 
   return (
-    <div className="flex flex-col gap-4">
-      {sections.map((section) => (
-        <Panel key={section} title={section} contentClassName="p-0 sm:p-2">
-          <Table label={`${section} settings`}>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <p className="max-w-xl text-xs text-muted">
+          Only settings made for {here}. Everything else follows its groups or the defaults;
+          analyzer options are also edited from each analysis page.
+        </p>
+        {writable && addable.length ? (
+          <Select
+            aria-label="Add an override"
+            className="w-72"
+            placeholder="Add an override…"
+            options={addable.map((definition) => ({
+              id: definition.key,
+              label: definition.label,
+              text: definition.label,
+            }))}
+            value={undefined}
+            onChange={(key) => {
+              const definition = addable.find((d) => d.key === key)
+              if (definition) setEditing({ definition })
+            }}
+          />
+        ) : null}
+      </div>
+      {rows.length === 0 ? (
+        <EmptyState
+          icon={<SlidersHorizontal />}
+          title="No overrides"
+          description={`Nothing is set for ${here} alone.`}
+        />
+      ) : (
+        <section className="rounded-xl border border-line bg-panel">
+          <Table label={`Overrides for ${here}`}>
             <thead>
               <tr>
                 <Th>Setting</Th>
                 <Th>For {here}</Th>
-                {focus.kind === 'repo' ? <Th>Effective</Th> : null}
+                <Th>Replaces</Th>
                 <Th />
               </tr>
             </thead>
             <tbody>
-              {definitions
-                .filter((d) => d.section === section)
-                .map((definition) => {
-                  const own = entries.filter(
-                    (e) => e.key === definition.key && namesFocus(e.scope, focus),
-                  )
-                  const winner =
-                    focus.kind === 'repo' ? resolved.data?.settings[definition.key] : undefined
-                  return (
-                    <tr key={definition.key} className="align-top">
-                      <Td>
-                        <div className="font-medium">{definition.label}</div>
-                        <div className="max-w-sm text-xs text-muted">{definition.description}</div>
-                      </Td>
-                      <Td>
-                        {own.length === 0 ? (
-                          <span className="text-xs text-muted">—</span>
-                        ) : (
-                          <ul className="flex flex-col gap-1">
-                            {own.map((entry) => (
-                              <li key={entry.id} className="flex items-center gap-1">
-                                <span className="max-w-64 truncate font-mono text-xs">
-                                  {display(definition, entry)}
-                                </span>
-                                {isSharedScope(entry.scope) ? (
-                                  <ScopeBadge scope={entry.scope} />
-                                ) : null}
-                                {writable ? (
-                                  <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      isIconOnly
-                                      aria-label={`Edit ${definition.label}`}
-                                      onPress={() => setEditing({ definition, entry })}
-                                    >
-                                      <Pencil className="size-3.5" />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      isIconOnly
-                                      aria-label={`Delete ${definition.label}`}
-                                      onPress={() => setDeleting({ definition, entry })}
-                                    >
-                                      <Trash2 className="size-3.5" />
-                                    </Button>
-                                  </>
-                                ) : null}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </Td>
-                      {focus.kind === 'repo' ? (
-                        <Td>
-                          {winner ? (
-                            <div className="flex flex-col items-start gap-1">
-                              <span className="max-w-64 truncate font-mono text-xs">
-                                {display(definition, winner)}
-                              </span>
-                              {namesFocus(winner.scope, focus) ? (
-                                <Chip tone="accent">this repository</Chip>
-                              ) : (
-                                <ScopeBadge scope={winner.scope} />
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted">default</span>
-                          )}
-                        </Td>
+              {rows.map((definition) => {
+                const own = entries.filter(
+                  (e) => e.key === definition.key && namesFocus(e.scope, focus),
+                )
+                const inherited = inheritedEntry(entries, definition.key, focus, focusGroups)
+                return (
+                  <tr key={definition.key} className="align-top">
+                    <Td>
+                      <div className="font-medium" title={definition.key}>
+                        {definition.label}
+                      </div>
+                      <div className="max-w-sm text-xs text-muted">{definition.description}</div>
+                    </Td>
+                    <Td>
+                      <ul className="flex flex-col gap-1">
+                        {own.map((entry) => (
+                          <li key={entry.id} className="flex items-center gap-1">
+                            <span className="mono max-w-64 truncate text-xs">
+                              {display(definition, entry)}
+                            </span>
+                            {isSharedScope(entry.scope) ? <ScopeBadge scope={entry.scope} /> : null}
+                            {writable ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  isIconOnly
+                                  aria-label={`Edit ${definition.label}`}
+                                  onPress={() => setEditing({ definition, entry })}
+                                >
+                                  <Pencil className="size-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  isIconOnly
+                                  aria-label={`Delete ${definition.label}`}
+                                  onPress={() => setDeleting({ definition, entry })}
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </Button>
+                              </>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </Td>
+                    <Td>
+                      {inherited ? (
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="mono max-w-64 truncate text-xs text-muted">
+                            {display(definition, inherited)}
+                          </span>
+                          <Tag>inherited from {inheritedFrom(inherited)}</Tag>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted">the default</span>
+                      )}
+                    </Td>
+                    <Td align="right">
+                      {writable ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onPress={() => setEditing({ definition })}
+                        >
+                          <Plus className="size-3.5" />
+                          Add
+                        </Button>
                       ) : null}
-                      <Td align="right">
-                        {writable ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onPress={() => setEditing({ definition })}
-                          >
-                            <Plus className="size-3.5" />
-                            {own.length ? 'Add' : 'Set here'}
-                          </Button>
-                        ) : null}
-                      </Td>
-                    </tr>
-                  )
-                })}
+                    </Td>
+                  </tr>
+                )
+              })}
             </tbody>
           </Table>
-        </Panel>
-      ))}
+        </section>
+      )}
 
       {editing ? (
         <EntryDialog

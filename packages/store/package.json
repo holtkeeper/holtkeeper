@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/chat": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/vuln": "workspace:*"
   }

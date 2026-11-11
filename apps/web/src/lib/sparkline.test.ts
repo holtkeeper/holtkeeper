@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { sparkPaths } from './sparkline.ts'
+import { auditSparkline, sparkPaths } from './sparkline.ts'
 
 describe('sparkPaths', () => {
   test('scales from zero to the largest value', () => {
@@ -20,4 +20,15 @@ describe('sparkPaths', () => {
   test('nothing to draw without values', () => {
     expect(sparkPaths([null, null], 10, 10)).toEqual({ line: '', area: '' })
   })
+})
+
+const run = (finishedAt: string, active: number) =>
+  ({ finishedAt, active }) as Parameters<typeof auditSparkline>[0][number]
+
+test('auditSparkline is chronological', () => {
+  expect(
+    auditSparkline([run('2026-10-02T00:00:00.000Z', 1), run('2026-10-01T00:00:00.000Z', 4)]).map(
+      (point) => point.active,
+    ),
+  ).toEqual([4, 1])
 })

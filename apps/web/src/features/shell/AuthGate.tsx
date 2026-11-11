@@ -21,10 +21,10 @@ export function AuthGate() {
       </div>
     )
   }
-  const { principal, auth } = me.data
+  const { principal, auth, crossTeam } = me.data
   if (!principal) return <LoginPage auth={auth} />
   return (
-    <SessionContext value={{ principal, auth }}>
+    <SessionContext value={{ principal, auth, crossTeam }}>
       <AppShell />
     </SessionContext>
   )

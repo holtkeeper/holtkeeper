@@ -38,7 +38,7 @@ export function Th({
   return (
     <th
       scope="col"
-      className={`sticky top-0 z-[2] whitespace-nowrap border-b border-border bg-[var(--table-bg,var(--surface))] px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted text-${align} ${className ?? ''}`}
+      className={`sticky top-0 z-[2] whitespace-nowrap border-b border-border bg-[var(--table-bg,var(--surface))] px-3.5 py-2 text-xs font-medium text-muted text-${align} ${className ?? ''}`}
     >
       {children}
     </th>
@@ -56,7 +56,7 @@ export function Td({
 }) {
   return (
     <td
-      className={`border-b border-separator px-3 py-3 align-middle text-${align} ${className ?? ''}`}
+      className={`border-b border-separator px-3.5 py-2.5 align-middle text-${align} ${className ?? ''}`}
     >
       {children}
     </td>

@@ -1,39 +1,38 @@
 # @holtkeeper/ci-jobs
 
-How long CI jobs take and how often they fail, per repository and over time. Job attempts are kept in the store (`CiJobStore`), so the first run reads the history once and every later run fetches only what is new. Produces serializable `CiJobsData` and a `ci-jobs` analysis kind that turns it into a universal `Report` with trends, slowdowns, weekly heatmaps and a jobs table with sparklines.
+How long a repository's pipelines take, how often they pass and which jobs cause trouble. Job attempts are kept in the store (`CiJobStore`), so the first run reads the history once and every later run fetches only what is new. Produces serializable `CiJobsData`, the problem list behind the web UI's **CI** page and a `ci-jobs` analysis kind with the same content as a universal `Report`.
 
 ## Analyzer
 
-`ciJobsAnalyzer` (`kind: 'ci-jobs'`, scope `repo`, `needs: { forge: true, history: true }`). A fresh install runs it every night through the default schedule `ci-jobs-nightly`. `createCiJobsAnalyzer({ now? })` builds one with another clock. Without `history.ciJobs` it reads the whole window into memory each run and says so in the notes.
+`ciJobsAnalyzer` (`kind: 'ci-jobs'`, scope `repo`, `needs: { forge: true, history: true }`, `keepRecords: 3`). Freshness reruns it daily (`refresh: { on: 'time', cadence: '1d' }`) and records the default-branch head it read as the record's `sha`. Runners keep its newest three records per repository; the job history lives in `CiJobStore`, not in records. `createCiJobsAnalyzer({ now? })` builds one with another clock. Without `history.ciJobs` it reads the whole window into memory each run and says so in the job log, where sync notes go too.
 
-| Option             | Flag               | Default | Meaning                                                    |
-| ------------------ | ------------------ | ------- | ---------------------------------------------------------- |
-| `days`             | `--days`           | `90`    | Window length, ending now                                  |
-| `branch`           | `--branch`         | —       | Only pipelines of this branch or tag; every ref when unset |
-| `recentDays`       | `--recent-days`    | `14`    | Trailing days compared with the rest of the window         |
-| `changePercent`    | `--change-percent` | `20`    | Median change in percent that marks a job slower or faster |
-| `minChangeSeconds` | `--min-change`     | `15`    | Smallest median change in seconds that counts              |
-| `maxJobs`          | `--max-jobs`       | `50000` | Job attempts one sync reads at most                        |
-
-Presets: `default-branch-quarter` (`main`, 90 days) and `half-year` (180 days, 28 recent days).
+| Option             | Default | Meaning                                                    |
+| ------------------ | ------- | ---------------------------------------------------------- |
+| `days`             | `90`    | Window length, ending now                                  |
+| `branch`           | —       | Only pipelines of this branch or tag; every ref when unset |
+| `recentDays`       | `14`    | Trailing days compared with the rest of the window         |
+| `changePercent`    | `20`    | Median change in percent that marks a job slower or faster |
+| `minChangeSeconds` | `15`    | Smallest median change in seconds that counts              |
+| `maxJobs`          | `50000` | Job attempts one sync reads at most                        |
 
 ## Pipeline
 
-1. **`syncCiJobs({ forge, store, repo, since, syncedFrom?, limit })`** — the first run, or one asking further back than any earlier full sync (`syncedFrom`, kept in the previous record's `history`), reads every job since `since`; later runs read from a day before the newest stored job, so jobs that were still running get their final status. Reads go through `listProjectJobRuns`; forges without it fall back to `listPipelineRuns` and `listJobRuns` per pipeline (newest 300). Only finished attempts (`success`, `failed`, `canceled`) are stored.
-2. **`analyzeCiJobs(records, { from, to }, options)`** — pure; the computations below over the stored attempts of the window.
-3. **`ciJobsAnalysis`** / **`ciJobsReport(data, { previous?, repo?, ref? })`** — the report. `ciJobsDataSchema` (zod) validates uploads.
+1. **`syncCiJobs({ forge, store, repo, since, syncedFrom?, limit })`** — the first run, or one asking further back than any earlier full sync (`syncedFrom`, kept in the previous record's `history` and read even from records in an older shape), reads every job since `since`; later runs read from a day before the newest stored job, so jobs that were still running get their final status. Reads go through `listProjectJobRuns`; forges without it fall back to `listPipelineRuns` and `listJobRuns` per pipeline (newest 300). Only finished attempts (`success`, `failed`, `canceled`) are stored.
+2. **`analyzeCiJobs(records, { from, to, defaultBranch? }, options)`** — pure; the computations below over the stored attempts of the window.
+3. **`problemJobs(data, limit = 5)`** and **`jobProblems(job)`** — the problem list and the problems of one job.
+4. **`ciJobsAnalysis`** / **`ciJobsReport(data, { previous?, repo?, ref? })`** — the report. `ciJobsDataSchema` (zod) validates uploads and drops unknown fields; `readCiJobs(data)` reads a stored record and returns `undefined` for one in an older shape, which lists and reports treat as no data.
 
 ## Computations
 
 Durations are seconds, rates percentages, weeks start on Monday (UTC).
 
 - **Attempts and finals**: the attempt with the highest job id per pipeline and job name is final; earlier ones were retried.
-- **Durations** come from successful attempts: p25, median, p75, p95 and max per job and per job and week.
-- **Failure rate** counts final attempts; jobs allowed to fail and canceled ones are left out. **Retried** is the share of pipelines where the job needed more than one attempt; **flaky** counts pipelines where an attempt failed and a later one passed.
+- **Pipelines**: the headline numbers describe the default branch's pipelines (`pipelines.ref`), or `options.branch` when set, or every pipeline when the default branch has none. **Pipeline time** is how long any job of a pipeline was running (the union of its attempts' run times, retries included), so idle gaps such as a manual job started days later do not count; it is measured on passing pipelines (median, p90, and per week). **Success rate** is the share of pipelines where no final attempt of a job not allowed to fail failed. **Queue** is the queue time of their attempts. **Change** compares the median of the last 7 days with the 7 days before.
+- **Stage order**: forges number jobs as a pipeline creates them, stage by stage, so the stage whose first job has the lower id runs earlier; each stage scores wins minus losses against the others across pipelines, ties by name. Jobs are listed in stage order, then by name.
+- **Per job**: durations of successful attempts (median, p90, weekly median), **failure rate** over final attempts (jobs allowed to fail and canceled ones left out), **retried** (share of pipelines needing more than one attempt), **flaky** (pipelines where an attempt failed and a later one passed).
 - **Trend**: the median of the last `recentDays` against the median of the window before them. `slower`/`faster` needs at least five successful runs on each side and a change of `changePercent` and `minChangeSeconds`; `new` has no earlier runs, `idle` no recent ones, everything else is `stable`.
-- **Change point** (slower and faster jobs): over daily medians, the day where the mean before and after differs most in the trend's direction, weighted towards balanced splits, with at least three days on each side. It names the first run of that day: time, commit, ref and link.
-- **Pipeline time**: how long any job of a pipeline was running (the union of its job attempts' run times, retries included), so idle gaps such as a manual job started days later do not count; quartiles per week.
-- **Pipelines by branch** (`refGroupOf`): each pipeline falls into one group by its ref's name — main branches (`main`, `master`, `trunk`, `production`, `prod`), development branches (`dev`, `develop`, `development`, `staging`, `stage`, `next`, `integration`), release and hotfix branches (`release…`, `hotfix…`, `rc…`, `support…`), merge requests (`refs/merge-requests/…`), tags (by the forge's `tag` flag, not by name) and every other branch as feature branches. The forge's default branch keeps the group its name gives it (a `development` default stays a development branch) and joins the main branches otherwise; its group is labelled `(default: <branch>)` and has `hasDefault`. Per group: pipelines, distinct refs, failure rate (pipelines with a failed job not allowed to fail), pipeline time of passing pipelines with its weekly median and p95, the recent median against the earlier one, and the five busiest refs.
+- **Change point** (slower and faster jobs): over daily medians, the day where the mean before and after differs most in the trend's direction, weighted towards balanced splits, with at least three days on each side. It names the first run of that day: time, commit and link.
+- **Problems** (`jobProblems`): `failing` from a 10% failure rate with at least two failures (never for jobs allowed to fail), `slower` from the trend, `flaky` from two pipelines that passed only on retry. `problemJobs` takes the worst failing (by failure rate), slower (by extra time across its runs) and flaky (by flaky pipelines) job in turn, each job once, up to `limit`, with a one-line reason ("fails in 23% of runs", "+40% since 12 Oct (1m 40s → 2m 20s)", "passed only on retry in 3 pipelines, retried in 18% of them") and a link to the run where a slowdown started or the job's last run.
 
 ## Data
 
@@ -43,70 +42,33 @@ interface CiJobsData {
   options: CiJobsOptions
   defaultBranch?: string
   history: { oldest?; newest?; jobs; syncedFrom? }
-  sync: { mode: 'full' | 'incremental' | 'none'; after?; fetched; stored }
-  notes: string[]
-  totals: {
-    runs
-    pipelines
-    jobs
-    failures
-    failureRate?
-    retryRate
-    flakyJobs
-    slowerJobs
-    fasterJobs
-    computeSeconds
-    wallTime
-    queue
-  }
-  weeks: {
-    week
-    pipelines
-    runs
-    failures
-    failureRate?
-    p25?
-    median?
-    p75?
-    p95?
-    queueMedian?
-    computeSeconds
-  }[]
-  refGroups: {
-    group: 'main' | 'develop' | 'release' | 'feature' | 'merge-request' | 'tag'
-    label
-    hasDefault
-    pipelines
-    refs
-    failureRate?
-    duration
-    recentMedian?
-    baselineMedian?
-    change?
-    weeks
-    topRefs
-  }[]
-  stages: { stage; computeSeconds }[]
-  jobs: JobStats[] // by CI time, largest first; per job: duration spread, rates, trend, changePoint?, weeks, last run
+  lastRunAt?: string
+  pipelines: { ref?; count; successRate?; duration: Spread; queue: Spread; change? }
+  weeks: { week; pipelines; median?; p90? }[]
+  stages: string[] // in run order
+  jobs: JobStats[] // stage order; per job: duration, rates, trend, changePoint?, weekly medians, last run
+}
+interface Spread {
+  samples
+  median?
+  p90?
 }
 ```
 
 ## Report
 
-`kind: 'ci-jobs'`, label `CI jobs`, listed on the web UI's **CI jobs** page. Metrics (with deltas against the previous record): main branch pipeline time median, pipeline time median, job failure rate, jobs slower, jobs faster, flaky jobs, CI time per week, queue median.
+`kind: 'ci-jobs'`, label `CI jobs`. Metrics (with deltas against the previous record): pipeline time median, success rate, queue median. Sections, matching the CI page:
 
-Sections:
+1. **Problem jobs** — `problemJobs` as issues.
+2. **Pipeline time per week** — median and p90 of passing pipelines.
+3. **Jobs** — every job in stage order: runs, median with a weekly sparkline, p90, recent change, failure rate.
+4. **Reliability** — jobs that failed or passed only on retry, worst failure rate first.
 
-1. **Slowdowns and speedups** — slower and faster jobs as issues ordered by CI time per week they add or save, naming when and on which commit the duration shifted; a weekly median chart with a p25–p75 band and a marker at the change for the three heaviest slowdowns.
-2. **Pipelines** — pipeline time per week (median, p95, p25–p75 band), job runs with failure rate on a second axis, CI time with queue median, and CI time by stage.
-3. **Pipelines by branch** — a table of the groups with a weekly median sparkline, p95, recent change and failure rate; a line per group of weekly median pipeline time; the busiest refs.
-4. **Jobs** — every job by CI time (100 heaviest): runs, median with a weekly sparkline, p95, recent change, failure rate with a weekly sparkline, retried, flaky, CI time share.
-5. **Week by week** — heatmaps of the 25 heaviest jobs: weekly median against the job's own median (diverging, ±50 %), and failure rate per week.
-6. **Reliability** — jobs that failed or passed only on retry, worst failure rate first.
-7. **Notes** — window, branch, stored history, what this run fetched, definitions and sync notes.
+A record in an older shape renders a short "older format" notice and no metrics.
 
 ## Limitations
 
 - Stored attempts are never pruned by the analyzer; `CiJobStore.prune` is there for retention.
-- A full sync of a very busy repository stops after `maxJobs` attempts; the notes say from when history is incomplete.
+- A full sync of a very busy repository stops after `maxJobs` attempts.
 - Pipeline time is measured from jobs, so jobs that never started (skipped, manual) do not count, and the forge's own pipeline duration may differ.
+- GitLab `needs:` edges are not stored, so the pipeline picture shows stages, not the job graph.

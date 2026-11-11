@@ -7,25 +7,17 @@ import {
   describeDays,
   describeTrigger,
   describeWindows,
-  formatTraitValue,
   isEvery,
   isHhmm,
   isIsoDate,
   looksLikeCron,
-  parseTraitValue,
   toScheduleDraft,
   toScheduleInput,
-  toTraitRows,
-  toTraitsDraft,
-  toTraitsInput,
   toTriggerDraft,
   toTriggerInput,
-  traitsDraftValid,
-  traitsId,
   triggerAnalyzers,
   triggerId,
   validateScheduleDraft,
-  validateTraitsDraft,
   validateTriggerDraft,
 } from './automation.ts'
 
@@ -132,7 +124,7 @@ describe('schedule form', () => {
       jitterMinutes: 10,
       spread: true,
     }
-    const draft = toScheduleDraft({ type: 'schedule', id: 'office', provenance: 'panel', data })
+    const draft = toScheduleDraft({ type: 'schedule', id: 'office', data })
     expect(draft.groups).toEqual(['games', 'frontend + storefront'])
     expect(validateScheduleDraft(draft)).toEqual({})
     expect(toScheduleInput(draft)).toEqual({
@@ -173,7 +165,6 @@ describe('schedule form', () => {
       toScheduleDraft({
         type: 'schedule',
         id: 'nightly',
-        provenance: 'file',
         data: { name: 'nightly', enabled: true, analyzers: ['deps'], cron: '0 3 * * *' },
       }).name,
     ).toBe('')
@@ -250,62 +241,5 @@ describe('triggers', () => {
     ).toBe('/holtkeeper port <targets>')
     expect(triggerAnalyzers({ on: 'command', command: 'port', analyzer: 'port' })).toEqual(['port'])
     expect(triggerAnalyzers({ on: 'tag', analyzers: ['a', 'b'] })).toEqual(['a', 'b'])
-  })
-})
-
-describe('repository traits', () => {
-  test('values parse by type', () => {
-    expect(parseTraitValue({ type: 'string', value: ' x ' })).toEqual({ value: ' x ' })
-    expect(parseTraitValue({ type: 'number', value: '2.5' })).toEqual({ value: 2.5 })
-    expect(parseTraitValue({ type: 'number', value: '' })).toEqual({ error: 'A number' })
-    expect(parseTraitValue({ type: 'number', value: 'ten' })).toEqual({ error: 'A number' })
-    expect(parseTraitValue({ type: 'boolean', value: 'true' })).toEqual({ value: true })
-    expect(parseTraitValue({ type: 'boolean', value: 'yes' })).toEqual({ error: 'true or false' })
-  })
-
-  test('rows keep the type of each value', () => {
-    expect(toTraitRows({ tier: 2, engine: 'unity', mobile: true })).toEqual([
-      { key: 'engine', type: 'string', value: 'unity' },
-      { key: 'mobile', type: 'boolean', value: 'true' },
-      { key: 'tier', type: 'number', value: '2' },
-    ])
-  })
-
-  test('validation and round trip', () => {
-    expect(validateTraitsDraft(toTraitsDraft())).toEqual({
-      pattern: 'Enter a path glob, e.g. games/*',
-    })
-    const draft = {
-      pattern: 'games/*',
-      forge: '',
-      rows: [
-        { key: 'tier', type: 'number' as const, value: 'x' },
-        { key: 'tier', type: 'string' as const, value: 'a' },
-        { key: '', type: 'string' as const, value: 'orphan' },
-        { key: '', type: 'string' as const, value: '' },
-      ],
-    }
-    const errors = validateTraitsDraft(draft, ['games/*'])
-    expect(errors).toEqual({
-      pattern: 'Traits for this pattern exist',
-      rows: { 0: 'A number', 1: 'Duplicate name', 2: 'Name the trait' },
-    })
-    expect(traitsDraftValid(errors)).toBe(false)
-    const data = { pattern: 'games/*', forge: 'work', traits: { engine: 'unity', tier: 2 } }
-    const good = toTraitsDraft(data)
-    expect(traitsDraftValid(validateTraitsDraft(good))).toBe(true)
-    expect(
-      toTraitsInput({ ...good, rows: [...good.rows, { key: '', type: 'string', value: '' }] }),
-    ).toEqual(data)
-  })
-
-  test('ids and display values', () => {
-    expect(traitsId('games/*')).toBe('games')
-    expect(traitsId('games/**', ['games'])).toBe('games-2')
-    expect(traitsId('**')).toBe('traits')
-    expect(formatTraitValue('2')).toBe('"2"')
-    expect(formatTraitValue('true')).toBe('"true"')
-    expect(formatTraitValue('unity')).toBe('unity')
-    expect(formatTraitValue(false)).toBe('false')
   })
 })

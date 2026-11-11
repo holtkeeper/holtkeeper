@@ -266,6 +266,10 @@ const currentUserSchema = z.object({
   email: z.string().nullable().optional(),
 })
 const anySchema = z.unknown()
+const awardSchema = z.object({
+  name: z.string(),
+  user: z.object({ username: z.string() }).nullish(),
+})
 const noteIdSchema = z.object({ id: z.number() })
 
 const toRelease = (release: z.infer<typeof releaseSchema>, fallbackUrl: string): ForgeRelease => ({
@@ -1035,6 +1039,16 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
       }))
     },
 
+    async headCommit(repo) {
+      const [head] = await client.json(
+        'GET',
+        `${project(repo)}/repository/commits`,
+        z.array(z.object({ id: z.string() })),
+        { query: { per_page: 1 } },
+      )
+      return head?.id
+    },
+
     async getPushRules(repo) {
       let rule: z.infer<typeof pushRuleSchema>
       try {
@@ -1157,6 +1171,17 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     async listDiscussions(repo, id) {
       const list = client.paginate(`${mrPath(repo, id)}/discussions`, discussionSchema)
       return (await take(list, undefined)).map(toDiscussion)
+    },
+
+    async listNoteReactions(repo, id, noteId) {
+      const list = client.paginate(
+        `${mrPath(repo, id)}/notes/${encode(String(noteId))}/award_emoji`,
+        awardSchema,
+      )
+      return (await take(list, undefined)).map((award) => ({
+        name: award.name,
+        user: award.user?.username ?? '',
+      }))
     },
 
     async submitReview(repo, id, review): Promise<ReviewOutcome> {

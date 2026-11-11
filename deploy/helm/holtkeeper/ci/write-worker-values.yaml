@@ -1,0 +1,16 @@
+writeWorker:
+  enabled: true
+  noProxy: [s3.example.test]
+  extraEgress:
+    - to: [{ ipBlock: { cidr: 192.0.2.10/32 } }]
+      ports: [{ port: 443, protocol: TCP }]
+networkPolicy:
+  enabled: true
+  extraEgress:
+    - to: [{ ipBlock: { cidr: 192.0.2.20/32 } }]
+      ports: [{ port: 5432, protocol: TCP }]
+egressProxy:
+  enabled: true
+  ca:
+    existingSecret: holtkeeper-egress-ca
+  forgeRules: false

@@ -8,7 +8,7 @@ SQLite implementation of the `Store` contract from `@holtkeeper/store`, built on
 import { sqliteStore } from '@holtkeeper/store-sqlite'
 
 const store = sqliteStore({ path: './data/holtkeeper.db' }) // or ':memory:'
-await store.activity.append({ at: new Date().toISOString(), actor: 'root', action: 'store.opened' })
+await store.settings.list()
 await store.close()
 ```
 
@@ -22,29 +22,39 @@ Audit appends and sweeps run in `BEGIN IMMEDIATE` transactions that read and mov
 
 Columns that are queried or filtered are real columns; nested data is JSON text.
 
-| Table                          | Real columns                                                                                                              | JSON columns                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `audit_runs`                   | `id`, `repo_forge`, `repo_path`, `trigger`, `actor`, `started_at`, `finished_at`                                          | `report`                                                   |
-| `credentials`                  | `id`, `name`, `kind`, `url`, `secret`, `expires_at`, `last_rotated_at`, `last_error`, timestamps                          | `scope`, `rotation`, `options` (v5)                        |
-| `settings`                     | `id`, `key`, `secret`, `updated_at`, `updated_by`                                                                         | `scope`, `value`                                           |
-| `users`                        | `id`, `name`, `email`, `email_lower`, `disabled`, `session_version`, `created_*`                                          | `grants`                                                   |
-| `passkeys`                     | `id`, `user_id`, `public_key`, `counter`, `label`, timestamps                                                             | `transports`                                               |
-| `identities`                   | `(provider, subject)`, `user_id`, `email`                                                                                 |                                                            |
-| `link_tokens`                  | `token_hash`, `user_id`, `purpose`, `expires_at`, `used_at`, `created_by`                                                 |                                                            |
-| `activity`                     | `id`, `at`, `actor`, `action`, `subject`                                                                                  | `details`                                                  |
-| `knowledge`                    | `id`, `title`, `body`, `kind`, `status`, `source`, `author`, `supersedes`, `tags`, `version`, timestamps                  | `scope`, `topics`, `applies_to`, `packages`, `evidence`    |
-| `knowledge_history`            | `(entry_id, version)`, `edited_by`, `edited_at`                                                                           | `content`                                                  |
-| `ai_usage`                     | every field of the record                                                                                                 | `groups`                                                   |
-| `audit_events` (v8)            | `seq`, `id`, `at`, `actor_id`, `via`, `action`, `target_type`, `target_id`, `target_repo`, `outcome`, `prev_hash`, `hash` | `event` (the whole event, the source of truth for hashing) |
-| `audit_chain` (v8)             | one row: `head_seq`, `head_hash`, `swept_through`                                                                         |                                                            |
-| `external_accounts` (v8)       | `id`, `user_id`, `(provider, external_id)` unique, `username`, `verification`, `linked_*`, `verified_at`                  | `challenge`, `principal`                                   |
-| `libraries` (v11)              | `(ecosystem, name)`                                                                                                       | `data` (the whole record)                                  |
-| `library_versions` (v11)       | `(ecosystem, name, version)`                                                                                              | `data` (the whole record)                                  |
-| `library_chunks` (v11)         | `seq`, `id`, `ecosystem`, `name`, `source`, `path`, `position`, `heading_text`, `anchor`, `text`, `url`                   | `headings`                                                 |
-| `library_chunk_versions` (v11) | `(chunk_id, version)`, cascades when the chunk goes                                                                       |                                                            |
-| `library_issues` (v11)         | `seq`, `id`, `ecosystem`, `name`, `state`, `updated_at`, `title`, `digest_text`, `body_text`                              | `data` (the whole issue)                                   |
+| Table                          | Real columns                                                                                                                             | JSON columns                                               |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `audit_runs`                   | `id`, `repo_forge`, `repo_path`, `trigger`, `actor`, `started_at`, `finished_at`                                                         | `report`                                                   |
+| `credentials`                  | `id`, `name`, `kind`, `url`, `secret`, `expires_at`, `last_rotated_at`, `last_error`, timestamps                                         | `scope`, `rotation`, `options` (v5), `capabilities` (v17)  |
+| `settings`                     | `id`, `key`, `secret`, `updated_at`, `updated_by`                                                                                        | `scope`, `value`                                           |
+| `users`                        | `id`, `name`, `email`, `email_lower`, `disabled`, `session_version`, `created_*`                                                         | `grants`                                                   |
+| `passkeys`                     | `id`, `user_id`, `public_key`, `counter`, `label`, timestamps                                                                            | `transports`                                               |
+| `identities`                   | `(provider, subject)`, `user_id`, `email`                                                                                                |                                                            |
+| `link_tokens`                  | `token_hash`, `user_id`, `purpose`, `expires_at`, `used_at`, `created_by`                                                                |                                                            |
+| `knowledge`                    | `id`, `title`, `body`, `kind`, `status`, `source`, `author`, `supersedes`, `tags`, `version`, timestamps                                 | `scope`, `topics`, `applies_to`, `packages`, `evidence`    |
+| `knowledge_history`            | `(entry_id, version)`, `edited_by`, `edited_at`                                                                                          | `content`                                                  |
+| `ai_usage`                     | every field of the record, `transcript_ref` (v17), index on `job_id` (v17)                                                               | `groups`                                                   |
+| `audit_events` (v8)            | `seq`, `id`, `at`, `actor_id`, `via`, `action`, `target_type`, `target_id`, `target_repo`, `outcome`, `prev_hash`, `hash`                | `event` (the whole event, the source of truth for hashing) |
+| `audit_chain` (v8)             | one row: `head_seq`, `head_hash`, `swept_through`                                                                                        |                                                            |
+| `external_accounts` (v8)       | `id`, `user_id`, `(provider, external_id)` unique, `username`, `verification`, `linked_*`, `verified_at`                                 | `challenge`, `principal`                                   |
+| `libraries` (v11)              | `(ecosystem, name)`                                                                                                                      | `data` (the whole record)                                  |
+| `library_versions` (v11)       | `(ecosystem, name, version)`                                                                                                             | `data` (the whole record)                                  |
+| `library_chunks` (v11)         | `seq`, `id`, `ecosystem`, `name`, `source`, `path`, `position`, `heading_text`, `anchor`, `text`, `url`                                  | `headings`                                                 |
+| `library_chunk_versions` (v11) | `(chunk_id, version)`, cascades when the chunk goes                                                                                      |                                                            |
+| `library_issues` (v11)         | `seq`, `id`, `ecosystem`, `name`, `state`, `updated_at`, `title`, `digest_text`, `body_text`                                             | `data` (the whole issue)                                   |
+| `guides` (v15)                 | `(scope, section)`                                                                                                                       | `data` (the whole section)                                 |
+| `guide_history` (v15)          | `(scope, section, version)`                                                                                                              | `data` (the revision)                                      |
+| `families` (v15)               | `id`, `name`                                                                                                                             | `data` (the whole family)                                  |
+| `learnings` (v16)              | `id`, `repo`, `key`, `created_at` (index on `repo, key`)                                                                                 | `data` (the whole candidate)                               |
+| `learning_claims` (v16)        | `key`, `at`                                                                                                                              |                                                            |
+| `review_reactions` (v16)       | `(repo, merge_request, note_id)`                                                                                                         | `data` (the counts)                                        |
+| `chat_threads` (v18)           | `id`, `updated_at`, `archived` (index on `archived, updated_at`)                                                                         | `data` (the whole thread)                                  |
+| `chat_messages` (v18)          | `seq` (the cursor), `id` unique, `thread_id`, `author_id`, `created_at`, `updated_at` (indexes on `thread_id, seq` and changed messages) | `data` (the whole message)                                 |
+| `chat_thread_reads` (v18)      | `(thread_id, user_id)`, `last_read_message_id`, `last_read_seq`                                                                          |                                                            |
+| `agent_task_groups` (v21)      | `id`, `updated_at` (index)                                                                                                               | `data` (the whole group)                                   |
+| `agent_tasks` (v21)            | `id`, `group_id`, `repo`, `status`, `updated_at` (indexes on `group_id` and `repo, updated_at`)                                          | `data` (the whole task)                                    |
 
-Indexes: audit runs by `finished_at` and by `(repo_forge, repo_path, finished_at)`, activity by `at`, settings by `key`, users by `email_lower`, and `user_id` on the child tables. Timestamps are ISO 8601 strings, which sort correctly as text. Every table also has an internal `seq` (or natural key) that keeps insertion order stable for ties.
+Indexes: audit runs by `finished_at` and by `(repo_forge, repo_path, finished_at)`, settings by `key`, users by `email_lower`, and `user_id` on the child tables. Timestamps are ISO 8601 strings, which sort correctly as text. Every table also has an internal `seq` (or natural key) that keeps insertion order stable for ties.
 
 ## Knowledge search
 
@@ -65,6 +75,8 @@ Migration 11 adds the library tables and two FTS5 external-content tables kept i
 `src/migrations.ts` holds an ordered list of `{ version, sql }` steps. On open, every step whose version is not recorded in `schema_migrations` runs, in version order, inside one `BEGIN IMMEDIATE` transaction (so a lower version merged after a higher one was applied still runs), so concurrent openers serialize and a failed step leaves the database untouched. Opening an up-to-date database changes nothing.
 
 To change the schema, append a new step with the next version (`ALTER TABLE ... ADD COLUMN`, `CREATE TABLE`, ...). Never edit a released step.
+
+Migration 22 cleans up after retired features (no schema change): it deletes analysis records and jobs of the retired analyzers (`changelog`, `quality`, `release-risk`, `fleet`, `delivery`, `port`, `warmup`), settings rows under the retired keys (`llm.model`, `llm.models`, `review.instructions`, `agent.instructions`, `analyzers.<retired kind>`), the digest and Slack policy entries in `kv` (`digests`, `digest:*`, `chat:slack:policy`; the stored Slack tokens in `chat:slack:connection` stay), and removes those analyzers from schedule and trigger documents. A document left with no analyzer (or a command trigger for one) is deleted with its history; any other changed document gets a new version by `system`, its previous version archived in `config_history`. The server still ignores such leftovers (retired setting keys, unknown analyzers in schedules, triggers and commands, records of unknown kinds) on stores that never ran it.
 
 ## Backup
 

@@ -79,7 +79,6 @@ const deps = (): ServerDeps => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: [...builtinSettings, pollingSetting],

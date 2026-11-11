@@ -2,21 +2,20 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { FolderGit2 } from 'lucide-react'
 
 import { useRepos } from '../../api/queries.ts'
-import { analysisPages } from '../../lib/analyses.ts'
+import { pickTab, repoTabs, visibleTabs } from '../../lib/repo-page.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
-import { Chip, EmptyState, LinkButton, Page, Tabs } from '../../ui/index.ts'
-import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
+import { EmptyState, Page, SegmentedTabs, Tag } from '../../ui/index.ts'
+import { AssetsTab } from '../assets/AssetsTab.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
-import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
-import { MediaButton } from '../media/MediaDialog.tsx'
-import { RepoPackagesTab } from '../public-api/UsagesTabs.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
 import { RepoAvatarEditor } from './RepoAvatar.tsx'
-import { RepoConfig } from './RepoConfig.tsx'
-import { RepoUpdates } from './RepoUpdates.tsx'
+import { RepoOverview } from './RepoOverview.tsx'
+import { RepoReviews } from './RepoReviews.tsx'
+import { UpdatesTag } from './RepoUpdates.tsx'
+import { ScopeGuide } from './ScopeGuide.tsx'
 
-/** One repository: its groups, settings made for it and the knowledge agents read there. */
+/** One repository: Overview cards, its Guide, assets, Holtkeeper's reviews and its overrides. */
 export function RepoPage() {
   const { can } = useSession()
   const search = useSearch({ from: '/app/repos/view' })
@@ -34,51 +33,16 @@ export function RepoPage() {
   const summary = repos.data?.repos.find((r) => repoKey(r.repo) === repoKey(repo))
   const groups = summary?.groups ?? []
   const allGroups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
-  const focus = { kind: 'repo' as const, repo }
-  const tabs = [
-    ...(can('settings:read')
-      ? [
-          {
-            id: 'settings',
-            label: 'Settings',
-            content: <ScopedSettings focus={focus} groups={allGroups} />,
-          },
-        ]
-      : []),
-    ...(can('settings:read')
-      ? [
-          {
-            id: 'updates',
-            label: 'Updates',
-            content: (
-              <RepoUpdates
-                repo={repo}
-                onOpenSettings={() =>
-                  void navigate({
-                    search: (previous) => ({ ...previous, tab: 'settings' }),
-                    replace: true,
-                  })
-                }
-              />
-            ),
-          },
-        ]
-      : []),
-    ...(can('knowledge:read')
-      ? [
-          {
-            id: 'knowledge',
-            label: 'Knowledge',
-            content: <ScopedKnowledge focus={focus} groups={allGroups} />,
-          },
-        ]
-      : []),
-    ...(can('analyses:read')
-      ? [{ id: 'packages', label: 'Packages', content: <RepoPackagesTab repo={repo} /> }]
-      : []),
-    { id: 'config', label: 'Config', content: <RepoConfig repo={repo} /> },
-  ]
-  const selected = tabs.some((t) => t.id === search.tab) ? search.tab : tabs[0]?.id
+  const tabs = visibleTabs(repoTabs, can)
+  const tab = pickTab(tabs, search.tab)
+  const go = (next: string) =>
+    void navigate({
+      search: (previous) => ({
+        repo: previous.repo,
+        ...(next === tabs[0]?.id ? {} : { tab: next }),
+      }),
+      replace: true,
+    })
 
   return (
     <Page
@@ -91,58 +55,41 @@ export function RepoPage() {
       title={repo.path}
       description={
         <span className="flex flex-wrap items-center gap-1.5">
-          {repo.forge}
+          <span className="mono">{repo.forge}</span>
           {groups.map((group) => (
             <Link key={group} to="/repos/groups/$groupId" params={{ groupId: group }}>
-              <Chip className="hover:underline">group {group}</Chip>
+              <Tag className="hover:underline">group {group}</Tag>
             </Link>
           ))}
-          {repos.isSuccess && !summary ? <Chip tone="warning">not in any group</Chip> : null}
+          {repos.isSuccess && !summary ? <Tag tone="warning">not in any group</Tag> : null}
+          {can('settings:read') ? (
+            <UpdatesTag repo={repo} onOpenSettings={() => go('settings')} />
+          ) : null}
         </span>
       }
-      actions={
-        <>
-          <RunJobButton repo={repo} />
-          <BackfillReleasesButton repo={repo} variant="ghost" />
-          <MediaButton repo={repo} />
-          {can('analyses:read') ? (
-            <LinkButton to="/jobs" search={{ repo: repoKey(repo) }} variant="ghost">
-              Jobs
-            </LinkButton>
-          ) : null}
-          {summary?.latestAudit ? (
-            <LinkButton
-              to="/audits/$runId"
-              params={{ runId: summary.latestAudit.id }}
-              variant="ghost"
-            >
-              Latest audit
-            </LinkButton>
-          ) : null}
-          {can('analyses:read')
-            ? analysisPages.map((analysis) => (
-                <LinkButton
-                  key={analysis.to}
-                  to={analysis.to}
-                  search={{ repo: repoKey(repo) }}
-                  variant="ghost"
-                >
-                  {analysis.title}
-                </LinkButton>
-              ))
-            : null}
-        </>
-      }
+      actions={<RunJobButton repo={repo} />}
     >
       {tabs.length ? (
-        <Tabs
+        <SegmentedTabs
           aria-label="Repository sections"
-          {...(selected ? { selected } : {})}
-          onSelect={(tab) =>
-            void navigate({ search: (previous) => ({ ...previous, tab }), replace: true })
-          }
-          items={tabs}
+          items={tabs.map(({ id, label }) => ({ id, label }))}
+          {...(tab ? { selected: tab } : {})}
+          onSelect={go}
+          className="self-start"
         />
+      ) : null}
+      {tab === 'overview' ? <RepoOverview repo={repo} onAssets={() => go('assets')} /> : null}
+      {tab === 'guide' ? <ScopeGuide space={{ kind: 'repo', repo }} /> : null}
+      {tab === 'assets' ? (
+        <AssetsTab
+          repo={repo}
+          {...(search.file ? { file: search.file } : {})}
+          {...(search.ref ? { ref: search.ref } : {})}
+        />
+      ) : null}
+      {tab === 'reviews' ? <RepoReviews repo={repo} /> : null}
+      {tab === 'settings' ? (
+        <ScopedSettings focus={{ kind: 'repo', repo }} groups={allGroups} focusGroups={groups} />
       ) : null}
     </Page>
   )

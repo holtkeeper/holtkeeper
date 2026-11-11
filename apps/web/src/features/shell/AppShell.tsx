@@ -1,39 +1,44 @@
-import { Link, Outlet, useMatch, useRouterState } from '@tanstack/react-router'
-import { ArrowUpRight, BookText, LogOut, Menu, X } from 'lucide-react'
-import { AnimatePresence, motion } from 'motion/react'
-import { type ReactNode, useEffect, useState } from 'react'
+import { Link, type LinkProps, Outlet, useMatch, useRouterState } from '@tanstack/react-router'
+import { BookText, LogOut } from 'lucide-react'
+import { useEffect } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useAnalysis, useAuthMutations } from '../../api/queries.ts'
-import { Avatar, BrandIcon, Button, Tooltip, brandIconUrl, notify } from '../../ui/index.ts'
-import { type NavItem, activeNav, docsUrl, groupNav, visibleNav } from './nav.ts'
+import { useAnalysis, useAuthMutations, useChatUnread } from '../../api/queries.ts'
+import { unreadBadge } from '../../lib/chat.ts'
+import {
+  Avatar,
+  BrandIcon,
+  Button,
+  SegmentedTabs,
+  Tooltip,
+  brandIconUrl,
+  notify,
+} from '../../ui/index.ts'
+import { type NavItem, activeNav, docsUrl, groupByWorkspace, navKey, visibleNav } from './nav.ts'
 import { useSession } from './session.ts'
 import { ThemeToggle } from './ThemeToggle.tsx'
-
-function Brand() {
-  return (
-    <Link
-      to="/"
-      className="flex items-center gap-2.5 rounded-lg px-2 py-1 focus-visible:outline-2 focus-visible:outline-focus"
-    >
-      <BrandIcon name="holtkeeper" className="size-8" />
-      <span className="text-[15px] font-semibold tracking-tight">Holtkeeper</span>
-    </Link>
-  )
-}
 
 const appName = 'Holtkeeper'
 const defaultFavicon = '/favicon.svg'
 
-function useActiveNav(): NavItem | undefined {
+const linkOf = (item: NavItem): LinkProps =>
+  item.tab ? { to: item.to, search: { tab: item.tab } } : { to: item.to }
+
+function useActiveNav(items: readonly NavItem[]): NavItem | undefined {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const tab = useRouterState({
+    select: (state) => {
+      const value: unknown = (state.location.search as { tab?: unknown }).tab
+      return typeof value === 'string' ? value : undefined
+    },
+  })
   const record = useMatch({ from: '/app/analyses/$id', shouldThrow: false })
   const analysis = useAnalysis(
     record?.params.id ?? '',
     record?.search.compare,
     record !== undefined,
   )
-  return activeNav(pathname, record ? analysis.data?.analysis.kind : undefined)
+  return activeNav(pathname, record ? analysis.data?.analysis.kind : undefined, tab, items)
 }
 
 function setDocumentMeta(title: string, favicon: string) {
@@ -52,93 +57,22 @@ function useDocumentMeta(item: NavItem | undefined) {
   }, [item])
 }
 
-function Nav({ active, onNavigate }: { active?: NavItem; onNavigate?: () => void }) {
-  const { principal, auth } = useSession()
-  const groups = groupNav(visibleNav(principal, auth))
-  return (
-    <nav
-      aria-label="Main"
-      className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1"
-    >
-      {groups.map((group) => (
-        <div key={group.section} className="flex flex-col gap-0.5">
-          <h2 className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted/70">
-            {group.section}
-          </h2>
-          {group.items.map((item) => {
-            const current = item.to === active?.to
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                {...(onNavigate ? { onClick: onNavigate } : {})}
-                aria-current={current ? 'page' : undefined}
-                className={`relative flex items-center gap-3 rounded-xl px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
-                  current
-                    ? 'font-medium text-accent-soft-foreground'
-                    : 'text-muted hover:bg-default-soft hover:text-foreground'
-                }`}
-              >
-                {current ? (
-                  <motion.span
-                    layoutId="nav-active"
-                    className="absolute inset-0 rounded-xl bg-accent-soft"
-                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-                  />
-                ) : null}
-                <item.icon className="relative size-4" />
-                <span className="relative">{item.label}</span>
-              </Link>
-            )
-          })}
-        </div>
-      ))}
-    </nav>
-  )
-}
-
-function DocsLink() {
-  return (
-    <a
-      href={docsUrl}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-center gap-3 rounded-xl px-3 py-1.5 text-sm text-muted transition-colors hover:bg-default-soft hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
-    >
-      <BookText className="size-4" />
-      <span>Documentation</span>
-      <ArrowUpRight className="ml-auto size-3.5 opacity-60" />
-    </a>
-  )
-}
-
-function Identity({ linked, children }: { linked: boolean; children: ReactNode }) {
-  const className = 'flex items-center gap-2.5 rounded-xl py-1 pl-1 pr-2'
-  if (!linked) return <div className={className}>{children}</div>
-  return (
-    <Link
-      to="/account"
-      aria-label="Your account"
-      className={`${className} transition-colors hover:bg-default-soft focus-visible:outline-2 focus-visible:outline-focus`}
-    >
-      {children}
-    </Link>
-  )
-}
+const railItemClass = (current: boolean) =>
+  `grid size-9 place-items-center rounded-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
+    current
+      ? 'bg-panel text-foreground shadow-[inset_0_0_0_1px_var(--line-strong)]'
+      : 'text-muted hover:bg-raise hover:text-foreground'
+  }`
 
 function Account() {
   const { principal, auth } = useSession()
   const { logout } = useAuthMutations()
+  const avatar = (
+    <Avatar key={principal.avatarUrl} src={principal.avatarUrl} name={principal.name} size="xs" />
+  )
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col items-center gap-1">
       <ThemeToggle />
-      <Identity linked={auth.provider === 'users'}>
-        <Avatar key={principal.avatarUrl} src={principal.avatarUrl} name={principal.name} />
-        <div className="hidden leading-tight sm:block">
-          <div className="max-w-40 truncate text-sm font-medium">{principal.name}</div>
-          <div className="text-xs text-muted">via {principal.provider}</div>
-        </div>
-      </Identity>
       {auth.logoutUrl ? (
         <Tooltip content="Sign out">
           <Button
@@ -156,96 +90,111 @@ function Account() {
           </Button>
         </Tooltip>
       ) : null}
+      <Tooltip content={`${principal.name} · via ${principal.provider}`}>
+        {auth.provider === 'users' ? (
+          <Link to="/account" aria-label="Your account" className={railItemClass(false)}>
+            {avatar}
+          </Link>
+        ) : (
+          <span tabIndex={0} aria-label={principal.name} className={railItemClass(false)}>
+            {avatar}
+          </span>
+        )}
+      </Tooltip>
     </div>
   )
 }
 
-/** Sidebar, header and the routed page of the signed-in app. */
+/** Workspace rail, the slim top bar with the workspace's tabs, and the routed page. */
 export function AppShell() {
-  const [drawer, setDrawer] = useState(false)
-  const active = useActiveNav()
+  const { principal, crossTeam } = useSession()
+  const visible = visibleNav(principal, crossTeam)
+  const groups = groupByWorkspace(visible)
+  const active = useActiveNav(visible)
+  const current = groups.find((group) => group.workspace.id === active?.workspace)
+  const unread = useChatUnread(groups.some((group) => group.workspace.id === 'chat'))
+  const chatBadge = unreadBadge(unread.data?.total ?? 0)
   useDocumentMeta(active)
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (drawer && event.key === 'Escape') setDrawer(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [drawer])
 
   return (
-    <div className="app-backdrop flex min-h-screen">
+    <div className="flex min-h-screen bg-background">
       <a
         href="#main"
-        className="sr-only z-50 rounded-lg bg-surface px-3 py-2 focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+        className="sr-only z-50 rounded-lg bg-panel px-3 py-2 focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
       >
         Skip to content
       </a>
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-6 border-r border-separator px-3 py-4 lg:flex">
-        <Brand />
-        <Nav active={active} />
-        <div className="flex flex-col gap-2">
-          <DocsLink />
-          <div className="px-3 text-xs text-muted">Keeps every repository in shape.</div>
+      <aside className="sticky top-0 flex h-screen w-11 shrink-0 flex-col items-center gap-4 overflow-y-auto border-r border-line py-2">
+        <Link
+          to="/"
+          aria-label={`${appName} home`}
+          className="grid size-8 place-items-center rounded-[9px] focus-visible:outline-2 focus-visible:outline-focus"
+        >
+          <BrandIcon name="holtkeeper" className="size-7" />
+        </Link>
+        <nav aria-label="Workspaces" className="flex flex-col items-center gap-1">
+          {groups.map(({ workspace, items }) => {
+            const selected = workspace.id === current?.workspace.id
+            return (
+              <Tooltip key={workspace.id} content={workspace.label}>
+                <Link
+                  {...linkOf(items[0]!)}
+                  aria-label={
+                    workspace.id === 'chat' && chatBadge
+                      ? `${workspace.label}, ${chatBadge} unread`
+                      : workspace.label
+                  }
+                  aria-current={selected ? 'page' : undefined}
+                  className={`relative ${railItemClass(selected)}`}
+                >
+                  <workspace.icon className="size-[18px]" />
+                  {workspace.id === 'chat' && chatBadge ? (
+                    <span
+                      aria-hidden
+                      className="mono absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-accent px-1 text-center text-[9px] leading-4 font-semibold text-accent-foreground"
+                    >
+                      {chatBadge}
+                    </span>
+                  ) : null}
+                </Link>
+              </Tooltip>
+            )
+          })}
+        </nav>
+        <div className="mt-auto flex flex-col items-center gap-1">
+          <Tooltip content="Documentation">
+            <a
+              href={docsUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Documentation"
+              className={railItemClass(false)}
+            >
+              <BookText className="size-4" />
+            </a>
+          </Tooltip>
+          <Account />
         </div>
       </aside>
 
-      <AnimatePresence>
-        {drawer ? (
-          <motion.div
-            className="fixed inset-0 z-40 lg:hidden"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <button
-              type="button"
-              aria-label="Close navigation"
-              className="absolute inset-0 bg-backdrop"
-              onClick={() => setDrawer(false)}
-            />
-            <motion.aside
-              initial={{ x: -280 }}
-              animate={{ x: 0 }}
-              exit={{ x: -280 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
-              className="relative flex h-full w-64 flex-col gap-6 bg-overlay px-3 py-4 shadow-overlay"
-            >
-              <div className="flex items-center justify-between">
-                <Brand />
-                <Button
-                  variant="ghost"
-                  isIconOnly
-                  aria-label="Close navigation"
-                  onPress={() => setDrawer(false)}
-                >
-                  <X className="size-4" />
-                </Button>
-              </div>
-              <Nav active={active} onNavigate={() => setDrawer(false)} />
-              <DocsLink />
-            </motion.aside>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-separator bg-background/75 px-4 backdrop-blur-md sm:px-6">
-          <div className="flex items-center gap-2 lg:hidden">
-            <Button
-              variant="ghost"
-              isIconOnly
-              aria-label="Open navigation"
-              onPress={() => setDrawer(true)}
-            >
-              <Menu className="size-4" />
-            </Button>
-            <Brand />
-          </div>
-          <div className="hidden lg:block" />
-          <Account />
+        <header className="sticky top-0 z-30 flex h-11 shrink-0 items-center gap-3 border-b border-line bg-background px-4">
+          <span className="shrink-0 text-[13px] font-semibold">
+            {current?.workspace.label ?? appName}
+          </span>
+          {current && current.items.length > 1 ? (
+            <SegmentedTabs
+              aria-label={`${current.workspace.label} pages`}
+              selected={active ? navKey(active) : undefined}
+              items={current.items.map((item) => ({
+                id: navKey(item),
+                label: item.label,
+                link: linkOf(item),
+              }))}
+            />
+          ) : null}
         </header>
-        <main id="main" tabIndex={-1} className="flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8">
+        <main id="main" tabIndex={-1} className="flex-1 px-4 py-5 outline-none sm:px-6">
           <Outlet />
         </main>
       </div>

@@ -1,124 +1,97 @@
-import type { Action, AuthInfo, Principal } from '@holtkeeper/api'
+import type { Action, CrossTeamLevel, Principal } from '@holtkeeper/api'
 import {
-  Activity,
   BookOpen,
+  Bot,
   Boxes,
-  CalendarClock,
-  Database,
-  DatabaseZap,
+  CodeXml,
   FileSearch,
-  Flame,
   FlaskConical,
   FolderGit2,
   GitBranch,
-  Hash,
-  Gauge,
+  History,
   HardDrive,
-  Images,
-  KeyRound,
   Layers,
   LayoutDashboard,
   Library,
-  Rocket,
-  LibraryBig,
   ListChecks,
   type LucideIcon,
   MessagesSquare,
-  Newspaper,
-  MousePointerClick,
   Network,
-  PackageCheck,
   Plug,
+  Rocket,
   Scale,
-  ScrollText,
   Settings2,
-  Ship,
   Sparkles,
-  Tag,
   Timer,
   Users,
+  Workflow,
 } from 'lucide-react'
 
-import { can } from '../../lib/access.ts'
-import { analysisPages, groupAnalysisPages } from '../../lib/analyses.ts'
+import { can, canCatalog, canGlobal } from '../../lib/access.ts'
+import { analysisPages, stackRecords } from '../../lib/analyses.ts'
+import { type SettingsTabId, parseSettingsTab, settingsTabs } from '../../lib/settings-tabs.ts'
 import type { BrandIconName } from '../../ui/BrandIcon.tsx'
 
-/** Sidebar headings in display order. */
-const navSections = [
-  'Overview',
-  'Assistant',
-  'Security',
-  'Code',
-  'Packages',
-  'Delivery',
-  'Agents',
-  'MCP',
-  'Admin',
-  'System',
-] as const
+/** A rail entry: a group of pages that share the segmented tabs of the top bar. */
+export interface Workspace {
+  id: 'home' | 'repos' | 'chat' | 'code' | 'delivery' | 'team' | 'ops' | 'admin'
+  label: string
+  icon: LucideIcon
+}
 
-export type NavSection = (typeof navSections)[number]
+/** Rail entries in display order. */
+const workspaces: readonly Workspace[] = [
+  { id: 'home', label: 'Home', icon: LayoutDashboard },
+  { id: 'repos', label: 'Repositories', icon: FolderGit2 },
+  { id: 'chat', label: 'Chat', icon: MessagesSquare },
+  { id: 'code', label: 'Code', icon: CodeXml },
+  { id: 'delivery', label: 'Delivery', icon: Rocket },
+  { id: 'team', label: 'Team', icon: BookOpen },
+  { id: 'ops', label: 'Ops', icon: Workflow },
+  { id: 'admin', label: 'Admin', icon: Settings2 },
+]
 
+/** A page reachable from the shell, shown as a tab of its workspace. */
 export interface NavItem {
   to:
     | '/'
     | '/repos'
     | '/audits'
     | '/releases'
-    | '/release-board'
     | '/bundles'
-    | '/assets'
     | '/dependencies'
-    | '/updates'
-    | '/quality'
     | '/coverage'
-    | '/testids'
     | '/branches'
     | '/ci'
-    | '/warmup'
     | '/licenses'
-    | '/fleet'
     | '/stack'
     | '/public-api'
-    | '/mcp-server'
-    | '/libraries'
     | '/jobs'
+    | '/tasks'
     | '/knowledge'
-    | '/credentials'
     | '/automation'
     | '/settings'
-    | '/ai'
-    | '/storage'
-    | '/database'
-    | '/caches'
-    | '/users'
-    | '/audit-log'
-    | '/activity'
+    | '/history'
     | '/chat'
-    | '/digests'
-    | '/slack'
-  /** Sidebar heading the entry is listed under. */
-  section: NavSection
+  /** The page's `tab` search parameter, for entries that open one tab of a shared page. */
+  tab?: string
+  workspace: Workspace['id']
   label: string
   icon: LucideIcon
   /** Brand icon used as the favicon while the entry is active. */
   brand?: BrandIconName
-  /** Hidden unless some grant allows this action. */
-  requires?: Action
-  /** Only for the `users` auth provider. */
-  usersOnly?: boolean
+  /** Hidden unless some grant allows this action, or one of these actions. */
+  requires?: Action | readonly Action[]
+  /** `requires` must come from a grant over everything, because the server checks it globally. */
+  global?: boolean
+  /** Catalog reach is enough (`canCatalog`), like the server's catalog check; replaces `requires`. */
+  catalog?: boolean
 }
 
 const navItems: readonly NavItem[] = [
+  { workspace: 'home', to: '/', label: 'Home', icon: LayoutDashboard },
   {
-    section: 'Overview',
-    to: '/',
-    label: 'Dashboard',
-    icon: LayoutDashboard,
-    requires: 'audits:read',
-  },
-  {
-    section: 'Overview',
+    workspace: 'repos',
     to: '/repos',
     brand: 'repos',
     label: 'Repositories',
@@ -126,45 +99,39 @@ const navItems: readonly NavItem[] = [
     requires: 'repos:read',
   },
   {
-    section: 'Overview',
-    to: '/fleet',
-    brand: 'fleet',
-    label: 'Fleet',
-    icon: Ship,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Overview',
-    to: '/stack',
-    brand: 'stack',
-    label: 'Tech stack',
-    icon: Layers,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Overview',
-    to: '/activity',
-    brand: 'activity',
-    label: 'Activity',
-    icon: Activity,
-  },
-  {
-    section: 'Assistant',
+    workspace: 'chat',
     to: '/chat',
     brand: 'chat',
     label: 'Chat',
     icon: MessagesSquare,
+    requires: 'repos:read',
   },
   {
-    section: 'Assistant',
-    to: '/digests',
-    brand: 'digests',
-    label: 'Digests',
-    icon: Newspaper,
-    requires: 'settings:read',
+    workspace: 'code',
+    to: '/dependencies',
+    brand: 'updates',
+    label: 'Dependencies',
+    icon: Network,
+    catalog: true,
   },
   {
-    section: 'Security',
+    workspace: 'code',
+    to: '/public-api',
+    brand: 'api',
+    label: 'Public API',
+    icon: Library,
+    catalog: true,
+  },
+  {
+    workspace: 'code',
+    to: '/stack',
+    brand: 'stack',
+    label: 'Stack',
+    icon: Layers,
+    catalog: true,
+  },
+  {
+    workspace: 'code',
     to: '/audits',
     brand: 'audit',
     label: 'Audits',
@@ -172,7 +139,7 @@ const navItems: readonly NavItem[] = [
     requires: 'audits:read',
   },
   {
-    section: 'Security',
+    workspace: 'code',
     to: '/licenses',
     brand: 'licenses',
     label: 'Licenses',
@@ -180,31 +147,7 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   {
-    section: 'Code',
-    to: '/quality',
-    brand: 'quality',
-    label: 'Code quality',
-    icon: Gauge,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Code',
-    to: '/coverage',
-    brand: 'coverage',
-    label: 'Test coverage',
-    icon: FlaskConical,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Code',
-    to: '/testids',
-    brand: 'testids',
-    label: 'Test ids',
-    icon: MousePointerClick,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Code',
+    workspace: 'code',
     to: '/bundles',
     brand: 'bundles',
     label: 'Bundles',
@@ -212,55 +155,15 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   {
-    section: 'Code',
-    to: '/assets',
-    brand: 'assets',
-    label: 'Assets',
-    icon: Images,
+    workspace: 'code',
+    to: '/coverage',
+    brand: 'coverage',
+    label: 'Coverage',
+    icon: FlaskConical,
     requires: 'analyses:read',
   },
   {
-    section: 'Packages',
-    to: '/dependencies',
-    brand: 'updates',
-    label: 'Dependencies',
-    icon: Network,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Packages',
-    to: '/updates',
-    brand: 'updates',
-    label: 'Dependency updates',
-    icon: PackageCheck,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Packages',
-    to: '/public-api',
-    brand: 'api',
-    label: 'Public API',
-    icon: Library,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Delivery',
-    to: '/release-board',
-    brand: 'releaseboard',
-    label: 'Release board',
-    icon: Rocket,
-    requires: 'releases:read',
-  },
-  {
-    section: 'Delivery',
-    to: '/releases',
-    brand: 'release',
-    label: 'Releases',
-    icon: Tag,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Delivery',
+    workspace: 'code',
     to: '/branches',
     brand: 'branches',
     label: 'Branches',
@@ -268,23 +171,23 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   {
-    section: 'Delivery',
+    workspace: 'delivery',
+    to: '/releases',
+    brand: 'releaseboard',
+    label: 'Releases',
+    icon: Rocket,
+    requires: 'releases:read',
+  },
+  {
+    workspace: 'delivery',
     to: '/ci',
     brand: 'ci',
-    label: 'CI jobs',
+    label: 'CI',
     icon: Timer,
     requires: 'analyses:read',
   },
   {
-    section: 'Delivery',
-    to: '/warmup',
-    brand: 'warmup',
-    label: 'Build warm-up',
-    icon: Flame,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Agents',
+    workspace: 'team',
     to: '/knowledge',
     brand: 'knowledge',
     label: 'Knowledge',
@@ -292,15 +195,16 @@ const navItems: readonly NavItem[] = [
     requires: 'knowledge:read',
   },
   {
-    section: 'Agents',
+    workspace: 'ops',
     to: '/automation',
+    global: true,
     brand: 'automation',
     label: 'Automation',
-    icon: CalendarClock,
+    icon: Workflow,
     requires: 'settings:read',
   },
   {
-    section: 'Agents',
+    workspace: 'ops',
     to: '/jobs',
     brand: 'jobs',
     label: 'Jobs',
@@ -308,126 +212,127 @@ const navItems: readonly NavItem[] = [
     requires: 'analyses:read',
   },
   {
-    section: 'Agents',
-    to: '/ai',
-    brand: 'ai',
-    label: 'AI usage',
-    icon: Sparkles,
-    requires: 'ai:read',
+    workspace: 'ops',
+    to: '/tasks',
+    brand: 'jobs',
+    label: 'Tasks',
+    icon: Bot,
+    requires: 'repos:read',
   },
   {
-    section: 'MCP',
-    to: '/mcp-server',
-    brand: 'mcp',
-    label: 'MCP server',
-    icon: Plug,
-  },
-  {
-    section: 'MCP',
-    to: '/libraries',
-    brand: 'libraries',
-    label: 'Libraries',
-    icon: LibraryBig,
-    requires: 'analyses:read',
-  },
-  {
-    section: 'Admin',
-    to: '/slack',
-    brand: 'slack',
-    label: 'Slack',
-    icon: Hash,
-    requires: 'settings:read',
-  },
-  {
-    section: 'Admin',
-    to: '/credentials',
-    brand: 'credentials',
-    label: 'Credentials',
-    icon: KeyRound,
-    requires: 'credentials:read',
-  },
-  {
-    section: 'Admin',
-    to: '/settings',
-    brand: 'settings',
-    label: 'Settings',
-    icon: Settings2,
-    requires: 'settings:read',
-  },
-  {
-    section: 'Admin',
-    to: '/users',
-    brand: 'users',
-    label: 'Users',
-    icon: Users,
-    requires: 'users:read',
-    usersOnly: true,
-  },
-  {
-    section: 'Admin',
-    to: '/audit-log',
+    workspace: 'ops',
+    to: '/history',
     brand: 'auditlog',
-    label: 'Audit log',
-    icon: ScrollText,
-    requires: 'audit:read',
+    label: 'History',
+    icon: History,
+    requires: 'repos:read',
   },
   {
-    section: 'System',
-    to: '/storage',
+    workspace: 'admin',
+    to: '/settings',
+    tab: 'ai',
+    brand: 'ai',
+    label: settingsTabs.ai.label,
+    icon: Sparkles,
+    requires: ['ai:read', 'ai:admin', 'settings:read', 'credentials:read'],
+  },
+  {
+    workspace: 'admin',
+    to: '/settings',
+    tab: 'access',
+    brand: 'users',
+    label: settingsTabs.access.label,
+    icon: Users,
+  },
+  {
+    workspace: 'admin',
+    to: '/settings',
+    tab: 'integrations',
+    brand: 'credentials',
+    label: settingsTabs.integrations.label,
+    icon: Plug,
+    requires: ['credentials:read', 'settings:read'],
+  },
+  {
+    workspace: 'admin',
+    to: '/settings',
+    tab: 'system',
+    global: true,
     brand: 'storage',
-    label: 'Storage',
+    label: settingsTabs.system.label,
     icon: HardDrive,
-    requires: 'settings:read',
-  },
-  {
-    section: 'System',
-    to: '/database',
-    brand: 'database',
-    label: 'Database',
-    icon: Database,
-    requires: 'settings:read',
-  },
-  {
-    section: 'System',
-    to: '/caches',
-    brand: 'caches',
-    label: 'Caches',
-    icon: DatabaseZap,
     requires: 'settings:read',
   },
 ]
 
-/** Navigation entries the principal can use under the given provider. */
-export const visibleNav = (principal: Principal, auth: AuthInfo): NavItem[] =>
-  navItems.filter(
-    (item) =>
-      (!item.requires || can(principal, item.requires)) &&
-      (!item.usersOnly || auth.provider === 'users'),
-  )
-
-const analysisPrefix = '/analyses/'
-
-/**
- * The entry a page belongs to: the one whose path is `pathname` or a parent of it. A single
- * analysis record (`/analyses/$id`) belongs to the page of its kind, so pass `analysisKind`
- * once the record is known.
- */
-export const activeNav = (pathname: string, analysisKind?: string): NavItem | undefined => {
-  if (pathname.startsWith(analysisPrefix)) {
-    const page = [...analysisPages, ...groupAnalysisPages].find((p) => p.kind === analysisKind)
-    return page && navItems.find((item) => item.to === page.to)
-  }
-  return navItems.find(
-    (item) => pathname === item.to || (item.to !== '/' && pathname.startsWith(`${item.to}/`)),
+const allowed = (item: NavItem, principal: Principal, crossTeam: CrossTeamLevel) => {
+  if (item.catalog) return canCatalog(principal, crossTeam)
+  if (!item.requires) return true
+  const check = item.global ? canGlobal : can
+  return (typeof item.requires === 'string' ? [item.requires] : item.requires).some((action) =>
+    check(principal, action),
   )
 }
 
-/** `items` grouped under their sidebar headings in display order; empty headings are left out. */
-export const groupNav = (items: readonly NavItem[]): { section: NavSection; items: NavItem[] }[] =>
-  navSections.flatMap((section) => {
-    const entries = items.filter((item) => item.section === section)
-    return entries.length ? [{ section, items: entries }] : []
+/** Navigation entries the principal can use at the given cross-team level. */
+export const visibleNav = (principal: Principal, crossTeam: CrossTeamLevel): NavItem[] =>
+  navItems.filter((item) => allowed(item, principal, crossTeam))
+
+/** The Settings tabs the principal can open, in display order. */
+export const visibleSettingsTabs = (principal: Principal): SettingsTabId[] =>
+  visibleNav(principal, 'off').flatMap((item) => {
+    const tab = item.to === '/settings' ? parseSettingsTab(item.tab) : undefined
+    return tab ? [tab] : []
   })
+
+/** `items` grouped under their workspaces in rail order; workspaces left without items are dropped. */
+export const groupByWorkspace = (
+  items: readonly NavItem[],
+): { workspace: Workspace; items: NavItem[] }[] =>
+  workspaces.flatMap((workspace) => {
+    const entries = items.filter((item) => item.workspace === workspace.id)
+    return entries.length ? [{ workspace, items: entries }] : []
+  })
+
+/** Stable key of an entry, unique even when several entries open tabs of one page. */
+export const navKey = (item: NavItem): string => (item.tab ? `${item.to}?tab=${item.tab}` : item.to)
+
+const analysisPrefix = '/analyses/'
+
+const pick = (candidates: readonly NavItem[], tab: string | undefined): NavItem | undefined =>
+  candidates.find((item) => item.tab !== undefined && item.tab === tab) ??
+  candidates.find((item) => item.tab === undefined) ??
+  candidates[0]
+
+/**
+ * The entry a page belongs to: the one whose path is `pathname` or a parent of it. When several
+ * entries open tabs of one page, `tab` (the page's `tab` search parameter) picks among them,
+ * falling back to the entry without a tab, then to the first. A single analysis record
+ * (`/analyses/$id`) belongs to the page of its kind, so pass `analysisKind` once it is known;
+ * kinds without a page belong to Repositories, whose repository page shows them. Pass `items`
+ * (the principal's `visibleNav`) so a tab the principal cannot open is never picked.
+ */
+export const activeNav = (
+  pathname: string,
+  analysisKind?: string,
+  tab?: string,
+  items: readonly NavItem[] = navItems,
+): NavItem | undefined => {
+  if (pathname.startsWith(analysisPrefix)) {
+    if (analysisKind === undefined) return undefined
+    const to = [...analysisPages, stackRecords].find((p) => p.kind === analysisKind)?.to ?? '/repos'
+    return pick(
+      items.filter((item) => item.to === to),
+      undefined,
+    )
+  }
+  return pick(
+    items.filter(
+      (item) => pathname === item.to || (item.to !== '/' && pathname.startsWith(`${item.to}/`)),
+    ),
+    tab,
+  )
+}
 
 /** The public Holtkeeper documentation site. */
 export const docsUrl = 'https://holtkeeper.github.io'

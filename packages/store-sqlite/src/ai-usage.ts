@@ -33,6 +33,7 @@ interface AiUsageRow {
   turns: number
   outcome: AiUsageRecord['outcome']
   error: string | null
+  transcript_ref: string | null
 }
 
 const toRecord = (r: AiUsageRow): AiUsageRecord => ({
@@ -57,6 +58,7 @@ const toRecord = (r: AiUsageRow): AiUsageRecord => ({
   turns: r.turns,
   outcome: r.outcome,
   ...(r.error !== null && { error: r.error }),
+  ...(r.transcript_ref !== null && { transcriptRef: r.transcript_ref }),
 })
 
 const day = 'substr(r.at, 1, 10)'
@@ -98,6 +100,7 @@ function plainWhere(filter: AiUsageFilter): Where {
   if (filter.taskKind !== undefined) add('r.task_kind = ?', filter.taskKind)
   if (filter.analyzer !== undefined) add('r.analyzer = ?', filter.analyzer)
   if (filter.outcome !== undefined) add('r.outcome = ?', filter.outcome)
+  if (filter.jobId !== undefined) add('r.job_id = ?', filter.jobId)
   return { sql: conditions.length ? conditions.join(' AND ') : '1', params }
 }
 
@@ -109,8 +112,8 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
   const insert = db.prepare(
     `INSERT INTO ai_usage (id, at, repo_forge, repo_path, groups, task_kind, analyzer, job_id,
        analysis_id, actor, provider, model, input_tokens, output_tokens, cache_read_tokens,
-       cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error, transcript_ref)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
 
   function where(filter: AiUsageFilter): Where {
@@ -169,6 +172,7 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
         record.turns,
         record.outcome,
         record.error ?? null,
+        record.transcriptRef ?? null,
       )
       return { ...structuredClone(record), id }
     },

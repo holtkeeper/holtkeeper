@@ -24,8 +24,6 @@ const answerSchema = z.object({
     .optional(),
   /** Whether the thread can be resolved after this answer. */
   resolve: z.boolean(),
-  /** A lasting rule of this repository the author stated, worth remembering for future reviews. */
-  learning: z.object({ title: z.string(), body: z.string() }).optional(),
 })
 
 export type ThreadAnswer = z.infer<typeof answerSchema>
@@ -45,27 +43,9 @@ export interface ReplyToThreadOptions {
   usage?: ReviewUsage
   /** Mounted for the agent when there is a checkout, e.g. code navigation tools. */
   toolsets?: readonly Toolset[]
-  /**
-   * Saves a rule the author taught in the thread, e.g. as a knowledge base proposal. Without it the
-   * agent is not asked for learnings. A failure is reported in the result, not thrown.
-   */
-  learn?: (learning: ThreadLearning) => Promise<LearnOutcome>
+  /** The repository's Guide, passed as the task's stable `context`. */
+  context?: string
   signal?: AbortSignal
-}
-
-/** A rule learned from a reply, with the note it came from. */
-export interface ThreadLearning {
-  title: string
-  body: string
-  discussionId: string
-  noteId: number | string
-}
-
-/** What saving a learning did: `id` of the new or existing entry, `duplicateOf` when it repeated one. */
-export interface LearnOutcome {
-  id: string
-  status: string
-  duplicateOf?: string
 }
 
 export interface ThreadReplyResult {
@@ -75,7 +55,6 @@ export interface ThreadReplyResult {
   replied: boolean
   resolved: boolean
   reason?: string
-  learning?: LearnOutcome | { error: string }
 }
 
 const isOurs = (note: { author: string; body: string }, botUsername?: string) =>
@@ -163,11 +142,6 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
         '- `concede` when the author is right; say so plainly and set resolve to true.',
         '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
         'Be short and concrete. Never be defensive.',
-        ...(options.learn
-          ? [
-              '- `learning`: only when the reply states a lasting rule of this repository (a convention, a deliberate design decision, something reviews should not flag) that is not tied to this one change. A short imperative `title` and a `body` saying what to do or not flag and why. Leave it out otherwise.',
-            ]
-          : []),
         options.language
           ? `Write in ${options.language}.`
           : 'Write in the language of the latest reply.',
@@ -181,6 +155,8 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
         .join('\n\n'),
       output: answerSchema,
       taskKind: 'review',
+      tier: 'main',
+      ...(options.context ? { context: options.context } : {}),
       ...(options.dir && options.toolsets ? { toolsets: options.toolsets } : {}),
       maxTurns: 15,
       ...(options.signal ? { signal: options.signal } : {}),
@@ -206,19 +182,5 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
   await forge.replyToDiscussion(repo.path, mr, discussionId, replyBody(body))
   const resolve = answer.resolve && discussion.resolvable && forge.resolveDiscussion !== undefined
   if (resolve) await forge.resolveDiscussion?.(repo.path, mr, discussionId, true)
-  const learning =
-    options.learn && answer.learning && last
-      ? await options
-          .learn({ ...answer.learning, discussionId, noteId: last.id })
-          .catch((error: unknown) => ({
-            error: error instanceof Error ? error.message : String(error),
-          }))
-      : undefined
-  return {
-    discussionId,
-    action: answer.action,
-    replied: true,
-    resolved: resolve,
-    ...(learning ? { learning } : {}),
-  }
+  return { discussionId, action: answer.action, replied: true, resolved: resolve }
 }

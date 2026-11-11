@@ -1,7 +1,6 @@
 import { Database } from 'bun:sqlite'
 
 import type {
-  ActivityEvent,
   AnalysisRecord,
   AuditRun,
   Identity,
@@ -14,17 +13,26 @@ import type {
   StoredCredential,
   User,
 } from '@holtkeeper/store'
-import { claimDueBy, DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
+import {
+  claimDueBy,
+  DEFAULT_MAX_ATTEMPTS,
+  errorSignature,
+  STALE_JOB_ERROR,
+} from '@holtkeeper/store'
 
 import { sqliteExternalAccounts } from './accounts.ts'
 import { sqliteAiUsage } from './ai-usage.ts'
 import { sqliteAudit } from './audit.ts'
+import { sqliteChat } from './chat.ts'
 import { sqliteCiJobs } from './ci-jobs.ts'
 import { sqliteConfig, sqliteKv } from './config.ts'
 import { sqliteDatabase } from './database.ts'
+import { sqliteFamilies, sqliteGuides } from './guides.ts'
 import { sqliteKnowledge } from './knowledge.ts'
+import { sqliteLearnings } from './learnings.ts'
 import { sqliteLibraries } from './libraries.ts'
 import { migrate } from './migrations.ts'
+import { sqliteTasks } from './tasks.ts'
 
 /** Options for `sqliteStore`. */
 export interface SqliteStoreOptions {
@@ -62,6 +70,7 @@ interface AnalysisRow {
   repo_path: string
   kind: string
   ref: string | null
+  sha: string | null
   created_at: string
   actor: string | null
   data: string
@@ -72,6 +81,7 @@ const toAnalysis = (r: AnalysisRow): AnalysisRecord => ({
   repo: { forge: r.repo_forge, path: r.repo_path },
   kind: r.kind,
   ...(r.ref !== null && { ref: r.ref }),
+  ...(r.sha !== null && { sha: r.sha }),
   createdAt: r.created_at,
   ...(r.actor !== null && { actor: r.actor }),
   data: JSON.parse(r.data),
@@ -89,6 +99,7 @@ interface CredentialRow {
   last_rotated_at: string | null
   last_error: string | null
   options: string | null
+  capabilities: string | null
   created_at: string
   updated_at: string
 }
@@ -105,6 +116,7 @@ const toCredential = (r: CredentialRow): StoredCredential => ({
   ...(r.last_rotated_at !== null && { lastRotatedAt: r.last_rotated_at }),
   ...(r.last_error !== null && { lastError: r.last_error }),
   ...(r.options !== null && { options: JSON.parse(r.options) }),
+  ...(r.capabilities !== null && { capabilities: JSON.parse(r.capabilities) }),
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 })
@@ -207,24 +219,6 @@ const toLinkToken = (r: LinkTokenRow): LinkToken => ({
   ...(r.created_by !== null && { createdBy: r.created_by }),
 })
 
-interface ActivityRow {
-  id: string
-  at: string
-  actor: string
-  action: string
-  subject: string | null
-  details: string | null
-}
-
-const toActivity = (r: ActivityRow): ActivityEvent => ({
-  id: r.id,
-  at: r.at,
-  actor: r.actor,
-  action: r.action,
-  ...(r.subject !== null && { subject: r.subject }),
-  ...(r.details !== null && { details: JSON.parse(r.details) }),
-})
-
 /**
  * A `Store` backed by SQLite (`bun:sqlite`). Opens the database in WAL mode with foreign keys on,
  * applies pending schema migrations, and behaves exactly like `memoryStore` for every contract in
@@ -250,8 +244,8 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
        ORDER BY finished_at DESC, seq DESC LIMIT ?4`,
     ),
     analysisInsert: db.prepare(
-      `INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, created_at, actor, data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, sha, created_at, actor, data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     analysisGet: db.query<AnalysisRow, [string]>('SELECT * FROM analyses WHERE id = ?'),
     analysisList: db.query<
@@ -267,7 +261,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
       AnalysisRow,
       [string | null, string | null, string | null, string | null, number]
     >(
-      `SELECT seq, id, repo_forge, repo_path, kind, ref, created_at, actor, 'null' AS data FROM analyses
+      `SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, 'null' AS data FROM analyses
        WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR kind = ?3)
          AND (?4 IS NULL OR created_at < ?4)
        ORDER BY created_at DESC, seq DESC LIMIT ?5`,
@@ -282,15 +276,32 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
          WHERE n = 1)
        ORDER BY created_at DESC, seq DESC`,
     ),
+    analysisLatestHeads: db.query<AnalysisRow, [string | null, string | null, string | null]>(
+      `SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, 'null' AS data
+       FROM analyses WHERE seq IN (
+         SELECT seq FROM (
+           SELECT seq, ROW_NUMBER() OVER (
+             PARTITION BY repo_forge, repo_path, kind ORDER BY created_at DESC, seq DESC) AS n
+           FROM analyses
+           WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR kind = ?3))
+         WHERE n = 1)
+       ORDER BY created_at DESC, seq DESC`,
+    ),
+    analysisPrune: db.prepare<unknown, [string, string, string, number]>(
+      `DELETE FROM analyses
+       WHERE repo_forge = ?1 AND repo_path = ?2 AND kind = ?3 AND seq NOT IN (
+         SELECT seq FROM analyses WHERE repo_forge = ?1 AND repo_path = ?2 AND kind = ?3
+         ORDER BY created_at DESC, seq DESC LIMIT ?4)`,
+    ),
     credList: db.query<CredentialRow, []>('SELECT * FROM credentials ORDER BY seq'),
     credGet: db.query<CredentialRow, [string]>('SELECT * FROM credentials WHERE id = ?'),
     credPut: db.prepare(
-      `INSERT INTO credentials (id, name, kind, url, scope, secret, expires_at, rotation, last_rotated_at, last_error, options, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO credentials (id, name, kind, url, scope, secret, expires_at, rotation, last_rotated_at, last_error, options, capabilities, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET name = excluded.name, kind = excluded.kind, url = excluded.url, scope = excluded.scope,
          secret = excluded.secret, expires_at = excluded.expires_at, rotation = excluded.rotation,
          last_rotated_at = excluded.last_rotated_at, last_error = excluded.last_error, options = excluded.options,
-         created_at = excluded.created_at, updated_at = excluded.updated_at`,
+         capabilities = excluded.capabilities, created_at = excluded.created_at, updated_at = excluded.updated_at`,
     ),
     credRemove: db.prepare('DELETE FROM credentials WHERE id = ?'),
     settingList: db.query<SettingRow, [string | null]>(
@@ -345,12 +356,6 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
        ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, purpose = excluded.purpose,
          expires_at = excluded.expires_at, used_at = excluded.used_at, created_by = excluded.created_by`,
     ),
-    activityInsert: db.prepare(
-      'INSERT INTO activity (id, at, actor, action, subject, details) VALUES (?, ?, ?, ?, ?, ?)',
-    ),
-    activityList: db.query<ActivityRow, [string | null, number]>(
-      'SELECT * FROM activity WHERE (?1 IS NULL OR at < ?1) ORDER BY at DESC, seq DESC LIMIT ?2',
-    ),
   }
 
   return {
@@ -388,6 +393,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
           record.repo.path,
           record.kind,
           orNull(record.ref),
+          orNull(record.sha),
           record.createdAt,
           orNull(record.actor),
           json(record.data),
@@ -416,6 +422,17 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
           .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind))
           .map(toAnalysis)
       },
+      async latestHeads({ repo, kind } = {}) {
+        return sql.analysisLatestHeads
+          .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind))
+          .map((row) => {
+            const { data: _, ...head } = toAnalysis(row)
+            return head
+          })
+      },
+      async prune({ repo, kind, keep }) {
+        return sql.analysisPrune.run(repo.forge, repo.path, kind, Math.max(keep, 0)).changes
+      },
     },
     credentials: {
       async list() {
@@ -438,6 +455,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
           orNull(c.lastRotatedAt),
           orNull(c.lastError),
           c.options ? json(c.options) : null,
+          c.capabilities ? json(c.capabilities) : null,
           c.createdAt,
           c.updatedAt,
         )
@@ -548,27 +566,15 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
         return row ? toLinkToken(row) : undefined
       },
     },
-    activity: {
-      async append(event) {
-        const stored: ActivityEvent = { ...event, id: crypto.randomUUID() }
-        sql.activityInsert.run(
-          stored.id,
-          event.at,
-          event.actor,
-          event.action,
-          orNull(event.subject),
-          event.details ? json(event.details) : null,
-        )
-        return stored
-      },
-      async list({ before, limit = 50 } = {}) {
-        return sql.activityList.all(orNull(before), limit).map(toActivity)
-      },
-    },
     jobs: sqliteJobs(db),
     knowledge: sqliteKnowledge(db),
+    guides: sqliteGuides(db),
+    families: sqliteFamilies(db),
+    learnings: sqliteLearnings(db),
+    tasks: sqliteTasks(db),
     aiUsage: sqliteAiUsage(db),
     ciJobs: sqliteCiJobs(db),
+    chat: sqliteChat(db),
     config: sqliteConfig(db),
     kv: sqliteKv(db),
     audit: sqliteAudit(db),
@@ -601,9 +607,11 @@ interface JobRow {
   heartbeat_at: string | null
   error: string | null
   analysis_id: string | null
-  log: string
+  error_signature: string | null
+  attempts_history: string
   actor: string | null
   schedule: string | null
+  reason: string | null
 }
 
 const toJob = (r: JobRow): Job => ({
@@ -624,11 +632,42 @@ const toJob = (r: JobRow): Job => ({
   ...(r.worker_id !== null && { workerId: r.worker_id }),
   ...(r.heartbeat_at !== null && { heartbeatAt: r.heartbeat_at }),
   ...(r.error !== null && { error: r.error }),
+  ...(r.error_signature !== null && { errorSignature: r.error_signature }),
+  attemptsHistory: JSON.parse(r.attempts_history),
   ...(r.analysis_id !== null && { analysisId: r.analysis_id }),
-  log: JSON.parse(r.log),
   ...(r.actor !== null && { actor: r.actor }),
   ...(r.schedule !== null && { schedule: r.schedule }),
+  ...(r.reason !== null && { reason: r.reason }),
 })
+
+/** `attempts_history` with the patch in parameter `param` (a JSON object) merged into its running last attempt. */
+const endAttempt = (param: string) =>
+  `CASE WHEN json_extract(attempts_history, '$[#-1].status') = 'running'
+     THEN json_set(attempts_history, '$[#-1]', json_patch(json_extract(attempts_history, '$[#-1]'), ${param}))
+     ELSE attempts_history END`
+
+/** JSON of an attempt patch; absent fields are left out so they do not overwrite anything. */
+const attemptPatch = (patch: Record<string, string | undefined>) =>
+  JSON.stringify(Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)))
+
+/** SQL condition and parameter limiting jobs to `repos` (none when omitted). */
+const reposParam = (repos: { forge: string; path: string }[] | undefined) =>
+  repos === undefined ? null : JSON.stringify(repos.map((repo) => [repo.forge, repo.path]))
+
+const IN_REPOS = (param: string) =>
+  `(${param} IS NULL OR EXISTS (SELECT 1 FROM json_each(${param}) r
+     WHERE json_extract(r.value, '$[0]') = repo_forge AND json_extract(r.value, '$[1]') = repo_path))`
+
+interface FailureRow {
+  analyzer: string
+  error_signature: string
+  count: number
+  repos: number
+  first_at: string
+  last_at: string
+  id: string
+  error: string | null
+}
 
 function sqliteJobs(db: Database): JobStore {
   const sql = {
@@ -648,20 +687,25 @@ function sqliteJobs(db: Database): JobStore {
         string,
         string | null,
         string | null,
+        string | null,
       ]
     >(
       `INSERT INTO jobs (id, analyzer, repo_forge, repo_path, group_name, ref, options, trigger, status, attempts,
-         max_attempts, run_after, created_at, log, actor, schedule)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 0, ?9, ?10, ?11, '[]', ?12, ?13)
+         max_attempts, run_after, created_at, actor, schedule, reason)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', 0, ?9, ?10, ?11, ?12, ?13, ?14)
        RETURNING *`,
     ),
     // One statement, so picking and taking the job is atomic even across processes.
-    claim: db.query<JobRow, [string, string, string, string, string]>(
+    claim: db.query<JobRow, [string, string, string, string, string, string | null, string]>(
       `UPDATE jobs SET status = 'running', attempts = attempts + 1, worker_id = ?1, started_at = ?2,
-         heartbeat_at = ?2, finished_at = NULL
+         heartbeat_at = ?2, finished_at = NULL,
+         attempts_history = json_insert(attempts_history, '$[#]',
+           json_object('n', attempts + 1, 'status', 'running', 'startedAt', ?2, 'workerId', ?1))
        WHERE id = (
          SELECT j.id FROM jobs j
          WHERE j.status = 'queued' AND j.run_after <= ?5
+           AND (?6 IS NULL OR j.analyzer IN (SELECT value FROM json_each(?6)))
+           AND j.analyzer NOT IN (SELECT value FROM json_each(?7))
            AND NOT EXISTS (
              SELECT 1 FROM jobs r
              WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
@@ -684,14 +728,14 @@ function sqliteJobs(db: Database): JobStore {
       `UPDATE jobs SET heartbeat_at = ?3 WHERE id = ?1 AND worker_id = ?2 AND status = 'running'
        RETURNING id`,
     ),
-    complete: db.query<JobRow, [string, string, string | null]>(
-      `UPDATE jobs SET status = 'succeeded', finished_at = ?2, error = NULL,
-         analysis_id = COALESCE(?3, analysis_id)
+    complete: db.query<JobRow, [string, string, string | null, string]>(
+      `UPDATE jobs SET status = 'succeeded', finished_at = ?2, error = NULL, error_signature = NULL,
+         analysis_id = COALESCE(?3, analysis_id), attempts_history = ${endAttempt('?4')}
        WHERE id = ?1 AND status = 'running'
        RETURNING *`,
     ),
-    fail: db.query<JobRow, [string, string, string, string | null]>(
-      `UPDATE jobs SET error = ?3,
+    fail: db.query<JobRow, [string, string, string, string | null, string, string]>(
+      `UPDATE jobs SET error = ?3, error_signature = ?5, attempts_history = ${endAttempt('?6')},
          status = CASE WHEN ?4 IS NOT NULL AND attempts < max_attempts THEN 'queued' ELSE 'failed' END,
          run_after = CASE WHEN ?4 IS NOT NULL AND attempts < max_attempts THEN ?4 ELSE run_after END,
          worker_id = CASE WHEN ?4 IS NOT NULL AND attempts < max_attempts THEN NULL ELSE worker_id END,
@@ -699,13 +743,19 @@ function sqliteJobs(db: Database): JobStore {
        WHERE id = ?1 AND status = 'running'
        RETURNING *`,
     ),
-    cancel: db.query<JobRow, [string, string]>(
-      `UPDATE jobs SET status = 'canceled', finished_at = ?2
+    block: db.query<JobRow, [string, string, string, string]>(
+      `UPDATE jobs SET status = 'blocked', finished_at = ?2, error = ?3, error_signature = NULL,
+         attempts_history = ${endAttempt('?4')}
+       WHERE id = ?1 AND status = 'running'
+       RETURNING *`,
+    ),
+    cancel: db.query<JobRow, [string, string, string]>(
+      `UPDATE jobs SET status = 'canceled', finished_at = ?2, attempts_history = ${endAttempt('?3')}
        WHERE id = ?1 AND status IN ('queued', 'running')
        RETURNING *`,
     ),
-    recover: db.query<JobRow, [string, string]>(
-      `UPDATE jobs SET error = 'worker stopped responding',
+    recover: db.query<JobRow, [string, string, string, string, string]>(
+      `UPDATE jobs SET error = ?3, error_signature = ?4, attempts_history = ${endAttempt('?5')},
          status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END,
          run_after = CASE WHEN attempts < max_attempts THEN ?2 ELSE run_after END,
          worker_id = CASE WHEN attempts < max_attempts THEN NULL ELSE worker_id END,
@@ -724,6 +774,9 @@ function sqliteJobs(db: Database): JobStore {
         string | null,
         number,
         string | null,
+        string | null,
+        string | null,
+        string | null,
       ]
     >(
       `SELECT * FROM jobs
@@ -732,22 +785,28 @@ function sqliteJobs(db: Database): JobStore {
          AND (?4 IS NULL OR analyzer = ?4)
          AND (?5 IS NULL OR created_at < ?5)
          AND (?7 IS NULL OR schedule = ?7)
+         AND (?8 IS NULL OR error_signature = ?8)
+         AND ${IN_REPOS('?9')}
+         AND (?10 IS NULL OR trigger = ?10)
        ORDER BY created_at DESC, seq DESC LIMIT ?6`,
     ),
-    log: db.query<{ log: string }, [string]>('SELECT log FROM jobs WHERE id = ?'),
-    setLog: db.prepare('UPDATE jobs SET log = ?2 WHERE id = ?1'),
+    // SQLite takes the bare id and error from the row that holds max(finished_at).
+    failures: db.query<FailureRow, [string, string | null, string | null, number]>(
+      `SELECT analyzer, error_signature, count(*) AS count,
+         count(DISTINCT repo_forge || ':' || repo_path) AS repos,
+         min(finished_at) AS first_at, max(finished_at) AS last_at, id, error
+       FROM jobs
+       WHERE status = 'failed' AND error_signature IS NOT NULL AND finished_at >= ?1
+         AND (?2 IS NULL OR analyzer = ?2) AND ${IN_REPOS('?3')}
+       GROUP BY analyzer, error_signature
+       ORDER BY last_at DESC LIMIT ?4`,
+    ),
+    targets: db.query<{ repo_forge: string; repo_path: string; group_name: string | null }, []>(
+      'SELECT DISTINCT repo_forge, repo_path, group_name FROM jobs',
+    ),
   }
 
   const one = (row: JobRow | null) => (row ? toJob(row) : undefined)
-  const appendLog = db.transaction((id: string, lines: string[]) => {
-    const row = sql.log.get(id)
-    if (!row) return
-    const previous: unknown = JSON.parse(row.log)
-    const log = [...(Array.isArray(previous) ? previous.map(String) : []), ...lines].slice(
-      -JOB_LOG_LIMIT,
-    )
-    sql.setLog.run(id, json(log))
-  })
 
   return {
     async enqueue(job) {
@@ -765,11 +824,12 @@ function sqliteJobs(db: Database): JobStore {
         job.createdAt,
         orNull(job.actor),
         orNull(job.schedule),
+        orNull(job.reason),
       )
       if (!row) throw new Error('job insert returned nothing')
       return toJob(row)
     },
-    async claim(workerId, now, { exclusive = [], after = {}, delayMs } = {}) {
+    async claim(workerId, now, { exclusive = [], after = {}, delayMs, only, except = [] } = {}) {
       return one(
         sql.claim.get(
           workerId,
@@ -777,6 +837,8 @@ function sqliteJobs(db: Database): JobStore {
           JSON.stringify(exclusive),
           JSON.stringify(after),
           claimDueBy(now, delayMs),
+          only ? JSON.stringify(only) : null,
+          JSON.stringify(except),
         ),
       )
     },
@@ -784,21 +846,54 @@ function sqliteJobs(db: Database): JobStore {
       return sql.heartbeat.get(id, workerId, now) !== null
     },
     async complete(id, { at, analysisId }) {
-      return one(sql.complete.get(id, at, orNull(analysisId)))
+      return one(
+        sql.complete.get(
+          id,
+          at,
+          orNull(analysisId),
+          attemptPatch({ status: 'succeeded', finishedAt: at }),
+        ),
+      )
     },
-    async fail(id, { at, error, retryAt }) {
-      return one(sql.fail.get(id, at, error, orNull(retryAt)))
+    async fail(id, { at, error, retryAt, step }) {
+      return one(
+        sql.fail.get(
+          id,
+          at,
+          error,
+          orNull(retryAt),
+          errorSignature(error),
+          attemptPatch({ status: 'failed', finishedAt: at, error, step }),
+        ),
+      )
+    },
+    async block(id, { at, error }) {
+      return one(
+        sql.block.get(id, at, error, attemptPatch({ status: 'blocked', finishedAt: at, error })),
+      )
     },
     async cancel(id, at) {
-      return one(sql.cancel.get(id, at) ?? sql.get.get(id))
+      return one(
+        sql.cancel.get(id, at, attemptPatch({ status: 'canceled', finishedAt: at })) ??
+          sql.get.get(id),
+      )
     },
     async recoverStale(heartbeatBefore, at) {
-      return sql.recover.all(heartbeatBefore, at).map(toJob)
+      return sql.recover
+        .all(
+          heartbeatBefore,
+          at,
+          STALE_JOB_ERROR,
+          errorSignature(STALE_JOB_ERROR),
+          attemptPatch({ status: 'failed', finishedAt: at, error: STALE_JOB_ERROR }),
+        )
+        .map(toJob)
     },
     async get(id) {
       return one(sql.get.get(id))
     },
-    async list({ status, repo, analyzer, schedule, before, limit = 50 } = {}) {
+    async list(query = {}) {
+      const { status, repo, analyzer, schedule, trigger, before, repos, limit = 50 } = query
       return sql.list
         .all(
           status === undefined ? null : json([status].flat()),
@@ -808,11 +903,29 @@ function sqliteJobs(db: Database): JobStore {
           orNull(before),
           limit,
           orNull(schedule),
+          orNull(query.errorSignature),
+          reposParam(repos),
+          orNull(trigger),
         )
         .map(toJob)
     },
-    async appendLog(id, lines) {
-      appendLog(id, lines)
+    async failures({ since, analyzer, repos, limit = 50 }) {
+      return sql.failures.all(since, orNull(analyzer), reposParam(repos), limit).map((row) => ({
+        analyzer: row.analyzer,
+        errorSignature: row.error_signature,
+        count: row.count,
+        repos: row.repos,
+        firstAt: row.first_at,
+        lastAt: row.last_at,
+        latestJobId: row.id,
+        error: row.error ?? '',
+      }))
+    },
+    async targets() {
+      return sql.targets.all().map((row) => ({
+        repo: { forge: row.repo_forge, path: row.repo_path },
+        ...(row.group_name !== null && { group: row.group_name }),
+      }))
     },
   }
 }

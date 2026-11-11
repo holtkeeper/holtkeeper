@@ -9,6 +9,7 @@
   "dependencies": {
     "@holtkeeper/access": "workspace:*",
     "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/artifacts": "workspace:*",
     "@holtkeeper/core": "workspace:*",
     "@holtkeeper/exec": "workspace:*",
     "@holtkeeper/exec-container": "workspace:*",

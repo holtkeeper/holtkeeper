@@ -52,19 +52,13 @@ const contracts = [
     area: 'Quality',
     iface: 'QualityCheck',
     href: '/modules/quality/',
-    impls: [
-      { name: 'linters via SARIF' },
-      { name: 'gitleaks' },
-      { name: 'knip' },
-      { name: 'jscpd' },
-      { name: 'conventions' },
-    ],
+    impls: [{ name: 'gitleaks' }, { name: 'test ids' }],
   },
   {
     area: 'Notify',
     iface: 'Notifier',
     href: '/modules/notify/',
-    impls: [{ name: 'Slack' }, { name: 'webhook' }],
+    impls: [{ name: 'webhook' }],
   },
   {
     area: 'Docs',

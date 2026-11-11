@@ -32,7 +32,7 @@ export interface DetectionInput {
 export function detectFlow(input: DetectionInput): FlowDetection {
   const reasons: string[] = []
   const settings: Record<string, unknown> = {}
-  let preset = 'trunk'
+  let mode: FlowDetection['mode'] = 'trunk'
 
   const packageTags = input.tags.filter((tag) => /^(?:@[^/]+\/)?[\w.-]+@\d/u.test(tag.name))
   if (input.files.includes('.changeset') || packageTags.length > input.tags.length / 2) {
@@ -41,7 +41,7 @@ export function detectFlow(input: DetectionInput): FlowDetection {
         ? 'a .changeset folder: changesets releases it'
         : 'tags name packages (name@version): a release tool tags it',
     )
-    return { preset: 'external', settings: { flow: { mode: 'external' } }, reasons }
+    return { mode: 'external', settings: { flow: { mode: 'external' } }, reasons }
   }
 
   const branches = new Set(input.branches.map((branch) => branch.name))
@@ -62,7 +62,7 @@ export function detectFlow(input: DetectionInput): FlowDetection {
   const release = [...pairs.values()].toSorted((a, b) => b.merges - a.merges)[0]
   const source = release?.source ?? sourceNames.find((name) => branches.has(name))
   if (release) {
-    preset = 'merge-request-deferred-version'
+    mode = 'merge-request'
     settings['flow'] = {
       mode: 'merge-request',
       source: release.source,
@@ -98,7 +98,7 @@ export function detectFlow(input: DetectionInput): FlowDetection {
         : 'no version tags yet: semantic versions with a v prefix',
     )
   }
-  return { preset, settings, reasons }
+  return { mode, settings, reasons }
 }
 
 /** Reads what `detectFlow` needs from the forge; reads a forge lacks count as empty. */

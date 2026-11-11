@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { memoryArtifactStore } from '@holtkeeper/artifacts'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -207,6 +210,16 @@ const configFor = (store: ReturnType<typeof memoryStore>, port: number) =>
   })
 
 describe('startServer roles', () => {
+  const miseDataDir = process.env.MISE_DATA_DIR
+  const emptyMise = mkdtempSync(join(tmpdir(), 'holtkeeper-mise-'))
+  beforeAll(() => {
+    process.env.MISE_DATA_DIR = emptyMise
+  })
+  afterAll(() => {
+    if (miseDataDir === undefined) delete process.env.MISE_DATA_DIR
+    else process.env.MISE_DATA_DIR = miseDataDir
+    rmSync(emptyMise, { recursive: true, force: true })
+  })
   const echo: AnyAnalyzer = {
     kind: 'echo',
     analysis: { kind: 'echo', label: 'Echo' } as AnyAnalyzer['analysis'],
@@ -245,6 +258,27 @@ describe('startServer roles', () => {
     }
   })
 
+  test('a write pool worker refuses to start without a sandbox', async () => {
+    const store = memoryStore()
+    const port = 20_000 + Math.floor(Math.random() * 20_000)
+    const started = startServer(configFor(store, port), {
+      roles: ['worker'],
+      worker: { pools: ['write'] },
+      analyzers: [echo],
+      artifacts: memoryArtifactStore(),
+      log: () => {},
+    })
+    expect(
+      await started.then(
+        async (running) => {
+          await running.stop()
+          return 'started'
+        },
+        (error: unknown) => String(error),
+      ),
+    ).toContain('jobs.execution.mode')
+  })
+
   test('a web process serves the API next to the probes', async () => {
     const store = memoryStore()
     const port = 20_000 + Math.floor(Math.random() * 20_000)
@@ -257,7 +291,9 @@ describe('startServer roles', () => {
     try {
       expect((await fetch(`${running.url}/api/me`)).status).toBe(200)
       expect((await fetch(`${running.url}/readyz`)).status).toBe(200)
-      expect((await store.settings.get('default:llm.model'))?.value).toBe('claude-opus@latest')
+      expect((await store.settings.get('default:agent.tools'))?.value).toEqual({
+        knowledgeTokens: 1500,
+      })
       expect(await (await fetch(`${running.url}/metrics`)).text()).toContain(
         'holtkeeper_jobs_queued',
       )

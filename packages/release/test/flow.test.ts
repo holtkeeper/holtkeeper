@@ -23,14 +23,15 @@ const repo = { forge: 'work', path: 'g/app' }
 
 function deferredFlow() {
   const fake = new FakeForge()
-  fake.commitTo('main', 'feat: [GTW-1] first screen')
+  fake.commitTo('main', 'feat: [ABC-1] first widget')
   fake.tag('v1.0.0')
-  fake.commitTo('development', 'feat: [GTW-2] statistics window', 'fix: [GTW-3] crash on load')
+  fake.commitTo('development', 'feat: [ABC-2] gadgets panel', 'fix: [ABC-3] crash on load')
   return fake
 }
 
 const settings = releaseSettings({
-  acceptance: { required: true, signals: ['manual', 'label'] },
+  enabled: true,
+  acceptance: 'label',
   deploy: {
     environments: [
       { name: 'preprod', job: 'deploy:preprod' },
@@ -54,13 +55,13 @@ describe('merge request flow with the version after acceptance', () => {
       latest: { tag: 'v1.0.0' },
       next: '1.1.0',
       ahead: 2,
-      tickets: ['GTW-2', 'GTW-3'],
+      tickets: ['ABC-2', 'ABC-3'],
     })
 
     const proposal = planRelease({ step: 'propose', facts: current, settings, now })
     expect(proposal.title).toBe('Release candidate 2026-11-01')
     expect(proposal.body).toContain('Next version if released now: **1.1.0**')
-    expect(proposal.body).toContain('- statistics window (GTW-2')
+    expect(proposal.body).toContain('- gadgets panel (ABC-2')
     expect(proposal.body.endsWith(releaseMarker)).toBe(true)
 
     const opened = await proposeRelease(context, current, proposal)
@@ -99,7 +100,7 @@ describe('merge request flow with the version after acceptance', () => {
     expect(version.tag).toBe('v1.2.0')
     expect(version.gates.every((gate) => gate.ok)).toBe(true)
     expect(version.entries.filter((entry) => entry.included).map((entry) => entry.text)).toEqual([
-      'statistics window',
+      'gadgets panel',
       'crash on load',
       'faster table',
     ])
@@ -163,7 +164,7 @@ describe('trunk flow', () => {
     fake.commitTo('main', 'feat: one')
     const trunk = releaseSettings({
       flow: { mode: 'trunk' },
-      tag: { changelogFile: { enabled: true } },
+      changelogFile: true,
     })
     const current = await collectFacts({ forge: fake.forge, repo, settings: trunk })
     expect(current.source).toBeUndefined()

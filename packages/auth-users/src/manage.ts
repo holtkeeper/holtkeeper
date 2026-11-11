@@ -1,5 +1,5 @@
 import type { Grant } from '@holtkeeper/access'
-import type { ActivityStore, User, UserStore } from '@holtkeeper/store'
+import type { AuditStore, User, UserStore } from '@holtkeeper/store'
 
 import { type IssuedLink, issueLink } from './links.ts'
 
@@ -8,8 +8,8 @@ export const adminGrants: Grant[] = [{ scope: { all: true }, actions: ['*'] }]
 
 export interface ManageOptions {
   store: UserStore
-  activity?: ActivityStore
-  /** Who acts, recorded as `createdBy` and activity actor, e.g. `cli`. */
+  audit?: Pick<AuditStore, 'append'>
+  /** Who acts, recorded as `createdBy` and audit actor (via `system`), e.g. `cli`. */
   actor: string
   now?: () => Date
 }
@@ -44,11 +44,13 @@ export async function createUser(
     createdBy: options.actor,
   }
   await options.store.putUser(user)
-  await options.activity?.append({
+  await options.audit?.append({
     at: now.toISOString(),
-    actor: options.actor,
+    actor: { id: options.actor, name: options.actor, provider: 'system' },
+    via: 'system',
     action: 'user.invited',
-    subject: user.id,
+    target: { type: 'user', id: user.id },
+    outcome: 'ok',
     details: { name: user.name, grants: user.grants },
   })
   return user
@@ -72,11 +74,13 @@ export async function issueUserLink(
     now,
     createdBy: options.actor,
   })
-  await options.activity?.append({
+  await options.audit?.append({
     at: now.toISOString(),
-    actor: options.actor,
+    actor: { id: options.actor, name: options.actor, provider: 'system' },
+    via: 'system',
     action: 'user.link_issued',
-    subject: input.user.id,
+    target: { type: 'user', id: input.user.id },
+    outcome: 'ok',
     details: { purpose: input.purpose, expiresAt: issued.expiresAt },
   })
   return issued

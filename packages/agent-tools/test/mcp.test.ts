@@ -3,14 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { type ClaudeQuery, createClaudeAgent } from '@holtkeeper/agent'
 
-import {
-  codeTools,
-  context7Server,
-  CONTEXT7_URL,
-  docsTools,
-  externalServers,
-  toMcpServer,
-} from '../src/index.ts'
+import { codeTools, docsTools, toMcpServer } from '../src/index.ts'
+
+const docsServer = { type: 'http' as const, url: 'https://docs.example.test/mcp' }
 
 const success = {
   type: 'result',
@@ -40,7 +35,7 @@ describe('MCP wiring', () => {
     ])
   })
 
-  test('the Claude adapter mounts toolsets and Context7 and allows nothing else', async () => {
+  test('the Claude adapter mounts toolsets and external servers and allows nothing else', async () => {
     const calls: Options[] = []
     const query: ClaudeQuery = async function* ({ options }) {
       calls.push(options ?? {})
@@ -50,18 +45,14 @@ describe('MCP wiring', () => {
       dir: '/repo',
       prompt: 'p',
       toolsets: [codeTools(), docsTools()],
-      mcpServers: externalServers({ context7: true }),
+      mcpServers: { 'docs-server': docsServer },
     })
     const options = calls[0] ?? {}
     expect(options.allowedTools).toContain('mcp__holtkeeper__code_outline')
     expect(options.allowedTools).toContain('mcp__holtkeeper__docs_package')
     expect(options.allowedTools?.some((name) => !name.startsWith('mcp__holtkeeper__'))).toBe(false)
     expect(options.tools).toEqual(['Read', 'Glob', 'Grep'])
-    expect(options.mcpServers?.['context7']).toEqual({
-      type: 'http',
-      url: CONTEXT7_URL,
-      alwaysLoad: true,
-    })
+    expect(options.mcpServers?.['docs-server']).toEqual(docsServer)
     expect(options.mcpServers?.['holtkeeper']?.type).toBe('sdk')
     const gate = options.canUseTool
     if (!gate) throw new Error('no gate')
@@ -73,29 +64,7 @@ describe('MCP wiring', () => {
           { signal: new AbortController().signal, toolUseID: 't', requestId: 'r' },
         )
       )?.behavior
-    expect(await verdict('mcp__context7__resolve-library-id')).toBe('allow')
+    expect(await verdict('mcp__docs-server__lookup')).toBe('allow')
     expect(await verdict('WebFetch')).toBe('deny')
-  })
-})
-
-describe('context7', () => {
-  test('is off unless enabled', () => {
-    expect(externalServers()).toEqual({})
-    expect(externalServers({ context7: false })).toEqual({})
-  })
-
-  test('remote and stdio configs', () => {
-    expect(context7Server({ apiKey: 'ck' })['context7']).toEqual({
-      type: 'http',
-      url: 'https://mcp.context7.com/mcp',
-      headers: { Authorization: 'Bearer ck' },
-      alwaysLoad: true,
-    })
-    expect(context7Server({ transport: 'stdio' })['context7']).toEqual({
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', '@upstash/context7-mcp'],
-      alwaysLoad: true,
-    })
   })
 })

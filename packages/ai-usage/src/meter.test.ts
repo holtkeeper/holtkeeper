@@ -1,19 +1,22 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { Agent, AgentResult } from '@holtkeeper/agent'
+import type { Agent, AgentResult, AgentTask } from '@holtkeeper/agent'
 import type { AiUsageRecord } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { budgetGuard } from './budget.ts'
 import { computeCost, costOf, defaultPrices, priceFor } from './cost.ts'
-import { BudgetExceededError, meteredAgent, usageRecorder } from './meter.ts'
+import { BudgetDeniedError, meteredAgent, usageRecorder } from './meter.ts'
 
 const repo = { forge: 'work', path: 'games/app', groups: ['games'] }
 
-const fakeAgent = (outcome: AgentResult | Error, onRun = () => {}): Agent => ({
+const fakeAgent = (
+  outcome: AgentResult | Error,
+  onRun: (task: AgentTask) => void = () => {},
+): Agent => ({
   name: 'fake',
-  async run() {
-    onRun()
+  async run(task) {
+    onRun(task)
     if (outcome instanceof Error) throw outcome
     return outcome as never
   },
@@ -118,36 +121,57 @@ describe('meteredAgent', () => {
     })
   })
 
-  test('a block budget denies without running and records denied-budget', async () => {
+  test('a block budget denies without running, records denied-budget and caps allowed runs', async () => {
     const store = memoryStore()
     await store.settings.put({
       id: 'b',
       key: 'llm.budget',
       scope: { all: true },
-      value: { monthlyUsd: 1, action: 'block' },
+      value: { weeklyUsd: 3, reserveUsd: 1, action: 'block' },
       secret: false,
       updatedAt: '2026-10-01T00:00:00.000Z',
     })
-    const budgets = budgetGuard({ settings: store.settings, usage: store.aiUsage, now: fixedNow })
-    let ran = 0
+    const budgets = budgetGuard({
+      settings: store.settings,
+      usage: store.aiUsage,
+      now: fixedNow,
+      timeZone: 'UTC',
+    })
+    const caps: (number | undefined)[] = []
     const agent = meteredAgent(
-      fakeAgent({ text: '', turns: 1, costUsd: 1 }, () => {
-        ran += 1
+      fakeAgent({ text: '', turns: 1, costUsd: 1.5 }, (task) => {
+        caps.push(task.maxCostUsd)
       }),
       { record: (e) => store.aiUsage.append(e), budgets, context, now: fixedNow },
     )
-    await agent.run({ dir: '/x', prompt: 'p' })
+    await agent.run({ dir: '/x', prompt: 'p', maxCostUsd: 5 })
     const denied = await agent.run({ dir: '/x', prompt: 'p' }).catch((error: unknown) => error)
-    expect(denied).toBeInstanceOf(BudgetExceededError)
-    expect((denied as BudgetExceededError).exceeded[0]).toMatchObject({
+    expect(denied).toBeInstanceOf(BudgetDeniedError)
+    expect((denied as BudgetDeniedError).exceeded[0]).toMatchObject({
       budgetId: 'b',
-      spentUsd: 1,
+      spentUsd: 1.5,
+      estimateUsd: 1.5,
+      limitUsd: 2,
     })
-    expect(ran).toBe(1)
+    expect(caps).toEqual([2])
     expect((await store.aiUsage.list()).map((r) => [r.outcome, r.costUsd])).toEqual([
       ['denied-budget', 0],
-      ['ok', 1],
+      ['ok', 1.5],
     ])
+
+    const interactive = meteredAgent(
+      fakeAgent({ text: '', turns: 1, costUsd: 0.1 }, (task) => {
+        caps.push(task.maxCostUsd)
+      }),
+      {
+        record: (e) => store.aiUsage.append(e),
+        budgets,
+        context: { ...context, interactive: true },
+        now: fixedNow,
+      },
+    )
+    await interactive.run({ dir: '/x', prompt: 'p' })
+    expect(caps).toEqual([2, 1.5])
   })
 
   test('a failing record does not replace the result', async () => {
@@ -179,13 +203,15 @@ describe('usageRecorder', () => {
         usage: { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
       },
       durationMs: 10_000,
+      jobId: 'job-1',
+      transcriptRef: 'b'.repeat(64),
     })
     await record({
       repo: { forge: 'work', path: 'games/app', groups: ['other'] },
       taskKind: 'review',
       provider: 'anthropic',
       model: 'claude-sonnet-5-5',
-      error: new BudgetExceededError([]),
+      error: new BudgetDeniedError([]),
       durationMs: 0,
       actor: 'jane',
       at: '2026-10-30T11:00:00.000Z',
@@ -198,7 +224,10 @@ describe('usageRecorder', () => {
       costUsd: 2,
       costSource: 'computed',
       outcome: 'ok',
+      jobId: 'job-1',
+      transcriptRef: 'b'.repeat(64),
     })
+    expect(denied?.transcriptRef).toBeUndefined()
     expect(denied).toMatchObject({ groups: ['other'], actor: 'jane', outcome: 'denied-budget' })
   })
 })

@@ -5,10 +5,16 @@ import type {
   KnowledgeLink,
   KnowledgePackage,
   KnowledgeStatus,
+  KnowledgeVisibility,
   Scope,
 } from '@holtkeeper/api'
 
+import type { Space } from './guide.ts'
+import { repoKey } from './repo.ts'
 import { isEmptyScope, normalizeScope } from './scope.ts'
+
+/** Settings edited in the Knowledge page's settings sheet instead of a Settings tab. */
+export const knowledgeSettingKeys: readonly string[] = ['knowledge.autoAccept', 'analyzers.review']
 
 export const knowledgeKinds: readonly { id: KnowledgeKind; label: string; hint: string }[] = [
   { id: 'convention', label: 'Convention', hint: 'How code is written here' },
@@ -18,22 +24,12 @@ export const knowledgeKinds: readonly { id: KnowledgeKind; label: string; hint: 
   { id: 'howto', label: 'How-to', hint: 'How to get a task done' },
 ]
 
-export const knowledgeStatuses: readonly { id: KnowledgeStatus; label: string }[] = [
-  { id: 'proposed', label: 'Proposed' },
-  { id: 'accepted', label: 'Accepted' },
-  { id: 'rejected', label: 'Rejected' },
-  { id: 'archived', label: 'Archived' },
-]
-
 /** Task kinds an entry may apply to; `*` is every task. */
 export const taskKinds: readonly { id: string; label: string }[] = [
   { id: '*', label: 'Every task' },
   { id: 'review', label: 'Review' },
   { id: 'port', label: 'Port' },
   { id: 'propagate', label: 'Propagate' },
-  { id: 'tests', label: 'Tests' },
-  { id: 'quality', label: 'Quality' },
-  { id: 'release-risk', label: 'Release risk' },
 ]
 
 export const isKnowledgeKind = (value: string): value is KnowledgeKind =>
@@ -60,9 +56,23 @@ export interface KnowledgeDraft {
   topics: string[]
   appliesTo: string[]
   packages: KnowledgePackage[]
+  /** `auto` lets the server decide: shared for a decision or convention about one package. */
+  visibility: KnowledgeVisibility | 'auto'
+  /** `npm:react`, `tool:node`; blank for none (an entry about one package gets it from there). */
+  subject: string
   evidence: KnowledgeLink[]
   version?: number
 }
+
+/** Who reads a note, as the editor offers it. */
+export const visibilityOptions = [
+  { id: 'auto', label: 'Default', hint: 'Shared when it decides about one package' },
+  { id: 'team', label: 'My team', hint: 'Only people its scope covers' },
+  { id: 'shared', label: 'Shared', hint: 'Other teams read it through the cross-team catalog' },
+] as const
+
+export const isVisibility = (value: string): value is KnowledgeDraft['visibility'] =>
+  visibilityOptions.some((option) => option.id === value)
 
 export const emptyDraft = (scope: Scope = { all: true }): KnowledgeDraft => ({
   title: '',
@@ -72,6 +82,8 @@ export const emptyDraft = (scope: Scope = { all: true }): KnowledgeDraft => ({
   topics: [],
   appliesTo: ['*'],
   packages: [],
+  visibility: 'auto',
+  subject: '',
   evidence: [],
 })
 
@@ -83,6 +95,8 @@ export const draftOf = (entry: KnowledgeEntry): KnowledgeDraft => ({
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   packages: entry.packages ?? [],
+  visibility: entry.visibility ?? 'team',
+  subject: entry.subject ?? '',
   evidence: entry.evidence,
   version: entry.version,
 })
@@ -125,14 +139,95 @@ export function inputOf(draft: KnowledgeDraft): CreateKnowledgeInput & { version
     topics: [...new Set(draft.topics.map((t) => t.trim().toLowerCase()).filter(Boolean))],
     appliesTo: draft.appliesTo.includes('*') ? ['*'] : draft.appliesTo,
     ...(packages.length ? { packages } : {}),
+    ...(draft.visibility === 'auto' ? {} : { visibility: draft.visibility }),
+    ...(draft.subject.trim() ? { subject: draft.subject.trim() } : {}),
     evidence,
     ...(draft.version !== undefined ? { version: draft.version } : {}),
   }
 }
 
-/** Entries whose scope names the group. */
+/** Entries whose scope names the group, alone or in a `frontend + storefront` entry. */
 export const entriesOfGroup = (entries: readonly KnowledgeEntry[], group: string) =>
-  entries.filter((entry) => entry.scope.groups?.includes(group))
+  entries.filter((entry) =>
+    entry.scope.groups?.some((match) =>
+      typeof match === 'string' ? match === group : match.includes(group),
+    ),
+  )
+
+const namesRepo = (scope: Scope, key: string) => {
+  const path = key.slice(key.indexOf(':') + 1)
+  return scope.repos?.some((pattern) => pattern === key || pattern === path) ?? false
+}
+
+/**
+ * Notes a space lists: every entry for *All*, entries naming the group or a family member, and
+ * for a repository the entries the server found covering it (`entries` is then already filtered).
+ */
+export function notesOfSpace(
+  entries: readonly KnowledgeEntry[],
+  space: Space,
+  members: readonly string[] = [],
+): KnowledgeEntry[] {
+  if (space.kind === 'group') return entriesOfGroup(entries, space.group)
+  if (space.kind === 'family')
+    return entries.filter((entry) => members.some((member) => namesRepo(entry.scope, member)))
+  return [...entries]
+}
+
+/** Whether a repository space shows the entry only because a broader scope covers it. */
+export const isInherited = (entry: KnowledgeEntry, space: Space): boolean =>
+  space.kind === 'repo' && !namesRepo(entry.scope, repoKey(space.repo))
+
+/** What the Notes tab shows: live entries (proposals and accepted), rejected or archived ones. */
+export type NoteFilter = 'live' | 'rejected' | 'archived'
+
+export const noteFilters: readonly { id: NoteFilter; label: string }[] = [
+  { id: 'live', label: 'Live' },
+  { id: 'rejected', label: 'Rejected' },
+  { id: 'archived', label: 'Archived' },
+]
+
+export const matchesFilter = (entry: KnowledgeEntry, filter: NoteFilter): boolean =>
+  filter === 'live'
+    ? entry.status === 'proposed' || entry.status === 'accepted'
+    : entry.status === filter
+
+/** How Notes cards are grouped. */
+export type NoteGrouping = 'topic' | 'kind'
+
+/** A heading of the Notes tab with its cards. */
+export interface NoteGroup {
+  id: string
+  label: string
+  entries: KnowledgeEntry[]
+}
+
+const NO_TOPIC = 'No topic'
+
+const byReview = (a: KnowledgeEntry, b: KnowledgeEntry) =>
+  Number(b.status === 'proposed') - Number(a.status === 'proposed') ||
+  b.updatedAt.localeCompare(a.updatedAt)
+
+/**
+ * Entries under headings: by their first topic (alphabetically, entries without one last) or by
+ * kind (in `knowledgeKinds` order). Proposals come first in each group, then the newest.
+ */
+export function groupNotes(entries: readonly KnowledgeEntry[], by: NoteGrouping): NoteGroup[] {
+  const groups = new Map<string, KnowledgeEntry[]>()
+  for (const entry of entries) {
+    const id = by === 'kind' ? entry.kind : (entry.topics[0] ?? '')
+    groups.set(id, [...(groups.get(id) ?? []), entry])
+  }
+  const order = (id: string) =>
+    by === 'kind' ? knowledgeKinds.findIndex((k) => k.id === id) : id === '' ? 1 : 0
+  return [...groups]
+    .toSorted(([a], [b]) => order(a) - order(b) || a.localeCompare(b))
+    .map(([id, list]) => ({
+      id,
+      label: by === 'kind' && isKnowledgeKind(id) ? kindLabel(id) : id || NO_TOPIC,
+      entries: list.toSorted(byReview),
+    }))
+}
 
 /** Count of entries per status. */
 export function countByStatus(entries: readonly KnowledgeEntry[]): Record<KnowledgeStatus, number> {

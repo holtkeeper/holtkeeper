@@ -8,12 +8,6 @@ import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } fro
 import type { FileScope } from './scope.ts'
 import type { Candidate } from './validate.ts'
 
-/** A knowledge entry (team decision, convention, known pitfall) the review may rely on. */
-export interface KnowledgeEntry {
-  title: string
-  body: string
-}
-
 /** Runs a task and adds its turns, cost and token counts to `usage`. */
 export async function runTracked<Output>(
   agent: Agent,
@@ -37,8 +31,12 @@ export interface ReviewPromptInput {
   mode: 'full' | 'incremental'
   previousHead?: string
   guidelines: readonly Guideline[]
+  /**
+   * The resolved Guide (repository rules files, team rules, policies, generated text, notes); it
+   * replaces the plain `guidelines` block when given.
+   */
+  guide?: string
   instructions?: string
-  knowledge?: readonly KnowledgeEntry[]
   /** REVIEW.md path rules that match files in scope, with those files. */
   pathInstructions?: readonly { glob: string; text: string; files: readonly string[] }[]
   /** Deterministic findings to turn into comments with suggestions, in the project's style. */
@@ -81,21 +79,19 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
 }
 
 /**
- * The stable context block (repository guidelines, team instructions, knowledge) passed as the
- * task's `context`, so adapters can cache it across runs; empty when there is nothing.
+ * The stable context block (the Guide, or the repository guidelines without one, then the run's
+ * own instructions) passed as the task's `context`, so adapters can cache it across runs; empty
+ * when there is nothing.
  */
 export function reviewContext(input: ReviewPromptInput): string {
   const parts: string[] = []
-  if (input.guidelines.length)
+  if (input.guide?.trim()) parts.push(input.guide.trim())
+  else if (input.guidelines.length)
     parts.push(
       `Project guidelines from the repository:\n\n${input.guidelines.map((g) => `### ${g.file}\n\n${g.text}`).join('\n\n')}`,
     )
   if (input.instructions?.trim())
-    parts.push(`Review instructions from the team:\n\n${input.instructions.trim()}`)
-  if (input.knowledge?.length)
-    parts.push(
-      `Team knowledge:\n\n${input.knowledge.map((k) => `### ${k.title}\n\n${k.body}`).join('\n\n')}`,
-    )
+    parts.push(`Review instructions for this run:\n\n${input.instructions.trim()}`)
   return parts.join('\n\n')
 }
 
@@ -140,12 +136,17 @@ export interface AgentReviewOptions {
   dir: string
   input: ReviewPromptInput
   usage: ReviewUsage
+  /** Run on the `deep` model tier instead of `main`. */
+  deep?: boolean
   toolsets?: readonly Toolset[]
   maxTurns?: number
   signal?: AbortSignal
 }
 
-/** Asks the agent for a structured review; comments come back as unvalidated candidates. */
+/**
+ * Asks the agent for a structured review on the `main` tier (`deep` with `options.deep`); comments
+ * come back as unvalidated candidates.
+ */
 export async function runAgentReview(
   options: AgentReviewOptions,
 ): Promise<
@@ -162,6 +163,7 @@ export async function runAgentReview(
       capabilities: ['read', 'search'],
       output: agentReviewSchema,
       taskKind: 'review',
+      tier: options.deep ? 'deep' : 'main',
       ...(options.toolsets ? { toolsets: options.toolsets } : {}),
       maxTurns: options.maxTurns ?? 40,
       ...(options.signal ? { signal: options.signal } : {}),
@@ -227,6 +229,7 @@ export async function recheckThreads(options: {
       capabilities: ['read', 'search'],
       output: recheckSchema,
       taskKind: 'triage',
+      tier: 'fast',
       ...(options.toolsets ? { toolsets: options.toolsets } : {}),
       maxTurns: 12,
       ...(options.signal ? { signal: options.signal } : {}),

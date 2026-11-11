@@ -37,7 +37,7 @@ export function ModelsDialog({
       onOpenChange={(open) => !open && onClose()}
       size="lg"
       title={`${credential.name} models`}
-      description="Use <prefix>@latest in llm.model or llm.models to always run the newest version, e.g. claude-opus@latest."
+      description="Agents run on the newest Haiku, Sonnet and Opus listed here: summaries on Haiku, reviews and changes on Sonnet, deep reviews on Opus."
     >
       {models.isPending ? <Placeholder className="h-48" /> : null}
       {models.isError ? <ErrorState error={models.error} /> : null}

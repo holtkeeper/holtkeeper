@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { type PropagateSteps, runPropagation } from './pipeline.ts'
 import { createHttpRegistry } from './registry.ts'
 import { propagationAnalysis } from './report.ts'
-import type { PropagationData, VersionRegistry } from './types.ts'
+import type { FixProposer, PropagationData, VersionRegistry } from './types.ts'
 
 const list = z.union([
   z.array(z.string().min(1)),
@@ -34,14 +34,7 @@ export const propagateOptionsSchema = z.object({
     .object({ install: check, typecheck: check, lint: check, test: check, build: check, go: check })
     .optional(),
   allowInstallScripts: z.coerce.boolean().default(false),
-  fix: z
-    .object({
-      enabled: z.boolean().optional(),
-      maxAttempts: z.coerce.number().int().nonnegative().default(3),
-      maxTurns: z.coerce.number().int().positive().optional(),
-      timeoutMinutes: z.coerce.number().positive().optional(),
-    })
-    .default({ maxAttempts: 3 }),
+  fixTasks: z.coerce.boolean().default(true),
   mergeRequest: z
     .object({
       draftOnFailure: z.boolean().default(true),
@@ -64,9 +57,14 @@ export interface PropagateAnalyzerDependencies {
   /** Called once per run; defaults to the npm registry / Go proxy. */
   registry?: () => VersionRegistry
   steps?: PropagateSteps
+  /** Proposes write tasks for repositories whose checks fail; without it they get draft merge requests. */
+  fixes?: FixProposer
 }
 
-/** The `propagate` analyzer (group scope); inject a registry or pipeline steps for tests. */
+/**
+ * The `propagate` analyzer (group scope). Inject `fixes` to hand failing repositories to write
+ * tasks, or a registry and pipeline steps for tests.
+ */
 export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependencies = {}) {
   const registryOf = dependencies.registry ?? (() => createHttpRegistry())
   return defineAnalyzer<PropagationData, PropagateOptions>({
@@ -74,7 +72,7 @@ export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependenc
     analysis: propagationAnalysis,
     scope: 'group',
     exclusive: true,
-    needs: { forge: true, agent: 'optional' },
+    needs: { forge: true },
     options: propagateOptionsSchema,
     flags: [
       { flag: 'only-repos', option: 'onlyRepos', description: 'comma-separated repository globs' },
@@ -91,7 +89,7 @@ export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependenc
         type: 'boolean',
       },
     ],
-    async run({ repo, repos, forge, checkout, runner, agent, options, signal, log }) {
+    async run({ repo, repos, forge, checkout, runner, options, signal, log }) {
       if (!forge) throw new Error('the propagate analyzer needs a forge')
       if (!checkout) throw new Error('the propagate analyzer needs checkouts from the runner')
       const data = await runPropagation({
@@ -101,13 +99,12 @@ export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependenc
         forge,
         checkout,
         runner,
-        ...(agent ? { agent } : {}),
         registry: registryOf(),
         packages: options.packages,
         ...(options.onlyRepos ? { onlyRepos: options.onlyRepos } : {}),
         ...(options.checks ? { checks: options.checks } : {}),
         allowInstallScripts: options.allowInstallScripts,
-        fix: options.fix,
+        ...(options.fixTasks && dependencies.fixes ? { fixes: dependencies.fixes } : {}),
         mergeRequest: options.mergeRequest,
         sources: options.sources,
         dryRun: options.dryRun,
@@ -121,5 +118,5 @@ export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependenc
   })
 }
 
-/** The `propagate` analyzer with default steps and registry. */
+/** The `propagate` analyzer with default steps and registry, without fix tasks. */
 export const propagateAnalyzer = createPropagateAnalyzer()

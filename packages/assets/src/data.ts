@@ -285,6 +285,101 @@ export const inlineSvgSchema = z.object({
 /** One inline `<svg>` or `<path>` in a source file that svgo makes noticeably smaller. */
 export type InlineSvgData = z.infer<typeof inlineSvgSchema>
 
+const bytes = z.coerce.number().int().positive()
+
+const limitsSchema = z.object({
+  warn: bytes.optional().describe('Bytes above which a file is a warning'),
+  error: bytes.optional().describe('Bytes above which a file is an error'),
+})
+
+/** Raster formats the policy can ask for next to PNG, JPEG and GIF originals. */
+const rasterPolicies = ['webp', 'avif', 'avif+webp', 'keep'] as const
+
+export const assetsPolicySchema = z.object({
+  formats: z
+    .object({
+      raster: z
+        .enum(rasterPolicies)
+        .default('webp')
+        .describe(
+          'Modern format every PNG, JPEG and GIF needs next to it; keep asks for none and keeps formats as they are',
+        ),
+      svg: z
+        .enum(['optimize', 'keep'])
+        .default('optimize')
+        .describe('optimize suggests svgo rewrites of SVG files and inline SVGs; keep leaves them'),
+      allowed: z
+        .array(z.string().trim().toLowerCase().min(1))
+        .optional()
+        .describe('File extensions allowed at all, e.g. webp, svg, woff2; unset allows every one'),
+    })
+    .prefault({}),
+  maxBytes: z
+    .object({
+      warn: bytes.default(500_000),
+      error: bytes.default(1_000_000),
+      perKind: z
+        .partialRecord(kindSchema, limitsSchema)
+        .optional()
+        .describe('Limits per kind replacing warn and error, e.g. audio: { error: 3000000 }'),
+    })
+    .prefault({}),
+  maxDimension: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(2560)
+    .describe('Largest width or height in pixels of a raster image or video'),
+  minSaving: z
+    .object({
+      pct: z.coerce.number().min(0).max(100).default(5),
+      bytes: z.coerce.number().int().min(0).default(1024),
+    })
+    .prefault({})
+    .describe('Conversions and optimizations saving less than both are not suggested'),
+  ignore: z
+    .array(z.string().trim().min(1))
+    .default(['vendor/**', '**/*.min.*', 'fixtures/**'])
+    .describe('Globs of files left out of the inventory and every check'),
+  budgets: z
+    .object({
+      total: bytes.optional().describe('Bytes of every asset together'),
+      perKind: z.partialRecord(kindSchema, bytes).optional().describe('Bytes per kind together'),
+    })
+    .prefault({}),
+  mode: z
+    .enum(['comment', 'suggest-mr'])
+    .default('comment')
+    .describe(
+      'comment: reviews only comment; suggest-mr: reviews also point at the panel to open a merge request with the variants',
+    ),
+})
+
+/** The effective asset policy of a repository: every field filled in. */
+export type AssetsPolicy = z.infer<typeof assetsPolicySchema>
+
+/** Rules of the asset policy. */
+const policyRules = ['format', 'max-bytes', 'max-dimension', 'modern-format', 'budget'] as const
+
+const policyViolationSchema = z.object({
+  /** Stable across runs: rule and path, or rule and kind for budgets. */
+  id: z.string(),
+  rule: z.enum(policyRules),
+  severity: z.enum(['error', 'warning']),
+  /** Unset for a budget over every file or a kind. */
+  path: z.string().optional(),
+  kind: kindSchema.optional(),
+  format: z.string().optional(),
+  /** The measured value: bytes, or pixels for `max-dimension`. */
+  actual: z.number().optional(),
+  /** The policy's limit the value is above. */
+  limit: z.number().optional(),
+  message: z.string(),
+})
+
+/** One file, kind or total that breaks the asset policy. */
+export type PolicyViolation = z.infer<typeof policyViolationSchema>
+
 export const assetsDataSchema = z.object({
   /** Globs that were scanned. */
   roots: z.array(z.string()),
@@ -307,6 +402,10 @@ export const assetsDataSchema = z.object({
   inlineSvgs: z.array(inlineSvgSchema).optional(),
   /** Proposed changes: SVG rewrites, image variants, markup swaps and inline SVG rewrites. */
   changes: z.array(codeChangeSchema).optional(),
+  /** The asset policy the run checked against. */
+  policy: assetsPolicySchema.optional(),
+  /** Files, kinds and totals breaking `policy`, errors first. */
+  violations: z.array(policyViolationSchema).optional(),
 })
 
 /** Result of one `assets` analysis; assets are sorted by path. */

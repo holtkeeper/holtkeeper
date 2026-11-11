@@ -1,4 +1,4 @@
-import type { ActivityPerson, AnalysisSummary, Metric } from '@holtkeeper/api'
+import type { PersonView, AnalysisSummary, Metric } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ChevronRight } from 'lucide-react'
 import { motion } from 'motion/react'
@@ -15,13 +15,7 @@ import { MetricTiles } from './MetricTiles.tsx'
 
 type Sort = 'name' | 'recent' | 'metric'
 
-function Person({
-  id,
-  people,
-}: {
-  id: string | undefined
-  people: Record<string, ActivityPerson>
-}) {
+function Person({ id, people }: { id: string | undefined; people: Record<string, PersonView> }) {
   if (!id) return null
   const person = people[id]
   if (!person) return null
@@ -40,7 +34,7 @@ function RepoCard({
 }: {
   card: RepoLatest
   trend: Metric | undefined
-  people: Record<string, ActivityPerson>
+  people: Record<string, PersonView>
 }) {
   const { latest } = card
   const { namespace, name } = splitRepoPath(latest.repo.path)
@@ -103,18 +97,15 @@ function RepoCard({
   )
 }
 
-/** The newest record of every repository (or group) as cards, sortable by name, recency or a metric. */
+/** The newest record of every repository as cards, sortable by name, recency or a metric. */
 export function RepoCards({
   analyses,
   trend,
   people,
-  noun = ['repository', 'repositories'],
 }: {
   analyses: readonly AnalysisSummary[]
   trend: Metric | undefined
-  people: Record<string, ActivityPerson>
-  /** What each card stands for, singular and plural; group analyses pass `group`. */
-  noun?: readonly [string, string]
+  people: Record<string, PersonView>
 }) {
   const [sort, setSort] = useState<Sort>('name')
   const cards = latestPerRepo(analyses, trend?.id)
@@ -133,7 +124,7 @@ export function RepoCards({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm text-muted">
-          {cards.length} {cards.length === 1 ? noun[0] : noun[1]}, newest run of each
+          {cards.length} {cards.length === 1 ? 'repository' : 'repositories'}, newest run of each
         </span>
         <Segmented
           aria-label="Sort"
@@ -166,7 +157,7 @@ export function RecordRows({
   people,
 }: {
   analyses: readonly AnalysisSummary[]
-  people: Record<string, ActivityPerson>
+  people: Record<string, PersonView>
 }) {
   const now = new Date()
   return (

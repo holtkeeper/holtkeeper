@@ -2,7 +2,7 @@
 
 The `testids` analyzer and analysis kind: lists the test attributes (`data-test-id`, `data-test-state`, `data-qa`, ...) a checkout's frontend templates (JSX/TSX, Vue, Svelte, HTML and Angular templates) expose, per component, so end-to-end tests can be written against them. Static: nothing is built or run.
 
-Recommending test ids on new code is the job of the `testids` check (`testIdsCheck`), which the merge request review runs and hands to its agent; the analysis itself only catalogs what exists.
+Recommending test ids on new code is the job of the `testids` check (`testIdsCheck`), which the merge request review runs by default and hands to its agent, and of the MCP tools `test_ids` and `suggest_test_ids`. The analysis itself only catalogs what exists; the conventions those use are learned from the catalog (`learnTestIdOptions`), with the team's overrides from the `analyzers.testids` setting on top. People see them in the Guide's **Test ids** section, where the setting is edited too; there is no page of its own.
 
 ## Public API
 
@@ -10,11 +10,18 @@ Recommending test ids on new code is the job of the `testids` check (`testIdsChe
   - `attributes: string[]` (`--attributes`) — test attribute names, case-insensitive; each also covers names extending it with `-`, so `data-test` covers `data-test-id` and `data-test-state`. Default `defaultAttributes`: `data-testid`, `data-test`, `data-qa`, `data-cy`, `testID`, `testId`.
   - `sources: string[]` (`--sources`) — template sources by name from `builtinSources`: `jsx`, `vue`, `svelte`, `html`.
   - `exclude: string[]` (`--exclude`) — glob patterns of files to skip.
+  - `elements?: string[]` — native tags that need a test id, for the check and `suggest_test_ids`; unset, learned from the catalog. The catalog ignores it.
   - `presets` — `testIdPresets`: `testing-library` (`data-testid`), `cypress` (`data-cy`, `data-test`, `data-testid`), `react-native` (`testID`).
-- `testIdsAnalysis` — the `AnalysisKind` (`schema: testIdsDataSchema`, `summarize`, `toReport`); `testIdsReport(data, options)` builds the report directly.
+- `testIdsAnalysis` — the `AnalysisKind` (`schema: testIdsDataSchema`, `summarize`, `toReport`); the report holds the headline numbers and the learned convention only.
 - `analyzeTestIds({ dir, sources?, attributes?, exclude?, signal? }): Promise<TestIdsData>` — the catalog.
-- `testIdsCheck(options?)` — a `QualityCheck` named `testids` (`TESTIDS_TOOL`): interactive elements without a test attribute as `missing-test-id` issues (category `tests`, severity `warning`). It skips itself when the project uses no test attributes at all. Each issue's `help` names the attribute the component (or else the project) uses most, with example values, so a reviewer can propose one in the same style. Options are those of `findUntagged` without `dir`.
-- `findUntagged({ dir, sources?, attributes?, exclude?, components?, factories?, aliases?, ignore?, tags?, events?, roles?, markers?, signal? }): Promise<UntaggedElement[]>` — interactive elements without a test attribute (see below).
+- `testIdsCheck(options?)` — a `QualityCheck` named `testids` (`TESTIDS_TOOL`): interactive elements without a test attribute as `missing-test-id` issues (category `tests`, severity `warning`). It skips itself when the project uses no test attributes at all. Otherwise it learns the convention from the checkout's catalog, applies `options.overrides` (`TestIdOverrides`) and runs `findUntagged` with the learned attributes, element kinds and naming. Each issue's `help` names the attribute the component (or else the project) uses most, with example values, and an id suggested in the project's style (`suggested: \`data-qa="cart-row-remove-button"\``). Other options are those of `findUntagged`without`dir`and`naming`.
+- Learned conventions (`learn.ts`):
+  - `learnTestIdOptions(data): LearnedTestIdOptions | undefined` — from a catalog: `attribute` (the most used one with literal values), `attributes` (every name in use), `elements` (native tags of `defaultTags` that carry ids; only from 20 tagged elements on, before that the defaults apply), `naming` (`TestIdNaming`: `separator` `-`/`_`/`.`/`''`, `case` `lower`/`camel`/`pascal`, `prefix` `none`, `component` in the same style or `name` as written, each by majority vote), `examples` and `tagged`. Deterministic, no LLM.
+  - `testIdOverridesSchema` / `testIdOverridesOf(value)` — the team's `attributes` (the first one for new ids), `elements` and `exclude` from a raw `analyzers.testids` value; anything invalid reads as no override.
+  - `testIdConvention(learned, overrides?)` — the rules that apply, overrides winning field by field, with `overridden` listing what the team set; `undefined` without any attribute. `renderTestIdConvention(convention)` writes it as Markdown bullets.
+  - `suggestTestId(element, component, naming)` — an id from the component name (per `prefix`), what the element is for (its `name`, `aria-label`, `placeholder`, `title`, `alt`, `label` or `id`, else the function its handler calls without `handle`/`on`, else a component tag's own name) and its kind (`link` for `a`): `cart-row-remove-button`. The same input always gives the same id.
+- `findUntagged({ dir, sources?, attributes?, exclude?, components?, factories?, aliases?, ignore?, tags?, events?, roles?, markers?, naming?, signal? }): Promise<UntaggedElement[]>` — interactive elements without a test attribute (see below); with `naming` each one carries a `suggestion`.
+- `findUntaggedInText({ file, text, ...rules })` — the same for one file's text (unsaved content): styled components defined in the file are followed, imports are not; empty when no source reads the file.
   - `components: Record<string, string>` — component name or `*` pattern → native tag it renders, e.g. `{ "Button": "button", "*Link": "a", "el-button": "button" }`. Checked before anything else; matches the whole name or its last `.` segment.
   - `factories: string[]` — names whose `.tag`, `('tag')` and `(Component)` results are styled tags. Default `defaultFactories`: `styled`, `tw`, `chakra`, `motion`.
   - `aliases: Record<string, string>` — import prefix → folder, on top of `compilerOptions.paths` of the root `tsconfig.json`/`jsconfig.json`, e.g. `{ "@/": "src/" }`.
@@ -62,16 +69,14 @@ interface TestIdsData {
 }
 ```
 
-Only files with at least one test attribute are kept. Analyses stored before the catalog read as empty, and their report asks to run the analysis again.
+Only files with at least one test attribute are kept. Analyses stored before the catalog read as empty.
 
 ## Report
 
 - **Metrics** — components with test attributes, elements with test attributes, attribute names in use.
-- **Attributes** — each attribute name in use with its elements, components, number of distinct static values and examples.
-- **By component** — one table grouped by component: each element with one column per attribute (the 8 most used; the rest under **Other**) and its `file:line`. Dynamic values show as `{expression}`.
-- **Changes** (with a previous analysis) — static selectors (`[data-test-id="submit"]`) added or removed per component.
+- **Convention** — the learned convention (`renderTestIdConvention`).
 
-It runs in the default `tests-weekly` schedule (Wednesday nights). The web panel shows it under **Test ids** (`/testids`).
+It runs in the default `tests-weekly` schedule (Wednesday nights). Records stored before the catalog read as empty.
 
 ## Limitations
 

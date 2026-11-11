@@ -101,7 +101,7 @@ test('throws when no collector produced a report', async () => {
   )
 })
 
-test('reports headline coverage, folders, files and changes', () => {
+test('reports headline coverage, folders and changes', () => {
   const data = {
     tools: ['bun test --coverage'],
     languages: ['js'],
@@ -126,11 +126,10 @@ test('reports headline coverage, folders, files and changes', () => {
     ['files', 2, 0, undefined],
     ['untested', 1, 0, 'warning'],
   ])
-  expect(report.sections.map((s) => s.id)).toEqual(['overview', 'files', 'changes'])
+  expect(report.sections.map((s) => s.id)).toEqual(['overview', 'changes'])
   const table = report.sections[1]?.blocks[0]
-  expect(table?.type === 'table' ? table.rows.map((row) => row.file) : []).toEqual([
-    'src/lib/b.ts',
-    'src/a.ts',
+  expect(table?.type === 'table' ? table.rows : []).toEqual([
+    { file: 'src/a.ts', before: (20 / 30) * 100, after: 100, delta: 100 - (20 / 30) * 100 },
   ])
   expect(coverageTree(data.files)).toEqual({
     name: 'project',

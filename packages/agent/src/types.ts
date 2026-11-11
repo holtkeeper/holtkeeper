@@ -1,6 +1,9 @@
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import type { z } from 'zod'
 
+import type { ModelTier } from './tiers.ts'
+import type { AgentRuntime, TranscriptSink } from './transcript.ts'
+
 /** What the agent may do in the checkout. */
 export type AgentCapability = 'read' | 'search' | 'run' | 'edit'
 
@@ -13,11 +16,31 @@ export interface AgentTask<Output = unknown> {
   capabilities?: AgentCapability[]
   /** When given, the agent must answer with JSON matching it; the result carries it parsed. */
   output?: z.ZodType<Output>
+  /**
+   * With `run`: the only commands the agent may run (`commandAllowed`), each exactly or followed
+   * by plain arguments; shell operators are refused. Absent: any command.
+   */
+  commands?: readonly string[]
+  /**
+   * Variables the agent's commands get on top of the adapter's minimal environment, e.g. the
+   * egress proxy. Never put secrets here.
+   */
+  env?: Record<string, string>
   maxTurns?: number
+  /**
+   * Spend cap of the run in USD. Once the run's cost reaches it, the agent stops and fails with
+   * `BudgetExceededError` carrying what the run used. Adapters that cannot price a run ignore it.
+   */
+  maxCostUsd?: number
   signal?: AbortSignal
   /**
-   * What kind of work this is (`review`, `refactor`, `triage`, ...). Adapters pick the model by it;
-   * it never changes what the agent may do.
+   * Model tier the task runs on (`fast`, `main`, `deep`), with the tier's reasoning effort.
+   * Default `DEFAULT_TIER` (`main`). Callers never name a model.
+   */
+  tier?: ModelTier
+  /**
+   * What kind of work this is (`review`, `refactor`, `triage`, ...), for knowledge, instructions
+   * and reporting. It never changes the model or what the agent may do.
    */
   taskKind?: string
   /**
@@ -27,11 +50,13 @@ export interface AgentTask<Output = unknown> {
   context?: string
   /** In-process tools mounted for this task; their tools are allowed in addition to `capabilities`. */
   toolsets?: readonly Toolset[]
-  /**
-   * External MCP servers by name (e.g. Context7). Every tool of a listed server is allowed; no
-   * other server is loaded.
-   */
+  /** External MCP servers by name. Every tool of a listed server is allowed; no other server is loaded. */
   mcpServers?: Record<string, McpServerConfig>
+  /**
+   * Receives the run's events: its start, every model message and tool call, tool results and
+   * the outcome with usage and cost. Adapters never write their options, environment or secrets.
+   */
+  transcript?: TranscriptSink
 }
 
 /** Token counts of one run, summed over every model the run used. */
@@ -49,6 +74,12 @@ export interface AgentResult<Output = unknown> {
   turns: number
   costUsd?: number
   usage?: AgentUsage
+  /** The provider's id of the model the run used, when the adapter knows it. */
+  model?: string
+  /** The loop that ran the task. */
+  runtime?: AgentRuntime
+  /** Where the run's transcript was stored (an artifact id), when the caller stored one. */
+  transcriptRef?: string
 }
 
 /** What a tool may use while it runs: the checkout it is confined to and the task's abort signal. */

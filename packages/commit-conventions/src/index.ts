@@ -1,5 +1,7 @@
+export * from './bump.ts'
 export * from './check.ts'
 export * from './render.ts'
 export * from './resolve.ts'
 export * from './setting.ts'
 export type * from './types.ts'
+export { ticketKeys } from './title.ts'

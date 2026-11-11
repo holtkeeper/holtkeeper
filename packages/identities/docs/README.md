@@ -1,10 +1,10 @@
 # @holtkeeper/identities
 
-External accounts — GitLab and GitHub users, Slack members, anything with a stable id — linked to Holtkeeper principals, and the one question bots and webhooks need answered: _who is this external actor in Holtkeeper, and may they do this?_
+External accounts — GitLab and GitHub users, anything with a stable id — linked to Holtkeeper principals, and the one question bots and webhooks need answered: _who is this external actor in Holtkeeper, and may they do this?_
 
 Links live in `store.externalAccounts` (see [@holtkeeper/store](../../store/docs/README.md)). An `ExternalAccount` is `{ id, userId, provider, externalId, username?, verification, linkedBy, linkedAt, verifiedAt? }`, unique by `(provider, externalId)`. `userId` is the Holtkeeper principal id: the user id with the `users` auth provider, the provider's principal id otherwise (`header:jane`, `root`, ...).
 
-Provider ids: `gitlab:<forgeId>`, `github:<forgeId>` (`forgeProvider(kind, forgeId)`), `slack:<workspaceId>` (`slackProvider(id)`), or any `kind[:instance]`. GitLab and GitHub accounts are linked by **numeric user id**, never by username: usernames can be renamed and reused, ids cannot.
+Provider ids: `gitlab:<forgeId>`, `github:<forgeId>` (`forgeProvider(kind, forgeId)`), or any `kind[:instance]`. GitLab and GitHub accounts are linked by **numeric user id**, never by username: usernames can be renamed and reused, ids cannot.
 
 ## Verification levels
 
@@ -23,7 +23,7 @@ Because unverified links prove nothing, they also do not block: when someone els
 
 1. The user links their id: `POST /api/accounts { provider: 'gitlab:work', externalId: '42' }` → `unverified`.
 2. `POST /api/accounts/:id/challenge` → `{ code: 'K7QD-2M9X', expiresAt, command: '/holtkeeper verify K7QD-2M9X' }`, shown once. Codes are 8 Crockford base32 characters (40 bits), valid 30 minutes, stored only as SHA-256 bound to the account id; a new challenge replaces the old one.
-3. The user posts the command as a GitLab MR or issue comment, or sends it to the Slack bot.
+3. The user posts the command as a GitLab MR or issue comment.
 4. The webhook or bot extracts the code with `parseVerifyCommand(text)` and calls `completeChallenge({ provider, externalId, username, code })` with the **author id from the authenticated event** — never from the comment text.
 5. A match turns the link into `challenge` with `verifiedAt` and the reported `username`. Five wrong codes or expiry drop the challenge. Every answer is appended to the audit log as `account.verify` (`ok` or `denied`, `via: 'webhook'` unless given).
 
@@ -35,8 +35,8 @@ Because unverified links prove nothing, they also do not block: when someone els
   - `list(principal)`, `link(principal, input)`, `unlink(principal, id)`, `issueChallenge(principal, id)` — self-service; throw `IdentityError` with `code` `invalid | forbidden | not-found | conflict`.
   - `completeChallenge(answer)` — see above.
   - `resolveExternalActor({ provider, externalId }) → Principal | undefined` — only verified links; the principal is the stored user with its **current** grants (disabled or deleted users → `undefined`).
-  - `authorizeExternal({ provider, externalId, action, repo }) → { allowed, principal?, reason }` with `reason` `allowed | not-linked | unverified | no-principal | forbidden`. `repo` is a `RepoTarget` (include the config groups, e.g. via the server's `repoTarget`). For MR commands and the Slack bot.
-- `linkInputSchema`, `parseVerifyCommand`, `verifyCommand`, `generateChallengeCode`, `normalizeChallengeCode`, `forgeProvider`, `slackProvider`, `isVerified`.
+  - `authorizeExternal({ provider, externalId, action, repo }) → { allowed, principal?, reason }` with `reason` `allowed | not-linked | unverified | no-principal | forbidden`. `repo` is a `RepoTarget` (include the config groups, e.g. via the server's `repoTarget`). For MR commands.
+- `linkInputSchema`, `parseVerifyCommand`, `verifyCommand`, `generateChallengeCode`, `normalizeChallengeCode`, `forgeProvider`, `isVerified`.
 
 The server builds the service with `identitiesFor(deps)` from `apps/server/src/routes/accounts.ts`.
 

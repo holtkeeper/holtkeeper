@@ -167,6 +167,12 @@ describe('describeField', () => {
     })
   })
 
+  test('x-multiline strings get a text area', () => {
+    const content = { type: 'string', minLength: 1, 'x-multiline': true }
+    expect(describeField(content, content)).toMatchObject({ kind: 'string', multiline: true })
+    expect(describeField({ type: 'string' }, {})).toMatchObject({ multiline: false })
+  })
+
   test('discriminated variants', () => {
     expect(describeField(rules.items, rules)).toMatchObject({
       kind: 'variants',

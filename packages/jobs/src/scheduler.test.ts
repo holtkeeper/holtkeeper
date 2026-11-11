@@ -88,9 +88,48 @@ describe('scheduler', () => {
     expect(problems).toHaveLength(3)
     expect(problems.join('\n')).toContain('unknown analyzer "nope"')
     expect(problems.join('\n')).toContain('options of depgraph: depth')
-    expect(() => createScheduler({ config, store, analyzers: [], resolveRepos })).toThrow(
-      'unknown analyzer',
-    )
+  })
+
+  test('skips and logs schedules whose analyzers the server no longer has', async () => {
+    const lines: string[] = []
+    const s = createScheduler({
+      config,
+      store,
+      analyzers: [],
+      resolveRepos,
+      now: () => clock,
+      timezone: 'UTC',
+      log: (line) => lines.push(line),
+    })
+    clock = new Date('2026-10-30T03:00:30.000Z')
+    expect(await s.tick()).toEqual([])
+    expect(lines.join('\n')).toContain('unknown analyzer')
+  })
+
+  test('leaves out analyzers the server no longer has and runs the rest', async () => {
+    const lines: string[] = []
+    const s = createScheduler({
+      config: {
+        ...config,
+        jobs: {
+          ...config.jobs,
+          schedules: (config.jobs?.schedules ?? []).map((schedule) => ({
+            ...schedule,
+            analyzers: [...schedule.analyzers, 'retired-kind'],
+          })),
+        },
+      },
+      store,
+      analyzers,
+      resolveRepos,
+      now: () => clock,
+      timezone: 'UTC',
+      log: (line) => lines.push(line),
+    })
+    clock = new Date('2026-10-30T03:00:30.000Z')
+    expect((await s.tick()).length).toBeGreaterThan(0)
+    expect(lines.join('\n')).toContain('unknown analyzer(s) "retired-kind" left out')
+    expect(lines.join('\n')).not.toContain('skipped')
   })
 
   test('enqueues per repository and once per group when a schedule comes due', async () => {

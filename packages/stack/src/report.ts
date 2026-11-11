@@ -1,3 +1,4 @@
+import { changeDiff } from '@holtkeeper/changes'
 import {
   type Block,
   type Cell,
@@ -23,7 +24,13 @@ import {
   type UsageStatus,
 } from './assess.ts'
 import { stackDataSchema } from './schema.ts'
-import type { ComponentKind, StackData, UsageVia } from './types.ts'
+import type {
+  ComponentKind,
+  ConventionResult,
+  ConventionStatus,
+  StackData,
+  UsageVia,
+} from './types.ts'
 import { majorOf } from './version.ts'
 
 /** Component columns shown in the version matrix; the components table lists all of them. */
@@ -116,6 +123,13 @@ const toneOf = (status: UsageStatus): Tone =>
   status.support === 'eol' || status.support === 'eol-soon'
     ? supportTones[status.support]
     : lagTones[status.lag]
+
+const conventionTones: Record<ConventionStatus, Tone> = {
+  matches: 'good',
+  drifts: 'warning',
+  missing: 'bad',
+  error: 'neutral',
+}
 
 const prev = (value: number | undefined) => (value === undefined ? {} : { previous: value })
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -584,7 +598,91 @@ function notesSection(data: StackData): Section | undefined {
     : undefined
 }
 
-/** The `stack` analysis: runtimes, package managers and images across the repositories of one group. */
+const resultKey = (result: ConventionResult) => `${result.repo}\0${result.file}`
+const failing = (result: ConventionResult) =>
+  result.status === 'drifts' || result.status === 'missing'
+
+function conventionsSection(
+  data: StackData,
+  previous: StackData | undefined,
+  compareTo?: string,
+): Section | undefined {
+  if (data.conventions.length === 0) return undefined
+  const files = [...new Set(data.conventions.map((result) => result.file))]
+  const columns: Column[] = [
+    { key: 'repo', label: 'Repository', format: 'code' },
+    ...files.map((file, index) => ({ key: `c${index}`, label: file })),
+  ]
+  const rows = [...Map.groupBy(data.conventions, (result) => result.repo)].map(
+    ([repo, results]) => {
+      const row: Record<string, Cell> = { repo }
+      files.forEach((file, index) => {
+        const result = results.find((entry) => entry.file === file)
+        row[`c${index}`] = result
+          ? {
+              text: result.status,
+              tone: conventionTones[result.status],
+              ...(result.problems.length ? { hint: result.problems.join('\n') } : {}),
+            }
+          : null
+      })
+      return row
+    },
+  )
+  const wasFailing = new Set(previous?.conventions.filter(failing).map(resultKey))
+  const isFailing = new Set(data.conventions.filter(failing).map(resultKey))
+  const issues: Issue[] = data.conventions
+    .filter((result) => result.status !== 'matches')
+    .map((result) => ({
+      id: resultKey(result),
+      tone: conventionTones[result.status],
+      title: `${result.repo}: ${result.file} ${result.status}`,
+      ...(result.problems.length ? { detail: result.problems.join('\n') } : {}),
+      tags: [
+        result.mode,
+        ...(previous && failing(result) && !wasFailing.has(resultKey(result)) ? ['new'] : []),
+      ],
+    }))
+  for (const result of previous?.conventions ?? [])
+    if (failing(result) && !isFailing.has(resultKey(result)))
+      issues.push({
+        id: `resolved:${resultKey(result)}`,
+        tone: 'good',
+        title: `${result.repo}: ${result.file} matches the convention again`,
+        tags: [result.mode, 'resolved'],
+      })
+  const items = data.conventions.flatMap((result) =>
+    result.change
+      ? [
+          {
+            change: result.change,
+            diff: changeDiff(result.change),
+            tone: conventionTones[result.status],
+            tags: [result.repo, result.file],
+          },
+        ]
+      : [],
+  )
+  const blocks: Block[] = [
+    { type: 'table', title: 'Status per repository', columns, rows },
+    issues.length
+      ? { type: 'issues', title: 'Differences', items: issues }
+      : { type: 'markdown', text: 'Every repository matches every convention.' },
+  ]
+  if (items.length)
+    blocks.push({ type: 'changes', title: 'Suggested fixes', items, applicable: true })
+  return {
+    id: 'conventions',
+    title: 'Conventions',
+    description: `Files compared with the group's golden files. Accepting fixes opens one merge request per repository.${previous ? ` New and resolved differences are against ${compareTo ?? 'the previous analysis'}.` : ''}`,
+    blocks,
+  }
+}
+
+/**
+ * The `stack` analysis: runtimes, package managers and images across the repositories of one group,
+ * and how they match the group's conventions.
+ */
 export const stackAnalysis = defineAnalysis<StackData>({
   kind: 'stack',
   label: 'Tech stack',
@@ -597,6 +695,7 @@ export const stackAnalysis = defineAnalysis<StackData>({
     const summaries = summarizeStack(data)
     const previousSummaries = before ? summarizeStack(before) : undefined
     const optional = [
+      conventionsSection(data, before, compareTo),
       mapSection(data, summaries),
       usagesSection(summaries),
       notesSection(data),
@@ -620,4 +719,5 @@ export const stackAnalysis = defineAnalysis<StackData>({
       ],
     }
   },
+  changes: (data) => data.conventions.flatMap((result) => (result.change ? [result.change] : [])),
 })

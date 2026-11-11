@@ -1,0 +1,20 @@
+{
+  "name": "@holtkeeper/guide",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/assets": "workspace:*",
+    "@holtkeeper/commit-conventions": "workspace:*",
+    "@holtkeeper/knowledge": "workspace:*",
+    "@holtkeeper/settings": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/testids": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

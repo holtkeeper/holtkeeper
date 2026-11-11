@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { ConfigEntryList, ForgeSshKeyResult } from '@holtkeeper/api'
 import { noAuth } from '@holtkeeper/auth-none'
-import { parseConfig } from '@holtkeeper/core'
+import { parseConfigFile } from '@holtkeeper/core'
 import { type CredentialService, createCredentialService } from '@holtkeeper/credentials'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { GitForge, SshKeyRegistration } from '@holtkeeper/forge'
@@ -22,12 +22,7 @@ import { forgeGitKeys } from '../src/ssh-keys.ts'
 
 const vault = aesVault('v'.repeat(32))
 const hostKey = generateKeyPair({ type: 'ed25519' })
-const file = parseConfig({
-  forges: {
-    work: { kind: 'gitlab', url: 'https://file.test', create: () => ({}) as GitForge },
-  },
-  groups: {},
-})
+const file = parseConfigFile({}, { warn: () => {} })
 
 let store: Store
 let credentials: CredentialService
@@ -59,21 +54,17 @@ beforeEach(async () => {
   keyscanFails = false
   credentials = createCredentialService({
     credentials: store.credentials,
-    activity: store.activity,
     vault,
     validateOptions: validateSshCredentialOptions,
   })
   tokenId = (
-    await credentials.create(
-      {
-        name: 'cloud',
-        kind: 'gitlab',
-        url: 'https://gitlab.test',
-        scope: { all: true },
-        secret: 'tok',
-      },
-      'root',
-    )
+    await credentials.create({
+      name: 'cloud',
+      kind: 'gitlab',
+      url: 'https://gitlab.test',
+      scope: { all: true },
+      secret: 'tok',
+    })
   ).id
   if (!store.config) throw new Error('memory store has config')
   const source = await createConfigSource({
@@ -128,7 +119,6 @@ const issue = async (body: unknown = {}) => {
 
 describe('forge SSH keys', () => {
   test('issue registers a user key, pins host keys and stores a credential', async () => {
-    expect((await call('POST', '/forges/work/ssh-key', {})).status).toBe(409)
     expect((await call('POST', '/forges/nope/ssh-key', {})).status).toBe(404)
     await putForge()
 
@@ -184,9 +174,9 @@ describe('forge SSH keys', () => {
     expect([...keys.keys()]).toEqual(['2'])
     expect(keys.get('2')?.publicKey).toBe(rotated.sshKey.publicKey)
 
-    const actions = (await store.activity.list({})).map((event) => event.action)
-    expect(actions).toContain('config.forge.ssh_key_created')
-    expect(actions).toContain('config.forge.ssh_key_rotated')
+    const actions = (await store.audit.list()).events.map((event) => event.action)
+    expect(actions).toContain('forge.ssh_key_create')
+    expect(actions).toContain('forge.ssh_key_rotate')
   })
 
   test('keyscan failure is a note, not an error', async () => {

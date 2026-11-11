@@ -41,12 +41,13 @@ const config = parseConfig({
   },
   jobs: {
     webhookSecret: 'hook-secret',
-    botUsername: 'holtkeeper',
+    botUsernames: { work: 'holtkeeper' },
     onMergeRequest: { analyzers: ['review', 'fleet'], groups: ['games'] },
     onLabel: { 'needs-port': ['port'], 'deep-review': ['review'] },
     commands: {
       review: { analyzer: 'review' },
       port: { analyzer: 'port', args: ['targets'] },
+      legacy: { analyzer: 'retired-kind' },
     },
   },
 })
@@ -81,7 +82,6 @@ const setup = () => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -199,7 +199,7 @@ describe('merge request events', () => {
     ])
     await hook('Merge Request Hook', mergeRequestEvent({ action: 'reopen' }))
     expect(await jobs()).toHaveLength(1)
-    expect((await store.activity.list())[0]?.action).toBe('job.merge_request')
+    expect(await store.audit.count({ action: 'job' })).toBe(0)
   })
 
   test('update runs only with new commits or when leaving draft', async () => {
@@ -285,12 +285,15 @@ describe('note events', () => {
         analyzer: 'port',
         ref: HEAD,
         options: { mergeRequest: 7, targets: ['web', 'api'] },
-        trigger: 'webhook',
+        trigger: 'command',
       },
     ])
     expect(notes[0]?.body).toContain('Queued `port`')
     expect(notes[0]?.body).toContain('holtkeeper:chat')
-    expect((await store.activity.list())[0]?.action).toBe('job.command')
+    expect((await store.audit.list({ action: 'job.command' })).events[0]).toMatchObject({
+      via: 'webhook',
+      target: { type: 'merge_request', repo: 'work:games/a' },
+    })
   })
 
   test('review command with options; unknown and invalid commands are answered', async () => {
@@ -302,6 +305,9 @@ describe('note events', () => {
     )
     expect(notes.at(-1)?.body).toContain('Unknown command `deploy`')
     expect(notes.at(-1)?.body).toContain('`/holtkeeper port [targets]`')
+    expect(await ignored(await hook('Note Hook', noteEvent('/holtkeeper legacy')))).toContain(
+      'unknown command',
+    )
     expect(
       await ignored(await hook('Note Hook', noteEvent('/holtkeeper review mode=fast'))),
     ).toContain('invalid')
@@ -324,7 +330,7 @@ describe('note events', () => {
     expect((await hook('Note Hook', noteEvent(`/holtkeeper verify ${code}`))).status).toBe(202)
     expect(notes.at(-1)?.body).toContain('Your account is verified.')
     expect((await accounts.find('gitlab:work', '2'))?.verification).toBe('challenge')
-    expect((await store.activity.list())[0]?.action).toBe('chat.command')
+    expect(await store.audit.count({ action: 'chat.command' })).toBe(1)
   })
 
   test('replies in chat threads are left alone', async () => {
@@ -350,7 +356,7 @@ describe('note events', () => {
     ).toContain('not started by Holtkeeper')
   })
 
-  test('a reply in our thread queues a reply job', async () => {
+  test('a reply in our thread queues an interactive reply job', async () => {
     discussions = [
       {
         id: 'disc-1',
@@ -375,7 +381,7 @@ describe('note events', () => {
         analyzer: 'review',
         ref: HEAD,
         options: { mergeRequest: 7, replyTo: 'disc-1' },
-        trigger: 'webhook',
+        trigger: 'command',
       },
     ])
   })

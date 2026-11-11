@@ -406,6 +406,58 @@
         }
       }
     },
+    "writeWorker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "concurrency": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "drainTimeout": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m)?$"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "type": "object"
+        },
+        "noProxy": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extraEgress": {
+          "type": "array"
+        },
+        "extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        }
+      }
+    },
     "scheduler": {
       "type": "object",
       "additionalProperties": false,

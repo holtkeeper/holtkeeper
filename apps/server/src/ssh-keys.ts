@@ -45,7 +45,6 @@ export interface IssueSshKeyInput {
   forge: GitForge
   credentials: CredentialService
   input: ForgeSshKeyInput
-  actor: string
   /** Runs `ssh-keyscan`. */
   runner: CommandRunner
   now: Date
@@ -95,7 +94,7 @@ async function knownHostsFor(
 export async function issueForgeSshKey(
   options: IssueSshKeyInput,
 ): Promise<{ sshKey: ForgeSshKey; notes: string[] }> {
-  const { forgeId, doc, forge, credentials, input, actor } = options
+  const { forgeId, doc, forge, credentials, input } = options
   if (!forge.registerSshKey || !forge.removeSshKey)
     throw new Error(`forge ${forgeId} cannot register SSH keys`)
   const notes: string[] = []
@@ -124,7 +123,7 @@ export async function issueForgeSshKey(
       comment,
       expiresAt,
       activate: async (next) => {
-        await credentials.update(existingId, { ...next, expiresAt }, actor)
+        await credentials.update(existingId, { ...next, expiresAt })
       },
     })
     for (const failed of result.failedRemovals)
@@ -154,7 +153,6 @@ export async function issueForgeSshKey(
         ...(knownHosts !== undefined && { knownHosts }),
         ...(identity && { identity }),
       }),
-      actor,
     )
     return { sshKey: { credentialId: created.id, createdAt: options.now.toISOString() }, notes }
   } catch (error) {
@@ -171,9 +169,8 @@ export async function removeForgeSshKey(options: {
   sshKey: ForgeSshKey
   forge: GitForge | undefined
   credentials: CredentialService
-  actor: string
 }): Promise<string[]> {
-  const { sshKey, forge, credentials, actor } = options
+  const { sshKey, forge, credentials } = options
   const errors: string[] = []
   const current = await readOptions(credentials, sshKey.credentialId)
   for (const ref of current?.registered ?? []) {
@@ -185,8 +182,7 @@ export async function removeForgeSshKey(options: {
       errors.push(`key ${ref.id}: ${messageOf(error)}`)
     }
   }
-  if (await credentials.get(sshKey.credentialId))
-    await credentials.remove(sshKey.credentialId, actor)
+  if (await credentials.get(sshKey.credentialId)) await credentials.remove(sshKey.credentialId)
   return errors
 }
 

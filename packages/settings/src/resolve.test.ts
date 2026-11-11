@@ -4,7 +4,13 @@ import type { Scope } from '@holtkeeper/access'
 import type { SettingEntry } from '@holtkeeper/store'
 
 import { builtinSettings } from './definitions.ts'
-import { resolveSetting, resolveSettings, settingCascade, settingCascades } from './resolve.ts'
+import {
+  resolveGlobalSetting,
+  resolveSetting,
+  resolveSettings,
+  settingCascade,
+  settingCascades,
+} from './resolve.ts'
 
 const entry = (
   id: string,
@@ -13,7 +19,7 @@ const entry = (
   updatedAt = '2026-10-01',
 ): SettingEntry => ({
   id,
-  key: 'llm.model',
+  key: 'audit.upgrade',
   scope,
   value,
   secret: false,
@@ -24,18 +30,18 @@ const repo = { forge: 'work', path: 'games/app-x', groups: ['games'] }
 
 describe('resolveSetting', () => {
   const entries = [
-    entry('global', { all: true }, 'claude-sonnet-5-5'),
-    entry('group', { groups: ['games'] }, 'claude-opus-5-5'),
-    entry('glob', { repos: ['games/app-*'] }, 'claude-haiku-5-5'),
+    entry('global', { all: true }, 'major'),
+    entry('group', { groups: ['games'] }, 'minor'),
+    entry('glob', { repos: ['games/app-*'] }, 'patch'),
   ]
 
   test('picks the most specific covering scope', () => {
-    expect(resolveSetting(entries, 'llm.model', repo)?.id).toBe('glob')
-    expect(resolveSetting(entries, 'llm.model', { ...repo, path: 'games/adventure' })?.id).toBe(
+    expect(resolveSetting(entries, 'audit.upgrade', repo)?.id).toBe('glob')
+    expect(resolveSetting(entries, 'audit.upgrade', { ...repo, path: 'games/adventure' })?.id).toBe(
       'group',
     )
     expect(
-      resolveSetting(entries, 'llm.model', { forge: 'work', path: 'tools/x', groups: [] })?.id,
+      resolveSetting(entries, 'audit.upgrade', { forge: 'work', path: 'tools/x', groups: [] })?.id,
     ).toBe('global')
     expect(resolveSetting(entries, 'audit.fix', repo)).toBeUndefined()
   })
@@ -46,11 +52,11 @@ describe('resolveSetting', () => {
       entry('exact', { repos: ['games/app-x'] }, 'x'),
       entry('glob2', { repos: ['games/*'] }, 'y', '2026-10-05'),
     ]
-    expect(resolveSetting(more, 'llm.model', repo)?.id).toBe('exact')
+    expect(resolveSetting(more, 'audit.upgrade', repo)?.id).toBe('exact')
     expect(
       resolveSetting(
         more.filter((e) => e.id !== 'exact'),
-        'llm.model',
+        'audit.upgrade',
         repo,
       )?.id,
     ).toBe('glob2')
@@ -62,7 +68,7 @@ describe('resolveSetting', () => {
       repo,
     )
     expect([...all].map(([key, value]) => [key, value.id])).toEqual([
-      ['llm.model', 'glob'],
+      ['audit.upgrade', 'glob'],
       ['audit.fix', 'fix'],
     ])
   })
@@ -70,14 +76,14 @@ describe('resolveSetting', () => {
 
 describe('settingCascade', () => {
   const entries = [
-    entry('global', { all: true }, 'claude-sonnet-5-5'),
-    entry('group', { groups: ['games'] }, 'claude-opus-5-5'),
-    entry('glob', { repos: ['games/app-*'] }, 'claude-haiku-5-5'),
+    entry('global', { all: true }, 'major'),
+    entry('group', { groups: ['games'] }, 'minor'),
+    entry('glob', { repos: ['games/app-*'] }, 'patch'),
     entry('other', { groups: ['tools'] }, 'x'),
   ]
 
   test('lists covering entries from the one that applies to the broadest', () => {
-    expect(settingCascade(entries, 'llm.model', repo).map((e) => e.id)).toEqual([
+    expect(settingCascade(entries, 'audit.upgrade', repo).map((e) => e.id)).toEqual([
       'glob',
       'group',
       'global',
@@ -91,8 +97,20 @@ describe('settingCascade', () => {
       repo,
     )
     expect([...all].map(([key, list]) => [key, list.map((e) => e.id)])).toEqual([
-      ['llm.model', ['glob', 'group', 'global']],
+      ['audit.upgrade', ['glob', 'group', 'global']],
     ])
+  })
+})
+
+describe('resolveGlobalSetting', () => {
+  test('takes the newest entry for everything and ignores narrower scopes', () => {
+    const entries = [
+      entry('old', { all: true }, 'major', '2026-09-01'),
+      entry('new', { all: true }, 'minor', '2026-10-01'),
+      entry('group', { groups: ['games'] }, 'patch', '2026-11-01'),
+    ]
+    expect(resolveGlobalSetting(entries, 'audit.upgrade')?.id).toBe('new')
+    expect(resolveGlobalSetting(entries.slice(2), 'audit.upgrade')).toBeUndefined()
   })
 })
 

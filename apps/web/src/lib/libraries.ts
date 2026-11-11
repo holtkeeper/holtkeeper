@@ -1,8 +1,7 @@
 import type {
-  LibraryDetail,
+  DependencyDetail,
   LibraryIndexProgressView,
   LibraryIndexRun,
-  LibrarySearchResult,
   LibrarySourceCoverage,
   LibrarySummary,
 } from '@holtkeeper/api'
@@ -10,14 +9,9 @@ import type {
 import { durationBetween, plural } from './format.ts'
 
 export type LibraryEcosystem = LibrarySummary['ecosystem']
-export type LibraryVersion = LibraryDetail['versions'][number]
-export type LibraryRole = LibraryVersion['roles'][number]
-export type LibrarySourceKind = keyof LibraryVersion['sources']
-export type LibrarySourceState = NonNullable<LibraryVersion['sources'][LibrarySourceKind]>
-export type LibraryDocSource = LibraryDetail['documents'][number]['source']
-export type LibraryHit = LibrarySearchResult['hits'][number]
-
-type Tone = 'default' | 'accent' | 'success' | 'warning' | 'danger'
+type LibraryDocument = DependencyDetail['docs']['documents'][number]
+export type LibraryRole = DependencyDetail['indexed'][number]['roles'][number]
+export type LibraryDocSource = LibraryDocument['source']
 
 /** Ecosystems in display order. */
 export const libraryEcosystems: readonly { id: LibraryEcosystem; label: string }[] = [
@@ -48,19 +42,7 @@ export const formatRoles = (
 ): { id: LibraryRole; label: string; description: string }[] =>
   roles.filter((role) => list.includes(role.id))
 
-const roleTone: Record<LibraryRole, Tone> = {
-  used: 'accent',
-  latest: 'success',
-  minor: 'default',
-  patch: 'default',
-  major: 'warning',
-  first: 'default',
-}
-
-/** Chip tone of a role. */
-export const toneOfRole = (role: LibraryRole): Tone => roleTone[role]
-
-const sourceKinds: readonly { id: LibrarySourceKind; label: string }[] = [
+const sourceKinds: readonly { id: string; label: string }[] = [
   { id: 'registry', label: 'Registry' },
   { id: 'archive', label: 'Package archive' },
   { id: 'api', label: 'API' },
@@ -75,26 +57,7 @@ const sourceKinds: readonly { id: LibrarySourceKind; label: string }[] = [
 export const sourceLabel = (kind: string): string =>
   sourceKinds.find((s) => s.id === kind)?.label ?? kind
 
-/** The sources that have a status, in fetch order. */
-export const sortedSources = (
-  sources: Partial<Record<LibrarySourceKind, LibrarySourceState>>,
-): { kind: LibrarySourceKind; label: string; state: LibrarySourceState }[] =>
-  sourceKinds.flatMap((source) => {
-    const state = sources[source.id]
-    return state ? [{ kind: source.id, label: source.label, state }] : []
-  })
-
-const statusTone: Record<LibrarySourceState['status'], Tone> = {
-  ok: 'success',
-  missing: 'default',
-  failed: 'danger',
-  skipped: 'warning',
-}
-
-/** Chip tone of a source status. */
-export const toneOfStatus = (status: LibrarySourceState['status']): Tone => statusTone[status]
-
-/** Query of `GET /api/libraries`; empty values are left out. */
+/** Query of `GET /api/system/library-index`; empty values are left out. */
 export const libraryListQuery = (filter: {
   q?: string
   ecosystem?: LibraryEcosystem | 'all'
@@ -106,7 +69,7 @@ export const libraryListQuery = (filter: {
   }
 }
 
-/** Query of `GET /api/libraries/search`; empty values are left out. */
+/** Query of `GET /api/dependencies/docs`; empty values are left out. */
 export const librarySearchQuery = (filter: {
   q: string
   ecosystem?: LibraryEcosystem
@@ -125,8 +88,8 @@ const docSources: readonly LibraryDocSource[] = ['archive', 'repository', 'relea
 
 /** Documents grouped by source in fetch order, paths sorted within each. */
 export const groupDocuments = (
-  documents: LibraryDetail['documents'],
-): { source: LibraryDocSource; label: string; documents: LibraryDetail['documents'] }[] =>
+  documents: readonly LibraryDocument[],
+): { source: LibraryDocSource; label: string; documents: LibraryDocument[] }[] =>
   docSources.flatMap((source) => {
     const list = documents
       .filter((doc) => doc.source === source)

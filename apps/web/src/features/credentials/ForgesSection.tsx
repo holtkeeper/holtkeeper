@@ -18,12 +18,7 @@ import {
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import {
-  useCredentials,
-  useForgeMutations,
-  useForges,
-  useRuntimeConfig,
-} from '../../api/queries.ts'
+import { useCredentials, useForgeMutations, useForges } from '../../api/queries.ts'
 import { formatDate } from '../../lib/format.ts'
 import {
   Button,
@@ -57,11 +52,11 @@ const usageLabels: Record<ForgeSshKeyView['usage'], string> = {
   signing: 'Sign commits',
 }
 
-/** Panel forges and those from the config file, each with the SSH key it issued. */
+/** Forges, each with the SSH key and webhook it issued. */
 export function ForgesSection() {
-  const { can } = useSession()
-  const readable = can('settings:read')
-  const writable = can('settings:write')
+  const { can, canGlobal } = useSession()
+  const readable = canGlobal('settings:read')
+  const writable = canGlobal('settings:write')
   const forges = useForges(readable)
   const credentials = useCredentials(can('credentials:read'))
   const { remove, removeSshKey } = useForgeMutations()
@@ -70,8 +65,6 @@ export function ForgesSection() {
   const [deleting, setDeleting] = useState<ForgeEntry | null>(null)
   const [unkeying, setUnkeying] = useState<ForgeEntry | null>(null)
   const [hooking, setHooking] = useState<ForgeEntry | null>(null)
-  const runtime = useRuntimeConfig(readable)
-  const baseUrl = (runtime.data?.server?.publicUrl ?? window.location.origin).replace(/\/+$/, '')
   if (!readable) return null
   const list = forges.data?.entries ?? []
   const tokens = (credentials.data?.credentials ?? []).filter((c) => c.kind === 'gitlab')
@@ -104,7 +97,6 @@ export function ForgesSection() {
       ) : (
         <ul className="flex flex-col divide-y divide-separator">
           {list.map((forge) => {
-            const panel = forge.provenance !== 'file'
             const sshKey = forge.data.sshKey
             return (
               <li key={forge.id} className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0">
@@ -117,7 +109,6 @@ export function ForgesSection() {
                       <div className="flex items-center gap-2 font-medium">
                         {forge.id}
                         <Chip variant="secondary">{forge.data.kind}</Chip>
-                        {panel ? null : <Chip>config file</Chip>}
                         {forge.data.packages === false ? <Chip>no packages for jobs</Chip> : null}
                         {forge.data.cachePackages ? (
                           <Chip tone="warning">packages cached</Chip>
@@ -131,7 +122,7 @@ export function ForgesSection() {
                       </div>
                     </div>
                   </div>
-                  {writable && panel ? (
+                  {writable ? (
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
@@ -172,7 +163,7 @@ export function ForgesSection() {
                       ) : null
                     }
                   />
-                ) : panel && writable && forge.data.kind === 'gitlab' ? (
+                ) : writable && forge.data.kind === 'gitlab' ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed border-separator p-3 text-sm text-muted">
                     No SSH key. Jobs clone over HTTPS with the token and commit through the API.
                     <Button variant="secondary" size="sm" onPress={() => setIssuing(forge)}>
@@ -181,25 +172,10 @@ export function ForgesSection() {
                     </Button>
                   </div>
                 ) : null}
-                {forge.data.credentialId ? (
-                  <WebhookSummary
-                    forge={forge}
-                    {...(writable ? { onIssue: () => setHooking(forge) } : {})}
-                  />
-                ) : (
-                  <div className="flex items-start gap-2 rounded-xl bg-default/60 p-3 text-xs text-muted">
-                    <Webhook className="mt-0.5 size-3.5 shrink-0" />
-                    <span>
-                      Webhook secret from{' '}
-                      <code className="font-mono">jobs.webhooks.{forge.id}.secret</code> in the
-                      config file; point hooks at{' '}
-                      <code className="font-mono">
-                        {baseUrl}/api/webhooks/{forge.id}
-                      </code>
-                      .
-                    </span>
-                  </div>
-                )}
+                <WebhookSummary
+                  forge={forge}
+                  {...(writable ? { onIssue: () => setHooking(forge) } : {})}
+                />
               </li>
             )
           })}
@@ -530,11 +506,6 @@ function ForgeDialog({
             {messageOf(put.error)}
           </Notice>
         ) : null}
-        {forge?.provenance === 'file+panel' ? (
-          <Notice title="Overrides the config file">
-            Deleting this forge brings back the entry from the config file.
-          </Notice>
-        ) : null}
         <TextField
           label="Id"
           value={draft.id}
@@ -590,6 +561,14 @@ function ForgeDialog({
             Create a GitLab credential with the token first.
           </Notice>
         )}
+        <TextField
+          label="Bot username"
+          value={draft.botUsername}
+          onChange={(v) => set('botUsername', v)}
+          placeholder="holtkeeper-bot"
+          description="The account Holtkeeper posts as. Its own pushes, merge requests and notes are ignored, and review skips its merge requests. Leave empty when the token belongs to a person."
+          mono
+        />
         <Switch
           label="Packages for jobs"
           isSelected={draft.packages}

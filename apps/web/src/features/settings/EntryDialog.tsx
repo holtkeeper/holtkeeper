@@ -33,7 +33,8 @@ export function EntryDialog({
     : definition.secret
       ? undefined
       : defaultValue(definition.schema)
-  const [scope, setScope] = useState<Scope>(entry?.scope ?? initialScope ?? { all: true })
+  const [chosenScope, setScope] = useState<Scope>(entry?.scope ?? initialScope ?? { all: true })
+  const scope: Scope = definition.global ? { all: true } : chosenScope
   const [value, setValue] = useState<unknown>(initial)
   const [applied, setApplied] = useState(0)
   const { put } = useSettingMutations()
@@ -80,7 +81,11 @@ export function EntryDialog({
               {messageOf(put.error)}
             </Notice>
           ) : null}
-          <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+          {definition.global ? (
+            <span className="text-sm text-muted">Applies to all repositories.</span>
+          ) : (
+            <ScopeEditor value={scope} onChange={setScope} groups={groups} label="Applies to" />
+          )}
           {definition.presets && definition.presets.length > 0 && !definition.secret ? (
             <PresetPicker
               presets={definition.presets}
@@ -120,11 +125,15 @@ function SettingHelp({ definition }: { definition: SettingDefinitionView }) {
       <Markdown text={definition.help ?? definition.description} />
       <div className="flex flex-col gap-1.5 border-t border-separator pt-3 text-xs text-muted">
         <span className="font-medium text-foreground">Scopes</span>
-        <span>
-          Add one entry for all repositories, then narrower entries for groups or repository
-          patterns. Usually the most specific entry covering a repository wins; settings that
-          combine entries say so above. Check the outcome on the Resolve tab.
-        </span>
+        {definition.global ? (
+          <span>This setting has one value for all repositories.</span>
+        ) : (
+          <span>
+            Add one entry for all repositories, then narrower entries for groups or repository
+            patterns. Usually the most specific entry covering a repository wins; settings that
+            combine entries say so above. Check the outcome on the Resolve tab.
+          </span>
+        )}
       </div>
     </aside>
   )

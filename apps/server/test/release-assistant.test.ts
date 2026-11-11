@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { Principal } from '@holtkeeper/access'
 import type {
-  ReleaseBoardView,
   ReleaseGateError,
+  ReleaseOverview,
   ReleaseRepoView,
   ReleaseStepResult,
+  ReleaseTimelineView,
+  ReleaseVersionDetailView,
 } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
@@ -38,9 +40,9 @@ let background: Promise<unknown>[]
 
 beforeEach(async () => {
   fake = new FakeForge()
-  fake.commitTo('main', 'feat: [GTW-1] first screen')
+  fake.commitTo('main', 'feat: [ABC-1] first widget')
   fake.tag('v1.0.0')
-  fake.commitTo('development', 'feat: [GTW-2] statistics', 'fix: [GTW-3] crash')
+  fake.commitTo('development', 'feat: [ABC-2] gadgets', 'fix: [ABC-3] crash')
   background = []
   store = memoryStore()
   const vault = aesVault('v'.repeat(32))
@@ -57,13 +59,13 @@ beforeEach(async () => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: [...builtinSettings, releaseSettingsDefinition],
     analyses: [],
     now: () => new Date('2026-11-01T09:00:00.000Z'),
     releasePollMs: 1,
+    releaseRefreshDelayMs: 0,
     onBackground: (work) => {
       background.push(work)
     },
@@ -72,7 +74,7 @@ beforeEach(async () => {
     id: 'releases',
     key: 'releases',
     scope: { all: true },
-    value: { acceptance: { required: true } },
+    value: { enabled: true, acceptance: 'manual' },
     secret: false,
     updatedAt: '2026-10-01T00:00:00.000Z',
   })
@@ -101,64 +103,232 @@ const run = async (path: string, body: unknown) => {
   }
 }
 
-const boardOf = async (query = '') =>
-  (await (await call('GET', `/releases/board${query}`)).json()) as ReleaseBoardView
+const overviewOf = async (query = '', headers = asAdmin) =>
+  (await (
+    await call('GET', `/releases/overview${query}`, undefined, headers)
+  ).json()) as ReleaseOverview
+
+const getJson = async <T>(path: string) => (await (await call('GET', path)).json()) as T
 
 describe('release assistant routes', () => {
-  test('shows the board and the plans of a repository', async () => {
-    const board = (await (await call('GET', '/releases/board')).json()) as ReleaseBoardView
-    expect(board.rows).toEqual([
-      expect.objectContaining({ stage: 'candidate', next: '1.1.0', ahead: 2 }),
+  test('shows the overview and the plans of a repository', async () => {
+    const overview = await overviewOf()
+    expect(overview.cards).toEqual([
+      expect.objectContaining({ stage: 'candidate', next: '1.1.0', ahead: 2, needsAction: true }),
     ])
 
     const view = await viewOf()
     expect(view.proposal?.title).toBe('Release candidate 2026-11-01')
     expect(view.version).toBeUndefined()
     expect(view.can).toEqual({ run: true, configure: true })
-    expect(view.detection?.preset).toBe('trunk')
+    expect(view.detection?.mode).toBe('trunk')
 
     expect((await viewOf(asViewer)).can.run).toBe(false)
     expect((await call('POST', '/releases/propose', { repo }, asViewer)).status).toBe(403)
   })
 
-  test('serves the board from a snapshot and rereads it in the background', async () => {
-    expect((await boardOf()).rows[0]).toMatchObject({ ahead: 2 })
+  test('serves the overview from a snapshot and rereads it after forge events', async () => {
+    expect((await overviewOf()).cards[0]).toMatchObject({ ahead: 2 })
 
-    fake.commitTo('development', 'feat: [GTW-4] settings')
+    fake.commitTo('development', 'feat: [ABC-4] settings')
     const reads = fake.listedCommits
-    expect((await boardOf()).rows[0]).toMatchObject({ ahead: 2 })
+    expect((await overviewOf()).cards[0]).toMatchObject({ ahead: 2 })
     expect(fake.listedCommits).toBe(reads)
 
-    expect((await boardOf('?refresh=1')).refreshing).toBe(true)
+    await createEventDispatcher(deps)(
+      {
+        kind: 'push',
+        repo: { forge: 'work', path: 'g/app' },
+        branch: 'development',
+        sha: fake.branches.get('development')!,
+        actor: 'dev',
+      },
+      { actor: 'webhook:gitlab', via: 'webhook' },
+    )
     await Promise.all(background)
-    const fresh = await boardOf()
-    expect(fresh).toMatchObject({
-      refreshing: false,
-      rows: [expect.objectContaining({ ahead: 3 })],
-    })
+    expect((await overviewOf()).cards[0]).toMatchObject({ ahead: 3 })
+
+    expect((await overviewOf('?refresh=1')).refreshing).toBe(true)
+    await Promise.all(background)
+    expect((await overviewOf()).refreshing).toBe(false)
   })
 
-  test('hides a repository from the board and stops reading it', async () => {
-    expect((await call('PUT', '/releases/hidden', { repo, hidden: true }, asViewer)).status).toBe(
-      403,
-    )
-    expect((await call('PUT', '/releases/hidden', { repo, hidden: true })).status).toBe(200)
+  test('lists only repositories with releases on, filtered by need of action', async () => {
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: {},
+      secret: false,
+      updatedAt: '2026-10-03T00:00:00.000Z',
+    })
     const reads = fake.listedCommits
-    const hidden = (await (
-      await call('GET', '/releases/board?refresh=1')
-    ).json()) as ReleaseBoardView
-    await Promise.all(background)
-    expect(hidden.rows).toEqual([])
-    expect(hidden.hidden).toEqual([
-      expect.objectContaining({ repo: { forge: 'work', path: 'g/app' }, by: 'header:jane' }),
-    ])
+    expect((await overviewOf()).cards).toEqual([])
     expect(fake.listedCommits).toBe(reads)
 
-    expect((await call('PUT', '/releases/hidden', { repo, hidden: false })).status).toBe(200)
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: { enabled: true, flow: { mode: 'external' } },
+      secret: false,
+      updatedAt: '2026-10-04T00:00:00.000Z',
+    })
+    await overviewOf('?refresh=1')
     await Promise.all(background)
-    const shown = (await (await call('GET', '/releases/board')).json()) as ReleaseBoardView
-    expect(shown.rows.map((row) => row.repo.path)).toEqual(['g/app'])
-    expect(shown.hidden).toEqual([])
+    expect((await overviewOf()).cards.map((card) => card.needsAction)).toEqual([false])
+    expect((await overviewOf('?filter=action')).cards).toEqual([])
+    expect((await call('GET', '/releases/overview?filter=some')).status).toBe(400)
+    expect(
+      (await overviewOf('', { 'x-forwarded-user': 'eve', 'x-forwarded-groups': '' })).cards,
+    ).toEqual([])
+  })
+
+  test('keeps working with a stored setting of an older shape', async () => {
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: {
+        enabled: true,
+        acceptance: { required: true, signals: ['label'] },
+        summary: { mode: 'agent', audience: 'qa' },
+        gates: { pipeline: 'success', freeze: [] },
+        timezone: 'Europe/Berlin',
+      },
+      secret: false,
+      updatedAt: '2026-10-03T00:00:00.000Z',
+    })
+    const view = await viewOf()
+    expect(view.settings.acceptance).toBe('none')
+    expect(view.row.stage).toBe('candidate')
+  })
+
+  test('pages the version timeline and details one version', async () => {
+    fake.commitTo('main', 'fix: [ABC-5] keep the counter')
+    fake.tag('v1.0.1')
+    const first = await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}&limit=1`)
+    expect(first).toMatchObject({
+      enabled: true,
+      total: 2,
+      nextOffset: 1,
+      next: expect.objectContaining({ stage: 'candidate' }),
+      versions: [
+        expect.objectContaining({ tag: 'v1.0.1', previous: 'v1.0.0', tickets: ['ABC-5'] }),
+      ],
+    })
+    const reads = fake.listedCommits
+    const second = await getJson<ReleaseTimelineView>(
+      `/releases/timeline?repo=${repo}&offset=1&limit=1`,
+    )
+    expect(second.next).toBeUndefined()
+    expect(second.versions.map((entry) => [entry.tag, entry.commitCount])).toEqual([['v1.0.0', 2]])
+    await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}&limit=1`)
+    expect(fake.listedCommits).toBe(reads + 1)
+
+    const detail = await getJson<ReleaseVersionDetailView>(
+      `/releases/version?repo=${repo}&tag=v1.0.1`,
+    )
+    expect(detail).toMatchObject({ tag: 'v1.0.1', bump: 'patch', deploys: [] })
+    expect(detail.changelog).toContain('### Fixes')
+    expect(detail.tasks.map((task) => task.key)).toEqual(['ABC-5'])
+    expect((await call('GET', `/releases/version?repo=${repo}&tag=nope`)).status).toBe(404)
+    expect((await call('GET', `/releases/timeline?repo=${repo}&limit=99`)).status).toBe(400)
+    expect(
+      (
+        await call('GET', `/releases/timeline?repo=${repo}`, undefined, {
+          'x-forwarded-user': 'eve',
+          'x-forwarded-groups': '',
+        })
+      ).status,
+    ).toBe(403)
+  })
+
+  test('the timeline pages past the newest hundred tags', async () => {
+    fake.commitTo('main', 'fix: [ABC-5] keep the counter')
+    fake.tag('v1.0.1')
+    for (let index = 0; index < 130; index++) fake.tag(`nightly-${index}`)
+    const limits: (number | undefined)[] = []
+    const listTags = fake.forge.listTags!.bind(fake.forge)
+    fake.forge.listTags = async (path, query) => {
+      limits.push(query?.limit)
+      return listTags(path, query)
+    }
+    const first = await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}&limit=1`)
+    expect(first.total).toBe(2)
+    expect(first.versions).toEqual([
+      expect.objectContaining({ tag: 'v1.0.1', previous: 'v1.0.0', tickets: ['ABC-5'] }),
+    ])
+    expect(limits).toContain(200)
+    const reads = limits.length
+    const detail = await getJson<ReleaseVersionDetailView>(
+      `/releases/version?repo=${repo}&tag=v1.0.0`,
+    )
+    expect(detail).toMatchObject({ tag: 'v1.0.0', commitCount: 2 })
+    expect(detail.previous).toBeUndefined()
+    expect(limits).toHaveLength(reads)
+  })
+
+  test('maintenance tags dated after a version do not end the tag paging early', async () => {
+    fake.commitTo('main', 'feat: add the dial')
+    fake.tag('v1.1.0')
+    for (let index = 0; index < 130; index++) fake.tag(`nightly-${index}`)
+    fake.commitTo('main', 'feat: add the knob')
+    fake.tag('v2.0.0')
+    fake.commitTo('main', 'fix: dial backport')
+    fake.tag('v1.0.5')
+    fake.commitTo('main', 'fix: knob backport')
+    fake.tag('v1.0.6')
+    const limits: (number | undefined)[] = []
+    const listTags = fake.forge.listTags!.bind(fake.forge)
+    fake.forge.listTags = async (path, query) => {
+      limits.push(query?.limit)
+      return listTags(path, query)
+    }
+    const first = await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}&limit=1`)
+    expect(first.versions).toEqual([expect.objectContaining({ tag: 'v2.0.0', previous: 'v1.1.0' })])
+    expect(limits.slice(0, 2)).toEqual([100, 200])
+  })
+
+  test('a tag event drops the cached tag list', async () => {
+    await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}`)
+    fake.commitTo('main', 'fix: later')
+    fake.tag('v1.0.1')
+    expect((await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}`)).total).toBe(1)
+    await createEventDispatcher(deps)(
+      {
+        kind: 'tag',
+        repo: { forge: 'work', path: 'g/app' },
+        tag: 'v1.0.1',
+        sha: fake.branches.get('main')!,
+      },
+      { actor: 'webhook:gitlab', via: 'webhook' },
+    )
+    await Promise.all(background)
+    expect((await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}`)).total).toBe(2)
+  })
+
+  test('writes the notes with the AI agent at propose time when asked', async () => {
+    const tasks: { taskKind?: string; tier?: string }[] = []
+    deps.agentFor = async () => ({
+      name: 'fake',
+      run: async (task) => {
+        tasks.push({ taskKind: task.taskKind, tier: task.tier })
+        return {
+          text: '',
+          turns: 1,
+          output: { overview: 'Gadgets arrive.', highlights: ['A gadgets panel'], check: [] },
+        } as never
+      },
+    })
+    app = createApp(deps)
+    const proposed = await run('/releases/propose', { repo, writeNotes: true })
+    expect(proposed.body).toMatchObject({ kind: 'proposed' })
+    expect(tasks).toEqual([{ taskKind: 'release-notes', tier: 'fast' }])
+    expect(fake.requests[0]?.description).toContain('Gadgets arrive.')
+
+    await run('/releases/propose', { repo })
+    expect(tasks).toHaveLength(1)
   })
 
   test('proposes, accepts after the merge and creates the version with edits', async () => {
@@ -229,8 +399,8 @@ describe('release assistant routes', () => {
       'merged',
       'proposed',
     ])
-    const actions = (await store.activity.list()).map((entry) => entry.action)
-    expect(actions).toContain('release.versioned')
+    const audited = (await store.audit.list({ action: 'release.versioned' })).events
+    expect(audited[0]?.target).toEqual({ type: 'release', repo: 'work:g/app' })
   })
 
   test('follows a started deploy until it fails', async () => {
@@ -238,7 +408,11 @@ describe('release assistant routes', () => {
       id: 'releases-deploy',
       key: 'releases',
       scope: { repos: ['g/app'] },
-      value: { deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }] } },
+      value: {
+        enabled: true,
+        acceptance: 'manual',
+        deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }] },
+      },
       secret: false,
       updatedAt: '2026-10-02T00:00:00.000Z',
     })
@@ -308,7 +482,11 @@ describe('release chat command', () => {
       id: 'releases-deploy',
       key: 'releases',
       scope: { repos: ['g/app'] },
-      value: { deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }] } },
+      value: {
+        enabled: true,
+        acceptance: 'manual',
+        deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }] },
+      },
       secret: false,
       updatedAt: '2026-10-02T00:00:00.000Z',
     })

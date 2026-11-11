@@ -2,7 +2,6 @@ export type { AgentTool, MountedToolsets, ToolContext, Toolset } from '@holtkeep
 export { mcpToolName, qualifiedToolName, toMcpServer, TOOLSET_SERVER } from '@holtkeeper/agent'
 export * from './budget.ts'
 export * from './code/index.ts'
-export * from './context7.ts'
 export { docsTools, packageDocsTool, type DocsToolsOptions } from './docs/package.ts'
 export {
   headingVersion,
@@ -14,4 +13,5 @@ export {
 export { insideDir, listFiles } from './files.ts'
 export * from './knowledge.ts'
 export * from './libraries.ts'
-export { defineTool } from './tool.ts'
+export * from './registry.ts'
+export { defineTool, ToolError, type RegistryTool, type RegistryToolset } from './tool.ts'

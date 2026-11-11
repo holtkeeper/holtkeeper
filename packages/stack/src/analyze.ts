@@ -5,6 +5,7 @@ import { detectToolchainFrom, subProjects, type Tool } from '@holtkeeper/toolcha
 
 import { hasEnded, isLts } from './assess.ts'
 import { type ComponentInfo, imageComponent, toolComponent } from './catalog.ts'
+import { compareWithConvention, conventionChange, type ConventionSpec } from './conventions.ts'
 import {
   type CiInclude,
   ciIncludes,
@@ -20,6 +21,7 @@ import {
 } from './references.ts'
 import type { VersionSources } from './sources.ts'
 import type {
+  ConventionResult,
   StackComponent,
   StackData,
   StackNote,
@@ -48,6 +50,8 @@ export interface AnalyzeStackOptions {
   maxFiles?: number
   /** Days before an end of life that count as soon. Default 180. */
   soonDays?: number
+  /** Golden files every readable repository is checked against. */
+  conventions?: ConventionSpec[]
   /** Repositories read in parallel. Default 4. */
   concurrency?: number
   /** Default now. */
@@ -557,6 +561,7 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
     ignore = [],
     maxFiles = 50,
     soonDays = 180,
+    conventions = [],
     concurrency = 4,
     now = new Date(),
     log,
@@ -623,6 +628,31 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
       })
 
   const unique = new Map(notes.map((note) => [`${note.repo ?? ''}\0${note.message}`, note]))
+  const readable = repos.filter((_, index) => {
+    const repo = scans[index]?.repo
+    return repo && !repo.error && !repo.archived
+  })
+  const checked = await mapLimit(
+    conventions.flatMap((spec) => readable.map((ref) => ({ spec, ref }))),
+    concurrency,
+    async ({ spec, ref }): Promise<ConventionResult> => {
+      const base = { repo: ref.path, file: spec.path, mode: spec.mode }
+      let actual: string | undefined
+      try {
+        actual = await forge.readFile(ref.path, spec.path)
+      } catch (error) {
+        return { ...base, status: 'error', problems: [`file could not be read: ${message(error)}`] }
+      }
+      const comparison = compareWithConvention(spec, actual)
+      const change = conventionChange(ref, spec, comparison)
+      return {
+        ...base,
+        status: comparison.status,
+        problems: comparison.problems,
+        ...(change ? { change } : {}),
+      }
+    },
+  )
 
   return {
     group,
@@ -634,6 +664,7 @@ export async function analyzeStack(options: AnalyzeStackOptions): Promise<StackD
         new Set(b.usages.map((usage) => usage.repo)).size -
           new Set(a.usages.map((usage) => usage.repo)).size || a.name.localeCompare(b.name),
     ),
+    conventions: checked,
     notes: [...unique.values()],
   }
 }

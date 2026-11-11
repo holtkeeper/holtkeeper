@@ -1,9 +1,8 @@
-import type { ChangelogLinks } from '@holtkeeper/changelog'
-
+import { isoDate } from './dates.ts'
 import { checkGates } from './gates.ts'
+import type { ChangelogLinks } from './links.ts'
 import { buildEntries, digestSummary, renderChangelog, suggestBump } from './notes.ts'
 import type { ReleaseSettings } from './settings.ts'
-import { fillTemplate } from './template.ts'
 import type { GateResult, ReleaseEdits, ReleaseFacts, ReleasePlan } from './types.ts'
 import { isValidVersion, nextVersion, tagName } from './version.ts'
 
@@ -23,7 +22,7 @@ export interface PlanOptions {
 
 /**
  * What a step would do now: the changes of its range as changelog entries, the suggested and the
- * chosen version, summary, title and body from the settings' templates, and the gates. `propose`
+ * chosen version, summary, title and body (fixed layouts, see the package docs), and the gates. `propose`
  * covers the source branch's commits not on the target; `version` the target's commits since
  * the latest version. A person's `edits` win over suggestions.
  */
@@ -49,12 +48,8 @@ export function planRelease({
         to: facts.target.sha,
         toLabel: facts.target.name,
       }
-  const labels = (propose ? facts.request?.labels : facts.merged?.labels) ?? []
   const entries = buildEntries(commits, settings.changelog, edits)
-  const suggestedBump = suggestBump(entries, settings.version.bump, {
-    ...(facts.latest ? { current: facts.latest.version } : {}),
-    labels,
-  })
+  const suggestedBump = suggestBump(entries, facts.latest ? { current: facts.latest.version } : {})
   const suggestedVersion = nextVersion(
     settings,
     facts.latest?.version,
@@ -65,37 +60,18 @@ export function planRelease({
   const version = edits.version ?? suggestedVersion
   const tag = version ? tagName(settings.version.tagFormat, version) : undefined
   const compareUrl = range.from && links ? links.compare(range.from, range.to) : undefined
-  const changelog = renderChangelog(entries, settings.changelog, links)
+  const changelog = renderChangelog(entries, links)
   const summary =
     edits.summary !== undefined
       ? { markdown: edits.summary.markdown, source: edits.summary.source }
-      : settings.summary.mode === 'off'
-        ? { markdown: '', source: 'none' as const }
-        : { markdown: digestSummary(entries), source: 'changelog' as const }
-
-  const values = {
-    version,
-    tag,
-    next: version ?? 'none',
-    previous: facts.latest?.version ?? 'none',
-    previousTag: facts.latest?.tag ?? 'none',
-    source: facts.source?.name ?? settings.flow.source,
-    target: facts.target.name,
-    repo: facts.repo.path,
-    summary: summary.markdown,
-    changelog,
-    compare: compareUrl ?? '',
-    commits: String(commits.length),
-  }
-  const fill = (template: string) => fillTemplate(template, values, now, settings.timezone)
-  const title = propose
-    ? (edits.title ?? fill(settings.mergeRequest.title))
-    : fill(settings.tag.releaseName)
+      : { markdown: digestSummary(entries), source: 'changelog' as const }
+  const notes = tidy(`${summary.markdown}\n\n${changelog}`)
+  const title = propose ? (edits.title ?? `Release candidate ${isoDate(now)}`) : (tag ?? '')
   const body = propose
-    ? `${tidy(fill(settings.mergeRequest.description))}\n\n${releaseMarker}`
-    : tidy(fill(settings.tag.notes))
+    ? `${tidy(`${notes}\n\nNext version if released now: **${version ?? 'none'}**`)}\n\n${releaseMarker}`
+    : notes
 
-  const gates: GateResult[] = checkGates(step, settings, facts, now)
+  const gates: GateResult[] = checkGates(step, settings, facts)
   const included = entries.filter((entry) => entry.included).length
   if (commits.length === 0) gates.unshift({ id: 'empty', ok: false, message: 'nothing to release' })
   else if (included === 0)

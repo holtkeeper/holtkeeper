@@ -24,6 +24,7 @@ const where = (sql: SQL, f: AuditFilter) => sql`
   AND (${f.targetType ?? null}::text IS NULL OR target_type = ${f.targetType ?? null}::text)
   AND (${f.targetId ?? null}::text IS NULL OR target_id = ${f.targetId ?? null}::text)
   AND (${f.repo ?? null}::text IS NULL OR target_repo = ${f.repo ?? null}::text)
+  AND (${f.repos === undefined}::boolean OR target_repo = ANY(${sql.array([...(f.repos ?? [])], 'TEXT')}))
   AND (${f.outcome ?? null}::text IS NULL OR outcome = ${f.outcome ?? null}::text)
   AND (${f.via ?? null}::text IS NULL OR via = ${f.via ?? null}::text)
   AND (${f.from ?? null}::timestamptz IS NULL OR at >= ${f.from ?? null}::timestamptz)
@@ -103,6 +104,13 @@ export function postgresAudit(db: () => Promise<Db>): AuditStore {
       const [row]: { count: number }[] = await sql`
         SELECT COUNT(*)::int AS count FROM ${t.auditEvents} WHERE ${where(sql, filter)}`
       return row?.count ?? 0
+    },
+    async repos() {
+      const { sql, t } = await db()
+      const rows: { repo: string }[] = await sql`
+        SELECT DISTINCT target_repo AS repo FROM ${t.auditEvents}
+        WHERE target_repo IS NOT NULL ORDER BY repo`
+      return rows.map((row) => row.repo)
     },
     async *export(filter = {}) {
       const { sql, t } = await db()

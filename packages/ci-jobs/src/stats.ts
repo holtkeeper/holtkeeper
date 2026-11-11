@@ -28,18 +28,14 @@ export const round = (value: number, digits = 1) => {
   return Math.round(value * factor) / factor
 }
 
-/** `samples`, p25, median, p75, p95 and max of `values`, rounded to a tenth. */
+/** `samples`, median and p90 of `values`, rounded to a tenth. */
 export function spread(values: readonly number[]): Spread {
   const sorted = values.toSorted((a, b) => a - b)
   const result: Spread = { samples: sorted.length }
-  const set = (key: Exclude<keyof Spread, 'samples'>, value: number | undefined) => {
-    if (value !== undefined) result[key] = round(value)
-  }
-  set('p25', sortedQuantile(sorted, 0.25))
-  set('median', sortedQuantile(sorted, 0.5))
-  set('p75', sortedQuantile(sorted, 0.75))
-  set('p95', sortedQuantile(sorted, 0.95))
-  set('max', sorted.at(-1))
+  const mid = sortedQuantile(sorted, 0.5)
+  const p90 = sortedQuantile(sorted, 0.9)
+  if (mid !== undefined) result.median = round(mid)
+  if (p90 !== undefined) result.p90 = round(p90)
   return result
 }
 

@@ -6,13 +6,14 @@ import { pathToFileURL } from 'node:url'
 
 import { defineAnalyzer } from '@holtkeeper/analyzer'
 import type { AnyAnalyzer } from '@holtkeeper/analyzer'
+import { memoryArtifactStore } from '@holtkeeper/artifacts'
 import { parseConfig } from '@holtkeeper/core'
 import { localRunner, runChecked } from '@holtkeeper/exec'
 import type { GitForge } from '@holtkeeper/forge'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { z } from 'zod'
 
-import { createContextFactory, createJobEngine } from '../src/index.ts'
+import { createContextFactory, createJobEngine, readJobLog } from '../src/index.ts'
 
 const isolated = {
   GIT_CONFIG_GLOBAL: '/dev/null',
@@ -122,7 +123,8 @@ describe.skipIf(!Bun.which('git'))('job engine with a real checkout', () => {
       jobs: { cacheDir: join(root, 'cache') },
     })
     const store = memoryStore()
-    const engine = createJobEngine({ config, store, analyzers: [readme] })
+    const logs = memoryArtifactStore()
+    const engine = createJobEngine({ config, store, analyzers: [readme], logs })
     const repo = { forge: 'work', path: 'games/a' }
     const createdAt = new Date().toISOString()
     await store.jobs.enqueue({ analyzer: 'readme', repo, trigger: 'manual', createdAt })
@@ -137,7 +139,14 @@ describe.skipIf(!Bun.which('git'))('job engine with a real checkout', () => {
       `- ${JSON.stringify({ text: 'v2\n' })}`,
       `v1.0.0 ${JSON.stringify({ text: 'v1\n' })}`,
     ])
-    expect(tagged?.log.some((line) => line.startsWith('checked out v1.0.0'))).toBeTrue()
+    const tagLog = await readJobLog(logs, tagged?.id ?? '', 1, { tail: 500 })
+    expect(tagLog.lines.some((line) => line.text.startsWith('checked out v1.0.0'))).toBeTrue()
+    expect(tagLog.lines.filter((line) => line.mark === 'end').map((line) => line.step)).toEqual([
+      'checkout',
+      'prepare',
+      'analyze',
+      'store',
+    ])
     expect((await readdir(join(root, 'cache'))).length).toBe(1)
     await engine.stop()
   })

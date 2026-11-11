@@ -35,6 +35,8 @@ export const knowledgeDraftSchema = z
     topics: tags,
     appliesTo: z.array(text).min(1, 'must name at least one task kind or *'),
     packages: z.array(knowledgePackageSchema).optional(),
+    visibility: z.enum(['team', 'shared']).optional(),
+    subject: text.max(300).optional(),
     status: z.enum(knowledgeStatuses).optional(),
     evidence: z.array(knowledgeLinkSchema).default([]),
     supersedes: text.optional(),

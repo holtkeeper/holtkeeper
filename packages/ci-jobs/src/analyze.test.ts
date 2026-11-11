@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { at, attempt, quarter } from '../test/history.ts'
-import { analyzeCiJobs, busySeconds, changePoint } from './analyze.ts'
+import { analyzeCiJobs, busySeconds, changePoint, stageOrder } from './analyze.ts'
 import type { CiJobsOptions } from './types.ts'
 
 const options: CiJobsOptions = { days: 90, recentDays: 14, changePercent: 20, minChangeSeconds: 15 }
@@ -22,10 +22,8 @@ describe('analyzeCiJobs', () => {
       at: at(75, 10),
       before: 100,
       after: 160,
-      ref: 'main',
     })
     expect(build?.changePoint?.sha).toStartWith('sha')
-    expect(result.totals).toMatchObject({ slowerJobs: 1, fasterJobs: 0 })
   })
 
   test('failure rates count final attempts and leave out jobs allowed to fail', () => {
@@ -43,9 +41,6 @@ describe('analyzeCiJobs', () => {
     const lint = result.jobs.find((j) => j.name === 'lint')
     expect(lint).toMatchObject({ allowFailure: true, failures: 0 })
     expect(lint?.failureRate).toBeUndefined()
-    expect(result.totals.failures).toBe(9)
-    expect(result.totals.failureRate).toBe(5)
-    expect(result.totals.flakyJobs).toBe(1)
   })
 
   test('pipeline time counts when jobs ran, not the gap before a late manual job', () => {
@@ -59,8 +54,7 @@ describe('analyzeCiJobs', () => {
       }),
     ]
     const result = analyzeCiJobs(records, window, options)
-    expect(result.totals.wallTime.median).toBe(130)
-    expect(result.totals.pipelines).toBe(1)
+    expect(result.pipelines).toMatchObject({ count: 1, duration: { median: 130 } })
   })
 
   test('busySeconds merges overlaps and skips gaps', () => {
@@ -75,46 +69,52 @@ describe('analyzeCiJobs', () => {
     expect(busySeconds([])).toBe(0)
   })
 
-  test('weeks cover the window, jobs are ordered by CI time', () => {
+  test('weeks cover the window, jobs follow the stage order', () => {
     const result = analyzeCiJobs(quarter(), window, options)
     expect(result.weeks).toHaveLength(14)
-    expect(result.weeks.reduce((sum, w) => sum + w.runs, 0)).toBe(result.totals.runs)
-    expect(result.jobs.map((j) => j.name)).toEqual(['build', 'test', 'deploy', 'lint'])
+    expect(result.stages).toEqual(['build', 'test'])
+    expect(result.jobs.map((j) => j.name)).toEqual(['build', 'deploy', 'lint', 'test'])
     expect(result.jobs[0]?.weeks).toHaveLength(14)
-    const share = result.jobs.reduce((sum, j) => sum + j.computeShare, 0)
-    expect(Math.round(share)).toBe(100)
-    expect(result.stages.map((s) => s.stage)).toEqual(['build', 'test'])
+    expect(result.jobs[0]?.weeks.at(-1)).toBe(160)
+    expect(result.lastRunAt).toBe(at(89, 14))
   })
 
   test('the branch filter drops other refs', () => {
     const all = analyzeCiJobs(quarter(), window, options)
     const main = analyzeCiJobs(quarter(), window, { ...options, branch: 'main' })
-    expect(all.totals.pipelines).toBe(123)
-    expect(main.totals.pipelines).toBe(90)
+    expect(all.pipelines.count).toBe(123)
+    expect(all.pipelines.ref).toBeUndefined()
+    expect(main.pipelines).toMatchObject({ ref: 'main', count: 90 })
   })
 
-  test('pipeline time per kind of ref, durations from passing pipelines', () => {
+  test('headline numbers describe the default branch: time, success rate, queue, change', () => {
     const result = analyzeCiJobs(quarter(), { ...window, defaultBranch: 'main' }, options)
     expect(result.defaultBranch).toBe('main')
-    expect(result.refGroups.map((g) => [g.group, g.pipelines, g.refs])).toEqual([
-      ['main', 90, 1],
-      ['feature', 30, 1],
-      ['tag', 3, 3],
+    expect(result.pipelines).toEqual({
+      ref: 'main',
+      count: 90,
+      successRate: 90,
+      duration: { samples: 81, median: 100, p90: 160 },
+      queue: { samples: 271, median: 30, p90: 30 },
+      change: 0,
+    })
+    expect(result.weeks.reduce((sum, w) => sum + w.pipelines, 0)).toBe(90)
+    expect(result.weeks.at(-2)).toMatchObject({ median: 160, pipelines: 7 })
+  })
+
+  test('without pipelines on the default branch every ref counts', () => {
+    const result = analyzeCiJobs(quarter(), { ...window, defaultBranch: 'trunk' }, options)
+    expect(result.pipelines.ref).toBeUndefined()
+    expect(result.pipelines.count).toBe(123)
+  })
+
+  test('stage order follows job ids within pipelines, not names', () => {
+    const records = [1, 2, 3].flatMap((p) => [
+      attempt('compile', at(p), 10, { pipelineId: p, jobId: p * 10 + 1, stage: 'prepare' }),
+      attempt('unit', at(p), 10, { pipelineId: p, jobId: p * 10 + 2, stage: 'check' }),
+      attempt('ship', at(p), 10, { pipelineId: p, jobId: p * 10 + 3, stage: 'ahead' }),
     ])
-    const main = result.refGroups[0]
-    expect(main?.label).toBe('Main branches (default: main)')
-    expect(main?.hasDefault).toBe(true)
-    expect(main?.failureRate).toBe(10)
-    expect(main?.baselineMedian).toBe(100)
-    expect(main?.recentMedian).toBe(160)
-    expect(main?.change).toBe(60)
-    expect(main?.weeks).toHaveLength(14)
-    expect(result.refGroups[2]?.duration.median).toBe(600)
-    expect(result.refGroups[2]?.topRefs.map((r) => r.ref)).toEqual([
-      'v1.29.0',
-      'v1.59.0',
-      'v1.89.0',
-    ])
+    expect(stageOrder(records)).toEqual(['prepare', 'check', 'ahead'])
   })
 
   test('new and idle jobs, and small changes that stay stable', () => {

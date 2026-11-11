@@ -73,7 +73,6 @@ export function deployState(
       attempts: attempts.map(attemptOf),
       ...(environment.after ? { after: environment.after } : {}),
       confirm: environment.confirm,
-      auto: environment.auto,
       ...(deployed
         ? {
             current: {
@@ -179,15 +178,8 @@ export async function startDeploy(
   return { job, state: environment }
 }
 
-/** Environments to start on their own once `finished` succeeded (or right after versioning when absent). */
-export function autoEnvironments(
-  settings: ReleaseSettings,
-  finished?: string,
-): ReleaseEnvironment[] {
-  return settings.deploy.environments.filter(
-    (environment) => environment.auto && environment.after === finished,
-  )
-}
+/** How long a started deploy is followed for its outcome. */
+export const deployWatchMinutes = 720
 
 /** Whether a deploy status is final. */
 export const deployFinished = (status: DeployStatus) =>

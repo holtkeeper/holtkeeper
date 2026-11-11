@@ -4,7 +4,6 @@ import {
   Boxes,
   Check,
   Flag,
-  Gauge,
   Image,
   LayoutDashboard,
   ShieldAlert,
@@ -16,8 +15,7 @@ import {
 } from 'lucide-react'
 
 import auditIcon from '@holtkeeper/brand/audit.svg?url'
-import qualityIcon from '@holtkeeper/brand/quality.svg?url'
-import releaseIcon from '@holtkeeper/brand/release.svg?url'
+import bundlesIcon from '@holtkeeper/brand/bundles.svg?url'
 import reviewIcon from '@holtkeeper/brand/review.svg?url'
 import updatesIcon from '@holtkeeper/brand/updates.svg?url'
 
@@ -31,22 +29,6 @@ const games: { name: string; state: 'ok' | 'fixed' | 'draft' }[] = [
   { name: 'runner', state: 'draft' },
   { name: 'hub', state: 'ok' },
 ]
-
-const factors = [
-  { label: 'Bundle growth', points: 9, max: 15 },
-  { label: 'Size of change', points: 8, max: 15 },
-  { label: 'Changed code without tests', points: 7, max: 15 },
-  { label: 'Breaking changes and reverts', points: 6, max: 20 },
-  { label: 'Contributors and hotspots', points: 4, max: 10 },
-]
-const score = factors.reduce((sum, f) => sum + f.points, 0)
-const gauge = { r: 62, cx: 80, cy: 78 }
-const arc = Math.PI * gauge.r
-const point = (fraction: number) => {
-  const angle = Math.PI * (1 - fraction)
-  return { x: gauge.cx + gauge.r * Math.cos(angle), y: gauge.cy - gauge.r * Math.sin(angle) }
-}
-const needle = point(score / 100)
 
 const treemap = [
   { name: 'app', share: 38, x: 0, y: 0, w: 52, h: 100 },
@@ -65,10 +47,10 @@ const spark = (() => {
 })()
 
 const quality = [
-  { label: 'lint', value: '0', note: 'errors' },
   { label: 'coverage', value: '78%', note: '+3.1' },
-  { label: 'duplication', value: '2.1%', note: '−0.4' },
-  { label: 'dead code', value: '3', note: 'files' },
+  { label: 'test ids', value: '412', note: '+18' },
+  { label: 'licenses', value: '0', note: 'violations' },
+  { label: 'outdated', value: '14', note: '−3' },
 ]
 
 const shelf = [
@@ -80,7 +62,6 @@ const shelf = [
       { name: 'Licenses', what: 'SPDX allow and deny lists' },
       { name: 'Dependency graph', what: 'cycles, libraries in several versions' },
       { name: 'Usages', what: 'which exports and props are used where' },
-      { name: 'Fleet drift', what: 'shared library versions, golden configs' },
     ],
   },
   {
@@ -91,18 +72,15 @@ const shelf = [
       { name: 'API surface', what: 'every exported name with its docs' },
       { name: 'i18n', what: 'missing keys, placeholder mismatches' },
       { name: 'Assets', what: 'budgets for images, audio, fonts' },
-      { name: 'Stack', what: 'runtimes and images, how far behind' },
+      { name: 'Stack', what: 'runtimes, images and golden configs, drift with fixes' },
     ],
   },
   {
     title: 'Delivery',
     items: [
-      { name: 'DORA', what: 'lead time, deploys, change failure rate' },
       { name: 'CI jobs', what: 'duration and failure rate over time' },
       { name: 'Branches', what: 'merged, abandoned and stale ones' },
-      { name: 'Port', what: 'carry a change to sibling repositories' },
-      { name: 'Warmup', what: 'build caches warm before people push' },
-      { name: 'Notify', what: 'Slack and webhooks for any report' },
+      { name: 'Notify', what: 'webhooks for release events' },
     ],
   },
 ]
@@ -118,7 +96,7 @@ const knowledge = [
     kind: 'migration',
     title: '@company/ui 3: Button lost the `kind` prop',
     scope: 'games/**',
-    applies: 'propagate · port',
+    applies: 'propagate · review',
     status: 'accepted',
   },
   {
@@ -168,7 +146,7 @@ const budget = 200
     </div>
 
     <div class="bento">
-      <article class="l-card b-card span-4 l-reveal">
+      <article class="l-card b-card span-6 l-reveal">
         <header class="b-head">
           <img class="b-icon" src={reviewIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><Sparkles size={14} /> AI review</span>
@@ -208,49 +186,6 @@ const budget = 200
               <span class="mr-btn ghost">Reply</span>
             </div>
           </div>
-        </div>
-      </article>
-
-      <article class="l-card b-card span-2 l-reveal">
-        <header class="b-head">
-          <img class="b-icon" src={releaseIcon} alt="" width="48" height="48" loading="lazy" />
-          <span class="b-tag"><Gauge size={14} /> Release risk</span>
-          <h3>A score QA can act on</h3>
-          <p>From stored changelog, bundle, quality and audit records — no checkout needed.</p>
-        </header>
-        <div class="b-mock risk">
-          <svg viewBox="0 0 160 102" class="gauge" role="img" aria-label={`Risk score ${score} of 100, medium`}>
-            <defs>
-              <linearGradient id="risk-grad" x1="0" x2="1">
-                <stop offset="0" stop-color="var(--l-teal)"></stop>
-                <stop offset="0.5" stop-color="var(--l-amber)"></stop>
-                <stop offset="1" stop-color="var(--l-red)"></stop>
-              </linearGradient>
-            </defs>
-            <path
-              d={`M${gauge.cx - gauge.r} ${gauge.cy} A${gauge.r} ${gauge.r} 0 0 1 ${gauge.cx + gauge.r} ${gauge.cy}`}
-              class="track"></path>
-            <path
-              d={`M${gauge.cx - gauge.r} ${gauge.cy} A${gauge.r} ${gauge.r} 0 0 1 ${gauge.cx + gauge.r} ${gauge.cy}`}
-              class="value"
-              style={`stroke-dasharray:${arc};--off:${arc * (1 - score / 100)};--arc:${arc}`}></path>
-            <circle cx={needle.x} cy={needle.y} r="4.5" class="knob"></circle>
-            <text x="80" y="70" class="num">{score}</text>
-            <text x="80" y="99" class="lvl">medium · 85% confidence</text>
-          </svg>
-          <ul class="factors">
-            {
-              factors.map((f) => (
-                <li>
-                  <span class="f-label">{f.label}</span>
-                  <span class="f-bar">
-                    <span style={`width:${(f.points / f.max) * 100}%`} />
-                  </span>
-                  <span class="f-pts">+{f.points}</span>
-                </li>
-              ))
-            }
-          </ul>
         </div>
       </article>
 
@@ -333,10 +268,10 @@ const budget = 200
 
       <article class="l-card b-card span-4 l-reveal">
         <header class="b-head">
-          <img class="b-icon" src={qualityIcon} alt="" width="48" height="48" loading="lazy" />
+          <img class="b-icon" src={bundlesIcon} alt="" width="48" height="48" loading="lazy" />
           <span class="b-tag"><LayoutDashboard size={14} /> Reports</span>
           <h3>Every analysis, one report format</h3>
-          <p>Bundle size per package, growth between releases, quality and coverage trends, changelogs with identical messages collapsed.</p>
+          <p>Bundle size per package, growth between releases, coverage trends, changelogs with identical messages collapsed.</p>
         </header>
         <div class="b-mock reports">
           <div class="r-tree" role="img" aria-label="Bundle composition by package">

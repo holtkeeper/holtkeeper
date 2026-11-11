@@ -10,8 +10,10 @@ A knowledge base of team decisions that agents read and propose and people curat
 | `kind`                   | `decision`, `convention`, `migration`, `quirk` or `howto`                                            |
 | `scope`                  | Which repositories it applies to (`Scope` from `@holtkeeper/access`: everything, groups, repo globs) |
 | `topics`                 | Free tags, lowercase: `testing`, `i18n`, ...                                                         |
-| `appliesTo`              | Task kinds: `review`, `port`, `propagate`, `tests`, `quality`, `release-risk`, or `*`                |
+| `appliesTo`              | Task kinds: `review`, `port`, `propagate`, or `*`                                                    |
 | `packages`               | `{ ecosystem, name, from?, to? }`; `from`/`to` are semver ranges. Required for migrations            |
+| `visibility`             | `team` (default) or `shared`: other teams read it through the cross-team catalog                     |
+| `subject`                | What it is about, a join key: `npm:react`, `Go:example.com/kit`, `tool:node`                         |
 | `status`                 | `proposed` → `accepted` / `rejected`; `archived` when no longer true                                 |
 | `source`, `author`       | `human` or `agent`, and who created it                                                               |
 | `evidence`               | Links `{ label, url }` backing it up                                                                 |
@@ -22,6 +24,7 @@ A migration's `from` and `to` are the ranges it starts from and lands on: a reac
 
 ## API
 
+- `sharingDefaults({ kind, packages, subject?, visibility? })` — what an entry gets when its author leaves them out: an entry about exactly one package has that package as `subject` (`packageSubject`: `npm:<name>`, `Go:<module>`), and a decision or convention with a subject is `shared`. Everything else stays `team`. The server applies it to people's new entries too.
 - `validateEntry(value)` → `{ success, data | issues }` and `knowledgeDraftSchema` (zod). Rules: the scope covers something, `appliesTo` is not empty, a `migration` names its packages. Topics are lowercased and deduplicated.
 - `classifyProposal(entry, { taskKind, repo, packages })` — pure heuristics filling what a proposal leaves out:
   - packages: task packages the text mentions (whole word, or the last segment of a scoped name), with `compatibleRange` of the task's versions;
@@ -29,7 +32,7 @@ A migration's `from` and `to` are the ranges it starts from and lands on: a reac
   - topics: keyword families (`testing`, `i18n`, `security`, `performance`, `build`, `dependencies`, `ci`, `release`, `api`, `style`);
   - appliesTo: the proposing task's kind plus kinds implied by kind and topics; `*` for quirks, how-tos and anything not narrowed.
 - `selectForTask({ entries, task: { kind, repo, packages?, query? }, budgetTokens })` → `{ selected, omitted, markdown, tokens }`. Keeps accepted entries whose scope covers the repository and whose `appliesTo` holds the task kind or `*`; migrations only when a task package overlaps their ranges; drops entries another match supersedes. Ranks by scope specificity (`scopeSpecificity` of `@holtkeeper/access`: exact repo > glob > group intersection > group > everything), then relevance to the query and task packages, then recency. Adds entries while the rendered block stays within the budget (4 characters per token); oversized entries are skipped, not cut. Each entry is headed `### [kb:<id>] Title` so the agent can cite it.
-- `proposeEntry({ store, input, actor, task, now, autoAccept?, duplicateOverlap? })` — creates a `proposed` agent entry (or `accepted` when its kind is in `autoAccept`), scoped to the task's repository unless the input says otherwise. If the proposal repeats a proposed, accepted or rejected entry — same title or body words, or word overlap (Jaccard) ≥ 0.8 — nothing is created: new evidence links are merged into the existing entry and its id comes back as `duplicateOf`. Invalid proposals throw `KnowledgeValidationError`. Writes `knowledge.proposed`, `knowledge.accepted` or `knowledge.evidence-added` activity.
+- `proposeEntry({ store, input, actor, task, now, autoAccept?, duplicateOverlap? })` — creates a `proposed` agent entry (or `accepted` when its kind is in `autoAccept`), scoped to the task's repository unless the input says otherwise. If the proposal repeats a proposed, accepted or rejected entry — same title or body words, or word overlap (Jaccard) ≥ 0.8 — nothing is created: new evidence links are merged into the existing entry and its id comes back as `duplicateOf`. Invalid proposals throw `KnowledgeValidationError`. Unless the input sets them, `sharingDefaults` picks subject and visibility. Audits `knowledge.propose`, `knowledge.accept` or `knowledge.evidence` (actor the agent, `via: 'job'`, target the entry and the task's repository) when the store has an audit log.
 - `knowledgeAccess({ store, now, autoAccept? })` — what agent tools call. `autoAccept` is a list of kinds or a function of the proposing repository returning them (the server resolves the scoped `knowledge.autoAccept` setting this way):
   - `search(query, { repo, taskKind, limit? })` → `{ id, title, kind, body, score }[]`: accepted entries applicable to the repository and task kind, best match first (blank query: all applicable, most specific first). Migrations are not filtered by package here, since the query decides.
   - `propose(input, { actor, repo, taskKind, packages? })` → `{ id, status, duplicateOf? }`.

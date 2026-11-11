@@ -2,6 +2,7 @@ import { defineAnalyzer } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
 import { analyzeStack } from './analyze.ts'
+import { conventionSpecSchema } from './conventions.ts'
 import { stackAnalysis } from './report.ts'
 import { createHttpSources, type VersionSources } from './sources.ts'
 import type { StackData } from './types.ts'
@@ -26,6 +27,10 @@ export const stackOptionsSchema = z.object({
   lookups: z
     .union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')])
     .default(true),
+  conventions: z
+    .array(conventionSpecSchema)
+    .default([])
+    .describe('Golden files every repository of the group should match'),
 })
 
 export type StackOptions = z.output<typeof stackOptionsSchema>
@@ -35,13 +40,17 @@ export interface StackAnalyzerDependencies {
   sources?: () => VersionSources
 }
 
-/** The `stack` analyzer (group scope, forge API only); inject sources for tests or mirrors. */
+/**
+ * The `stack` analyzer (group scope, forge API only): runtimes, images and tools with their end of
+ * life, and the group's conventions checked in the same pass. Inject sources for tests or mirrors.
+ */
 export function createStackAnalyzer(dependencies: StackAnalyzerDependencies = {}) {
   const sourcesOf = dependencies.sources ?? (() => createHttpSources())
   return defineAnalyzer<StackData, StackOptions>({
     kind: 'stack',
     analysis: stackAnalysis,
     scope: 'group',
+    refresh: { on: 'time', cadence: '1d' },
     needs: { forge: true },
     options: stackOptionsSchema,
     flags: [
@@ -72,6 +81,7 @@ export function createStackAnalyzer(dependencies: StackAnalyzerDependencies = {}
         ignore: options.ignore,
         soonDays: options.soonDays,
         maxFiles: options.maxFiles,
+        conventions: options.conventions,
         ...(log ? { log } : {}),
       })
       return { data }

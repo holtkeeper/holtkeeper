@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, sep } from 'node:path'
 import type { CommandRunner } from '@holtkeeper/exec'
 import { z } from 'zod'
 
+import { commandAllowed } from './commands.ts'
 import { resolveInside } from './paths.ts'
 import type { AgentCapability, AgentTool, ToolContext } from './types.ts'
 
@@ -72,7 +73,12 @@ async function files(dir: string, root: string, pattern: string, signal: AbortSi
  */
 export function localTools(
   capabilities: readonly AgentCapability[],
-  options: { runner?: CommandRunner; limits?: Partial<LocalToolLimits> } = {},
+  options: {
+    runner?: CommandRunner
+    limits?: Partial<LocalToolLimits>
+    commands?: readonly string[]
+    env?: Record<string, string>
+  } = {},
 ): AgentTool[] {
   const limits = { ...DEFAULT_LOCAL_TOOL_LIMITS, ...options.limits }
   const granted = new Set(capabilities)
@@ -209,9 +215,14 @@ export function localTools(
           timeout_ms: z.number().int().min(1000).max(600_000).optional(),
         }),
         async run({ command, timeout_ms }, { dir, signal }) {
+          if (options.commands && !commandAllowed(command, options.commands))
+            throw new Error(
+              `Only these commands may run, with plain arguments: ${options.commands.join(', ')}`,
+            )
           const result = await runner.run(['sh', '-c', command], {
             cwd: dir,
             signal,
+            ...(options.env && { env: options.env }),
             timeoutMs: timeout_ms ?? limits.commandTimeoutMs,
           })
           const output = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join('\n')

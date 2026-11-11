@@ -142,7 +142,7 @@ A sink must reject when `expectedVersion` no longer matches; `isVersionConflict(
 - **Changes** — `repo-file` changes, applicable.
 - **Errors**.
 
-The server publishes with `POST /api/trackers/:analysisId/publish` (body `{ outputs?: string[] }`, permission `analyses:run` on the record's group), using `documentSinks(repo)` from the server dependencies (503 without them), and records a `tracker.published` activity event and a `tracker.publish` audit event.
+The server publishes with `POST /api/trackers/:analysisId/publish` (body `{ outputs?: string[] }`, permission `analyses:run` on the record's group), using `documentSinks(repo)` from the server dependencies (503 without them), and records a `tracker.publish` audit event.
 
 ## Example: feature flags
 

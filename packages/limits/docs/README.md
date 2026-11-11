@@ -27,11 +27,11 @@ Omitted fields are unlimited. `limitPolicySchema` validates one policy (strict: 
 
 `resolveLimitPolicy(credential, configured?)` returns the kind defaults overridden field by field by the configured entry for the credential's id, or else its name. Defaults (`defaultLimitPolicy`):
 
-| Kind              | Default                                                                                                                                                 |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gitlab`          | `maxConcurrent: 8`, `requestsPerMinute: 300`, back off on 429 (1 s doubling, at most 60 s)                                                              |
-| `ai`, `anthropic` | `maxConcurrent: 3`, `tokensPerMinute` from the credential's `options.tokensPerMinute` or `options.limits.tokensPerMinute` when set, back off on 429/529 |
-| anything else     | only the 429 backoff                                                                                                                                    |
+| Kind                                                                            | Default                                                                                                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gitlab`                                                                        | `maxConcurrent: 8`, `requestsPerMinute: 300`, back off on 429 (1 s doubling, at most 60 s)                                                              |
+| `ai` and every AI provider kind (`anthropic`, `anthropic-compatible`, `ai-sdk`) | `maxConcurrent: 3`, `tokensPerMinute` from the credential's `options.tokensPerMinute` or `options.limits.tokensPerMinute` when set, back off on 429/529 |
+| anything else                                                                   | only the 429 backoff                                                                                                                                    |
 
 ## Limiter
 
@@ -88,7 +88,7 @@ const forge = gitlab({ url, token, fetch }) // @holtkeeper/forge-gitlab
 
 All jobs using this forge now share 8 concurrent requests and 300 requests per minute. When GitLab answers 429, its `Retry-After`/`RateLimit-Reset` pauses every job using the token, and the request is retried after the pause (up to 3 times, then the 429 is returned to the client, which may retry on its own).
 
-### One corporate AI key shared by review, propagate and port
+### One corporate AI key shared by review and write tasks
 
 ```ts
 import { createLimiter, limitAgent, limitJobs, resolveLimitPolicy } from '@holtkeeper/limits'
@@ -96,20 +96,20 @@ import { createLimiter, limitAgent, limitJobs, resolveLimitPolicy } from '@holtk
 // limits.credentials: { "corp-ai": { maxConcurrent: 2, tokensPerMinute: 80000, tokensPerDay: 20000000, costPerDayUsd: 150 } }
 const policy = resolveLimitPolicy(aiCredential, settings['limits.credentials'])
 const agent = limitAgent(createClaudeAgent(aiCredential), limiter, aiCredential.id, policy)
-// the same `agent` instance (or another limitAgent with the same key) serves review, propagate and port
+// the same `agent` instance (or another limitAgent with the same key) serves review and write tasks
 ```
 
-- at most two agent runs at once across the three automations;
+- at most two agent runs at once across both;
 - each run reserves `ceil((prompt + system + context) / 4)` tokens first (override with `estimateTokens`) and waits while the minute bucket cannot cover it; on success the reservation is replaced by `usage.inputTokens + outputTokens + cacheWriteTokens` and `costUsd` is counted;
 - once 20 M tokens or 150 USD are used today, runs fail fast with `LimitExceededError` until UTC midnight;
-- a 429/529 from the provider starts a cool-down for all three; the run itself is not retried (it may have changed the checkout), the job's retry handles it.
+- a 429/529 from the provider starts a cool-down for both; the run itself is not retried (it may have changed the checkout), the job's retry handles it.
 
 To keep the worker from tying up its slots with jobs that would only wait for the key, give it the admission hook:
 
 ```ts
 const admission = limitJobs({
   limiter,
-  keysFor: (job) => (['review', 'propagate', 'port'].includes(job.analyzer) ? [aiCredential.id] : []),
+  keysFor: (job) => (['review', 'write-task'].includes(job.analyzer) ? [aiCredential.id] : []),
 })
 createJobEngine({ ..., admission })
 ```

@@ -1,7 +1,5 @@
-import { compareVersions } from '@holtkeeper/changelog'
-
+import { dateParts } from './dates.ts'
 import type { Bump, ReleaseSettings } from './settings.ts'
-import { dateParts } from './template.ts'
 
 /** A tag that names a version under the repository's tag format. */
 export interface VersionTag {
@@ -49,11 +47,20 @@ function calverPattern(format: string): RegExp {
   return new RegExp(`^${source}(?:-[0-9A-Za-z.-]+)?$`, 'u')
 }
 
+/** Calendar version format: year, month without padding, a counter within the month. */
+export const calverFormat = 'YYYY.MM.MICRO'
+
+/** First semantic version when a repository has no version tag yet. */
+export const initialVersion = '0.1.0'
+
+/** Pre-release channel when `version.prerelease` is on. */
+export const prereleaseChannel = 'rc'
+
+const calverMatcher = calverPattern(calverFormat)
+
 /** Whether `version` is valid under the settings' scheme. */
 export function isValidVersion(settings: ReleaseSettings, version: string): boolean {
-  return settings.version.scheme === 'semver'
-    ? SEMVER.test(version)
-    : calverPattern(settings.version.calver).test(version)
+  return settings.version.scheme === 'semver' ? SEMVER.test(version) : calverMatcher.test(version)
 }
 
 const calverKey = (version: string) =>
@@ -64,11 +71,15 @@ const calverKey = (version: string) =>
     .map((part) => part.padStart(6, '0'))
     .join('.')
 
+const preOf = (version: string) => version.slice(version.indexOf('-') + 1)
+
 /** Orders two versions of the settings' scheme; pre-releases sort before their release. */
 export function compareSchemeVersions(settings: ReleaseSettings, a: string, b: string): number {
   if (settings.version.scheme === 'semver') return compareVersions(a, b)
   const order = calverKey(a).localeCompare(calverKey(b))
   if (order !== 0) return order
+  if (a.includes('-') && b.includes('-'))
+    return compareVersions(`0.0.0-${preOf(a)}`, `0.0.0-${preOf(b)}`)
   return Number(b.includes('-')) - Number(a.includes('-'))
 }
 
@@ -90,7 +101,7 @@ export function versionTags(
     .toSorted((a, b) => compareSchemeVersions(settings, b.version, a.version))
 }
 
-/** The newest released version; pre-releases count only when `prerelease` is set. */
+/** The newest released version; pre-releases count only when `prerelease` is on. */
 export function latestVersion(
   settings: ReleaseSettings,
   tags: readonly VersionTag[],
@@ -121,8 +132,8 @@ export function bumpSemver(version: string, bump: Bump): string {
   return `${major}.${minor}.${patch}`
 }
 
-function nextCalver(format: string, previous: string | undefined, now: Date, timeZone: string) {
-  const parts = dateParts(now, timeZone)
+function nextCalver(format: string, previous: string | undefined, now: Date) {
+  const parts = dateParts(now)
   const values: Record<string, string> = {
     YYYY: parts.year,
     YY: parts.year.slice(2),
@@ -131,16 +142,25 @@ function nextCalver(format: string, previous: string | undefined, now: Date, tim
     '0D': parts.day,
     DD: String(Number(parts.day)),
   }
-  const period = format.replace(/YYYY|YY|0M|MM|0D|DD|MICRO/gu, (token) =>
-    token === 'MICRO' ? '\u0000' : (values[token] ?? token),
+  const pieces = format.split(/(YYYY|YY|0M|MM|0D|DD|MICRO)/u)
+  const tokens = pieces.filter((_, index) => index % 2 === 1)
+  const matcher = new RegExp(
+    `^${pieces.map((piece, index) => (index % 2 === 1 ? '(\\d+)' : escape(piece))).join('')}$`,
+    'u',
   )
-  const [before = '', after = ''] = period.split('\u0000')
-  const base = previous?.split('-')[0]
-  if (base?.startsWith(before) && base.endsWith(after)) {
-    const micro = base.slice(before.length, base.length - after.length)
-    if (/^\d+$/u.test(micro)) return `${before}${Number(micro) + 1}${after}`
-  }
-  return `${before}0${after}`
+  const match = matcher.exec(previous?.split('-')[0] ?? '')
+  const samePeriod =
+    match !== null &&
+    tokens.every(
+      (token, index) => token === 'MICRO' || Number(match[index + 1]) === Number(values[token]),
+    )
+  const micro = samePeriod ? Number(match[tokens.indexOf('MICRO') + 1]) + 1 : 0
+  const next = pieces
+    .map((piece, index) =>
+      index % 2 === 0 ? piece : piece === 'MICRO' ? String(micro) : values[piece]!,
+    )
+    .join('')
+  return { next, samePeriod }
 }
 
 function withPrerelease(
@@ -148,9 +168,8 @@ function withPrerelease(
   core: string,
   tags: readonly VersionTag[],
 ): string {
-  const channel = settings.version.prerelease
-  if (!channel) return core
-  const prefix = `${core}-${channel}.`
+  if (!settings.version.prerelease) return core
+  const prefix = `${core}-${prereleaseChannel}.`
   const numbers = tags
     .filter((tag) => tag.version.startsWith(prefix))
     .map((tag) => Number(tag.version.slice(prefix.length)))
@@ -159,9 +178,9 @@ function withPrerelease(
 }
 
 /**
- * The version after `current` for `bump`: semantic versions start at `version.initial`, calendar
- * versions follow the date in the settings' time zone. With a pre-release channel the result is
- * the next pre-release of that version. `undefined` when `bump` is `none`.
+ * The version after `current` for `bump`: semantic versions start at `initialVersion`, calendar
+ * versions follow the UTC date (`calverFormat`). With `version.prerelease` the result is the next
+ * release candidate of that version. `undefined` when `bump` is `none`.
  */
 export function nextVersion(
   settings: ReleaseSettings,
@@ -173,20 +192,102 @@ export function nextVersion(
   if (bump === 'none') return undefined
   if (settings.version.scheme === 'calver') {
     const released = current?.split('-')[0]
-    return withPrerelease(
-      settings,
-      nextCalver(settings.version.calver, released, now, settings.timezone),
-      tags,
-    )
+    const { next, samePeriod } = nextCalver(calverFormat, released, now)
+    if (released && current !== released && samePeriod && settings.version.prerelease)
+      return withPrerelease(settings, released, tags)
+    return withPrerelease(settings, next, tags)
   }
-  if (!current) return withPrerelease(settings, settings.version.initial, tags)
+  if (!current) return withPrerelease(settings, initialVersion, tags)
   const parsed = parseSemver(current)
   if (parsed?.pre && settings.version.prerelease) {
     const core = `${parsed.major}.${parsed.minor}.${parsed.patch}`
     const released = tags.find((tag) => !tag.version.includes('-'))
-    const base = released ? bumpSemver(released.version, bump) : settings.version.initial
+    const base = released ? bumpSemver(released.version, bump) : initialVersion
     if (compareVersions(base, core) <= 0) return withPrerelease(settings, core, tags)
     return withPrerelease(settings, base, tags)
   }
   return withPrerelease(settings, bumpSemver(current, bump), tags)
 }
+
+const tagVersion = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/u
+
+interface TagVersion {
+  core: [number, number, number]
+  pre: string[]
+}
+
+function parseTagVersion(name: string): TagVersion | undefined {
+  const match = tagVersion.exec(name)
+  if (!match) return undefined
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    pre: match[4] ? match[4].split('.') : [],
+  }
+}
+
+/** Whether a tag name is a semantic version, with or without a leading `v`. */
+export const isVersion = (name: string) => tagVersion.test(name)
+
+/** Semantic version precedence of two tag names; non-versions compare as equal. */
+export function compareVersions(a: string, b: string): number {
+  const left = parseTagVersion(a)
+  const right = parseTagVersion(b)
+  if (!left || !right) return 0
+  for (let i = 0; i < 3; i++) {
+    const diff = left.core[i]! - right.core[i]!
+    if (diff) return diff
+  }
+  if (!left.pre.length || !right.pre.length) return right.pre.length - left.pre.length
+  for (let i = 0; i < Math.max(left.pre.length, right.pre.length); i++) {
+    const x = left.pre[i]
+    const y = right.pre[i]
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    const numeric = /^\d+$/u
+    if (numeric.test(x) && numeric.test(y)) {
+      const diff = Number(x) - Number(y)
+      if (diff) return diff
+    } else if (numeric.test(x) !== numeric.test(y)) {
+      return numeric.test(x) ? -1 : 1
+    } else if (x !== y) {
+      return x < y ? -1 : 1
+    }
+  }
+  return 0
+}
+
+/** A tag that versions one package of a monorepo rather than the whole repository. */
+export interface PackageTag {
+  tag: string
+  package: string
+  version: string
+}
+
+const separators = ['@', '/', '-'] as const
+
+/**
+ * Reads tags that monorepo release tools create per package: `@scope/name@1.2.3` and
+ * `name@1.2.3` (changesets, lerna), `path/to/module/v1.2.3` (Go modules), `name-v1.2.3`
+ * (release-please). Plain versions such as `v1.2.3` are not package tags.
+ */
+export function parsePackageTag(tag: string): PackageTag | undefined {
+  for (const separator of separators) {
+    const at = tag.lastIndexOf(separator)
+    if (at <= 0) continue
+    const version = tag.slice(at + 1)
+    if (separator === '-' && !version.startsWith('v')) continue
+    if (!isVersion(version)) continue
+    return { tag, package: tag.slice(0, at), version }
+  }
+  return undefined
+}
+
+/** Whether a tag versions one package of a monorepo; see `parsePackageTag`. */
+export const isPackageTag = (tag: string) => parsePackageTag(tag) !== undefined
+
+/**
+ * What a release job targets for a tag: the tagged commit for package tags, so every package
+ * released by one commit becomes one release, and the tag itself otherwise.
+ */
+export const releaseTarget = (tag: { name: string; sha: string }) =>
+  isPackageTag(tag.name) ? tag.sha : tag.name

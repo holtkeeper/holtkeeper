@@ -125,6 +125,49 @@ describe('can', () => {
   })
 })
 
+describe('catalog:read', () => {
+  const games = repo('games/a', ['games'])
+  const tools = repo('tools/a', ['tools'])
+
+  test('analyses:read implies catalog:read on the same scope only', () => {
+    const reader = principal([{ scope: { groups: ['games'] }, actions: ['analyses:read'] }])
+    expect(can(reader, 'catalog:read', { kind: 'repo', repo: games })).toBe(true)
+    expect(can(reader, 'catalog:read', { kind: 'repo', repo: tools })).toBe(false)
+  })
+
+  test('catalog:read implies nothing else', () => {
+    const catalog = principal([{ scope: { all: true }, actions: ['catalog:read'] }])
+    expect(can(catalog, 'catalog:read', { kind: 'repo', repo: tools })).toBe(true)
+    for (const action of ['analyses:read', 'audits:read', 'releases:read', 'repos:read'] as const)
+      expect(can(catalog, action, { kind: 'repo', repo: tools })).toBe(false)
+  })
+
+  test('the grant matrix', () => {
+    const cases: [Grant['actions'], boolean][] = [
+      [['*'], true],
+      [['analyses:read'], true],
+      [['catalog:read'], true],
+      [['repos:read'], false],
+      [['audits:read', 'releases:read', 'knowledge:read'], false],
+    ]
+    for (const [actions, expected] of cases)
+      expect(
+        can(principal([{ scope: { all: true }, actions }]), 'catalog:read', {
+          kind: 'repo',
+          repo: games,
+        }),
+      ).toBe(expected)
+  })
+
+  test('delegating catalog:read is covered by analyses:read', () => {
+    const parent: Grant[] = [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }]
+    expect(
+      grantsWithin([{ scope: { groups: ['games'] }, actions: ['catalog:read'] }], parent),
+    ).toBe(true)
+    expect(grantsWithin([{ scope: { all: true }, actions: ['catalog:read'] }], parent)).toBe(false)
+  })
+})
+
 describe('delegation', () => {
   const gamesAdmin = principal([{ scope: { repos: ['games/**'] }, actions: ['*'] }])
   const reader = principal([{ scope: { all: true }, actions: ['audits:read'] }])

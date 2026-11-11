@@ -34,7 +34,7 @@ export const notificationSchema: z.ZodType<Notification> = z.object({
 })
 
 /**
- * Delivers notifications to one channel (a Slack webhook, a generic webhook, ...). `send` resolves
+ * Delivers notifications to one channel (a generic webhook, ...). `send` resolves
  * once the channel accepted the message and rejects otherwise; errors never contain secrets.
  */
 export interface Notifier {

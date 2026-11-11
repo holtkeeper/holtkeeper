@@ -13,14 +13,11 @@ export {
   type EffectiveConfigOptions,
   type ForgeFactory,
   type ForgeOrigin,
-  type Provenance,
   effectiveConfig,
   memoizeForge,
-  provenanceKey,
   scheduleFromDocument,
   unavailableForge,
 } from './effective.ts'
-export { envName, exportConfig } from './export.ts'
 export {
   type ConfigSource,
   type ConfigSourceOptions,
@@ -30,12 +27,10 @@ export {
 export { generateWebhookSecret } from './secret.ts'
 export { gitlabForgeFactory } from './factories.ts'
 export {
-  type DefaultSchedule,
   type DefaultTrigger,
-  SCHEDULES_MARKER,
   type SeedDefaultsOptions,
   defaultMarker,
-  defaultSchedules,
   defaultTriggers,
+  retireSeededSchedules,
   seedDefaults,
 } from './defaults.ts'

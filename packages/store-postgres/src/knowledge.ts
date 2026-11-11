@@ -32,6 +32,7 @@ export interface KnowledgeFilterParams {
   scope: string | null
   packageName: string | null
   ecosystem: string | null
+  subject: string | null
 }
 
 const list = <T>(value: T | T[] | undefined) => (value === undefined ? null : [value].flat())
@@ -47,11 +48,12 @@ export function knowledgeFilterParams(filter: KnowledgeFilter = {}): KnowledgeFi
     scope: filter.scope ?? null,
     packageName: pkg === undefined ? null : separator > 0 ? pkg.slice(separator + 1) : pkg,
     ecosystem: pkg !== undefined && separator > 0 ? pkg.slice(0, separator) : null,
+    subject: filter.subject ?? null,
   }
 }
 
 const columns = (sql: SQL) => sql`k.id, k.title, k.body, k.kind, k.status, k.source, k.author,
-  k.scope, k.topics, k.applies_to, k.packages, k.evidence, k.supersedes, k.created_at, k.updated_at,
+  k.scope, k.topics, k.applies_to, k.packages, k.visibility, k.subject, k.evidence, k.supersedes, k.created_at, k.updated_at,
   k.updated_by, k.version`
 
 const jsonList = (sql: SQL, value: string[] | null) => (value === null ? null : sql.json(value))
@@ -77,7 +79,8 @@ function where(sql: SQL, filter?: KnowledgeFilter) {
     AND (${p.packageName}::text IS NULL OR EXISTS (
       SELECT 1 FROM jsonb_array_elements(COALESCE(k.packages, '[]'::jsonb)) AS pkg (value)
       WHERE pkg.value ->> 'name' = ${p.packageName}::text
-        AND (${p.ecosystem}::text IS NULL OR pkg.value ->> 'ecosystem' = ${p.ecosystem}::text)))`
+        AND (${p.ecosystem}::text IS NULL OR pkg.value ->> 'ecosystem' = ${p.ecosystem}::text)))
+    AND (${p.subject}::text IS NULL OR k.subject = ${p.subject}::text)`
 }
 
 /** The SQL `KnowledgeStore`: rows in `knowledge`, versions in `knowledge_history`, `tsvector` search. */
@@ -98,18 +101,19 @@ export function postgresKnowledge(db: () => Promise<Db>, schema: string): Knowle
         }
         const [stored]: KnowledgeRow[] = await tx`
           INSERT INTO ${t.knowledge} AS k (id, title, body, kind, status, source, author, scope, topics,
-            applies_to, packages, evidence, supersedes, tags, created_at, updated_at, updated_by, version)
+            applies_to, packages, visibility, subject, evidence, supersedes, tags, created_at, updated_at,
+            updated_by, version)
           VALUES (${input.id}, ${input.title}, ${input.body}, ${input.kind}, ${input.status},
             ${input.source}, ${input.author}, ${tx.json(input.scope)}, ${tx.json(input.topics)},
             ${tx.json(input.appliesTo)}, ${input.packages ? tx.json(input.packages) : null},
-            ${tx.json(input.evidence)}, ${input.supersedes ?? null}, ${knowledgeTags(input)},
+            ${input.visibility ?? null}, ${input.subject ?? null}, ${tx.json(input.evidence)}, ${input.supersedes ?? null}, ${knowledgeTags(input)},
             ${input.createdAt}, ${input.updatedAt}, ${input.updatedBy ?? null},
             ${(previous?.version ?? 0) + 1})
           ON CONFLICT (id) DO UPDATE SET title = excluded.title, body = excluded.body,
             kind = excluded.kind, status = excluded.status, source = excluded.source,
             author = excluded.author, scope = excluded.scope, topics = excluded.topics,
             applies_to = excluded.applies_to, packages = excluded.packages,
-            evidence = excluded.evidence, supersedes = excluded.supersedes, tags = excluded.tags,
+            visibility = excluded.visibility, subject = excluded.subject, evidence = excluded.evidence, supersedes = excluded.supersedes, tags = excluded.tags,
             created_at = excluded.created_at, updated_at = excluded.updated_at,
             updated_by = excluded.updated_by, version = excluded.version
           RETURNING ${columns(tx)}`

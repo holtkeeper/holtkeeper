@@ -1,3 +1,5 @@
+import type { CodeChange } from '@holtkeeper/changes'
+
 /**
  * What a component is: a language runtime, a package manager, a service image (database, cache,
  * web server), a base operating system image, any other image, or any other tool.
@@ -70,6 +72,28 @@ export interface StackRepo {
   archived?: boolean
 }
 
+/** How a repository file is compared with a convention's golden content. */
+export type ConventionMode = 'exact' | 'json-subset' | 'yaml-subset' | 'lines-present'
+
+/**
+ * Result of comparing one repository file with one convention. `error`: the file could not be
+ * read, or it or the golden content does not parse.
+ */
+export type ConventionStatus = 'matches' | 'drifts' | 'missing' | 'error'
+
+/** One repository checked against one convention. */
+export interface ConventionResult {
+  repo: string
+  /** File path inside the repository, the convention's `path`. */
+  file: string
+  mode: ConventionMode
+  status: ConventionStatus
+  /** Human-readable differences, e.g. `engines.node: expected "22.x", found "18.x"`. */
+  problems: string[]
+  /** Suggested fix targeting the repository, when one could be computed. */
+  change?: CodeChange
+}
+
 /** A problem that did not stop the analysis, e.g. an unparsable Dockerfile. */
 export interface StackNote {
   repo?: string
@@ -85,5 +109,7 @@ export interface StackData {
   soonDays: number
   repos: StackRepo[]
   components: StackComponent[]
+  /** Every readable repository checked against every convention of the group. */
+  conventions: ConventionResult[]
   notes: StackNote[]
 }

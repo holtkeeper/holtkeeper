@@ -4,11 +4,11 @@ import type { Agent, AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@
 import type { JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
-import type { SlackFetch } from '@holtkeeper/chat-slack'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
+import type { IssueTracker } from '@holtkeeper/issues'
 import type { AnyAnalyzer } from '@holtkeeper/jobs'
 import type { Limiter } from '@holtkeeper/limits'
 import type { ConfigSource } from '@holtkeeper/managed-config'
@@ -22,6 +22,7 @@ import { HTTPException } from 'hono/http-exception'
 import type { z } from 'zod'
 
 import type { AuditEnrichment } from './audit.ts'
+import type { ChatAgentFor } from './chat-threads.ts'
 import type { MediaEngine } from './media/engine.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 
@@ -60,20 +61,40 @@ export interface ServerDeps {
   aiCatalog?: AiCatalog
   /** AI providers from the config's `ai.providers`, which `ai-sdk` credentials may name. */
   aiProviders?: readonly AiProviderPlugin[]
-  /** The agent of a repository, for work routes run outside jobs (library issue digests). */
+  /**
+   * The agent of a repository, for work routes run outside jobs when a person asks (release
+   * summaries, API answers); its runs count as interactive for the AI budget.
+   */
   agentFor?: (repo: RepoRef) => Promise<Agent | undefined>
+  /**
+   * The agent of a repository for automatic work the server does outside jobs (learning capture
+   * from review replies); its runs are not interactive, so they leave the budget reserve alone.
+   */
+  automaticAgentFor?: (repo: RepoRef) => Promise<Agent | undefined>
+  /**
+   * The agent of team chat replies and summaries (`ChatAgentFor`); its runs are interactive work
+   * of the person who asked. Without it the chat answers that no AI provider is configured.
+   */
+  chatAgentFor?: ChatAgentFor
   /** Replaces the AI SDK models of `ai-sdk` credential tests; for tests. */
   languageModel?: LanguageModelFactory
+  /** Replaces `fetch` of the agent-loop probe of Anthropic credential tests; for tests. */
+  probeFetch?: typeof fetch
   /** Runs host tools for routes, such as `ssh-keyscan` when a forge issues an SSH key. Default: `localRunner`. */
   hostRunner?: CommandRunner
   /** Areas the storage overview reports, e.g. artifacts, git mirrors, the database. */
   storage?: StorageProvider[]
+  /**
+   * The issue tracker release pages and tools enrich ticket keys with. Default: `issueTrackerFor`,
+   * from `jira` credentials; tests pass a fake.
+   */
+  issueTracker?: (repo: RepoRef) => Promise<IssueTracker | undefined>
   /** How often the release assistant polls a started deploy, in milliseconds. Default 15 s. */
   releasePollMs?: number
-  /** Receives work routes leave running after responding, e.g. a release backfill; for tests. */
+  /** How long forge events wait before the release snapshot of a repository is reread, in milliseconds. Default 30 s. */
+  releaseRefreshDelayMs?: number
+  /** Receives work routes leave running after responding, e.g. an analysis backfill; for tests. */
   onBackground?: (work: Promise<unknown>) => void
-  /** `fetch` of Slack Web API calls; for tests. */
-  slackFetch?: SlackFetch
   now: () => Date
 }
 
@@ -82,16 +103,28 @@ export interface JobAnalyzerInfo {
   kind: string
   scope: 'repo' | 'group'
   options: z.ZodType
-  analysis?: { label: string }
+  /** `kind` is the record kind the analyzer stores, when it differs from the analyzer's own. */
+  analysis?: { label: string; kind?: string }
   needs?: JobAnalyzerView['needs']
   presets?: { id: string; label: string; description?: string; options: unknown }[]
   /** The run changes repositories; `jobs.onNewRepo` never queues it. */
   exclusive?: boolean
+  /** Kinds whose results the run reads; its jobs wait for theirs on the same repository. */
+  after?: string[]
+  /** The run reads only the default branch; event triggers and policies, whose jobs carry a ref, skip it. */
+  defaultBranchOnly?: boolean
   appliesTo?: AnyAnalyzer['appliesTo']
+  /** How the freshness sweeper keeps its records current; absent: never automatically. */
+  refresh?: AnyAnalyzer['refresh']
 }
 
 export interface Env {
-  Variables: { principal: Principal | undefined; audit?: AuditEnrichment }
+  Variables: {
+    principal: Principal | undefined
+    audit?: AuditEnrichment
+    /** `forge:path` of every repository a permission check of this request allowed. */
+    allowedRepos?: string[]
+  }
 }
 
 export type AppContext = Context<Env>
@@ -103,11 +136,19 @@ export function principalOf(c: AppContext): Principal {
   return principal
 }
 
-/** Throws 403 unless the caller may perform `action` on `target`. */
+/**
+ * Throws 403 unless the caller may perform `action` on `target`. An allowed repository target is
+ * remembered for the request, so its audit event may name that repository.
+ */
 export function authorize(c: AppContext, action: Action, target: Target): Principal {
   const principal = principalOf(c)
   if (!can(principal, action, target))
     throw new HTTPException(403, { message: `missing permission ${action}` })
+  if (target.kind === 'repo')
+    c.set('allowedRepos', [
+      ...(c.get('allowedRepos') ?? []),
+      `${target.repo.forge}:${target.repo.path}`,
+    ])
   return principal
 }
 

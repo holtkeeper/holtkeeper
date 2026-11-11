@@ -21,6 +21,7 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { ExternalAccounts } from './ExternalAccounts.tsx'
+import { HomeGroups } from './HomeGroups.tsx'
 
 type Editing = { mode: 'add' } | { mode: 'rename'; id: string; label: string }
 
@@ -255,6 +256,7 @@ export function AccountPage() {
         </ul>
       </Panel>
 
+      <HomeGroups />
       <ExternalAccounts />
 
       {editing ? (

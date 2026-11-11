@@ -1,6 +1,6 @@
-import type { Store } from '@holtkeeper/store'
+import { SYSTEM_ACTOR, type Store } from '@holtkeeper/store'
 
-import { llmBudget, llmModels, type SettingDefinition } from './definitions.ts'
+import { llmBudget, type SettingDefinition } from './definitions.ts'
 
 /** A value seeded for every repository on a fresh install. */
 export interface DefaultSetting {
@@ -12,18 +12,13 @@ const presetValue = (definition: SettingDefinition, id: string) =>
   definition.presets?.find((preset) => preset.id === id)?.value
 
 /**
- * Values a fresh install starts with, each for `{ all: true }`: the newest Opus as the default
- * model with the balanced per-task map, a warning-only budget, local agent tools, low-risk
- * knowledge auto-accepted and fixes limited to minor upgrades.
+ * Values a fresh install starts with, each for `{ all: true }`: a $150 weekly budget that blocks,
+ * 1500 tokens of team knowledge per task, low-risk knowledge auto-accepted and fixes limited to
+ * minor upgrades.
  */
 export const defaultSettings: DefaultSetting[] = [
-  { key: 'llm.model', value: 'claude-opus@latest' },
-  { key: 'llm.models', value: presetValue(llmModels, 'balanced') },
-  { key: 'llm.budget', value: presetValue(llmBudget, 'learn') },
-  {
-    key: 'agent.tools',
-    value: { context7: false, maxResultLines: 200, knowledgeTokens: 1500 },
-  },
+  { key: 'llm.budget', value: presetValue(llmBudget, 'default') },
+  { key: 'agent.tools', value: { knowledgeTokens: 1500 } },
   { key: 'knowledge.autoAccept', value: ['quirk', 'howto'] },
   { key: 'audit.upgrade', value: 'minor' },
 ]
@@ -32,7 +27,7 @@ export const defaultSettings: DefaultSetting[] = [
 export const DEFAULTS_MARKER = 'settings:defaults-seeded'
 
 export interface SeedDefaultsOptions {
-  store: Pick<Store, 'settings' | 'activity' | 'kv'>
+  store: Pick<Store, 'settings' | 'audit' | 'kv'>
   /** Settings the server knows; defaults for other keys, or values they reject, are skipped. */
   definitions: readonly SettingDefinition[]
   defaults?: readonly DefaultSetting[]
@@ -44,8 +39,8 @@ export interface SeedDefaultsOptions {
  * store: the first call records a marker in `Store.kv` (atomically when it supports
  * `compareAndSet`, so concurrent servers seed once), and later calls do nothing even after every
  * setting was removed. Without `kv` it relies on the store being empty, with stable entry ids so
- * concurrent seeding writes the same entries. Never touches existing entries. Logs a
- * `settings.seeded` activity event. Resolves with the keys written.
+ * concurrent seeding writes the same entries. Never touches existing entries. Audits the run as
+ * `setting.seed` by the system actor. Resolves with the keys written.
  */
 export async function seedDefaultSettings({
   store,
@@ -83,11 +78,13 @@ export async function seedDefaultSettings({
     written.push(key)
   }
   if (written.length > 0)
-    await store.activity.append({
+    await store.audit.append({
       at,
-      actor: 'system',
-      action: 'settings.seeded',
-      subject: 'defaults',
+      actor: SYSTEM_ACTOR,
+      via: 'system',
+      action: 'setting.seed',
+      target: { type: 'setting' },
+      outcome: 'ok',
       details: { keys: written },
     })
   return written

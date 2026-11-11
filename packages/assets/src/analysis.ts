@@ -24,6 +24,7 @@ import {
   assetsDataSchema,
 } from './data.ts'
 import { wasted } from './findings.ts'
+import { defaultAssetsPolicy } from './policy.ts'
 
 /** Display settings of the report. */
 export interface AssetsAnalysisOptions {
@@ -83,11 +84,11 @@ function metricsOf(data: AssetsData, previous?: AssetsData): Metric[] {
       ),
     ),
     {
-      ...metric('over-budget', 'Over budget', overBudgetCount(data.budgets), {
+      ...metric('over-budget', 'Policy violations', violationCount(data), {
         better: 'down',
-        ...was(previous && overBudgetCount(previous.budgets)),
+        ...was(previous && violationCount(previous)),
       }),
-      tone: data.budgets.length ? 'bad' : 'good',
+      tone: violationCount(data) ? 'bad' : 'good',
     },
     ...(data.changes || previous?.changes
       ? [
@@ -242,12 +243,22 @@ const limitLabels: Record<BudgetViolation['limit'], string> = {
 const formatLimit = (violation: BudgetViolation, value: number) =>
   violation.limit === 'width' || violation.limit === 'height' ? `${value} px` : formatBytes(value)
 
+const violationCount = (data: AssetsData) =>
+  overBudgetCount(data.budgets) + (data.violations?.length ?? 0)
+
 function budgetsSection(
   data: AssetsData,
   previous: AssetsData | undefined,
   comparison: AssetComparison | undefined,
 ): Section {
   const fresh = new Set(comparison?.newViolations)
+  const before = new Set(previous?.violations?.map((violation) => violation.id))
+  const policyItems: Issue[] = (data.violations ?? []).map((violation) => ({
+    id: violation.id,
+    tone: violation.severity === 'error' ? 'bad' : 'warning',
+    title: violation.path ? `${violation.path}: ${violation.message}` : violation.message,
+    tags: [violation.rule, ...(previous?.violations && !before.has(violation.id) ? ['new'] : [])],
+  }))
   const items: Issue[] = data.budgets.map((violation) => ({
     id: violation.id,
     tone: 'bad',
@@ -259,6 +270,7 @@ function budgetsSection(
       : {}),
     tags: ['budget', ...(fresh.has(violation.id) && comparison ? ['new'] : [])],
   }))
+  items.unshift(...policyItems)
   const resolved = new Set(comparison?.resolvedViolations)
   for (const violation of previous?.budgets ?? []) {
     if (!resolved.has(violation.id)) continue
@@ -282,13 +294,13 @@ function budgetsSection(
   }
   return {
     id: 'budgets',
-    title: 'Budgets',
+    title: 'Policy',
     description:
-      'Configured size and dimension budgets, plus textures too large or oddly sized for GPUs.',
+      'Files, kinds and totals breaking the asset policy, plus textures too large or oddly sized for GPUs.',
     blocks: [
       items.length
         ? { type: 'issues', items }
-        : { type: 'markdown', text: 'All assets are within budget.' },
+        : { type: 'markdown', text: 'All assets follow the policy.' },
     ],
   }
 }
@@ -852,17 +864,13 @@ function duplicatesSection(data: AssetsData): Section {
 }
 
 const assetsExclude: ReportExclude = {
-  setting: 'analyzers.assets',
+  setting: 'assets.policy',
   options: [
     {
-      option: 'optimizeIgnore',
-      label: 'Skip optimization',
-      description: 'Still counted in totals and budgets, never flagged, converted or optimized',
-    },
-    {
       option: 'ignore',
-      label: 'Ignore entirely',
+      label: 'Ignore',
       description: 'Left out of the inventory, totals, budgets and every check',
+      defaults: defaultAssetsPolicy.ignore,
     },
   ],
 }

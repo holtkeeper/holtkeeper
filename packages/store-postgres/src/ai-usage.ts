@@ -104,7 +104,8 @@ const plainWhere = (sql: SQL, f: AiUsageFilter) => sql`
   AND (${f.provider ?? null}::text IS NULL OR r.provider = ${f.provider ?? null}::text)
   AND (${f.taskKind ?? null}::text IS NULL OR r.task_kind = ${f.taskKind ?? null}::text)
   AND (${f.analyzer ?? null}::text IS NULL OR r.analyzer = ${f.analyzer ?? null}::text)
-  AND (${f.outcome ?? null}::text IS NULL OR r.outcome = ${f.outcome ?? null}::text)`
+  AND (${f.outcome ?? null}::text IS NULL OR r.outcome = ${f.outcome ?? null}::text)
+  AND (${f.jobId ?? null}::text IS NULL OR r.job_id = ${f.jobId ?? null}::text)`
 
 // A fragment is thenable, so the async helper wraps it in an array (which Bun joins) to keep the
 // promise from running it as a query of its own.
@@ -142,14 +143,14 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
       const [row]: AiUsageRow[] = await sql`
         INSERT INTO ${t.aiUsage} (id, at, repo_forge, repo_path, groups, task_kind, analyzer, job_id,
           analysis_id, actor, provider, model, input_tokens, output_tokens, cache_read_tokens,
-          cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error)
+          cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error, transcript_ref)
         VALUES (${crypto.randomUUID()}, ${record.at}, ${record.repo.forge}, ${record.repo.path},
           ${sql.json(record.groups)}, ${record.taskKind}, ${record.analyzer ?? null},
           ${record.jobId ?? null}, ${record.analysisId ?? null}, ${record.actor},
           ${record.provider}, ${record.model}, ${record.inputTokens}, ${record.outputTokens},
           ${record.cacheReadTokens}, ${record.cacheWriteTokens}, ${record.costUsd}::float8,
           ${record.costSource}, ${record.durationMs}, ${record.turns}, ${record.outcome},
-          ${record.error ?? null})
+          ${record.error ?? null}, ${record.transcriptRef ?? null})
         RETURNING *`
       if (!row) throw new Error('insert returned no row')
       return toAiUsage(row)

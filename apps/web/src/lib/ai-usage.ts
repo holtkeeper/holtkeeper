@@ -1,4 +1,4 @@
-import type { AiBudgetLimitView, AiUsageBucket, AiUsageTotals } from '@holtkeeper/api'
+import type { AiBudgetStatus, AiUsageBucket, AiUsageTotals } from '@holtkeeper/api'
 import { percentChange } from '@holtkeeper/api'
 
 const usd = new Intl.NumberFormat('en', { style: 'currency', currency: 'USD' })
@@ -93,11 +93,36 @@ export function fillDays(
   })
 }
 
-/** Health of a budget limit: over it, heading over it by month end or close, or fine. */
-export function budgetTone(limit: AiBudgetLimitView): 'success' | 'warning' | 'danger' {
-  if (limit.percent >= 100) return 'danger'
-  if (limit.percent >= 80 || (limit.projectedUsd ?? 0) > limit.limitUsd) return 'warning'
+type BudgetNumbers = Pick<AiBudgetStatus, 'weeklyUsd' | 'reserveUsd' | 'spentUsd' | 'projectedUsd'>
+
+/** Spend at which automatic work stops: the weekly limit minus the reserve, never below 0. */
+export const automaticLimit = (budget: Pick<AiBudgetStatus, 'weeklyUsd' | 'reserveUsd'>) =>
+  Math.max(budget.weeklyUsd - budget.reserveUsd, 0)
+
+/**
+ * Health of a weekly budget: the week's limit is used up, automatic work already eats into the
+ * reserve or is heading over the limit by week end, or fine.
+ */
+export function budgetTone(budget: BudgetNumbers): 'success' | 'warning' | 'danger' {
+  if (budget.spentUsd >= budget.weeklyUsd) return 'danger'
+  if (budget.spentUsd >= automaticLimit(budget) || budget.projectedUsd > budget.weeklyUsd)
+    return 'warning'
   return 'success'
+}
+
+/** Bar positions in percent of the weekly limit: spend, projection and the reserve marker. */
+export function budgetBar(budget: BudgetNumbers): {
+  spent: number
+  projected: number
+  reserve: number
+} {
+  const share = (amount: number) =>
+    budget.weeklyUsd > 0 ? Math.min(100, Math.max(0, (amount / budget.weeklyUsd) * 100)) : 0
+  return {
+    spent: share(budget.spentUsd),
+    projected: share(budget.projectedUsd),
+    reserve: share(automaticLimit(budget)),
+  }
 }
 
 /** A named, costed entry for top lists. */

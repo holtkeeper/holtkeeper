@@ -40,7 +40,7 @@ function setup(rotators: TokenRotator[] = [fakeRotator().rotator]) {
   const store = memoryStore()
   const service = createCredentialService({
     credentials: store.credentials,
-    activity: store.activity,
+    audit: store.audit,
     vault: aesVault('a'.repeat(32)),
     rotators,
     now: () => new Date((tick += 1000)),
@@ -57,13 +57,10 @@ const input = (overrides: Partial<CreateCredentialInput> = {}): CreateCredential
   ...overrides,
 })
 
-const actions = async (store: ReturnType<typeof memoryStore>) =>
-  (await store.activity.list()).map((event) => [event.action, event.actor]).toReversed()
-
 describe('create', () => {
   test('seals the secret and never returns it', async () => {
     const { store, service } = setup()
-    const view = await service.create(input({ expiresAt: '2026-12-01T00:00:00Z' }), 'alice')
+    const view = await service.create(input({ expiresAt: '2026-12-01T00:00:00Z' }))
 
     expect(view).not.toHaveProperty('secret')
     expect(view.expiresAt).toBe('2026-12-01T00:00:00.000Z')
@@ -74,19 +71,18 @@ describe('create', () => {
     expect(await service.reveal(view.id)).toBe('glpat-secret')
     expect(await service.list()).toEqual([view])
     expect(await service.get(view.id)).toEqual(view)
-    expect(await actions(store)).toEqual([['credential.created', 'alice']])
   })
 
   test('fills expiresAt from the rotator when not given', async () => {
     const { service } = setup()
-    const view = await service.create(input(), 'alice')
+    const view = await service.create(input())
     expect(view.expiresAt).toBe('2026-11-15T00:00:00.000Z')
   })
 
   test('a failing inspect is not fatal', async () => {
     const { rotator } = fakeRotator({ inspect: () => Promise.reject(new Error('boom')) })
     const { service } = setup([rotator])
-    const view = await service.create(input(), 'alice')
+    const view = await service.create(input())
     expect(view.expiresAt).toBeUndefined()
   })
 
@@ -100,7 +96,7 @@ describe('create', () => {
       secret: '',
       rotation: { enabled: true, daysBefore: 0, lifetimeDays: 1.5 },
     }
-    const error = await errorOf(service.create(bad, 'alice'))
+    const error = await errorOf(service.create(bad))
     expect(error).toBeInstanceOf(CredentialInputError)
     const issues =
       error instanceof CredentialInputError ? error.issues.map((issue) => issue.split(':')[0]) : []
@@ -118,7 +114,7 @@ describe('create', () => {
   test('rejects daysBefore not below lifetimeDays', async () => {
     const { service } = setup()
     const rotation = { enabled: true, daysBefore: 30, lifetimeDays: 30 }
-    expect((await errorOf(service.create(input({ rotation }), 'alice'))).message).toMatch(
+    expect((await errorOf(service.create(input({ rotation })))).message).toMatch(
       'less than rotation.lifetimeDays',
     )
   })
@@ -126,43 +122,47 @@ describe('create', () => {
 
 describe('update and remove', () => {
   test('re-seals a new secret and re-inspects its expiry', async () => {
-    const { store, service } = setup()
-    const { id } = await service.create(input({ expiresAt: '2026-12-01T00:00:00Z' }), 'alice')
-    const view = await service.update(id, { name: 'Renamed', secret: 'glpat-new' }, 'bob')
+    const { service } = setup()
+    const { id } = await service.create(input({ expiresAt: '2026-12-01T00:00:00Z' }))
+    const view = await service.update(id, { name: 'Renamed', secret: 'glpat-new' })
 
     expect(view.name).toBe('Renamed')
     expect(view.expiresAt).toBe('2026-11-15T00:00:00.000Z')
     expect(await service.reveal(id)).toBe('glpat-new')
-    const [event] = await store.activity.list({ limit: 1 })
-    expect(event).toMatchObject({
-      action: 'credential.updated',
-      actor: 'bob',
-      details: { fields: ['name', 'secret'] },
-    })
-    expect(JSON.stringify(event)).not.toContain('glpat-new')
   })
 
   test('keeps the secret when none is given', async () => {
     const { service } = setup()
-    const { id } = await service.create(input(), 'alice')
-    await service.update(id, { scope: { groups: ['games'] } }, 'bob')
+    const { id } = await service.create(input())
+    await service.update(id, { scope: { groups: ['games'] } })
     expect(await service.reveal(id)).toBe('glpat-secret')
     expect((await service.get(id))?.scope).toEqual({ groups: ['games'] })
   })
 
-  test('remove deletes and logs; unknown ids throw', async () => {
-    const { store, service } = setup()
-    const { id } = await service.create(input(), 'alice')
-    await service.remove(id, 'bob')
-    expect(await service.list()).toEqual([])
-    expect(await actions(store)).toEqual([
-      ['credential.created', 'alice'],
-      ['credential.removed', 'bob'],
-    ])
-    expect(await errorOf(service.remove(id, 'bob'))).toBeInstanceOf(CredentialNotFoundError)
-    expect(await errorOf(service.update(id, { name: 'x' }, 'bob'))).toBeInstanceOf(
+  test('capabilities are stored without updatedAt and dropped when the endpoint changes', async () => {
+    const { service } = setup()
+    const { id, updatedAt } = await service.create(input())
+    const capabilities = { agentLoop: 'ok' as const, checkedAt: '2026-10-30T12:00:00.000Z' }
+    const probed = await service.setCapabilities(id, capabilities)
+    expect(probed).toMatchObject({ capabilities, updatedAt })
+    expect((await service.update(id, { name: 'Renamed' })).capabilities).toEqual(capabilities)
+    expect((await service.update(id, { url: 'https://other.example.com' })).capabilities).toBe(
+      undefined,
+    )
+    await service.setCapabilities(id, capabilities)
+    expect((await service.update(id, { secret: 'glpat-next' })).capabilities).toBeUndefined()
+    expect(await errorOf(service.setCapabilities('missing', capabilities))).toBeInstanceOf(
       CredentialNotFoundError,
     )
+  })
+
+  test('remove deletes; unknown ids throw', async () => {
+    const { service } = setup()
+    const { id } = await service.create(input())
+    await service.remove(id)
+    expect(await service.list()).toEqual([])
+    expect(await errorOf(service.remove(id))).toBeInstanceOf(CredentialNotFoundError)
+    expect(await errorOf(service.update(id, { name: 'x' }))).toBeInstanceOf(CredentialNotFoundError)
     expect(await errorOf(service.reveal(id))).toBeInstanceOf(CredentialNotFoundError)
   })
 })
@@ -170,10 +170,10 @@ describe('update and remove', () => {
 describe('rotate', () => {
   test('stores the new token and its expiry', async () => {
     const { rotator, calls } = fakeRotator()
-    const { store, service } = setup([rotator])
+    const { service } = setup([rotator])
     const rotation = { enabled: true, daysBefore: 7, lifetimeDays: 90 }
-    const { id } = await service.create(input({ rotation }), 'alice')
-    const view = await service.rotate(id, 'bob')
+    const { id } = await service.create(input({ rotation }))
+    const view = await service.rotate(id)
 
     expect(calls).toEqual([
       { url: 'https://gitlab.example.com', token: 'glpat-secret', lifetimeDays: 90 },
@@ -183,10 +183,6 @@ describe('rotate', () => {
       expiresAt: '2027-01-28T00:00:00.000Z',
       lastRotatedAt: view.updatedAt,
     })
-    expect(await actions(store)).toEqual([
-      ['credential.created', 'alice'],
-      ['credential.rotated', 'bob'],
-    ])
   })
 
   test('records the failure, rethrows and clears it after a later success', async () => {
@@ -197,40 +193,34 @@ describe('rotate', () => {
       rotate: (args) =>
         fail ? Promise.reject(new Error('GitLab 401: revoked')) : rotator.rotate(args),
     }
-    const { store, service } = setup([flaky])
-    const { id } = await service.create(input(), 'alice')
+    const { service } = setup([flaky])
+    const { id } = await service.create(input())
 
-    expect((await errorOf(service.rotate(id, 'bob'))).message).toBe('GitLab 401: revoked')
+    expect((await errorOf(service.rotate(id))).message).toBe('GitLab 401: revoked')
     expect((await service.get(id))?.lastError).toBe('GitLab 401: revoked')
     expect(await service.reveal(id)).toBe('glpat-secret')
 
     fail = false
-    const view = await service.rotate(id, 'bob')
+    const view = await service.rotate(id)
     expect(view.lastError).toBeUndefined()
-    expect(await actions(store)).toEqual([
-      ['credential.created', 'alice'],
-      ['credential.rotation_failed', 'bob'],
-      ['credential.rotated', 'bob'],
-    ])
   })
 
   test('refuses a kind without a rotator and keeps the credential untouched', async () => {
-    const { store, service } = setup([])
-    const created = await service.create(input({ kind: 'github' }), 'alice')
+    const { service } = setup([])
+    const created = await service.create(input({ kind: 'github' }))
     expect(created.rotatable).toBe(false)
-    const error = await errorOf(service.rotate(created.id, 'bob'))
+    const error = await errorOf(service.rotate(created.id))
     expect(error).toBeInstanceOf(CredentialInputError)
     expect(error.message).toMatch('no token rotator for kind "github"')
     expect(await service.get(created.id)).toEqual(created)
     expect(await service.reveal(created.id)).toBe('glpat-secret')
-    expect(await actions(store)).toEqual([['credential.created', 'alice']])
   })
 
   test('concurrent calls share one rotation', async () => {
     const { rotator, calls } = fakeRotator()
     const { service } = setup([rotator])
-    const { id } = await service.create(input(), 'alice')
-    const [a, b] = await Promise.all([service.rotate(id, 'bob'), service.rotate(id, 'carol')])
+    const { id } = await service.create(input())
+    const [a, b] = await Promise.all([service.rotate(id), service.rotate(id)])
     expect(calls).toHaveLength(1)
     expect(a).toEqual(b)
   })
@@ -241,22 +231,16 @@ describe('rotateDue', () => {
     const { rotator, calls } = fakeRotator()
     const { store, service } = setup([rotator])
     const policy = { enabled: true, daysBefore: 7, lifetimeDays: 30 }
-    const due = await service.create(
-      input({ rotation: policy, expiresAt: '2026-11-05T00:00:00Z' }),
-      'a',
-    )
+    const due = await service.create(input({ rotation: policy, expiresAt: '2026-11-05T00:00:00Z' }))
     const expired = await service.create(
       input({ rotation: policy, expiresAt: '2026-10-01T00:00:00Z' }),
-      'a',
     )
-    await service.create(input({ rotation: policy, expiresAt: '2026-12-01T00:00:00Z' }), 'a')
+    await service.create(input({ rotation: policy, expiresAt: '2026-12-01T00:00:00Z' }))
     await service.create(
       input({ rotation: { ...policy, enabled: false }, expiresAt: '2026-11-01T00:00:00Z' }),
-      'a',
     )
     await service.create(
       input({ kind: 'other', rotation: policy, expiresAt: '2026-11-01T00:00:00Z' }),
-      'a',
     )
 
     const results = await service.rotateDue()
@@ -267,12 +251,12 @@ describe('rotateDue', () => {
       ].toSorted((x, y) => x.id.localeCompare(y.id)),
     )
     expect(calls).toHaveLength(2)
-    const events = await store.activity.list()
-    expect(
-      events
-        .filter((e) => e.action.startsWith('credential.rot'))
-        .every((e) => e.actor === 'system'),
-    ).toBe(true)
+    const { events } = await store.audit.list()
+    expect(events.map((e) => [e.action, e.actor.id, e.outcome])).toEqual([
+      ['credential.rotate', 'system', 'ok'],
+      ['credential.rotate', 'system', 'ok'],
+    ])
+    expect(new Set(events.map((e) => e.target.id))).toEqual(new Set([due.id, expired.id]))
   })
 })
 
@@ -281,27 +265,26 @@ describe('credential options', () => {
     const { store, service } = setup()
     const created = await service.create(
       input({ kind: 'ai', options: { provider: 'x', headers: { 'X-Team': 'a' } } }),
-      'u1',
     )
     expect(created.options).toEqual({ provider: 'x', headers: { 'X-Team': 'a' } })
     expect((await store.credentials.get(created.id))?.options).toEqual(created.options)
-    const replaced = await service.update(created.id, { options: { provider: 'y' } }, 'u1')
+    const replaced = await service.update(created.id, { options: { provider: 'y' } })
     expect(replaced.options).toEqual({ provider: 'y' })
-    const renamed = await service.update(created.id, { name: 'n' }, 'u1')
+    const renamed = await service.update(created.id, { name: 'n' })
     expect(renamed.options).toEqual({ provider: 'y' })
-    const cleared = await service.update(created.id, { options: {} }, 'u1')
+    const cleared = await service.update(created.id, { options: {} })
     expect(cleared.options).toBeUndefined()
-    expect((await service.create(input({ options: {} }), 'u1')).options).toBeUndefined()
+    expect((await service.create(input({ options: {} }))).options).toBeUndefined()
   })
 
   test('must be a JSON object within the size limit', async () => {
     const { service } = setup()
     const invalid = await errorOf(
-      service.create(input({ options: ['x'] as unknown as Record<string, unknown> }), 'u1'),
+      service.create(input({ options: ['x'] as unknown as Record<string, unknown> })),
     )
     expect(invalid).toBeInstanceOf(CredentialInputError)
     expect(invalid.message).toContain('options: must be an object')
-    const large = await errorOf(service.create(input({ options: { x: 'a'.repeat(20_000) } }), 'u1'))
+    const large = await errorOf(service.create(input({ options: { x: 'a'.repeat(20_000) } })))
     expect(large.message).toContain('options: must be at most')
   })
 
@@ -317,16 +300,16 @@ describe('credential options', () => {
         return options?.['region'] ? [] : ['options.region: required']
       },
     })
-    const error = await errorOf(service.create(input({ kind: 'ai' }), 'u1'))
+    const error = await errorOf(service.create(input({ kind: 'ai' })))
     expect(error).toBeInstanceOf(CredentialInputError)
     expect(error.message).toContain('options.region: required')
-    const ok = await service.create(input({ kind: 'ai', options: { region: 'eu' } }), 'u1')
-    await service.update(ok.id, { name: 'renamed' }, 'u1')
+    const ok = await service.create(input({ kind: 'ai', options: { region: 'eu' } }))
+    await service.update(ok.id, { name: 'renamed' })
     expect(seen).toHaveLength(2)
-    expect(await errorOf(service.update(ok.id, { options: {} }, 'u1'))).toBeInstanceOf(
+    expect(await errorOf(service.update(ok.id, { options: {} }))).toBeInstanceOf(
       CredentialInputError,
     )
     expect((await service.get(ok.id))?.options).toEqual({ region: 'eu' })
-    await service.create(input({ kind: 'gitlab' }), 'u1')
+    await service.create(input({ kind: 'gitlab' }))
   })
 })

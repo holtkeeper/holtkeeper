@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 
 import { localRunner } from '@holtkeeper/exec'
 
-import { detectTestSetup, testGapsCheck } from '../src/index.ts'
+import { collectCoverage, coverageCollectors, detectTestSetup } from '../src/index.ts'
 
 const dirs: string[] = []
 
@@ -25,9 +25,9 @@ afterAll(async () => {
   await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
-describe('testGapsCheck on real projects', () => {
+describe('coverage of real projects', () => {
   test.skipIf(!Bun.which('bun'))(
-    'bun project: the untested module ranks first',
+    'bun project: the untested module has no covered lines',
     async () => {
       const dir = await project({
         'package.json': JSON.stringify({
@@ -75,24 +75,21 @@ describe('testGapsCheck on real projects', () => {
       const setup = await detectTestSetup(dir)
       expect(setup.frameworks[0]?.framework).toBe('bun:test')
 
-      const result = await testGapsCheck().run({ dir, runner: localRunner })
-      expect(result.tests?.[0]).toMatchObject({
-        file: 'src/session.ts',
-        symbol: 'createSession',
-        coverage: { covered: 0 },
-        framework: 'bun:test',
+      const report = await collectCoverage(await coverageCollectors(dir), {
+        dir,
+        runner: localRunner,
       })
-      expect(result.tests?.[0]?.reason).toStartWith('No test covers createSession; 8 lines')
-      expect(result.tests?.map((t) => t.symbol)).toContain('clamp')
-      expect(result.tests?.map((t) => t.symbol)).not.toContain('add')
-      expect(result.coverage?.lines?.total).toBeGreaterThan(0)
-      expect(result.changes).toEqual([])
+      const math = report.files.find((file) => file.file === 'src/math.ts')
+      expect(math?.lines.some((line) => line.hits > 0)).toBeTrue()
+      const session = report.files.find((file) => file.file === 'src/session.ts')
+      expect(session?.lines.every((line) => line.hits === 0) ?? true).toBeTrue()
+      expect(report.summary.lines?.total).toBeGreaterThan(0)
     },
     60_000,
   )
 
   test.skipIf(!Bun.which('go'))(
-    'go module: the untested function ranks first',
+    'go module: the untested function is not covered',
     async () => {
       const dir = await project({
         'go.mod': 'module example.com/shop\n\ngo 1.22\n',
@@ -114,14 +111,13 @@ describe('testGapsCheck on real projects', () => {
         'calc/calc_test.go':
           'package calc\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal("bad")\n\t}\n}\n',
       })
-      const result = await testGapsCheck().run({ dir, runner: localRunner })
-      expect(result.tests?.[0]).toMatchObject({
-        file: 'calc/calc.go',
-        symbol: 'Discount',
-        framework: 'go test',
+      const report = await collectCoverage(await coverageCollectors(dir), {
+        dir,
+        runner: localRunner,
       })
-      expect(result.tests?.map((t) => t.symbol)).not.toContain('Add')
-      expect(result.coverage).toEqual({
+      const calc = report.files.find((file) => file.file === 'calc/calc.go')
+      expect(calc?.functions.find((fn) => fn.name === 'Discount')?.hits).toBe(0)
+      expect(report.summary).toEqual({
         lines: { covered: 1, total: 4 },
         functions: { covered: 1, total: 2 },
       })

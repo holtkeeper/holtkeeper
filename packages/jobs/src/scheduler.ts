@@ -243,8 +243,9 @@ export function spreadRequests(requests: JobRequest[], start: Date, end: Date): 
 }
 
 /**
- * Creates a scheduler for `config.jobs.schedules`; throws when a schedule is invalid at creation.
- * Schedules that become invalid later (a live config) are skipped and logged once per version.
+ * Creates a scheduler for `config.jobs.schedules`. Invalid schedules (bad cron, invalid options, no
+ * analyzer the server still has) never fail it: they are skipped and logged once per version.
+ * Analyzers the server no longer has are left out of a schedule that names others, logged once.
  * Due times come from `nextRuns`, so windows, time zones and jitter apply; `spread` schedules give
  * their repository jobs `runAfter` times across `runWindowEnd`.
  */
@@ -254,8 +255,6 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
   const log = options.log ?? (() => {})
   const resolveRepos = options.resolveRepos ?? groupRepositories(config)
   const schedules = () => config.jobs?.schedules ?? []
-  const problems = scheduleProblems(schedules(), analyzers)
-  if (problems.length) throw new Error(`invalid job schedules:\n${problems.join('\n')}`)
   const reported = new Set<string>()
   const zone = timezone ? { timezone } : {}
 
@@ -280,15 +279,30 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     return enqueued
   }
 
+  const known = new Set(analyzers.map((analyzer) => analyzer.kind))
+  const reportOnce = (schedule: Schedule, line: string) => {
+    const key = `${JSON.stringify(schedule)}\0${line}`
+    if (reported.has(key)) return
+    reported.add(key)
+    log(line)
+  }
   const valid = (schedule: Schedule) => {
-    const found = scheduleProblems([schedule], analyzers)
-    if (!found.length) return true
-    const key = JSON.stringify(schedule)
-    if (!reported.has(key)) {
-      reported.add(key)
-      log(`schedule ${schedule.name} skipped: ${found.join('; ')}`)
+    const kept = schedule.analyzers.filter((kind) => known.has(kind))
+    const dropped = schedule.analyzers.filter((kind) => !known.has(kind))
+    const found = scheduleProblems(
+      [kept.length ? { ...schedule, analyzers: kept } : schedule],
+      analyzers,
+    )
+    if (found.length) {
+      reportOnce(schedule, `schedule ${schedule.name} skipped: ${found.join('; ')}`)
+      return false
     }
-    return false
+    if (dropped.length)
+      reportOnce(
+        schedule,
+        `schedule ${schedule.name}: unknown analyzer(s) ${dropped.map((kind) => `"${kind}"`).join(', ')} left out`,
+      )
+    return true
   }
 
   const tick = async () => {

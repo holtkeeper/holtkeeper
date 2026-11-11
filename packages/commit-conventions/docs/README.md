@@ -26,6 +26,8 @@ checkCommitMessage(conventions.commit, 'feat(web): [ABC-1] add the board') // []
 - `Ruleset<Rules>` has `rules` (`CommitRules` or `BranchRules`), `sources` (the `RuleSource` of every field), `patterns` (`PatternRule`: regexes the whole message or name must match, or must not match when `negative`) and `examples`.
 - `checkCommitMessage(ruleset, message)` and `checkBranchName(ruleset, name)` → `Problem[]`. A problem from a `history` rule is a `warning`. Every other problem is an `error`.
 - `renderCommitConventions(conventions)` and `renderProblems([{ what, problems }])` render Markdown for the MCP tools.
+- `bumpFor({ title, body? })` → `CommitBump` (`major`, `minor`, `patch`): the semantic version bump one commit calls for. Breaking changes (`type!:` or a `BREAKING CHANGE:` footer) are `major`, `feat` is `minor`, everything else is `patch`; leading ticket keys (`[ABC-1] feat:`, `ABC-1: feat:`) are skipped. The release engine ([@holtkeeper/release](../../release/docs/README.md)) derives the next version from it.
+- `ticketKeys(text)` → tracker keys such as `ABC-435` in order (`UTF-8`-like keys are not tickets).
 - `commitConventionsSetting`, `commitConventionsKey` (`commits.conventions`), `commitConventionsSchema`: the setting for the registry.
 
 ## Combining sources

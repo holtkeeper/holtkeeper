@@ -200,6 +200,9 @@ securityContext:
     {{- end }}
     {{- end }}
     {{- end }}
+    {{- with .extraEnv }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- with (include "holtkeeper.envFrom" .ctx | trim) }}
   envFrom:
     {{- . | nindent 4 }}
@@ -223,6 +226,9 @@ securityContext:
     - name: egress-ca
       mountPath: /etc/holtkeeper/egress-ca
       readOnly: true
+    {{- end }}
+    {{- with .extraMounts }}
+    {{- toYaml . | nindent 4 }}
     {{- end }}
 {{- end -}}
 

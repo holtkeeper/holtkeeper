@@ -17,12 +17,8 @@ export function boardRow(
 ): ReleaseBoardRow {
   const stage = releaseStage(settings, facts)
   const pending = facts.unreleased.length > 0 ? facts.unreleased : facts.ahead
-  const labels = (facts.unreleased.length > 0 ? facts.merged?.labels : facts.request?.labels) ?? []
   const entries = buildEntries(pending, settings.changelog)
-  const { bump } = suggestBump(entries, settings.version.bump, {
-    ...(facts.latest ? { current: facts.latest.version } : {}),
-    labels,
-  })
+  const { bump } = suggestBump(entries, facts.latest ? { current: facts.latest.version } : {})
   const next =
     stage === 'external'
       ? undefined

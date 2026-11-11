@@ -1,8 +1,8 @@
 import type { Commit, ForgeRelease, GitForge, MergeRequest, RepoRef } from '@holtkeeper/forge'
 
+import { isoDate } from './dates.ts'
 import { blockingGates, releaseMarker } from './plan.ts'
 import type { ReleaseSettings } from './settings.ts'
-import { fillTemplate } from './template.ts'
 import type { GateResult, ReleaseFacts, ReleasePlan } from './types.ts'
 
 /** A step refused because gates failed; `gates` lists the failing ones. */
@@ -74,18 +74,14 @@ export async function proposeRelease(
     title: plan.title,
     description: plan.body,
     ...(settings.mergeRequest.labels.length ? { labels: settings.mergeRequest.labels } : {}),
-    ...(settings.mergeRequest.reviewers.length
-      ? { reviewers: settings.mergeRequest.reviewers }
-      : {}),
-    draft: settings.mergeRequest.draft,
   })
   return { request, created: true }
 }
 
 /**
- * Rewrites the description of the open release candidate merge request with `plan`, when the
- * settings keep it updated and Holtkeeper opened it (its description carries the marker). The
- * title stays as people may have edited it. Resolves `false` when nothing was changed.
+ * Rewrites the description of the open release candidate merge request with `plan` when
+ * Holtkeeper opened it (its description carries the marker). The title stays as people may have
+ * edited it. Resolves `false` when nothing was changed.
  */
 export async function refreshProposal(
   context: StepContext,
@@ -93,7 +89,7 @@ export async function refreshProposal(
   plan: ReleasePlan,
 ): Promise<boolean> {
   const request = facts.request
-  if (!request || !context.settings.mergeRequest.autoUpdate) return false
+  if (!request) return false
   if (!request.description.includes(releaseMarker) || request.description === plan.body)
     return false
   if (context.dryRun) return true
@@ -123,10 +119,14 @@ export interface VersionResult {
   dryRun?: true
 }
 
+/** File the notes go to when `changelogFile` is on. */
+export const changelogPath = 'CHANGELOG.md'
+
 /**
- * Creates the version: optionally commits the notes to the changelog file on the target branch,
- * tags the target head (or that commit) with an annotated tag, and creates a forge release with
- * the notes when the settings ask and the forge can. Refuses when gates fail, unless `force`.
+ * Creates the version: with `changelogFile` commits the notes on top of `CHANGELOG.md` on the
+ * target branch, tags the target head (or that commit) with an annotated tag `Release <version>`,
+ * and creates a forge release named after the tag with the notes when the forge can. Refuses when
+ * gates fail, unless `force`.
  */
 export async function createVersion(
   context: StepContext,
@@ -138,32 +138,22 @@ export async function createVersion(
   checkPlan(plan, force)
   const { version, tag } = plan
   if (!version || !tag) throw new Error('no version chosen')
-  const values = {
-    version,
-    tag,
-    previous: facts.latest?.version ?? 'none',
-    previousTag: facts.latest?.tag ?? 'none',
-    target: facts.target.name,
-    repo: repo.path,
-  }
-  const fill = (template: string) => fillTemplate(template, values, now, settings.timezone)
   if (context.dryRun) return { version, tag, sha: facts.target.sha, dryRun: true }
 
   let sha = facts.target.sha
   let changelogCommit: Commit | undefined
-  const file = settings.tag.changelogFile
-  if (file.enabled) {
-    const current = await forge.readFile(repo.path, file.path, facts.target.name)
-    const section = [fill(file.heading), plan.summary.markdown, plan.changelog]
+  if (settings.changelogFile) {
+    const current = await forge.readFile(repo.path, changelogPath, facts.target.name)
+    const section = [`## ${version} (${isoDate(now)})`, plan.summary.markdown, plan.changelog]
       .filter((part) => part.trim())
       .join('\n\n')
     changelogCommit = await forge.commit(repo.path, {
       branch: facts.target.name,
-      message: fill(file.message),
+      message: `chore(release): ${version}`,
       changes: [
         {
           action: current === undefined ? 'create' : 'update',
-          path: file.path,
+          path: changelogPath,
           content: prependChangelog(current, section),
         },
       ],
@@ -174,12 +164,11 @@ export async function createVersion(
   const created = await forge.createTag(repo.path, {
     name: tag,
     ref: sha,
-    message: fill(settings.tag.message),
+    message: `Release ${version}`,
   })
-  const release =
-    settings.tag.release && forge.createRelease
-      ? await forge.createRelease(repo.path, { tag, name: plan.title, description: plan.body })
-      : undefined
+  const release = forge.createRelease
+    ? await forge.createRelease(repo.path, { tag, name: plan.title, description: plan.body })
+    : undefined
   return {
     version,
     tag,

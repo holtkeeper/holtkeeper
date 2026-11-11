@@ -37,6 +37,7 @@ export function ExcludeDialog({
       pattern.trim(),
       repo,
       resolved.data?.settings[exclude.setting],
+      chosen?.defaults,
     )
     put.mutate(entry, {
       onSuccess: () => {

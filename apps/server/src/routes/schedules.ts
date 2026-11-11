@@ -3,6 +3,7 @@ import { enqueueUnique, groupRepositories, planSchedule, scheduleRuns } from '@h
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
+import { appendAudit, auditActorOf } from '../audit.ts'
 import { type Env, type ServerDeps, authorize } from '../context.ts'
 import { knownRepos, queueNewRepoJobs } from '../new-repos.ts'
 
@@ -22,7 +23,7 @@ export function scheduleRoutes(deps: ServerDeps) {
   app.get('/schedules/runs', async (c) => {
     authorize(c, 'analyses:read', GLOBAL)
     const limit = Math.min(Math.max(Number(c.req.query('limit')) || 10, 1), 50)
-    const schedules = config.jobs?.schedules ?? []
+    const schedules = config.jobs.schedules
     const lists = await Promise.all(
       schedules.map((schedule) => store.jobs.list({ schedule: schedule.name, limit: RUN_JOBS })),
     )
@@ -37,7 +38,7 @@ export function scheduleRoutes(deps: ServerDeps) {
   app.post('/schedules/:id/run', async (c) => {
     const principal = authorize(c, 'analyses:run', GLOBAL)
     const id = c.req.param('id')
-    const schedule = config.jobs?.schedules.find((s) => s.name === id)
+    const schedule = config.jobs.schedules.find((s) => s.name === id)
     if (!schedule) throw new HTTPException(404, { message: `schedule ${id} not found` })
     const startedAt = deps.now().toISOString()
     const run = async (): Promise<ScheduleRunResult> => {
@@ -63,15 +64,16 @@ export function scheduleRoutes(deps: ServerDeps) {
         }
       })
       .then((details) =>
-        store.activity.append({
+        appendAudit(store, {
           at: deps.now().toISOString(),
-          actor: principal.id,
-          action: 'schedule.run',
-          subject: id,
+          actor: auditActorOf(principal, deps.auth.name),
+          via: 'job',
+          action: 'schedule.run_result',
+          target: { type: 'schedule', id },
+          outcome: details.error ? 'error' : 'ok',
           details: { ...details },
         }),
       )
-      .catch((error: unknown) => console.error('schedules: logging a run failed', error))
     deps.onBackground?.(done)
     return c.json<ScheduleRunStarted>({ id, startedAt }, 202)
   })
@@ -93,15 +95,16 @@ export function scheduleRoutes(deps: ServerDeps) {
         error: error instanceof Error ? error.message : String(error),
       }))
       .then((details) =>
-        store.activity.append({
+        appendAudit(store, {
           at: deps.now().toISOString(),
-          actor: principal.id,
-          action: 'trigger.new_repo.run',
-          subject: 'new-repo',
+          actor: auditActorOf(principal, deps.auth.name),
+          via: 'job',
+          action: 'trigger.run_result',
+          target: { type: 'trigger', id: 'new-repo' },
+          outcome: details.error ? 'error' : 'ok',
           details: { ...details },
         }),
       )
-      .catch((error: unknown) => console.error('triggers: logging a new-repo run failed', error))
     deps.onBackground?.(done)
     return c.json<ScheduleRunStarted>({ id: 'new-repo', startedAt }, 202)
   })

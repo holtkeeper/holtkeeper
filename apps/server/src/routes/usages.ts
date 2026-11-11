@@ -1,5 +1,6 @@
 import type { Principal } from '@holtkeeper/access'
 import type {
+  RepoRef,
   PackageUsageView,
   PublishedPackagesView,
   RepoUsageView,
@@ -18,9 +19,10 @@ import {
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
-import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
+import type { ApiCatalog } from '../api-surface/catalog.ts'
 import { type UsageIndex, impactOf } from '../api-surface/usages.ts'
 import { type AppContext, type Env, principalOf } from '../context.ts'
+import type { CatalogReach } from '../visibility.ts'
 
 const required = (c: AppContext, name: string) => {
   const value = c.req.query(name)
@@ -42,21 +44,25 @@ const withoutSites = (item: UsedExport): Omit<UsedExport, 'sites' | 'truncated'>
 })
 
 /**
- * Routes under `/api/api-surface/usages` over the newest `usages` record of every readable
- * repository: who uses a package and which parts, the sites with snippets, what one repository
- * uses, how much the packages one repository defines are used, and what upgrading a package
- * affects.
+ * Routes under `/api/api-surface/usages` over the newest `usages` record of every repository in
+ * the caller's catalog reach: who uses a package and which parts, what one repository uses and how
+ * much the packages one repository defines are used. The sites with snippets and what upgrading a
+ * package affects need snippet reach (`CatalogReach.snippets`).
  */
 export function usageRoutes(options: {
   catalog: ApiCatalog
   usages: UsageIndex
-  readable: (principal: Principal) => RepoFilter
+  reach: (principal: Principal) => Promise<CatalogReach>
+  /** The config groups of a repository. */
+  groupsOf: (repo: RepoRef) => string[]
 }) {
-  const { catalog, usages, readable } = options
+  const { catalog, usages } = options
+  const readable = async (principal: Principal) => (await options.reach(principal)).catalog
+  const snippets = async (principal: Principal) => (await options.reach(principal)).snippets
   const routes = new Hono<Env>()
 
   routes.get('/api-surface/usages/package', async (c) => {
-    const filter = readable(principalOf(c))
+    const filter = await readable(principalOf(c))
     const name = required(c, 'name')
     const records = await usages.records(filter)
     const byOrigin = new Map(
@@ -76,6 +82,7 @@ export function usageRoutes(options: {
         return [
           {
             repo: repo.origin,
+            groups: options.groupsOf(repo.origin),
             analysisId: record.id,
             analyzedAt: record.createdAt,
             ...(record.ref ? { ref: record.ref } : {}),
@@ -94,7 +101,7 @@ export function usageRoutes(options: {
   })
 
   routes.get('/api-surface/usages/sites', async (c) => {
-    const filter = readable(principalOf(c))
+    const filter = await snippets(principalOf(c))
     const kind = optional(c, 'kind')
     if (kind && !isUsageKind(kind))
       throw new HTTPException(400, { message: `kind must be one of ${usageKinds.join(', ')}` })
@@ -122,7 +129,7 @@ export function usageRoutes(options: {
   })
 
   routes.get('/api-surface/usages/repo', async (c) => {
-    const filter = readable(principalOf(c))
+    const filter = await readable(principalOf(c))
     const origin = required(c, 'repo')
     const record = await usages.record(filter, origin)
     if (!record) throw new HTTPException(404, { message: `no usage record of ${origin}` })
@@ -137,7 +144,7 @@ export function usageRoutes(options: {
   })
 
   routes.get('/api-surface/usages/published', async (c) => {
-    const filter = readable(principalOf(c))
+    const filter = await readable(principalOf(c))
     const origin = required(c, 'repo')
     const defined = await catalog.packages(
       (repo) => `${repo.forge}:${repo.path}` === origin && filter(repo),
@@ -163,7 +170,7 @@ export function usageRoutes(options: {
   })
 
   routes.get('/api-surface/usages/impact', async (c) => {
-    const filter = readable(principalOf(c))
+    const filter = await snippets(principalOf(c))
     const name = required(c, 'package')
     const from = optional(c, 'from')
     const to = optional(c, 'to')

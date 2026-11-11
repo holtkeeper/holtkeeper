@@ -13,7 +13,7 @@ export const severityBg: Record<Severity, string> = {
 }
 
 /** CSS color of a severity, for SVG fills and strokes. */
-export const severityColor = (severity: Severity) => `var(--sev-${severity})`
+const severityColor = (severity: Severity) => `var(--sev-${severity})`
 
 /** Severity as a dot plus label, so color is never the only signal. */
 export function SeverityChip({

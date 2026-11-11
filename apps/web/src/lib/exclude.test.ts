@@ -62,4 +62,11 @@ test('starts a repository entry from a broader winning value', () => {
     scope: { repos: ['work:games/app'] },
     value: { ignore: ['tmp/**'] },
   })
+  expect(
+    excludeEntry('assets.policy', 'ignore', 'tmp/**', repo, undefined, ['vendor/**']).value,
+  ).toEqual({ ignore: ['vendor/**', 'tmp/**'] })
+  expect(
+    excludeEntry('assets.policy', 'ignore', 'tmp/**', repo, entry({ all: true }, {}), ['vendor/**'])
+      .value,
+  ).toEqual({ ignore: ['vendor/**', 'tmp/**'] })
 })

@@ -75,7 +75,6 @@ const deps = (config: ServerDeps['config']): ServerDeps => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -117,8 +116,8 @@ describe('jobs.onNewRepo', () => {
       'games/b licenses new-repo',
       'games/b quality new-repo',
     ])
-    const activity = await store.activity.list()
-    expect(activity.filter((a) => a.action === 'job.new_repo').map((a) => a.subject)).toEqual(
+    const discovered = (await store.audit.list({ action: 'repo.discover' })).events
+    expect(discovered.map((a) => a.target.repo)).toEqual(
       expect.arrayContaining(['work:games/a', 'work:games/b']),
     )
   })
@@ -226,7 +225,7 @@ describe('running the trigger on known repositories', () => {
     await app.request('/api/triggers/new-repo/run', { method: 'POST' })
     await Promise.all(background)
     expect(await queued()).toHaveLength(2)
-    const runs = (await store.activity.list()).filter((a) => a.action === 'trigger.new_repo.run')
+    const runs = (await store.audit.list({ action: 'trigger.run_result' })).events
     expect(runs.map((a) => a.details)).toEqual(
       expect.arrayContaining([
         { queued: 2, skipped: 0 },

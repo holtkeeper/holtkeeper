@@ -14,6 +14,8 @@ import {
   Notice,
   Panel,
   Placeholder,
+  SideSheet,
+  Tag,
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
@@ -29,14 +31,49 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** How a repository learns about forge changes: polling status and its own webhook URL. */
-export function RepoUpdates({
+/**
+ * A header tag saying how the repository learns about forge changes (webhook or polling); pressing
+ * it opens a sheet with the polling status and the repository's own webhook URL. Hidden while
+ * loading and when the server has no key-value store.
+ */
+export function UpdatesTag({
   repo,
   onOpenSettings,
 }: {
   repo: RepoRef
   onOpenSettings: () => void
 }) {
+  const updates = useRepoUpdates(repo)
+  const [open, setOpen] = useState(false)
+  if (!updates.isSuccess) return null
+  const { viaWebhook, polling } = updates.data
+  const tone = polling.lastError ? 'danger' : viaWebhook ? 'success' : 'default'
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="rounded-md focus-visible:outline-2 focus-visible:outline-focus"
+        aria-label="How this repository gets updates"
+      >
+        <Tag tone={tone} dot>
+          {viaWebhook ? 'webhook' : polling.enabled ? 'polling' : 'no updates'}
+        </Tag>
+      </button>
+      <SideSheet open={open} onClose={() => setOpen(false)} title="Updates">
+        <RepoUpdates
+          repo={repo}
+          onOpenSettings={() => {
+            setOpen(false)
+            onOpenSettings()
+          }}
+        />
+      </SideSheet>
+    </>
+  )
+}
+
+function RepoUpdates({ repo, onOpenSettings }: { repo: RepoRef; onOpenSettings: () => void }) {
   const updates = useRepoUpdates(repo)
   if (updates.isPending) return <Placeholder className="h-64" />
   if (updates.isError) return <ErrorState error={updates.error} />

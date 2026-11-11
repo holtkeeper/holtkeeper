@@ -9,7 +9,7 @@ import { usersAuth } from '@holtkeeper/auth-users'
 
 const auth = usersAuth({
   store: store.users,
-  activity: store.activity,
+  audit: store.audit,
   sessionSecret: { env: 'HOLTKEEPER_SESSION_SECRET' },
   origin: 'https://keeper.example.com',
   bootstrap: { name: 'Admin', email: 'admin@example.com' },
@@ -41,7 +41,7 @@ for (const line of (await auth.start?.()) ?? []) console.log(line)
   provider. Creates a root user (`*` on everything) when there are no users and returns
   `{ link, expiresAt }`. While that bootstrap user is the only user and has no passkey, every call
   issues a fresh link, so losing the startup log does not lock the instance. Otherwise `undefined`.
-- `createUser({ store, activity?, actor, now? }, { name, email?, grants })`, `findUser(store,
+- `createUser({ store, audit?, actor, now? }, { name, email?, grants })`, `findUser(store,
   idEmailOrName)`, `issueUserLink(manage, { user, purpose, origin, ttlMs })` and `adminGrants` —
   account management for operators with direct store access (the CLI's `users` command), without
   delegation checks. `issueUserLink` with purpose `login` returns a single-use sign-in link that
@@ -160,9 +160,11 @@ A global admin holds every action on everything (`grantsWithin(root, caller.gran
 - Nobody changes their own grants or disables themselves.
 - Changing grants or disabling bumps `sessionVersion`, so the change applies immediately.
 
-Activity events (when `activity` is given): `user.invited`, `user.updated`, `user.disabled`,
-`user.enabled`, `user.recovery_issued`, `user.recovered`, `user.login`, `user.signed_up`,
-`passkey.registered`, `passkey.renamed`, `passkey.removed`, `identity.linked`, `account.linked`, `account.unlinked`.
+Audit events (when `audit` is given), with the user as actor and `via: 'ui'`: `user.recovered`,
+`user.login`, `user.signed_up`, `passkey.registered`, `passkey.renamed`, `passkey.removed` (own
+passkeys), `identity.linked` and `account.linked` (OIDC sign-in). `createUser` and `issueUserLink`
+append `user.invited` and `user.link_issued` with `via: 'system'`. Admin changes under `/admin` are
+not logged here: the server's audit middleware records those requests.
 
 ## Security notes
 

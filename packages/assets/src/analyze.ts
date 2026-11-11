@@ -8,13 +8,14 @@ import {
 } from '@holtkeeper/media'
 
 import { evaluateBudgets, totalsOf } from './budgets.ts'
-import type { Asset, AssetsData, Budget, Suggestion, TotalBudgets } from './data.ts'
+import type { Asset, AssetsData, AssetsPolicy, Budget, Suggestion, TotalBudgets } from './data.ts'
 import { detectEngines } from './engine.ts'
 import { hasModernFormats, hasSizes, imageFamilies, variantPaths } from './families.ts'
 import { findDuplicates, findIssues } from './findings.ts'
 import { scanInlineSvgs } from './inline.ts'
 import { defaultRoots, inventory } from './inventory.ts'
 import { optimizableFormats, optimizeAssets } from './optimize.ts'
+import { policyViolations, worthSaving } from './policy.ts'
 import { collectTokens, markReferences } from './references.ts'
 import { candidates, estimateSuggestions, measureSuggestions } from './suggest.ts'
 import { findReferences, usageSources } from './usages.ts'
@@ -45,6 +46,12 @@ export interface AnalyzeAssetsOptions {
   avif?: boolean
   /** With `sharp`: variant file names. Default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}`. */
   naming?: NamingScheme
+  /**
+   * Asset policy checked on top: its violations land in `violations`, suggestions below its
+   * `minSaving` are dropped and `formats.svg: 'keep'` leaves SVGs alone. The analyzer derives
+   * `ignore`, `avif` and `minSaving` from it as well.
+   */
+  policy?: AssetsPolicy
   /** Required for `convert: 'tools'`. */
   runner?: CommandRunner
   /** Assets below this size get no conversion suggestion. Default 8 kB. */
@@ -123,7 +130,9 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
   }
   const engines = await detectEngines(options.dir)
   const skipGlobs = (options.optimizeIgnore ?? []).map((pattern) => new Bun.Glob(pattern))
-  const skipped = (path: string) => skipGlobs.some((glob) => glob.match(path))
+  const keepSvgs = options.policy?.formats.svg === 'keep'
+  const skipped = (path: string) =>
+    skipGlobs.some((glob) => glob.match(path)) || (keepSvgs && path.toLowerCase().endsWith('.svg'))
   const families = imageFamilies(assets)
   const variants = variantPaths(families)
   const covered = new Map(
@@ -195,8 +204,17 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
       ...(result.svgs.some((svg) => !svg.error) ? ['svgo'] : []),
     ]
   }
+  if (options.policy) {
+    const { policy } = options
+    const keepRasters = policy.formats.raster === 'keep'
+    suggestions = suggestions.filter(
+      (suggestion) =>
+        worthSaving(policy, suggestion.bytes, suggestion.saving) &&
+        !(keepRasters && suggestion.kind === 'image' && suggestion.suggested !== suggestion.format),
+    )
+  }
   const inline =
-    convert !== 'off' && options.inlineSvg !== false
+    convert !== 'off' && options.inlineSvg !== false && !keepSvgs
       ? await scanInlineSvgs({
           dir: options.dir,
           ignore: [...(options.ignore ?? []), ...(options.optimizeIgnore ?? [])],
@@ -221,12 +239,19 @@ export async function analyzeAssets(options: AnalyzeAssetsOptions): Promise<Asse
         ...(options.minBytes === undefined ? {} : { minBytes: options.minBytes }),
       }),
       ...(inline?.findings ?? []),
-    ].filter((finding) => !skipped(finding.path)),
+    ].filter(
+      (finding) =>
+        !skipped(finding.path) &&
+        !(options.policy?.formats.raster === 'keep' && finding.rule === 'missing-modern-formats'),
+    ),
     suggestions,
     duplicates: findDuplicates(assets),
     ...optimized,
     ...(inline?.inlineSvgs.length ? { inlineSvgs: inline.inlineSvgs } : {}),
     ...(changes.length ? { changes } : {}),
+    ...(options.policy
+      ? { policy: options.policy, violations: policyViolations(assets, options.policy) }
+      : {}),
   }
   runArtifacts.set(data, artifacts)
   return data

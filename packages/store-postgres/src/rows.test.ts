@@ -50,9 +50,11 @@ describe('row mapping', () => {
       heartbeat_at: at,
       error: null,
       analysis_id: null,
-      log: ['x'],
+      error_signature: null,
+      attempts_history: [{ n: 1, status: 'running', startedAt: '2026-10-30T10:00:00.000Z' }],
       actor: null,
       schedule: null,
+      reason: null,
     }
     expect(toJob(row)).toEqual({
       id: 'j1',
@@ -69,7 +71,7 @@ describe('row mapping', () => {
       startedAt: iso(at),
       workerId: 'w1',
       heartbeatAt: iso(at),
-      log: ['x'],
+      attemptsHistory: [{ n: 1, status: 'running', startedAt: '2026-10-30T10:00:00.000Z' }],
     })
   })
 
@@ -86,6 +88,7 @@ describe('row mapping', () => {
       last_rotated_at: null,
       last_error: null,
       options: { headers: { a: 'b' } },
+      capabilities: null,
       created_at: at,
       updated_at: at,
     })
@@ -130,6 +133,8 @@ describe('row mapping', () => {
       topics: ['x'],
       applies_to: ['*'],
       packages: null,
+      visibility: null,
+      subject: null,
       evidence: [],
       supersedes: null,
       created_at: at,
@@ -178,6 +183,7 @@ describe('row mapping', () => {
       turns: 2,
       outcome: 'ok',
       error: null,
+      transcript_ref: null,
     }
     expect(toAiUsage(row)).toMatchObject({
       at: iso(at),

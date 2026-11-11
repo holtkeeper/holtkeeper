@@ -17,6 +17,7 @@ describe('forge form', () => {
           credentialId: 'c1',
           packages: true,
           cachePackages: false,
+          botUsername: '',
         },
         ['work'],
       ),
@@ -27,7 +28,6 @@ describe('forge form', () => {
     const draft = toForgeDraft({
       type: 'forge',
       id: 'work',
-      provenance: 'panel',
       data: { kind: 'gitlab', url: 'https://gitlab.test', credentialId: 'c1' },
     })
     expect(validateForgeDraft(draft, [])).toEqual({})
@@ -43,12 +43,18 @@ describe('forge form', () => {
     const draft = toForgeDraft({
       type: 'forge',
       id: 'work',
-      provenance: 'panel',
       data: { kind: 'gitlab', url: 'https://gitlab.test', credentialId: 'c1', packages: false },
     })
     expect(draft.packages).toBe(false)
     expect(toForgeInput(draft).packages).toBe(false)
     expect(toForgeInput({ ...draft, packages: true })).not.toHaveProperty('packages')
+  })
+
+  test('the bot username is trimmed and left out when empty', () => {
+    expect(toForgeInput(toForgeDraft())).not.toHaveProperty('botUsername')
+    expect(toForgeInput({ ...toForgeDraft(), botUsername: ' keeper ' })).toMatchObject({
+      botUsername: 'keeper',
+    })
   })
 
   test('package caching is off by default and sent only together with packages', () => {

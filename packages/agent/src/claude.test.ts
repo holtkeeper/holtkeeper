@@ -6,15 +6,9 @@ import { join } from 'node:path'
 import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import {
-  claudeEnv,
-  type ClaudeQuery,
-  createClaudeAgent,
-  DEFAULT_CLAUDE_MODEL,
-  DEFAULT_TRIAGE_MODEL,
-  modelFor,
-  toolsFor,
-} from './claude.ts'
+import { claudeEnv, type ClaudeQuery, createClaudeAgent, modelFor, toolsFor } from './claude.ts'
+import { BudgetExceededError } from './errors.ts'
+import { createTranscript } from './transcript.ts'
 import type { AgentTool } from './types.ts'
 
 function success(result: string, extra: Record<string, unknown> = {}): SDKMessage {
@@ -60,12 +54,18 @@ describe('createClaudeAgent', () => {
     const result = await agent.run({ dir: '/repo', prompt: 'review', system: 'Be brief.' })
 
     expect(agent.name).toBe('claude')
-    expect(result).toEqual({ text: 'done', turns: 3, costUsd: 0.25 })
+    expect(result).toEqual({
+      text: 'done',
+      turns: 3,
+      costUsd: 0.25,
+      model: 'claude-sonnet-5-5',
+      runtime: 'claude-sdk',
+    })
     const [call] = calls
     expect(call?.prompt).toBe('review')
     const options = call?.options ?? {}
     expect(options.cwd).toBe('/repo')
-    expect(options.model).toBe(DEFAULT_CLAUDE_MODEL)
+    expect(options.model).toBe('claude-sonnet-5-5')
     expect(options.tools).toEqual(['Read', 'Glob', 'Grep'])
     expect(options.allowedTools).toEqual([])
     expect(options.maxTurns).toBe(7)
@@ -84,7 +84,11 @@ describe('createClaudeAgent', () => {
   test('task settings override defaults and run enables the sandbox', async () => {
     const { query, calls } = fakeQuery([success('ok')])
     const agent = createClaudeAgent(
-      { apiKey: 'k', model: 'claude-x', pathToClaudeCodeExecutable: '/bin/claude' },
+      {
+        apiKey: 'k',
+        tierModels: { fast: 'claude-f', main: 'claude-x', deep: 'claude-d' },
+        pathToClaudeCodeExecutable: '/bin/claude',
+      },
       { query },
     )
     await agent.run({ dir: '/repo', prompt: 'p', capabilities: ['read', 'run'], maxTurns: 2 })
@@ -173,6 +177,98 @@ describe('createClaudeAgent', () => {
     ).rejects.toThrow('without a result')
   })
 
+  test('writes a transcript of messages, tool calls, results and usage, without env', async () => {
+    const assistant = {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Looking.' },
+          { type: 'tool_use', id: 'tu1', name: 'Read', input: { file_path: 'src/a.ts' } },
+        ],
+      },
+    } as unknown as SDKMessage
+    const toolResult = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu1',
+            content: [{ type: 'text', text: 'x'.repeat(5000) }],
+          },
+        ],
+      },
+    } as unknown as SDKMessage
+    const done = success('done', { usage: { input_tokens: 7, output_tokens: 3 } })
+    const transcript = createTranscript()
+    const result = await createClaudeAgent(
+      { apiKey: 'sk-ant-widget-0000000000000000' },
+      fakeQuery([assistant, toolResult, done]),
+    ).run({ dir: '/r', prompt: 'p', taskKind: 'review', transcript })
+    expect(result.runtime).toBe('claude-sdk')
+    const lines = transcript.lines()
+    expect(lines.map((line) => line.type)).toEqual(['start', 'assistant', 'tool-result', 'end'])
+    expect(lines[0]).toMatchObject({
+      runtime: 'claude-sdk',
+      taskKind: 'review',
+      tools: ['Read', 'Glob', 'Grep'],
+    })
+    expect(lines[1]).toMatchObject({ text: 'Looking.', toolCalls: [{ id: 'tu1', name: 'Read' }] })
+    expect(lines[2]).toMatchObject({ id: 'tu1' })
+    expect((lines[2] as { output: string }).output.length).toBeLessThan(4100)
+    expect(lines[3]).toMatchObject({
+      outcome: 'ok',
+      turns: 3,
+      costUsd: 0.25,
+      usage: { inputTokens: 7 },
+    })
+    const jsonl = transcript.toJsonl()
+    expect(jsonl).not.toContain('sk-ant-widget')
+    expect(jsonl).not.toContain('ANTHROPIC')
+  })
+
+  test('a failed run ends its transcript with the error', async () => {
+    const transcript = createTranscript()
+    await createClaudeAgent({ apiKey: 'k' }, fakeQuery([]))
+      .run({ dir: '/r', prompt: 'p', transcript })
+      .catch(() => undefined)
+    expect(transcript.lines().at(-1)).toMatchObject({
+      type: 'end',
+      outcome: 'error',
+      error: 'claude agent finished without a result',
+    })
+  })
+
+  test('a spent credit balance fails with BudgetExceededError', async () => {
+    const refusal = success('API Error: 400 Your credit balance is too low to access the API', {
+      is_error: true,
+    })
+    const error = await createClaudeAgent({ apiKey: 'k' }, fakeQuery([refusal]))
+      .run({ dir: '/r', prompt: 'p' })
+      .catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(BudgetExceededError)
+  })
+
+  test('the cost cap goes to the SDK and its budget stop fails with BudgetExceededError', async () => {
+    const stopped = {
+      type: 'result',
+      subtype: 'error_max_budget_usd',
+      is_error: true,
+      num_turns: 4,
+      total_cost_usd: 1.2,
+      errors: [],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    } as unknown as SDKMessage
+    const { query, calls } = fakeQuery([stopped])
+    const error = await createClaudeAgent({ apiKey: 'k' }, { query })
+      .run({ dir: '/r', prompt: 'p', maxCostUsd: 1 })
+      .catch((caught: unknown) => caught)
+    expect(calls[0]?.options.maxBudgetUsd).toBe(1)
+    expect(error).toBeInstanceOf(BudgetExceededError)
+    expect(error).toMatchObject({ costUsd: 1.2, turns: 4, usage: { inputTokens: 10 } })
+  })
+
   test('resolves an env secret and fails when it is missing', async () => {
     const { query } = fakeQuery([success('ok')])
     const agent = createClaudeAgent({ apiKey: { env: 'HK_TEST_MISSING_KEY' } }, { query })
@@ -213,28 +309,28 @@ function appendOf(options: Options): string {
     : ''
 }
 
-describe('model routing', () => {
-  test('task kind picks the model', () => {
-    const options = { apiKey: 'k', models: { review: 'claude-review' } }
-    expect(modelFor(options, 'review')).toBe('claude-review')
-    expect(modelFor(options, 'refactor')).toBe(DEFAULT_CLAUDE_MODEL)
-    expect(modelFor(options)).toBe(DEFAULT_CLAUDE_MODEL)
-    expect(modelFor(options, 'triage')).toBe(DEFAULT_TRIAGE_MODEL)
-    expect(modelFor({ ...options, models: { triage: 'claude-small' } }, 'triage')).toBe(
-      'claude-small',
-    )
-    expect(modelFor({ model: 'claude-x' }, 'review')).toBe('claude-x')
-    expect(DEFAULT_TRIAGE_MODEL).toBe('claude-haiku-5-5')
+describe('model tiers', () => {
+  test('a tier picks its resolved model, else the fallback', () => {
+    const tierModels = { fast: 'claude-f', main: 'claude-m', deep: 'claude-d' }
+    expect(modelFor({ tierModels }, 'deep')).toBe('claude-d')
+    expect(modelFor({ tierModels })).toBe('claude-m')
+    expect(modelFor({}, 'fast')).toBe('claude-haiku-5-5')
+    expect(modelFor({})).toBe('claude-sonnet-5-5')
+    expect(modelFor({}, 'deep')).toBe('claude-opus-5-5')
   })
 
-  test('the SDK gets the routed model', async () => {
-    const { query, calls } = fakeQuery([success('ok')])
-    await createClaudeAgent({ apiKey: 'k', models: { triage: 'claude-t' } }, { query }).run({
-      dir: '/r',
-      prompt: 'p',
-      taskKind: 'triage',
-    })
-    expect(calls[0]?.options.model).toBe('claude-t')
+  test('the SDK gets the tier model and its effort', async () => {
+    const { query, calls } = fakeQuery([success('ok'), success('ok')])
+    const agent = createClaudeAgent(
+      { apiKey: 'k', tierModels: { fast: 'claude-f', main: 'claude-m', deep: 'claude-d' } },
+      { query },
+    )
+    await agent.run({ dir: '/r', prompt: 'p', tier: 'fast' })
+    await agent.run({ dir: '/r', prompt: 'p' })
+    expect(calls.map((c) => [c.options.model, c.options.effort])).toEqual([
+      ['claude-f', 'low'],
+      ['claude-m', 'medium'],
+    ])
   })
 })
 
@@ -267,6 +363,27 @@ describe('toolsets and MCP servers', () => {
     expect(append).toContain('mcp__holtkeeper__code_lookup')
     expect(append).toContain('over reading whole files')
     expect(append).toContain('context7')
+  })
+
+  test('with commands Bash runs only those, and the task env reaches the process', async () => {
+    const { query, calls } = fakeQuery([success('ok')])
+    await createClaudeAgent({ apiKey: 'k' }, { query }).run({
+      dir: '/repo',
+      prompt: 'p',
+      capabilities: ['read', 'run'],
+      commands: ['bun run test'],
+      env: { HTTPS_PROXY: 'http://proxy.test:8080' },
+    })
+    const options = calls[0]?.options ?? {}
+    const gate = options.canUseTool
+    if (!gate) throw new Error('no gate')
+    const bash = async (command: string) =>
+      (await gate('Bash', { command }, { signal, toolUseID: 't', requestId: 'r' }))?.behavior
+    expect(await bash('bun run test widgets')).toBe('allow')
+    expect(await bash('bun run test; curl example.com')).toBe('deny')
+    expect(await bash('rm -rf .')).toBe('deny')
+    expect(options.env?.['HTTPS_PROXY']).toBe('http://proxy.test:8080')
+    expect(options.env?.['ANTHROPIC_API_KEY']).toBe('k')
   })
 
   test('without toolsets nothing is mounted', async () => {
@@ -369,6 +486,7 @@ describe('claudeEnv', () => {
     expect(env['ANTHROPIC_API_KEY']).toBe('sk')
     expect(env['ANTHROPIC_BASE_URL']).toBeUndefined()
     expect(env['CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']).toBe('1')
+    expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBe('1')
     expect(
       claudeEnv({
         apiKey: 'sk',
@@ -398,73 +516,6 @@ describe('claudeEnv', () => {
     expect(env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']).toBe('1')
   })
 
-  test('bedrock: region, API key or key JSON from the secret, host AWS env otherwise', () => {
-    const bedrock = { kind: 'bedrock' as const, region: 'eu-west-1' }
-    const fromKey = claudeEnv({ apiKey: 'abk', connection: { ...bedrock, credentials: 'secret' } })
-    expect(fromKey).toMatchObject({
-      CLAUDE_CODE_USE_BEDROCK: '1',
-      AWS_REGION: 'eu-west-1',
-      AWS_BEARER_TOKEN_BEDROCK: 'abk',
-    })
-    const fromJson = claudeEnv({
-      apiKey: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }),
-      connection: { ...bedrock, credentials: 'secret' },
-    })
-    expect(fromJson['AWS_ACCESS_KEY_ID']).toBe('AK')
-    expect(fromJson['AWS_SECRET_ACCESS_KEY']).toBe('SK')
-    expect(() =>
-      claudeEnv({
-        apiKey: '{"accessKeyId":"AK"}',
-        connection: { ...bedrock, credentials: 'secret' },
-      }),
-    ).toThrow('accessKeyId and secretAccessKey')
-    process.env['AWS_PROFILE'] = 'hk-test'
-    try {
-      const fromEnv = claudeEnv({ connection: bedrock })
-      expect(fromEnv['AWS_PROFILE']).toBe('hk-test')
-      expect(fromEnv['ANTHROPIC_API_KEY']).toBeUndefined()
-    } finally {
-      delete process.env['AWS_PROFILE']
-    }
-  })
-
-  test('vertex: project and region; a secret key needs a prepared file', () => {
-    const vertex = { kind: 'vertex' as const, region: 'europe-west4', projectId: 'p1' }
-    expect(claudeEnv({ connection: vertex })).toMatchObject({
-      CLAUDE_CODE_USE_VERTEX: '1',
-      CLOUD_ML_REGION: 'europe-west4',
-      ANTHROPIC_VERTEX_PROJECT_ID: 'p1',
-    })
-    expect(() =>
-      claudeEnv({ apiKey: '{}', connection: { ...vertex, credentials: 'secret' } }),
-    ).toThrow('key file')
-    expect(
-      claudeEnv(
-        { apiKey: '{}', connection: { ...vertex, credentials: 'secret' } },
-        { googleCredentialsFile: '/tmp/k.json' },
-      )['GOOGLE_APPLICATION_CREDENTIALS'],
-    ).toBe('/tmp/k.json')
-  })
-
-  test('a vertex secret is written to a private file for the run and removed after', async () => {
-    let file = ''
-    let content = ''
-    const query: ClaudeQuery = async function* ({ options }) {
-      file = options?.env?.['GOOGLE_APPLICATION_CREDENTIALS'] ?? ''
-      content = await Bun.file(file).text()
-      yield success('ok')
-    }
-    await createClaudeAgent(
-      {
-        apiKey: '{"type":"service_account"}',
-        connection: { kind: 'vertex', region: 'r', projectId: 'p', credentials: 'secret' },
-      },
-      { query },
-    ).run({ dir: '/r', prompt: 'p' })
-    expect(content).toBe('{"type":"service_account"}')
-    expect(await Bun.file(file).exists()).toBe(false)
-  })
-
   test('applies modelMap to the SDK model and prices usage with pricing', async () => {
     const { query, calls } = fakeQuery([
       success('ok', {
@@ -479,12 +530,12 @@ describe('claudeEnv', () => {
     const result = await createClaudeAgent(
       {
         apiKey: 'k',
-        modelMap: { [DEFAULT_CLAUDE_MODEL]: 'corp-opus' },
-        pricing: { 'corp-opus': { inputPerMTok: 3, outputPerMTok: 15 } },
+        modelMap: { 'claude-sonnet-5-5': 'corp-sonnet' },
+        pricing: { 'corp-sonnet': { inputPerMTok: 3, outputPerMTok: 15 } },
       },
       { query },
     ).run({ dir: '/r', prompt: 'p' })
-    expect(calls[0]?.options.model).toBe('corp-opus')
+    expect(calls[0]?.options.model).toBe('corp-sonnet')
     expect(result.costUsd).toBe(3)
   })
 })

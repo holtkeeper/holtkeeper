@@ -1,10 +1,10 @@
 import type {
-  ActivityEvent,
   AiUsageRecord,
   AnalysisRecord,
   AuditRun,
   Identity,
   Job,
+  JobAttempt,
   ExternalAccount,
   KnowledgeContent,
   KnowledgeEntry,
@@ -56,6 +56,7 @@ export interface AnalysisRow {
   repo_path: string
   kind: string
   ref: string | null
+  sha: string | null
   created_at: PgTimestamp
   actor: string | null
   data: unknown
@@ -66,6 +67,7 @@ export const toAnalysis = (r: AnalysisRow): AnalysisRecord => ({
   repo: { forge: r.repo_forge, path: r.repo_path },
   kind: r.kind,
   ...(r.ref !== null && { ref: r.ref }),
+  ...(r.sha !== null && { sha: r.sha }),
   createdAt: iso(r.created_at),
   ...(r.actor !== null && { actor: r.actor }),
   data: r.data,
@@ -83,6 +85,7 @@ export interface CredentialRow {
   last_rotated_at: PgTimestamp | null
   last_error: string | null
   options: Record<string, unknown> | null
+  capabilities: StoredCredential['capabilities'] | null
   created_at: PgTimestamp
   updated_at: PgTimestamp
 }
@@ -102,6 +105,8 @@ export const toCredential = (r: CredentialRow): StoredCredential => {
     ...(lastRotatedAt !== undefined && { lastRotatedAt }),
     ...(r.last_error !== null && { lastError: r.last_error }),
     ...(r.options !== null && { options: r.options }),
+    ...(r.capabilities !== null &&
+      r.capabilities !== undefined && { capabilities: r.capabilities }),
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   }
@@ -206,24 +211,6 @@ export const toLinkToken = (r: LinkTokenRow): LinkToken => ({
   ...(r.created_by !== null && { createdBy: r.created_by }),
 })
 
-export interface ActivityRow {
-  id: string
-  at: PgTimestamp
-  actor: string
-  action: string
-  subject: string | null
-  details: Record<string, unknown> | null
-}
-
-export const toActivity = (r: ActivityRow): ActivityEvent => ({
-  id: r.id,
-  at: iso(r.at),
-  actor: r.actor,
-  action: r.action,
-  ...(r.subject !== null && { subject: r.subject }),
-  ...(r.details !== null && { details: r.details }),
-})
-
 export interface JobRow {
   id: string
   analyzer: string
@@ -244,9 +231,11 @@ export interface JobRow {
   heartbeat_at: PgTimestamp | null
   error: string | null
   analysis_id: string | null
-  log: string[]
+  error_signature: string | null
+  attempts_history: JobAttempt[]
   actor: string | null
   schedule: string | null
+  reason: string | null
 }
 
 export const toJob = (r: JobRow): Job => {
@@ -271,10 +260,12 @@ export const toJob = (r: JobRow): Job => {
     ...(r.worker_id !== null && { workerId: r.worker_id }),
     ...(heartbeatAt !== undefined && { heartbeatAt }),
     ...(r.error !== null && { error: r.error }),
+    ...(r.error_signature !== null && { errorSignature: r.error_signature }),
+    attemptsHistory: r.attempts_history,
     ...(r.analysis_id !== null && { analysisId: r.analysis_id }),
-    log: r.log,
     ...(r.actor !== null && { actor: r.actor }),
     ...(r.schedule !== null && { schedule: r.schedule }),
+    ...(r.reason !== null && { reason: r.reason }),
   }
 }
 
@@ -290,6 +281,8 @@ export interface KnowledgeRow {
   topics: string[]
   applies_to: string[]
   packages: KnowledgeEntry['packages'] | null
+  visibility: KnowledgeEntry['visibility'] | null
+  subject: string | null
   evidence: KnowledgeEntry['evidence']
   supersedes: string | null
   created_at: PgTimestamp
@@ -307,6 +300,8 @@ export const toKnowledgeEntry = (r: KnowledgeRow): KnowledgeEntry => ({
   topics: r.topics,
   appliesTo: r.applies_to,
   ...(r.packages !== null && r.packages !== undefined && { packages: r.packages }),
+  ...(r.visibility !== null && r.visibility !== undefined && { visibility: r.visibility }),
+  ...(r.subject !== null && r.subject !== undefined && { subject: r.subject }),
   status: r.status,
   evidence: r.evidence,
   ...(r.supersedes !== null && { supersedes: r.supersedes }),
@@ -327,6 +322,8 @@ export const knowledgeContent = (entry: KnowledgeEntry): KnowledgeContent => ({
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   ...(entry.packages !== undefined && { packages: entry.packages }),
+  ...(entry.visibility !== undefined && { visibility: entry.visibility }),
+  ...(entry.subject !== undefined && { subject: entry.subject }),
   status: entry.status,
   evidence: entry.evidence,
   ...(entry.supersedes !== undefined && { supersedes: entry.supersedes }),
@@ -369,6 +366,7 @@ export interface AiUsageRow {
   turns: number
   outcome: AiUsageRecord['outcome']
   error: string | null
+  transcript_ref: string | null
 }
 
 export const toAiUsage = (r: AiUsageRow): AiUsageRecord => ({
@@ -393,6 +391,7 @@ export const toAiUsage = (r: AiUsageRow): AiUsageRecord => ({
   turns: num(r.turns),
   outcome: r.outcome,
   ...(r.error !== null && { error: r.error }),
+  ...(r.transcript_ref !== null && { transcriptRef: r.transcript_ref }),
 })
 
 export interface ExternalAccountRow {

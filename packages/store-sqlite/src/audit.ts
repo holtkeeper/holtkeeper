@@ -37,6 +37,10 @@ function where(filter: AuditFilter, extra: string[] = [], extraParams: SQLQueryB
   add('target_type = ?', filter.targetType)
   add('target_id = ?', filter.targetId)
   add('target_repo = ?', filter.repo)
+  if (filter.repos !== undefined) {
+    clauses.push(`target_repo IN (${filter.repos.map(() => '?').join(', ') || 'NULL'})`)
+    params.push(...filter.repos)
+  }
   add('outcome = ?', filter.outcome)
   add('via = ?', filter.via)
   add('at >= ?', filter.from)
@@ -134,6 +138,13 @@ export function sqliteAudit(db: Database): AuditStore {
           .get(...clause.params)?.n ?? 0
       )
     },
+    repos: async () =>
+      db
+        .query<{ repo: string }, []>(
+          'SELECT DISTINCT target_repo AS repo FROM audit_events WHERE target_repo IS NOT NULL ORDER BY repo',
+        )
+        .all()
+        .map((row) => row.repo),
     async *export(filter = {}) {
       let after = 0
       for (;;) {

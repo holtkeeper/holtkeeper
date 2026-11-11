@@ -15,7 +15,7 @@ export function AuthCard({
   children: ReactNode
 }) {
   return (
-    <div className="app-backdrop relative grid min-h-screen place-items-center px-4 py-10">
+    <div className="relative grid min-h-screen bg-background place-items-center px-4 py-10">
       <div className="absolute right-4 top-4">
         <ThemeToggle />
       </div>
@@ -23,7 +23,7 @@ export function AuthCard({
         initial={{ opacity: 0, y: 12, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: 'spring', stiffness: 260, damping: 26 }}
-        className="w-full max-w-sm rounded-3xl border border-border bg-surface p-8 shadow-overlay"
+        className="w-full max-w-sm rounded-2xl border border-line bg-panel p-8"
       >
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <BrandIcon name="holtkeeper" className="size-16" />

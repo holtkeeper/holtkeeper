@@ -3,7 +3,6 @@ import type { ExternalAccountView, LinkAccountInput } from '@holtkeeper/api'
 const kindLabels: Record<string, string> = {
   gitlab: 'GitLab',
   github: 'GitHub',
-  slack: 'Slack',
 }
 
 /** Display name of a provider kind: `gitlab` → `GitLab`. */
@@ -11,7 +10,7 @@ const providerKindLabel = (kind: string): string =>
   kindLabels[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)
 
 /** Splits `gitlab:work` into kind and instance. */
-export function splitProvider(provider: string): { kind: string; instance?: string } {
+function splitProvider(provider: string): { kind: string; instance?: string } {
   const separator = provider.indexOf(':')
   return separator < 0
     ? { kind: provider }
@@ -101,7 +100,7 @@ export function validateLinkDraft(draft: LinkDraft): Partial<Record<keyof LinkDr
   const externalId = draft.externalId.trim()
   if (!provider) errors.provider = 'Choose or type a provider'
   else if (!/^[a-z][a-z0-9-]*(:[^\s:]+)?$/.test(provider))
-    errors.provider = 'Like gitlab:<forge id> or slack:<workspace>'
+    errors.provider = 'Like gitlab:<forge id>'
   if (!externalId) errors.externalId = 'Enter the account id'
   else if (provider && numericIdProvider(provider) && !/^\d+$/.test(externalId))
     errors.externalId = 'The numeric user id, not the username'

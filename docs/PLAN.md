@@ -1,15 +1,15 @@
 # Holtkeeper — plan
 
-Holtkeeper is an automation engine for a fleet of Git repositories (GitLab and GitHub): code review, dependency updates, vulnerability audits, releases. It is driven through a CLI, a web interface and a chat bot.
+Holtkeeper is an automation engine for a fleet of Git repositories (GitLab and GitHub): code review, dependency updates, vulnerability audits, releases. People drive it through the web panel; AI agents through its MCP endpoint.
 
-This repository holds the public engine and generic plugins. The concrete setup (repository list, tokens, rules, custom plugins) lives in a separate private repository that depends on the `@holtkeeper/*` packages and describes everything in `holtkeeper.config.ts`.
+This repository holds the public engine and its analyzers. The infrastructure (storage, secrets, sign-in, workers) lives in `holtkeeper.config.ts`, often in a separate private repository that depends on the `@holtkeeper/*` packages; forges, repository groups, schedules, triggers, rules and analyzer options are managed in the panel.
 
 ## Principles
 
 - **Everything behind interfaces.** Git hosting, LLM, chat, storage and command execution are adapters behind abstractions. A new provider is a new adapter package; the core does not change.
-- **Plugins, not features.** Every automation is a plugin with one contract (triggers, config schema, handler). Built-in plugins are no different from those written in the private repository.
-- **Config as code.** `defineConfig()` with full typing, presets and `extends` (like Renovate), repository groups and overrides per group or repository.
-- **CLI first.** Any task runs with a single command (`holtkeeper run audit --repo games/*`) — locally, from cron or from a scheduled pipeline. The server, webhooks, UI and bot are built on top of the same core.
+- **Analyzers, not features.** Every automation is an analyzer with one contract (options schema, scope, what it needs, run); webhooks, schedules, comment commands and the panel all queue the same analyzers.
+- **Config as code for infrastructure.** `defineConfig()` with full typing holds what a deployment needs (server, job execution, limits, AI providers); groups, repository traits, forges and automation live in the panel.
+- **Panel first.** Work runs on the server — on webhooks, schedules or a button in the panel. Agents get the same data and actions over MCP.
 - **Safe by default.** `dryRun` mode, every change goes through an MR rather than a direct push, dangerous actions (release, deploy) require human confirmation.
 - **No build step.** Libraries export TypeScript source and Bun runs it directly; see [development.md](development.md#no-build-step).
 - **Reuse, don't rewrite.** Renovate for dependency updates, Chat SDK for bots, Claude Agent SDK for agentic tasks, gitbeaker/octokit for APIs.
@@ -43,7 +43,6 @@ Turborepo is not needed yet: `bun run --filter` is enough. Revisit if builds get
 
 - `apps/` — `cli`, `server`, `web`
 - `packages/` — contracts (`core`, `forge`, `exec`, `store`, `access`, `auth`, `report`, `changes`, `analyzer`, `vuln`, `quality`, `agent`) and their replaceable implementations
-- `plugins/` — automations on the plugin contract
 - `fixtures/` — vulnerable sample projects for tests
 - `examples/dev/` — local development config and demo data
 
@@ -53,7 +52,7 @@ The full module list with links is in [docs/README.md](README.md). Every module 
 
 ### GitForge
 
-A single interface over GitLab and GitHub. It covers what plugins need, not the whole API:
+A single interface over GitLab and GitHub. It covers what analyzers need, not the whole API:
 
 - repositories: listing by group/organization, reading files, default branch;
 - branches, commits (including multi-file commits through the API without cloning);
@@ -65,40 +64,27 @@ A single interface over GitLab and GitHub. It covers what plugins need, not the 
 
 Terminology differences (MR/PR, group/org, pipeline/workflow) are hidden inside adapters. Provider-specific features are exposed through `capabilities` and an explicit escape hatch to the native client.
 
-### Plugin
+### Analyzer
 
-```ts
-export default definePlugin({
-  name: 'browserslist',
-  config: z.object({ schedule: z.string().default('0 6 * * 1') }),
-  triggers: [schedule(), command('update-browserslist')],
-  async run(ctx) {
-    // ctx.repo, ctx.forge, ctx.workspace, ctx.agent, ctx.chat, ctx.config, ctx.log
-  },
-})
-```
-
-Triggers: schedule, webhook event, MR comment command (`/holtkeeper review`), chat bot command, UI button, manual CLI run. The outcome of every run (created MRs, comments, errors) is stored and visible in the UI.
+The contract lives in [@holtkeeper/analyzer](../packages/analyzer/docs/README.md): a `kind`, an options schema, a `scope` (one repository or a whole group), what the run `needs` (checkout, forge, agent, history) and `run`. Triggers: schedule, webhook event, MR comment command (`/holtkeeper review`), chat command, a button in the panel. The outcome of every run (created MRs, comments, errors) is stored and visible in the UI.
 
 ### Config
 
+`holtkeeper.config.ts` holds infrastructure only: store, artifacts, sign-in, vault key, listener, worker execution and egress, shared limits and AI provider plugins.
+
 ```ts
 export default defineConfig({
-  forges: { work: gitlab({ url: 'https://gitlab.example.com', token: env('GITLAB_TOKEN') }) },
-  groups: {
-    games: { forge: 'work', match: ['games/*'], exclude: ['games/legacy-*'] },
+  server: {
+    auth: passwordAuth({ password: env('HOLTKEEPER_PASSWORD'), sessionSecret: env('SESSION') }),
+    store: postgresStore({ url: env('DATABASE_URL') }),
+    vaultKey: env('HOLTKEEPER_VAULT_KEY'),
   },
-  plugins: {
-    browserslist: { groups: ['games'] },
-    audit: { groups: ['games'], allowlist: [/* ... */] },
-  },
-  repos: {
-    'games/app-x': { audit: { ssr: true } },
-  },
+  jobs: { execution: { mode: 'mise' }, concurrency: 2 },
+  limits: { distributed: true },
 })
 ```
 
-The public repository ships presets (`extends: ['holtkeeper:recommended']`); the private one holds the real values and its own plugins.
+Forges, groups, repository traits, schedules, triggers, policies, analyzer options and budgets live in the database and are edited in the panel, which seeds sensible defaults on first start. Keys the file no longer takes are warned about and ignored.
 
 ### Workspace
 
@@ -108,7 +94,7 @@ Cloning into a temporary directory (shallow, cached), detecting the package mana
 
 An interface of "give the agent a checkout, a task and tools, get back changes or a report". The default adapter is Claude Agent SDK, with a configurable model. Used by review, deps (refactoring for breaking changes) and audit (classifying whether a vulnerability applies).
 
-## Plugins
+## Automations
 
 ### 1. Code review
 
@@ -121,16 +107,16 @@ An interface of "give the agent a checkout, a task and tools, get back changes o
 
 ### 2. Browserslist
 
-Status: done as the `browserslist` analyzer ([packages/browserslist](../packages/browserslist/docs/README.md)) on a default weekly schedule; it runs only in repositories whose lockfile resolves `caniuse-lite` (analyzer `appliesTo`). Auto-merge waits for the forge contract.
+Status: done as the `browserslist` analyzer ([packages/browserslist](../packages/browserslist/docs/README.md)) refreshed weekly by freshness; it runs only in repositories whose lockfile resolves `caniuse-lite` (analyzer `appliesTo`). Auto-merge waits for the forge contract.
 
 - On a schedule per repository group: `update-browserslist-db` through the repository's package manager.
 - If the lockfile changed — branch, commit, MR (or update the already open MR), optional auto-merge after a green pipeline.
 - Report: whether the resolved browser list changed (`browserslist` before/after) — the main thing a reviewer looks at.
-- First plugin to implement: exercises the whole clone → command → commit → MR path without AI.
+- First automation to implement: exercises the whole clone → command → commit → MR path without AI.
 
 ### 3. Package update propagation
 
-Status: our own packages roll out through [packages/propagate](../packages/propagate/docs/README.md) (own bump, checks and agent fixes before the MR opens); third-party updates run on Renovate inside Holtkeeper ([packages/renovate](../packages/renovate/docs/README.md)), report-only by default; the summary across repositories is the **Dependency updates** page. Renovate's forge API calls go through the per-token limiter via a loopback proxy. Not done: the agent fixing failed Renovate MRs.
+Status: our own packages roll out through [packages/propagate](../packages/propagate/docs/README.md) (own bump and checks; repositories whose checks fail get a proposed `propagate-fix` write task that carries the bump); third-party updates run on Renovate inside Holtkeeper ([packages/renovate](../packages/renovate/docs/README.md)), report-only by default; Renovate state per library shows on the **Dependencies** page. Renovate's forge API calls go through the per-token limiter via a loopback proxy. Not done: the agent fixing failed Renovate MRs.
 
 - Sources: releases in our own monorepos/package repositories (webhook on a tag or registry publish) and third-party packages.
 - The update mechanics for third-party packages are Renovate: holtkeeper generates its config from the `analyzers.renovate` setting (which repositories, grouping, release age, limits) and runs the CLI per repository.
@@ -139,7 +125,7 @@ Status: our own packages roll out through [packages/propagate](../packages/propa
 
 ### 4. Vulnerability audit
 
-Status: scanner, fixers, allowlist and `holtkeeper audit` exist (see [packages/vuln](../packages/vuln/docs/README.md)); the plugin that opens MRs comes with the workspace and forge adapters.
+Status: scanner, fixers and allowlist run as the server's `audit` analyzer (see [packages/vuln](../packages/vuln/docs/README.md)); opening MRs with the fixes comes with the workspace and forge adapters.
 
 - One contract for every language: a `Scanner` produces `Finding`s, a chain of `Fixer`s changes the project, a rescan decides what was resolved. Ecosystems are added as fixer packages without touching the rest.
 - Scanning: **OSV-Scanner** reads lockfiles of any supported ecosystem (JS, Go, Python, Java, PHP, Rust, Ruby…) without installing dependencies.
@@ -149,13 +135,12 @@ Status: scanner, fixers, allowlist and `holtkeeper audit` exist (see [packages/v
 
 ### 5. Releases
 
-Status: the release assistant ([packages/release](../packages/release/docs/README.md)) proposes the next version from conventional commits, builds the changelog of unique messages and a summary, opens or updates the `develop → main` candidate merge request, creates versions after a configurable acceptance (person, API/CLI, label or merge), deploys through the tag pipeline's manual jobs and follows them; the **Release board** in the web UI, `holtkeeper release` in the CLI. Chat: `/holtkeeper release` in merge requests shows the state and runs the steps with confirmations, and a deploy card is edited in place as the deploy runs. In Slack the same commands run from `/holtkeeper`, mentions, direct messages and buttons, with form modals, and the panel has its own **Chat** page.
+Status: the release assistant ([packages/release](../packages/release/docs/README.md)) proposes the next version from conventional commits, builds the changelog of unique messages and a summary, opens or updates the `develop → main` candidate merge request, creates versions after a configurable acceptance (person, API, label or merge), deploys through the tag pipeline's manual jobs and follows them; the **Releases** pages in the web UI (overview cards, a version timeline per repository, the flow diagram). Chat: `/holtkeeper release` in merge requests shows the state and runs the steps with confirmations, and a deploy card is edited in place as the deploy runs. The panel has its own **Chat** page.
 
 - Creating a `develop → main` MR with a changelog from commits/MRs, readiness checks (green pipeline, no open blockers).
-- After merge: a tag following the project scheme (semver/calver/custom), a release with notes.
+- After merge: a tag following the project scheme (semver or calendar versions), a release with notes.
 - Deploy: running the pipeline's manual jobs for the tag, waiting, retries, status notifications.
-- Everything is described as steps in the config (projects have different flows), with human confirmation on dangerous steps — a Slack or UI button.
-- Batch mode: "release all games in group X" with one command.
+- Flows are fixed modes (merge request, trunk, external) set per repository in a few settings; a person confirms every step that writes to a forge, in the panel, in chat or over MCP with a confirm token. Repositories are released one at a time; there is no batch mode.
 
 ## Analyses
 
@@ -165,19 +150,20 @@ Every analysis produces its own data and renders it into the universal report fo
 - **Bundle size** — app builds (one or many targets, each with its entrypoints) and published packages (archives from their registry), per entrypoint and per package (source maps), raw/gzip/brotli, history across releases and versions. Any bundler.
 - **Dependencies** — workspace graph, package graph from lockfiles, module imports; cycles and libraries in several versions. JS and Go sources; more are new `GraphSource`s.
 - **Package usage** — which exports, members and JSX props of each dependency a repository uses and where, through imports and the TypeScript 7 checker; joined across repositories into "used by" and the uses an upgrade breaks, for people and for agents over MCP.
-- **Code quality** — naming conventions inferred from the project (ast-grep), test gaps from coverage with example tests written by the agent in the project's style, linters through SARIF (oxlint, ESLint, Biome, golangci-lint, ruff, Semgrep, ast-grep), duplication (jscpd).
+- **Test coverage** — line, function and branch coverage per file from the project's own test runner; test attributes frontend templates expose.
 
 Suggested code changes from any analysis share one shape ([`@holtkeeper/changes`](../packages/changes/docs/README.md)) and can be accepted from a report as a patch or a merge request.
 
-Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run on every tag and on a schedule; fleet drift (library versions and shared configs across repositories); release risk; DORA and CI health; secret and license scanning; asset budgets; i18n gaps; dead code (knip); Sentry errors per release.
+Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run on every tag and on a schedule; fleet drift (library versions and shared configs across repositories); CI health; secret and license scanning; asset budgets; i18n gaps; team rules checked on every merge request; Sentry errors per release.
 
 ## Interfaces
 
-- **CLI** — the first interface: `run <plugin>`, `--repo`/`--group`, `--dry-run`, `validate-config`, `explain`, `audit`, `serve`.
-- **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and activity; audit ingestion; credential rotation._
-- **Web** — repositories and their state per plugin, run history with logs, manual runs, confirmations, audit allowlist, release dashboard. _Started: dashboard, audit reports, repositories, credentials, settings, users, activity._
-- **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters. _Started: [@holtkeeper/chat](../packages/chat/docs/README.md) with commands, cards, forms and the merge request surface; `release`, `verify` and `jobs.commands` run through it; Slack through [@holtkeeper/chat-slack](../packages/chat-slack/docs/README.md), talking to the Web API directly (the router and cards are ours, so Chat SDK would only add its own state store and a smaller form model)._
-- **Digests** — scheduled summaries of what analyses found (license problems, images to optimize, stale merge requests…) per group of repositories, to Slack channels and panel chats. _Started: [@holtkeeper/digest](../packages/digest/docs/README.md), the **Digests** page with presets and a live preview, sending on the leader._
+- **Web panel** — the primary interface for people. _Started: Home, audit reports, repositories, credentials, settings, users, history, automation, releases._
+- **MCP** — the interface for AI agents: package APIs, usages, library docs, knowledge, commit conventions (`POST /mcp`, see [apps/server](../apps/server/docs/README.md)).
+- **CLI** — only the server's entrypoint: `holtkeeper serve` (the Helm chart's command) and `holtkeeper users` for operator account tasks such as an agent's login link ([agent-access.md](agent-access.md)).
+- **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and history; audit ingestion; credential rotation._
+- **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters. _Started: [@holtkeeper/chat](../packages/chat/docs/README.md) with commands, cards, forms and the merge request surface; `release`, `verify` and `jobs.commands` run through it; the Slack integration was removed for now and will come back differently: only its stored app tokens and the Block Kit rendering in [@holtkeeper/chat-slack](../packages/chat-slack/docs/README.md) remain._
+- **Digests** — scheduled summaries of what analyses found (license problems, images to optimize, stale merge requests…) per group of repositories, to Slack channels and panel chats. _A first version was removed together with the Slack integration; not started again yet._
 
 ### Access
 
@@ -195,19 +181,19 @@ Credentials (forge accounts, API keys) and settings (models, keys, review rules,
 **0. Foundation**
 
 - Bun workspaces monorepo, TS 7, oxlint + oxfmt, knip, lefthook, CI.
-- `core`: config schema, `defineConfig`, plugin contract, config loading.
+- `core`: config schema, `defineConfig`, config loading.
 - `forge` + `forge-gitlab` (primary), `forge-github` skeleton, contract tests.
 - `workspace`, `apps/cli`.
 
 **1. Browserslist** — the first end-to-end scenario without AI. _Done._
 
-**2. Audit** — without the agent: report normalization, autofix, allowlist. _Engine and CLI done; MR plugin pending the workspace._
+**2. Audit** — without the agent: report normalization, autofix, allowlist. _Engine done; fix MRs pending the workspace._
 
 **3. Releases via CLI** — develop → main MR, tags, running jobs.
 
-**4. Server** — `storage`, queue, scheduler, webhooks; moving plugins to server-side triggers.
+**4. Server** — `storage`, queue, scheduler, webhooks; moving automations to server-side triggers.
 
-**5. Agent and code review** — `agent` package, `review` plugin, comment commands.
+**5. Agent and code review** — `agent` package, `review` analyzer, comment commands.
 
 **6. Update propagation** — Renovate integration, AI fixing of failed MRs; agent classification in audit.
 

@@ -1,6 +1,6 @@
 # @holtkeeper/cli
 
-The `holtkeeper` command. It runs from source with Bun.
+The `holtkeeper` command: the server's entrypoint. It starts the server (`serve`, the command of the container image and the Helm chart) and handles operator account tasks (`users`). Everything else happens in the web panel, or over MCP for AI agents. It runs from source with Bun.
 
 ```sh
 bunx holtkeeper <command> [options]
@@ -14,50 +14,6 @@ bunx holtkeeper <command> [options]
 | `-h, --help`          | Show usage.                                                            |
 
 ## Commands
-
-### `validate-config`
-
-Loads and validates the config, prints a short summary and exits with `0`. On errors, prints every problem with its path and exits with `1`. Does not need secrets.
-
-### `explain <forge>:<path>`
-
-Prints, as JSON, what applies to a repository: its groups, merged traits and every plugin with its final options.
-
-```sh
-holtkeeper explain work:games/app-x
-```
-
-Matching is done against the config only; the forge is not contacted.
-
-### `audit [dir]`
-
-Scans a checkout (default: the current directory) with osv-scanner and prints findings that are not allowlisted. Exits with `1` while any remain, `0` otherwise.
-
-| Option                | Description                                                                                                                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--fix`               | Try to fix findings, then rescan. Fixers run in order: `osv-scanner fix` (npm, Maven), then the JavaScript fixer (bun, pnpm, yarn, npm leftovers), then the Go fixer. Files are changed in place. |
-| `--allowlist <file>`  | JSON array of allowlist entries (see [@holtkeeper/vuln](../../../packages/vuln/docs/README.md#allowlist)).                                                                                        |
-| `--trait <key=value>` | Repository trait for conditional entries, repeatable. `true`, `false` and numbers are typed.                                                                                                      |
-| `--json`              | Print the full report as JSON.                                                                                                                                                                    |
-
-```sh
-holtkeeper audit ./games/app-x --fix --allowlist allowlist.json --trait ssr=false
-```
-
-Needs `osv-scanner` on `PATH`; fixing needs the project's package manager or `go`.
-
-### `release <action>`
-
-The release assistant (see [@holtkeeper/release](../../../packages/release/docs/README.md)) against the config's forges. Settings are the `releases` setting from the config's store when the config has a `server` section, with `--preset <ids>` (comma-separated) and a JSON `--settings <file>` laid over it.
-
-- `status [--repo <forge>:<path> | --group <name>]` — one tab-separated line per repository: path, stage, latest → next version, commits ahead and unreleased, open candidate, acceptance, deploy state (`--json` for the rows).
-- `plan --repo <forge>:<path> [--step propose|version] [--version x.y.z]` — the plan of the step that waits (or the given one): range, suggested version with reasons, gates and the text; exits 2 while a gate fails.
-- `propose --repo …` — opens or updates the release candidate merge request.
-- `accept --repo … [--note <text>]` — accepts the target branch head for release in the store, like the panel; needs a store with `kv`. Use it from CI or scripts to tie acceptance to any process.
-- `version --repo … [--version x.y.z]` — creates the version (tag, release, optional changelog file).
-- `deploy --repo … --env <name> [--tag <tag>] [--redeploy]` — starts the deploy job of an environment for the version (the latest by default).
-
-`--force` overrides failing pipeline, freeze, blocker and acceptance gates (and the deploy order); `--dry-run` (or `dryRun` in the config) reports without changing anything.
 
 ### `users <action>`
 
@@ -77,6 +33,7 @@ Starts the web server described by the config's `server` section (see [@holtkeep
 - `--role web|worker|scheduler|all` (or `HOLTKEEPER_ROLE`; default `all`; combine with commas, e.g. `web,scheduler`).
 - `--concurrency <n>` (`HOLTKEEPER_CONCURRENCY`): jobs this worker runs at once.
 - `--claim-delay <time>` (`HOLTKEEPER_CLAIM_DELAY`): take only jobs queued at least this long, e.g. `15s`, so workers without a delay get new jobs first and this one takes the overflow.
+- `--pool <pools>` (`HOLTKEEPER_WORKER_POOL`): worker pools this worker serves, comma-separated (default `default`). A worker claims only jobs of analyzers in its pools: `--pool write` makes a dedicated [write task](../../../packages/write-task/docs/README.md) worker, `--pool default,write` a single process that runs everything.
 - `--max-jobs <n>` (`HOLTKEEPER_MAX_JOBS`): exit 0 after running `n` jobs, for a fresh container or pod per job.
 - `--drain-timeout <time>` (`HOLTKEEPER_DRAIN_TIMEOUT`, default `30s`): how long running jobs may finish on shutdown before they are requeued.
 

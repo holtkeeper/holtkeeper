@@ -1,13 +1,13 @@
-import { findingMarker, MARKER_PREFIX } from './dedupe.ts'
+import { findingMarker, MARKER_PREFIX, markerOf } from './dedupe.ts'
 import {
+  type ReviewCategory,
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
-  type ReviewTestRun,
-  type ReviewTestVerdict,
   type ReviewWalkthrough,
   type SkippedFile,
   type ThreadAction,
+  categories,
   severities,
 } from './schema.ts'
 
@@ -37,6 +37,20 @@ export function commentBody(
     finding.body.trim(),
     findingMarker(finding.id),
   ].join('\n\n')
+}
+
+/**
+ * The category and finding id of an inline comment `commentBody` wrote; `undefined` for other
+ * notes, ours or not.
+ */
+export function commentFinding(
+  body: string,
+): { category: ReviewCategory; findingId: string } | undefined {
+  const findingId = markerOf(body)
+  if (!findingId) return undefined
+  const match = /^\*\*\w+\*\* · (\w+)/.exec(body.trimStart())
+  const category = categories.find((name) => name === match?.[1])
+  return category ? { category, findingId } : undefined
 }
 
 /** The marker of the summary note; carries the reviewed head. */
@@ -136,54 +150,6 @@ export function summaryNote(
 
   lines.push(summaryMarker(data.head))
   return lines.filter(Boolean).join('\n\n')
-}
-
-const verdictLabel: Record<ReviewTestVerdict, string> = {
-  passes: 'passes',
-  flaky: 'flaky, dropped',
-  unfinished: 'not passing, dropped',
-}
-
-const fenceLanguage = (path: string) => path.split('.').at(-1) ?? ''
-
-function fenced(path: string, content: string): string {
-  const longest = Math.max(2, ...(content.match(/`{3,}/g) ?? []).map((run) => run.length))
-  const fence = '`'.repeat(longest + 1)
-  return `${fence}${fenceLanguage(path)}\n${content.replace(/\n$/, '')}\n${fence}`
-}
-
-/**
- * The "Tests" part of the summary note: one row per test with what the runs showed, the passing
- * tests' files in collapsed blocks, and the functions left without a test.
- */
-export function testsSummary(run: ReviewTestRun): string {
-  const lines: string[] = run.skipped ? [`No tests were written: ${run.skipped}.`] : []
-  if (run.items.length) {
-    lines.push(
-      [
-        '| Function | Test | Result | Runs on the head |',
-        '| --- | --- | --- | ---: |',
-        ...run.items.map(
-          (test) =>
-            `| \`${cell(test.target.path)}\` ${cell(test.target.symbol)} | \`${cell(test.testFile)}\` | ${verdictLabel[test.verdict]}${test.reason ? `: ${cell(test.reason)}` : ''} | ${test.head.passed}/${test.head.runs} |`,
-        ),
-      ].join('\n'),
-    )
-    const passing = run.items.filter((test) => test.verdict === 'passes')
-    if (passing.length)
-      lines.push(
-        'Holtkeeper ran the passing tests itself; accept them from the review report as a patch or a merge request into this branch.',
-        ...passing.map(
-          (test) =>
-            `<details><summary><code>${test.testFile}</code></summary>\n\n${fenced(test.testFile, test.content)}\n\n</details>`,
-        ),
-      )
-  } else if (!run.skipped) lines.push('No test was written.')
-  if (run.notTested.length)
-    lines.push(
-      `<details><summary>Not tested</summary>\n\n${run.notTested.map((n) => `- \`${n.path}\` ${n.symbol} — ${n.reason}`).join('\n')}\n\n</details>`,
-    )
-  return lines.join('\n\n')
 }
 
 /** Body of a reply to a thread, with our marker so it is not answered again. */

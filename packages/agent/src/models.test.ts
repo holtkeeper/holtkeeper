@@ -1,16 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import {
-  listProviderModels,
-  modelCatalog,
-  resolveLatestModel,
-  resolveLatestRouting,
-  resolveProviderRouting,
-} from './models.ts'
-
-const listedIds = (ids: string[]) => async () => ({
-  models: ids.map((id) => ({ id, source: 'provider' as const })),
-})
+import { listProviderModels, modelCatalog, resolveLatestModel } from './models.ts'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -71,7 +61,7 @@ describe('listProviderModels', () => {
     expect(calls[1]?.url).toContain('after_id=claude-opus-5-5')
   })
 
-  test('reads OpenRouter-style prices from an OpenAI-compatible listing', async () => {
+  test('reads OpenRouter-style prices from an OpenAI-compatible listing of your own', async () => {
     const { fetch, calls } = recordingFetch(() =>
       json({
         data: [
@@ -85,7 +75,7 @@ describe('listProviderModels', () => {
       }),
     )
     const listing = await listProviderModels(
-      { kind: 'openai-compatible', url: 'https://llm.test/v1/', secret: 'key' },
+      { kind: 'ai-sdk', url: 'https://llm.test/v1/', secret: 'key', options: { provider: 'corp' } },
       { fetch },
     )
     expect(calls[0]?.url).toBe('https://llm.test/v1/models')
@@ -108,7 +98,6 @@ describe('listProviderModels', () => {
         secret: 'token',
         options: {
           authHeader: 'bearer',
-          model: 'claude-opus@latest',
           modelMap: { 'claude-opus-5-5': 'corp-opus' },
           pricing: { 'claude-opus-5-5': { inputPerMTok: 5, outputPerMTok: 25 } },
         },
@@ -119,21 +108,6 @@ describe('listProviderModels', () => {
     expect(listing.models).toEqual([
       { id: 'corp-opus', source: 'config', pricing: { inputPerMTok: 5, outputPerMTok: 25 } },
     ])
-  })
-
-  test('lists only configured models for Bedrock', async () => {
-    const { fetch, calls } = recordingFetch(() => json({}))
-    const listing = await listProviderModels(
-      {
-        kind: 'bedrock',
-        url: '',
-        secret: '',
-        options: { region: 'eu-north-1', models: { review: 'opus' } },
-      },
-      { fetch },
-    )
-    expect(calls).toHaveLength(0)
-    expect(listing).toEqual({ models: [{ id: 'opus', source: 'config' }] })
   })
 })
 
@@ -156,87 +130,30 @@ describe('latest', () => {
     expect(resolveLatestModel('gemini@latest', models)).toBeUndefined()
   })
 
-  test('resolves routing and names what matches nothing', () => {
-    expect(
-      resolveLatestRouting(
-        { model: 'claude-sonnet@latest', models: { review: 'claude-opus-4@latest' } },
-        models,
-      ),
-    ).toEqual({ model: 'claude-sonnet-5-5', models: { review: 'claude-opus-4-1' } })
-    expect(() => resolveLatestRouting({ model: 'gemini@latest' }, models)).toThrow(
-      'no listed model matches gemini@latest',
-    )
+  test('matches vendor-prefixed ids and dotted versions', () => {
+    const routed = [
+      { id: 'acme/widget-pro-4.6' },
+      { id: 'acme/widget-pro-4-5-20260101' },
+      { id: 'acme/widget-pro-4.6-lite' },
+      { id: 'other/widget-pro-9' },
+      { id: 'acme/widget-max-5-5' },
+    ]
+    expect(resolveLatestModel('widget-pro@latest', routed)).toBe('other/widget-pro-9')
+    expect(resolveLatestModel('acme/widget-pro@latest', routed)).toBe('acme/widget-pro-4.6')
+    expect(resolveLatestModel('widget-pro-4@latest', routed)).toBe('acme/widget-pro-4.6')
+    expect(resolveLatestModel('widget-pro-4-6@latest', routed)).toBe('acme/widget-pro-4.6')
+    expect(resolveLatestModel('widget-pro-4.5@latest', routed)).toBe('acme/widget-pro-4-5-20260101')
+    expect(resolveLatestModel('acme/widget-max@latest', routed)).toBe('acme/widget-max-5-5')
+    expect(resolveLatestModel('nobody/widget-max@latest', routed)).toBeUndefined()
   })
 
-  test('resolveProviderRouting lists only when a reference asks for latest', async () => {
-    let listed = 0
-    const list = async () => {
-      listed++
-      return { models: models.map((model) => ({ ...model, source: 'provider' as const })) }
-    }
-    const provider = { kind: 'anthropic', options: { models: { triage: 'claude-sonnet@latest' } } }
-    expect(await resolveProviderRouting(provider, { model: 'claude-opus-5-5' }, list)).toEqual({
-      model: 'claude-opus-5-5',
-      models: { triage: 'claude-sonnet-5-5' },
-    })
-    expect(listed).toBe(1)
-    expect(await resolveProviderRouting({ kind: 'anthropic' }, { model: 'x' }, list)).toEqual({
-      model: 'x',
-    })
-    expect(listed).toBe(1)
-    const failed = await resolveProviderRouting(
-      { kind: 'anthropic' },
-      { model: 'gemini@latest' },
-      async () => ({ models: [], error: 'HTTP 500' }),
-    ).catch((error: unknown) => error)
-    expect(failed).toBeInstanceOf(Error)
-    expect(String(failed)).toContain('no listed model matches gemini@latest (HTTP 500)')
-  })
-
-  test('resolveProviderRouting adds a fallback only for unrouted kinds the provider lists', async () => {
-    const fallbacks = { 'library-digest': 'claude-haiku@latest' }
-    expect(
-      await resolveProviderRouting(
-        { kind: 'anthropic' },
-        { model: 'claude-opus-5-5' },
-        listedIds(['claude-opus-5-5', 'claude-haiku-5-5']),
-        fallbacks,
-      ),
-    ).toEqual({ model: 'claude-opus-5-5', models: { 'library-digest': 'claude-haiku-5-5' } })
-    expect(
-      await resolveProviderRouting(
-        { kind: 'openai-compatible' },
-        { model: 'gpt-5' },
-        listedIds(['gpt-5']),
-        fallbacks,
-      ),
-    ).toEqual({ model: 'gpt-5' })
-    expect(
-      await resolveProviderRouting(
-        { kind: 'anthropic' },
-        { model: 'claude-opus-5-5', models: { 'library-digest': 'claude-sonnet-5-5' } },
-        listedIds(['claude-haiku-5-5']),
-        fallbacks,
-      ),
-    ).toEqual({ model: 'claude-opus-5-5', models: { 'library-digest': 'claude-sonnet-5-5' } })
-    expect(
-      await resolveProviderRouting(
-        { kind: 'anthropic', options: { models: { 'library-digest': 'claude-opus-5-5' } } },
-        { model: 'claude-opus-5-5' },
-        listedIds(['claude-haiku-5-5']),
-        fallbacks,
-      ),
-    ).toEqual({ model: 'claude-opus-5-5' })
-    expect(
-      await resolveProviderRouting(
-        { kind: 'anthropic' },
-        { model: 'claude-opus-5-5' },
-        async () => {
-          throw new Error('catalog down')
-        },
-        fallbacks,
-      ),
-    ).toEqual({ model: 'claude-opus-5-5' })
+  test('prefers the id without a vendor when both list the same version', () => {
+    const both = [{ id: 'acme/gadget-3-2' }, { id: 'gadget-3-2' }, { id: 'zeta/gadget-3-2' }]
+    expect(resolveLatestModel('gadget@latest', both)).toBe('gadget-3-2')
+    expect(resolveLatestModel('gadget@latest', both.toReversed())).toBe('gadget-3-2')
+    const vendored = [{ id: 'zeta/gadget-3-2' }, { id: 'acme/gadget-3-2' }]
+    expect(resolveLatestModel('gadget@latest', vendored)).toBe('acme/gadget-3-2')
+    expect(resolveLatestModel('gadget@latest', vendored.toReversed())).toBe('acme/gadget-3-2')
   })
 
   test('modelCatalog caches listings per key and drops failed ones', async () => {
@@ -244,7 +161,12 @@ describe('latest', () => {
     const { fetch, calls } = recordingFetch(() => json({ data: [{ id: 'gpt-5' }] }, status))
     let time = 0
     const catalog = modelCatalog({ fetch, ttlMs: 1000, now: () => time })
-    const provider = { kind: 'openai-compatible', url: 'https://llm.test/v1', secret: 'k' }
+    const provider = {
+      kind: 'ai-sdk',
+      url: 'https://llm.test/v1',
+      secret: 'k',
+      options: { provider: 'corp' },
+    }
     await catalog.list('a', provider)
     await catalog.list('a', provider)
     expect(calls).toHaveLength(1)

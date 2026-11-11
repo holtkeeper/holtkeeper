@@ -15,6 +15,7 @@ describe('ci-jobs analyzer', () => {
       kind: 'ci-jobs',
       scope: 'repo',
       needs: { forge: true, history: true },
+      keepRecords: 3,
     })
     expect(ciJobsOptionsSchema.parse({ days: '30' })).toEqual({
       days: 30,
@@ -35,10 +36,10 @@ describe('ci-jobs analyzer', () => {
 
     const first = await analyzer.run({ repo, forge, runner, history, options })
     expect(ciJobsDataSchema.parse(first.data)).toEqual(first.data)
-    expect(first.data.sync).toMatchObject({ mode: 'full', after: at(0), stored: 304 })
     expect(first.data.history).toMatchObject({ jobs: 304, syncedFrom: at(0) })
-    expect(first.data.totals.slowerJobs).toBe(1)
-    expect(first.data.notes).toEqual([])
+    expect(first.data.jobs.filter((j) => j.trend === 'slower').map((j) => j.name)).toEqual([
+      'build',
+    ])
     await store.analyses.add({
       repo,
       kind: 'ci-jobs',
@@ -47,20 +48,39 @@ describe('ci-jobs analyzer', () => {
     })
 
     const second = await analyzer.run({ repo, forge, runner, history, options })
-    expect(second.data.sync).toMatchObject({ mode: 'incremental', after: at(88, 14) })
     expect(forge.calls).toEqual([`jobs after ${at(0)}`, `jobs after ${at(88, 14)}`])
-    expect(second.data.totals).toEqual(first.data.totals)
+    expect(second.data.pipelines).toEqual(first.data.pipelines)
   })
 
-  test('without a store it reads everything and says history is not kept', async () => {
+  test('without a store it reads everything and logs that history is not kept', async () => {
     const analyzer = createCiJobsAnalyzer({ now: () => new Date(at(90)) })
+    const lines: string[] = []
     const { data } = await analyzer.run({
       repo,
       forge: fakeForge(() => toJobRuns(quarter())),
       runner,
       options: ciJobsOptionsSchema.parse({}),
+      log: (line) => lines.push(line),
     })
-    expect(data.sync.mode).toBe('full')
-    expect(data.notes[0]).toContain('history is not kept')
+    expect(data.pipelines).toMatchObject({ ref: 'main', count: 90 })
+    expect(lines.some((line) => line.includes('history is not kept'))).toBe(true)
+  })
+
+  test('an earlier record in an older shape still lets the next sync be incremental', async () => {
+    const store = memoryStore()
+    const jobs = toJobRuns(quarter())
+    const forge = fakeForge(() => jobs)
+    const history = { analyses: store.analyses, auditRuns: store.auditRuns, ciJobs: store.ciJobs }
+    const analyzer = createCiJobsAnalyzer({ now: () => new Date(at(90)) })
+    const options = ciJobsOptionsSchema.parse({})
+    await analyzer.run({ repo, forge, runner, history, options })
+    await store.analyses.add({
+      repo,
+      kind: 'ci-jobs',
+      createdAt: at(90),
+      data: { history: { jobs: 304, syncedFrom: at(0) }, totals: {}, notes: [] },
+    })
+    await analyzer.run({ repo, forge, runner, history, options })
+    expect(forge.calls.at(-1)).toBe(`jobs after ${at(88, 14)}`)
   })
 })

@@ -39,10 +39,12 @@ export interface JobEngineOptions {
   admission?: WorkerOptions['admission']
   /** Stores the artifacts of runs; see `WorkerOptions.persistArtifacts`. */
   persistArtifacts?: WorkerOptions['persistArtifacts']
+  /** Where attempt logs are stored; see `WorkerOptions.logs`. */
+  logs?: WorkerOptions['logs']
   /** Cache shared between runs; see `ContextFactoryOptions.cache`. */
   cache?: ContextFactoryOptions['cache']
   /** Overrides for this process's worker, e.g. from `serve --concurrency` / `--claim-delay`. */
-  worker?: Pick<WorkerOptions, 'concurrency' | 'claimDelayMs' | 'maxJobs' | 'workerId'>
+  worker?: Pick<WorkerOptions, 'concurrency' | 'claimDelayMs' | 'maxJobs' | 'workerId' | 'pools'>
   now?: () => Date
   onFinished?: (job: Job, record?: AnalysisRecord) => void | Promise<void>
   log?: (line: string) => void
@@ -56,11 +58,10 @@ export interface JobEngine {
   stop(): Promise<void>
 }
 
-/** Wires a scheduler and a worker from `config.jobs`; throws when the section is missing or invalid. */
+/** Wires a scheduler and a worker from `config.jobs`; throws when a schedule is invalid. */
 export function createJobEngine(options: JobEngineOptions): JobEngine {
   const { config, store, analyzers } = options
   const jobs = config.jobs
-  if (!jobs) throw new Error('the config has no `jobs` section')
   const resolveRepos = options.resolveRepos ?? groupRepositories(config)
   const shared = {
     ...(options.now && { now: options.now }),
@@ -91,6 +92,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
     ...(options.settingOptions && { settingOptions: options.settingOptions }),
     ...(options.admission && { admission: options.admission }),
     ...(options.persistArtifacts && { persistArtifacts: options.persistArtifacts }),
+    ...(options.logs && { logs: options.logs }),
     ...options.worker,
     ...shared,
   })

@@ -182,9 +182,7 @@ export function classifyProposal(
     const kinds = new Set<string>()
     if (hints.taskKind) kinds.add(hints.taskKind)
     if (kind === 'migration') for (const k of ['propagate', 'port', 'review']) kinds.add(k)
-    if (kind === 'convention') for (const k of ['review', 'quality']) kinds.add(k)
-    if (topics.has('testing')) kinds.add('tests')
-    if (topics.has('release')) kinds.add('release-risk')
+    if (kind === 'convention') kinds.add('review')
     appliesTo = kind === 'quirk' || kind === 'howto' || !kinds.size ? ['*'] : [...kinds]
   }
 

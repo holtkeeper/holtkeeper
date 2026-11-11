@@ -113,7 +113,7 @@ export interface Tag {
   sha: string
 }
 
-/** A merge request with its timestamps, for delivery insights. Times are ISO 8601. */
+/** A merge request with its timestamps, for history insights. Times are ISO 8601. */
 export interface MergeRequestRecord extends MergeRequest {
   createdAt: string
   updatedAt: string
@@ -376,6 +376,13 @@ export interface Discussion {
   position?: { path: string; line: number; side: 'new' | 'old'; headSha: string }
 }
 
+/** An emoji reaction on a merge request note. */
+export interface NoteReaction {
+  /** As the forge names it, e.g. `thumbsup` on GitLab, `+1` on GitHub. */
+  name: string
+  user: string
+}
+
 export interface ReviewSubmission {
   refs: DiffRefs
   comments: ReviewComment[]
@@ -451,7 +458,7 @@ export interface GitForge {
   createTag(repo: string, input: { name: string; ref: string; message?: string }): Promise<Tag>
 
   /**
-   * Read-only history for delivery insights. Optional so adapters can add them later; callers
+   * Read-only history for history insights. Optional so adapters can add them later; callers
    * check for presence. Lists are newest first and return at most `limit` items.
    */
   listMergeRequests?(repo: string, query?: MergeRequestQuery): Promise<MergeRequestRecord[]>
@@ -474,6 +481,11 @@ export interface GitForge {
    * `ref` does not exist.
    */
   listCommits?(repo: string, query: CommitQuery): Promise<CommitRecord[]>
+  /**
+   * The commit the default branch points at, in one cheap request; `undefined` for an empty
+   * repository.
+   */
+  headCommit?(repo: string): Promise<string | undefined>
   /**
    * The push rules of the repository; `undefined` when it has none or the forge, its edition or the
    * token cannot read them.
@@ -504,6 +516,8 @@ export interface GitForge {
   /** Diff between two commits of the repository, e.g. what changed since the last review. */
   compareCommits?(repo: string, from: string, to: string): Promise<DiffFile[]>
   listDiscussions?(repo: string, id: number): Promise<Discussion[]>
+  /** Emoji reactions on one note of a merge request; forges without reactions leave it out. */
+  listNoteReactions?(repo: string, id: number, noteId: number | string): Promise<NoteReaction[]>
   /** Posts all comments as one review where the forge supports batching (GitLab draft notes). */
   submitReview?(repo: string, id: number, review: ReviewSubmission): Promise<ReviewOutcome>
   replyToDiscussion?(repo: string, id: number, discussionId: string, body: string): Promise<void>

@@ -66,7 +66,7 @@ export function LinkLine({
           style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
         >
           {data.label ? (
-            <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] text-muted shadow-surface">
+            <span className="rounded-md border border-border bg-surface px-1.5 py-0.5 text-[10px] text-muted">
               {data.label}
             </span>
           ) : null}
@@ -75,7 +75,7 @@ export function LinkLine({
               type="button"
               aria-label={removeLabel}
               title={removeLabel}
-              className="flex size-5 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-surface hover:border-danger hover:text-danger"
+              className="flex size-5 items-center justify-center rounded-full border border-border bg-surface text-muted hover:border-danger hover:text-danger"
               onClick={data.onRemove}
             >
               <X className="size-3" />

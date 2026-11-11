@@ -105,7 +105,6 @@ beforeEach(async () => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -142,6 +141,16 @@ const get = async <T>(path: string, headers: Record<string, string> = asAdmin) =
   return (await response.json()) as T
 }
 
+const crossTeam = (level: 'off' | 'metadata' | 'snippets') =>
+  store.settings.put({
+    id: 'cross-team',
+    key: 'access.crossTeam',
+    scope: { all: true },
+    value: level,
+    secret: false,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+  })
+
 describe('catalog routes', () => {
   test('lists the newest version of each package the caller may read', async () => {
     const list = await get<PublicApiPackageList>('/api/api-surface/packages')
@@ -151,7 +160,10 @@ describe('catalog routes', () => {
     ])
     expect(list.indexedAt).toBeDefined()
     const games = await get<PublicApiPackageList>('/api/api-surface/packages', asGames)
-    expect(games.packages.map((p) => p.name)).toEqual(['@games/engine'])
+    expect(games.packages.map((p) => p.name)).toEqual(['@acme/ui', '@games/engine'])
+    await crossTeam('off')
+    const own = await get<PublicApiPackageList>('/api/api-surface/packages', asGames)
+    expect(own.packages.map((p) => p.name)).toEqual(['@games/engine'])
     const filtered = await get<PublicApiPackageList>('/api/api-surface/packages?q=acme')
     expect(filtered.packages.map((p) => p.name)).toEqual(['@acme/ui'])
   })
@@ -176,6 +188,7 @@ describe('catalog routes', () => {
       '/api/api-surface/package?name=@acme/ui&version=v1.0.0',
     )
     expect(old.package.version).toBe('1.0.0')
+    await crossTeam('off')
     expect(
       (await app.request('/api/api-surface/package?name=@acme/ui', { headers: asGames })).status,
     ).toBe(404)
@@ -301,6 +314,13 @@ describe('removed packages', () => {
   })
 })
 
+const releaseToolsOf = async (headers: Record<string, string>) =>
+  (
+    (await (await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, headers)).json()) as {
+      result: { tools: { name: string; annotations?: { readOnlyHint?: boolean } }[] }
+    }
+  ).result.tools.filter((tool) => tool.name.startsWith('release_'))
+
 describe('MCP endpoint', () => {
   test('rejects anonymous requests and answers tools for token holders', async () => {
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {})).status).toBe(401)
@@ -347,18 +367,52 @@ describe('MCP endpoint', () => {
       'upgrade_impact',
       'repo_packages',
       'evaluate_dependency',
+      'who_uses',
+      'stack_usage',
+      'repo_stack',
       'search_knowledge',
       'get_knowledge',
       'propose_knowledge',
+      'repo_rules',
+      'propose_rule_change',
       'commit_conventions',
       'check_commit_message',
+      'test_ids',
+      'suggest_test_ids',
+      'asset_policy',
+      'repo_assets',
+      'release_rules',
+      'release_status',
+      'release_changes',
+      'jobs',
+      'job_log',
+      'why_job',
+      'analysis_status',
+      'start_task',
+      'task_status',
+      'request_review',
     ])
 
+    const reached = await callTool('list_packages', {}, bearer)
+    expect(reached.content[0]?.text).toContain('**@acme/ui**@1.1.0')
+    await crossTeam('off')
     const packages = await callTool('list_packages', {}, bearer)
     expect(packages.content[0]?.text).toContain('**@games/engine**@0.1.0')
     expect(packages.content[0]?.text).not.toContain('@acme/ui')
     const hidden = await callTool('get_package_api', { package: '@acme/ui' }, bearer)
     expect(hidden.isError).toBe(true)
+    const rules = await callTool('repo_rules', { repo: 'work:games/a' }, bearer)
+    expect(rules.isError).toBe(true)
+    const proposal = await callTool(
+      'propose_rule_change',
+      { repo: 'work:games/a', section: 'general', rule: 'Name scenes after levels.', reason: 'x' },
+      bearer,
+    )
+    expect(proposal.isError).toBe(true)
+    expect(await store.learnings.list()).toEqual([])
+    const testIds = await callTool('test_ids', { repo: 'work:games/a' }, bearer)
+    expect(testIds.content[0]?.text).toContain('No test id catalog for `work:games/a` yet')
+    expect((await callTool('test_ids', { repo: 'work:libs/ui' }, bearer)).isError).toBe(true)
 
     const tokens = await get<McpTokenList>('/api/api-surface/mcp/tokens', bearer)
     expect(tokens.tokens.map((t) => t.name)).toEqual(['laptop'])
@@ -378,6 +432,38 @@ describe('MCP endpoint', () => {
     })
     expect(revoked.status).toBe(204)
     expect((await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, bearer)).status).toBe(401)
+  })
+
+  test('offers release_step only to tokens with the release scope', async () => {
+    const issue = async (body: Record<string, unknown>) =>
+      (await (
+        await app.request('/api/api-surface/mcp/tokens', {
+          method: 'POST',
+          headers: { ...asAdmin, 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+      ).json()) as CreateMcpTokenResult
+    const reader = await issue({ name: 'reader' })
+    expect(reader.token.scopes).toBeUndefined()
+    expect(
+      (await releaseToolsOf({ authorization: `Bearer ${reader.secret}` })).map((t) => t.name),
+    ).toEqual(['release_rules', 'release_status', 'release_changes'])
+
+    const releaser = await issue({ name: 'releaser', scopes: ['release'] })
+    expect(releaser.token.scopes).toEqual(['release'])
+    const tools = await releaseToolsOf({ authorization: `Bearer ${releaser.secret}` })
+    expect(tools.map((t) => [t.name, t.annotations?.readOnlyHint])).toEqual([
+      ['release_rules', true],
+      ['release_status', true],
+      ['release_changes', true],
+      ['release_step', false],
+    ])
+    expect((await releaseToolsOf(asAdmin)).map((t) => t.name)).not.toContain('release_step')
+    expect(
+      (await releaseToolsOf({ ...asAdmin, authorization: 'Bearer hk_mcp_unknown' })).map(
+        (t) => t.name,
+      ),
+    ).not.toContain('release_step')
   })
 
   test('tools render APIs, versions and diffs, and usage is counted', async () => {
@@ -553,6 +639,7 @@ describe('usage routes and tools', () => {
       '/api/api-surface/usages/published?repo=work:games/a',
     )
     expect(games.packages.map((p) => [p.name, p.repos])).toEqual([['@games/engine', 0]])
+    await crossTeam('off')
     const hidden = await get<PublishedPackagesView>(
       '/api/api-surface/usages/published?repo=work:libs/ui',
       asGames,
@@ -579,7 +666,7 @@ describe('usage routes and tools', () => {
 
     const used = await callTool('package_usage', { package: '@acme/ui' }, asAdmin)
     expect(used.content[0]?.text).toContain(
-      '- `work:games/a` — 1.0.0, 3 uses in 2 files, 2 exports',
+      '- `work:games/a` (team games) — 1.0.0, 3 uses in 2 files, 2 exports',
     )
     const found = await callTool('find_usages', { package: '@acme/ui', export: 'button' }, asAdmin)
     expect(found.content[0]?.text).toContain('`src/hud.tsx:9` — jsx props `variant`')
@@ -675,6 +762,43 @@ describe('knowledge tools', () => {
       asGames,
     )
     expect(denied.isError).toBe(true)
+  })
+})
+
+describe('rules tools', () => {
+  test('repo_rules resolves the Guide and propose_rule_change leaves an audited candidate', async () => {
+    await store.guides.put({
+      scope: 'group:games',
+      section: 'general',
+      rules: 'Scenes own their assets.',
+      steering: '',
+      learnings: [],
+    })
+    const rules = await callTool('repo_rules', { repo: 'work:games/a' }, asAdmin)
+    expect(rules.content[0]?.text).toContain('Scenes own their assets.')
+
+    const proposed = await callTool(
+      'propose_rule_change',
+      {
+        repo: 'work:games/a',
+        section: 'general',
+        rule: 'Unload scene textures on exit.',
+        reason: 'Leaks in two merge requests.',
+        scope: 'group',
+      },
+      asAdmin,
+    )
+    expect(proposed.content[0]?.text).toStartWith('Proposed "Unload scene textures on exit."')
+    const [candidate] = await store.learnings.list()
+    expect(candidate).toMatchObject({
+      repo: 'work:games/a',
+      suggestedScope: 'group',
+      proposal: { by: 'header:jane', reason: 'Leaks in two merge requests.' },
+    })
+    const events = await store.audit.list({ action: 'learning.propose' })
+    expect(events.events.map((event) => [event.target.id, event.target.repo])).toEqual([
+      [candidate?.id, 'work:games/a'],
+    ])
   })
 })
 
@@ -792,7 +916,7 @@ describe('evaluate_dependency', () => {
       asAdmin,
     )
     const text = result.content[0]?.text ?? ''
-    expect(text).toContain('  - `work:games/a`: 2.29.1 (4 uses in 3 files)')
+    expect(text).toContain('  - `work:games/a`: 2.29.1; 4 uses in 3 files; team games')
     expect(text).toContain(
       '- high `GHSA-wc69-rhjr-hc9g` Inefficient parsing of RFC 2822 dates — **affects 2.29.1**, seen at 2.29.1 in `work:games/a`; fixed in 2.29.4',
     )

@@ -3,16 +3,15 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import type {
   CreateMcpTokenResult,
   GitHubTokenUsage,
-  LibraryDetail,
-  LibraryList,
+  LibraryIndexStatus,
   LibraryReindexResult,
-  LibrarySearchResult,
 } from '@holtkeeper/api'
 import type { ApiPackage } from '@holtkeeper/api-surface'
 import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
+import { type DepEdge, type DepNode, analyzeLayer } from '@holtkeeper/depgraph'
 import type { LibraryRegistry } from '@holtkeeper/libraries'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { LibraryStore, Store } from '@holtkeeper/store'
@@ -237,7 +236,6 @@ beforeEach(async () => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: [...builtinSettings, librariesSetting],
@@ -370,58 +368,33 @@ describe('githubClientFor', () => {
 })
 
 const post = (headers: Record<string, string>) =>
-  app.request('/api/libraries/reindex', { method: 'POST', headers })
+  app.request('/api/system/library-index/reindex', { method: 'POST', headers })
 
-describe('library routes', () => {
-  test('lists libraries used by readable repositories', async () => {
+describe('library index admin routes', () => {
+  test('lists every indexed library for global settings:read', async () => {
     await enable({ enabled: false })
-    const list = await get<LibraryList>('/api/libraries')
-    expect(list.enabled).toBe(false)
+    const status = await get<LibraryIndexStatus>('/api/system/library-index')
+    expect(status.enabled).toBe(false)
     expect(
-      list.libraries.map((l) => [l.name, l.versions, l.repos, l.chunks, l.issues, l.failed]),
+      status.libraries.map((l) => [l.name, l.versions, l.repos, l.chunks, l.issues, l.failed]),
     ).toEqual([
       ['left-pad', ['1.3.0'], 1, 1, 0, []],
       ['zod', ['4.0.0', '3.22.0'], 2, 2, 1, ['issues']],
     ])
-    expect(list.libraries[1]?.repository).toBe('https://example.com/zod')
+    expect(status.libraries[1]?.repository).toBe('https://example.com/zod')
+    expect((await app.request('/api/system/library-index', { headers: asGames })).status).toBe(403)
 
     await enable()
-    const games = await get<LibraryList>('/api/libraries', asGames)
-    expect(games.enabled).toBe(true)
-    expect(games.libraries.map((l) => [l.name, l.repos])).toEqual([['zod', 1]])
-    const filtered = await get<LibraryList>('/api/libraries?q=pad')
+    const filtered = await get<LibraryIndexStatus>('/api/system/library-index?q=pad')
+    expect(filtered.enabled).toBe(true)
     expect(filtered.libraries.map((l) => l.name)).toEqual(['left-pad'])
-    expect((await app.request('/api/libraries?ecosystem=rust', { headers: asAdmin })).status).toBe(
-      400,
-    )
+    expect(
+      (await app.request('/api/system/library-index?ecosystem=rust', { headers: asAdmin })).status,
+    ).toBe(400)
   })
 
-  test('shows one library with readable users and the documents of its newest version', async () => {
-    const detail = await get<LibraryDetail>('/api/libraries/npm/zod', asGames)
-    expect(detail.library.description).toBe('Schemas')
-    expect(detail.versions.map((v) => [v.version, v.usedBy])).toEqual([
-      ['4.0.0', []],
-      ['3.22.0', ['work:games/a']],
-    ])
-    expect(detail.documents).toEqual([{ source: 'archive', path: 'README.md', chunks: 1 }])
-    expect((await app.request('/api/libraries/npm/left-pad', { headers: asGames })).status).toBe(
-      404,
-    )
-    expect((await app.request('/api/libraries/npm/nope', { headers: asAdmin })).status).toBe(404)
-  })
-
-  test('searches chunks of visible libraries', async () => {
-    const result = await get<LibrarySearchResult>('/api/libraries/search?q=refinements', asGames)
-    expect(result.hits.map((h) => h.chunk.id).toSorted()).toEqual(['readme-3.22.0', 'readme-4.0.0'])
-    const only = await get<LibrarySearchResult>(
-      '/api/libraries/search?q=refinements&name=zod&version=4.0.0',
-    )
-    expect(only.hits.map((h) => h.chunk.id)).toEqual(['readme-4.0.0'])
-    expect((await get<LibrarySearchResult>('/api/libraries/search?q=')).hits).toEqual([])
-  })
-
-  test('the list carries coverage per source and the running index run', async () => {
-    const before = await get<LibraryList>('/api/libraries')
+  test('carries coverage per source and the running index run', async () => {
+    const before = await get<LibraryIndexStatus>('/api/system/library-index')
     expect(before.progress).toBeUndefined()
     expect(before.coverage.map((row) => row.source)).toContain('archive')
     await store.kv?.set('libraries:progress', {
@@ -431,7 +404,7 @@ describe('library routes', () => {
       library: 'npm:zod',
       updatedAt: at,
     })
-    expect((await get<LibraryList>('/api/libraries')).progress).toMatchObject({
+    expect((await get<LibraryIndexStatus>('/api/system/library-index')).progress).toMatchObject({
       total: 4,
       done: 1,
       library: 'npm:zod',
@@ -439,7 +412,7 @@ describe('library routes', () => {
   })
 
   test('the index is on without a libraries setting', async () => {
-    expect((await get<LibraryList>('/api/libraries')).enabled).toBe(true)
+    expect((await get<LibraryIndexStatus>('/api/system/library-index')).enabled).toBe(true)
     expect((await post(asAdmin)).status).toBe(200)
   })
 
@@ -455,7 +428,9 @@ describe('library routes', () => {
   })
 
   test('GitHub token usage needs global settings:read and counts what the clients sent', async () => {
-    expect((await app.request('/api/libraries/github', { headers: asGames })).status).toBe(403)
+    expect(
+      (await app.request('/api/system/library-index/github', { headers: asGames })).status,
+    ).toBe(403)
     const counter = githubUsageFor(store.kv, () => now)
     counter.record({
       kind: 'request',
@@ -472,7 +447,7 @@ describe('library routes', () => {
       limited: false,
     })
     counter.record({ kind: 'wait', resource: 'search', ms: 1500 })
-    const body = await get<GitHubTokenUsage>('/api/libraries/github?days=7', asAdmin)
+    const body = await get<GitHubTokenUsage>('/api/system/library-index/github?days=7', asAdmin)
     expect(body.tokens).toEqual([])
     expect(body.days).toHaveLength(7)
     expect(body.anonymous['core']).toMatchObject({ requests: 2, notModified: 1 })
@@ -480,7 +455,7 @@ describe('library routes', () => {
     expect(body.days.at(-1)?.byToken).toEqual({ anonymous: 2 })
   })
 
-  test('MCP tokens read the library routes', async () => {
+  test('MCP tokens cannot reach the admin routes', async () => {
     const created = await app.request('/api/api-surface/mcp/tokens', {
       method: 'POST',
       headers: { ...asAdmin, 'content-type': 'application/json' },
@@ -488,9 +463,10 @@ describe('library routes', () => {
     })
     const { secret } = (await created.json()) as CreateMcpTokenResult
     const bearer = { authorization: `Bearer ${secret}` }
-    expect((await get<LibraryList>('/api/libraries', bearer)).libraries).toHaveLength(2)
+    expect((await app.request('/api/system/library-index', { headers: bearer })).status).toBe(401)
     expect(
-      (await app.request('/api/libraries/reindex', { method: 'POST', headers: bearer })).status,
+      (await app.request('/api/system/library-index/reindex', { method: 'POST', headers: bearer }))
+        .status,
     ).toBe(401)
   })
 })
@@ -521,6 +497,16 @@ const callTool = async (
   return { text: body.result.content[0]?.text ?? '', isError: body.result.isError }
 }
 
+const crossTeamOff = () =>
+  store.settings.put({
+    id: 'cross-team',
+    key: 'access.crossTeam',
+    scope: { all: true },
+    value: 'off',
+    secret: false,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+  })
+
 describe('library MCP tools', () => {
   test('lists the library tools', async () => {
     const response = await app.request('/mcp', {
@@ -546,6 +532,7 @@ describe('library MCP tools', () => {
   })
 
   test('answers from the index with the caller repository’s version', async () => {
+    await crossTeamOff()
     const versions = await callTool('library_versions', { package: 'zod' }, asGames)
     expect(versions.text).toContain('3.22.0')
     expect(versions.text).toContain('work:games/a')
@@ -581,6 +568,7 @@ describe('library MCP tools', () => {
   })
 
   test('hides libraries the caller could not see through the web routes', async () => {
+    await crossTeamOff()
     const versions = await callTool('library_versions', { package: 'left-pad' }, asGames)
     expect(versions.text).toContain('is not indexed')
     const search = await callTool('search_library_docs', { query: 'refinements' }, asGames)
@@ -600,7 +588,13 @@ describe('library MCP tools', () => {
     const api = await callTool('get_package_api', { package: 'zod' }, asOutsider)
     expect(api.isError).toBe(true)
     expect(api.text).toContain('No package zod')
-    expect((await app.request('/api/libraries/npm/zod', { headers: asOutsider })).status).toBe(404)
+    expect(
+      (
+        await app.request('/api/dependencies/library?ecosystem=npm&name=zod', {
+          headers: asOutsider,
+        })
+      ).status,
+    ).toBe(404)
   })
 
   test('API tools fall back to the library index', async () => {
@@ -668,14 +662,17 @@ const indexDeps = () => ({
   now: () => now,
 })
 
+const layer = (nodes: DepNode[], edges: DepEdge[]) =>
+  analyzeLayer({ id: 'packages', source: 'test', graph: { nodes, edges } })
+
 describe('library index triggers', () => {
-  test('new usages and fleet records ask for a debounced run', async () => {
+  test('new usages and depgraph records ask for a debounced run', async () => {
     const kv = store.kv as NonNullable<Store['kv']>
-    await noteLibraryUses(kv, 'depgraph', now)
+    await noteLibraryUses(kv, 'stack', now)
     expect(await kv.get('libraries:reindex')).toBeUndefined()
     await noteLibraryUses(kv, 'usages', now)
     expect(await kv.get('libraries:reindex')).toEqual({ after: '2026-10-30T12:10:00.000Z' })
-    await noteLibraryUses(kv, 'fleet', new Date('2026-10-30T12:05:00.000Z'))
+    await noteLibraryUses(kv, 'depgraph', new Date('2026-10-30T12:05:00.000Z'))
     expect(await kv.get('libraries:reindex')).toEqual({ after: '2026-10-30T12:15:00.000Z' })
     await requestLibraryIndex(kv)
     await noteLibraryUses(kv, 'usages', now)
@@ -707,47 +704,139 @@ describe('library index duty', () => {
     })
   })
 
-  test('collects uses from usages and fleet records', async () => {
+  test('collects uses from depgraph and usages records, Go included, and finds internal packages', async () => {
     await store.analyses.add({
-      repo: { forge: 'work', path: 'games' },
-      kind: 'fleet',
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'depgraph',
       createdAt: at,
       data: {
-        group: 'games',
-        repos: [],
-        templates: [],
-        notes: [],
-        libraries: [
-          {
-            ecosystem: 'Go',
-            name: 'github.com/spf13/cobra',
-            reason: 'auto',
-            usages: [
+        layers: [
+          layer(
+            [
               {
-                repo: 'games/a',
-                manifest: 'go.mod',
-                declared: 'v1.8.0',
-                version: 'v1.8.0',
-                kind: 'prod',
+                id: 'example.com/games/a',
+                name: 'example.com/games/a',
+                ecosystem: 'Go',
+                kind: 'workspace',
+              },
+              {
+                id: 's@v2.1.0',
+                name: 'example.com/shapes/v2',
+                version: 'v2.1.0',
+                ecosystem: 'Go',
+                kind: 'package',
+              },
+              {
+                id: 'e@v0.3.0',
+                name: 'example.com/games/engine',
+                version: 'v0.3.0',
+                ecosystem: 'Go',
+                kind: 'package',
               },
             ],
-          },
-          {
-            ecosystem: 'npm',
-            name: '@games/engine',
-            definedIn: 'work:games/engine',
-            reason: 'auto',
-            usages: [],
-          },
+            [
+              { from: 'example.com/games/a', to: 's@v2.1.0', kind: 'prod' },
+              { from: 'example.com/games/a', to: 'e@v0.3.0', kind: 'prod' },
+            ],
+          ),
         ],
+        errors: [],
       },
     })
-    const { uses, internal } = await fleetLibraryUses(store.analyses)
-    expect(uses).toEqual([
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/engine' },
+      kind: 'depgraph',
+      createdAt: at,
+      data: {
+        layers: [
+          layer(
+            [{ id: 'm', name: 'example.com/games/engine', ecosystem: 'Go', kind: 'workspace' }],
+            [],
+          ),
+          layer(
+            [
+              {
+                id: 'kit',
+                name: '@games/widget-kit',
+                version: '2.0.0',
+                ecosystem: 'npm',
+                kind: 'workspace',
+              },
+              {
+                id: 'tiny@1.0.0',
+                name: 'tiny',
+                version: '1.0.0',
+                ecosystem: 'npm',
+                kind: 'package',
+              },
+              { id: 'range', name: 'loose', version: '^1.0.0', ecosystem: 'npm', kind: 'package' },
+            ],
+            [
+              { from: 'kit', to: 'tiny@1.0.0', kind: 'prod' },
+              { from: 'kit', to: 'range', kind: 'prod' },
+            ],
+          ),
+        ],
+        errors: [],
+      },
+    })
+    const { uses, internal, defined } = await fleetLibraryUses(store.analyses)
+    expect(
+      uses.toSorted((a, b) => `${a.repo}${a.name}`.localeCompare(`${b.repo}${b.name}`)),
+    ).toEqual([
+      {
+        ecosystem: 'Go',
+        name: 'example.com/games/engine',
+        version: 'v0.3.0',
+        repo: 'work:games/a',
+      },
+      { ecosystem: 'Go', name: 'example.com/shapes/v2', version: 'v2.1.0', repo: 'work:games/a' },
+      { ecosystem: 'npm', name: 'tiny', version: '1.0.0', repo: 'work:games/engine' },
       { ecosystem: 'npm', name: 'tiny', version: '1.0.0', repo: 'work:libs/ui' },
-      { ecosystem: 'Go', name: 'github.com/spf13/cobra', version: 'v1.8.0', repo: 'work:games/a' },
     ])
-    expect([...internal]).toEqual(['npm:@games/engine'])
+    expect([...internal].toSorted()).toEqual([
+      'Go:example.com/games/a',
+      'Go:example.com/games/engine',
+      'npm:@games/widget-kit',
+    ])
+    expect(Object.fromEntries(defined)).toEqual({
+      'Go:example.com/games/engine': 'v0.3.0',
+      'npm:@games/widget-kit': '2.0.0',
+    })
+
+    const games = await fleetLibraryUses(store.analyses, {
+      accept: (repo) => repo.path === 'games/a',
+    })
+    expect(games.uses.map((use) => use.repo)).toEqual(['work:games/a', 'work:games/a'])
+    expect(games.internal).toEqual(internal)
+  })
+
+  test('the index leaves internal packages to the API catalog and records latest versions', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/engine' },
+      kind: 'depgraph',
+      createdAt: at,
+      data: {
+        layers: [
+          analyzeLayer({
+            id: 'packages',
+            source: 'test',
+            graph: {
+              nodes: [
+                { id: 'kit', name: 'tiny', version: '0.1.0', ecosystem: 'npm', kind: 'workspace' },
+              ],
+              edges: [],
+            },
+          }),
+        ],
+        errors: [],
+      },
+    })
+    await enable({ enabled: true, sources: { repository: false, releases: false, issues: false } })
+    const run = await runLibraryIndex(indexDeps(), { registries: { npm: registry() } })
+    expect(run?.libraries).toBe(0)
+    expect(await libraries.getLibrary({ ecosystem: 'npm', name: 'tiny' })).toBeUndefined()
+    expect(await store.kv?.get('libraries:latest')).toEqual({})
   })
 
   test('indexes nothing while the setting is off, then runs and records the run', async () => {

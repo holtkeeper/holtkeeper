@@ -23,23 +23,16 @@ describe('provider options', () => {
       headers: { 'X-Key': '{secret}' },
       modelMap: { a: 'b' },
     })
-    expect(
-      parseProviderOptions({ kind: 'bedrock', options: { region: 'eu-west-1' } }),
-    ).toMatchObject({ credentials: 'env' })
-    expect(parseProviderOptions({ kind: 'openai-compatible' })).toEqual({
-      kind: 'openai-compatible',
-      supportsTools: true,
+    expect(parseProviderOptions({ kind: 'ai-sdk', options: { provider: 'x' } })).toEqual({
+      kind: 'ai-sdk',
+      provider: 'x',
+      package: '@ai-sdk/openai-compatible',
     })
   })
 
   test('report every problem with its field', () => {
     expect(providerOptionsIssues('gitlab', {})).toEqual(['kind: gitlab is not an AI provider kind'])
-    expect(providerOptionsIssues('vertex', { region: 'x' })).toEqual([
-      'options.projectId: Invalid input: expected string, received undefined',
-    ])
-    expect(providerOptionsIssues('openai-compatible', { supportsTools: false })).toEqual([
-      'options.supportsTools: the provider must support tool calling',
-    ])
+    expect(providerOptionsIssues('vertex', {})).toEqual(['kind: vertex is not an AI provider kind'])
     expect(
       providerOptionsIssues('anthropic-compatible', {
         baseUrl: 'ftp://x',
@@ -47,10 +40,11 @@ describe('provider options', () => {
         pricing: { m: { inputPerMTok: -1, outputPerMTok: 1 } },
       }),
     ).toHaveLength(4)
-    expect(() => parseProviderOptions({ kind: 'bedrock', options: {} })).toThrow(
-      'invalid AI provider: options.region',
+    expect(() => parseProviderOptions({ kind: 'ai-sdk', options: {} })).toThrow(
+      'invalid AI provider: options.provider',
     )
-    expect(isAiProviderKind('vertex')).toBe(true)
+    expect(isAiProviderKind('anthropic-compatible')).toBe(true)
+    expect(isAiProviderKind('openai-compatible')).toBe(false)
     expect(isAiProviderKind('github')).toBe(false)
   })
 
@@ -87,7 +81,7 @@ describe('aiProviderOptionsValidator', () => {
   test('checks AI kinds and ignores others', async () => {
     const { aiProviderOptionsValidator } = await import('./provider.ts')
     expect(aiProviderOptionsValidator('gitlab', { x: 1 })).toBeUndefined()
-    expect(aiProviderOptionsValidator('bedrock', { region: 'eu' })).toEqual([])
-    expect(aiProviderOptionsValidator('bedrock', undefined)?.[0]).toStartWith('options.region')
+    expect(aiProviderOptionsValidator('anthropic-compatible', {})).toEqual([])
+    expect(aiProviderOptionsValidator('ai-sdk', undefined)?.[0]).toStartWith('options.provider')
   })
 })

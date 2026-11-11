@@ -1,14 +1,13 @@
 // oxlint-disable no-await-in-loop -- steps touch the same checkout or forge branch and run in order
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Agent } from '@holtkeeper/agent'
-import type { CommandRunner } from '@holtkeeper/exec'
+import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 
-import { defaultBumpers, detectNodeProject, writeUsages } from './bump.ts'
+import { defaultBumpers } from './bump.ts'
 import { type CheckOptions, defaultVerifier, detectChecks } from './checks.ts'
-import { createAgentFixer, fixUntilPassing, noopFixer } from './fix.ts'
-import { chainNotes, forgeNotes, nodeModulesNotes } from './notes.ts'
+import { chainNotes, forgeNotes, nodeModulesNotes, trimText } from './notes.ts'
 import { type Planner, defaultPlanner, diskFiles, forgeFiles } from './plan.ts'
 import {
   type ChangedFile,
@@ -23,12 +22,11 @@ import {
 import { createHttpRegistry, resolveTargets } from './registry.ts'
 import { globToRegExp } from './semver.ts'
 import type {
-  AgentReport,
   Bump,
   Bumper,
   CheckResult,
-  FixContext,
-  Fixer,
+  FixProposer,
+  FixRequest,
   PackageRequest,
   PackageTarget,
   ReleaseNotes,
@@ -46,21 +44,20 @@ export interface PropagateSteps {
   bumpers?: Bumper[]
   verifier?: Verifier
   notes?: ReleaseNotesSource
-  fixer?: Fixer
 }
 
-/** Result of bumping, verifying and fixing one checkout. */
+/** Result of bumping and verifying one checkout. */
 export interface CheckoutOutcome {
   status: RepoStatus
   bumps: Bump[]
   checks: CheckResult[]
-  attempts: number
-  agent?: AgentReport
+  /** Release notes of the bumped packages, looked up only when checks fail. */
   releaseNotes: ReleaseNotes[]
   notes: string[]
-  /** Files to publish: the bump's manifests and lockfiles plus what the fixer touched. */
+  /** Files to publish: the bump's manifests and lockfiles. */
   files: ChangedFile[]
-  fixedFiles: string[]
+  /** What a write task needs to make failing checks pass; only when checks fail in a git checkout. */
+  fix?: Omit<FixRequest, 'repo'>
 }
 
 /** Input of `updateCheckout`. */
@@ -72,10 +69,8 @@ export interface UpdateCheckoutInput {
   bumpers: Bumper[]
   verifier: Verifier
   notes: ReleaseNotesSource
-  fixer: Fixer
   checks?: CheckOptions
   allowInstallScripts: boolean
-  maxAttempts: number
   signal?: AbortSignal
   log?: (line: string) => void
 }
@@ -88,38 +83,63 @@ async function trySnapshot(dir: string, runner: CommandRunner) {
   }
 }
 
-/** Rules for a fixer working on a dependency bump, passed as its instructions. */
+/** Rules for the agent of a fix task, at the top of its prompt. */
 export const bumpInstructions = [
-  'Dependencies were updated in this repository and some checks now fail.',
-  'Adapt the code to the new versions. Never edit lockfiles, never change dependency versions or',
-  'ranges in manifests and never downgrade a package.',
+  'Dependencies were updated in this repository and some checks now fail. The update is already',
+  'applied in the checkout. Adapt the code to the new versions. Never edit lockfiles, never change',
+  'dependency versions or ranges in manifests and never downgrade a package.',
 ].join(' ')
 
-/** Fix context for a bump: the bumped declarations and the release notes found. */
-export function bumpContext(bumps: Bump[], notes: ReleaseNotes[]): FixContext[] {
-  return [
-    {
-      title: 'Updated dependencies',
-      text: bumps
-        .map((bump) => `- ${bump.package}: ${bump.from} → ${bump.to} (${bump.manifest})`)
-        .join('\n'),
-    },
-    ...notes.map((note) => ({
-      title: `Release notes of ${note.package} ${note.from ?? ''} → ${note.to} (${note.source})`,
-      text: note.text,
-    })),
+/** Longest prompt a fix task gets; write tasks accept 20 000 characters. */
+const MAX_FIX_PROMPT = 19_000
+
+/** The prompt of a fix task: the rules, the bumps, the failing checks' output and the release notes. */
+export function fixPrompt(input: {
+  bumps: Bump[]
+  checks: CheckResult[]
+  releaseNotes: ReleaseNotes[]
+}): string {
+  const failing = input.checks.filter((check) => !check.ok)
+  const parts = [
+    bumpInstructions,
+    '## Updated dependencies',
+    input.bumps
+      .map((bump) => `- ${bump.package}: ${bump.from} → ${bump.to} (${bump.manifest})`)
+      .join('\n'),
+    '## Failing checks',
+    ...failing.map(
+      (check) =>
+        `### ${check.name} (\`${check.command}\`, exit ${check.exitCode})\n\n\`\`\`\n${trimText(check.output.split('\n').slice(-120).join('\n'), 4000)}\n\`\`\``,
+    ),
+    ...input.releaseNotes.map(
+      (note) =>
+        `## Release notes of ${note.package} ${note.from ?? ''} → ${note.to} (${note.source})\n\n${trimText(note.text, 5000)}`,
+    ),
   ]
+  return trimText(parts.join('\n\n'), MAX_FIX_PROMPT)
+}
+
+/** The staged diff of `files` against `HEAD`, binary-safe, for `git apply -3` elsewhere. */
+async function diffOf(dir: string, runner: CommandRunner, files: ChangedFile[]) {
+  const paths = files.map((file) => file.path)
+  await runChecked(runner, ['git', 'add', '-A', '--', ...paths], { cwd: dir })
+  const { stdout } = await runChecked(
+    runner,
+    ['git', 'diff', '--cached', '--binary', '--no-color', '--', ...paths],
+    { cwd: dir },
+  )
+  return stdout
 }
 
 /**
- * Bumps, verifies and (when checks fail and the fixer can) fixes one writable checkout. The
- * fixer may not change the lockfile or the bumped values: both are restored after each attempt.
- * Rejects only when a bumper fails.
+ * Bumps and verifies one writable checkout. When checks fail it looks up the release notes and
+ * prepares a fix request (the bump as a patch, the prompt for a write task's agent). Rejects only
+ * when a bumper fails.
  */
 export async function updateCheckout(input: UpdateCheckoutInput): Promise<CheckoutOutcome> {
   const { dir, runner, signal } = input
   const toBump = input.plan.usages.filter((usage) => usage.next !== undefined)
-  const base = { checks: [], attempts: 0, releaseNotes: [], files: [], fixedFiles: [] }
+  const base = { checks: [], releaseNotes: [], files: [] }
   if (input.plan.usages.length === 0)
     return { ...base, status: 'skipped', bumps: [], notes: [...input.plan.notes] }
   if (toBump.length === 0)
@@ -147,26 +167,21 @@ export async function updateCheckout(input: UpdateCheckoutInput): Promise<Checko
   )
 
   const afterBump = await trySnapshot(dir, runner)
-  const lockfile = (await detectNodeProject(dir))?.lockfile
-  const lockText = lockfile ? await Bun.file(join(dir, lockfile)).text() : undefined
   const specs = await detectChecks(dir, {
     ...(input.checks ? { checks: input.checks } : {}),
     go: bumps.some((bump) => bump.manifest.endsWith('go.mod')),
     allowInstallScripts: input.allowInstallScripts,
   })
-  let checks = await input.verifier.verify({
+  const checks = await input.verifier.verify({
     dir,
     checks: specs,
     runner,
-    attempt: 0,
     ...(signal ? { signal } : {}),
   })
-  let attempts = 0
-  let agent: AgentReport | undefined
-  const releaseNotes: ReleaseNotes[] = []
-  const fixed = new Set<string>()
+  const ok = checks.every((check) => check.ok)
 
-  if (checks.some((check) => !check.ok) && input.maxAttempts > 0) {
+  const releaseNotes: ReleaseNotes[] = []
+  if (!ok)
     for (const name of new Set(bumps.map((bump) => bump.package))) {
       const usage = toBump.find((candidate) => candidate.package === name)
       const target = input.targets.find((candidate) => candidate.name === name)
@@ -180,64 +195,31 @@ export async function updateCheckout(input: UpdateCheckoutInput): Promise<Checko
       })
       if (found) releaseNotes.push(found)
     }
-    const loop = await fixUntilPassing({
-      dir,
-      runner,
-      verifier: input.verifier,
-      fixer: input.fixer,
-      specs,
-      checks,
-      maxAttempts: input.maxAttempts,
-      context: bumpContext(bumps, releaseNotes),
-      instructions: bumpInstructions,
-      async afterAttempt(attempt) {
-        if (
-          lockfile &&
-          lockText !== undefined &&
-          (await Bun.file(join(dir, lockfile)).text()) !== lockText
-        ) {
-          await Bun.write(join(dir, lockfile), lockText)
-          notes.push(`attempt ${attempt}: restored ${lockfile}, which the fixer changed`)
-        }
-        const reapplied = await writeUsages(
-          dir,
-          toBump.filter((usage) => usage.ecosystem === 'npm'),
-        )
-        notes.push(...reapplied.notes)
-      },
-      ...(signal ? { signal } : {}),
-      ...(input.log ? { log: input.log } : {}),
-    })
-    checks = loop.checks
-    attempts = loop.attempts
-    agent = loop.report
-    for (const path of loop.touched) fixed.add(path)
-  }
 
-  const ok = checks.every((check) => check.ok)
-  const status: RepoStatus = ok ? (attempts > 0 ? 'fixed' : 'updated') : 'failed'
   let files: ChangedFile[] = []
-  try {
-    const keep = new Set([...(afterBump?.keys() ?? []), ...fixed])
-    files = (await changedFiles(dir, runner)).filter((file) => keep.has(file.path))
-  } catch {
+  let fix: CheckoutOutcome['fix']
+  if (afterBump) {
+    files = (await changedFiles(dir, runner)).filter((file) => afterBump.has(file.path))
+    if (!ok && files.length)
+      fix = {
+        prompt: fixPrompt({ bumps, checks, releaseNotes }),
+        patch: await diffOf(dir, runner, files),
+      }
+  } else {
     files = [...new Set(bumps.map((bump) => bump.manifest))].map((path) => ({
       path,
       action: 'update' as const,
     }))
     notes.push('not a git checkout; changed files are the bumped manifests only')
   }
-  const fixedFiles = [...fixed].filter((path) => !afterBump?.has(path)).toSorted()
   return {
-    status,
+    status: ok ? 'updated' : 'failed',
     bumps,
     checks,
-    attempts,
-    ...(agent ? { agent } : {}),
     releaseNotes,
     notes,
     files,
-    fixedFiles,
+    ...(fix && { fix }),
   }
 }
 
@@ -272,7 +254,10 @@ function dedupeNotes(outcomes: { releaseNotes: ReleaseNotes[] }[]): ReleaseNotes
 
 /** Options of the merge requests the wave opens. */
 export interface MergeRequestSettings {
-  /** Open a draft labeled `needs-attention` when checks still fail; otherwise no merge request. Default true. */
+  /**
+   * Open a draft labeled `needs-attention` when checks fail and no fix task takes the repository
+   * over; otherwise no merge request. Default true.
+   */
   draftOnFailure?: boolean
   /** Default `['holtkeeper', 'dependencies']`. */
   labels?: string[]
@@ -280,22 +265,13 @@ export interface MergeRequestSettings {
   branchPrefix?: string
 }
 
-/** Settings of the fix step. */
-export interface FixSettings {
-  /** Default: true when an agent is configured. */
-  enabled?: boolean
-  /** Default 3. */
-  maxAttempts?: number
-  maxTurns?: number
-  timeoutMinutes?: number
-}
-
 /** A checkout as the task engine provides it. */
 export interface Checkout {
   dir: string
   sha: string
   ref: string
-  cleanup(): Promise<void> /** Commits signed with the forge's key; see `AnalyzerContext.checkout`. */
+  cleanup(): Promise<void>
+  /** Commits signed with the forge's key; see `AnalyzerContext.checkout`. */
   publisher?: GitPublisher
 }
 
@@ -305,6 +281,9 @@ export type CheckoutFn = (
   options?: { ref?: string; writable?: boolean },
 ) => Promise<Checkout>
 
+/** Longest bump patch a fix task takes; write tasks accept 1 000 000 characters. */
+const MAX_FIX_PATCH = 1_000_000
+
 /** Everything one wave across a group needs. */
 export interface PropagationInput {
   group: string
@@ -313,13 +292,18 @@ export interface PropagationInput {
   forge: GitForge
   checkout: CheckoutFn
   runner: CommandRunner
-  agent?: Agent
   registry?: VersionRegistry
   packages: PackageRequest[]
   onlyRepos?: string[]
   checks?: CheckOptions
   allowInstallScripts?: boolean
-  fix?: FixSettings
+  /**
+   * Proposes one write task per repository whose checks fail after the bump, all in one task
+   * group; such repositories get no merge request from the wave. Without it (or with `dryRun`),
+   * and for repositories it proposed no task for or when proposing fails, they get a draft
+   * (`draftOnFailure`), made again from the bump patch after proposing.
+   */
+  fixes?: FixProposer
   mergeRequest?: MergeRequestSettings
   /** Package name → `forge:path` of its source repository, for release notes. */
   sources?: Record<string, string>
@@ -331,27 +315,12 @@ export interface PropagationInput {
   log?: (line: string) => void
 }
 
-function stepsOf(
-  steps: PropagateSteps,
-  agent: Agent | undefined,
-  fix: FixSettings | undefined,
-  extraNotes: ReleaseNotesSource[],
-) {
-  const enabled = fix?.enabled ?? agent !== undefined
+function stepsOf(steps: PropagateSteps, extraNotes: ReleaseNotesSource[]) {
   return {
     planner: steps.planner ?? defaultPlanner,
     bumpers: steps.bumpers ?? defaultBumpers,
     verifier: steps.verifier ?? defaultVerifier,
     notes: steps.notes ?? chainNotes([nodeModulesNotes(), ...extraNotes]),
-    fixer:
-      steps.fixer ??
-      (enabled && agent
-        ? createAgentFixer(agent, {
-            ...(fix?.maxTurns ? { maxTurns: fix.maxTurns } : {}),
-            ...(fix?.timeoutMinutes ? { timeoutMinutes: fix.timeoutMinutes } : {}),
-          })
-        : noopFixer),
-    maxAttempts: enabled || steps.fixer ? (fix?.maxAttempts ?? 3) : 0,
   }
 }
 
@@ -365,22 +334,24 @@ const emptyOutcome = (
   usages: [],
   bumps: [],
   checks: [],
-  attempts: 0,
   changedFiles: [],
-  fixedFiles: [],
   notes: [],
   ...extra,
 })
 
+const bumpedTargets = (targets: PackageTarget[], bumps: Bump[]) =>
+  targets.filter((target) => bumps.some((bump) => bump.package === target.name))
+
 /**
  * Rolls package updates out across the repositories of a group: plans through the forge, then
- * per repository checks out, bumps, verifies, fixes and (unless `dryRun`) commits and opens or
- * updates a merge request. Per-repository failures end up in the outcome, never as a rejection;
- * rejects only when a `latest` version cannot be resolved.
+ * per repository checks out, bumps, verifies and (unless `dryRun`) commits and opens or updates a
+ * merge request. Repositories whose checks fail go to one task group of write tasks (`fixes`)
+ * that carry the bump as a patch. Per-repository failures end up in the outcome, never as a
+ * rejection; rejects only when a `latest` version cannot be resolved.
  */
 export async function runPropagation(input: PropagationInput) {
   const targets = await resolveTargets(input.packages, input.registry ?? createHttpRegistry())
-  const steps = stepsOf(input.steps ?? {}, input.agent, input.fix, [
+  const steps = stepsOf(input.steps ?? {}, [
     forgeNotes({ forge: input.forge, forgeId: input.forgeId, sources: input.sources ?? {} }),
   ])
   const only = (input.onlyRepos ?? []).map(globToRegExp)
@@ -393,6 +364,15 @@ export async function runPropagation(input: PropagationInput) {
     branchPrefix: input.mergeRequest?.branchPrefix ?? 'holtkeeper/update',
   }
   const dryRun = input.dryRun ?? false
+  const fixes = dryRun ? undefined : input.fixes
+  const requests: (FixRequest & {
+    bumps: Bump[]
+    ref: RepoRef
+    targetBranch: string
+    files: ChangedFile[]
+    checks: CheckResult[]
+    releaseNotes: ReleaseNotes[]
+  })[] = []
 
   const results = await mapLimit(repos, input.concurrency ?? 2, async (ref) => {
     const log = input.log ? (line: string) => input.log?.(`${ref.path}: ${line}`) : undefined
@@ -430,10 +410,8 @@ export async function runPropagation(input: PropagationInput) {
           bumpers: steps.bumpers,
           verifier: steps.verifier,
           notes: steps.notes,
-          fixer: steps.fixer,
           ...(input.checks ? { checks: input.checks } : {}),
           allowInstallScripts: input.allowInstallScripts ?? false,
-          maxAttempts: steps.maxAttempts,
           ...(input.signal ? { signal: input.signal } : {}),
           ...(log ? { log } : {}),
         })
@@ -444,42 +422,42 @@ export async function runPropagation(input: PropagationInput) {
           usages: plan.usages,
           bumps: result.bumps,
           checks: result.checks,
-          attempts: result.attempts,
-          ...(result.agent ? { agent: result.agent } : {}),
           changedFiles: result.files.map((file) => file.path),
-          fixedFiles: result.fixedFiles,
           notes: result.notes,
         }
         const manifests = new Set(result.bumps.map((bump) => bump.manifest))
-        const publishable =
-          result.files.some((file) => manifests.has(file.path)) &&
-          (result.status !== 'failed' || settings.draftOnFailure)
-        if (result.status === 'failed' && !settings.draftOnFailure)
+        const changed = result.files.some((file) => manifests.has(file.path))
+        const failed = result.status === 'failed'
+        if (failed && changed && fixes && result.fix) {
+          if (result.fix.patch.length <= MAX_FIX_PATCH) {
+            requests.push({
+              repo: `${input.forgeId}:${ref.path}`,
+              ...result.fix,
+              bumps: result.bumps,
+              ref,
+              targetBranch: repository.defaultBranch,
+              files: result.files,
+              checks: result.checks,
+              releaseNotes: result.releaseNotes,
+            })
+            return { outcome, releaseNotes: result.releaseNotes }
+          }
+          outcome.notes.push('the bump is too large for a fix task')
+        }
+        if (failed && !settings.draftOnFailure)
           outcome.notes.push('checks fail; no merge request opened')
-        if (
-          !dryRun &&
-          publishable &&
-          (result.status === 'updated' || result.status === 'fixed' || result.status === 'failed')
-        ) {
-          const failed = result.status === 'failed'
+        if (!dryRun && changed && (!failed || settings.draftOnFailure)) {
+          const bumped = bumpedTargets(targets, result.bumps)
           const mergeRequest = await publishChanges({
             forge: input.forge,
             repo: ref.path,
             dir: checkout.dir,
             files: result.files,
-            branch: branchName(
-              settings.branchPrefix,
-              targets.filter((target) => result.bumps.some((bump) => bump.package === target.name)),
-            ),
-            title: mergeRequestTitle(
-              targets.filter((target) => result.bumps.some((bump) => bump.package === target.name)),
-            ),
+            branch: branchName(settings.branchPrefix, bumped),
+            title: mergeRequestTitle(bumped),
             description: mergeRequestBody({
               bumps: result.bumps,
               checks: result.checks,
-              attempts: result.attempts,
-              ...(result.agent ? { agent: result.agent } : {}),
-              fixedFiles: result.fixedFiles,
               notes: result.releaseNotes,
             }),
             labels: settings.labels,
@@ -488,7 +466,7 @@ export async function runPropagation(input: PropagationInput) {
             ...(checkout.publisher && { mode: 'git' as const, git: checkout.publisher }),
           })
           if (mergeRequest) outcome.mergeRequest = mergeRequest
-        } else if (result.bumps.length && !result.files.some((file) => manifests.has(file.path)))
+        } else if (result.bumps.length && !changed)
           outcome.notes.push('no manifest changed in the checkout; nothing to publish')
         return { outcome, releaseNotes: result.releaseNotes }
       } finally {
@@ -506,12 +484,97 @@ export async function runPropagation(input: PropagationInput) {
     }
   })
 
+  /** Opens the `needs-attention` draft of a repository no fix task took, from its bump patch. */
+  const publishDraft = async (request: (typeof requests)[number], outcome: RepoOutcome) => {
+    if (!settings.draftOnFailure) {
+      outcome.notes.push('checks fail; no merge request opened')
+      return
+    }
+    const checkout = await input.checkout(request.ref, {
+      ref: request.targetBranch,
+      writable: true,
+    })
+    try {
+      const file = join(checkout.dir, '.holtkeeper-bump.patch')
+      await Bun.write(file, request.patch)
+      try {
+        await runChecked(input.runner, ['git', 'apply', '--whitespace=nowarn', file], {
+          cwd: checkout.dir,
+        })
+      } finally {
+        await rm(file, { force: true })
+      }
+      const bumped = bumpedTargets(targets, request.bumps)
+      const mergeRequest = await publishChanges({
+        forge: input.forge,
+        repo: request.ref.path,
+        dir: checkout.dir,
+        files: request.files,
+        branch: branchName(settings.branchPrefix, bumped),
+        title: mergeRequestTitle(bumped),
+        description: mergeRequestBody({
+          bumps: request.bumps,
+          checks: request.checks,
+          notes: request.releaseNotes,
+        }),
+        labels: settings.labels,
+        failed: true,
+        targetBranch: request.targetBranch,
+        ...(checkout.publisher && { mode: 'git' as const, git: checkout.publisher }),
+      })
+      if (mergeRequest) outcome.mergeRequest = mergeRequest
+    } catch (error) {
+      outcome.notes.push(`opening a draft failed: ${message(error)}`)
+    } finally {
+      await checkout.cleanup().catch(() => undefined)
+    }
+  }
+
+  const outcomes = results.map((result) => result.outcome)
+  let fixGroup: string | undefined
+  if (fixes && requests.length) {
+    const byRepo = new Map<string, RepoOutcome>(
+      outcomes.map((outcome) => [`${input.forgeId}:${outcome.repo}`, outcome]),
+    )
+    let tasks: Record<string, string> = {}
+    try {
+      const proposed = await fixes.propose({
+        group: input.group,
+        title: mergeRequestTitle(
+          bumpedTargets(
+            targets,
+            requests.flatMap((request) => request.bumps),
+          ),
+        ),
+        fixes: requests.map(({ repo, prompt, patch }) => ({ repo, prompt, patch })),
+      })
+      fixGroup = proposed?.groupId
+      tasks = proposed?.tasks ?? {}
+    } catch (error) {
+      input.log?.(`fix tasks: ${message(error)}`)
+      for (const request of requests)
+        byRepo.get(request.repo)?.notes.push(`proposing a fix task failed: ${message(error)}`)
+    }
+    for (const request of requests) {
+      const outcome = byRepo.get(request.repo)
+      if (!outcome) continue
+      const task = tasks[request.repo]
+      if (task) {
+        outcome.fixTask = task
+        continue
+      }
+      outcome.notes.push('no fix task was proposed')
+      await publishDraft(request, outcome)
+    }
+  }
+
   return {
     group: input.group,
     packages: targets,
     dryRun,
-    repos: results.map((result) => result.outcome),
+    repos: outcomes,
     releaseNotes: dedupeNotes(results),
+    ...(fixGroup && { fixGroup }),
   }
 }
 
@@ -521,12 +584,10 @@ export interface PropagateLocalInput {
   dirs: string[]
   packages: PackageRequest[]
   checks?: CheckOptions
-  agent?: Agent
   runner: CommandRunner
   /** Needed only for `latest`; default npm registry / Go proxy. */
   registry?: VersionRegistry
   allowInstallScripts?: boolean
-  fix?: FixSettings
   steps?: PropagateSteps
   concurrency?: number
   signal?: AbortSignal
@@ -534,8 +595,8 @@ export interface PropagateLocalInput {
 }
 
 /**
- * Plan, bump, verify and fix on local directories without publishing anything. Each outcome's
- * `repo` is its directory. Rejects only when a `latest` version cannot be resolved.
+ * Plan, bump and verify on local directories without publishing or proposing anything. Each
+ * outcome's `repo` is its directory. Rejects only when a `latest` version cannot be resolved.
  */
 export async function propagateLocal(input: PropagateLocalInput) {
   const targets = await resolveTargets(
@@ -543,7 +604,7 @@ export async function propagateLocal(input: PropagateLocalInput) {
     input.registry ??
       (input.packages.some((pkg) => pkg.version === 'latest') ? createHttpRegistry() : undefined),
   )
-  const steps = stepsOf(input.steps ?? {}, input.agent, input.fix, [])
+  const steps = stepsOf(input.steps ?? {}, [])
   const results = await mapLimit(input.dirs, input.concurrency ?? 1, async (dir) => {
     try {
       const plan = await steps.planner.plan(diskFiles(dir), targets)
@@ -555,10 +616,8 @@ export async function propagateLocal(input: PropagateLocalInput) {
         bumpers: steps.bumpers,
         verifier: steps.verifier,
         notes: steps.notes,
-        fixer: steps.fixer,
         ...(input.checks ? { checks: input.checks } : {}),
         allowInstallScripts: input.allowInstallScripts ?? false,
-        maxAttempts: steps.maxAttempts,
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.log ? { log: (line: string) => input.log?.(`${dir}: ${line}`) } : {}),
       })
@@ -568,10 +627,7 @@ export async function propagateLocal(input: PropagateLocalInput) {
         usages: plan.usages,
         bumps: result.bumps,
         checks: result.checks,
-        attempts: result.attempts,
-        ...(result.agent ? { agent: result.agent } : {}),
         changedFiles: result.files.map((file) => file.path),
-        fixedFiles: result.fixedFiles,
         notes: result.notes,
       }
       return { outcome, releaseNotes: result.releaseNotes }

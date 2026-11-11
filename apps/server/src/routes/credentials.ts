@@ -5,6 +5,8 @@ import {
   isAiProviderKind,
   listProviderModels,
   pingAiSdkProvider,
+  probeAgentLoop,
+  resolveTierModels,
   providerOptionsIssues,
 } from '@holtkeeper/agent'
 import type {
@@ -14,6 +16,7 @@ import type {
   ProviderModelList,
 } from '@holtkeeper/api'
 import { parseCredentialInput } from '@holtkeeper/credentials'
+import type { CredentialCapabilities } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
@@ -39,7 +42,10 @@ const secretChange = (input: unknown) =>
 
 /**
  * Forge accounts and API keys. Validation and sealing happen in the credential service; routes
- * only check permissions against the credential's scope.
+ * only check permissions against the credential's scope. `POST /credentials/:id/test` pings an
+ * `ai-sdk` provider; for Anthropic and Anthropic-compatible ones it probes Messages tool use
+ * (`probeAgentLoop`) and stores the outcome as the credential's `capabilities.agentLoop`, which
+ * decides whether agent tool loops run on the Claude Agent SDK.
  */
 export function credentialRoutes(deps: ServerDeps) {
   const { credentials, store, vault } = deps
@@ -62,8 +68,8 @@ export function credentialRoutes(deps: ServerDeps) {
 
   app.post('/credentials', async (c) => {
     const input = parseCredentialInput(await c.req.json().catch(() => undefined))
-    const principal = authorize(c, 'credentials:write', scopeTarget(input.scope))
-    const created = await credentials.create(input, principal.id)
+    authorize(c, 'credentials:write', scopeTarget(input.scope))
+    const created = await credentials.create(input)
     c.set('audit', {
       action: 'credential.create',
       target: { type: 'credential', id: created.id },
@@ -78,10 +84,8 @@ export function credentialRoutes(deps: ServerDeps) {
   app.patch('/credentials/:id', async (c) => {
     const credential = await existing(c, 'credentials:write')
     const input = parseCredentialInput(await c.req.json().catch(() => undefined), true)
-    const principal = input.scope
-      ? authorize(c, 'credentials:write', scopeTarget(input.scope))
-      : principalOf(c)
-    const updated = await credentials.update(credential.id, input, principal.id)
+    if (input.scope) authorize(c, 'credentials:write', scopeTarget(input.scope))
+    const updated = await credentials.update(credential.id, input)
     c.set('audit', {
       action: 'credential.update',
       target: { type: 'credential', id: credential.id },
@@ -95,7 +99,7 @@ export function credentialRoutes(deps: ServerDeps) {
 
   app.delete('/credentials/:id', async (c) => {
     const credential = await existing(c, 'credentials:write')
-    await credentials.remove(credential.id, principalOf(c).id)
+    await credentials.remove(credential.id)
     c.set('audit', {
       action: 'credential.delete',
       target: { type: 'credential', id: credential.id },
@@ -134,14 +138,37 @@ export function credentialRoutes(deps: ServerDeps) {
 
   app.post('/credentials/:id/test', async (c) => {
     const provider = await aiProvider(c, 'credentials:write')
-    if (provider.kind !== 'ai-sdk') {
-      throw new HTTPException(400, { message: 'only ai-sdk providers can be tested' })
-    }
     const input = await readBody(c, credentialTestSchema)
-    const configured = provider.options?.['model']
-    const model = input.model ?? (typeof configured === 'string' ? configured : undefined)
-    if (!model) throw new HTTPException(400, { message: 'name a model to test' })
+    let model = input.model
     try {
+      model ??= resolveTierModels(
+        await listProviderModels(provider, {
+          signal: AbortSignal.timeout(15_000),
+          ...(deps.aiCatalog && { catalog: deps.aiCatalog }),
+        }),
+      ).main
+      if (provider.kind !== 'ai-sdk') {
+        const probe = await probeAgentLoop(provider, model, {
+          signal: AbortSignal.timeout(30_000),
+          ...(deps.probeFetch && { fetch: deps.probeFetch }),
+        })
+        const capabilities: CredentialCapabilities | undefined = probe.conclusive
+          ? {
+              agentLoop: probe.status,
+              checkedAt: deps.now().toISOString(),
+              ...(probe.error !== undefined && { error: probe.error }),
+            }
+          : (await credentials.get(c.req.param('id')))?.capabilities
+        if (probe.conclusive && capabilities)
+          await credentials.setCapabilities(c.req.param('id'), capabilities)
+        return c.json<CredentialTestResult>({
+          ok: probe.status === 'ok',
+          model: probe.model,
+          latencyMs: probe.latencyMs,
+          ...(capabilities && { capabilities }),
+          ...(probe.error !== undefined && { error: probe.error }),
+        })
+      }
       const reply = await pingAiSdkProvider(provider, model, {
         signal: AbortSignal.timeout(30_000),
         ...(deps.aiProviders && { plugins: deps.aiProviders }),
@@ -156,7 +183,7 @@ export function credentialRoutes(deps: ServerDeps) {
     } catch (error) {
       return c.json<CredentialTestResult>({
         ok: false,
-        model,
+        model: model ?? '',
         error: error instanceof Error ? error.message : String(error),
       })
     }
@@ -164,7 +191,7 @@ export function credentialRoutes(deps: ServerDeps) {
 
   app.post('/credentials/:id/rotate', async (c) => {
     const credential = await existing(c, 'credentials:write')
-    const rotated = await credentials.rotate(credential.id, principalOf(c).id)
+    const rotated = await credentials.rotate(credential.id)
     c.set('audit', {
       action: 'credential.rotate',
       target: { type: 'credential', id: credential.id },

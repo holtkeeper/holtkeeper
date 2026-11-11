@@ -8,14 +8,7 @@ import type {
 import { isEmptyScope, normalizeScope } from '../../lib/scope.ts'
 
 /** Credential kinds that are AI providers, whose models the server can list. */
-export const aiProviderKinds: readonly string[] = [
-  'anthropic',
-  'anthropic-compatible',
-  'bedrock',
-  'vertex',
-  'openai-compatible',
-  'ai-sdk',
-]
+export const aiProviderKinds: readonly string[] = ['anthropic', 'anthropic-compatible', 'ai-sdk']
 
 /** Credential kinds the UI offers; anything else is stored as `other`. */
 export const credentialKinds = [
@@ -101,8 +94,7 @@ export interface AiDraft {
   custom: boolean
   package: string
   baseUrl: string
-  model: string
-  /** Every other option as JSON: headers, settings, models, modelMap, pricing, limits. */
+  /** Every other option as JSON: headers, settings, modelMap, pricing, limits. */
   advanced: string
 }
 
@@ -111,7 +103,6 @@ const emptyAi: AiDraft = {
   custom: false,
   package: OPENAI_COMPATIBLE,
   baseUrl: '',
-  model: '',
   advanced: '',
 }
 
@@ -147,13 +138,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 function aiDraftOf(options: Record<string, unknown> | undefined): AiDraft {
   if (!options) return emptyAi
-  const { provider, package: pkg, baseUrl, model, ...rest } = options
+  const { provider, package: pkg, baseUrl, model: _model, models: _models, ...rest } = options
   return {
     provider: text(provider),
     custom: false,
     package: text(pkg) || OPENAI_COMPATIBLE,
     baseUrl: text(baseUrl),
-    model: text(model),
     advanced: Object.keys(rest).length ? JSON.stringify(rest, null, 2) : '',
   }
 }
@@ -257,7 +247,6 @@ function aiOptions(ai: AiDraft): Record<string, unknown> {
     provider: ai.provider.trim(),
     package: ai.package,
     ...(ai.baseUrl.trim() && { baseUrl: ai.baseUrl.trim() }),
-    ...(ai.model.trim() && { model: ai.model.trim() }),
   }
 }
 
@@ -315,16 +304,5 @@ export function filterProviders<P extends { id: string; name: string }>(
     .toSorted(
       (a, b) =>
         Number(!a.name.toLowerCase().startsWith(q)) - Number(!b.name.toLowerCase().startsWith(q)),
-    )
-}
-
-/** Models agents can use (they call tools), newest first. */
-export function agentModels<M extends { id: string; toolCall?: boolean; createdAt?: string }>(
-  models: readonly M[],
-): M[] {
-  return models
-    .filter((m) => m.toolCall !== false)
-    .toSorted(
-      (a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || a.id.localeCompare(b.id),
     )
 }

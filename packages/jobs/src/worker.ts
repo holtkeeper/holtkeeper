@@ -1,8 +1,11 @@
 import type { AnalyzerArtifact, AnyAnalyzer } from '@holtkeeper/analyzer'
+import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { AnalysisRecord, AnalysisStore, ClaimRules, Job, JobStore } from '@holtkeeper/store'
+import type { AnalysisRecord, AnalysisStore, Job, JobStore } from '@holtkeeper/store'
 
 import type { ContextFor } from './context.ts'
+import { type JobLog, type JobLogOptions, createJobLog } from './log.ts'
+import { claimRulesOf } from './wait.ts'
 
 export interface WorkerOptions {
   store: { jobs: JobStore; analyses: AnalysisStore }
@@ -22,6 +25,11 @@ export interface WorkerOptions {
    * (`ClaimRules.delayMs`). Keep it above their `pollMs`. Default 0.
    */
   claimDelayMs?: number
+  /**
+   * Worker pools this worker serves (see `Analyzer.pool`); it never claims jobs of other pools.
+   * Default `[DEFAULT_POOL]`.
+   */
+  pools?: string[]
   /** A run is aborted after this long. Default 30 minutes. */
   timeoutMs?: number
   now?: () => Date
@@ -44,7 +52,17 @@ export interface WorkerOptions {
    * record's id. A failing hook is logged and does not fail the job. Without it artifacts are dropped.
    */
   persistArtifacts?: PersistArtifacts
-  /** Called once per job that succeeded (with its record) or failed for good (without one). */
+  /**
+   * Where each attempt's log is stored in chunks (see `createJobLog`); `readJobLog` reads it.
+   * Default: process memory, so logs are lost with the process.
+   */
+  logs?: ArtifactStore
+  /** Chunking of attempt logs. Default: 100 lines or 1 second. */
+  logFlush?: Pick<JobLogOptions, 'flushLines' | 'flushMs'>
+  /**
+   * Called once per job that succeeded (with its record), failed for good (also when stale
+   * recovery fails it after its worker died) or was blocked by a budget (without one).
+   */
   onFinished?: (job: Job, record?: AnalysisRecord) => void | Promise<void>
   /**
    * Whether a claimed job may start now, e.g. `false` while the credentials it needs are
@@ -108,6 +126,21 @@ class JobAbort extends Error {
   }
 }
 
+/**
+ * Whether a spend limit stopped the run: an error named `BudgetExceededError` (as
+ * `@holtkeeper/agent` throws for refused or capped runs) is the error or in its `cause` chain.
+ */
+export function isBudgetStop(error: unknown): boolean {
+  const seen = new Set<unknown>()
+  let current = error
+  while (current instanceof Error && !seen.has(current)) {
+    if (current.name === 'BudgetExceededError') return true
+    seen.add(current)
+    current = current.cause
+  }
+  return false
+}
+
 export const exponentialBackoff = (attempt: number) =>
   Math.min(60_000 * 2 ** Math.max(attempt - 1, 0), 3_600_000)
 
@@ -154,15 +187,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 export function createWorker(options: WorkerOptions): Worker {
   const { store, contextFor } = options
   const analyzers = new Map(options.analyzers.map((analyzer) => [analyzer.kind, analyzer]))
-  const rules: ClaimRules = {
-    exclusive: options.analyzers.filter((analyzer) => analyzer.exclusive).map((a) => a.kind),
-    after: Object.fromEntries(
-      options.analyzers.flatMap((analyzer) =>
-        analyzer.after ? [[analyzer.kind, analyzer.after]] : [],
-      ),
-    ),
-    ...(options.claimDelayMs && { delayMs: options.claimDelayMs }),
-  }
+  const rules = claimRulesOf(options.analyzers, options.claimDelayMs, options.pools)
   const now = options.now ?? (() => new Date())
   const at = () => now().toISOString()
   const workerId = options.workerId ?? `worker-${crypto.randomUUID().slice(0, 8)}`
@@ -172,6 +197,7 @@ export function createWorker(options: WorkerOptions): Worker {
   const staleMs = options.staleMs ?? 120_000
   const retryDelayMs = options.retryDelayMs ?? exponentialBackoff
   const say = options.log ?? (() => {})
+  const logs = options.logs ?? memoryArtifactStore()
   const admission = options.admission
   const admissionPollMs = options.admissionPollMs ?? 1000
   const maxWaiting = admission
@@ -271,10 +297,15 @@ export function createWorker(options: WorkerOptions): Worker {
     const controller = new AbortController()
     controllers.set(controller, ticket)
     const { signal } = controller
-    let pendingLog: Promise<void> = Promise.resolve()
-    const log = (line: string) => {
-      pendingLog = pendingLog.then(() => store.jobs.appendLog(job.id, [line])).catch(() => {})
-    }
+    const jobLog: JobLog = createJobLog(logs, {
+      jobId: job.id,
+      attempt: job.attempts,
+      now,
+      ...options.logFlush,
+      onError: (error) => say(`storing the log of job ${job.id} failed: ${messageOf(error)}`),
+    })
+    const log = (line: string) => jobLog.write(line)
+    const step = <T>(name: string, run: () => Promise<T>) => jobLog.step(name, run)
     let timeout: ReturnType<typeof setTimeout> | undefined
     const beat = async () => {
       const alive = await store.jobs.heartbeat(job.id, workerId, at()).catch(() => true)
@@ -303,15 +334,29 @@ export function createWorker(options: WorkerOptions): Worker {
         throw new PermanentJobError(`invalid options for ${analyzer.kind}: ${issues.join('; ')}`)
       }
 
-      const prepared = await abortable(
-        contextFor(job, analyzer, { signal, log, options: parsed.data }),
-        signal,
+      const prepared = await step('prepare', () =>
+        abortable(contextFor(job, analyzer, { signal, log, step, options: parsed.data }), signal),
       )
-      let result: { data: unknown; ref?: string; at?: string; artifacts?: AnalyzerArtifact[] }
+      let result: {
+        data: unknown
+        ref?: string
+        sha?: string
+        at?: string
+        artifacts?: AnalyzerArtifact[]
+      }
       try {
-        result = await abortable(
-          analyzer.run({ ...prepared.context, options: parsed.data, signal, log }),
-          signal,
+        result = await step('analyze', () =>
+          abortable(
+            analyzer.run({
+              ...prepared.context,
+              options: parsed.data,
+              jobId: job.id,
+              signal,
+              log,
+              step,
+            }),
+            signal,
+          ),
         )
       } finally {
         await prepared.cleanup()
@@ -319,28 +364,42 @@ export function createWorker(options: WorkerOptions): Worker {
       if (signal.aborted) throw signal.reason
 
       const ref = result.ref ?? job.ref
-      const record = await store.analyses.add({
-        repo: job.repo,
-        kind: analyzer.analysis.kind,
-        ...(ref !== undefined && { ref }),
-        createdAt: result.at ?? at(),
-        ...(job.actor !== undefined && { actor: job.actor }),
-        data: result.data,
-      })
-      log(`stored analysis ${record.id}`)
-      if (result.artifacts?.length && options.persistArtifacts) {
-        try {
-          await options.persistArtifacts(result.artifacts, {
+      const sha = result.sha ?? prepared.sha
+      const stored = result
+      const record = await step('store', async () => {
+        const added = await store.analyses.add({
+          repo: job.repo,
+          kind: analyzer.analysis.kind,
+          ...(ref !== undefined && { ref }),
+          ...(sha !== undefined && { sha }),
+          createdAt: stored.at ?? at(),
+          ...(job.actor !== undefined && { actor: job.actor }),
+          data: stored.data,
+        })
+        log(`stored analysis ${added.id}`)
+        if (analyzer.keepRecords) {
+          const pruned = await store.analyses.prune({
             repo: job.repo,
-            kind: record.kind,
-            analysisId: record.id,
+            kind: added.kind,
+            keep: analyzer.keepRecords,
           })
-          log(`stored ${result.artifacts.length} artifact(s)`)
-        } catch (error) {
-          log(`storing artifacts failed: ${messageOf(error)}`)
+          if (pruned) log(`deleted ${pruned} older record(s)`)
         }
-      }
-      await pendingLog
+        if (stored.artifacts?.length && options.persistArtifacts) {
+          try {
+            await options.persistArtifacts(stored.artifacts, {
+              repo: job.repo,
+              kind: added.kind,
+              analysisId: added.id,
+            })
+            log(`stored ${stored.artifacts.length} artifact(s)`)
+          } catch (error) {
+            log(`storing artifacts failed: ${messageOf(error)}`)
+          }
+        }
+        return added
+      })
+      await jobLog.close()
       const done = await store.jobs.complete(job.id, { at: at(), analysisId: record.id })
       say(`job ${job.id} (${label}) succeeded`)
       if (done) await finished(done, record)
@@ -349,13 +408,22 @@ export function createWorker(options: WorkerOptions): Worker {
       const abort = error instanceof JobAbort ? error : undefined
       if (abort?.reason === 'canceled') {
         log('canceled')
-        await pendingLog
+        await jobLog.close()
         say(`job ${job.id} (${label}) canceled`)
         return store.jobs.get(job.id)
       }
       const message = messageOf(error)
-      log(`failed: ${message}`)
-      await pendingLog
+      if (isBudgetStop(error)) {
+        jobLog.write(`blocked by budget: ${message}`, { level: 'error' })
+        await jobLog.close()
+        const blocked = await store.jobs.block(job.id, { at: at(), error: message })
+        say(`job ${job.id} (${label}) blocked by budget: ${message}`)
+        if (blocked) await finished(blocked)
+        return blocked
+      }
+      jobLog.write(`failed: ${message}`, { level: 'error' })
+      await jobLog.close()
+      const failedStep = jobLog.failedStep
       const retryAt =
         error instanceof PermanentJobError
           ? undefined
@@ -366,6 +434,7 @@ export function createWorker(options: WorkerOptions): Worker {
         at: at(),
         error: message,
         ...(retryAt !== undefined && { retryAt }),
+        ...(failedStep !== undefined && { step: failedStep }),
       })
       say(
         `job ${job.id} (${label}) ${failed?.status === 'queued' ? 'will retry' : 'failed'}: ${message}`,
@@ -409,6 +478,9 @@ export function createWorker(options: WorkerOptions): Worker {
       at(),
     )
     for (const job of recovered) say(`recovered job ${job.id} (${job.status})`)
+    await Promise.all(
+      recovered.filter((job) => job.status === 'failed').map((job) => finished(job)),
+    )
   }
 
   const sweepStale = () =>

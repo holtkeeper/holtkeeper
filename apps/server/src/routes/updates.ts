@@ -33,6 +33,13 @@ export interface UpdateRoutesOptions {
   repoHooks?: RepoHooks
 }
 
+const audit = (c: AppContext, action: string, repo: RepoRef, details: Record<string, unknown>) =>
+  c.set('audit', {
+    action,
+    target: { type: 'repo', repo: `${repo.forge}:${repo.path}` },
+    details,
+  })
+
 /**
  * How a repository learns about forge changes: `GET /repos/updates?repo=` shows its polling and
  * webhook state, `POST /repos/updates/poll` polls it now, `POST /repos/updates/webhook` issues or
@@ -126,20 +133,6 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
     }
   }
 
-  const activity = (
-    actor: string,
-    action: string,
-    repo: RepoRef,
-    details: Record<string, unknown>,
-  ) =>
-    deps.store.activity.append({
-      at: deps.now().toISOString(),
-      actor,
-      action,
-      subject: `${repo.forge}:${repo.path}`,
-      details,
-    })
-
   app.get('/repos/updates', async (c) => {
     const repo = repoOf(c.req.query('repo'))
     authorize(c, 'settings:read', target(repo))
@@ -223,12 +216,7 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
       await hooks.save(repo, registered.length ? { ...rest, registered } : rest)
     }
 
-    await activity(
-      principal.id,
-      previous ? 'repo.webhook_rotated' : 'repo.webhook_created',
-      repo,
-      details,
-    )
+    audit(c, previous ? 'repo.webhook_rotate' : 'repo.webhook_create', repo, details)
     if (typeof details.error === 'string')
       throw new HTTPException(502, {
         message: `the new URL is active but registering it on the forge failed: ${details.error}`,
@@ -238,12 +226,12 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
 
   app.delete('/repos/updates/webhook', async (c) => {
     const repo = repoOf(c.req.query('repo'))
-    const principal = authorize(c, 'settings:write', target(repo))
+    authorize(c, 'settings:write', target(repo))
     const { hooks } = parts()
     const hook = await hooks.remove(repo)
     if (!hook) throw new HTTPException(404, { message: 'the repository has no webhook' })
     const removeError = await unregister(repo, hook)
-    await activity(principal.id, 'repo.webhook_removed', repo, {
+    audit(c, 'repo.webhook_delete', repo, {
       ...(removeError && { removeError }),
     })
     return c.body(null, 204)

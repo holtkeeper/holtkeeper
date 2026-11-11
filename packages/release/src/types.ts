@@ -1,6 +1,6 @@
-import type { SectionId } from '@holtkeeper/changelog'
 import type { MergeRequest, PipelineStatus, RepoRef } from '@holtkeeper/forge'
 
+import type { SectionId } from './sections.ts'
 import type { Bump, ReleaseEventKind } from './settings.ts'
 import type { VersionTag } from './version.ts'
 
@@ -48,7 +48,7 @@ export interface PipelineState {
 
 /**
  * Where a person ran a release step: `ui` (the panel), `api`, `cli`, `forge` (a merge or a label)
- * or the id of the chat surface (`slack`, `web` for the panel's chat).
+ * or the id of the chat surface (`web` for the panel's chat).
  */
 export type ReleaseChannel = string
 
@@ -116,6 +116,8 @@ export interface ReleaseEntry {
   type?: string
   scope?: string
   breaking: boolean
+  /** What the entry's commits call for, by the commit conventions' `bumpFor`. */
+  bump: Bump
   /** Text as written in the commits. */
   title: string
   /** Text shown: `title` or what a person changed it to. */
@@ -140,7 +142,7 @@ export interface ReleaseEdits {
   /** New text per entry id. */
   texts?: Record<string, string>
   summary?: { markdown: string; source: 'agent' | 'changelog' | 'person'; at: string }
-  /** Merge request title instead of the template's. */
+  /** Merge request title instead of the default. */
   title?: string
   updatedAt?: string
   updatedBy?: string
@@ -148,7 +150,7 @@ export interface ReleaseEdits {
 
 /** A check a step must pass; failing checks need an explicit override. */
 export interface GateResult {
-  id: 'pipeline' | 'freeze' | 'blockers' | 'acceptance' | 'empty' | 'tag-exists' | 'order'
+  id: 'pipeline' | 'blockers' | 'acceptance' | 'empty' | 'tag-exists' | 'order'
   ok: boolean
   message: string
 }
@@ -171,7 +173,7 @@ export interface ReleasePlan {
   summary: { markdown: string; source: 'agent' | 'changelog' | 'person' | 'none' }
   /** Changelog markdown of the included entries. */
   changelog: string
-  /** Title and description of the merge request (`propose`) or notes of the release (`version`). */
+  /** Title and description of the merge request (`propose`) or name and notes of the release (`version`). */
   title: string
   body: string
   gates: GateResult[]
@@ -209,7 +211,6 @@ export interface EnvironmentState {
   attempts: DeployAttempt[]
   after?: string
   confirm: boolean
-  auto: boolean
   /** What the forge reports as deployed there now, when it tracks environments. */
   current?: { ref: string; sha: string; status: string; at?: string }
 }
@@ -223,7 +224,7 @@ export interface DeployState {
 
 /** A suggested flow for a repository without its own settings. */
 export interface FlowDetection {
-  preset: string
+  mode: 'merge-request' | 'trunk' | 'external'
   settings: Record<string, unknown>
   reasons: string[]
 }

@@ -1,6 +1,6 @@
 import type { GroupDocumentData, RepoAccessView, RepoRef } from '@holtkeeper/api'
 
-/** `forge:path`, the form the API uses in query strings and activity subjects. */
+/** `forge:path`, the form the API uses in query strings and audit targets. */
 export const repoKey = (repo: RepoRef): string => `${repo.forge}:${repo.path}`
 
 /** Parses `forge:path`; `undefined` when there is no forge prefix or path. */

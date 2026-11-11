@@ -45,7 +45,7 @@ export function ReportView({ report }: { report: Report }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2 rounded-2xl border border-border bg-surface p-5 shadow-surface">
+      <header className="flex flex-col gap-2 rounded-2xl border border-border bg-surface p-5">
         <h2 className="text-xl font-semibold tracking-tight">{report.title}</h2>
         {report.subtitle ? <p className="text-sm text-muted">{report.subtitle}</p> : null}
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
@@ -94,7 +94,7 @@ export function ReportView({ report }: { report: Report }) {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: '-40px' }}
                 transition={{ duration: 0.3 }}
-                className="flex scroll-mt-20 flex-col gap-4 rounded-2xl border border-border bg-surface p-5 shadow-surface"
+                className="flex scroll-mt-20 flex-col gap-4 rounded-2xl border border-border bg-surface p-5"
               >
                 <div>
                   <h2 id={`${anchors[index]}-title`} className="text-base font-semibold">

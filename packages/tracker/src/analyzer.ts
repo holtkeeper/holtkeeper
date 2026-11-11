@@ -41,6 +41,7 @@ export function createTrackerAnalyzer(dependencies: TrackerAnalyzerDependencies 
     kind: 'tracker',
     analysis: trackerAnalysis,
     scope: 'group',
+    refresh: { on: 'time', cadence: '1d' },
     needs: { forge: true },
     options: trackerOptionsSchema,
     flags: [{ flag: 'tracker', option: 'tracker', description: 'id of the tracker to run' }],

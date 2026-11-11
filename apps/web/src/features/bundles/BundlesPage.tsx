@@ -26,6 +26,7 @@ import {
   targetRows,
 } from '../../lib/bundles.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
+import { pageSettingKeys } from '../../lib/settings-tabs.ts'
 import { formatValue } from '../../lib/units.ts'
 import {
   Chip,
@@ -44,8 +45,9 @@ import { AnalysisRecords, RepoSelect } from '../analyses/AnalysesPage.tsx'
 import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import { ReportView } from '../reports/ReportView.tsx'
+import { SettingsButton } from '../settings/SettingsSheet.tsx'
 
-const [, page] = analysisPages
+const [page] = analysisPages
 
 const compressions = [
   { id: 'gzip', label: 'Gzip' },
@@ -458,13 +460,14 @@ export function BundlesPage() {
       actions={
         <div className="flex items-center gap-2">
           <RepoSelect to={page.to} />
-          <BackfillReleasesButton repo={repo} bundle />
+          <BackfillReleasesButton analyzer="bundle" repo={repo} />
           <RunJobButton
             analyzer={page.kind}
             label="Run now"
             variant="secondary"
             {...(repo ? { repo } : {})}
           />
+          <SettingsButton title="Bundle settings" keys={pageSettingKeys.bundles} />
         </div>
       }
     >

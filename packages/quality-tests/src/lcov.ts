@@ -1,9 +1,14 @@
 import { isAbsolute, relative } from 'node:path'
 
-import type { CoverageSummary } from '@holtkeeper/quality'
-
 import { languageOf } from './files.ts'
-import type { BranchHit, CoverageReport, FileCoverage, FunctionHit, TestLanguage } from './types.ts'
+import type {
+  BranchHit,
+  CoverageReport,
+  CoverageSummary,
+  FileCoverage,
+  FunctionHit,
+  TestLanguage,
+} from './types.ts'
 
 /** `/`-separated path relative to `dir`; absolute paths outside `dir` stay absolute. */
 export function relativeTo(dir: string | undefined, path: string): string {

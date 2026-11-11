@@ -2,29 +2,33 @@
 
 The persistence contract. Everything Holtkeeper stores goes through `Store`; implementations are interchangeable.
 
-| Part               | Holds                                                                                                                                                     |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auditRuns`        | Finished audit runs with full reports, newest first, filterable by repository                                                                             |
-| `credentials`      | Forge accounts, API keys and AI providers; `secret` is always sealed by a `Vault`, kind-specific `options` are stored as given                            |
-| `settings`         | Scoped setting entries (see [@holtkeeper/settings](../../settings/docs/README.md))                                                                        |
-| `users`            | Users, passkeys, OIDC identities and one-time link tokens (only hashes)                                                                                   |
-| `activity`         | Who did what: logins, credential and setting changes, ingested audits                                                                                     |
-| `analyses`         | Analysis records: `list` newest first by repository, kind and time, `heads` the same without data; `latest` the newest record of every (repository, kind) |
-| `jobs`             | The task queue for background analyses (see below)                                                                                                        |
-| `knowledge`        | Knowledge base entries with version history and search (see below)                                                                                        |
-| `aiUsage`          | One record per LLM agent run: tokens, cost, outcome (see below)                                                                                           |
-| `ciJobs`           | Finished CI job attempts per repository, kept so job analytics fetch only what is new (see below)                                                         |
-| `audit`            | Optional. The append-only, hash-chained audit log (see below)                                                                                             |
-| `externalAccounts` | Optional. External accounts (GitLab, GitHub, Slack ids) linked to principals (see below)                                                                  |
-| `libraries`        | Optional. Third-party library docs: libraries, indexed versions, document chunks and issues (see below)                                                   |
-| `database`         | Optional. Read-only introspection of the underlying database for the admin UI (see below)                                                                 |
+| Part               | Holds                                                                                                                                                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auditRuns`        | Finished audit runs with full reports, newest first, filterable by repository                                                                                                                                                                      |
+| `credentials`      | Forge accounts, API keys and AI providers; `secret` is always sealed by a `Vault`, kind-specific `options` are stored as given, `capabilities` hold probe results (`{ agentLoop, checkedAt, error? }`)                                             |
+| `settings`         | Scoped setting entries (see [@holtkeeper/settings](../../settings/docs/README.md))                                                                                                                                                                 |
+| `users`            | Users, passkeys, OIDC identities and one-time link tokens (only hashes)                                                                                                                                                                            |
+| `analyses`         | Analysis records (`sha`: the commit the analysis ran on, when known): `list` newest first by repository, kind and time, `heads` the same without data; `latest` the newest record of every (repository, kind), `latestHeads` the same without data |
+| `jobs`             | The task queue for background analyses (see below)                                                                                                                                                                                                 |
+| `knowledge`        | Knowledge base entries with version history and search (see below)                                                                                                                                                                                 |
+| `guides`           | Guide sections per scope and section with revisions of their human layer (see below)                                                                                                                                                               |
+| `learnings`        | Learning candidates from replies to review comments, handled reply notes and reaction counts on review comments (see below)                                                                                                                        |
+| `families`         | Named sets of similar repositories; a repository is in at most one (see below)                                                                                                                                                                     |
+| `aiUsage`          | One record per LLM agent run: tokens, cost, outcome (see below)                                                                                                                                                                                    |
+| `ciJobs`           | Finished CI job attempts per repository, kept so job analytics fetch only what is new (see below)                                                                                                                                                  |
+| `tasks`            | Agent tasks (write tasks people or automation asked for) and their groups (see below)                                                                                                                                                              |
+| `chat`             | Team chat threads, their messages and read markers (see below)                                                                                                                                                                                     |
+| `audit`            | The append-only, hash-chained audit log of who did what (see below)                                                                                                                                                                                |
+| `externalAccounts` | Optional. External accounts (GitLab, GitHub and other ids) linked to principals (see below)                                                                                                                                                        |
+| `libraries`        | Optional. Third-party library docs: libraries, indexed versions, document chunks and issues (see below)                                                                                                                                            |
+| `database`         | Optional. Read-only introspection of the underlying database for the admin UI (see below)                                                                                                                                                          |
 
 ## Jobs
 
-`JobStore` is the queue of [@holtkeeper/jobs](../../jobs/docs/README.md). A `Job` is one analyzer run for one repository (or one config group: `repo` is `{ forge, path: <group> }` and `group` is set) with `status` `queued | running | succeeded | failed | canceled`.
+`JobStore` is the queue of [@holtkeeper/jobs](../../jobs/docs/README.md). A `Job` is one analyzer run for one repository (or one config group: `repo` is `{ forge, path: <group> }` and `group` is set) with `status` `queued | running | succeeded | failed | blocked | canceled` (`blocked`: an AI budget refused or stopped the run; final, not retried, not a failure) and `trigger` `schedule | manual | command | webhook | tag | push | poll | new-repo | freshness` (`manual` and `command`, a merge request comment command, mean a person asked).
 
 - `enqueue` — defaults: `maxAttempts` 3, `runAfter` = `createdAt`, empty `options` and `log`.
-- `claim(workerId, now, rules?)` — atomically takes the first due queued job in `(runAfter, enqueue order)` that may start next to the running jobs of its repository, marks it running and counts the attempt. `ClaimRules` name analyzer kinds: `exclusive` kinds change their repository, `after` maps a kind to the kinds whose results it reads, and `delayMs` limits the claim to jobs due at least that long before `now`. A job is skipped while its repository:
+- `claim(workerId, now, rules?)` — atomically takes the first due queued job in `(runAfter, enqueue order)` that may start next to the running jobs of its repository, marks it running and counts the attempt. `ClaimRules` name analyzer kinds: `exclusive` kinds change their repository, `after` maps a kind to the kinds whose results it reads, `delayMs` limits the claim to jobs due at least that long before `now`, `only` to jobs of the listed kinds and `except` to jobs of other kinds (worker pools). A job is skipped while its repository:
   - runs a job of the same analyzer;
   - runs anything, when the job is exclusive;
   - runs an exclusive job or has one queued ahead of it, so readers neither overtake nor starve it;
@@ -33,9 +37,12 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
   Without `rules` only the first rule applies, so jobs of different analyzers of one repository run side by side.
 
 - `heartbeat(id, workerId, now)` — `false` once the job is no longer running for that worker (e.g. canceled).
-- `complete`, `fail(id, { at, error, retryAt? })` (back to the queue while attempts remain and `retryAt` is given), `cancel`, `recoverStale(heartbeatBefore, at)` for jobs of dead workers.
-- A job queued by a schedule carries its `schedule` name, also when someone ran the schedule by hand (`actor` is set then).
-- `list({ status, repo, analyzer, schedule, before, limit })` newest first; `appendLog` keeps the last `JOB_LOG_LIMIT` (200) lines.
+- `complete`, `fail(id, { at, error, retryAt?, step? })` (back to the queue while attempts remain and `retryAt` is given), `block(id, { at, error })` (a running job becomes `blocked` for good), `cancel`, `recoverStale(heartbeatBefore, at)` for jobs of dead workers.
+- `attemptsHistory` has one `JobAttempt { n, status, startedAt, finishedAt?, workerId?, error?, step? }` per attempt: `claim` appends a `running` one, and `complete`, `fail`, `block`, `cancel` and `recoverStale` end it (`succeeded`, `failed`, `blocked`, `canceled`, `failed`). Logs are not in the store: the worker writes them to the artifact store (see [@holtkeeper/jobs](../../jobs/docs/README.md#job-logs)).
+- `errorSignature` is `errorSignature(error)` of the latest failure, set by `fail` and `recoverStale` and cleared by `complete` and `block`: the first non-empty line with URLs, UUIDs, hex hashes, paths and numbers replaced by `<url>`, `<id>`, `<hash>`, `<path>` and `<n>`, at most 200 characters, so the same failure in different repositories and runs compares equal.
+- A job queued by a schedule carries its `schedule` name, also when someone ran the schedule by hand (`actor` is set then). A job queued by automation that decided on its own carries its `reason` (freshness: `sha 1a2b3c4 != head 5d6e7f8`); the `reason` column came with sqlite v19 and postgres v18.
+- `list({ status, repo, analyzer, schedule, trigger, before, errorSignature, repos, limit })` newest first. `repos` limits to those repositories (group jobs by `{ forge, path: <group> }`; an empty list matches nothing), so callers apply visibility before `limit`.
+- `failures({ since, analyzer?, repos?, limit? })` groups jobs that failed for good since `since` by analyzer and `errorSignature`: `count`, distinct `repos`, `firstAt`, `lastAt`, the latest job and its raw error, the group that failed last first. `targets()` lists every distinct repository or group that has jobs.
 
 ## Knowledge
 
@@ -43,18 +50,50 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 
 - `put(entry)` — upsert by id. The store assigns `version` (1, then +1 per put) and moves the previous version into the history with `editedBy` (its `updatedBy`, or `author`) and `editedAt` (its `updatedAt`).
 - `get(id)`, `history(id)` (previous versions, newest first), `remove(id)` (drops the history too).
-- `list(filter)` — most recently updated first. `KnowledgeFilter`: `status` and `kind` (one or a list), `topic` (exact, case-insensitive), `scope` (substring of a group or repo pattern; `all` matches scopes covering everything), `package` (`react` or `npm:react`).
+- `list(filter)` — most recently updated first. `KnowledgeFilter`: `status` and `kind` (one or a list), `topic` (exact, case-insensitive), `scope` (substring of a group or repo pattern; `all` matches scopes covering everything), `package` (`react` or `npm:react`), `subject` (exact). Entries keep `visibility` and `subject` (columns since sqlite migration 20 and postgres migration 19).
 - `search(text, filter, limit = 20)` → `{ entry, score }[]`, best first. Every word of `text` is a prefix (`migr` finds `migration`), any word may match, title matches outrank topic/package matches, which outrank body matches. Quotes, operators and punctuation are plain text; blank text returns nothing. Scores are only comparable within one result.
 
 `knowledgeWords` and `matchesKnowledgeFilter` are exported for implementations.
 
+## Guides and families
+
+`GuideStore` holds the sections of the [Guide](../../guide/docs/README.md), one `GuideSection` per scope key (`all`, `group:<name>`, `family:<id>`, `repo:<forge>:<path>`) and section: human `rules` (Markdown) and `steering`, `version`/`editedBy`/`editedAt` of the human layer, the `generated` layer (`body`, `inputHash`, `model`, `costUsd`, `status: proposed | accepted`, `generatedAt`, `sha?`, `prompt?`, `acceptedBy?`, `acceptedAt?`), an optional `proposal` of the same shape (newer generated text waiting while `generated` is accepted) and `learnings` (accepted short rules with source links).
+
+- `put(section)` — upsert by scope and section. Only a change of `rules` or `steering` bumps `version` (0 before the first human text) and moves the previous human layer into the history; writing the generated layer or learnings keeps the version and byline. `nextGuideSection` holds that rule for implementations.
+- `get`, `list({ scopes?, sections? })` (sorted by scope, then section, byte order), `history(scope, section)` (newest first), `removeScope(scope)` (sections and history).
+
+`FamilyStore` holds `Family { id, name, members, createdBy, createdAt, updatedAt, updatedBy? }`, members as sorted `forge:path`. `put` throws `FamilyConflictError` (nothing written) when a member already belongs to another family (`assertNoFamilyConflict`); `list` is sorted by name.
+
+`LearningStore` holds the candidates of [review learnings](../../guide/docs/README.md#review-learnings) (`LearningCandidate`, stored whole; a direct proposal has no `sources` and a `proposal: { by, reason }`):
+
+- `put` (by id), `get`, `list({ repos?, status? })` newest `updatedAt` first (`byLearningUpdate`, `matchesLearningFilter`), `find(repo, key)` the oldest candidate of a repository with that normalized rule.
+- `claim(key, at)` is `true` only for the first caller of a key, atomically across processes; `release(key)` forgets it. Capture claims each reply note before its LLM call.
+- `putReactions(signal)` replaces the 👍/👎 counts of one review comment (repository, merge request, note) with its finding category; `reactionTotals({ repos? })` sums them per category (`sumReactions`); `reactions({ repo, mergeRequests? })` returns one repository's counts per comment (`reactionsOf`), for the Reviews tab of the repository page.
+
+## Team chat
+
+`ChatStore` holds the threads of the team chat (`chat_threads`, `chat_messages`, `chat_thread_reads` in SQLite and Postgres):
+
+- `ChatThread { id, title, repo?, group?, createdBy, createdAt, updatedAt, archived, autoReply, participants, people?, summary?, replyingSince?, replyingBy? }`: `participants` are principal ids in order of first appearance (they decide the `Participant A/B` labels), `people` (`ChatPerson { id, name?, email? }`) the name and email each poster last wrote under, so prompts can scrub them without a `users` account (`rememberPeople` in a patch replaces or adds entries by id), `summary { text, uptoMessageId, tokens }` stands for every message up to and including `uptoMessageId`. `createThread` starts unarchived with `updatedAt = createdAt`; `updateThread(id, patch)` changes `title`, `archived`, `autoReply`, `participants` and `summary` (`null` clears it), and answers `undefined` for unknown ids. It applies the patch to the thread as stored, under the row lock or transaction, so `addParticipants` (append ids not yet there) never loses a concurrent addition, and `claimReply { by, at, staleBefore }` takes the reply claim (`replyingSince`, `replyingBy`) only when nobody holds it or the held claim started before `staleBefore`; `releaseReply: by` drops it while `by` still holds it; `listThreads({ archived? })` returns unarchived (or only archived) threads by newest `updatedAt`.
+- `ChatMessage { id, threadId, seq, authorType: human | agent | system, authorId?, body, card?, toolTrace?, costUsd?, transcriptRef?, mentions, createdAt, updatedAt? }`: `seq` is assigned by the store and grows across the store, so it orders messages and serves as the cursor. `addMessage` moves the thread's `updatedAt`; `updateMessage(id, { card?, body?, updatedAt })` changes a card in place (deploy cards). `listMessages(threadId, { after?, before?, changedSince?, limit? })` answers oldest first: the oldest `limit` (default 50, at most 500) after `after`, else the newest before `before`, plus messages changed in place since `changedSince` (`selectChatMessages` holds the rule).
+- `markRead(threadId, userId, messageId)` moves a person's marker forward only; `reads(userId)`; `unreadCounts(userId, threadIds)` counts messages after the marker that others wrote (agent and system messages included), listing only threads with any.
+
+## Agent tasks
+
+`AgentTaskStore` (`agent_task_groups`, `agent_tasks` in SQLite and Postgres) holds requests to change code:
+
+- `AgentTaskGroup { id, kind, title, prompt, plan?, patch?, proposedBy, approvedBy?, approvedAt?, cancelledBy?, source, repos, budgetClass, requests?, createdAt, updatedAt }`: one source (`AgentTaskSource`: a chat thread and its card message, a dependency upgrade, a propagate run (with its config group), an MCP client or the API) and its targets as `forge:path`. `requests` are repositories a running task asked to add (`pending | approved | rejected`, with who decided). `kind` is `fix | port | upgrade | propagate-fix | chat | tests`.
+- `AgentTask { id, groupId, kind, title, prompt, plan?, patch?, repo, requester, source, status, jobId?, budgetUsd?, costUsd?, transcriptRef?, mergeRequest?, error?, createdAt, updatedAt }`: one repository's part of a group. `status` is `proposed | approved | queued | running | mr-open | done | failed | cancelled`; `mergeRequest { id, url, draft, state?, ci?, checkedAt? }` with the forge's state and the CI of the branch's latest pipeline.
+- `put`/`putGroup` insert or replace, `transition(task, from)` replaces a task only while its stored status is one of `from` (atomic; `false` when it is missing or changed meanwhile, so two approvals never both queue it), `get`/`getGroup` by id, `list({ groupIds?, repos?, status?, requester?, limit? })` and `listGroups({ sourceType?, repos?, proposedBy?, limit? })` newest `updatedAt` first, then by id (`byTaskUpdate`, `matchesAgentTaskFilter`, `matchesAgentGroupFilter`).
+- `agentGroupStatus(tasks)` derives a group's status: `proposed` while any task waits, then the most advanced active status (`running`, `queued`, `approved`), then `mr-open`, `cancelled` when all were cancelled, `failed` when any of the rest failed, else `done`. `finalTaskStatuses` are `done`, `failed` and `cancelled`.
+
 ## AI usage
 
-`AiUsageStore` is the history behind [@holtkeeper/ai-usage](../../ai-usage/docs/README.md). An `AiUsageRecord` holds the repository and the groups it had at the time, task kind, analyzer/job/analysis ids, actor, provider, model, the four token counts, `costUsd` with `costSource` (`reported | computed | unknown`), duration, turns and `outcome` (`ok | error | denied-budget`).
+`AiUsageStore` is the history behind [@holtkeeper/ai-usage](../../ai-usage/docs/README.md). An `AiUsageRecord` holds the repository and the groups it had at the time, task kind, analyzer/job/analysis ids, actor, provider, model, the four token counts, `costUsd` with `costSource` (`reported | computed | unknown`), duration, turns, `outcome` (`ok | error | denied-budget`) and `transcriptRef` (artifact id of the run's JSONL transcript, when one was stored).
 
 - `append(record)`; `list({ ...filter, before, limit })` newest first.
 - `aggregate({ from, to, groupBy, filter })` — one bucket per distinct combination of `groupBy` values (`day`, `week` = its Monday, `month`, all UTC; `repo` as `forge:path`, `group`, `model`, `provider`, `taskKind`, `analyzer`), sorted by key. Each bucket sums tokens per kind and cost and counts `runs`, `errors`, `denied`, with `avgDurationMs` over runs that were not denied. A record in several groups counts once per group; records without groups (or analyzer) fall under `''`. No matching records, no buckets.
-- `AiUsageFilter`: `from` (inclusive), `to` (exclusive), `repo`, `group`, `model`, `provider`, `taskKind`, `analyzer`, `outcome`, and `scopes` — records covered by any of them (an empty list matches nothing), used for access filtering and scoped budgets.
+- `AiUsageFilter`: `from` (inclusive), `to` (exclusive), `repo`, `group`, `model`, `provider`, `taskKind`, `analyzer`, `outcome`, `jobId`, and `scopes` — records covered by any of them (an empty list matches nothing), used for access filtering and scoped budgets.
 
 ## CI jobs
 
@@ -76,18 +115,19 @@ Both are optional parts of `Store`; servers without them use the file config onl
 
 ## Audit log
 
-`AuditStore` (`store.audit`) is the tamper-evident record of who changed what. It is separate from `activity`, which stays the human-readable feed. An `AuditEvent` is `{ id, seq, at, actor { id, name, provider }, via: ui | api | webhook | job | system, action, target { type, id?, repo? }, outcome: ok | denied | error, status?, request? { method, path, route?, params?, ip?, userAgent?, durationMs? }, changes? { field, before?, after? }[], details?, prevHash, hash }`. Secret values in `changes` are `«redacted»` before they reach the store.
+`AuditStore` (`store.audit`) is the tamper-evident record of who changed what. It is mandatory in every `Store` and the only record of who did what; the server's History page reads it. An `AuditEvent` is `{ id, seq, at, actor { id, name, provider }, via: ui | api | webhook | job | system, action, target { type, id?, repo? }, outcome: ok | denied | error, status?, request? { method, path, route?, params?, ip?, userAgent?, durationMs? }, changes? { field, before?, after? }[], details?, prevHash, hash }`. Secret values in `changes` are `«redacted»` before they reach the store.
 
 - `append(input)` — the store assigns `id`, `seq` (one more than the newest event ever appended; never reused, not even after a sweep) and the chain: `prevHash` is the previous event's `hash` (64 zeros for `seq` 1), `hash` the SHA-256 of `canonicalJson` of every other field (keys sorted, `undefined` dropped). Appends are serialized.
 - `list({ ...filter, cursor, limit = 50 })` → `{ events, nextCursor? }`, newest first by `seq`; pass `nextCursor` back as `cursor`.
+- `repos()` — every distinct `target.repo` among the kept events, sorted; callers filter it by permission to build `repos`.
 - `count(filter)`; `export(filter)` — an async iterable, oldest first, read in batches of `AUDIT_EXPORT_BATCH` (500); `formatAuditEvents(events, 'csv' | 'ndjson')` turns it into text chunks (CSV cells starting with `= + - @` are prefixed with `'` against formula injection).
-- `AuditFilter`: `actor` (id), `action` (prefix: `credential` matches `credential.update`), `targetType`, `targetId`, `repo` (exact `forge:path`), `outcome`, `via`, `from` (inclusive), `to` (exclusive).
+- `AuditFilter`: `actor` (id), `action` (prefix: `credential` matches `credential.update`), `targetType`, `targetId`, `repo` (exact `forge:path`), `repos` (the event's `target.repo` is one of the list; events without a repository never match, an empty list matches nothing), `outcome`, `via`, `from` (inclusive), `to` (exclusive).
 - `sweep(before)` — retention. Removes the oldest events up to the first one at or after `before`, so the kept events stay one contiguous chain even when `at` is not monotonic. Returns how many it removed; the store remembers the last swept `seq`.
 - `verifyChain({ fromSeq?, toSeq? })` → `{ ok, checked, firstSeq?, lastSeq?, broken? }`. Every `seq` from the requested start (or the first unswept one) to the requested end (or the newest appended) must be present once, hash to its `hash` and link to the hash before it. `broken.reason`: `hash` (content edited), `link` (re-hashed or inserted event), `gap` (event removed from the middle or start), `tail` (newest events removed).
 
 What the chain does and does not prove: anyone who edits the database without also recomputing every later hash and the stored chain head is caught. Someone with full write access who rewrites the whole chain and the head is not — export the log regularly (or record `hash` of the newest event elsewhere) to anchor it.
 
-`canonicalJson`, `auditHash`, `sealAuditEvent`, `verifyAuditEvents`, `auditVerifyRange`, `matchesAuditFilter`, `auditCursorSeq` and `AUDIT_GENESIS_HASH` are exported for implementations.
+`canonicalJson`, `auditHash`, `sealAuditEvent`, `verifyAuditEvents`, `auditVerifyRange`, `matchesAuditFilter`, `auditCursorSeq` and `AUDIT_GENESIS_HASH` are exported for implementations. `SYSTEM_ACTOR` (`{ id: 'system', name: 'Holtkeeper', provider: 'system' }`) is the actor of what Holtkeeper does on its own, such as seeding defaults.
 
 ## External accounts
 
@@ -113,7 +153,7 @@ Search text is plain words: every word is a prefix (`useEff` finds `useEffect`),
 
 ## Analyses
 
-`AnalysisStore.latest({ repo?, kind? })` returns the newest record of every (repository, kind) pair, newest first; among records created at the same time the last added wins. `newestRecords(analyses, kind, read, accept?)` builds on `latest`: the newest record of `kind` of every repository that `read` turns into a value, trying up to 20 older records of a repository only when `read` rejects its newest; `accept` leaves repositories out by their newest record.
+`AnalysisStore.prune({ repo, kind, keep })` deletes a repository's records of one kind except the newest `keep` and returns how many it deleted; the task engine calls it for analyzers with `keepRecords`. `AnalysisStore.latest({ repo?, kind? })` returns the newest record of every (repository, kind) pair, newest first; among records created at the same time the last added wins; `latestHeads` returns the same records without their data. `newestRecords(analyses, kind, read, accept?)` builds on `latest`: the newest record of `kind` of every repository that `read` turns into a value, trying up to 20 older records of a repository only when `read` rejects its newest; `accept` leaves repositories out by their newest record.
 
 ## Database inspector
 
@@ -127,7 +167,7 @@ Search text is plain words: every word is a prefix (`useEff` finds `useEffect`),
 - `sessions()` — other client connections with state, statement, start times, wait event and the pids blocking them.
 - `migrations()` — applied schema versions with their time, oldest first.
 
-`tableDomain(name)` puts a table into one of `databaseDomains` (`jobs`, `analyses`, `audit`, `ai`, `knowledge`, `libraries`, `config`, `accounts`, `other`) for size reports; search side tables count with the table they index.
+`tableDomain(name)` puts a table into one of `databaseDomains` (`jobs`, `analyses`, `audit`, `ai`, `knowledge` (with guides, families and learnings), `libraries`, `chat`, `tasks`, `config`, `accounts`, `other`) for size reports; search side tables count with the table they index.
 
 ## Implementations
 

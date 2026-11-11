@@ -3,15 +3,8 @@ import { describe, expect, test } from 'bun:test'
 import { formatDuration, percent, spread, weekOf, weeksOf } from './stats.ts'
 
 describe('stats', () => {
-  test('spread gives quartiles, p95 and max', () => {
-    expect(spread([10, 20, 30, 40, 50])).toEqual({
-      samples: 5,
-      p25: 20,
-      median: 30,
-      p75: 40,
-      p95: 48,
-      max: 50,
-    })
+  test('spread gives the median and p90', () => {
+    expect(spread([10, 20, 30, 40, 50])).toEqual({ samples: 5, median: 30, p90: 46 })
     expect(spread([])).toEqual({ samples: 0 })
   })
 

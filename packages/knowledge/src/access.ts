@@ -62,7 +62,7 @@ export interface KnowledgeAccess {
 }
 
 export interface KnowledgeAccessOptions {
-  store: Pick<Store, 'knowledge'> & Partial<Pick<Store, 'activity'>>
+  store: Pick<Store, 'knowledge'> & Partial<Pick<Store, 'audit'>>
   now: () => Date
   /**
    * Kinds agent proposals are accepted for without review, or a function giving them for the

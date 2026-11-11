@@ -11,6 +11,22 @@ import { osvFixer, osvScanner } from '@holtkeeper/vuln-osv'
 const fixtures = join(import.meta.dir, '../../fixtures')
 const store = sqliteStore({ path: join(import.meta.dir, 'holtkeeper.db') })
 const scanner = osvScanner()
+const at = new Date().toISOString()
+
+/** A forge without a stored credential (its tasks fail) and two groups on it. */
+await store.config?.put({
+  type: 'forge',
+  id: 'work',
+  data: { kind: 'gitlab', url: 'https://gitlab.example.com', credentialId: 'dev-none' },
+  updatedAt: at,
+})
+for (const group of ['games', 'tools'])
+  await store.config?.put({
+    type: 'group',
+    id: group,
+    data: { forge: 'work', include: [`${group}/*`], exclude: [] },
+    updatedAt: at,
+  })
 
 /** Real audits of the fixtures, stored as runs of made-up repositories over the past days. */
 const repos = [

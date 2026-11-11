@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import {
-  isAllowedAt,
-  nextRuns,
-  runWindowEnd,
-  schedulePresets,
-  type ScheduleTiming,
-} from './smart.ts'
+import { isAllowedAt, nextRuns, runWindowEnd, type ScheduleTiming } from './smart.ts'
 
 const iso = (dates: Date[]) => dates.map((date) => date.toISOString().slice(0, 16))
 const at = (value: string) => new Date(`${value}:00.000Z`)
@@ -39,7 +33,7 @@ describe('nextRuns: cron', () => {
 
   test('holidays and weekends are skipped', () => {
     const schedule: ScheduleTiming = {
-      ...schedulePresets.nightly(),
+      cron: '0 3 * * 1-5',
       timezone: berlin,
       windows: { holidays: ['2026-11-03'], skipWeekends: true },
     }
@@ -56,7 +50,10 @@ describe('nextRuns: cron', () => {
 describe('nextRuns: every', () => {
   test('aligns to the start of allowed windows', () => {
     const schedule: ScheduleTiming = {
-      ...schedulePresets.workHours({ to: '12:00' }),
+      every: '1h',
+      windows: {
+        allow: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], from: '09:00', to: '12:00' }],
+      },
       timezone: berlin,
     }
     // Friday 30 Oct 10:30 local (CET); next week starts Monday 09:00 local.
@@ -151,7 +148,13 @@ describe('windows', () => {
   })
 
   test('runWindowEnd stops at the window end or the next run', () => {
-    const work: ScheduleTiming = { ...schedulePresets.workHours(), timezone: 'UTC' }
+    const work: ScheduleTiming = {
+      every: '1h',
+      windows: {
+        allow: [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], from: '09:00', to: '18:00' }],
+      },
+      timezone: 'UTC',
+    }
     expect(runWindowEnd(work, at('2026-10-30T09:00')).toISOString()).toBe(
       '2026-10-30T10:00:00.000Z',
     )
@@ -163,12 +166,5 @@ describe('windows', () => {
     expect(runWindowEnd(night, at('2026-10-30T03:00')).toISOString()).toBe(
       '2026-10-30T05:00:00.000Z',
     )
-  })
-
-  test('presets', () => {
-    expect(schedulePresets.nightly()).toEqual({ cron: '0 3 * * 1-5' })
-    expect(schedulePresets.nightly({ at: '02:30', weekends: true })).toEqual({ cron: '30 2 * * *' })
-    expect(schedulePresets.weekly({ day: 'sun', at: '07:15' })).toEqual({ cron: '15 7 * * 0' })
-    expect(schedulePresets.workHours({ every: '30m' }).every).toBe('30m')
   })
 })

@@ -31,6 +31,18 @@ export {
 } from '@holtkeeper/toolchain'
 export { type JobEngine, type JobEngineOptions, createJobEngine } from './engine.ts'
 export { type JobRequest, enqueueUnique } from './enqueue.ts'
+export {
+  FRESHNESS_DEBOUNCE_MS,
+  type FreshnessContext,
+  type FreshnessDecision,
+  type FreshnessInput,
+  type FreshnessMode,
+  type NightWindow,
+  decideFreshness,
+  inNightWindow,
+  matchesAnyPath,
+  refreshIntervalMs,
+} from './freshness.ts'
 export { type ResolveRepos, groupRepositories, matchesRepoGlob, staticPrefix } from './repos.ts'
 export {
   type CheckedSchedule,
@@ -42,16 +54,7 @@ export {
   scheduleProblems,
   spreadRequests,
 } from './scheduler.ts'
-export {
-  type NextRunsOptions,
-  type ScheduleTiming,
-  everyMs,
-  isAllowedAt,
-  nextRuns,
-  runWindowEnd,
-  schedulePresets,
-  systemTimeZone,
-} from './smart.ts'
+export { nextRuns, systemTimeZone } from './smart.ts'
 export {
   PermanentJobError,
   type PersistArtifacts,
@@ -59,5 +62,25 @@ export {
   type WorkerOptions,
   createWorker,
   exponentialBackoff,
+  isBudgetStop,
 } from './worker.ts'
 export { type ScheduleRunSummary, scheduleRuns } from './runs.ts'
+export {
+  type JobLog,
+  type JobLogLine,
+  type JobLogOptions,
+  type JobLogPage,
+  type JobStep,
+  type ReadJobLogOptions,
+  MAX_LOG_PAGE,
+  createJobLog,
+  readJobLog,
+  stepsOf,
+} from './log.ts'
+export {
+  type JobWait,
+  type WaitReason,
+  claimRulesOf,
+  describeWaitReason,
+  waitReasons,
+} from './wait.ts'

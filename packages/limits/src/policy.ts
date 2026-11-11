@@ -86,7 +86,7 @@ export interface LimitedCredential {
 
 export const DEFAULT_BACKOFF: BackoffPolicy = { onStatus: [429], baseMs: 1000, maxMs: 60_000 }
 
-const AI_KINDS = new Set(['ai', 'anthropic'])
+const AI_KINDS = new Set(['ai', 'anthropic', 'anthropic-compatible', 'ai-sdk'])
 
 const numberAt = (options: Record<string, unknown> | undefined, field: string) => {
   const direct = options?.[field]
@@ -99,9 +99,10 @@ const numberAt = (options: Record<string, unknown> | undefined, field: string) =
 
 /**
  * Defaults per credential kind: GitLab tokens get 8 concurrent requests and 300 per minute; AI
- * keys (`ai`, `anthropic`) get 3 concurrent runs and `tokensPerMinute` from the credential's
- * options (`options.tokensPerMinute` or `options.limits.tokensPerMinute`) when known. Other kinds
- * are unlimited apart from backing off after 429.
+ * keys (`ai` and every AI provider credential kind of `@holtkeeper/agent`) get 3 concurrent runs and
+ * `tokensPerMinute` from the credential's options (`options.tokensPerMinute` or
+ * `options.limits.tokensPerMinute`) when known. Other kinds are unlimited apart from backing off
+ * after 429.
  */
 export function defaultLimitPolicy(credential: LimitedCredential): LimitPolicy {
   if (credential.kind === 'gitlab') {

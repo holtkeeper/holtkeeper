@@ -1,41 +1,53 @@
 import { describe, expect, test } from 'bun:test'
 
 import { detectFlow } from './detect.ts'
-import { activeFreeze } from './gates.ts'
 import { releaseSettings } from './settings.ts'
 import { prependChangelog } from './steps.ts'
-import { fillTemplate } from './template.ts'
 
-describe('freeze windows', () => {
-  const settings = releaseSettings({
-    timezone: 'Europe/Berlin',
-    gates: {
-      freeze: [
-        { days: ['fri'], from: '15:00', reason: 'weekend' },
-        { from: '22:00', to: '06:00' },
-      ],
-    },
+describe('settings', () => {
+  test('default to off and parse an empty value', () => {
+    const settings = releaseSettings()
+    expect(settings.enabled).toBe(false)
+    expect(settings.acceptance).toBe('none')
+    expect(settings.gates.pipeline).toBe(true)
   })
 
-  test('match by weekday and local time, also across midnight', () => {
-    expect(activeFreeze(settings, new Date('2026-10-30T14:30:00Z'))?.reason).toBe('weekend')
-    expect(activeFreeze(settings, new Date('2026-10-30T12:00:00Z'))).toBeUndefined()
-    expect(activeFreeze(settings, new Date('2026-10-28T03:00:00Z'))).toBeDefined()
-    expect(activeFreeze(settings, new Date('2026-10-28T10:00:00Z'))).toBeUndefined()
+  test('drop fields a stored row of an older shape breaks, keep the rest', () => {
+    const settings = releaseSettings({
+      enabled: true,
+      flow: { mode: 'trunk' },
+      version: { tagFormat: 'release-{version}', prerelease: 'rc', bump: { minimum: 'minor' } },
+      acceptance: { required: true, signals: ['label'] },
+      gates: { pipeline: 'success', freeze: [{ days: ['fri'] }], blockingLabels: ['hold'] },
+      deploy: { environments: [{ name: 'prod', auto: true }, { job: 'nameless' }] },
+      summary: { mode: 'agent' },
+      timezone: 'Europe/Berlin',
+    })
+    expect(settings).toEqual({
+      enabled: true,
+      flow: { mode: 'trunk', source: 'development' },
+      version: { scheme: 'semver', tagFormat: 'release-{version}', prerelease: false },
+      acceptance: 'none',
+      changelogFile: false,
+      changelog: { excludeTypes: [] },
+      mergeRequest: { labels: [] },
+      deploy: { environments: [{ name: 'prod', confirm: true }] },
+      gates: { pipeline: true, blockingLabels: ['hold'] },
+    })
   })
-})
 
-describe('templates', () => {
-  test('fill values and dates, keep unknown placeholders', () => {
-    const now = new Date('2026-11-01T23:30:00Z')
-    expect(
-      fillTemplate(
-        'Release candidate {date} {date:DD.MM.YYYY} {version} {nope}',
-        { version: '1.0.0' },
-        now,
-        'Europe/Moscow',
-      ),
-    ).toBe('Release candidate 2026-11-02 02.11.2026 1.0.0 {nope}')
+  test('drop only the broken elements of a list', () => {
+    const settings = releaseSettings({
+      mergeRequest: { labels: [1, 'b', 2, 'd'] },
+      deploy: { environments: [{ name: '' }, { name: 'b' }, { name: '' }, { name: 'd' }] },
+    })
+    expect(settings.mergeRequest.labels).toEqual(['b', 'd'])
+    expect(settings.deploy.environments.map((environment) => environment.name)).toEqual(['b', 'd'])
+  })
+
+  test('survive values that are not objects', () => {
+    expect(releaseSettings('nope').enabled).toBe(false)
+    expect(releaseSettings({ flow: 'trunk' }).flow.mode).toBe('merge-request')
   })
 })
 
@@ -57,7 +69,7 @@ describe('flow detection', () => {
       merged: [{ sourceBranch: 'development', targetBranch: 'main' }],
       files: ['package.json'],
     })
-    expect(detected.preset).toBe('merge-request-deferred-version')
+    expect(detected.mode).toBe('merge-request')
     expect(detected.settings).toEqual({
       flow: { mode: 'merge-request', source: 'development' },
       version: { scheme: 'semver', tagFormat: 'v{version}' },
@@ -78,7 +90,7 @@ describe('flow detection', () => {
       ],
       files: [],
     })
-    expect(detected.preset).toBe('merge-request-deferred-version')
+    expect(detected.mode).toBe('merge-request')
     expect(detected.settings['flow']).toEqual({
       mode: 'merge-request',
       source: 'development',
@@ -104,7 +116,7 @@ describe('flow detection', () => {
         tags: [{ name: '@scope/a@1.0.0' }],
         merged: [],
         files: ['.changeset'],
-      }).preset,
+      }).mode,
     ).toBe('external')
   })
 })

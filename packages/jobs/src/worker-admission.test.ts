@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { AnyAnalyzer } from '@holtkeeper/analyzer'
+import { memoryArtifactStore } from '@holtkeeper/artifacts'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { Job } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { z } from 'zod'
 
 import type { ContextFor } from './context.ts'
+import { readJobLog } from './log.ts'
 import { createWorker } from './worker.ts'
 
 const { runner } = createFakeRunner()
@@ -36,6 +38,7 @@ const until = async (check: () => boolean | Promise<boolean>, ms = 2000) => {
 describe('worker admission', () => {
   test('a refused job waits without a slot while other jobs run, then runs once admitted', async () => {
     const store = memoryStore()
+    const logs = memoryArtifactStore()
     const order: string[] = []
     let saturated = true
     const asked: string[] = []
@@ -52,6 +55,8 @@ describe('worker admission', () => {
         }),
       ],
       contextFor,
+      logs,
+      logFlush: { flushLines: 1 },
       concurrency: 1,
       pollMs: 5,
       admissionPollMs: 5,
@@ -74,7 +79,9 @@ describe('worker admission', () => {
     await until(async () => (await store.jobs.get(size.id))?.status === 'succeeded')
     const waiting = await store.jobs.get(ai.id)
     expect(waiting).toMatchObject({ status: 'running', attempts: 1 })
-    expect(waiting?.log).toContain('waiting for capacity')
+    expect(
+      (await readJobLog(logs, ai.id, 1, { tail: 100 })).lines.map((line) => line.text),
+    ).toContain('waiting for capacity')
     expect(order).toEqual(['size'])
 
     saturated = false

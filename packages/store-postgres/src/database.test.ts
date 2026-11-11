@@ -30,15 +30,22 @@ describe.skipIf(!url || !store)('postgres database inspector (HOLTKEEPER_PG_URL)
   })
 
   test('tables and indexes cover only the store schema', async () => {
-    await store!.activity.append({ at: new Date().toISOString(), actor: 'a', action: 'test' })
+    await store!.audit.append({
+      at: new Date().toISOString(),
+      actor: { id: 'a', name: 'A', provider: 'users' },
+      via: 'api',
+      action: 'x.a',
+      target: { type: 'x' },
+      outcome: 'ok',
+    })
     const tables = await inspector().tables()
     const names = tables.map((table) => table.name)
-    expect(names).toContain('activity')
+    expect(names).toContain('audit_events')
     expect(names).toContain('schema_migrations')
-    const activity = tables.find((table) => table.name === 'activity')!
-    expect(activity.totalBytes).toBeGreaterThanOrEqual(activity.dataBytes + activity.indexBytes)
+    const events = tables.find((table) => table.name === 'audit_events')!
+    expect(events.totalBytes).toBeGreaterThanOrEqual(events.dataBytes + events.indexBytes)
     const indexes = await inspector().indexes()
-    expect(indexes.some((index) => index.table === 'activity' && index.primary)).toBe(true)
+    expect(indexes.some((index) => index.table === 'audit_events' && index.primary)).toBe(true)
     expect(indexes.every((index) => names.includes(index.table))).toBe(true)
   })
 

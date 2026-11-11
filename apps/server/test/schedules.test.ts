@@ -47,7 +47,6 @@ const setup = () => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -61,8 +60,7 @@ const setup = () => {
 }
 
 const settled = () => Promise.all(background.splice(0))
-const runs = async () =>
-  (await store.activity.list()).filter((entry) => entry.action === 'schedule.run')
+const runs = async () => (await store.audit.list({ action: 'schedule.run_result' })).events
 
 const send = (path: string, method: string, headers: Record<string, string>) =>
   setup().request(path, { method, headers })

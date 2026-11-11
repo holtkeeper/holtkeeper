@@ -1,4 +1,4 @@
-import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
+import { type AnalyzerPreset, defineAnalyzer, dependencyPaths } from '@holtkeeper/analyzer'
 import { loadPackageCatalog } from '@holtkeeper/depgraph'
 import { z } from 'zod'
 
@@ -123,6 +123,7 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
   kind: 'licenses',
   analysis: licensesAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '1d', paths: dependencyPaths },
   needs: { checkout: true, history: true },
   options: licensesOptionsSchema,
   flags: [

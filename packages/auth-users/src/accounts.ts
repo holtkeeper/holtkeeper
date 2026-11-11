@@ -94,11 +94,6 @@ export async function linkUserAccount(
     verifiedAt: at,
   }
   await accounts.put(account)
-  await ctx.log(caller.id, 'account.linked', user.id, {
-    provider: account.provider,
-    externalId: account.externalId,
-    verification: 'admin',
-  })
   return toAccountView(account)
 }
 
@@ -114,10 +109,6 @@ export async function unlinkUserAccount(
   const account = await accounts.get(accountId)
   if (account?.userId !== user.id) throw new HttpError(404, 'account not found')
   await accounts.remove(account.id)
-  await ctx.log(caller.id, 'account.unlinked', user.id, {
-    provider: account.provider,
-    externalId: account.externalId,
-  })
 }
 
 /**

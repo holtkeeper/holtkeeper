@@ -1,15 +1,7 @@
-import type { Agent } from '@holtkeeper/agent'
 import type { CodeChange, Range } from '@holtkeeper/changes'
 import type { CommandRunner } from '@holtkeeper/exec'
 
-export type QualityCategory =
-  | 'convention'
-  | 'tests'
-  | 'complexity'
-  | 'duplication'
-  | 'lint'
-  | 'security'
-  | 'style'
+export type QualityCategory = 'convention' | 'tests' | 'lint' | 'security' | 'style'
 
 export type IssueSeverity = 'error' | 'warning' | 'info'
 
@@ -31,60 +23,6 @@ export interface QualityIssue {
   changeId?: string
 }
 
-/** Code worth testing, with why and — when an agent wrote one — an example test. */
-export interface TestSuggestion {
-  id: string
-  file: string
-  symbol: string
-  kind: 'function' | 'method' | 'class' | 'module'
-  range?: Range
-  reason: string
-  /** Line coverage of the symbol, when coverage data exists. */
-  coverage?: { covered: number; total: number }
-  complexity?: number
-  /** How often the file changed recently; risky untested code changes often. */
-  churn?: number
-  /** Test framework the example follows, e.g. `bun:test`, `vitest`, `go test`. */
-  framework?: string
-  testFile?: string
-  changeId?: string
-}
-
-/** How consistently one kind of name is written, e.g. module-level constants in TypeScript. */
-export interface ConventionStat {
-  language: string
-  /** e.g. `module constant`, `local variable`, `function`, `type`, `file name`. */
-  kind: string
-  /** Dominant style, e.g. `SCREAMING_SNAKE_CASE`, `camelCase`, `PascalCase`, `kebab-case`. */
-  dominant: string
-  /** Share of names in the dominant style, 0..1. */
-  share: number
-  total: number
-  outliers: number
-  /**
-   * Whether enough names follow `dominant` for it to count as the convention, so its outliers
-   * are reported. Absent in older data, read as true.
-   */
-  established?: boolean
-  /**
-   * Linters whose explicit naming rules cover some of these names (`eslint`, `biome`, ...).
-   * Covered names count in `share` but are never outliers: the linter reports them instead.
-   */
-  enforcedBy?: string[]
-}
-
-export interface CoverageSummary {
-  lines?: { covered: number; total: number }
-  functions?: { covered: number; total: number }
-}
-
-export interface DuplicationSummary {
-  /** Share of duplicated lines, 0..100. */
-  percentage: number
-  duplicatedLines: number
-  totalLines: number
-}
-
 export interface ToolRun {
   name: string
   version?: string
@@ -95,22 +33,16 @@ export interface ToolRun {
   durationMs?: number
 }
 
-/** Everything a quality analysis found; serializable, stored as analysis data. */
+/** Everything the checks of one run found, merged; serializable. */
 export interface QualityData {
   tools: ToolRun[]
   issues: QualityIssue[]
-  tests: TestSuggestion[]
-  conventions: ConventionStat[]
-  coverage?: CoverageSummary
-  duplication?: DuplicationSummary
   changes: CodeChange[]
 }
 
 export interface QualityContext {
   dir: string
   runner: CommandRunner
-  /** Present when an LLM is configured; checks that need one skip themselves otherwise. */
-  agent?: Agent
   signal?: AbortSignal
 }
 
@@ -124,8 +56,8 @@ export type QualityResult = Partial<Omit<QualityData, 'tools'>> & {
 }
 
 /**
- * One source of findings: a linter through SARIF, the conventions engine, coverage and test
- * suggestions, duplication. Checks are independent and replaceable.
+ * One source of findings on a checkout, e.g. leaked secrets or missing test ids. Checks are
+ * independent and replaceable.
  */
 export interface QualityCheck {
   readonly name: string

@@ -24,7 +24,7 @@ describe('classifyProposal', () => {
     expect(result).toEqual({
       kind: 'migration',
       topics: ['testing', 'dependencies'],
-      appliesTo: ['propagate', 'port', 'review', 'tests'],
+      appliesTo: ['propagate', 'port', 'review'],
       packages: [{ ecosystem: 'npm', name: 'react', from: '>=18 <19', to: '>=19 <20' }],
     })
   })
@@ -77,11 +77,9 @@ describe('classifyProposal', () => {
     ).toEqual({
       kind: 'convention',
       topics: ['testing'],
-      appliesTo: ['review', 'quality', 'tests'],
+      appliesTo: ['review'],
     })
-    expect(classifyProposal({ title: 'Release on Tuesdays', body: '' }).appliesTo).toEqual([
-      'release-risk',
-    ])
+    expect(classifyProposal({ title: 'Release on Tuesdays', body: '' }).appliesTo).toEqual(['*'])
   })
 
   test('matches scoped package names by their last segment, as whole words', () => {

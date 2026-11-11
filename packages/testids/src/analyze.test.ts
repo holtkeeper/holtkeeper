@@ -3,10 +3,16 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { analyzeTestIds, componentName, findUntagged, tsconfigAliases } from './analyze.ts'
+import { testIdsAnalysis } from './analysis.ts'
+import {
+  analyzeTestIds,
+  componentName,
+  findUntagged,
+  findUntaggedInText,
+  tsconfigAliases,
+} from './analyze.ts'
 import { testIdsCheck } from './check.ts'
 import type { TestIdsData } from './model.ts'
-import { testIdsAnalysis, testIdsReport } from './report.ts'
 
 let dir: string
 
@@ -83,23 +89,25 @@ test('lists test attributes per component with static and runtime values', async
     },
   ])
 
-  const report = testIdsReport(data, { generatedAt: '2026-10-30T00:00:00Z' })
+  const report = testIdsAnalysis.toReport({
+    id: 'a1',
+    repo: { forge: 'work', path: 'shop/web' },
+    kind: 'testids',
+    createdAt: '2026-10-30T00:00:00.000Z',
+    data,
+  })
   expect(report.metrics.map((m) => [m.id, m.value])).toEqual([
     ['components', 2],
     ['elements', 3],
     ['attributes', 5],
   ])
-  expect(report.sections.map((s) => s.id)).toEqual(['attributes', 'components'])
-
-  const previous = await analyzeTestIds({ dir, exclude: ['src/*.vue'] })
-  const changes = testIdsReport(data, { previous }).sections.at(-1)
-  expect(changes?.blocks[0]).toMatchObject({
-    type: 'table',
-    rows: [{ component: 'Menu · src/Menu.vue', selector: '[data-test="toggle"]' }],
+  expect(report.sections[0]?.blocks[0]).toMatchObject({
+    type: 'markdown',
+    text: expect.stringContaining('New ids use `data-test`'),
   })
 })
 
-test('asks to run analyses stored before the catalog again', () => {
+test('reads analyses stored before the catalog as empty', () => {
   const report = testIdsAnalysis.toReport({
     id: 'a1',
     repo: { forge: 'work', path: 'shop/web' },
@@ -108,7 +116,9 @@ test('asks to run analyses stored before the catalog again', () => {
     data: { attributes: ['data-testid'], untagged: [] } as unknown as TestIdsData,
   })
   expect(report.metrics.map((m) => m.value)).toEqual([0, 0, 0])
-  expect(report.sections.map((s) => s.id)).toEqual(['stale'])
+  expect(report.sections[0]?.blocks[0]).toMatchObject({
+    text: 'No test attributes were found in templates.',
+  })
 })
 
 test('names components after files, or their folder for index files', () => {
@@ -139,6 +149,29 @@ test('finds interactive elements without a test attribute through linaria styles
   expect(mapped).toMatchObject([{ tag: 'router-link', as: 'a', reason: 'a' }])
 })
 
+test('finds untagged elements in unsaved text and suggests ids in the given style', async () => {
+  const text = `const Go = styled.button\`\`
+export const Panel = () => (
+  <div>
+    <Go onClick={handleCheckout}>Go</Go>
+    <input name="promoCode" />
+    <a href="/help" data-qa="panel-help-link">Help</a>
+  </div>
+)
+`
+  const found = await findUntaggedInText({
+    file: 'src/OrderPanel.tsx',
+    text,
+    attributes: ['data-qa'],
+    naming: { separator: '-', case: 'lower', prefix: 'component' },
+  })
+  expect(found.map((e) => [e.line, e.tag, e.as, e.suggestion])).toEqual([
+    [4, 'Go', 'button', 'order-panel-checkout-button'],
+    [5, 'input', undefined, 'order-panel-promo-code-input'],
+  ])
+  expect(await findUntaggedInText({ file: 'README.md', text: '<button />' })).toEqual([])
+})
+
 test('the check reports missing test ids with the project convention', async () => {
   const check = testIdsCheck()
   expect(await check.detect(dir)).toBe(true)
@@ -150,7 +183,19 @@ test('the check reports missing test ids with the project convention', async () 
     ['src/Toggle.svelte', 2],
   ])
   expect(result.issues?.[1]?.help).toContain('this component already uses `data-test-id="status"`')
+  expect(result.issues?.[1]?.help).toContain('suggested: `data-test-id="submit-button"`')
   expect(result.issues?.[3]?.help).toContain('e.g.')
+  const overridden = await testIdsCheck({
+    overrides: { attributes: ['data-qa'], exclude: ['src/*.svelte'] },
+  }).run({ dir, runner: undefined as never })
+  expect(overridden.issues?.map((issue) => [issue.file, issue.range?.start.line])).toEqual([
+    ['src/Form.tsx', 4],
+    ['src/Form.tsx', 6],
+    ['src/Form.tsx', 7],
+    ['src/Menu.vue', 6],
+    ['src/Menu.vue', 7],
+  ])
+  expect(overridden.issues?.[0]?.help).toContain('select elements by `data-qa`')
   const none = await testIdsCheck({ attributes: ['data-e2e'] }).run({
     dir,
     runner: undefined as never,

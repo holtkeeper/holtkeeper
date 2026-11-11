@@ -82,6 +82,22 @@ export function ownPackages(data: DepgraphData): OwnPackage[] {
 }
 
 /**
+ * Every package the repository defines (workspace nodes of any layer, versioned or not, e.g. Go
+ * main modules), deduplicated by ecosystem and name. Sorted by name.
+ */
+export function definedPackages(data: DepgraphData): { ecosystem: string; name: string }[] {
+  const result = new Map<string, { ecosystem: string; name: string }>()
+  for (const layer of data.layers)
+    for (const node of layer.graph.nodes)
+      if (node.kind === 'workspace')
+        result.set(`${node.ecosystem}\0${node.name}`, {
+          ecosystem: node.ecosystem,
+          name: node.name,
+        })
+  return [...result.values()].toSorted((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
  * How far apart a set of versions is: `major` when they are not semver-compatible (below 1.0 a
  * minor bump is breaking), otherwise the most significant part that differs.
  */

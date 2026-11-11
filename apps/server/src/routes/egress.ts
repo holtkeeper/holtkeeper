@@ -184,7 +184,7 @@ export function egressRoutes(deps: ServerDeps) {
   })
 
   app.post('/egress/cache/delete', async (c) => {
-    const principal = authorize(c, 'settings:write', { kind: 'global' })
+    authorize(c, 'settings:write', { kind: 'global' })
     const egress = deps.config.server?.egress
     if (!egress?.proxy) throw new HTTPException(404, { message: 'no egress proxy configured' })
     const input = (await readBody(c, deleteSchema)) ?? {}
@@ -199,11 +199,9 @@ export function egressRoutes(deps: ServerDeps) {
     } catch (error) {
       throw new HTTPException(502, { message: reason(error) })
     }
-    await deps.store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'egress-cache.cleared',
-      subject: input.kind ?? (input.paths ? 'entries' : 'all'),
+    c.set('audit', {
+      action: 'egress_cache.delete',
+      target: { type: 'egress_cache', id: input.kind ?? (input.paths ? 'entries' : 'all') },
       details: { ...(input.paths ? { entries: input.paths.length } : {}), ...result },
     })
     return c.json<DeleteEgressCacheResult>(result)

@@ -21,14 +21,6 @@ void exhaustive
 /** Sidebar pages for analysis kinds: route, kind, title, icon and the metrics their trend prefers. */
 export const analysisPages = [
   {
-    to: '/releases',
-    kind: 'changelog',
-    title: 'Releases',
-    icon: 'release',
-    description: 'Commit history and contributors per release',
-    trend: [/commits/i, /contributors/i],
-  },
-  {
     to: '/bundles',
     kind: 'bundle',
     title: 'Bundles',
@@ -45,28 +37,12 @@ export const analysisPages = [
     trend: [/cycle/i, /duplicate/i],
   },
   {
-    to: '/quality',
-    kind: 'quality',
-    title: 'Code quality',
-    icon: 'quality',
-    description: 'Lint issues, coverage and suggested fixes',
-    trend: [/issues/i, /coverage/i],
-  },
-  {
     to: '/coverage',
     kind: 'coverage',
     title: 'Test coverage',
     icon: 'coverage',
-    description: 'Line, function and branch coverage per folder and file',
+    description: 'Line and branch coverage per repository, package and folder',
     trend: [/line coverage/i, /without tests/i],
-  },
-  {
-    to: '/testids',
-    kind: 'testids',
-    title: 'Test ids',
-    icon: 'testids',
-    description: 'Test attributes (data-test-id, data-test-state, ...) per component',
-    trend: [/elements with test attributes/i, /components/i],
   },
   {
     to: '/branches',
@@ -79,10 +55,10 @@ export const analysisPages = [
   {
     to: '/ci',
     kind: 'ci-jobs',
-    title: 'CI jobs',
+    title: 'CI',
     icon: 'ci',
-    description: 'Job durations, slowdowns and failure rates over time',
-    trend: [/pipeline time/i, /failure rate/i],
+    description: 'Pipeline time, success rate and problem jobs',
+    trend: [/pipeline time/i, /success rate/i],
   },
   {
     to: '/licenses',
@@ -100,57 +76,17 @@ export const analysisPages = [
     description: 'Exports of every package per version, diffs and the MCP endpoint for agents',
     trend: [/documented/i, /exports/i],
   },
-  {
-    to: '/assets',
-    kind: 'assets',
-    title: 'Assets',
-    icon: 'assets',
-    description:
-      'Images, fonts and media: budgets, AVIF/WebP and responsive variants, SVG and inline SVG optimization',
-    trend: [/savings/i, /^total$/i],
-  },
-  {
-    to: '/warmup',
-    kind: 'warmup',
-    title: 'Build warm-up',
-    icon: 'warmup',
-    description: 'Commands run on branch pushes to fill build caches: status, duration and output',
-    trend: [/duration/i],
-  },
-  {
-    to: '/updates',
-    kind: 'renovate',
-    title: 'Dependency updates',
-    icon: 'updates',
-    description: 'Outdated dependencies and update merge requests across repositories',
-    trend: [/outdated/i, /libyears/i],
-  },
 ] as const
+
+/** Where records of the group-scoped `stack` kind belong: the Stack page. */
+export const stackRecords = { to: '/stack', kind: 'stack', title: 'Stack' } as const
 
 /**
- * Sidebar pages for group-scoped analysis kinds, whose records are stored under
- * `{ forge, path: <group> }`; each group page shows the same records as a tab.
+ * Where the records of a kind without a page of their own live: a tab of the repository page,
+ * `undefined` for its first tab.
  */
-export const groupAnalysisPages = [
-  {
-    to: '/fleet',
-    kind: 'fleet',
-    title: 'Fleet',
-    icon: 'fleet',
-    description: 'Shared library versions and config drift per group',
-    trend: [/behind-major/i, /drifted/i],
-  },
-  {
-    to: '/stack',
-    kind: 'stack',
-    title: 'Tech stack',
-    icon: 'stack',
-    description: 'Runtimes, package managers and images per group: versions, lag and end of life',
-    trend: [/^eol$/i, /behind-major/i],
-  },
-] as const
-
-export const [fleetView, stackView] = groupAnalysisPages
+export const recordRepoTab = (kind: string): 'assets' | 'reviews' | undefined =>
+  kind === 'assets' ? 'assets' : kind === 'review' ? 'reviews' : undefined
 
 /**
  * Metrics worth charting across records: numeric in the newest record, one per pattern in

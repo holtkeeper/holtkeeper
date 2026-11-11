@@ -7,8 +7,10 @@ import {
   newAction,
   newPolicy,
   normalizePolicies,
+  policiesEntryFor,
   policyProblems,
-  summarizePolicy,
+  withPolicy,
+  withoutPolicy,
 } from './policies.ts'
 
 describe('normalizePolicies', () => {
@@ -72,7 +74,7 @@ test('cleanCondition drops empty lists, blank titles and empty groups', () => {
   })
 })
 
-test('describeCondition and summarizePolicy read like a sentence', () => {
+test('describeCondition reads like a sentence', () => {
   expect(
     describeCondition({
       targetBranch: ['main'],
@@ -86,19 +88,6 @@ test('describeCondition and summarizePolicy read like a sentence', () => {
     '(labels include deps or at most 50 lines)',
     'not (is a draft)',
   ])
-  expect(
-    summarizePolicy({
-      id: 'p',
-      name: 'P',
-      enabled: true,
-      when: { event: ['open', 'update'] },
-      actions: [{ type: 'approve' }, { type: 'merge' }],
-      skipAnalyzers: ['review'],
-    }),
-  ).toBe('If event is open or update → approve, merge, skip review')
-  expect(summarizePolicy({ id: 'p', name: 'P', enabled: true, when: {}, actions: [] })).toBe(
-    'Always → nothing',
-  )
 })
 
 test('policyProblems reports bad and repeated ids, missing names and empty label actions', () => {
@@ -158,5 +147,38 @@ describe('actionVariants', () => {
       type: 'merge',
     })
     expect(newAction('custom', undefined, schema)).toEqual({ type: 'custom' })
+  })
+})
+
+describe('saving one policy of an entry', () => {
+  const stored = [
+    { id: 'a', name: 'A', when: { targetBranch: 'main' }, actions: [{ type: 'approve' }] },
+    { id: 'b', name: 'B', when: {}, actions: [] },
+  ]
+
+  test('replaces in place, renames by previous id, appends new ones and removes', () => {
+    const renamed = withPolicy(stored, { ...newPolicy([]), id: 'c', name: 'C' }, 'a')
+    expect(renamed.map((p) => p.id)).toEqual(['c', 'b'])
+    expect(withPolicy(stored, { ...newPolicy(['a', 'b']), name: 'New' }).map((p) => p.id)).toEqual([
+      'a',
+      'b',
+      'policy-3',
+    ])
+    expect(
+      withPolicy(stored, { ...newPolicy([]), id: 'a', name: 'A', when: { title: ' ' } })[0]?.when,
+    ).toEqual({})
+    expect(withoutPolicy(stored, 'a').map((p) => p.id)).toEqual(['b'])
+  })
+
+  test('a new policy of a team goes to the entry scoped to exactly that group', () => {
+    const entries = [
+      { id: '1', key: 'mergeRequests.policies', scope: { groups: ['toys', 'games'] } },
+      { id: '2', key: 'mergeRequests.policies', scope: { groups: ['toys'] } },
+      { id: '3', key: 'mergeRequests.policies', scope: { all: true } },
+      { id: '4', key: 'other', scope: { groups: ['games'] } },
+    ]
+    expect(policiesEntryFor(entries, 'mergeRequests.policies', 'toys')?.id).toBe('2')
+    expect(policiesEntryFor(entries, 'mergeRequests.policies', undefined)?.id).toBe('3')
+    expect(policiesEntryFor(entries, 'mergeRequests.policies', 'games')).toBeUndefined()
   })
 })

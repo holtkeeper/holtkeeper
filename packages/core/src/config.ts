@@ -8,8 +8,6 @@ import type { ForgeDefinition, Secret } from '@holtkeeper/forge'
 import type { Store } from '@holtkeeper/store'
 import { z } from 'zod'
 
-import type { PluginUse } from './plugin.ts'
-
 const id = z.string().regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -18,11 +16,6 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const forgeSchema = z.custom<ForgeDefinition>(
   (value) => isObject(value) && typeof value.create === 'function',
   'expected a forge, e.g. gitlab({ ... })',
-)
-
-const pluginUseSchema = z.custom<PluginUse>(
-  (value) => isObject(value) && isObject(value.plugin) && typeof value.plugin.run === 'function',
-  'expected a plugin, e.g. browserslist({ ... })',
 )
 
 const authSchema = z.custom<AuthProvider>(
@@ -256,14 +249,23 @@ const executionSchema = z.object({
     .optional(),
 })
 
-/** Background analyses: schedules, forge webhooks and the worker that runs them. */
-const jobsSchema = z.object({
+/** The worker that runs background analyses, and the shared webhook secret. */
+const jobsFileSchema = z.object({
   execution: executionSchema.optional(),
   /** Jobs run at the same time; one repository never runs two jobs at once. */
   concurrency: z.number().int().positive().default(2),
   /** Bare mirrors of analyzed repositories, reused between jobs. */
   cacheDir: z.string().default('.holtkeeper/cache'),
   timeoutMinutes: z.number().positive().default(30),
+  /** Shared secret forge webhooks must send; webhooks are refused without it. */
+  webhookSecret: secretSchema.optional(),
+})
+
+/**
+ * `jobs` of the effective config: the file's worker settings plus the schedules, triggers, bot
+ * accounts and webhook secrets built from panel documents.
+ */
+const jobsSchema = jobsFileSchema.extend({
   schedules: z.array(scheduleSchema).default([]),
   /** Analyzers run for a repository when a tag is pushed (forge webhook). */
   onTag: z
@@ -329,10 +331,8 @@ const jobsSchema = z.object({
       z.object({ analyzer: z.string().min(1), args: z.array(z.string().min(1)).optional() }),
     )
     .optional(),
-  /** Username Holtkeeper posts as; its own webhook events are ignored. */
-  botUsername: z.string().min(1).optional(),
-  /** Shared secret forge webhooks must send; webhooks are refused without it. */
-  webhookSecret: secretSchema.optional(),
+  /** Username Holtkeeper posts as, by forge id; its own events on that forge are ignored. */
+  botUsernames: z.record(id, z.string().min(1)).optional(),
   /** Per-forge webhook secrets for `POST /api/webhooks/<forge>`, by forge id. */
   webhooks: z.record(id, z.object({ secret: secretSchema })).optional(),
 })
@@ -372,42 +372,72 @@ const repoSchema = z.object({
   traits: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
 })
 
-/** Where people talk to Holtkeeper besides merge request comments. */
-const chatSchema = z.object({
-  /**
-   * A Slack app: its bot token (`xoxb-…`) and signing secret. Requests reach
-   * `/api/chat/slack/{events,commands,interactions}`. Optional: the panel can connect one too;
-   * this one wins when both are set.
-   */
-  slack: z.object({ botToken: secretSchema, signingSecret: secretSchema }).optional(),
-})
+const fileShape = {
+  dryRun: z.boolean().default(false),
+  server: serverSchema.optional(),
+  jobs: jobsFileSchema.prefault({}),
+  limits: limitsSchema.optional(),
+  ai: aiSchema.optional(),
+}
 
-/** Validates a whole config, including references between sections and every plugin's options. */
+const uniqueAiProviders = (
+  config: { ai?: { providers: AiProviderPlugin[] } | undefined },
+  ctx: z.RefinementCtx,
+) => {
+  const aiPackages = new Set<string>()
+  for (const [index, provider] of (config.ai?.providers ?? []).entries()) {
+    if (aiPackages.has(provider.package)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ai', 'providers', index],
+        message: `AI provider "${provider.package}" is added twice`,
+      })
+    }
+    aiPackages.add(provider.package)
+  }
+}
+
+/**
+ * `holtkeeper.config.ts`: infrastructure only (store, artifacts, auth, vault key, listener, worker
+ * execution, egress, shared limits, AI provider plugins). Everything else is edited in the panel.
+ */
+export const configFileSchema = z.object(fileShape).superRefine(uniqueAiProviders)
+
+/**
+ * Keys an older config file may still have, with where they are edited now. `parseConfigFile`
+ * warns about each one it finds and ignores it.
+ */
+export const removedConfigKeys: Readonly<Record<string, string>> = {
+  forges: 'forges are added in the panel (Settings → Integrations → Forges)',
+  groups: 'groups are edited in the panel (Repositories)',
+  repos: 'repository traits are edited in the panel',
+  plugins: 'plugins were removed',
+  'jobs.schedules': 'schedules are edited in the panel (Automation)',
+  'jobs.onTag': 'triggers are edited in the panel (Automation)',
+  'jobs.onPush': 'triggers are edited in the panel (Automation)',
+  'jobs.onMergeRequest': 'triggers are edited in the panel (Automation)',
+  'jobs.onNewRepo': 'triggers are edited in the panel (Automation)',
+  'jobs.onLabel': 'triggers are edited in the panel (Automation)',
+  'jobs.commands': 'commands are edited in the panel (Automation)',
+  'jobs.botUsername': "the bot username is a forge's setting in the panel",
+  'jobs.webhooks': 'webhook secrets are created per panel forge (Settings → Integrations → Forges)',
+}
+
+/**
+ * The config the server runs on: the file config plus forges, groups, repository traits,
+ * schedules, triggers, bot usernames and webhook secrets from panel documents. References between
+ * them are checked.
+ */
 export const configSchema = z
   .object({
-    dryRun: z.boolean().default(false),
-    forges: z.record(id, forgeSchema),
+    ...fileShape,
+    forges: z.record(id, forgeSchema).default({}),
     groups: z.record(id, groupSchema).default({}),
     repos: z.record(z.string(), repoSchema).default({}),
-    plugins: z.array(pluginUseSchema).default([]),
-    server: serverSchema.optional(),
-    jobs: jobsSchema.optional(),
-    limits: limitsSchema.optional(),
-    ai: aiSchema.optional(),
-    chat: chatSchema.optional(),
+    jobs: jobsSchema.prefault({}),
   })
   .superRefine((config, ctx) => {
-    const aiPackages = new Set<string>()
-    for (const [index, provider] of (config.ai?.providers ?? []).entries()) {
-      if (aiPackages.has(provider.package)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['ai', 'providers', index],
-          message: `AI provider "${provider.package}" is added twice`,
-        })
-      }
-      aiPackages.add(provider.package)
-    }
+    uniqueAiProviders(config, ctx)
 
     for (const [name, group] of Object.entries(config.groups)) {
       if (!(group.forge in config.forges)) {
@@ -437,7 +467,7 @@ export const configSchema = z
       }
     }
     const scheduleNames = new Set<string>()
-    for (const [index, schedule] of (config.jobs?.schedules ?? []).entries()) {
+    for (const [index, schedule] of config.jobs.schedules.entries()) {
       const path = ['jobs', 'schedules', index]
       if (scheduleNames.has(schedule.name)) {
         ctx.addIssue({
@@ -459,56 +489,17 @@ export const configSchema = z
         }
       }
     }
-    for (const forge of Object.keys(config.jobs?.webhooks ?? {})) {
-      if (!(forge in config.forges)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['jobs', 'webhooks', forge],
-          message: `unknown forge "${forge}"`,
-        })
-      }
-    }
-    unknownGroups(config.jobs?.onTag?.groups, ['jobs', 'onTag', 'groups'])
-    unknownGroups(config.jobs?.onPush?.groups, ['jobs', 'onPush', 'groups'])
-    unknownGroups(config.jobs?.onMergeRequest?.groups, ['jobs', 'onMergeRequest', 'groups'])
-    unknownGroups(config.jobs?.onNewRepo?.groups, ['jobs', 'onNewRepo', 'groups'])
-
-    const names = new Set<string>()
-    for (const [index, use] of config.plugins.entries()) {
-      const path = ['plugins', index]
-      const { name, options } = use.plugin
-
-      if (names.has(name)) {
-        ctx.addIssue({ code: 'custom', path, message: `plugin "${name}" is used twice` })
-      }
-      names.add(name)
-
-      unknownGroups(use.groups, [...path, 'groups'])
-
-      const base = use.options ?? {}
-      const variants: [PropertyKey[], object][] = [
-        [['options'], base],
-        ...Object.entries(use.overrides ?? {}).map(
-          ([pattern, override]): [PropertyKey[], object] => [
-            ['overrides', pattern],
-            { ...base, ...override },
-          ],
-        ),
-      ]
-      for (const [suffix, value] of variants) {
-        const result = options.safeParse(value)
-        for (const issue of result.error?.issues ?? []) {
-          ctx.addIssue({
-            code: 'custom',
-            path: [...path, ...suffix, ...issue.path],
-            message: issue.message,
-          })
-        }
-      }
-    }
+    unknownGroups(config.jobs.onTag?.groups, ['jobs', 'onTag', 'groups'])
+    unknownGroups(config.jobs.onPush?.groups, ['jobs', 'onPush', 'groups'])
+    unknownGroups(config.jobs.onMergeRequest?.groups, ['jobs', 'onMergeRequest', 'groups'])
+    unknownGroups(config.jobs.onNewRepo?.groups, ['jobs', 'onNewRepo', 'groups'])
   })
 
-export type HoltkeeperConfigInput = z.input<typeof configSchema>
+/** What a config module's default export may contain. */
+export type HoltkeeperConfigInput = z.input<typeof configFileSchema>
+/** A validated config file with defaults applied. */
+export type HoltkeeperFileConfig = z.output<typeof configFileSchema>
+/** The effective config: the file config with panel documents applied. */
 export type HoltkeeperConfig = z.output<typeof configSchema>
 
 /** Identity helper that types a config module's default export. */
@@ -519,20 +510,59 @@ export class ConfigError extends Error {
   override name = 'ConfigError'
 }
 
-/** Validates a config object and applies defaults. */
+/** Validates an effective config object (file config plus panel entries) and applies defaults. */
 export function parseConfig(input: unknown): HoltkeeperConfig {
   const result = configSchema.safeParse(input)
   if (!result.success) throw new ConfigError(z.prettifyError(result.error))
   return result.data
 }
 
-/** Imports a config module and validates its default export. */
-export async function loadConfig(file: string): Promise<HoltkeeperConfig> {
+/** One line per key of `input` that a config file no longer takes, saying where it moved. */
+export function removedKeyWarnings(input: unknown): string[] {
+  if (!isObject(input)) return []
+  const present = (path: string) => {
+    const [head = '', tail] = path.split('.')
+    const value = input[head]
+    return tail === undefined ? value !== undefined : isObject(value) && value[tail] !== undefined
+  }
+  return Object.entries(removedConfigKeys)
+    .filter(([path]) => present(path))
+    .map(
+      ([path, where]) =>
+        `config: \`${path}\` is no longer read from the config file and is ignored: ${where}`,
+    )
+}
+
+export interface ParseConfigFileOptions {
+  /** Receives one warning per removed key the file still has. Default `console.warn`. */
+  warn?: (line: string) => void
+}
+
+/**
+ * Validates a config file's default export and applies defaults. Removed keys
+ * (`removedConfigKeys`) are reported through `warn` and ignored.
+ */
+export function parseConfigFile(
+  input: unknown,
+  options: ParseConfigFileOptions = {},
+): HoltkeeperFileConfig {
+  const warn = options.warn ?? ((line: string) => console.warn(line))
+  for (const line of removedKeyWarnings(input)) warn(line)
+  const result = configFileSchema.safeParse(input)
+  if (!result.success) throw new ConfigError(z.prettifyError(result.error))
+  return result.data
+}
+
+/** Imports a config module and validates its default export with `parseConfigFile`. */
+export async function loadConfig(
+  file: string,
+  options: ParseConfigFileOptions = {},
+): Promise<HoltkeeperFileConfig> {
   const path = resolve(file)
   if (!(await Bun.file(path).exists())) throw new ConfigError(`config not found: ${path}`)
   const module: unknown = await import(pathToFileURL(path).href)
   if (!isObject(module) || module.default === undefined) {
     throw new ConfigError(`${path} has no default export`)
   }
-  return parseConfig(module.default)
+  return parseConfigFile(module.default, options)
 }

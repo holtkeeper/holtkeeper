@@ -5,7 +5,6 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "plugins/*",
     "examples",
     "docs"
   ],

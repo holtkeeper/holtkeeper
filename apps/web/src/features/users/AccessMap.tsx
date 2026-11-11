@@ -31,7 +31,7 @@ const HANDLE = '!border-0 !bg-border-tertiary'
 function UserCard({ data }: NodeProps<UserNode>) {
   return (
     <div
-      className="flex h-full w-full cursor-pointer items-center gap-2 overflow-hidden rounded-xl border border-border bg-surface px-2.5 shadow-surface transition-opacity"
+      className="flex h-full w-full cursor-pointer items-center gap-2 overflow-hidden rounded-xl border border-border bg-surface px-2.5 transition-opacity"
       style={{ opacity: data.dim ? 0.35 : data.disabled ? 0.6 : 1 }}
       title={data.disabled ? `${data.name} (disabled)` : data.name}
     >
@@ -51,7 +51,7 @@ function UserCard({ data }: NodeProps<UserNode>) {
 function ScopeCard({ data }: NodeProps<ScopeNode>) {
   return (
     <div
-      className="flex h-full w-full items-center overflow-hidden rounded-xl border border-border bg-surface px-3 shadow-surface transition-opacity"
+      className="flex h-full w-full items-center overflow-hidden rounded-xl border border-border bg-surface px-3 transition-opacity"
       style={{
         opacity: data.dim ? 0.35 : data.idle ? 0.6 : 1,
         borderStyle: data.idle ? 'dashed' : 'solid',

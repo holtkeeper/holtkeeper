@@ -24,6 +24,8 @@ export interface StringRules {
   maxLength?: number
   pattern?: string
   format?: string
+  /** `x-multiline`: edited in a text area, e.g. file content. */
+  multiline?: boolean
 }
 
 /** How one value of a JSON Schema is edited in a form. */
@@ -143,7 +145,12 @@ const leafOf = (schema: JsonSchema): FieldNode | undefined => {
     case 'boolean':
       return { kind: 'boolean' }
     case 'string':
-      return { kind: 'string', ...stringRules(schema), format: str(schema.format) }
+      return {
+        kind: 'string',
+        ...stringRules(schema),
+        format: str(schema.format),
+        multiline: schema['x-multiline'] === true,
+      }
     case 'integer':
     case 'number':
       return {

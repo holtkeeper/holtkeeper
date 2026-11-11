@@ -4,7 +4,7 @@ import type {
   PublicApiPackageDetail,
   PublicApiPackageSummary,
 } from '@holtkeeper/api'
-import { Link, Navigate, useNavigate, useSearch } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ArrowLeft, FileText, Library, RefreshCw, Search } from 'lucide-react'
 import { useState } from 'react'
 
@@ -17,7 +17,6 @@ import {
   usePublicApiRescan,
   usePublicApiSearch,
 } from '../../api/queries.ts'
-import { analysisPages } from '../../lib/analyses.ts'
 import { formatDate, formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import {
   documentedShare,
@@ -27,6 +26,7 @@ import {
   versionLabel,
 } from '../../lib/public-api.ts'
 import { repoKey } from '../../lib/repo.ts'
+import { pageSettingKeys } from '../../lib/settings-tabs.ts'
 import { useDebounced } from '../../lib/use-debounced.ts'
 import {
   Button,
@@ -49,13 +49,11 @@ import {
   Th,
   notify,
 } from '../../ui/index.ts'
-import { AnalysisRecords } from '../analyses/AnalysesPage.tsx'
 import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
+import { SettingsButton } from '../settings/SettingsSheet.tsx'
 import { useSession } from '../shell/session.ts'
-import { ImpactTab, UsedByTab } from './UsagesTabs.tsx'
-
-const page = analysisPages.find((p) => p.kind === 'api-surface') ?? analysisPages[0]
+import { UpgradeTab, UsedByTab } from './UsagesTabs.tsx'
 
 interface PublicApiSearch {
   package?: string
@@ -67,7 +65,6 @@ interface PublicApiSearch {
 /** Public API of every package per version and symbol search. */
 export function PublicApiPage() {
   const search: PublicApiSearch = useSearch({ strict: false })
-  if (search.tab === 'mcp' && !search.package) return <Navigate to="/mcp-server" replace />
   if (search.package)
     return (
       <PackageView
@@ -77,7 +74,7 @@ export function PublicApiPage() {
         {...(search.tab ? { tab: search.tab } : {})}
       />
     )
-  return <CatalogView tab={search.tab ?? 'packages'} />
+  return <CatalogView tab={search.tab === 'search' ? 'search' : 'packages'} />
 }
 
 function CatalogView({ tab }: { tab: string }) {
@@ -105,8 +102,9 @@ function CatalogView({ tab }: { tab: string }) {
               Reread records
             </Button>
           ) : null}
-          <BackfillReleasesButton api />
+          <BackfillReleasesButton analyzer="api-surface" />
           <RunJobButton analyzer="api-surface" label="Run now" variant="secondary" />
+          <SettingsButton title="Public API settings" keys={pageSettingKeys['public-api']} />
         </div>
       }
     >
@@ -117,7 +115,6 @@ function CatalogView({ tab }: { tab: string }) {
         items={[
           { id: 'packages', label: 'Packages', content: <PackagesTab /> },
           { id: 'search', label: 'Search', content: <SearchTab /> },
-          { id: 'records', label: 'Reports', content: <AnalysisRecords page={page} /> },
         ]}
       />
     </Page>
@@ -323,7 +320,7 @@ function SymbolCard({ symbol, importFrom }: { symbol: ApiSymbol; importFrom: str
 
 const symbolPage = 150
 
-const packageTabs = ['api', 'changes', 'used-by', 'impact']
+const packageTabs = ['api', 'changes', 'used-by', 'upgrade']
 
 function PackageView({
   name,
@@ -438,7 +435,7 @@ function PackageView({
                 content: <ChangesTab data={data} />,
               },
               { id: 'used-by', label: 'Used by', content: <UsedByTab data={data} /> },
-              { id: 'impact', label: 'Upgrade impact', content: <ImpactTab data={data} /> },
+              { id: 'upgrade', label: 'Upgrade', content: <UpgradeTab data={data} /> },
             ]}
           />
         </>
@@ -654,7 +651,7 @@ function ChangesTab({ data }: { data: PublicApiPackageDetail }) {
       <EmptyState
         title="No earlier version on record"
         description="Analyze past releases with the public API snapshot to compare versions."
-        action={<BackfillReleasesButton repo={data.repo} api />}
+        action={<BackfillReleasesButton analyzer="api-surface" repo={data.repo} />}
       />
     )
   const result = diff.data

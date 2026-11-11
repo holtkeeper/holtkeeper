@@ -1,11 +1,14 @@
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { HoltkeeperFileConfig } from '@holtkeeper/core'
 import type { RunningServer, ServerOptions } from '@holtkeeper/server'
 
-import { UsageError } from './audit.ts'
+/** A wrong command line; the CLI prints its message and exits 1. */
+export class UsageError extends Error {
+  override name = 'UsageError'
+}
 
 /** `startServer` from `@holtkeeper/server`, injectable for tests. */
 export type StartServer = (
-  config: HoltkeeperConfig,
+  config: HoltkeeperFileConfig,
   options: ServerOptions,
 ) => Promise<RunningServer>
 
@@ -14,6 +17,7 @@ export interface ServeFlags {
   role?: string | undefined
   concurrency?: string | undefined
   'claim-delay'?: string | undefined
+  pool?: string | undefined
   'max-jobs'?: string | undefined
   'drain-timeout'?: string | undefined
 }
@@ -24,6 +28,14 @@ const positiveInt = (flag: string, value: string | undefined) => {
   if (!Number.isInteger(parsed) || parsed < 1)
     throw new UsageError(`--${flag} expects a positive integer, got "${value}"`)
   return parsed
+}
+
+function poolList(value: string | undefined): string[] | undefined {
+  if (value === undefined || value.trim() === '') return undefined
+  const pools = [...new Set(value.split(',').map((part) => part.trim()))]
+  const bad = pools.find((pool) => !/^[a-z][a-z0-9-]*$/.test(pool))
+  if (bad !== undefined) throw new UsageError(`--pool expects pool names like write, got "${bad}"`)
+  return pools
 }
 
 const durationUnits: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }
@@ -37,8 +49,9 @@ export function parseDuration(flag: string, value: string): number {
 
 /**
  * Server options from `serve` flags and the environment: `--role` (else `HOLTKEEPER_ROLE`, else
- * `all`), `--concurrency`, `--claim-delay` (else `HOLTKEEPER_CLAIM_DELAY`), `--max-jobs`,
- * `--drain-timeout` (else `HOLTKEEPER_DRAIN_TIMEOUT`).
+ * `all`), `--concurrency`, `--claim-delay` (else `HOLTKEEPER_CLAIM_DELAY`), `--pool` (else
+ * `HOLTKEEPER_WORKER_POOL`; comma-separated pool names), `--max-jobs`, `--drain-timeout` (else
+ * `HOLTKEEPER_DRAIN_TIMEOUT`).
  */
 export async function serveOptions(
   flags: ServeFlags,
@@ -56,15 +69,16 @@ export async function serveOptions(
   const delay = flags['claim-delay'] ?? env.HOLTKEEPER_CLAIM_DELAY
   const claimDelayMs = delay === undefined ? undefined : parseDuration('claim-delay', delay)
   const drain = flags['drain-timeout'] ?? env.HOLTKEEPER_DRAIN_TIMEOUT
+  const pools = poolList(flags.pool ?? env.HOLTKEEPER_WORKER_POOL)
+  const worker = {
+    ...(concurrency !== undefined && { concurrency }),
+    ...(claimDelayMs !== undefined && { claimDelayMs }),
+    ...(maxJobs !== undefined && { maxJobs }),
+    ...(pools && { pools }),
+  }
   return {
     roles,
-    ...((concurrency !== undefined || claimDelayMs !== undefined || maxJobs !== undefined) && {
-      worker: {
-        ...(concurrency !== undefined && { concurrency }),
-        ...(claimDelayMs !== undefined && { claimDelayMs }),
-        ...(maxJobs !== undefined && { maxJobs }),
-      },
-    }),
+    ...(Object.keys(worker).length > 0 && { worker }),
     ...(drain !== undefined && { drainTimeoutMs: parseDuration('drain-timeout', drain) }),
   }
 }
@@ -74,7 +88,7 @@ export async function serveOptions(
  * ran that many jobs; then drains and stops it. Resolves with exit code 0.
  */
 export async function serve(
-  config: HoltkeeperConfig,
+  config: HoltkeeperFileConfig,
   options: ServerOptions,
   start: StartServer,
   untilStopped: () => Promise<void>,

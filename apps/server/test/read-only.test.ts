@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import { noAuth } from '@holtkeeper/auth-none'
-import { parseConfig } from '@holtkeeper/core'
+import { parseConfig, parseConfigFile } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { type GitForge, type RepoRef, ReadOnlyRepositoryError } from '@holtkeeper/forge'
 import { createLimiter } from '@holtkeeper/limits'
@@ -36,8 +36,7 @@ const config = parseConfig({
 })
 
 const vault = aesVault('v'.repeat(32))
-const credentials = () =>
-  createCredentialService({ credentials: store.credentials, activity: store.activity, vault })
+const credentials = () => createCredentialService({ credentials: store.credentials, vault })
 
 const markReadOnly = (scope: { groups: string[] } | { repos: string[] }, value = true) =>
   store.settings.put({
@@ -68,11 +67,32 @@ describe('repo.readOnly', () => {
 
   test('forge clients of the managed config refuse writes to read-only repositories', async () => {
     await markReadOnly({ groups: ['libs'] })
+    const service = credentials()
+    const credential = await service.create({
+      name: 'work',
+      kind: 'gitlab',
+      url: 'https://gitlab.test',
+      scope: { all: true },
+      secret: 'tok',
+    })
+    const at = '2026-10-30T00:00:00.000Z'
+    await store.config?.put({
+      type: 'forge',
+      id: 'work',
+      data: { kind: 'gitlab', url: 'https://gitlab.test', credentialId: credential.id },
+      updatedAt: at,
+    })
+    await store.config?.put({
+      type: 'group',
+      id: 'libs',
+      data: { forge: 'work', include: ['libs/*'], exclude: [] },
+      updatedAt: at,
+    })
     const managed = await startManagedConfig({
-      file: config,
+      file: parseConfigFile({}, { warn: () => {} }),
       store,
       vault,
-      credentials: credentials(),
+      credentials: service,
       limiter: createLimiter(),
       pollMs: 0,
     })
@@ -84,8 +104,6 @@ describe('repo.readOnly', () => {
         (error: unknown) => error,
       ),
     ).toBeInstanceOf(ReadOnlyRepositoryError)
-    await forge?.commentOnMergeRequest('games/a', 1, 'hi')
-    expect(comments).toEqual(['games/a'])
     managed.stop()
   })
 

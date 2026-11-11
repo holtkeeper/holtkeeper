@@ -8,14 +8,15 @@ One `AiUsageRecord` per agent run: when it started, the repository and the confi
 
 - `ok` — the agent returned.
 - `error` — the agent threw; the error message is kept, and so are tokens, cost and turns when the error carries them (`usage`, `costUsd`, `turns` properties).
-- `denied-budget` — a `block` budget stopped the run before the agent was called; tokens and cost are 0.
+- `denied-budget` — a spend limit stopped the run: a `block` budget refused it before the agent was called (tokens and cost 0), or the run failed with `BudgetExceededError` (a provider refusal or its own cost cap; whatever it used is kept).
 
 Prompts and answers are never recorded.
 
 ## Recording runs
 
-- `meteredAgent(agent, { record, budgets?, context, prices?, now?, onRecordError? })` wraps an `Agent`. `context` says who and what the runs are for (`repo` with groups, `actor`, `provider`, `model`, optional `taskKind`, `analyzer`, `jobId`, `analysisId`); the task's own `taskKind` wins over the context's, `agent` is the fallback. With `budgets` every run is checked first; a denial is recorded and thrown as `BudgetExceededError` (with the `exceeded` limits). Results and errors pass through unchanged; a failing `record` is reported to `onRecordError` (default `console.error`) and never replaces them.
-- `usageRecorder(store.aiUsage, { prices?, now?, groupsOf?, budgets? })` returns an `onRun(info)` hook for agent wrappers that report `{ repo, taskKind, provider, model, result | error, durationMs }` (plus optional `actor`, `analyzer`, `jobId`, `analysisId`, `at`). A `BudgetExceededError` is stored as `denied-budget`.
+- `meteredAgent(agent, { record, budgets?, context, prices?, now?, onRecordError? })` wraps an `Agent`. `context` says who and what the runs are for (`repo` with groups, `actor`, `provider`, `model`, optional `taskKind`, `analyzer`, `jobId`, `analysisId`, `interactive`); the task's own `taskKind` wins over the context's, `agent` is the fallback. With `budgets` every run is checked first; a denial is recorded and thrown as `BudgetDeniedError` (with the `exceeded` budgets), and an allowed run gets `maxCostUsd` lowered to what the budget has left (`withCostCap`). Results and errors pass through unchanged; a failing `record` is reported to `onRecordError` (default `console.error`) and never replaces them.
+- `usageRecorder(store.aiUsage, { prices?, now?, groupsOf?, budgets? })` returns an `onRun(info)` hook for agent wrappers that report `{ repo, taskKind, provider, model, result | error, durationMs }` (plus optional `actor`, `analyzer`, `jobId`, `analysisId`, `at`, `transcriptRef`). A `BudgetExceededError` is stored as `denied-budget`.
+- `BudgetDeniedError` is a `BudgetExceededError` of `@holtkeeper/agent` (same `name`), so everything that recognizes a spend stop, the job worker included, treats a pre-run refusal the same way.
 
 ## Costs
 
@@ -23,21 +24,22 @@ Prompts and answers are never recorded.
 
 ## Budgets
 
-The scoped setting `llm.budget`:
+The scoped setting `llm.budget`, one weekly limit:
 
 ```json
-{ "monthlyUsd": 200, "dailyUsd": 20, "perTaskKind": { "review": 50 }, "action": "block" }
+{ "weeklyUsd": 150, "reserveUsd": 25, "action": "block" }
 ```
 
-- `monthlyUsd` / `dailyUsd` limit spend per UTC calendar month / day; `perTaskKind` limits a task kind per month.
-- Spend of a budget is the cost of every run its scope covers: a group budget is shared by the group, a global (`all`) budget by everything.
+- Every field has a default: `weeklyUsd` 150, `reserveUsd` 25, `action` `block`. Without a valid global (`all`) entry the default budget (id `default`) applies to everything.
+- The week runs from Monday 00:00 to the next Monday 00:00 in the instance time zone (the process's local zone; `timeZone` overrides it). Spend of a budget is the cost of every run its scope covers this week: a group budget is shared by the group, a global one by everything.
 - For a run, two budgets apply: the most specific one covering the repository (exact path > glob > group > all, newest among equals, as for every setting) and the newest global one when that is a different entry.
-- A limit is reached when spend so far is at or above it, so the run that crosses a limit still runs and the next one is checked.
-- `warn` lets the run go on; `block` denies it. Either way the first time a limit is reached in a period an `ai.budget.exceeded` activity event is appended (deduplicated in process memory, so a restart may log it once more).
-- `budgetGuard({ settings, usage, activity?, now?, cacheMs? })` caches each limit's spend for `cacheMs` (30 s) and adds recorded runs to the cached value (`note`), so a burst of runs costs one aggregate per limit.
+- Before a run, its cost is estimated (`estimateUsd`, default the mean cost of this week's runs of its task kind that were not denied). **Automatic** work (schedules, triggers, webhooks, freshness) exceeds a budget when spend so far plus the estimate goes above `weeklyUsd - reserveUsd`; **interactive** work (`interactive: true`: a person clicked, chat, a command on a merge request) only above `weeklyUsd`, so the reserve stays for people.
+- `warn` lets the run go on; `block` denies it. The decision's `remainingUsd` is what the run may still spend under the `block` budgets; agents stop once a run spends it (`AgentTask.maxCostUsd`).
+- The first time a budget is exceeded in a week (per kind of work) an `ai.budget_exceeded` audit event is appended (target the budget and the repository, `outcome: 'denied'` for `block` budgets) (deduplicated in process memory, so a restart may log it once more).
+- `budgetGuard({ settings, usage, audit?, now?, timeZone?, cacheMs? })` caches spend for `cacheMs` (30 s) and adds recorded runs to the cached values (`note`), so a burst of runs costs one aggregate per budget.
 
-`budgetStatuses(entries, usage, now)` reports every budget's limits with spend, percent used and, for monthly limits, the projected month-end spend (linear in elapsed time).
+`budgetStatuses(entries, usage, now, { timeZone?, includeDefault? })` reports every budget with this week's spend, percent of `weeklyUsd`, `reserveUsd`, the projected spend by week end (linear in elapsed time) and the week's range; `includeDefault` adds the default budget when no global entry exists.
 
 ## Pure helpers
 
-`periodRange(period, now)`, `previousMonth(now)`, `projectMonthEnd(spent, now)`, `parseBudgets`, `applicableBudgets`, `budgetLimits`, `limitReached`, `costOf`, `computeCost`, `priceFor`, `usageEntry`, `partialUsage`. `budgetSchema` mirrors the definition in `@holtkeeper/settings`, which this package does not depend on.
+`weekRange(now, timeZone?)`, `monthRange(now)`, `previousMonth(now)`, `projectPeriodEnd(spent, range, now)`, `instanceTimeZone()`, `parseBudgets`, `defaultBudget`, `withDefaultBudget`, `applicableBudgets`, `limitFor`, `withCostCap`, `costOf`, `computeCost`, `priceFor`, `usageEntry`, `partialUsage`. `budgetSchema` mirrors the definition in `@holtkeeper/settings`, which this package does not depend on.

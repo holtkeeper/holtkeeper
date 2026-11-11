@@ -14,13 +14,7 @@ import type {
 import type { QualityCheck } from '@holtkeeper/quality'
 import type { AnalysisStore } from '@holtkeeper/store'
 
-import {
-  type KnowledgeEntry,
-  type RecheckVerdict,
-  recheckThreads,
-  runAgentReview,
-  runTracked,
-} from './agent.ts'
+import { type RecheckVerdict, recheckThreads, runAgentReview } from './agent.ts'
 import {
   type ReviewCheckName,
   agentCompletedChecks,
@@ -29,7 +23,7 @@ import {
   reviewCheckNames,
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
-import { commentBody, summaryNote, testsSummary, threadNote } from './format.ts'
+import { commentBody, summaryNote, threadNote } from './format.ts'
 import {
   type Guideline,
   type PathInstruction,
@@ -42,14 +36,12 @@ import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
-  type ReviewTestRun,
   type ReviewUsage,
   type ReviewWalkthrough,
   type ThreadAction,
   reviewDataSchema,
 } from './schema.ts'
 import { type FileScope, type ReviewScope, matchesAny, scopeDiff } from './scope.ts'
-import { type MergeRequestTester, defaultReviewTestOptions } from './tests.ts'
 import { type Candidate, validateCandidate } from './validate.ts'
 
 /** Validated options of one review run; see the `review` analyzer for defaults. */
@@ -60,6 +52,8 @@ export interface ReviewOptions {
   minSeverity: ReviewSeverity
   includeChecks: boolean | ReviewCheckName[]
   approve: 'never' | 'when-clean'
+  /** `deep` reviews on the `deep` model tier (Opus) instead of `main` (Sonnet). Default `standard`. */
+  depth?: 'standard' | 'deep'
   ignore: string[]
   maxDiffLines: number
   language?: string
@@ -67,14 +61,6 @@ export interface ReviewOptions {
   replyTo?: string
   /** Reviews added or changed images with the injected `MediaReviewer`. */
   media: boolean
-  /** Writes and runs tests for changed functions with the injected `MergeRequestTester`. */
-  tests?: boolean
-  maxTests?: number
-  testRepeat?: number
-  testTimeoutMs?: number
-  testAttempts?: number
-  /** Write tests for functions in component files (`.tsx`, `.jsx`) too. */
-  testComponents?: boolean
   /** `source:target` branch globs of release merge requests the analyzer does not review. */
   releaseBranches?: string[]
   /** Review merge requests Holtkeeper authored. */
@@ -119,17 +105,16 @@ export interface ReviewRun {
   analyses?: AnalysisStore
   options: ReviewOptions
   checks?: Partial<Record<ReviewCheckName, QualityCheck>>
-  /** The scoped `review.instructions` setting; `options.instructions` is added after it. */
-  instructions?: string
-  /** Knowledge entries for the agent, as a list or looked up by the files in scope. */
-  knowledge?: readonly KnowledgeEntry[] | ((files: string[]) => Promise<readonly KnowledgeEntry[]>)
+  /**
+   * Resolves the repository's Guide for the review from its rules files and the text notes are
+   * ranked by (title and files in scope); replaces the plain guidelines block in the context.
+   */
+  guide?: (docs: readonly Guideline[], query: string) => Promise<string | undefined>
   /** Passed to the agent as `toolsets`, e.g. code navigation and knowledge tools. */
   toolsets?: readonly Toolset[]
   botUsername?: string
   /** Reviews images when `options.media` is on. Default: a reviewer that reports nothing. */
   mediaReviewer?: MediaReviewer
-  /** Writes and runs tests when `options.tests` is on; without it the option does nothing. */
-  tester?: MergeRequestTester
   /** Replaces pipeline steps, e.g. in tests or for another review strategy. */
   steps?: Partial<ReviewSteps>
   log?: (line: string) => void
@@ -186,12 +171,6 @@ export interface ReviewSteps {
     run: ReviewRun,
     loaded: LoadedReview,
   ): Promise<{ candidates: Candidate[]; summary?: string } | undefined>
-  tests(
-    run: ReviewRun,
-    loaded: LoadedReview,
-    plan: ReviewPlan,
-    usage: ReviewUsage,
-  ): Promise<ReviewTestRun | undefined>
   recheck(
     run: ReviewRun,
     loaded: LoadedReview,
@@ -301,16 +280,23 @@ const deterministic: ReviewSteps['deterministic'] = async (run, planned) => {
 
 const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usage, requests) => {
   if (!run.agent || !run.dir) return undefined
-  const instructions = [run.instructions, run.options.instructions].filter(Boolean).join('\n\n')
-  const knowledge =
-    typeof run.knowledge === 'function'
-      ? await run.knowledge(planned.scope.files.map((f) => f.path)).catch((error: unknown) => {
+  const instructions = run.options.instructions?.trim()
+  const guide = run.guide
+    ? await run
+        .guide(
+          planned.guidelines,
+          `${loaded.mr.title}\n${planned.scope.files
+            .slice(0, 30)
+            .map((f) => f.path)
+            .join('\n')}`,
+        )
+        .catch((error: unknown) => {
           run.log?.(
-            `knowledge lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+            `guide lookup failed: ${error instanceof Error ? error.message : String(error)}`,
           )
-          return []
+          return undefined
         })
-      : run.knowledge
+    : undefined
   const pathRules = (planned.pathInstructions ?? []).flatMap((rule) => {
     const files = planned.scope.files
       .map((f) => f.path)
@@ -332,8 +318,8 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       mode: planned.mode,
       ...(planned.previousHead ? { previousHead: planned.previousHead } : {}),
       guidelines: planned.guidelines,
+      ...(guide ? { guide } : {}),
       ...(instructions ? { instructions } : {}),
-      ...(knowledge?.length ? { knowledge } : {}),
       ...(pathRules.length ? { pathInstructions: pathRules } : {}),
       ...(requests?.length
         ? {
@@ -349,6 +335,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       maxComments: run.options.maxComments,
       ...(run.options.language ? { language: run.options.language } : {}),
     },
+    ...(run.options.depth === 'deep' ? { deep: true } : {}),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
     ...(run.signal ? { signal: run.signal } : {}),
   })
@@ -363,40 +350,6 @@ const media: ReviewSteps['media'] = async (run, loaded) => {
     mergeRequest: loaded.mr.id,
     refs: loaded.diff.refs,
     files: loaded.diff.files,
-  })
-}
-
-const tests: ReviewSteps['tests'] = async (run, loaded, planned, usage) => {
-  if (!run.options.tests) return undefined
-  if (!run.tester || !run.agent || !run.dir)
-    return {
-      skipped: !run.dir
-        ? 'no checkout'
-        : !run.agent
-          ? 'no agent is configured'
-          : 'no tester is configured',
-      items: [],
-      notTested: [],
-    }
-  const agent = run.agent
-  return run.tester.test({
-    dir: run.dir,
-    runner: run.runner,
-    agent: { name: agent.name, run: (task) => runTracked(agent, task, usage) },
-    files: planned.scope.files,
-    headSha: loaded.diff.refs.headSha,
-    mergeRequest: { title: loaded.mr.title, description: loaded.mr.description },
-    ...(loaded.previous?.tests ? { previous: loaded.previous.tests.items } : {}),
-    options: {
-      maxTests: run.options.maxTests ?? defaultReviewTestOptions.maxTests,
-      repeat: run.options.testRepeat ?? defaultReviewTestOptions.repeat,
-      timeoutMs: run.options.testTimeoutMs ?? defaultReviewTestOptions.timeoutMs,
-      attempts: run.options.testAttempts ?? defaultReviewTestOptions.attempts,
-      components: run.options.testComponents ?? false,
-    },
-    ...(run.toolsets ? { toolsets: run.toolsets } : {}),
-    ...(run.log ? { log: run.log } : {}),
-    ...(run.signal ? { signal: run.signal } : {}),
   })
 }
 
@@ -504,7 +457,6 @@ export const defaultSteps: ReviewSteps = {
   deterministic,
   agentReview,
   media,
-  tests,
   recheck,
   post,
 }
@@ -586,7 +538,6 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
       : []
   const agentOutcome = await steps.agentReview(run, loaded, planned, usage, requests)
   const mediaOutcome = await steps.media(run, loaded)
-  const testRun = await steps.tests(run, loaded, planned, usage)
 
   const validate = (candidates: readonly Candidate[]) =>
     candidates.flatMap((candidate) => {
@@ -671,7 +622,6 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
     summary: [
       agentOutcome?.summary ?? (comments.length ? '' : 'No problems found on the changed lines.'),
       mediaOutcome?.summary ? `#### Images\n\n${mediaOutcome.summary}` : '',
-      testRun ? `#### Tests\n\n${testsSummary(testRun)}` : '',
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -683,7 +633,6 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
     stats,
     approved: run.options.approve === 'when-clean' && verdict === 'looks-good' && !stillOpen,
     checks: found.checks,
-    ...(testRun ? { tests: testRun } : {}),
     ...(usage.turns > 0 || usage.costUsd !== undefined ? { usage } : {}),
   }
   return steps.post(run, loaded, data)

@@ -15,8 +15,6 @@ import {
   type ReviewData,
   type ReviewFinding,
   type ReviewSeverity,
-  type ReviewTest,
-  type ReviewTestVerdict,
   reviewDataSchema,
 } from './schema.ts'
 
@@ -47,84 +45,6 @@ export function suggestionChange(finding: ReviewFinding): CodeChange | undefined
         newText: `${finding.suggestion.replacement}\n`,
       },
     ],
-  }
-}
-
-/**
- * A passing test as a change that creates its file in the merge request's source branch, so
- * accepting it opens a merge request into that branch.
- */
-export function testChange(test: ReviewTest, sourceBranch: string): CodeChange {
-  return {
-    id: test.id,
-    title: `Add a test for ${test.target.symbol}`,
-    ...(test.notes?.trim() ? { description: test.notes.trim() } : {}),
-    confidence: 'review',
-    source: 'review-tests',
-    base: sourceBranch,
-    edits: [{ kind: 'create', file: test.testFile, newText: test.content }],
-  }
-}
-
-const testChanges = (data: ReviewData) =>
-  (data.tests?.items ?? [])
-    .filter((test) => test.verdict === 'passes')
-    .map((test) => testChange(test, data.mergeRequest.sourceBranch))
-
-const testTones: Record<ReviewTestVerdict, Tone> = {
-  passes: 'good',
-  flaky: 'warning',
-  unfinished: 'neutral',
-}
-
-function testsSection(tests: NonNullable<ReviewData['tests']>, data: ReviewData): Section {
-  const blocks: Block[] = tests.skipped
-    ? [{ type: 'markdown', text: `No tests were written: ${tests.skipped}.` }]
-    : []
-  if (tests.items.length)
-    blocks.push({
-      type: 'table',
-      columns: [
-        { key: 'target', label: 'Function', format: 'code' },
-        { key: 'test', label: 'Test', format: 'code' },
-        { key: 'verdict', label: 'Result' },
-        { key: 'runs', label: 'Runs passed', align: 'end' },
-        { key: 'attempts', label: 'Attempts', align: 'end' },
-        { key: 'reason', label: 'Why' },
-      ],
-      rows: tests.items.map((test) => ({
-        target: `${test.target.path}:${test.target.startLine} ${test.target.symbol}`,
-        test: test.testFile,
-        verdict: { text: test.verdict, tone: testTones[test.verdict] },
-        runs: `${test.head.passed}/${test.head.runs}`,
-        attempts: test.attempts,
-        reason: test.reason ?? (test.ranAt === data.head ? '' : `ran at ${test.ranAt.slice(0, 8)}`),
-      })),
-    })
-  const changes = testChanges(data).map((change) => ({
-    change,
-    diff: changeDiff(change),
-    tone: 'good' as const,
-    tags: ['test'],
-  }))
-  if (changes.length) blocks.push({ type: 'changes', items: changes, applicable: true })
-  if (tests.notTested.length)
-    blocks.push({
-      type: 'table',
-      title: 'Not tested',
-      columns: [
-        { key: 'target', label: 'Function', format: 'code' },
-        { key: 'reason', label: 'Why' },
-      ],
-      rows: tests.notTested.map((n) => ({ target: `${n.path} ${n.symbol}`, reason: n.reason })),
-    })
-  if (!blocks.length) blocks.push({ type: 'markdown', text: 'No function needed a test.' })
-  return {
-    id: 'tests',
-    title: 'Tests',
-    description:
-      'Written by the agent and run by Holtkeeper on the merge request head. Accepting opens a merge request into the source branch.',
-    blocks,
   }
 }
 
@@ -169,14 +89,6 @@ function metricsOf(data: ReviewData, previous?: ReviewData): Metric[] {
     ),
     metric('files', 'Files reviewed', data.stats.files),
   ]
-  if (data.tests)
-    list.push(
-      metric(
-        'tests',
-        'Passing tests',
-        data.tests.items.filter((test) => test.verdict === 'passes').length,
-      ),
-    )
   if (data.usage?.costUsd !== undefined)
     list.push({
       id: 'cost',
@@ -244,7 +156,6 @@ export const reviewAnalysis = defineAnalysis<ReviewData>({
   label: 'Code review',
   schema: reviewDataSchema,
   summarize: (data) => metricsOf(data),
-  changes: testChanges,
   toReport(current, previousRecord) {
     const data = current.data
     const previous = sameMr(data, previousRecord)
@@ -318,7 +229,6 @@ export const reviewAnalysis = defineAnalysis<ReviewData>({
           ? [{ type: 'changes', items: changes, applicable: false }]
           : [{ type: 'markdown', text: 'No suggestions.' }],
       },
-      ...(data.tests ? [testsSection(data.tests, data)] : []),
       {
         id: 'threads',
         title: 'Threads',
@@ -342,9 +252,7 @@ export const reviewAnalysis = defineAnalysis<ReviewData>({
                           ? 'warning'
                           : 'neutral',
                   },
-                  reason: t.learning
-                    ? `${t.reason}; ${'error' in t.learning ? `knowledge proposal failed: ${t.learning.error}` : `knowledge entry ${t.learning.duplicateOf ?? t.learning.id}`}`
-                    : t.reason,
+                  reason: t.reason,
                 })),
               },
             ]

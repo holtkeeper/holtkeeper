@@ -385,6 +385,12 @@ export class FakeGitLab {
     return discussion
   }
 
+  private readonly awards = new Map<number, { name: string; user: { username: string } }[]>()
+
+  addAward(noteId: number, name: string, username: string) {
+    this.awards.set(noteId, [...(this.awards.get(noteId) ?? []), { name, user: { username } }])
+  }
+
   private reviewState() {
     return { versions: [], drafts: [], discussions: [], approvals: [], reviewerStates: [] }
   }
@@ -1045,6 +1051,11 @@ export class FakeGitLab {
         mr.drafts = mr.drafts.filter((d) => d !== draft)
         return new Response(null, { status: 204 })
       }
+    }
+    if (rest[0] === 'notes' && method === 'GET' && rest[2] === 'award_emoji') {
+      const known = mr.discussions.flatMap((d) => d.notes).some((n) => String(n.id) === rest[1])
+      if (!known) return json(404, { message: '404 Note Not Found' })
+      return this.page(url, this.awards.get(Number(rest[1])) ?? [])
     }
     if (rest[0] === 'notes' && method === 'PUT' && rest[1]) {
       const standalone = this.standaloneNotes.get(Number(rest[1]))

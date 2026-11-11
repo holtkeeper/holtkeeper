@@ -1,5 +1,5 @@
 import { defineAnalysis, metric } from '@holtkeeper/report'
-import type { Block, Cell, Metric, Report, Section, Tone, TreeNode } from '@holtkeeper/report'
+import type { Metric, Report, Section, Tone, TreeNode } from '@holtkeeper/report'
 
 import {
   type Counts,
@@ -9,8 +9,9 @@ import {
   percentOf,
   sumCounts,
 } from './model.ts'
+import { coverageChanges } from './summary.ts'
 
-const limits = { files: 50, depth: 3, changes: 50 }
+const limits = { depth: 3, changes: 50 }
 
 /** Line coverage from which a file or folder reads as good, and below which it reads as bad. */
 const thresholds = { good: 80, bad: 50 }
@@ -61,13 +62,6 @@ function metrics(data: CoverageData, previous?: CoverageData): Metric[] {
   ]
 }
 
-const percentCell = (counts: Counts | undefined): Cell => {
-  const value = percentOf(counts)
-  return value === undefined
-    ? null
-    : { text: `${value.toFixed(1)}%`, value, tone: coverageTone(value) }
-}
-
 interface Folder {
   lines: Counts[]
   children: Map<string, Folder>
@@ -112,65 +106,10 @@ function overviewSection(data: CoverageData): Section {
   }
 }
 
-function filesSection(data: CoverageData): Section {
-  const ranked = data.files
-    .filter((file) => file.lines.total > 0)
-    .toSorted(
-      (a, b) =>
-        b.lines.total - b.lines.covered - (a.lines.total - a.lines.covered) ||
-        a.file.localeCompare(b.file),
-    )
-  const rows: Record<string, Cell>[] = ranked.slice(0, limits.files).map((file) => ({
-    file: file.file,
-    lines: percentCell(file.lines),
-    uncovered: file.lines.total - file.lines.covered,
-    functions: percentCell(file.functions),
-    branches: percentCell(file.branches),
-    status: file.loaded === false ? { text: 'no tests', tone: 'bad' as const } : null,
-  }))
-  const blocks: Block[] = rows.length
-    ? [
-        {
-          type: 'table',
-          columns: [
-            { key: 'file', label: 'File', format: 'code' },
-            { key: 'lines', label: 'Lines', align: 'end' },
-            { key: 'uncovered', label: 'Uncovered lines', unit: 'count', align: 'end' },
-            { key: 'functions', label: 'Functions', align: 'end' },
-            { key: 'branches', label: 'Branches', align: 'end' },
-            { key: 'status', label: 'Status' },
-          ],
-          rows,
-        },
-        ...(ranked.length > limits.files
-          ? [
-              {
-                type: 'markdown' as const,
-                text: `…and ${ranked.length - limits.files} more files.`,
-              },
-            ]
-          : []),
-      ]
-    : [{ type: 'markdown', text: 'No source files were measured.' }]
-  return {
-    id: 'files',
-    title: 'Least covered files',
-    description: 'Ordered by uncovered lines: where new tests cover the most code.',
-    blocks,
-  }
-}
-
 function changesSection(data: CoverageData, previous: CoverageData, compareTo?: string): Section {
-  const before = new Map(previous.files.map((file) => [file.file, file]))
-  const rows = data.files
-    .flatMap((file) => {
-      const now = percentOf(file.lines)
-      const old = before.get(file.file)
-      const then = old ? percentOf(old.lines) : undefined
-      if (now === undefined || then === undefined || Math.abs(now - then) < 1) return []
-      return [{ file: file.file, before: then, after: now, delta: now - then }]
-    })
-    .toSorted((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+  const rows = coverageChanges(data, previous, 1)
+    .slice(0, limits.changes)
+    .map((change) => ({ ...change, before: change.before ?? null }))
   const since = compareTo ?? 'the previous analysis'
   return {
     id: 'changes',
@@ -186,7 +125,7 @@ function changesSection(data: CoverageData, previous: CoverageData, compareTo?: 
               { key: 'after', label: 'After', unit: 'percent', align: 'end' },
               { key: 'delta', label: 'Change', unit: 'percent', format: 'delta', better: 'up' },
             ],
-            rows: rows.slice(0, limits.changes),
+            rows,
           },
         ]
       : [{ type: 'markdown', text: `No file changed its coverage by 1% or more since ${since}.` }],
@@ -207,7 +146,6 @@ export function coverageReport(
     metrics: metrics(data, previous),
     sections: [
       overviewSection(data),
-      filesSection(data),
       ...(previous ? [changesSection(data, previous, compareTo)] : []),
     ],
   }

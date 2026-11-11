@@ -1,4 +1,3 @@
-import { type GroupMatch, can, groupsMatch } from '@holtkeeper/access'
 import type {
   ConfigEntryDetail,
   ConfigEntryList,
@@ -10,11 +9,9 @@ import type {
   ForgeWebhookInput,
   ForgeWebhookResult,
   RepoAccessView,
-  RepoExplain,
-  RuntimeConfigView,
   SchedulePreview,
 } from '@holtkeeper/api'
-import { ConfigError, type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
+import { ConfigError, type HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
 import { type WebhookTarget, forgeErrorStatus, webhookEvents } from '@holtkeeper/forge'
@@ -28,9 +25,7 @@ import {
   repoTraitsDataSchema,
   scheduleDataSchema,
   triggerDataSchema,
-  exportConfig,
   generateWebhookSecret,
-  provenanceKey,
   triggerId,
 } from '@holtkeeper/managed-config'
 import type {
@@ -52,11 +47,8 @@ import {
   authorize,
   publicUrlOf,
   forgeFor,
-  parseRepo,
   readBody,
-  repoTarget,
 } from '../context.ts'
-import { newRepoAnalyzers } from '../new-repos.ts'
 import { issueForgeSshKey, removeForgeSshKey, sshKeyView } from '../ssh-keys.ts'
 
 /** URL segment of each document type. */
@@ -96,7 +88,6 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 
 const triggersOf = (config: HoltkeeperConfig): [string, TriggerDocumentData][] => {
   const jobs = config.jobs
-  if (!jobs) return []
   const list: TriggerDocumentData[] = [
     ...(jobs.onTag ? [{ on: 'tag' as const, ...jobs.onTag }] : []),
     ...(jobs.onPush ? [{ on: 'push' as const, ...jobs.onPush }] : []),
@@ -131,63 +122,6 @@ export function defaultWebhookTargets(config: HoltkeeperConfig, forgeId: string)
   return [...targets.values()]
 }
 
-/** The file-only parts of a config, without secrets. */
-function runtimeView(config: HoltkeeperConfig): RuntimeConfigView {
-  const { jobs, server } = config
-  const execution = jobs?.execution
-  const artifacts = server?.artifacts
-  return {
-    dryRun: config.dryRun,
-    ...(jobs && {
-      jobs: {
-        concurrency: jobs.concurrency,
-        timeoutMinutes: jobs.timeoutMinutes,
-        cacheDir: jobs.cacheDir,
-        ...(jobs.botUsername !== undefined && { botUsername: jobs.botUsername }),
-        ...(execution && {
-          execution: {
-            mode: execution.mode,
-            ...(execution.image !== undefined && { image: execution.image }),
-            ...(execution.engine !== undefined && { engine: execution.engine }),
-            ...(execution.network !== undefined && { network: execution.network }),
-            ...(execution.limits !== undefined && { limits: execution.limits }),
-            ...(execution.user !== undefined && { user: execution.user }),
-            ...(execution.egress && {
-              egress: { proxy: new URL(execution.egress.url).host, ca: !!execution.egress.caFile },
-            }),
-          },
-        }),
-        schedules: jobs.schedules.length,
-      },
-    }),
-    ...(server && {
-      server: {
-        ...(server.publicUrl !== undefined && { publicUrl: server.publicUrl }),
-        rotationIntervalMinutes: server.rotationIntervalMinutes,
-        artifacts:
-          artifacts?.kind === 's3'
-            ? {
-                kind: 's3',
-                bucket: artifacts.bucket,
-                ...(artifacts.endpoint !== undefined && { endpoint: artifacts.endpoint }),
-                ...(artifacts.region !== undefined && { region: artifacts.region }),
-                ...(artifacts.prefix !== undefined && { prefix: artifacts.prefix }),
-              }
-            : { kind: 'fs', dir: artifacts?.dir ?? server.artifactsDir ?? '.holtkeeper/artifacts' },
-        ...(server.retention && { retention: server.retention }),
-      },
-    }),
-    limits: { distributed: config.limits?.distributed ?? false },
-    aiProviders: (config.ai?.providers ?? []).map((provider) => provider.package),
-    plugins: config.plugins.map((use) => ({
-      name: use.plugin.name,
-      groups: use.groups,
-      exclude: use.exclude ?? [],
-      overrides: Object.keys(use.overrides ?? {}),
-    })),
-  }
-}
-
 const sameHook = (a: RegisteredWebhook, b: { scope: string; target: string }) =>
   a.scope === b.scope && a.target === b.target
 
@@ -197,10 +131,19 @@ const typeOf = (collection: string): ConfigDocumentType => {
   return type
 }
 
+const audit = (
+  c: AppContext,
+  action: string,
+  type: ConfigDocumentType,
+  id: string,
+  details: Record<string, unknown> = {},
+) => c.set('audit', { action, target: { type, id }, details })
+
 /**
  * Panel-managed configuration: CRUD for forges, groups, repo traits, schedules and triggers
- * (`/config/<collection>[/:id]`), forge webhooks, export and schedule previews. Reading needs global
- * `settings:read`, changing global `settings:write`; every change is in the activity log.
+ * (`/config/<collection>[/:id]`), forge webhooks and schedule previews. Reading needs global
+ * `settings:read`, changing global `settings:write`; every change is audited with the document as
+ * target.
  */
 export function configRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
@@ -220,17 +163,15 @@ export function configRoutes(deps: ServerDeps) {
     type: ConfigDocumentType,
     credentials: ReadonlyMap<string, CredentialView>,
   ): ConfigEntryView[] => {
-    const { config, provenance } = effective
+    const { config } = effective
     const docOf = (id: string) => docs.find((doc) => doc.type === type && doc.id === id)
     const entry = (
       id: string,
-      key: string,
       data: ConfigViewData[ConfigDocumentType],
       doc = docOf(id),
     ): ConfigEntryView => ({
       type,
       id,
-      provenance: provenance[provenanceKey(type, key)] ?? 'file',
       data,
       ...(doc && {
         version: doc.version,
@@ -247,13 +188,14 @@ export function configRoutes(deps: ServerDeps) {
             doc?.type === 'forge' && doc.data.sshKey
               ? sshKeyView(doc.data.sshKey, credentials.get(doc.data.sshKey.credentialId))
               : undefined
-          return entry(id, id, {
+          return entry(id, {
             kind: origin.kind,
             url: origin.url,
-            ...(origin.credentialId !== undefined && { credentialId: origin.credentialId }),
+            credentialId: origin.credentialId,
             ...(doc?.type === 'forge' && {
               packages: doc.data.packages !== false,
               cachePackages: doc.data.packages !== false && doc.data.cachePackages === true,
+              ...(doc.data.botUsername !== undefined && { botUsername: doc.data.botUsername }),
             }),
             ...(webhook && {
               webhook: {
@@ -266,13 +208,12 @@ export function configRoutes(deps: ServerDeps) {
           })
         })
       case 'group':
-        return Object.entries(config.groups).map(([id, group]) => entry(id, id, group))
+        return Object.entries(config.groups).map(([id, group]) => entry(id, group))
       case 'repoTraits':
         return Object.entries(config.repos).map(([pattern, repo]) => {
           const doc = docs.find((d) => d.type === 'repoTraits' && d.data.pattern === pattern)
           return entry(
             doc?.id ?? pattern,
-            pattern,
             {
               pattern,
               ...(repo.forge !== undefined && { forge: repo.forge }),
@@ -282,12 +223,12 @@ export function configRoutes(deps: ServerDeps) {
           )
         })
       case 'schedule':
-        return (config.jobs?.schedules ?? []).map((schedule) => {
+        return config.jobs.schedules.map((schedule) => {
           const { name, title, ...rest } = schedule
-          return entry(name, name, { ...rest, name: title ?? name })
+          return entry(name, { ...rest, name: title ?? name })
         })
     }
-    return triggersOf(config).map(([id, data]) => entry(id, id, data))
+    return triggersOf(config).map(([id, data]) => entry(id, data))
   }
 
   const credentialViews = async (type: ConfigDocumentType) =>
@@ -307,21 +248,6 @@ export function configRoutes(deps: ServerDeps) {
     return found
   }
 
-  const activity = (
-    actor: string,
-    action: string,
-    type: ConfigDocumentType,
-    id: string,
-    details: Record<string, unknown> = {},
-  ) =>
-    deps.store.activity.append({
-      at: deps.now().toISOString(),
-      actor,
-      action,
-      subject: `${type}:${id}`,
-      details,
-    })
-
   /** Validates the change against the whole config, stores it and rebuilds. */
   const save = async <T extends ConfigDocumentType>(input: ConfigDocumentInput<T>) => {
     const { source, store } = managed()
@@ -335,61 +261,6 @@ export function configRoutes(deps: ServerDeps) {
     await source.refresh()
     return stored
   }
-
-  app.get('/config/export', (c) => {
-    authorize(c, 'settings:read', GLOBAL)
-    const { source } = managed()
-    return c.body(exportConfig(source.effective()), 200, {
-      'content-type': 'text/typescript; charset=utf-8',
-      'content-disposition': 'attachment; filename="holtkeeper.config.ts"',
-    })
-  })
-
-  app.get('/config/runtime', (c) => {
-    authorize(c, 'settings:read', GLOBAL)
-    return c.json<RuntimeConfigView>(runtimeView(deps.config))
-  })
-
-  app.get('/repos/explain', (c) => {
-    const repo = parseRepo(c.req.query('repo'))
-    if (!repo) throw new HTTPException(400, { message: 'repo is required (forge:path)' })
-    const config = deps.config
-    const target = repoTarget(config, repo)
-    const principal = authorize(c, 'repos:read', { kind: 'repo', repo: target })
-    const withOptions = can(principal, 'settings:read', { kind: 'repo', repo: target })
-    const resolved = resolveRepo(config, repo)
-    const key = `${repo.forge}:${repo.path}`
-    const inGroups = (groups: readonly GroupMatch[] | undefined) =>
-      !groups?.length || groupsMatch(groups, resolved.groups)
-    return c.json<RepoExplain>({
-      repo,
-      groups: resolved.groups,
-      traits: resolved.traits,
-      plugins: resolved.plugins.map(({ plugin, options }) => ({
-        name: plugin.name,
-        ...(withOptions && { options }),
-      })),
-      schedules: (config.jobs?.schedules ?? [])
-        .filter(
-          (schedule) =>
-            schedule.enabled &&
-            (groupsMatch(schedule.groups ?? [], resolved.groups) ||
-              (schedule.repos ?? []).includes(key)),
-        )
-        .map(({ name, title, analyzers }) => ({ name, ...(title && { title }), analyzers })),
-      triggers: triggersOf(config)
-        .filter(([, data]) => !('groups' in data) || inGroups(data.groups))
-        .map(([id, data]) => ({
-          id,
-          analyzers:
-            data.on === 'command'
-              ? [data.analyzer]
-              : data.on === 'newRepo'
-                ? newRepoAnalyzers(data, deps.analyzers ?? [])
-                : data.analyzers,
-        })),
-    })
-  })
 
   app.get('/config/:collection', async (c) => {
     authorize(c, 'settings:read', GLOBAL)
@@ -458,14 +329,14 @@ export function configRoutes(deps: ServerDeps) {
     }
     const previous = await store.get(type, id)
     const stored = await save(input)
-    await activity(principal.id, `config.${type}.${previous ? 'updated' : 'created'}`, type, id, {
+    audit(c, `${type}.${previous ? 'update' : 'create'}`, type, id, {
       version: stored.version,
     })
     return c.json<ConfigEntryView>(await findEntry(c, type, id))
   })
 
   app.delete('/config/:collection/:id', async (c) => {
-    const principal = authorize(c, 'settings:write', GLOBAL)
+    authorize(c, 'settings:write', GLOBAL)
     const type = typeOf(c.req.param('collection'))
     const id = c.req.param('id')
     const { source, store } = managed()
@@ -497,13 +368,12 @@ export function configRoutes(deps: ServerDeps) {
         sshKey,
         forge: deps.config.forges[id]?.create(),
         credentials: deps.credentials,
-        actor: principal.id,
       }).catch((error: unknown) => [messageOf(error)])
       if (errors.length) details.sshKeyErrors = errors
     }
     await store.remove(type, id)
     await source.refresh()
-    await activity(principal.id, `config.${type}.removed`, type, id, details)
+    audit(c, `${type}.delete`, type, id, details)
     return c.body(null, 204)
   })
 
@@ -513,14 +383,7 @@ export function configRoutes(deps: ServerDeps) {
     const input: ForgeWebhookInput = await readBody(c, webhookInputSchema)
     const { store } = managed()
     const doc = await store.get('forge', id)
-    if (!doc) {
-      const known = id in deps.config.forges
-      throw new HTTPException(known ? 409 : 404, {
-        message: known
-          ? `forge ${id} comes from the config file; set jobs.webhooks.${id}.secret there`
-          : `forge ${id} not found`,
-      })
-    }
+    if (!doc) throw new HTTPException(404, { message: `forge ${id} not found` })
     const previous = doc.data.webhook?.registered ?? []
     const register = input.register ?? previous.length > 0
     const targets: WebhookTarget[] =
@@ -585,17 +448,11 @@ export function configRoutes(deps: ServerDeps) {
       updatedAt: deps.now().toISOString(),
       updatedBy: principal.id,
     })
-    await activity(
-      principal.id,
-      doc.data.webhook ? 'config.forge.webhook_rotated' : 'config.forge.webhook_created',
-      'forge',
-      id,
-      {
-        registered: result.registered.map((hook) => `${hook.scope}:${hook.target}`),
-        ...(result.notes.length && { notes: result.notes }),
-        ...(result.errors.length && { errors: result.errors }),
-      },
-    )
+    audit(c, doc.data.webhook ? 'forge.webhook_rotate' : 'forge.webhook_create', 'forge', id, {
+      registered: result.registered.map((hook) => `${hook.scope}:${hook.target}`),
+      ...(result.notes.length && { notes: result.notes }),
+      ...(result.errors.length && { errors: result.errors }),
+    })
     return c.json<ForgeWebhookResult>(result, 201)
   })
 
@@ -658,13 +515,8 @@ export function configRoutes(deps: ServerDeps) {
 
   const panelForge = async (id: string) => {
     const doc = await managed().store.get('forge', id)
-    if (doc) return doc
-    const known = id in deps.config.forges
-    throw new HTTPException(known ? 409 : 404, {
-      message: known
-        ? `forge ${id} comes from the config file; add it in the panel to manage its SSH key`
-        : `forge ${id} not found`,
-    })
+    if (!doc) throw new HTTPException(404, { message: `forge ${id} not found` })
+    return doc
   }
 
   app.post('/forges/:id/ssh-key', async (c) => {
@@ -683,7 +535,6 @@ export function configRoutes(deps: ServerDeps) {
         forge,
         credentials: deps.credentials,
         input,
-        actor: principal.id,
         runner: deps.hostRunner ?? localRunner,
         now: deps.now(),
       })
@@ -696,16 +547,10 @@ export function configRoutes(deps: ServerDeps) {
       updatedAt: deps.now().toISOString(),
       updatedBy: principal.id,
     })
-    await activity(
-      principal.id,
-      doc.data.sshKey ? 'config.forge.ssh_key_rotated' : 'config.forge.ssh_key_created',
-      'forge',
-      id,
-      {
-        credentialId: issued.sshKey.credentialId,
-        ...(issued.notes.length && { notes: issued.notes }),
-      },
-    )
+    audit(c, doc.data.sshKey ? 'forge.ssh_key_rotate' : 'forge.ssh_key_create', 'forge', id, {
+      credentialId: issued.sshKey.credentialId,
+      ...(issued.notes.length && { notes: issued.notes }),
+    })
     const sshKey = sshKeyView(issued.sshKey, await deps.credentials.get(issued.sshKey.credentialId))
     if (!sshKey) throw new HTTPException(500, { message: 'the issued SSH key cannot be read back' })
     return c.json<ForgeSshKeyResult>({ sshKey, notes: issued.notes }, 201)
@@ -721,7 +566,6 @@ export function configRoutes(deps: ServerDeps) {
       sshKey,
       forge: deps.config.forges[id]?.create(),
       credentials: deps.credentials,
-      actor: principal.id,
     })
     const { sshKey: _removed, ...data } = doc.data
     await save<'forge'>({
@@ -730,7 +574,7 @@ export function configRoutes(deps: ServerDeps) {
       updatedAt: deps.now().toISOString(),
       updatedBy: principal.id,
     })
-    await activity(principal.id, 'config.forge.ssh_key_removed', 'forge', id, {
+    audit(c, 'forge.ssh_key_delete', 'forge', id, {
       credentialId: sshKey.credentialId,
       ...(errors.length && { errors }),
     })
@@ -740,7 +584,7 @@ export function configRoutes(deps: ServerDeps) {
   app.get('/schedules/:id/preview', (c) => {
     authorize(c, 'settings:read', GLOBAL)
     const id = c.req.param('id')
-    const schedule = deps.config.jobs?.schedules.find((s) => s.name === id)
+    const schedule = deps.config.jobs.schedules.find((s) => s.name === id)
     if (!schedule) throw new HTTPException(404, { message: `schedule ${id} not found` })
     const count = Math.min(Math.max(Number(c.req.query('count')) || 10, 1), 100)
     const timezone = schedule.timezone ?? systemTimeZone()

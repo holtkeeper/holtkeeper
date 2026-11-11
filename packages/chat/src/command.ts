@@ -5,11 +5,11 @@ import type { z } from 'zod'
 import type { Card } from './card.ts'
 import type { CommandLine } from './parse.ts'
 
-/** Who wrote a message, in the terms of the surface: `gitlab:work` user `42`, `slack:T1` member `U7`. */
+/** Who wrote a message, in the terms of the surface: `gitlab:work` user `42`. */
 export interface ChatActor {
   /** Identity provider id, as `@holtkeeper/identities` names it. */
   provider: string
-  /** The stable id there: a numeric forge user id, a Slack member id. Never a username. */
+  /** The stable id there: e.g. a numeric forge user id. Never a username. */
   externalId: string
   username?: string
 }
@@ -39,7 +39,7 @@ export interface PostedMessage {
 }
 
 /**
- * A place people talk to Holtkeeper: merge request notes, a Slack workspace, the web panel.
+ * A place people talk to Holtkeeper: merge request notes, the web panel.
  * `post` resolves once the message is shown; `update` replaces a posted message in place, and
  * surfaces without it get a new message for every update.
  */
@@ -71,8 +71,7 @@ export function liveMessage(surface: ChatSurface, posted: PostedMessage): LiveMe
 
 /**
  * Whether an actor may perform an action. `reason` explains a refusal with the codes of
- * `@holtkeeper/identities` (`not-linked`, `unverified`, `no-principal`, `forbidden`), or
- * `outside-scope` when the conversation itself may not do it, e.g. a Slack channel's binding.
+ * `@holtkeeper/identities` (`not-linked`, `unverified`, `no-principal`, `forbidden`).
  */
 export type ChatAuthorization =
   | { allowed: true; principal: Principal }

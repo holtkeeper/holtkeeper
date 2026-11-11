@@ -1,0 +1,27 @@
+{
+  "name": "@holtkeeper/guide-generator",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/access": "workspace:*",
+    "@holtkeeper/agent": "workspace:*",
+    "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/commit-conventions": "workspace:*",
+    "@holtkeeper/coverage": "workspace:*",
+    "@holtkeeper/forge": "workspace:*",
+    "@holtkeeper/guide": "workspace:*",
+    "@holtkeeper/quality-tests": "workspace:*",
+    "@holtkeeper/report": "workspace:*",
+    "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/testids": "workspace:*",
+    "@holtkeeper/toolchain": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@holtkeeper/exec": "workspace:*"
+  }
+}

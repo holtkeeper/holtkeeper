@@ -3,9 +3,10 @@ import { ChevronRight, FileSearch } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 
 import { useAuditRuns, useRepos } from '../../api/queries.ts'
-import { sparkline } from '../../lib/dashboard.ts'
 import { durationBetween, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
+import { pageSettingKeys } from '../../lib/settings-tabs.ts'
+import { auditSparkline } from '../../lib/sparkline.ts'
 import {
   Chip,
   EmptyState,
@@ -19,6 +20,7 @@ import {
 } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
+import { SettingsButton } from '../settings/SettingsSheet.tsx'
 import { type AuditsSearch, isTrigger, triggerLabel } from './labels.ts'
 
 const allRepos = '*'
@@ -55,7 +57,7 @@ export function AuditsPage() {
       (!search.findings || (search.findings === 'open') === run.active > 0),
   )
   const query = latestOnly ? repos : runs
-  const trend = sparkline(list).map((p) => ({ at: p.at, value: p.active }))
+  const trend = auditSparkline(list).map((p) => ({ at: p.at, value: p.active }))
   const filtered = list.length !== source.length
 
   return (
@@ -69,7 +71,12 @@ export function AuditsPage() {
             ? 'The latest run of each repository you can see'
             : 'Every run across the repositories you can see'
       }
-      actions={<RunJobButton analyzer="audit" label="Run audit" {...(repo ? { repo } : {})} />}
+      actions={
+        <>
+          <RunJobButton analyzer="audit" label="Run audit" {...(repo ? { repo } : {})} />
+          <SettingsButton title="Audit settings" keys={pageSettingKeys.audits} />
+        </>
+      }
     >
       <div className="flex flex-wrap items-center gap-2">
         <Select

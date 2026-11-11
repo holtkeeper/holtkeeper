@@ -3,9 +3,6 @@ import { z } from 'zod'
 /** Provider id of accounts on a configured forge: `gitlab:<forgeId>`, `github:<forgeId>`. */
 export const forgeProvider = (kind: 'gitlab' | 'github', forgeId: string) => `${kind}:${forgeId}`
 
-/** Provider id of a Slack workspace: `slack:<workspaceId>`. */
-export const slackProvider = (workspaceId: string) => `slack:${workspaceId}`
-
 const numericKinds = new Set(['gitlab', 'github'])
 
 /**

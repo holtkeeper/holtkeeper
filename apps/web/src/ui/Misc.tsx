@@ -102,3 +102,41 @@ export function CopyField({ value, label }: { value: string; label: string }) {
     </div>
   )
 }
+
+/** A button that copies text made on press, e.g. a prompt; confirms with a toast. */
+export function CopyButton({
+  text,
+  children,
+  size = 'sm',
+  variant = 'secondary',
+  isDisabled,
+}: {
+  text: () => string
+  children: ReactNode
+  size?: 'sm' | 'md'
+  variant?: 'secondary' | 'ghost' | 'primary'
+  isDisabled?: boolean
+}) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text())
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+      notify.success('Copied')
+    } catch {
+      notify.error('Not copied', 'The browser did not allow the clipboard.')
+    }
+  }
+  return (
+    <Button
+      size={size}
+      variant={variant}
+      {...(isDisabled ? { isDisabled } : {})}
+      onPress={() => void copy()}
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {children}
+    </Button>
+  )
+}

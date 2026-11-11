@@ -17,9 +17,8 @@ import {
   requireReviewForge,
   reviewMergeRequest,
 } from './pipeline.ts'
-import type { AgentReview, ReviewData, ReviewTest } from './schema.ts'
+import type { AgentReview, ReviewData } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
-import type { MergeRequestTestInput, MergeRequestTester } from './tests.ts'
 
 const repo = { forge: 'work', path: 'games/a' }
 const options: ReviewOptions = {
@@ -67,20 +66,6 @@ const finding = (line: number, source: string) => ({
   title: `${source}: rule`,
   body: `found on ${line}`,
   source,
-})
-
-const testOf = (verdict: ReviewTest['verdict']): ReviewTest => ({
-  id: 't1',
-  target: { path: 'src/price.ts', symbol: 'price', startLine: 1, endLine: 3, hash: 'h' },
-  testFile: 'src/price.test.ts',
-  framework: 'bun:test',
-  command: ['bun', 'test', './src/price.test.ts'],
-  cwd: '.',
-  verdict,
-  head: { passed: 2, runs: 2, durationMs: 40 },
-  attempts: 1,
-  content: "test('price', () => {})\n",
-  ranAt: HEAD,
 })
 
 const runOf = (extra: Partial<ReviewRun> & Pick<ReviewRun, 'forge'>): ReviewRun => ({
@@ -134,10 +119,15 @@ describe('reviewMergeRequest', () => {
       ],
     })
     const data = await reviewMergeRequest(
-      runOf({ forge: requireReviewForge(forge), agent, instructions: 'Check money.' }),
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        guide: async (docs) => `Guide with ${docs.length} docs. Check money.`,
+      }),
     )
 
     expect(tasks[0]?.taskKind).toBe('review')
+    expect(tasks[0]?.tier).toBe('main')
     expect(tasks[0]?.context).toContain('Check money.')
     expect(tasks[0]?.prompt).toContain('2 +   return a * b')
     expect(tasks[0]?.prompt).not.toContain('bun.lock')
@@ -199,6 +189,19 @@ describe('reviewMergeRequest', () => {
     }
   })
 
+  test('a deep review runs on the deep model tier', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+    await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        options: { ...options, depth: 'deep' },
+      }),
+    )
+    expect(tasks[0]?.tier).toBe('deep')
+  })
+
   test('marks comments the forge rejected', async () => {
     const { forge } = fakeForge({ files, discussions: [], reject: () => 'line outside the diff' })
     const { agent } = fakeAgent({
@@ -220,15 +223,15 @@ describe('reviewMergeRequest', () => {
   })
 
   test('without an agent posts deterministic findings and approves when clean', async () => {
-    const lint: QualityCheck = {
-      name: 'lint',
+    const secrets: QualityCheck = {
+      name: 'secrets',
       detect: async () => true,
       run: async () => ({
         issues: [
           {
             id: 'i',
-            tool: 'oxlint',
-            rule: 'no-console',
+            tool: 'gitleaks',
+            rule: 'generic-api-key',
             category: 'lint',
             severity: 'info',
             message: 'console',
@@ -242,17 +245,17 @@ describe('reviewMergeRequest', () => {
     const data = await reviewMergeRequest(
       runOf({
         forge: requireReviewForge(forge),
-        checks: { lint },
+        checks: { secrets },
         options: {
           ...options,
-          includeChecks: ['lint'],
+          includeChecks: ['secrets'],
           minSeverity: 'info',
           approve: 'when-clean',
         },
       }),
     )
-    expect(data.comments.map((c) => c.source)).toEqual(['oxlint'])
-    expect(data.checks).toEqual([{ name: 'lint', ok: true }])
+    expect(data.comments.map((c) => c.source)).toEqual(['gitleaks'])
+    expect(data.checks).toEqual([{ name: 'secrets', ok: true }])
     expect(data.approved).toBe(true)
     expect(submissions[0]?.event).toBe('approve')
   })
@@ -395,6 +398,7 @@ describe('reviewMergeRequest', () => {
     expect(tasks[0]?.prompt).toContain('4 + export const tax = 0.2')
     expect(tasks[0]?.prompt).toContain('2 ~   return a * b')
     expect(tasks[1]?.taskKind).toBe('triage')
+    expect(tasks[1]?.tier).toBe('fast')
     expect(data.threads.map((t) => [t.discussionId, t.action])).toEqual([
       ['fixed', 'resolved'],
       ['repeat', 'replied'],
@@ -567,58 +571,6 @@ describe('reviewMergeRequest', () => {
       ['agent', 1],
       ['oxlint', 4],
     ])
-  })
-
-  test('tests: the tester gets the scope and usage-tracking agent; its run lands in data and summary', async () => {
-    const { forge, submissions } = fakeForge({ files, discussions: [] })
-    const { agent } = fakeAgent({ review: [review([])] })
-    const seen: MergeRequestTestInput[] = []
-    const tester: MergeRequestTester = {
-      async test(input) {
-        seen.push(input)
-        await input.agent.run({ dir: input.dir, prompt: 'write' })
-        return {
-          items: [testOf('passes')],
-          notTested: [{ path: 'src/price.ts', symbol: 'tax', reason: 'over the limit' }],
-        }
-      },
-    }
-    const data = await reviewMergeRequest(
-      runOf({
-        forge: requireReviewForge(forge),
-        agent,
-        tester,
-        options: { ...options, tests: true, maxTests: 1 },
-      }),
-    )
-    expect(seen[0]?.files.map((f) => f.path)).toEqual(['src/price.ts'])
-    expect(seen[0]?.options).toEqual({
-      maxTests: 1,
-      repeat: 2,
-      timeoutMs: 120_000,
-      attempts: 3,
-      components: false,
-    })
-    expect(seen[0]?.mergeRequest.title).toBe('Add pricing')
-    expect(data.tests?.items.map((t) => t.verdict)).toEqual(['passes'])
-    expect(data.usage?.turns).toBe(4)
-    expect(data.summary).toContain('#### Tests')
-    expect(submissions[0]?.summary).toContain('<code>src/price.test.ts</code>')
-    expect(submissions[0]?.summary).toContain('over the limit')
-  })
-
-  test('tests: off by default, skipped with a reason without a tester', async () => {
-    const { forge } = fakeForge({ files, discussions: [] })
-    const off = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge) }))
-    expect(off.tests).toBeUndefined()
-    const missing = await reviewMergeRequest(
-      runOf({
-        forge: requireReviewForge(fakeForge({ files, discussions: [] }).forge),
-        agent: fakeAgent({ review: [review([])] }).agent,
-        options: { ...options, tests: true },
-      }),
-    )
-    expect(missing.tests).toEqual({ skipped: 'no tester is configured', items: [], notTested: [] })
   })
 
   test('requireReviewForge names missing methods', () => {

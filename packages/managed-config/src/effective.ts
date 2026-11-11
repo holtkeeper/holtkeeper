@@ -1,11 +1,11 @@
-import { type HoltkeeperConfig, type ScheduleConfig, parseConfig } from '@holtkeeper/core'
+import {
+  type HoltkeeperConfig,
+  type HoltkeeperFileConfig,
+  type ScheduleConfig,
+  parseConfig,
+} from '@holtkeeper/core'
 import type { ForgeDefinition, GitForge } from '@holtkeeper/forge'
-import type { AnyConfigDocument, ConfigDocument, ConfigDocumentType } from '@holtkeeper/store'
-
-import { triggerId } from './documents.ts'
-
-/** Where an entry of the effective config comes from. */
-export type Provenance = 'file' | 'panel' | 'file+panel'
+import type { AnyConfigDocument, ConfigDocument } from '@holtkeeper/store'
 
 /** Builds the forge definition of a panel forge document from its revealed token. */
 export type ForgeFactory = (doc: ConfigDocument<'forge'>, token: string) => ForgeDefinition
@@ -28,26 +28,18 @@ export interface EffectiveConfigOptions {
   ) => ForgeDefinition
 }
 
-/** What a panel forge needs for export: kind, URL and which credential holds its token. */
+/** A forge's kind, URL and the credential that holds its token. */
 export interface ForgeOrigin {
   kind: string
   url: string
-  credentialId?: string
+  credentialId: string
 }
 
-/**
- * The config the server runs on: the file config with panel documents applied, validated with
- * the file config's rules. `provenance` has one entry per forge, group, repo pattern, schedule
- * and trigger, keyed `<type>:<id>` (`forge:work`, `repoTraits:games/*`, `trigger:label:port`).
- */
+/** The config the server runs on (file config plus panel documents) and each forge's origin. */
 export interface EffectiveConfig {
   config: HoltkeeperConfig
-  provenance: Record<string, Provenance>
   forges: Record<string, ForgeOrigin>
 }
-
-/** The provenance key of an entry. Triggers use their document ids, repo traits their pattern. */
-export const provenanceKey = (type: ConfigDocumentType, id: string) => `${type}:${id}`
 
 /** `value` without its `undefined` fields, so optional fields stay absent. */
 function without<T extends Record<string, unknown>>(value: T): T {
@@ -71,7 +63,7 @@ export function memoizeForge(definition: ForgeDefinition): ForgeDefinition {
   return { ...definition, create: () => (client ??= definition.create()) }
 }
 
-/** The file config's schedule entry a schedule document stands for. */
+/** The effective config's schedule entry a schedule document stands for. */
 export function scheduleFromDocument(doc: ConfigDocument<'schedule'>): ScheduleConfig {
   const { data } = doc
   return without({
@@ -91,58 +83,29 @@ export function scheduleFromDocument(doc: ConfigDocument<'schedule'>): ScheduleC
   })
 }
 
-type Jobs = NonNullable<HoltkeeperConfig['jobs']>
-
-/** Provenance keys of the triggers a jobs section defines. */
-function triggerKeys(jobs: Jobs | undefined): string[] {
-  if (!jobs) return []
-  return [
-    ...(jobs.onTag ? ['tag'] : []),
-    ...(jobs.onPush ? ['push'] : []),
-    ...(jobs.onMergeRequest ? ['merge-request'] : []),
-    ...(jobs.onNewRepo ? ['new-repo'] : []),
-    ...Object.keys(jobs.onLabel ?? {}).map((label) => `label:${label}`),
-    ...Object.keys(jobs.commands ?? {}).map((name) => `command:${name}`),
-  ].map((id) => provenanceKey('trigger', id))
-}
+type Jobs = HoltkeeperConfig['jobs']
 
 /**
- * Applies panel documents to the file config: a document replaces the file entry with the same
- * id (forges, groups, schedules by name, repo traits by pattern, triggers by trigger id) or adds
- * a new one. Panel schedules, triggers and webhook secrets create a `jobs` section with defaults
- * when the file has none. Throws `ConfigError` when the result breaks the file config's rules.
+ * Builds the effective config from the file config and the panel documents: forges, groups,
+ * repository traits, schedules, triggers (by trigger id), bot usernames and webhook secrets all
+ * come from documents. Throws `ConfigError` when the documents reference each other wrongly
+ * (unknown forge or group, duplicate schedule).
  */
 export function effectiveConfig(
-  file: HoltkeeperConfig,
+  file: HoltkeeperFileConfig,
   documents: readonly AnyConfigDocument[],
   options: EffectiveConfigOptions,
 ): EffectiveConfig {
-  const provenance: Record<string, Provenance> = {}
-  const mark = (key: string, fromFile: boolean) => {
-    provenance[key] = fromFile ? 'file+panel' : 'panel'
-  }
-  for (const id of Object.keys(file.forges)) provenance[provenanceKey('forge', id)] = 'file'
-  for (const id of Object.keys(file.groups)) provenance[provenanceKey('group', id)] = 'file'
-  for (const pattern of Object.keys(file.repos))
-    provenance[provenanceKey('repoTraits', pattern)] = 'file'
-  for (const schedule of file.jobs?.schedules ?? [])
-    provenance[provenanceKey('schedule', schedule.name)] = 'file'
-  for (const key of triggerKeys(file.jobs)) provenance[key] = 'file'
-
-  const forges: Record<string, ForgeDefinition> = { ...file.forges }
-  const origins: Record<string, ForgeOrigin> = Object.fromEntries(
-    Object.entries(file.forges).map(([id, forge]) => [id, { kind: forge.kind, url: forge.url }]),
-  )
-  const groups = { ...file.groups }
-  const repos = { ...file.repos }
-  const schedules = [...(file.jobs?.schedules ?? [])]
+  const forges: Record<string, ForgeDefinition> = {}
+  const origins: Record<string, ForgeOrigin> = {}
+  const groups: HoltkeeperConfig['groups'] = {}
+  const repos: HoltkeeperConfig['repos'] = {}
+  const schedules: ScheduleConfig[] = []
   const jobs: Partial<Jobs> = { ...file.jobs }
-  let touchesJobs = false
 
   for (const doc of documents) {
     switch (doc.type) {
       case 'forge': {
-        mark(provenanceKey('forge', doc.id), doc.id in file.forges)
         const token = options.tokens?.[doc.data.credentialId]
         const factory = options.forgeFactories[doc.data.kind]
         const build = () =>
@@ -165,15 +128,13 @@ export function effectiveConfig(
           url: doc.data.url,
           credentialId: doc.data.credentialId,
         }
+        if (doc.data.botUsername)
+          jobs.botUsernames = { ...jobs.botUsernames, [doc.id]: doc.data.botUsername }
         const secret = options.webhookSecrets?.[doc.id]
-        if (secret !== undefined) {
-          jobs.webhooks = { ...jobs.webhooks, [doc.id]: { secret } }
-          touchesJobs = true
-        }
+        if (secret !== undefined) jobs.webhooks = { ...jobs.webhooks, [doc.id]: { secret } }
         break
       }
       case 'group':
-        mark(provenanceKey('group', doc.id), doc.id in file.groups)
         groups[doc.id] = {
           forge: doc.data.forge,
           include: doc.data.include,
@@ -181,28 +142,12 @@ export function effectiveConfig(
         }
         break
       case 'repoTraits':
-        mark(provenanceKey('repoTraits', doc.data.pattern), doc.data.pattern in file.repos)
         repos[doc.data.pattern] = without({ forge: doc.data.forge, traits: doc.data.traits })
         break
-      case 'schedule': {
-        const schedule = scheduleFromDocument(doc)
-        const index = schedules.findIndex((s) => s.name === schedule.name)
-        mark(
-          provenanceKey('schedule', doc.id),
-          (file.jobs?.schedules ?? []).some((s) => s.name === doc.id),
-        )
-        if (index >= 0) schedules[index] = schedule
-        else schedules.push(schedule)
-        touchesJobs = true
+      case 'schedule':
+        schedules.push(scheduleFromDocument(doc))
         break
-      }
       case 'trigger': {
-        const id = triggerId(doc.data)
-        mark(
-          provenanceKey('trigger', id),
-          triggerKeys(file.jobs).includes(provenanceKey('trigger', id)),
-        )
-        touchesJobs = true
         const data = doc.data
         if (data.on === 'tag')
           jobs.onTag = without({ analyzers: data.analyzers, groups: data.groups })
@@ -237,12 +182,6 @@ export function effectiveConfig(
     }
   }
 
-  const config = parseConfig({
-    ...file,
-    forges,
-    groups,
-    repos,
-    ...(file.jobs || touchesJobs ? { jobs: { ...jobs, schedules } } : {}),
-  })
-  return { config, provenance, forges: origins }
+  const config = parseConfig({ ...file, forges, groups, repos, jobs: { ...jobs, schedules } })
+  return { config, forges: origins }
 }

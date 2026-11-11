@@ -174,6 +174,18 @@ describe('discussions', () => {
     expect(server.calls).toHaveLength(3)
   })
 
+  test('lists the emoji reactions of a note', async () => {
+    const { server, forge, mr } = setup()
+    const discussion = server.addDiscussion(mr, [{ body: 'Rename this.', resolvable: true }])
+    const note = discussion.notes[0]?.id ?? 0
+    server.addAward(note, 'thumbsdown', 'dev')
+    server.addAward(note, 'rocket', 'lead')
+    expect(await forge.listNoteReactions('g/a', 1, note)).toEqual([
+      { name: 'thumbsdown', user: 'dev' },
+      { name: 'rocket', user: 'lead' },
+    ])
+  })
+
   test('replies to and resolves a discussion', async () => {
     const { server, forge, mr } = setup()
     const discussion = server.addDiscussion(mr, [{ body: 'q', resolvable: true }])

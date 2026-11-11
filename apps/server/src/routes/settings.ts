@@ -5,7 +5,7 @@ import type {
   SettingList,
   SettingView,
 } from '@holtkeeper/api'
-import { settingCascades } from '@holtkeeper/settings'
+import { isRetiredSetting, settingCascades } from '@holtkeeper/settings'
 import type { SettingEntry } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -35,16 +35,21 @@ const toView = (entry: SettingEntry): SettingView => ({
   ...(entry.updatedBy ? { updatedBy: entry.updatedBy } : {}),
 })
 
-/** Settings per scope: AI models and keys, audit policy, review rules, ... */
+/**
+ * Settings per scope: AI provider and budget, access, integrations, analyzer options, ... Entries
+ * and definitions of retired keys are never listed and refuse new values.
+ */
 export function settingRoutes(deps: ServerDeps) {
   const { store, vault, config } = deps
-  const definitions = new Map(deps.settings.map((definition) => [definition.key, definition]))
-  const definitionViews: SettingDefinitionView[] = deps.settings.map((definition) => ({
+  const live = deps.settings.filter((definition) => !isRetiredSetting(definition.key))
+  const definitions = new Map(live.map((definition) => [definition.key, definition]))
+  const definitionViews: SettingDefinitionView[] = live.map((definition) => ({
     key: definition.key,
     label: definition.label,
     description: definition.description,
     section: definition.section,
     secret: definition.secret ?? false,
+    ...(definition.global ? { global: true } : {}),
     ...(definition.help ? { help: definition.help } : {}),
     ...(definition.presets?.length ? { presets: definition.presets } : {}),
     schema: z.toJSONSchema(definition.form ?? definition.schema, {
@@ -56,8 +61,10 @@ export function settingRoutes(deps: ServerDeps) {
 
   app.get('/settings', async (c) => {
     const principal = principalOf(c)
-    const visible = (await store.settings.list()).filter((entry) =>
-      can(principal, 'settings:read', { kind: 'scope', scope: entry.scope }),
+    const visible = (await store.settings.list()).filter(
+      (entry) =>
+        !isRetiredSetting(entry.key) &&
+        can(principal, 'settings:read', { kind: 'scope', scope: entry.scope }),
     )
     return c.json<SettingList>({
       definitions: definitionViews,
@@ -73,6 +80,8 @@ export function settingRoutes(deps: ServerDeps) {
     const input = await readBody(c, putSettingSchema)
     const definition = definitions.get(input.key)
     if (!definition) throw new HTTPException(400, { message: `unknown setting ${input.key}` })
+    if (definition.global && input.scope.all !== true)
+      throw new HTTPException(400, { message: `${input.key} applies to all repositories only` })
     const principal = authorize(c, 'settings:write', { kind: 'scope', scope: input.scope })
 
     const previous = input.id ? await store.settings.get(input.id) : undefined
@@ -105,20 +114,13 @@ export function settingRoutes(deps: ServerDeps) {
       ),
       details: { key: entry.key },
     })
-    await store.activity.append({
-      at: entry.updatedAt,
-      actor: principal.id,
-      action: previous ? 'setting.updated' : 'setting.created',
-      subject: entry.key,
-      details: { id: entry.id, scope: entry.scope },
-    })
     return c.json<SettingView>(toView(entry))
   })
 
   app.delete('/settings/:id', async (c) => {
     const entry = await store.settings.get(c.req.param('id'))
     if (!entry) throw new HTTPException(404, { message: 'setting not found' })
-    const principal = authorize(c, 'settings:write', { kind: 'scope', scope: entry.scope })
+    authorize(c, 'settings:write', { kind: 'scope', scope: entry.scope })
     await store.settings.remove(entry.id)
     c.set('audit', {
       action: 'setting.delete',
@@ -127,13 +129,6 @@ export function settingRoutes(deps: ServerDeps) {
         secret: (field) => entry.secret && (field === 'value' || field.startsWith('value.')),
       }),
       details: { key: entry.key },
-    })
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'setting.removed',
-      subject: entry.key,
-      details: { id: entry.id, scope: entry.scope },
     })
     return c.body(null, 204)
   })

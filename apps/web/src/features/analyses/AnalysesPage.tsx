@@ -3,24 +3,20 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { GitBranch } from 'lucide-react'
 
 import { useAnalyses, useAnalysisKinds, useRepos } from '../../api/queries.ts'
-import {
-  analysisPages,
-  groupAnalysisPages,
-  metricSeries,
-  trendMetrics,
-} from '../../lib/analyses.ts'
+import { analysisPages, metricSeries, trendMetrics } from '../../lib/analyses.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
+import { pageSettingKeys } from '../../lib/settings-tabs.ts'
 import { formatValue } from '../../lib/units.ts'
 import { EmptyState, ErrorState, Notice, Page, Panel, Placeholder, Select } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
-import { BackfillReleasesButton } from './BackfillReleases.tsx'
+import { SettingsButton } from '../settings/SettingsSheet.tsx'
 import { RecordRows, RepoCards } from './RecordViews.tsx'
 
 const allRepos = '*'
 
-/** One entry of `analysisPages` or `groupAnalysisPages`. */
-export type AnalysisPage = (typeof analysisPages)[number] | (typeof groupAnalysisPages)[number]
+/** One entry of `analysisPages`. */
+export type AnalysisPage = (typeof analysisPages)[number]
 
 /** What `AnalysisRecords` needs of a page: the kind, its title and preferred trend metrics. */
 export interface AnalysisView {
@@ -52,46 +48,8 @@ export function RepoSelect({ to }: { to: AnalysisPage['to'] }) {
   )
 }
 
-/** A group picker for group analysis pages, as `forge:group`: `*` stands for all groups. */
-function GroupSelect({ to }: { to: AnalysisPage['to'] }) {
-  const search = useSearch({ strict: false })
-  const navigate = useNavigate()
-  const repos = useRepos()
-  const groupParam = typeof search.repo === 'string' ? search.repo : undefined
-  const groups = new Map<string, string>()
-  for (const entry of repos.data?.repos ?? [])
-    for (const group of entry.groups)
-      groups.set(repoKey({ forge: entry.repo.forge, path: group }), group)
-  return (
-    <Select
-      aria-label="Group"
-      className="w-72"
-      options={[
-        { id: allRepos, label: 'All groups' },
-        ...[...groups]
-          .toSorted((a, b) => a[1].localeCompare(b[1]))
-          .map(([id, group]) => ({ id, label: group })),
-      ]}
-      value={groupParam ?? allRepos}
-      onChange={(id) => void navigate({ to, search: id === allRepos ? {} : { repo: id } })}
-    />
-  )
-}
-
-/**
- * Records of one analysis kind, newest first, with trends of its headline metrics. `group`
- * targets the empty state's run button at a group for group-scoped kinds.
- */
-export function AnalysisRecords({
-  page,
-  repo,
-  group,
-}: {
-  page: AnalysisView
-  repo?: RepoRef
-  group?: string
-}) {
-  const groupScoped = groupAnalysisPages.some((entry) => entry.kind === page.kind)
+/** Records of one analysis kind, newest first, with trends of its headline metrics. */
+export function AnalysisRecords({ page, repo }: { page: AnalysisView; repo?: RepoRef }) {
   const kinds = useAnalysisKinds()
   const analyses = useAnalyses(page.kind, repo, repo ? 100 : 500)
   const list = analyses.data?.analyses ?? []
@@ -136,7 +94,6 @@ export function AnalysisRecords({
           analyses={list}
           trend={trends[0]?.metric ?? trendMetrics(list, page.trend)[0]}
           people={people}
-          {...(groupScoped ? { noun: ['group', 'groups'] as const } : {})}
         />
       ) : null}
 
@@ -160,7 +117,7 @@ export function AnalysisRecords({
                   analyzer={page.kind}
                   label="Run now"
                   size="sm"
-                  {...(group ? { group } : repo ? { repo } : {})}
+                  {...(repo ? { repo } : {})}
                 />
               }
             />
@@ -174,11 +131,9 @@ export function AnalysisRecords({
 }
 
 /** Records of one analysis kind on a page of its own. */
-function AnalysesPage({ page }: { page: AnalysisPage }) {
+function AnalysesPage({ page, settings }: { page: AnalysisPage; settings: readonly string[] }) {
   const search = useSearch({ strict: false })
   const repo = parseRepoKey(typeof search.repo === 'string' ? search.repo : undefined)
-  const groupScoped = groupAnalysisPages.some((entry) => entry.kind === page.kind)
-  const target = repo ? (groupScoped ? { group: repo.path } : { repo }) : {}
   return (
     <Page
       title={page.title}
@@ -186,34 +141,27 @@ function AnalysesPage({ page }: { page: AnalysisPage }) {
       description={repo ? `${page.description} · ${repoKey(repo)}` : page.description}
       actions={
         <div className="flex items-center gap-2">
-          {groupScoped ? <GroupSelect to={page.to} /> : <RepoSelect to={page.to} />}
-          {page.kind === 'changelog' ? <BackfillReleasesButton repo={repo} /> : null}
-          <RunJobButton analyzer={page.kind} label="Run now" variant="secondary" {...target} />
+          <RepoSelect to={page.to} />
+          <RunJobButton
+            analyzer={page.kind}
+            label="Run now"
+            variant="secondary"
+            {...(repo ? { repo } : {})}
+          />
+          <SettingsButton title={`${page.title} settings`} keys={settings} />
         </div>
       }
     >
-      <AnalysisRecords
-        page={page}
-        {...(repo ? { repo } : {})}
-        {...(groupScoped && repo ? { group: repo.path } : {})}
-      />
+      <AnalysisRecords page={page} {...(repo ? { repo } : {})} />
     </Page>
   )
 }
 
-const [releases, , , quality, coverage, testIds, branches, ciJobs, licenses, , assets] =
-  analysisPages
+const [, , , branches, , licenses] = analysisPages
 
-export const ReleasesPage = () => <AnalysesPage page={releases} />
-export const AssetsPage = () => <AnalysesPage page={assets} />
-export const QualityPage = () => <AnalysesPage page={quality} />
-export const CoveragePage = () => <AnalysesPage page={coverage} />
-export const TestIdsPage = () => <AnalysesPage page={testIds} />
-export const BranchesPage = () => <AnalysesPage page={branches} />
-export const CiJobsPage = () => <AnalysesPage page={ciJobs} />
-export const LicensesPage = () => <AnalysesPage page={licenses} />
-
-const [fleet, stack] = groupAnalysisPages
-
-export const FleetPage = () => <AnalysesPage page={fleet} />
-export const StackPage = () => <AnalysesPage page={stack} />
+export const BranchesPage = () => (
+  <AnalysesPage page={branches} settings={pageSettingKeys.branches} />
+)
+export const LicensesPage = () => (
+  <AnalysesPage page={licenses} settings={pageSettingKeys.licenses} />
+)

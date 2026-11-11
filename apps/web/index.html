@@ -3,15 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>Holtkeeper</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script>
       try {
         var pref = localStorage.getItem('holtkeeper.theme')
         var dark =
-          pref === 'dark' ||
-          (pref !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+          pref === 'light'
+            ? false
+            : pref === 'system'
+              ? matchMedia('(prefers-color-scheme: dark)').matches
+              : true
         var root = document.documentElement
         root.classList.add(dark ? 'dark' : 'light')
         root.dataset.theme = dark ? 'dark' : 'light'

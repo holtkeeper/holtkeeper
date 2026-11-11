@@ -1,21 +1,14 @@
-import {
-  type ChangelogCommit,
-  type ChangelogLinks,
-  type CommitCluster,
-  groupCommits,
-  parseCommit,
-  sectionOrder,
-  sectionOf,
-  sectionTitles,
-} from '@holtkeeper/changelog'
+import { bumpFor } from '@holtkeeper/commit-conventions'
 
+import { type ParsedReleaseCommit, parseCommit } from './conventional.ts'
+import type { ChangelogLinks } from './links.ts'
+import { type CommitCluster, groupCommits, sectionOrder, sectionTitles } from './sections.ts'
 import type { Bump, ReleaseSettings } from './settings.ts'
 import type { BumpReason, ReleaseCommit, ReleaseEdits, ReleaseEntry } from './types.ts'
 import { maxBump } from './version.ts'
 
-const toChangelogCommit = (commit: ReleaseCommit): ChangelogCommit => ({
+const toParsed = (commit: ReleaseCommit): ParsedReleaseCommit => ({
   ...commit,
-  stats: { files: 0, insertions: 0, deletions: 0 },
   parsed: parseCommit(commit.subject, commit.body),
 })
 
@@ -25,7 +18,7 @@ const withoutTrailingRefs = (title: string) =>
   title.replace(/\s*\((?:[#!]\d+(?:,\s*)?)+\)\s*$/u, '').trim() || title
 
 /** Shas of commits that are reverted by another commit of the same list, plus those reverts. */
-function revertPairs(commits: readonly ChangelogCommit[]): Set<string> {
+function revertPairs(commits: readonly ParsedReleaseCommit[]): Set<string> {
   const paired = new Set<string>()
   for (const revert of commits) {
     const target = revert.parsed.revert
@@ -44,43 +37,35 @@ function revertPairs(commits: readonly ChangelogCommit[]): Set<string> {
 }
 
 function ruleExcludes(settings: ReleaseSettings['changelog'], cluster: CommitCluster): boolean {
-  const newest = cluster.commits[0]
-  if (!newest) return true
+  if (cluster.commits.length === 0) return true
   if (cluster.commits.every((commit) => commit.parsed.wip)) return true
-  if (cluster.type && settings.excludeTypes.includes(cluster.type)) return true
-  if (settings.sections?.length && !settings.sections.includes(cluster.section)) return true
-  return settings.exclude.some((pattern) =>
-    cluster.commits.every((commit) => new RegExp(pattern, 'iu').test(commit.subject)),
-  )
+  return cluster.type !== undefined && settings.excludeTypes.includes(cluster.type)
 }
+
+const clusterBump = (cluster: CommitCluster): Bump =>
+  cluster.commits.reduce<Bump>(
+    (max, commit) => maxBump(max, bumpFor({ title: commit.subject, body: commit.body })),
+    cluster.breaking ? 'major' : 'none',
+  )
 
 /**
  * Changelog entries of a range: commits with the same type, scope and message are one entry, so
- * repeated messages appear once. Rules of the settings mark entries left out (`excludedBy:
- * 'rule'`), commits reverted within the range drop out with their revert, and `edits` apply last:
- * a person's choice beats the rules. Entries keep the section order of `@holtkeeper/changelog`.
+ * repeated messages appear once; merge commits are left out. `excludeTypes` and WIP commits mark
+ * entries left out (`excludedBy: 'rule'`), commits reverted within the range drop out with their
+ * revert, and `edits` apply last: a person's choice beats the rules. Each entry carries the bump
+ * its commits call for (`bumpFor` of the commit conventions). Entries keep the order of
+ * `sectionOrder`.
  */
 export function buildEntries(
   commits: readonly ReleaseCommit[],
   settings: ReleaseSettings['changelog'],
   edits: ReleaseEdits = {},
 ): ReleaseEntry[] {
-  const parsed = commits.map(toChangelogCommit)
-  const reverted = settings.revertPairs ? revertPairs(parsed) : new Set<string>()
-  const groups = groupCommits(parsed)
-  const regular = groups.sections.flatMap((section) =>
+  const parsed = commits.map(toParsed)
+  const reverted = revertPairs(parsed)
+  const clusters = groupCommits(parsed).sections.flatMap((section) =>
     section.scopes.flatMap((scope) => scope.clusters),
   )
-  const merges = groups.merges.map((cluster) => {
-    const newest = cluster.commits[0]
-    return newest ? { ...cluster, section: sectionOf(newest) } : cluster
-  })
-  const clusters =
-    settings.merges === 'only'
-      ? merges
-      : settings.merges === 'include'
-        ? [...regular, ...merges]
-        : regular
 
   return clusters
     .map((cluster): ReleaseEntry => {
@@ -106,6 +91,7 @@ export function buildEntries(
         ...(cluster.type ? { type: cluster.type } : {}),
         ...(cluster.scope ? { scope: cluster.scope } : {}),
         breaking: cluster.breaking,
+        bump: clusterBump(cluster),
         title,
         text: text || title,
         tickets: cluster.tickets,
@@ -128,58 +114,36 @@ const plural = (count: number, word: string) =>
   `${count} ${word}${count === 1 ? '' : /(?:s|x|ch|sh)$/u.test(word) ? 'es' : 's'}`
 
 /**
- * The bump the included entries call for: breaking changes, then the bump per commit type
- * (`other` for the rest), raised by merge request labels and at least `minimum` when anything is
- * included. While the major version is 0, breaking changes bump `initialDevelopment`.
+ * The bump the included entries call for, each by `bumpFor` of the commit conventions (breaking →
+ * major, feat → minor, anything else → patch). While the major version is 0, breaking changes
+ * bump the minor version. `none` when nothing is included.
  */
 export function suggestBump(
   entries: readonly ReleaseEntry[],
-  settings: ReleaseSettings['version']['bump'],
-  options: { current?: string; labels?: readonly string[] } = {},
+  options: { current?: string } = {},
 ): { bump: Bump; reasons: BumpReason[] } {
   const included = entries.filter((entry) => entry.included)
   if (included.length === 0) return { bump: 'none', reasons: [] }
-  const reasons: BumpReason[] = []
   const zeroMajor = options.current?.startsWith('0.') === true
-
-  const breaking = included.filter((entry) => entry.breaking)
-  if (breaking.length) {
-    const bump = zeroMajor ? settings.initialDevelopment : settings.breaking
-    reasons.push({
-      bump,
-      because: `${plural(breaking.length, 'breaking change')}${zeroMajor ? ' while the major version is 0' : ''}`,
-      entries: breaking.map((entry) => entry.id),
-    })
-  }
-
-  const byBump = new Map<Bump, Map<string, string[]>>()
+  const groups = new Map<string, { bump: Bump; ids: string[] }>()
   for (const entry of included) {
-    if (entry.breaking) continue
-    const type = entry.type ?? ''
-    const bump = settings.types[type] ?? settings.other
-    const types = byBump.get(bump) ?? new Map<string, string[]>()
-    types.set(type, [...(types.get(type) ?? []), entry.id])
-    byBump.set(bump, types)
+    const breaking = entry.bump === 'major'
+    const bump = breaking ? (zeroMajor ? 'minor' : 'major') : maxBump(entry.bump, 'patch')
+    const key = breaking ? '\u0000' : (entry.type ?? '')
+    const group = groups.get(key) ?? { bump, ids: [] }
+    group.ids.push(entry.id)
+    groups.set(key, group)
   }
-  for (const [bump, types] of byBump)
-    for (const [type, ids] of types)
-      reasons.push({
-        bump,
-        because: type ? plural(ids.length, type) : plural(ids.length, 'other change'),
-        entries: ids,
-      })
-
-  for (const label of options.labels ?? []) {
-    const bump = settings.labels[label]
-    if (bump) reasons.push({ bump, because: `label ${label}`, entries: [] })
-  }
-
-  const bump = reasons.reduce<Bump>((max, reason) => maxBump(max, reason.bump), 'none')
-  const raised = maxBump(bump, settings.minimum)
-  if (raised !== bump)
-    reasons.push({ bump: raised, because: `at least ${settings.minimum}`, entries: [] })
+  const reasons = [...groups].map(([key, group]) => ({
+    bump: group.bump,
+    because:
+      key === '\u0000'
+        ? `${plural(group.ids.length, 'breaking change')}${zeroMajor ? ' while the major version is 0' : ''}`
+        : plural(group.ids.length, key || 'other change'),
+    entries: group.ids,
+  }))
   return {
-    bump: raised,
+    bump: reasons.reduce<Bump>((max, reason) => maxBump(max, reason.bump), 'none'),
     reasons: reasons.toSorted((a, b) => rank(b.bump) - rank(a.bump)),
   }
 }
@@ -188,13 +152,9 @@ const rank = (bump: Bump) => ['none', 'patch', 'minor', 'major'].indexOf(bump)
 
 const shortSha = (sha: string) => sha.slice(0, 8)
 
-function references(
-  entry: ReleaseEntry,
-  options: { links?: ChangelogLinks | undefined; withLinks: boolean },
-): string {
-  const { links, withLinks } = options
-  const link = (label: string, url: string | undefined) =>
-    withLinks && url ? `[${label}](${url})` : label
+const link = (label: string, url: string | undefined) => (url ? `[${label}](${url})` : label)
+
+function references(entry: ReleaseEntry, links: ChangelogLinks | undefined): string {
   const refs = [
     ...entry.tickets.map((ticket) => link(ticket, links?.ticket(ticket))),
     ...entry.mergeRequests.map((n) => link(`!${n}`, links?.mergeRequest(n))),
@@ -204,60 +164,22 @@ function references(
   return refs.length ? ` (${refs.join(', ')})` : ''
 }
 
-function line(
-  entry: ReleaseEntry,
-  options: {
-    links?: ChangelogLinks | undefined
-    withLinks: boolean
-    authors: boolean
-    scope: boolean
-  },
-) {
-  const scope = options.scope && entry.scope ? `**${entry.scope}:** ` : ''
-  const authors = options.authors && entry.authors.length ? ` — ${entry.authors.join(', ')}` : ''
-  return `- ${scope}${entry.text}${references(entry, options)}${authors}`
-}
+const line = (entry: ReleaseEntry, links: ChangelogLinks | undefined) =>
+  `- ${entry.scope ? `**${entry.scope}:** ` : ''}${entry.text}${references(entry, links)}`
 
 /**
- * Markdown of the included entries, grouped by the settings' `groupBy`: sections as `###`
- * headings, scopes, tickets (entries without one under Other) or one flat list.
+ * Markdown of the included entries: one `###` heading per section in `sectionOrder`, breaking
+ * changes first, each line with its scope and links to tickets and merge requests (or the commit).
  */
-export function renderChangelog(
-  entries: readonly ReleaseEntry[],
-  settings: ReleaseSettings['changelog'],
-  links?: ChangelogLinks,
-): string {
-  const included = entries.filter((entry) => entry.included)
-  if (included.length === 0) return ''
-  const options = { links, withLinks: settings.links, authors: settings.authors }
-  const block = (title: string, list: ReleaseEntry[], scope: boolean) =>
-    `### ${title}\n\n${list.map((entry) => line(entry, { ...options, scope })).join('\n')}`
-
-  if (settings.groupBy === 'none')
-    return included.map((entry) => line(entry, { ...options, scope: true })).join('\n')
-
+export function renderChangelog(entries: readonly ReleaseEntry[], links?: ChangelogLinks): string {
   const groups = new Map<string, ReleaseEntry[]>()
-  const add = (key: string, entry: ReleaseEntry) => {
-    const list = groups.get(key) ?? []
-    if (!list.includes(entry)) list.push(entry)
-    groups.set(key, list)
+  for (const entry of entries) {
+    if (!entry.included) continue
+    const title = sectionTitles[entry.section]
+    groups.set(title, [...(groups.get(title) ?? []), entry])
   }
-  for (const entry of included) {
-    if (settings.groupBy === 'section') add(sectionTitles[entry.section], entry)
-    else if (settings.groupBy === 'scope') add(entry.scope ?? '', entry)
-    else if (entry.tickets.length) for (const ticket of entry.tickets) add(ticket, entry)
-    else add('', entry)
-  }
-  const keys = [...groups.keys()]
-  const ordered =
-    settings.groupBy === 'section'
-      ? keys
-      : [
-          ...keys.filter(Boolean).toSorted((a, b) => a.localeCompare(b)),
-          ...keys.filter((key) => !key),
-        ]
-  return ordered
-    .map((key) => block(key || 'Other', groups.get(key) ?? [], settings.groupBy !== 'scope'))
+  return [...groups]
+    .map(([title, list]) => `### ${title}\n\n${list.map((entry) => line(entry, links)).join('\n')}`)
     .join('\n\n')
 }
 

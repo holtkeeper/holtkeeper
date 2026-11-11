@@ -1,10 +1,13 @@
 import { expect, test } from 'bun:test'
 
+import { assetsPolicySchema } from '@holtkeeper/assets'
 import { requireSharp } from '@holtkeeper/media'
 import type { VariantCache } from '@holtkeeper/media'
 import type { MediaReviewInput } from '@holtkeeper/review'
 
-import { createMediaReviewer, panelLink } from '../src/media/reviewer.ts'
+import { createMediaReviewer, panelLink, policyNotes } from '../src/media/reviewer.ts'
+
+const policy = (value: unknown) => async () => assetsPolicySchema.parse(value)
 
 const photo = async () => {
   const sharp = await requireSharp()
@@ -42,7 +45,7 @@ const base = {
   paths: [],
 }
 
-test('without avif only WebP is encoded and asked for', async () => {
+test('without avif in the policy only WebP is encoded and asked for', async () => {
   const result = await createMediaReviewer().review({
     ...base,
     paths: ['public/bg-720.png', 'public/bg-1080.png'],
@@ -67,7 +70,7 @@ test('raster images get a savings table, a <picture> suggestion and a panel link
   }
   const result = await createMediaReviewer({
     publicUrl: 'https://hk.example.com/',
-    avif: true,
+    policyFor: policy({ formats: { raster: 'avif+webp' } }),
   }).review(input)
   expect(result.comments).toHaveLength(1)
   const comment = result.comments[0]
@@ -81,12 +84,18 @@ test('raster images get a savings table, a <picture> suggestion and a panel link
   expect(result.summary).toContain('`public/hero.png`: no AVIF/WebP version comes with it.')
   expect(result.summary).toContain('| 375 px @2x | 750 px |')
   expect(result.summary).toContain(
-    '(https://hk.example.com/media?repo=work%3Aweb%2Fsite&file=public%2Fhero.png&ref=h1)',
+    '[Variants and snippets for `hero.png`](https://hk.example.com/repos/view?repo=work%3Aweb%2Fsite&tab=assets&file=public%2Fhero.png&ref=h1)',
   )
 })
 
 test('an added SVG gets a whole-file suggestion; a modified one only a summary line', async () => {
-  const reviewer = createMediaReviewer()
+  const reviewer = createMediaReviewer({ policyFor: policy({ minSaving: { pct: 5, bytes: 64 } }) })
+  const small = await createMediaReviewer().review({
+    ...base,
+    files: [{ path: 'icons/check.svg', status: 'added', text: svg }],
+    usages: [],
+  })
+  expect(small.comments).toEqual([])
   const added = await reviewer.review({
     ...base,
     files: [{ path: 'icons/check.svg', status: 'added', text: svg }],
@@ -120,7 +129,7 @@ test('unreadable images are mentioned, not reviewed', async () => {
   expect(result.summary).toContain('`a.png`: not readable')
   expect(result.summary).toContain('`b.png`: cannot decode')
   expect(panelLink('https://x.test', { ...base, files: [], usages: [] }, 'a b.png')).toBe(
-    'https://x.test/media?repo=work%3Aweb%2Fsite&file=a+b.png&ref=h1',
+    'https://x.test/repos/view?repo=work%3Aweb%2Fsite&tab=assets&file=a+b.png&ref=h1',
   )
 })
 
@@ -187,4 +196,50 @@ test('a large image with its AVIF and WebP but one size is flagged, and re-revie
   const second = await reviewer.review(input)
   expect(hits).toBe(entries.size)
   expect(second.summary).toBe(first.summary)
+})
+
+test('files the policy ignores are not reviewed', async () => {
+  const result = await createMediaReviewer({
+    policyFor: policy({ ignore: ['vendor/**'] }),
+  }).review({
+    ...base,
+    files: [{ path: 'vendor/icons/check.svg', status: 'added', text: svg }],
+    usages: [],
+  })
+  expect(result).toEqual({ comments: [] })
+})
+
+test('an SVG breaking the policy is called out and keep leaves it unoptimized', async () => {
+  const result = await createMediaReviewer({
+    publicUrl: 'https://hk.example.com',
+    policyFor: policy({
+      formats: { svg: 'keep', allowed: ['png', 'webp'] },
+      mode: 'suggest-mr',
+    }),
+  }).review({
+    ...base,
+    files: [{ path: 'icons/check.svg', status: 'added', text: svg }],
+    usages: [],
+  })
+  expect(result.comments).toEqual([])
+  expect(result.summary).toContain(
+    '`icons/check.svg` breaks the asset policy: .svg is not an allowed format (png, webp).',
+  )
+  expect(result.summary).toContain('[Open a merge request with variants of `check.svg`](')
+})
+
+test('policy notes name format, size and dimension limits', () => {
+  const strict = assetsPolicySchema.parse({
+    formats: { allowed: ['webp'] },
+    maxBytes: { warn: 1000, error: 5000, perKind: { image: { error: 2000 } } },
+    maxDimension: 100,
+  })
+  expect(policyNotes({ path: 'a/hero.png', bytes: 3000, width: 300, height: 50 }, strict)).toEqual([
+    '.png is not an allowed format (webp)',
+    "3 kB is above the policy's error limit of 2 kB",
+    "300×50 px is larger than the policy's 100 px",
+  ])
+  expect(policyNotes({ path: 'a/b.webp', bytes: 1500 }, strict)).toEqual([
+    "2 kB is above the policy's warning limit of 1 kB",
+  ])
 })

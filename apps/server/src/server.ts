@@ -7,7 +7,7 @@ import {
   modelsDevCatalog,
   withPluginCatalogs,
 } from '@holtkeeper/agent'
-import { builtinAnalyzers, reviewChecks, reviewTester } from '@holtkeeper/analyzers'
+import { builtinAnalyzers, reviewChecks } from '@holtkeeper/analyzers'
 import {
   type ArtifactStore,
   type StorageProvider,
@@ -16,26 +16,31 @@ import {
   fsArtifactStore,
   s3ArtifactStore,
 } from '@holtkeeper/artifacts'
+import { assetsPolicySetting } from '@holtkeeper/assets'
 import { commitConventionsSetting } from '@holtkeeper/commit-conventions'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { HoltkeeperFileConfig } from '@holtkeeper/core'
 import {
   type TokenRotator,
   createCredentialService,
   startRotationSchedule,
 } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
-import { miseCacheStorage } from '@holtkeeper/exec-container'
+import { egressEnvironment, miseCacheStorage } from '@holtkeeper/exec-container'
 import { resolveSecret } from '@holtkeeper/forge'
 import { gitlabTokenRotator } from '@holtkeeper/forge-gitlab'
+import { createGuideResolver, testIdOverridesFor, testIdsSettingKey } from '@holtkeeper/guide'
+import { createGuideAnalyzer } from '@holtkeeper/guide-generator'
+import { validateJiraCredentialOptions } from '@holtkeeper/issues-jira'
 import { knowledgeAccess } from '@holtkeeper/knowledge'
 import { createLimiter, limitsCredentialsSetting } from '@holtkeeper/limits'
 import {
-  type DefaultSchedule,
   type DefaultTrigger,
   liveConfig,
+  retireSeededSchedules,
   seedDefaults,
 } from '@holtkeeper/managed-config'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
+import { createPropagateAnalyzer } from '@holtkeeper/propagate'
 import { releaseNotifyDefinition, releaseSettingsDefinition } from '@holtkeeper/release'
 import type { AnalysisKind } from '@holtkeeper/report'
 import { createReviewAnalyzer } from '@holtkeeper/review'
@@ -46,24 +51,25 @@ import {
   defaultSettings,
   seedDefaultSettings,
 } from '@holtkeeper/settings'
-import { resolveSetting } from '@holtkeeper/settings'
 import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
 import type { Job } from '@holtkeeper/store'
 import { createTrackerAnalyzer, trackersSetting } from '@holtkeeper/tracker'
 import { defaultPolling, pollingSetting } from '@holtkeeper/updates'
 import { aesVault } from '@holtkeeper/vault'
 import { mirrorStorage } from '@holtkeeper/workspace'
+import { WRITE_POOL, createWriteTaskAnalyzer } from '@holtkeeper/write-task'
 
 import { autoAcceptFrom, settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
 import { createApp } from './app.ts'
+import { assetsPolicyFor } from './assets.ts'
 import { startAuditRetention } from './audit.ts'
-import { type ServerDeps, repoTarget } from './context.ts'
+import { type ServerDeps, forgeFor, repoTarget } from './context.ts'
 import { startDatabaseSnapshots } from './database.ts'
-import { digestServiceFor } from './digests.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
+import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
 import {
   type AgentFor,
   type AnyAnalyzer,
@@ -78,19 +84,30 @@ import { startManagedConfig } from './managed.ts'
 import type { MediaEngine } from './media/engine.ts'
 import { createMediaReviewer } from './media/reviewer.ts'
 import { startOperations } from './operations.ts'
+import { agentOpsAccess } from './ops-tools.ts'
+import { agentReleaseAccess } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { startStorageReports } from './storage-reports.ts'
 import { databaseStorage } from './storage.ts'
+import {
+  proposePropagateFixes,
+  relatedRepos,
+  requestRepository,
+  taskJobFinished,
+  taskStarted,
+} from './tasks.ts'
+import { commitConventionsReader } from './tools/rules.ts'
 import { serverPoller } from './updates.ts'
 import { serveWeb } from './web.ts'
 import { startWebhookSync } from './webhook-sync.ts'
+import { writeTaskPolicy } from './write-tasks.ts'
 
 export interface ServerOptions {
   /** Extra token rotators besides GitLab's. */
   rotators?: TokenRotator[]
-  /** Analysis kinds besides the built-in changelog, bundle and dependency analyses. */
+  /** Analysis kinds besides those of the built-in analyzers. */
   // oxlint-disable-next-line typescript/no-explicit-any -- kinds differ in their data type
   analyses?: AnalysisKind<any>[]
   /** Extra settings, e.g. from plugins. */
@@ -102,13 +119,11 @@ export interface ServerOptions {
    */
   defaultSettings?: readonly DefaultSetting[] | false
   /**
-   * Schedules and triggers an install starts with, each written once per store as a panel
-   * document (see `seedDefaults`). Default `defaultSchedules` and `defaultTriggers` from
-   * `@holtkeeper/managed-config`; `false` seeds nothing.
+   * Triggers an install starts with, each written once per store as a panel document (see
+   * `seedDefaults`). Default `defaultTriggers` from `@holtkeeper/managed-config`; `false` seeds
+   * nothing.
    */
-  defaultConfig?:
-    | { schedules?: readonly DefaultSchedule[]; triggers?: readonly DefaultTrigger[] }
-    | false
+  defaultConfig?: { triggers?: readonly DefaultTrigger[] } | false
   /** Analyzers background jobs may run. Default: the registry from `@holtkeeper/analyzers`. */
   analyzers?: AnyAnalyzer[]
   /** The LLM agent for a repository. Default: the AI provider credential named by `llm.provider`. */
@@ -133,9 +148,10 @@ export interface ServerOptions {
   roles?: Role[]
   /**
    * Worker overrides for this process: `concurrency`, `claimDelayMs` (take only jobs queued that
-   * long), `maxJobs` (exit after that many jobs).
+   * long), `maxJobs` (exit after that many jobs), `pools` (the worker pools it serves, default
+   * `['default']`).
    */
-  worker?: { concurrency?: number; claimDelayMs?: number; maxJobs?: number }
+  worker?: { concurrency?: number; claimDelayMs?: number; maxJobs?: number; pools?: string[] }
   /** On `stop`, running jobs get this long to finish before they are requeued. Default 30 s. */
   drainTimeoutMs?: number
   log?: (line: string) => void
@@ -151,7 +167,7 @@ export interface RunningServer {
 
 const defaultWebRoot = join(import.meta.dir, '../../web/dist')
 
-type ServerConfig = NonNullable<HoltkeeperConfig['server']>
+type ServerConfig = NonNullable<HoltkeeperFileConfig['server']>
 
 /** The artifact store a server config describes: `artifacts`, else `artifactsDir`, else `.holtkeeper/artifacts`. */
 function artifactStoreFor(server: ServerConfig): ArtifactStore {
@@ -200,9 +216,12 @@ export function startArtifactRetention(
   return () => clearInterval(timer)
 }
 
-/** Builds the dependencies from a config and starts listening. */
+/**
+ * Builds the dependencies from a config file and the panel documents in its store, and starts
+ * listening.
+ */
 export async function startServer(
-  fileConfig: HoltkeeperConfig,
+  fileConfig: HoltkeeperFileConfig,
   options: ServerOptions = {},
 ): Promise<RunningServer> {
   const server = fileConfig.server
@@ -213,21 +232,23 @@ export async function startServer(
   const vault = aesVault(server.vaultKey)
   const credentials = createCredentialService({
     credentials: server.store.credentials,
-    activity: server.store.activity,
+    audit: server.store.audit,
     vault,
     rotators: [gitlabTokenRotator(), ...(options.rotators ?? [])],
     validateOptions: (kind, values) =>
       validateSshCredentialOptions(kind, values) ??
       validateEgressSecretOptions(kind, values) ??
+      validateJiraCredentialOptions(kind, values) ??
       aiProviderOptionsValidatorFor(aiProviders)(kind, values),
   })
   const duties = roleDuties(options.roles ?? ['all'])
   const limiterOptions = limiterOptionsFor(fileConfig, server.store)
   const limiter = createLimiter(limiterOptions)
+  const retired = await retireSeededSchedules({ store: server.store })
+  if (retired.length > 0) log(`config: removed seeded schedules ${retired.join(', ')}`)
   if (options.defaultConfig !== false) {
     const seeded = await seedDefaults({
       store: server.store,
-      file: fileConfig,
       analyzers: (options.analyzers ?? builtinAnalyzers).map((analyzer) => analyzer.kind),
       ...options.defaultConfig,
     })
@@ -243,17 +264,33 @@ export async function startServer(
   })
   // Everything below reads the effective config through this live view.
   const config = liveConfig(managed.source)
+  const executionMode = config.jobs.execution?.mode ?? 'host'
+  if (duties.worker && options.worker?.pools?.includes(WRITE_POOL) && executionMode === 'host') {
+    managed.stop()
+    throw new Error(
+      'the write pool runs repository scripts: set jobs.execution.mode to mise or container',
+    )
+  }
   const artifacts = options.artifacts ?? artifactStoreFor(server)
   const mediaCache = artifactCache(artifacts, {
     onError: (error) => log(`cache: ${error instanceof Error ? error.message : String(error)}`),
   })
-  // The review analyzer needs server state: scoped review instructions and the knowledge base.
+  // The review analyzer needs server state: the Guide and the knowledge base.
+  const resolveGuide = createGuideResolver({ store: server.store })
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
-    tester: reviewTester(),
-    ...(config.jobs?.botUsername ? { botUsername: config.jobs.botUsername } : {}),
+    checksFor: async (repo) =>
+      reviewChecks({
+        testids: testIdOverridesFor(
+          await server.store.settings.list(testIdsSettingKey),
+          repoTarget(config, repo),
+        ),
+      }),
+    botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
     mediaReviewer: createMediaReviewer({
       cache: mediaCache,
+      policyFor: async (repo) =>
+        (await assetsPolicyFor(server.store, repoTarget(config, repo))).policy,
       ...(server.publicUrl ? { publicUrl: server.publicUrl } : {}),
     }),
     knowledge: {
@@ -264,13 +301,14 @@ export async function startServer(
       }),
       groupsOf: (repo) => repoTarget(config, repo).groups,
     },
-    async instructionsFor(repo) {
-      const entry = resolveSetting(
-        await server.store.settings.list(),
-        'review.instructions',
-        repoTarget(config, repo),
-      )
-      return typeof entry?.value === 'string' ? entry.value : undefined
+    async guideFor(repo, { docs, query }) {
+      const resolved = await resolveGuide({
+        repo: repoTarget(config, repo),
+        task: 'review',
+        repoDocs: docs,
+        ...(query && { query }),
+      })
+      return resolved.text || undefined
     },
   })
   const documentDeps = { config, store: server.store, vault }
@@ -281,40 +319,80 @@ export async function startServer(
     definitionsFor: trackerDefinitionsFor(documentDeps),
     groupRepos: () => undefined,
   })
-  const replacements: Record<string, AnyAnalyzer> = { review, tracker }
+  const guide = createGuideAnalyzer({
+    store: server.store,
+    groupsOf: (repo) => repoTarget(config, repo).groups,
+  })
+  const conventionsOf = commitConventionsReader({
+    forgeOf: (forge) => forgeFor(config, forge),
+    settings: server.store.settings,
+    now: () => new Date(),
+  })
+  const taskDeps = { store: server.store, config, now: () => new Date() }
+  const writeTask = createWriteTaskAnalyzer({
+    policy: writeTaskPolicy({
+      store: server.store,
+      readOnly: managed.readOnly,
+      dryRun: () => config.dryRun,
+      executionMode: () => config.jobs.execution?.mode,
+      now: () => new Date(),
+    }),
+    conventions: (repo) => conventionsOf(repoTarget(config, repo)),
+    env: () => {
+      const egress = config.jobs.execution?.egress
+      return egress ? egressEnvironment(egress).env : undefined
+    },
+    onStart: (repo, task, jobId) => taskStarted(taskDeps, repo, task, jobId),
+    links: {
+      related: (repo, task) => relatedRepos(taskDeps, repo, task),
+      requestRepository: (request) => requestRepository(taskDeps, request),
+    },
+  })
+  const propagate = createPropagateAnalyzer({
+    fixes: { propose: (input) => proposePropagateFixes(taskDeps, input) },
+  })
+  const replacements: Record<string, AnyAnalyzer> = {
+    review,
+    propagate,
+    tracker,
+    guide,
+    'write-task': writeTask,
+  }
   const analyzers =
     options.analyzers ?? builtinAnalyzers.map((analyzer) => replacements[analyzer.kind] ?? analyzer)
   const aiCatalog = withPluginCatalogs(options.aiCatalog ?? modelsDevCatalog(), aiProviders, {
     onError: (error) =>
       log(`ai catalog: ${error instanceof Error ? error.message : String(error)}`),
   })
-  const agentFor =
-    options.agentFor ??
-    settingsAgentFor({
-      config,
-      store: server.store,
-      vault,
-      rateLimiter: limiter,
-      aiCatalog,
-      aiProviders,
-      artifacts,
-    })
+  const settingsAgent = options.agentFor
+    ? undefined
+    : settingsAgentFor({
+        config,
+        store: server.store,
+        vault,
+        rateLimiter: limiter,
+        aiCatalog,
+        aiProviders,
+        artifacts,
+        releases: (target, requester) => agentReleaseAccess(deps, target, requester),
+        ops: (target, requester) => agentOpsAccess(deps, target, requester),
+      })
+  const agentFor: AgentFor = options.agentFor ?? settingsAgent ?? (() => undefined)
   // Areas on the disks of the process that runs jobs; web processes see them through reports.
-  const workerStorage =
-    config.jobs && duties.worker
-      ? [
-          mirrorStorage(config.jobs.cacheDir),
-          miseCacheStorage(
-            config.jobs.execution?.mode === 'container'
-              ? {
-                  mode: 'container',
-                  ...(config.jobs.execution.engine ? { engine: config.jobs.execution.engine } : {}),
-                  hostRunner: localRunner,
-                }
-              : { mode: 'host' },
-          ),
-        ]
-      : []
+  const workerStorage = duties.worker
+    ? [
+        mirrorStorage(config.jobs.cacheDir),
+        miseCacheStorage(
+          config.jobs.execution?.mode === 'container'
+            ? {
+                mode: 'container',
+                ...(config.jobs.execution.engine ? { engine: config.jobs.execution.engine } : {}),
+                hostRunner: localRunner,
+              }
+            : { mode: 'host' },
+        ),
+      ]
+    : []
   const deps: ServerDeps = {
     config,
     auth: server.auth,
@@ -333,7 +411,10 @@ export async function startServer(
       releaseSettingsDefinition,
       releaseNotifyDefinition,
       commitConventionsSetting,
+      assetsPolicySetting,
       librariesSetting,
+      freshnessSetting,
+      freshnessSweepSetting,
       ...analyzerSettings(analyzers),
       ...executionSettings(),
       ...(options.settings ?? []),
@@ -344,7 +425,14 @@ export async function startServer(
     artifacts,
     aiCatalog,
     aiProviders,
-    agentFor: async (repo) => agentFor(repo),
+    agentFor: async (repo) =>
+      settingsAgent ? settingsAgent(repo, { interactive: true }) : agentFor(repo),
+    chatAgentFor: async (target, run) =>
+      settingsAgent ? settingsAgent(target, run) : agentFor(target),
+    automaticAgentFor: async (repo) =>
+      settingsAgent
+        ? settingsAgent(repo, { interactive: false, actor: 'agent:learning' })
+        : agentFor(repo),
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),
@@ -395,6 +483,7 @@ export async function startServer(
     onFinished: async (job, record) => {
       metrics?.observeJob(job)
       if (record) await noteLibraryUses(server.store.kv, record.kind, deps.now())
+      await taskJobFinished(taskDeps, job, record)
     },
     log,
   })
@@ -419,14 +508,14 @@ export async function startServer(
           log,
         }),
       () => {
-        jobs?.scheduler.start()
-        return () => jobs?.scheduler.stop()
+        jobs.scheduler.start()
+        return () => jobs.scheduler.stop()
       },
       () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
+      () => startFreshness(deps, log) ?? (() => {}),
       () => startWebhookSync(deps, log),
       () => startLibraryIndex(deps, log),
       () => startDatabaseSnapshots(server.store, { log }),
-      () => digestServiceFor(deps).start(log),
       () => releaseServiceFor(deps).startBoardRefresh(),
     ],
   })
@@ -437,8 +526,8 @@ export async function startServer(
           kv: server.store.kv,
           providers: workerStorage,
           directories: {
-            ...(config.jobs ? { 'git-mirrors': config.jobs.cacheDir } : {}),
-            ...(config.jobs?.execution?.mode !== 'container'
+            'git-mirrors': config.jobs.cacheDir,
+            ...(config.jobs.execution?.mode !== 'container'
               ? { 'mise-cache': Bun.env.MISE_DATA_DIR ?? join(homedir(), '.local/share/mise') }
               : {}),
           },
@@ -457,10 +546,10 @@ export async function startServer(
 
   return {
     url,
-    exhausted: duties.worker && jobs ? jobs.worker.exhausted : new Promise<void>(() => {}),
+    exhausted: duties.worker ? jobs.worker.exhausted : new Promise<void>(() => {}),
     async stop() {
       ops.startDraining()
-      if (duties.worker && jobs) {
+      if (duties.worker) {
         const drained = await jobs.worker.drain(options.drainTimeoutMs ?? 30_000)
         log(`drained: ${drained.finished} job(s) finished, ${drained.requeued} requeued`)
       }
@@ -468,7 +557,7 @@ export async function startServer(
       await stopStorageReports?.()
       managed.stop()
       await listener.stop()
-      await jobs?.stop()
+      await jobs.stop()
       limiterOptions.state?.close()
       await server.store.close()
     },

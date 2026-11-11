@@ -10,6 +10,8 @@ export interface ForgeDraft {
   packages: boolean
   /** Only takes effect with `packages`. */
   cachePackages: boolean
+  /** Username Holtkeeper posts as; empty when unknown. */
+  botUsername: string
 }
 
 export type ForgeDraftErrors = Partial<Record<keyof ForgeDraft, string>>
@@ -20,6 +22,7 @@ export const toForgeDraft = (forge?: ConfigEntryView<'forge'>): ForgeDraft => ({
   credentialId: forge?.data.credentialId ?? '',
   packages: forge?.data.packages ?? true,
   cachePackages: forge?.data.cachePackages ?? false,
+  botUsername: forge?.data.botUsername ?? '',
 })
 
 /** Problems by field; `taken` are ids a new forge must not reuse. */
@@ -42,4 +45,5 @@ export const toForgeInput = (draft: ForgeDraft): PutConfigInput['forge'] => ({
   credentialId: draft.credentialId,
   ...(!draft.packages && { packages: false }),
   ...(draft.packages && draft.cachePackages && { cachePackages: true }),
+  ...(draft.botUsername.trim() && { botUsername: draft.botUsername.trim() }),
 })

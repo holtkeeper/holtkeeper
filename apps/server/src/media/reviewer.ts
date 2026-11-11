@@ -1,4 +1,14 @@
-import type { ReviewComment } from '@holtkeeper/forge'
+import {
+  type AssetsPolicy,
+  byteLimits,
+  defaultAssetsPolicy,
+  formatAllowed,
+  isIgnored,
+  kindOfPath,
+  requiredFormats,
+  worthSaving,
+} from '@holtkeeper/assets'
+import type { RepoRef, ReviewComment } from '@holtkeeper/forge'
 import type {
   EncodedVariant,
   SnippetFramework,
@@ -22,18 +32,23 @@ export interface MediaReviewerOptions {
   maxBytes?: number
   /** Images decoded above this many pixels are only mentioned. Default 50 megapixels. */
   maxPixels?: number
-  /** A format must save at least this many bytes to be suggested. Default 2 kB. */
-  minSaving?: number
   /** Added SVGs up to this many lines get a whole-file suggestion. Default 200. */
   maxSuggestionLines?: number
   /** Encoded variants kept between reviews (e.g. `artifactCache` on S3), so re-pushes do not encode again. */
   cache?: VariantCache
-  /** Encode AVIF and ask for an AVIF sibling next to WebP. Default false. */
-  avif?: boolean
+  /**
+   * The `assets.policy` of a repository: ignored files are skipped, its formats decide which
+   * siblings are asked for and whether SVGs are optimized, a suggested saving clears its
+   * `minSaving` (percent and bytes), and files above its limits or of disallowed formats are called out.
+   * Default `defaultAssetsPolicy`.
+   */
+  policyFor?: (repo: RepoRef) => Promise<AssetsPolicy>
 }
 
-type Limits = Required<Omit<MediaReviewerOptions, 'publicUrl' | 'cache'>> & {
+type Limits = Required<Omit<MediaReviewerOptions, 'publicUrl' | 'cache' | 'policyFor'>> & {
   cache?: VariantCache
+  policy: AssetsPolicy
+  avif: boolean
 }
 
 /** Images wider than this should come with smaller sizes. */
@@ -64,18 +79,42 @@ function deliveryNotes(
   file: MediaFile,
   width: number,
   paths: readonly string[],
-  avif: boolean,
+  policy: AssetsPolicy,
 ): string[] {
   const format = file.path.slice(file.path.lastIndexOf('.') + 1).toLowerCase()
   const siblings = siblingsOf(file.path, paths)
   const notes: string[] = []
-  const missing = (avif ? ['avif', 'webp'] : ['webp']).filter(
+  const missing = requiredFormats(policy.formats.raster).filter(
     (other) => !siblings.formats.has(other),
   )
   if (legacyFormats.has(format) && missing.length)
     notes.push(`no ${missing.map((other) => formatNames[other]).join('/')} version comes with it`)
   if (width > HIGH_RES_WIDTH && !siblings.sized && !SIZE_SUFFIX.test(file.path))
     notes.push(`only one resolution (${width} px wide): phones download the full-size file`)
+  return notes
+}
+
+const kb = (bytes: number) => `${Math.round(bytes / 1000)} kB`
+
+/** Where a file breaks the asset policy: format, size and, for images, dimensions. */
+export function policyNotes(
+  file: { path: string; bytes: number; width?: number; height?: number },
+  policy: AssetsPolicy,
+): string[] {
+  const format = file.path.slice(file.path.lastIndexOf('.') + 1).toLowerCase()
+  const notes: string[] = []
+  if (!formatAllowed(policy, format))
+    notes.push(`.${format} is not an allowed format (${policy.formats.allowed?.join(', ')})`)
+  const limits = byteLimits(policy, kindOfPath(file.path))
+  if (file.bytes > limits.error)
+    notes.push(`${kb(file.bytes)} is above the policy's error limit of ${kb(limits.error)}`)
+  else if (file.bytes > limits.warn)
+    notes.push(`${kb(file.bytes)} is above the policy's warning limit of ${kb(limits.warn)}`)
+  const side = Math.max(file.width ?? 0, file.height ?? 0)
+  if (side > policy.maxDimension)
+    notes.push(
+      `${file.width}×${file.height} px is larger than the policy's ${policy.maxDimension} px`,
+    )
   return notes
 }
 
@@ -88,26 +127,31 @@ const frameworkOf = (path: string): SnippetFramework =>
 
 const escapeRegExp = (value: string) => value.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** Link to the media panel for a file of the merge request's head. */
+/** Link to the repository's Assets tab with the media dialog open on a file of the merge request's head. */
 export function panelLink(publicUrl: string, input: MediaReviewInput, file: string): string {
   const query = new URLSearchParams({
     repo: `${input.repo.forge}:${input.repo.path}`,
+    tab: 'assets',
     file,
     ref: input.refs.headSha,
   })
-  return `${publicUrl.replace(/\/+$/, '')}/media?${query.toString()}`
+  return `${publicUrl.replace(/\/+$/, '')}/repos/view?${query.toString()}`
 }
 
 /** Lines of a text, not counting the empty string after a final newline. */
 const lineCount = (text: string) => text.replace(/\n$/, '').split('\n').length
 
-/** Per format, the variants worth shipping: its largest one saves at least `minSaving`. */
-function worthShipping(original: number, variants: readonly EncodedVariant[], minSaving: number) {
+/** Per format, the variants worth shipping: the saving of its largest one clears `minSaving`. */
+function worthShipping(
+  original: number,
+  variants: readonly EncodedVariant[],
+  policy: AssetsPolicy,
+) {
   return variants.filter((variant) => {
     const largest = variants
       .filter((other) => other.format === variant.format)
       .toSorted((a, b) => b.width - a.width)[0]
-    return largest !== undefined && original - largest.bytes >= minSaving
+    return largest !== undefined && worthSaving(policy, original, original - largest.bytes)
   })
 }
 
@@ -127,15 +171,25 @@ async function reviewRaster(
   paths: readonly string[],
 ): Promise<{ comments: ReviewComment[]; summary: string }> {
   const bytes = file.bytes
-  if (!bytes) return { comments: [], summary: `\`${file.path}\`: not readable from the forge.` }
+  if (!bytes)
+    return {
+      comments: [],
+      summary: `\`${file.path}\`: not readable from the forge.`,
+    }
   if (bytes.byteLength > options.maxBytes)
-    return { comments: [], summary: `\`${file.path}\`: too large to analyze here.` }
+    return {
+      comments: [],
+      summary: `\`${file.path}\`: too large to analyze here.`,
+    }
   let info: Awaited<ReturnType<Media['probeImage']>>
   try {
     const sharp = await media.requireSharp()
     const meta = await sharp(bytes).metadata()
     if (meta.width * (meta.pageHeight ?? meta.height) > options.maxPixels)
-      return { comments: [], summary: `\`${file.path}\`: too many pixels to analyze here.` }
+      return {
+        comments: [],
+        summary: `\`${file.path}\`: too many pixels to analyze here.`,
+      }
     info = await media.probeImage(bytes)
   } catch (error) {
     return {
@@ -150,17 +204,31 @@ async function reviewRaster(
     info,
     ...(options.cache ? { cache: options.cache } : {}),
   })
-  const original = { bytes: bytes.byteLength, width: info.width, format: info.format }
+  const original = {
+    bytes: bytes.byteLength,
+    width: info.width,
+    format: info.format,
+  }
   const summary = media.savingsSummary(original, variants)
-  const notes = info.animated ? [] : deliveryNotes(file, info.width, paths, options.avif)
+  const notes = info.animated ? [] : deliveryNotes(file, info.width, paths, options.policy)
+  const broken = policyNotes(
+    {
+      path: file.path,
+      bytes: bytes.byteLength,
+      width: info.width,
+      height: info.height,
+    },
+    options.policy,
+  )
   const table = [
     media.savingsMarkdown(summary, `${file.path} · ${info.width}×${info.height}`),
     ...(notes.length ? [`\`${file.path}\`: ${notes.join('; ')}.`] : []),
+    ...(broken.length ? [`\`${file.path}\` breaks the asset policy: ${broken.join('; ')}.`] : []),
   ].join('\n\n')
-  const shipped = worthShipping(bytes.byteLength, variants, options.minSaving)
+  const shipped = worthShipping(bytes.byteLength, variants, options.policy)
   const best = summary.best
   const comments: ReviewComment[] = []
-  if (best && best.saving >= options.minSaving && shipped.length) {
+  if (best && worthSaving(options.policy, bytes.byteLength, best.saving) && shipped.length) {
     const name = nameOf(file.path)
     for (const usage of usages) {
       const img = imgOf(usage.text, name)
@@ -260,7 +328,10 @@ function reviewSvg(
 ): { comments: ReviewComment[]; summary?: string } {
   const text = file.text
   if (text === undefined)
-    return { comments: [], summary: `\`${file.path}\`: not readable from the forge.` }
+    return {
+      comments: [],
+      summary: `\`${file.path}\`: not readable from the forge.`,
+    }
   let result: ReturnType<Media['optimizeSvg']>
   try {
     result = media.optimizeSvg(text, { preset: 'safe' })
@@ -271,10 +342,22 @@ function reviewSvg(
     }
   }
   const saving = result.bytes.before - result.bytes.after
-  if (saving < Math.max(64, result.bytes.before * 0.05)) return { comments: [] }
+  const notes = policyNotes({ path: file.path, bytes: result.bytes.before }, options.policy)
+  const policyLine = notes.length
+    ? `\`${file.path}\` breaks the asset policy: ${notes.join('; ')}.`
+    : undefined
+  if (
+    options.policy.formats.svg === 'keep' ||
+    saving < 64 ||
+    !worthSaving(options.policy, result.bytes.before, saving)
+  )
+    return { comments: [], ...(policyLine ? { summary: policyLine } : {}) }
   const percent = Math.round((saving / result.bytes.before) * 1000) / 10
   const { paths } = result.breakdown
-  const line = `\`${file.path}\`: ${result.bytes.before} → ${result.bytes.after} bytes (−${percent}%), gzip ${result.gzip.before} → ${result.gzip.after}; path digits ${paths.before.digits} → ${paths.after.digits}`
+  const line = [
+    `\`${file.path}\`: ${result.bytes.before} → ${result.bytes.after} bytes (−${percent}%), gzip ${result.gzip.before} → ${result.gzip.after}; path digits ${paths.before.digits} → ${paths.after.digits}`,
+    ...(policyLine ? [policyLine] : []),
+  ].join('\n\n')
   const lines = lineCount(text)
   if (file.status !== 'added' || lines > options.maxSuggestionLines)
     return { comments: [], summary: line }
@@ -304,20 +387,27 @@ function reviewSvg(
  * SVGs on added code lines, and links to the media panel.
  */
 export function createMediaReviewer(options: MediaReviewerOptions = {}): MediaReviewer {
-  const limits: Limits = {
+  const base = {
     maxBytes: options.maxBytes ?? 25 * 1024 * 1024,
     maxPixels: options.maxPixels ?? 50_000_000,
-    minSaving: options.minSaving ?? 2048,
     maxSuggestionLines: options.maxSuggestionLines ?? 200,
-    avif: options.avif ?? false,
     ...(options.cache ? { cache: options.cache } : {}),
   }
   return {
     async review(input) {
+      const policy = (await options.policyFor?.(input.repo)) ?? defaultAssetsPolicy
+      const limits: Limits = {
+        ...base,
+        policy,
+        avif: requiredFormats(policy.formats.raster).includes('avif'),
+      }
+      const files = input.files.filter((file) => !isIgnored(file.path, policy))
+      const code = input.code.filter((file) => !isIgnored(file.path, policy))
+      if (!files.length && !code.length) return { comments: [] }
       const media = await loadMedia()
       const comments: ReviewComment[] = []
       const parts: string[] = []
-      for (const file of input.files) {
+      for (const file of files) {
         const name = nameOf(file.path)
         const usages = input.usages.filter((usage) => usage.text.includes(name))
         const result = /\.svg$/i.test(file.path)
@@ -325,17 +415,25 @@ export function createMediaReviewer(options: MediaReviewerOptions = {}): MediaRe
           : await reviewRaster(media, file, usages, limits, input.paths)
         comments.push(...result.comments)
         if (!result.summary) continue
+        const label =
+          policy.mode === 'suggest-mr'
+            ? `Open a merge request with variants of \`${name}\``
+            : `Variants and snippets for \`${name}\``
         const link = options.publicUrl
-          ? `\n\n[Variants and snippets for \`${name}\`](${panelLink(options.publicUrl, input, file.path)})`
+          ? `\n\n[${label}](${panelLink(options.publicUrl, input, file.path)})`
           : ''
         parts.push(`${result.summary}${link}`)
       }
-      for (const file of input.code) {
-        const result = reviewCode(media, file)
-        comments.push(...result.comments)
-        if (result.summary) parts.push(result.summary)
+      if (policy.formats.svg !== 'keep')
+        for (const file of code) {
+          const result = reviewCode(media, file)
+          comments.push(...result.comments)
+          if (result.summary) parts.push(result.summary)
+        }
+      return {
+        comments,
+        ...(parts.length ? { summary: parts.join('\n\n') } : {}),
       }
-      return { comments, ...(parts.length ? { summary: parts.join('\n\n') } : {}) }
     },
   }
 }

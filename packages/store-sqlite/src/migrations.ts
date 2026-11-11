@@ -460,6 +460,194 @@ export const migrations: readonly Migration[] = [
       END;
     `,
   },
+  {
+    version: 12,
+    sql: `
+      ALTER TABLE analyses ADD COLUMN sha TEXT;
+    `,
+  },
+  {
+    version: 13,
+    sql: `
+      DROP TABLE activity;
+    `,
+  },
+  {
+    version: 14,
+    sql: `
+      ALTER TABLE jobs DROP COLUMN log;
+      ALTER TABLE jobs ADD COLUMN attempts_history TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE jobs ADD COLUMN error_signature TEXT;
+      CREATE INDEX jobs_error_signature ON jobs (error_signature, created_at)
+        WHERE error_signature IS NOT NULL;
+      CREATE INDEX jobs_failed ON jobs (finished_at) WHERE status = 'failed';
+    `,
+  },
+  {
+    version: 15,
+    sql: `
+      CREATE TABLE guides (
+        scope TEXT NOT NULL,
+        section TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (scope, section)
+      );
+      CREATE TABLE guide_history (
+        scope TEXT NOT NULL,
+        section TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (scope, section, version)
+      );
+      CREATE TABLE families (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    version: 16,
+    sql: `
+      CREATE TABLE learnings (
+        id TEXT PRIMARY KEY,
+        repo TEXT NOT NULL,
+        key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX learnings_repo_key ON learnings (repo, key);
+      CREATE TABLE learning_claims (
+        key TEXT PRIMARY KEY,
+        at TEXT NOT NULL
+      );
+      CREATE TABLE review_reactions (
+        repo TEXT NOT NULL,
+        merge_request INTEGER NOT NULL,
+        note_id TEXT NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (repo, merge_request, note_id)
+      );
+    `,
+  },
+  {
+    version: 17,
+    sql: `
+      ALTER TABLE credentials ADD COLUMN capabilities TEXT;
+      ALTER TABLE ai_usage ADD COLUMN transcript_ref TEXT;
+      CREATE INDEX ai_usage_job ON ai_usage (job_id);
+    `,
+  },
+  {
+    version: 18,
+    sql: `
+      CREATE TABLE chat_threads (
+        id TEXT PRIMARY KEY,
+        updated_at TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX chat_threads_updated ON chat_threads (archived, updated_at);
+      CREATE TABLE chat_messages (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE,
+        thread_id TEXT NOT NULL,
+        author_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX chat_messages_thread ON chat_messages (thread_id, seq);
+      CREATE INDEX chat_messages_changed ON chat_messages (thread_id, updated_at)
+        WHERE updated_at IS NOT NULL;
+      CREATE TABLE chat_thread_reads (
+        thread_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        last_read_message_id TEXT NOT NULL,
+        last_read_seq INTEGER NOT NULL,
+        PRIMARY KEY (thread_id, user_id)
+      );
+    `,
+  },
+  {
+    version: 19,
+    sql: `ALTER TABLE jobs ADD COLUMN reason TEXT;`,
+  },
+  {
+    version: 20,
+    sql: `
+      ALTER TABLE knowledge ADD COLUMN visibility TEXT;
+      ALTER TABLE knowledge ADD COLUMN subject TEXT;
+      CREATE INDEX knowledge_subject ON knowledge (subject) WHERE subject IS NOT NULL;
+    `,
+  },
+  {
+    version: 21,
+    sql: `
+      CREATE TABLE agent_task_groups (
+        id TEXT PRIMARY KEY,
+        updated_at TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX agent_task_groups_updated ON agent_task_groups (updated_at);
+      CREATE TABLE agent_tasks (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        repo TEXT NOT NULL,
+        status TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX agent_tasks_group ON agent_tasks (group_id);
+      CREATE INDEX agent_tasks_repo ON agent_tasks (repo, updated_at);
+    `,
+  },
+  {
+    version: 22,
+    sql: `
+      DELETE FROM analyses WHERE kind IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup');
+      DELETE FROM jobs WHERE analyzer IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup');
+      DELETE FROM settings WHERE key IN (
+        'llm.model', 'llm.models', 'review.instructions', 'agent.instructions',
+        'analyzers.changelog', 'analyzers.delivery', 'analyzers.fleet', 'analyzers.port',
+        'analyzers.quality', 'analyzers.release-risk', 'analyzers.warmup'
+      );
+      DELETE FROM kv WHERE key = 'digests' OR key LIKE 'digest:%' OR key = 'chat:slack:policy';
+      DELETE FROM config_history WHERE (type, id) IN (
+        SELECT type, id FROM config_documents
+        WHERE type IN ('schedule', 'trigger') AND (
+          json_extract(data, '$.analyzer') IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')
+          OR (json_array_length(data, '$.analyzers') > 0 AND NOT EXISTS (
+            SELECT 1 FROM json_each(data, '$.analyzers')
+            WHERE value NOT IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')))));
+      DELETE FROM config_documents
+        WHERE type IN ('schedule', 'trigger') AND (
+          json_extract(data, '$.analyzer') IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')
+          OR (json_array_length(data, '$.analyzers') > 0 AND NOT EXISTS (
+            SELECT 1 FROM json_each(data, '$.analyzers')
+            WHERE value NOT IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup'))));
+      CREATE TEMP TABLE retired_config AS
+        SELECT type, id FROM config_documents
+        WHERE type IN ('schedule', 'trigger') AND (
+          EXISTS (SELECT 1 FROM json_each(data, '$.analyzers') WHERE value IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup'))
+          OR EXISTS (SELECT 1 FROM json_each(data, '$.options') WHERE key IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')));
+      INSERT INTO config_history (type, id, version, data, updated_at, updated_by)
+        SELECT type, id, version, data, updated_at, updated_by FROM config_documents
+        WHERE (type, id) IN (SELECT type, id FROM retired_config);
+      UPDATE config_documents SET
+        data = json_remove(
+          CASE WHEN json_type(data, '$.analyzers') = 'array' THEN json_set(data, '$.analyzers', json((
+            SELECT json_group_array(value) FROM json_each(config_documents.data, '$.analyzers')
+            WHERE value NOT IN ('changelog', 'quality', 'release-risk', 'fleet', 'delivery', 'port', 'warmup')))) ELSE data END,
+          '$.options.changelog', '$.options.quality', '$.options."release-risk"', '$.options.fleet',
+            '$.options.delivery', '$.options.port', '$.options.warmup'),
+        version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+        updated_by = 'system'
+        WHERE (type, id) IN (SELECT type, id FROM retired_config);
+      DROP TABLE retired_config;
+    `,
+  },
 ]
 
 /**

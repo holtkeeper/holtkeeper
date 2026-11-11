@@ -1,5 +1,5 @@
 import { type Principal, type Scope, can } from '@holtkeeper/access'
-import { budgetKey, budgetStatuses, periodRange, previousMonth } from '@holtkeeper/ai-usage'
+import { budgetKey, budgetStatuses, monthRange, previousMonth } from '@holtkeeper/ai-usage'
 import type { AiRunList, AiUsageBuckets, AiUsageOverview, AiUsagePeriod } from '@holtkeeper/api'
 import {
   type AiRunOutcome,
@@ -29,20 +29,28 @@ const top = 5
 const dayMs = 86_400_000
 
 /**
- * Scopes the caller may read AI usage in (`ai:read`, or `ai:admin` which includes it), or
- * `undefined` when that is everything. 403 when there are none.
+ * Scopes the principal may read AI usage in (`ai:read`, or `ai:admin` which includes it): `all`
+ * for everything, an empty list for nothing.
  */
-function readableScopes(principal: Principal): Scope[] | undefined {
+export function aiReadScopes(principal: Principal): Scope[] | 'all' {
   const scopes = principal.grants
     .filter((grant) =>
       grant.actions.some((action) => action === '*' || readActions.some((a) => a === action)),
     )
     .map((grant) => grant.scope)
-  if (!scopes.length) throw new HTTPException(403, { message: 'missing permission ai:read' })
-  return scopes.some((scope) => scope.all) ? undefined : scopes
+  return scopes.some((scope) => scope.all) ? 'all' : scopes
 }
 
-const canReadScope = (principal: Principal, scope: Scope) =>
+/** As `aiReadScopes`, `undefined` for everything; 403 when there are none. */
+function readableScopes(principal: Principal): Scope[] | undefined {
+  const scopes = aiReadScopes(principal)
+  if (scopes === 'all') return undefined
+  if (!scopes.length) throw new HTTPException(403, { message: 'missing permission ai:read' })
+  return scopes
+}
+
+/** Whether the principal may read the AI usage and budget of `scope`. */
+export const canReadAiScope = (principal: Principal, scope: Scope) =>
   readActions.some((action) => can(principal, action, { kind: 'scope', scope }))
 
 function timeParam(c: AppContext, name: string): string | undefined {
@@ -151,7 +159,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
     const scopes = readableScopes(principal)
     const at = now()
     const access: AiUsageFilter = scopes ? { scopes } : {}
-    const month = periodRange('month', at)
+    const month = monthRange(at)
     const previous = previousMonth(at)
     const period = async (range: typeof month): Promise<AiUsagePeriod> => ({
       ...range,
@@ -169,7 +177,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
         .toSorted((a, b) => b.costUsd - a.costUsd || b.runs - a.runs)
         .slice(0, top)
     const entries = (await store.settings.list(budgetKey)).filter((entry) =>
-      canReadScope(principal, entry.scope),
+      canReadAiScope(principal, entry.scope),
     )
     const [current, last, topRepos, topModels, topTaskKinds, budgets] = await Promise.all([
       period(month),
@@ -177,7 +185,9 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
       topBy('repo'),
       topBy('model'),
       topBy('taskKind'),
-      budgetStatuses(entries, store.aiUsage, at),
+      budgetStatuses(entries, store.aiUsage, at, {
+        includeDefault: canReadAiScope(principal, { all: true }),
+      }),
     ])
     const { totals } = current
     const input = totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens

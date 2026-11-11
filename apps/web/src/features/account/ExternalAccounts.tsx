@@ -12,7 +12,6 @@ import {
   forgeProviders,
   numericIdProvider,
   providerLabel,
-  splitProvider,
   toLinkInput,
   validateLinkDraft,
   verificationLabel,
@@ -38,7 +37,7 @@ import { useSession } from '../shell/session.ts'
 const unavailable = (error: unknown) => error instanceof ApiError && error.status === 503
 const otherProvider = '__other'
 
-/** The signed-in principal's linked GitLab, GitHub and Slack accounts, with self-verification. */
+/** The signed-in principal's linked GitLab, GitHub and other accounts, with self-verification. */
 export function ExternalAccounts() {
   const accounts = useAccounts()
   const { unlink, challenge } = useAccountMutations()
@@ -123,9 +122,7 @@ export function ExternalAccounts() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="font-medium">
-                        {account.providerName ?? providerLabel(account.provider)}
-                      </span>
+                      <span className="font-medium">{providerLabel(account.provider)}</span>
                       <span
                         className={`truncate ${account.username ? '' : 'font-mono text-xs'}`}
                         title={`id ${account.externalId}`}
@@ -175,7 +172,7 @@ export function ExternalAccounts() {
                       variant="ghost"
                       size="sm"
                       isIconOnly
-                      aria-label={`Unlink ${account.providerName ?? providerLabel(account.provider)} ${name}`}
+                      aria-label={`Unlink ${providerLabel(account.provider)} ${name}`}
                       onPress={() => setRemoving(account)}
                     >
                       <Trash2 className="size-3.5" />
@@ -297,8 +294,8 @@ function LinkDialog({
           label={suggestions.length ? 'Provider id' : 'Provider'}
           value={draft.provider}
           onChange={(value) => set({ provider: value })}
-          placeholder="gitlab:<forge id> or slack:<workspace>"
-          description="gitlab:<forge id>, github:<forge id> or slack:<workspace id>."
+          placeholder="gitlab:<forge id>"
+          description="gitlab:<forge id>, github:<forge id> or another <kind>:<instance>."
           error={errors.provider}
           mono
           autoFocus
@@ -343,7 +340,6 @@ function ChallengeDialog({
   challenge: AccountChallenge
   onClose: () => void
 }) {
-  const { kind } = splitProvider(account.provider)
   return (
     <Dialog
       isOpen
@@ -359,9 +355,7 @@ function ChallengeDialog({
       }
     >
       <p className="text-sm">
-        {kind === 'slack'
-          ? 'Send this command to the Holtkeeper bot from your Slack account:'
-          : 'Post this command as a merge request or issue comment from that account:'}
+        Post this command as a merge request or issue comment from that account:
       </p>
       <CopyField value={challenge.command} label="verification command" />
       <div className="flex flex-col gap-1">

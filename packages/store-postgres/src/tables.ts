@@ -10,13 +10,23 @@ export interface Tables {
   passkeys: SQL.Query<unknown>
   identities: SQL.Query<unknown>
   linkTokens: SQL.Query<unknown>
-  activity: SQL.Query<unknown>
   jobs: SQL.Query<unknown>
   knowledge: SQL.Query<unknown>
   knowledgeHistory: SQL.Query<unknown>
   knowledgeFold: SQL.Query<unknown>
+  guides: SQL.Query<unknown>
+  guideHistory: SQL.Query<unknown>
+  families: SQL.Query<unknown>
+  learnings: SQL.Query<unknown>
+  learningClaims: SQL.Query<unknown>
+  reviewReactions: SQL.Query<unknown>
   aiUsage: SQL.Query<unknown>
   ciJobs: SQL.Query<unknown>
+  chatThreads: SQL.Query<unknown>
+  chatMessages: SQL.Query<unknown>
+  chatThreadReads: SQL.Query<unknown>
+  agentTasks: SQL.Query<unknown>
+  agentTaskGroups: SQL.Query<unknown>
   configDocuments: SQL.Query<unknown>
   configHistory: SQL.Query<unknown>
   kv: SQL.Query<unknown>
@@ -42,13 +52,23 @@ export function tables(sql: SQL, schema: string): Tables {
     passkeys: name('passkeys'),
     identities: name('identities'),
     linkTokens: name('link_tokens'),
-    activity: name('activity'),
     jobs: name('jobs'),
     knowledge: name('knowledge'),
     knowledgeHistory: name('knowledge_history'),
     knowledgeFold: name('knowledge_fold'),
+    guides: name('guides'),
+    guideHistory: name('guide_history'),
+    families: name('families'),
+    learnings: name('learnings'),
+    learningClaims: name('learning_claims'),
+    reviewReactions: name('review_reactions'),
     aiUsage: name('ai_usage'),
     ciJobs: name('ci_jobs'),
+    chatThreads: name('chat_threads'),
+    chatMessages: name('chat_messages'),
+    chatThreadReads: name('chat_thread_reads'),
+    agentTasks: name('agent_tasks'),
+    agentTaskGroups: name('agent_task_groups'),
     configDocuments: name('config_documents'),
     configHistory: name('config_history'),
     kv: name('kv'),

@@ -1,0 +1,114 @@
+{{- if .Values.writeWorker.enabled }}
+{{- if not .Values.egressProxy.enabled }}
+{{- fail "writeWorker.enabled needs egressProxy.enabled: write workers reach the network only through the proxy" }}
+{{- end }}
+{{- $component := dict "ctx" $ "component" "write-worker" }}
+{{- $base := omit .Values.worker "pools" "extraArgs" "nodeSelector" "tolerations" "affinity" "topologySpreadConstraints" "claimDelay" "maxJobs" }}
+{{- $worker := mergeOverwrite (deepCopy $base) (omit .Values.writeWorker "enabled" "noProxy" "extraEgress") }}
+{{- $_ := set $worker "extraArgs" (concat (list "--pool" "write") .Values.writeWorker.extraArgs) }}
+{{- $proxy := printf "http://%s-egress-proxy:%v" (include "holtkeeper.fullname" .) .Values.egressProxy.port }}
+{{- $noProxy := concat (list "localhost" "127.0.0.1" ".svc" ".cluster.local") .Values.egressProxy.noProxy .Values.writeWorker.noProxy | uniq }}
+{{- $env := list
+  (dict "name" "HTTP_PROXY" "value" $proxy)
+  (dict "name" "HTTPS_PROXY" "value" $proxy)
+  (dict "name" "http_proxy" "value" $proxy)
+  (dict "name" "https_proxy" "value" $proxy)
+  (dict "name" "NO_PROXY" "value" (join "," $noProxy))
+  (dict "name" "no_proxy" "value" (join "," $noProxy))
+  (dict "name" "NODE_EXTRA_CA_CERTS" "value" "/etc/holtkeeper/egress-ca/tls.crt")
+  (dict "name" "SSL_CERT_FILE" "value" "/etc/holtkeeper/ca-bundle/bundle.pem")
+  (dict "name" "GIT_SSL_CAINFO" "value" "/etc/holtkeeper/ca-bundle/bundle.pem")
+  (dict "name" "CURL_CA_BUNDLE" "value" "/etc/holtkeeper/ca-bundle/bundle.pem")
+}}
+{{- $mounts := list (dict "name" "ca-bundle" "mountPath" "/etc/holtkeeper/ca-bundle" "readOnly" true) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-write-worker
+  labels:
+    {{- include "holtkeeper.componentLabels" $component | nindent 4 }}
+    holtkeeper.dev/worker-pool: write
+spec:
+  replicas: {{ $worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "holtkeeper.selectorLabels" $component | nindent 8 }}
+        holtkeeper.dev/worker-pool: write
+      annotations:
+        {{- include "holtkeeper.podAnnotations" . | nindent 8 }}
+    spec:
+      {{- include "holtkeeper.podSpecCommon" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ $worker.terminationGracePeriodSeconds }}
+      # The system trust store plus the proxy CA, for git and other non-Node clients whose TLS the
+      # proxy intercepts (the forge host).
+      initContainers:
+        - name: ca-bundle
+          image: {{ include "holtkeeper.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [sh, -c, 'cat /etc/ssl/certs/ca-certificates.crt /etc/holtkeeper/egress-ca/tls.crt > /etc/holtkeeper/ca-bundle/bundle.pem']
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          volumeMounts:
+            - name: egress-ca
+              mountPath: /etc/holtkeeper/egress-ca
+              readOnly: true
+            - name: ca-bundle
+              mountPath: /etc/holtkeeper/ca-bundle
+      containers:
+        {{- include "holtkeeper.workerContainer" (dict "ctx" $ "worker" $worker "extraEnv" $env "extraMounts" $mounts) | nindent 8 }}
+      volumes:
+        {{- include "holtkeeper.workerVolumes" . | nindent 8 }}
+        - name: ca-bundle
+          emptyDir:
+            sizeLimit: 8Mi
+      {{- include "holtkeeper.scheduling" .Values.writeWorker | nindent 6 }}
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+---
+# Write workers accept only metrics scrapes and reach only DNS, the egress proxy and the listed
+# extra egress (database, object store): everything else goes through the proxy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "holtkeeper.fullname" . }}-write-worker
+  labels:
+    {{- include "holtkeeper.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "holtkeeper.selectorLabels" $component | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    {{- if $np.metricsFrom }}
+    - ports:
+        - port: http
+      from:
+        {{- toYaml $np.metricsFrom | nindent 8 }}
+    {{- else }}
+    []
+    {{- end }}
+  egress:
+    - ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - ports:
+        - { port: {{ .Values.egressProxy.port }}, protocol: TCP }
+      to:
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "egress-proxy") | nindent 14 }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.writeWorker.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}

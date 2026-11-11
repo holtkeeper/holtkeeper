@@ -8,10 +8,12 @@ import type {
 const domainLabels: Record<DatabaseDomain, string> = {
   jobs: 'Jobs and CI',
   analyses: 'Analyses and audits',
-  audit: 'Audit log and activity',
+  audit: 'Audit log',
   ai: 'AI usage',
   knowledge: 'Knowledge base',
   libraries: 'Library index',
+  chat: 'Team chat',
+  tasks: 'Agent tasks',
   config: 'Config and credentials',
   accounts: 'Users and accounts',
   other: 'Other',

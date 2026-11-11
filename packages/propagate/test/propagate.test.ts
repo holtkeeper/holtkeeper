@@ -3,12 +3,11 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { Agent, AgentTask } from '@holtkeeper/agent'
 import { type CommandRunner, localRunner } from '@holtkeeper/exec'
 
 import { propagateLocal, runPropagation } from '../src/pipeline.ts'
 import { propagationAnalysis } from '../src/report.ts'
-import type { PropagationData } from '../src/types.ts'
+import type { FixProposer, FixRequest, PropagationData } from '../src/types.ts'
 import { fakeForge } from './fakes.ts'
 
 const tsc = join(import.meta.dir, '../../../node_modules/.bin/tsc')
@@ -159,29 +158,6 @@ async function copyProject() {
   return dir
 }
 
-/** An agent that fixes the call site and, against the rules, also touches the lockfile. */
-function fixingAgent() {
-  const tasks: AgentTask[] = []
-  const agent: Agent = {
-    name: 'fake',
-    async run(task) {
-      tasks.push(task)
-      await writeFile(
-        join(task.dir, 'src/index.ts'),
-        "import { greet } from 'acme-lib'\n\nexport const message = greet({ name: 'world' })\n",
-      )
-      await writeFile(join(task.dir, 'bun.lock'), 'tampered')
-      const output = task.output?.parse({
-        summary: 'Passed an options object to greet.',
-        changes: ['src/index.ts: greet(name) → greet({ name })'],
-        remainingProblems: [],
-      })
-      return { text: 'done', turns: 3, ...(output === undefined ? {} : { output }) }
-    },
-  }
-  return { agent, tasks }
-}
-
 const packages = [{ name: 'acme-lib', version: 'latest' }]
 const registry = { latest: async () => '2.0.0' }
 
@@ -202,34 +178,9 @@ describe.skipIf(!available)('propagate on a real bun project', () => {
     ])
     expect(outcome.checks[1]!.output).toContain('src/index.ts')
     expect(outcome.changedFiles.toSorted()).toEqual(['bun.lock', 'package.json'])
-    expect(outcome.attempts).toBe(0)
   }, 60_000)
 
-  test('lets the agent fix the breaking change and guards the lockfile', async () => {
-    const dir = await copyProject()
-    const { agent, tasks } = fixingAgent()
-    const result = await propagateLocal({ dirs: [dir], packages, runner, registry, agent })
-    const outcome = result.repos[0]!
-    expect(outcome.status).toBe('fixed')
-    expect(outcome.attempts).toBe(1)
-    expect(outcome.checks.every((check) => check.ok)).toBe(true)
-    expect(outcome.fixedFiles).toEqual(['src/index.ts'])
-    expect(outcome.agent?.summary).toBe('Passed an options object to greet.')
-    expect(outcome.notes).toContain('attempt 1: restored bun.lock, which the fixer changed')
-    expect(await readFile(join(dir, 'bun.lock'), 'utf8')).toContain('acme-lib@2.0.0')
-    expect(tasks[0]!.capabilities).toEqual(['read', 'search', 'edit', 'run'])
-    expect(tasks[0]!.dir).toBe(dir)
-    expect(tasks[0]!.prompt).toContain('`greet` takes `{ name }` instead of a string')
-    expect(tasks[0]!.prompt).toContain('Never edit lockfiles')
-    expect(result.releaseNotes[0]).toMatchObject({
-      package: 'acme-lib',
-      from: '1.0.0',
-      to: '2.0.0',
-      source: 'node_modules/acme-lib',
-    })
-  }, 60_000)
-
-  test('publishes the fixed checkout through the forge and reports the wave', async () => {
+  test('proposes a fix task with the bump as a patch and publishes nothing for it', async () => {
     const manifest = await readFile(join(template, 'package.json'), 'utf8')
     const { forge, commits, mergeRequests } = fakeForge({
       'games/a': { 'package.json': manifest },
@@ -238,7 +189,13 @@ describe.skipIf(!available)('propagate on a real bun project', () => {
       'other/d': {},
     })
     const cleaned: string[] = []
-    const { agent } = fixingAgent()
+    const proposals: { group: string; title: string; fixes: FixRequest[] }[] = []
+    const fixes: FixProposer = {
+      async propose(input) {
+        proposals.push(input)
+        return { groupId: 'gabc1234', tasks: { 'work:games/a': 'tabc1234' } }
+      },
+    }
     const data: PropagationData = await runPropagation({
       group: 'games',
       forgeId: 'work',
@@ -251,33 +208,44 @@ describe.skipIf(!available)('propagate on a real bun project', () => {
         return { dir, sha: 'abc', ref: 'main', cleanup: async () => void cleaned.push(repo.path) }
       },
       runner,
-      agent,
       registry,
       packages,
+      fixes,
     })
-    expect(data.repos.map((repo) => [repo.repo, repo.status])).toEqual([
-      ['games/a', 'fixed'],
-      ['games/b', 'unchanged'],
-      ['games/c', 'skipped'],
+    expect(data.repos.map((repo) => [repo.repo, repo.status, repo.fixTask])).toEqual([
+      ['games/a', 'failed', 'tabc1234'],
+      ['games/b', 'unchanged', undefined],
+      ['games/c', 'skipped', undefined],
     ])
+    expect(data.fixGroup).toBe('gabc1234')
     expect(cleaned).toEqual(['games/a'])
-    expect(commits).toHaveLength(1)
-    const commit = commits[0]!
-    expect(commit.branch).toBe('holtkeeper/update/acme-lib-2.0.0')
-    expect(commit.startBranch).toBe('main')
-    expect(commit.changes.map((change) => `${change.action} ${change.path}`).toSorted()).toEqual([
-      'update bun.lock',
-      'update package.json',
-      'update src/index.ts',
-    ])
-    const mr = mergeRequests[0]!
-    expect(mr.draft).toBe(false)
-    expect(mr.labels).toEqual(['holtkeeper', 'dependencies'])
-    expect(mr.title).toBe('chore(deps): update acme-lib to 2.0.0')
-    expect(mr.description).toContain('| `acme-lib` | `^1.0.0` | `^2.0.0` | `package.json` |')
-    expect(mr.description).toContain('## Changes by the agent (1 attempt)')
-    expect(data.repos[0]!.mergeRequest).toEqual({ id: 1, url: mr.webUrl, draft: false })
+    expect(commits).toEqual([])
+    expect(mergeRequests).toEqual([])
 
+    expect(proposals).toHaveLength(1)
+    const [proposal] = proposals
+    expect(proposal!.group).toBe('games')
+    expect(proposal!.title).toBe('chore(deps): update acme-lib to 2.0.0')
+    const fix = proposal!.fixes[0]!
+    expect(fix.repo).toBe('work:games/a')
+    expect(fix.prompt).toContain('Never edit lockfiles')
+    expect(fix.prompt).toContain('- acme-lib: ^1.0.0 → ^2.0.0 (package.json)')
+    expect(fix.prompt).toContain('### typecheck')
+    expect(fix.prompt).toContain('`greet` takes `{ name }` instead of a string')
+
+    const fresh = await copyProject()
+    await writeFile(join(fresh, 'bump.patch'), fix.patch)
+    await sh(fresh, 'git', 'update-index', '-q', '--refresh')
+    await sh(fresh, 'git', 'apply', '-3', 'bump.patch')
+    expect(await readFile(join(fresh, 'package.json'), 'utf8')).toContain('"acme-lib": "^2.0.0"')
+    expect(await readFile(join(fresh, 'bun.lock'), 'utf8')).toContain('acme-lib@2.0.0')
+
+    expect(data.releaseNotes[0]).toMatchObject({
+      package: 'acme-lib',
+      from: '1.0.0',
+      to: '2.0.0',
+      source: 'node_modules/acme-lib',
+    })
     const report = propagationAnalysis.toReport({
       id: '1',
       repo: { forge: 'work', path: 'games' },
@@ -287,10 +255,75 @@ describe.skipIf(!available)('propagate on a real bun project', () => {
     })
     expect(report.sections.map((section) => section.id)).toEqual([
       'overview',
-      'fixed',
+      'failures',
       'release-notes',
       'plan',
     ])
     expect(propagationAnalysis.schema.parse(data)).toEqual(data)
+  }, 90_000)
+
+  test('opens the draft from the bump patch when no fix task is proposed', async () => {
+    const manifest = await readFile(join(template, 'package.json'), 'utf8')
+    const { forge, commits, mergeRequests } = fakeForge({ 'games/a': { 'package.json': manifest } })
+    let checkouts = 0
+    const data = await runPropagation({
+      group: 'games',
+      forgeId: 'work',
+      repos: [{ forge: 'work', path: 'games/a' }],
+      forge,
+      checkout: async () => {
+        checkouts++
+        return { dir: await copyProject(), sha: 'abc', ref: 'main', cleanup: async () => {} }
+      },
+      runner,
+      registry,
+      packages,
+      fixes: { propose: async () => undefined },
+    })
+    expect(checkouts).toBe(2)
+    expect(data.repos[0]).toMatchObject({ status: 'failed', mergeRequest: { draft: true } })
+    expect(data.repos[0]!.notes).toContain('no fix task was proposed')
+    expect(commits[0]!.changes.map((change) => change.path).toSorted()).toEqual([
+      'bun.lock',
+      'package.json',
+    ])
+    expect(mergeRequests[0]!.labels).toContain('needs-attention')
+  }, 90_000)
+
+  test('opens a draft labeled needs-attention without a fix proposer', async () => {
+    const manifest = await readFile(join(template, 'package.json'), 'utf8')
+    const { forge, commits, mergeRequests } = fakeForge({ 'games/a': { 'package.json': manifest } })
+    const data = await runPropagation({
+      group: 'games',
+      forgeId: 'work',
+      repos: [{ forge: 'work', path: 'games/a' }],
+      forge,
+      checkout: async () => ({
+        dir: await copyProject(),
+        sha: 'abc',
+        ref: 'main',
+        cleanup: async () => {},
+      }),
+      runner,
+      registry,
+      packages,
+    })
+    expect(data.repos[0]!.status).toBe('failed')
+    expect(data.fixGroup).toBeUndefined()
+    expect(commits).toHaveLength(1)
+    const commit = commits[0]!
+    expect(commit.branch).toBe('holtkeeper/update/acme-lib-2.0.0')
+    expect(commit.startBranch).toBe('main')
+    expect(commit.changes.map((change) => `${change.action} ${change.path}`).toSorted()).toEqual([
+      'update bun.lock',
+      'update package.json',
+    ])
+    const mr = mergeRequests[0]!
+    expect(mr.draft).toBe(true)
+    expect(mr.labels).toEqual(['holtkeeper', 'dependencies', 'needs-attention'])
+    expect(mr.title).toBe('chore(deps): update acme-lib to 2.0.0')
+    expect(mr.description).toContain('| `acme-lib` | `^1.0.0` | `^2.0.0` | `package.json` |')
+    expect(mr.description).toContain('## Needs attention')
+    expect(data.repos[0]!.mergeRequest).toEqual({ id: 1, url: mr.webUrl, draft: true })
   }, 90_000)
 })

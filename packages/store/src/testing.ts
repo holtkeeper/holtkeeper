@@ -4,6 +4,10 @@ import type { AuditReport } from '@holtkeeper/vuln'
 
 import { ExternalAccountConflictError } from './accounts.ts'
 import { AUDIT_GENESIS_HASH, auditHash } from './audit.ts'
+import { chatStoreTests } from './chat-contract.ts'
+import { guideStoreTests } from './guides-contract.ts'
+import { learningStoreTests } from './learnings-contract.ts'
+import { taskStoreTests } from './tasks-contract.ts'
 import type {
   AiUsageRecord,
   AuditEventInput,
@@ -231,6 +235,11 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       await store.close()
     })
 
+    guideStoreTests(() => store)
+    learningStoreTests(() => store)
+    chatStoreTests(() => store)
+    taskStoreTests(() => store)
+
     test('audit runs: add, get, list newest first with filters and limit', async () => {
       const a = await store.auditRuns.add(run('games/a', '2026-10-01T00:00:00.000Z'))
       await store.auditRuns.add(run('games/b', '2026-10-03T00:00:00.000Z'))
@@ -314,6 +323,23 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(heads[0]).not.toHaveProperty('data')
     })
 
+    test('analyses: sha round-trips through add, get, list, heads and latest', async () => {
+      const sha = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+      const withSha = await store.analyses.add({
+        ...record('bundle', 'games/a', '2026-10-01T00:00:00.000Z'),
+        sha,
+      })
+      const without = await store.analyses.add(
+        record('changelog', 'games/a', '2026-10-02T00:00:00.000Z'),
+      )
+      expect(withSha.sha).toBe(sha)
+      expect((await store.analyses.get(withSha.id))?.sha).toBe(sha)
+      expect(await store.analyses.get(without.id)).not.toHaveProperty('sha')
+      expect((await store.analyses.list({ kind: 'bundle' }))[0]?.sha).toBe(sha)
+      expect((await store.analyses.heads({ kind: 'bundle' }))[0]?.sha).toBe(sha)
+      expect((await store.analyses.latest({ kind: 'bundle' }))[0]?.sha).toBe(sha)
+    })
+
     test('analyses: latest keeps the newest record per repository and kind', async () => {
       await store.analyses.add(record('bundle', 'games/a', '2026-10-01T00:00:00.000Z', 'v1.0.0'))
       await store.analyses.add(record('bundle', 'games/a', '2026-10-03T00:00:00.000Z', 'v1.1.0'))
@@ -334,6 +360,32 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(
         await store.analyses.latest({ repo: { forge: 'work', path: 'games/a' }, kind: 'review' }),
       ).toEqual([])
+      const heads = await store.analyses.latestHeads({ kind: 'bundle' })
+      expect(refs(heads)).toEqual(['c-new', 'b1', 'v1.1.0'])
+      expect(heads.every((head) => !('data' in head))).toBe(true)
+    })
+
+    test('analyses: prune keeps the newest records of one repository and kind', async () => {
+      for (const [day, ref] of [
+        ['01', 'r1'],
+        ['03', 'r3'],
+        ['02', 'r2'],
+        ['03', 'r3b'],
+      ] as const)
+        await store.analyses.add(record('ci-jobs', 'games/a', `2026-10-${day}T00:00:00.000Z`, ref))
+      await store.analyses.add(record('ci-jobs', 'games/b', '2026-10-01T00:00:00.000Z', 'b1'))
+      await store.analyses.add(record('bundle', 'games/a', '2026-10-01T00:00:00.000Z', 'x1'))
+      const a = { forge: 'work', path: 'games/a' }
+
+      expect(await store.analyses.prune({ repo: a, kind: 'ci-jobs', keep: 2 })).toBe(2)
+      expect(
+        refs(await store.analyses.list({ repo: a, kind: 'ci-jobs' })).toSorted((x, y) =>
+          (x ?? '').localeCompare(y ?? ''),
+        ),
+      ).toEqual(['r3', 'r3b'])
+      expect(refs(await store.analyses.list({ kind: 'ci-jobs' }))).toContain('b1')
+      expect(refs(await store.analyses.list({ kind: 'bundle' }))).toEqual(['x1'])
+      expect(await store.analyses.prune({ repo: a, kind: 'ci-jobs', keep: 2 })).toBe(0)
     })
 
     test('credentials: put replaces, remove deletes', async () => {
@@ -369,12 +421,13 @@ export function describeStoreContract(name: string, create: () => Store | Promis
           headers: { 'X-Team': 'platform' },
           modelMap: { 'claude-opus-5-5': 'opus' },
         },
+        capabilities: { agentLoop: 'ok', checkedAt: '2026-10-02T00:00:00.000Z' },
         createdAt: '2026-10-01T00:00:00.000Z',
         updatedAt: '2026-10-01T00:00:00.000Z',
       }
       await store.credentials.put(credential)
       expect(await store.credentials.get('c2')).toEqual(credential)
-      const { options: _, ...withoutOptions } = credential
+      const { options: _, capabilities: __, ...withoutOptions } = credential
       await store.credentials.put(withoutOptions)
       expect(await store.credentials.get('c2')).toEqual(withoutOptions)
     })
@@ -438,24 +491,6 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await store.users.getLinkToken('h')).toBeUndefined()
     })
 
-    test('activity: append and list newest first', async () => {
-      await store.activity.append({
-        at: '2026-10-01T00:00:00.000Z',
-        actor: 'root',
-        action: 'a.one',
-      })
-      await store.activity.append({
-        at: '2026-10-02T00:00:00.000Z',
-        actor: 'root',
-        action: 'a.two',
-        subject: 'x',
-        details: { n: 1 },
-      })
-      const events = await store.activity.list()
-      expect(events.map((e) => e.action)).toEqual(['a.two', 'a.one'])
-      expect(events[0]?.details).toEqual({ n: 1 })
-      expect(await store.activity.list({ before: '2026-10-02T00:00:00.000Z' })).toHaveLength(1)
-    })
     test('jobs: enqueue applies defaults and round-trips fields', async () => {
       const queued = await store.jobs.enqueue(
         job('games/a', t(0), {
@@ -465,6 +500,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
           group: 'games',
           maxAttempts: 5,
           schedule: 'nightly',
+          reason: 'sha 1a2b3c4 != head 5d6e7f8',
         }),
       )
       expect(queued).toMatchObject({
@@ -479,9 +515,10 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         maxAttempts: 5,
         runAfter: t(0),
         createdAt: t(0),
-        log: [],
+        attemptsHistory: [],
         actor: 'jane',
         schedule: 'nightly',
+        reason: 'sha 1a2b3c4 != head 5d6e7f8',
       })
       expect(await store.jobs.get(queued.id)).toEqual(queued)
       expect(await store.jobs.get('missing')).toBeUndefined()
@@ -490,6 +527,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(plain.options).toEqual({})
       expect(plain.ref).toBeUndefined()
       expect(plain.schedule).toBeUndefined()
+      expect(plain.reason).toBeUndefined()
     })
 
     test('jobs: claim takes the oldest due job and skips repositories running the same analyzer', async () => {
@@ -534,6 +572,22 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       })
       expect(await store.jobs.claim('w1', t(10), rules)).toBeUndefined()
       expect((await store.jobs.claim('w1', t(11), rules))?.id).toBeDefined()
+    })
+
+    test('jobs: only and except limit a claim to the kinds of a worker pool', async () => {
+      const bundle = await store.jobs.enqueue(job('games/a', t(1)))
+      const task = await store.jobs.enqueue(job('games/b', t(2), { analyzer: 'write-task' }))
+
+      expect(await store.jobs.claim('w1', t(10), { only: ['write-task'] })).toMatchObject({
+        id: task.id,
+      })
+      expect(await store.jobs.claim('w1', t(10), { only: ['write-task'] })).toBeUndefined()
+      const other = await store.jobs.enqueue(job('games/c', t(3), { analyzer: 'write-task' }))
+      expect(await store.jobs.claim('w2', t(10), { except: ['write-task'] })).toMatchObject({
+        id: bundle.id,
+      })
+      expect(await store.jobs.claim('w2', t(10), { except: ['write-task'] })).toBeUndefined()
+      expect((await store.jobs.get(other.id))?.status).toBe('queued')
     })
 
     test('jobs: read-only jobs of one repository run side by side', async () => {
@@ -617,6 +671,17 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await store.jobs.heartbeat(queued.id, 'w1', t(7))).toBeFalse()
     })
 
+    test('jobs: block a running job for good, not a queued or finished one', async () => {
+      const queued = await store.jobs.enqueue(job('games/a', t(0), { maxAttempts: 3 }))
+      expect(await store.jobs.block(queued.id, { at: t(1), error: 'budget' })).toBeUndefined()
+      await store.jobs.claim('w1', t(1))
+      const blocked = await store.jobs.block(queued.id, { at: t(2), error: 'budget' })
+      expect(blocked).toMatchObject({ status: 'blocked', finishedAt: t(2), error: 'budget' })
+      expect(await store.jobs.claim('w1', t(3))).toBeUndefined()
+      expect(await store.jobs.block(queued.id, { at: t(3), error: 'again' })).toBeUndefined()
+      expect((await store.jobs.list({ status: 'blocked' })).map((j) => j.id)).toEqual([queued.id])
+    })
+
     test('jobs: cancel queued and running jobs, keep finished ones', async () => {
       const queued = await store.jobs.enqueue(job('games/a', t(0)))
       const running = await store.jobs.enqueue(job('games/b', t(1)))
@@ -650,9 +715,11 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await store.jobs.get(spent.id)).toMatchObject({ status: 'failed', finishedAt: t(10) })
     })
 
-    test('jobs: list newest first with filters, appendLog keeps the tail', async () => {
+    test('jobs: list newest first with filters', async () => {
       const a = await store.jobs.enqueue(job('games/a', t(1)))
-      await store.jobs.enqueue(job('games/b', t(2), { analyzer: 'changelog', schedule: 'weekly' }))
+      const b = await store.jobs.enqueue(
+        job('games/b', t(2), { analyzer: 'changelog', schedule: 'weekly', trigger: 'schedule' }),
+      )
       const c = await store.jobs.enqueue(job('games/a', t(3)))
       await store.jobs.claim('w1', t(4))
 
@@ -666,20 +733,150 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect((await store.jobs.list({ schedule: 'weekly' })).map((j) => j.createdAt)).toEqual([
         t(2),
       ])
+      expect((await store.jobs.list({ trigger: 'schedule' })).map((j) => j.id)).toEqual([b.id])
       expect((await store.jobs.list({ before: t(3), limit: 1 })).map((j) => j.createdAt)).toEqual([
         t(2),
       ])
 
-      await store.jobs.appendLog(a.id, ['one', 'two'])
-      await store.jobs.appendLog(
-        a.id,
-        Array.from({ length: 200 }, (_, i) => `line ${i}`),
-      )
-      const log = (await store.jobs.get(a.id))?.log ?? []
-      expect(log).toHaveLength(200)
-      expect(log[0]).toBe('line 0')
-      expect(log.at(-1)).toBe('line 199')
-      await store.jobs.appendLog('missing', ['x'])
+      expect(
+        (
+          await store.jobs.list({
+            repos: [
+              { forge: 'work', path: 'games/b' },
+              { forge: 'work', path: 'games/z' },
+            ],
+          })
+        ).map((j) => j.createdAt),
+      ).toEqual([t(2)])
+      expect(await store.jobs.list({ repos: [] })).toEqual([])
+    })
+
+    test('jobs: attempts history records every attempt and how it ended', async () => {
+      const queued = await store.jobs.enqueue(job('games/a', t(0), { maxAttempts: 3 }))
+      await store.jobs.claim('w1', t(1))
+      await store.jobs.fail(queued.id, {
+        at: t(2),
+        error: 'install failed after 12s',
+        retryAt: t(3),
+        step: 'install',
+      })
+      await store.jobs.claim('w2', t(3))
+      const running = await store.jobs.get(queued.id)
+      expect(running?.attemptsHistory).toEqual([
+        {
+          n: 1,
+          status: 'failed',
+          startedAt: t(1),
+          finishedAt: t(2),
+          workerId: 'w1',
+          error: 'install failed after 12s',
+          step: 'install',
+        },
+        { n: 2, status: 'running', startedAt: t(3), workerId: 'w2' },
+      ])
+      expect(running?.errorSignature).toBe('install failed after <n>s')
+
+      const done = await store.jobs.complete(queued.id, { at: t(4) })
+      expect(done?.attemptsHistory.at(-1)).toEqual({
+        n: 2,
+        status: 'succeeded',
+        startedAt: t(3),
+        finishedAt: t(4),
+        workerId: 'w2',
+      })
+      expect(done?.errorSignature).toBeUndefined()
+
+      const other = await store.jobs.enqueue(job('games/b', t(5)))
+      await store.jobs.claim('w1', t(6))
+      const blocked = await store.jobs.block(other.id, { at: t(7), error: 'budget' })
+      expect(blocked?.attemptsHistory.map((a) => a.status)).toEqual(['blocked'])
+      const third = await store.jobs.enqueue(job('games/c', t(8)))
+      await store.jobs.claim('w1', t(9))
+      expect((await store.jobs.cancel(third.id, t(10)))?.attemptsHistory).toMatchObject([
+        { status: 'canceled', finishedAt: t(10) },
+      ])
+      const queuedOnly = await store.jobs.enqueue(job('games/d', t(11)))
+      expect((await store.jobs.cancel(queuedOnly.id, t(12)))?.attemptsHistory).toEqual([])
+    })
+
+    test('jobs: recoverStale ends the attempt and signs the error', async () => {
+      const stale = await store.jobs.enqueue(job('games/a', t(0), { maxAttempts: 1 }))
+      await store.jobs.claim('w1', t(1))
+      await store.jobs.recoverStale(t(5), t(10))
+      const failed = await store.jobs.get(stale.id)
+      expect(failed?.errorSignature).toBe(failed?.error)
+      expect(failed?.attemptsHistory).toMatchObject([
+        { status: 'failed', finishedAt: t(10), error: failed?.error },
+      ])
+    })
+
+    test('jobs: failures group equal errors and filter by signature', async () => {
+      const failFor = async (path: string, at: number, error: string, analyzer = 'bundle') => {
+        const queued = await store.jobs.enqueue(job(path, t(at), { analyzer, maxAttempts: 1 }))
+        await store.jobs.claim('w1', t(at))
+        await store.jobs.fail(queued.id, { at: t(at + 1), error })
+        return queued
+      }
+      await failFor('games/a', 1, 'timeout after 30s in /tmp/run-1/widget')
+      await failFor('games/a', 3, 'timeout after 45s in /tmp/run-7/widget')
+      const latest = await failFor('games/b', 5, 'timeout after 12s in /tmp/run-9/widget')
+      await failFor('games/c', 7, 'quota exceeded')
+      await failFor('games/c', 9, 'quota exceeded', 'changelog')
+      const old = await failFor('games/d', 0, 'quota exceeded')
+      expect(old.id).toBeString()
+
+      const groups = await store.jobs.failures({ since: t(2) })
+      expect(groups).toEqual([
+        {
+          analyzer: 'changelog',
+          errorSignature: 'quota exceeded',
+          count: 1,
+          repos: 1,
+          firstAt: t(10),
+          lastAt: t(10),
+          latestJobId: expect.any(String),
+          error: 'quota exceeded',
+        },
+        {
+          analyzer: 'bundle',
+          errorSignature: 'quota exceeded',
+          count: 1,
+          repos: 1,
+          firstAt: t(8),
+          lastAt: t(8),
+          latestJobId: expect.any(String),
+          error: 'quota exceeded',
+        },
+        {
+          analyzer: 'bundle',
+          errorSignature: 'timeout after <n>s in <path>',
+          count: 3,
+          repos: 2,
+          firstAt: t(2),
+          lastAt: t(6),
+          latestJobId: latest.id,
+          error: 'timeout after 12s in /tmp/run-9/widget',
+        },
+      ])
+      expect(await store.jobs.failures({ since: t(2), analyzer: 'changelog' })).toHaveLength(1)
+      expect(
+        await store.jobs.failures({ since: t(0), repos: [{ forge: 'work', path: 'games/b' }] }),
+      ).toMatchObject([{ count: 1, latestJobId: latest.id }])
+      expect(await store.jobs.failures({ since: t(0), limit: 1 })).toHaveLength(1)
+
+      const same = await store.jobs.list({ errorSignature: 'timeout after <n>s in <path>' })
+      expect(same.map((j) => j.repo.path)).toEqual(['games/b', 'games/a', 'games/a'])
+    })
+
+    test('jobs: targets lists each repository and group once', async () => {
+      await store.jobs.enqueue(job('games/a', t(0)))
+      await store.jobs.enqueue(job('games/a', t(1), { analyzer: 'changelog' }))
+      await store.jobs.enqueue(job('games', t(2), { group: 'games' }))
+      const targets = await store.jobs.targets()
+      expect(targets.toSorted((a, b) => a.repo.path.localeCompare(b.repo.path))).toEqual([
+        { repo: { forge: 'work', path: 'games' }, group: 'games' },
+        { repo: { forge: 'work', path: 'games/a' } },
+      ])
     })
     test('knowledge: put bumps the version and keeps history, remove drops both', async () => {
       const first = await store.knowledge.put(knowledgeEntry('k1', { updatedAt: t(0) }))
@@ -760,6 +957,24 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(await ids({ package: 'npm:react' })).toEqual(['b'])
       expect(await ids({ package: 'vue' })).toEqual([])
       expect(await ids({ status: 'proposed', topic: 'testing' })).toEqual([])
+    })
+
+    test('knowledge: keeps visibility and subject, filters by subject', async () => {
+      await store.knowledge.put(
+        knowledgeEntry('shared', { visibility: 'shared', subject: 'npm:widget-kit' }),
+      )
+      await store.knowledge.put(knowledgeEntry('team', { subject: 'tool:node' }))
+      await store.knowledge.put(knowledgeEntry('plain'))
+      const shared = await store.knowledge.get('shared')
+      expect(shared?.visibility).toBe('shared')
+      expect(shared?.subject).toBe('npm:widget-kit')
+      expect((await store.knowledge.get('plain'))?.visibility).toBeUndefined()
+      expect(
+        (await store.knowledge.list({ subject: 'npm:widget-kit' })).map((entry) => entry.id),
+      ).toEqual(['shared'])
+      await store.knowledge.put({ ...knowledgeEntry('shared'), visibility: 'team' })
+      expect((await store.knowledge.history('shared'))[0]?.visibility).toBe('shared')
+      expect((await store.knowledge.get('shared'))?.subject).toBeUndefined()
     })
 
     test('knowledge: search ranks title over topics over body, matches prefixes', async () => {
@@ -938,6 +1153,12 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         (await store.aiUsage.list({ scopes: [{ repos: ['other:games/**'] }, { all: true }] }))
           .length,
       ).toBe(3)
+      const traced = await store.aiUsage.append(
+        usage({ at: '2026-09-30T10:00:00.000Z', jobId: 'job-7', transcriptRef: 'a'.repeat(64) }),
+      )
+      expect(traced.transcriptRef).toBe('a'.repeat(64))
+      expect(await store.aiUsage.list({ jobId: 'job-7' })).toEqual([traced])
+      expect(first.transcriptRef).toBeUndefined()
     })
 
     test('ai usage: aggregate sums per bucket, sorted by key', async () => {
@@ -1157,7 +1378,6 @@ export function describeStoreContract(name: string, create: () => Store | Promis
 
     test('audit: append builds a hash chain; list pages newest first with filters', async () => {
       const audit = store.audit
-      if (!audit) return
       const first = await audit.append(auditInput(1))
       expect(first.seq).toBe(1)
       expect(first.prevHash).toBe(AUDIT_GENESIS_HASH)
@@ -1208,8 +1428,16 @@ export function describeStoreContract(name: string, create: () => Store | Promis
         await seqs({ from: '2026-10-30T09:02:00.000Z', to: '2026-10-30T09:04:00.000Z' }),
       ).toEqual([3, 2])
       expect(await seqs({ action: '50%_' })).toEqual([])
+      await audit.append(
+        auditInput(5, { action: 'release.cut', target: { type: 'release', repo: 'work:games/b' } }),
+      )
+      expect(await seqs({ repos: ['work:games/a', 'work:games/b'] })).toEqual([5, 2])
+      expect(await seqs({ repos: ['work:games/b'], actor: 'alice' })).toEqual([5])
+      expect(await seqs({ repos: [] })).toEqual([])
+      expect(await audit.count({ repos: ['work:games/a'] })).toBe(1)
+      expect(await audit.repos()).toEqual(['work:games/a', 'work:games/b'])
 
-      expect(await audit.count()).toBe(4)
+      expect(await audit.count()).toBe(5)
       expect(await audit.count({ action: 'credential' })).toBe(3)
       const exported = []
       for await (const event of audit.export({ action: 'credential' })) exported.push(event.seq)
@@ -1219,7 +1447,6 @@ export function describeStoreContract(name: string, create: () => Store | Promis
 
     test('audit: verifyChain and retention sweep keep the chain whole', async () => {
       const audit = store.audit
-      if (!audit) return
       expect(await audit.verifyChain()).toEqual({ ok: true, checked: 0 })
       for (const minute of [1, 2, 3, 5, 4, 6]) await audit.append(auditInput(minute))
       expect(await audit.verifyChain()).toEqual({ ok: true, checked: 6, firstSeq: 1, lastSeq: 6 })

@@ -52,13 +52,10 @@ export function auditRoutes(deps: ServerDeps) {
       repo: repoTarget(config, input.repo),
     })
     const run = await store.auditRuns.add({ ...input, actor: principal.id })
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'audit.ingested',
-      subject: `${run.repo.forge}:${run.repo.path}`,
+    c.set('audit', {
+      action: 'audit_run.ingest',
+      target: { type: 'audit_run', id: run.id, repo: `${run.repo.forge}:${run.repo.path}` },
       details: {
-        runId: run.id,
         active: run.report.findings.length,
         resolved: run.report.resolved.length,
       },
@@ -93,6 +90,9 @@ export function auditRoutes(deps: ServerDeps) {
         latest.set(key, { repo: { forge: group.forge, path }, groups: target.groups })
       }
     }
+    for (const summary of latest.values())
+      if (canSee(principal, 'settings:write', repoTarget(config, summary.repo)))
+        summary.configurable = true
     await Promise.all(
       [...latest.values()].map(async (summary) => {
         if (!canSee(principal, 'analyses:read', repoTarget(config, summary.repo))) return

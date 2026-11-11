@@ -89,7 +89,6 @@ export async function inviteUser(
     now,
     createdBy: caller.id,
   })
-  await ctx.log(caller.id, 'user.invited', user.id, { name: user.name, grants: user.grants })
   return { user: await toUserView(ctx.store, user), ...link }
 }
 
@@ -128,13 +127,6 @@ export async function updateUser(
       grantsChanged || disabledChanged ? user.sessionVersion + 1 : user.sessionVersion,
   }
   await ctx.store.putUser(updated)
-  await ctx.log(caller.id, 'user.updated', user.id, {
-    fields: Object.entries(input)
-      .filter(([, value]) => value !== undefined)
-      .map(([key]) => key),
-  })
-  if (disabledChanged)
-    await ctx.log(caller.id, updated.disabled ? 'user.disabled' : 'user.enabled', user.id)
   return toUserView(ctx.store, updated)
 }
 
@@ -153,7 +145,6 @@ export async function issueRecovery(
     now: ctx.now(),
     createdBy: caller.id,
   })
-  await ctx.log(caller.id, 'user.recovery_issued', user.id)
   return { user: await toUserView(ctx.store, user), ...link }
 }
 
@@ -167,5 +158,4 @@ export async function removePasskey(
   const passkey = await ctx.store.getPasskey(passkeyId)
   if (passkey?.userId !== user.id) throw new HttpError(404, 'passkey not found')
   await ctx.store.removePasskey(passkey.id)
-  await ctx.log(caller.id, 'passkey.removed', user.id, { passkey: passkey.id })
 }

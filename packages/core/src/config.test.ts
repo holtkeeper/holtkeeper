@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { ForgeDefinition } from '@holtkeeper/forge'
-import { z } from 'zod'
 
-import { ConfigError, loadConfig, looksLikeCron, parseConfig } from './config.ts'
-import { definePlugin } from './plugin.ts'
+import { ConfigError, loadConfig, looksLikeCron, parseConfig, parseConfigFile } from './config.ts'
 import { resolveRepo } from './resolve.ts'
 
 const forge: ForgeDefinition = {
@@ -14,12 +12,6 @@ const forge: ForgeDefinition = {
     throw new Error('not used')
   },
 }
-
-const greeter = definePlugin({
-  name: 'greeter',
-  options: z.object({ greeting: z.string().default('hello'), loud: z.boolean().default(false) }),
-  run: async () => {},
-})
 
 const base = {
   forges: { work: forge },
@@ -42,7 +34,9 @@ const errorOf = (input: unknown) => {
 describe('parseConfig', () => {
   test('applies defaults', () => {
     const config = parseConfig({ forges: { work: forge } })
-    expect(config).toMatchObject({ dryRun: false, groups: {}, repos: {}, plugins: [] })
+    expect(config).toMatchObject({ dryRun: false, groups: {}, repos: {} })
+    expect(config.jobs.schedules).toEqual([])
+    expect(parseConfig({}).forges).toEqual({})
   })
 
   test('rejects unknown forge in a group', () => {
@@ -51,22 +45,11 @@ describe('parseConfig', () => {
     ).toContain('unknown forge "nope"')
   })
 
-  test('rejects values that are not forges or plugins', () => {
-    const message = errorOf({ forges: { work: {} }, plugins: [{}] })
-    expect(message).toContain('expected a forge')
-    expect(message).toContain('expected a plugin')
-  })
-
-  test('rejects unknown groups and duplicate plugins', () => {
-    const message = errorOf({
-      ...base,
-      plugins: [greeter({ groups: ['games'] }), greeter({ groups: ['nope'] })],
-    })
-    expect(message).toContain('plugin "greeter" is used twice')
-    expect(message).toContain('unknown group "nope"')
-    expect(errorOf({ ...base, plugins: [greeter({ groups: [['games', 'gone']] })] })).toContain(
-      'unknown group "gone"',
-    )
+  test('rejects values that are not forges and unknown groups', () => {
+    expect(errorOf({ forges: { work: {} } })).toContain('expected a forge')
+    expect(
+      errorOf({ ...base, jobs: { onTag: { analyzers: ['x'], groups: [['games', 'gone']] } } }),
+    ).toContain('unknown group "gone"')
   })
 
   test('accepts AI provider plugins once each', () => {
@@ -78,22 +61,6 @@ describe('parseConfig', () => {
       'expected an AI provider plugin',
     )
   })
-
-  test('validates plugin options and overrides', () => {
-    const message = errorOf({
-      ...base,
-      plugins: [
-        {
-          plugin: greeter({ groups: [] }).plugin,
-          groups: ['games'],
-          options: { greeting: 1 },
-          overrides: { 'games/x': { loud: 'yes' } },
-        },
-      ],
-    })
-    expect(message).toContain('plugins[0].options.greeting')
-    expect(message).toContain('plugins[0].overrides["games/x"].loud')
-  })
 })
 
 describe('resolveRepo', () => {
@@ -103,28 +70,16 @@ describe('resolveRepo', () => {
       'games/*': { traits: { ssr: false, runtime: 'browser' } },
       'games/app-x': { traits: { ssr: true } },
     },
-    plugins: [
-      greeter({
-        groups: ['games'],
-        exclude: ['games/skip-me'],
-        options: { greeting: 'hi' },
-        overrides: { 'games/app-*': { loud: true } },
-      }),
-    ],
   })
 
-  test('collects groups, traits and plugin options', () => {
+  test('collects groups and traits', () => {
     const resolved = resolveRepo(config, { forge: 'work', path: 'games/app-x' })
     expect(resolved.groups).toEqual(['games'])
     expect(resolved.traits).toEqual({ ssr: true, runtime: 'browser' })
-    expect(resolved.plugins.map((p) => [p.plugin.name, p.options])).toEqual([
-      ['greeter', { greeting: 'hi', loud: true }],
-    ])
   })
 
-  test('respects group and plugin excludes', () => {
+  test('respects group excludes', () => {
     expect(resolveRepo(config, { forge: 'work', path: 'games/legacy-a' }).groups).toEqual([])
-    expect(resolveRepo(config, { forge: 'work', path: 'games/skip-me' }).plugins).toEqual([])
   })
 
   test('matches nested paths only with globstar', () => {
@@ -132,32 +87,10 @@ describe('resolveRepo', () => {
     expect(resolveRepo(config, { forge: 'work', path: 'tools/a/b' }).groups).toEqual(['tools'])
   })
 
-  test('runs plugins on repositories in every group of an intersection', () => {
-    const layered = parseConfig({
-      ...base,
-      groups: {
-        frontend: { forge: 'work', include: ['shop/web', 'admin/*-ui'] },
-        storefront: { forge: 'work', include: ['shop/*'] },
-        'admin-panel': { forge: 'work', include: ['admin/**'] },
-      },
-      plugins: [greeter({ groups: [['frontend', 'storefront']] })],
-    })
-    const pluginsOf = (path: string) =>
-      resolveRepo(layered, { forge: 'work', path }).plugins.map((p) => p.plugin.name)
-    expect(resolveRepo(layered, { forge: 'work', path: 'shop/web' }).groups).toEqual([
-      'frontend',
-      'storefront',
-    ])
-    expect(pluginsOf('shop/web')).toEqual(['greeter'])
-    expect(pluginsOf('shop/api')).toEqual([])
-    expect(pluginsOf('admin/orders-ui')).toEqual([])
-  })
-
   test('ignores repositories from other forges', () => {
     expect(resolveRepo(config, { forge: 'other', path: 'games/app-x' })).toMatchObject({
       groups: [],
       traits: {},
-      plugins: [],
     })
   })
 })
@@ -165,6 +98,51 @@ describe('resolveRepo', () => {
 describe('loadConfig', () => {
   test('reports a missing file', async () => {
     expect(loadConfig('does-not-exist.config.ts')).rejects.toThrow('config not found')
+  })
+})
+
+describe('parseConfigFile', () => {
+  test('keeps infrastructure and always has a jobs section', () => {
+    const config = parseConfigFile({ limits: { distributed: true } }, { warn: () => {} })
+    expect(config).toEqual({
+      dryRun: false,
+      jobs: { concurrency: 2, cacheDir: '.holtkeeper/cache', timeoutMinutes: 30 },
+      limits: { distributed: true },
+    })
+  })
+
+  test('warns once per removed key and ignores it', () => {
+    const warnings: string[] = []
+    const config = parseConfigFile(
+      {
+        forges: { work: forge },
+        groups: {},
+        jobs: {
+          concurrency: 3,
+          schedules: [],
+          onTag: { analyzers: ['x'] },
+          botUsername: 'bot',
+          webhookSecret: 's',
+        },
+      },
+      { warn: (line) => warnings.push(line) },
+    )
+    expect(warnings).toHaveLength(5)
+    expect(warnings[0]).toContain('`forges` is no longer read from the config file')
+    expect(warnings.some((line) => line.includes('`jobs.botUsername`'))).toBeTrue()
+    expect(config).not.toHaveProperty('forges')
+    expect(config.jobs).toEqual({
+      concurrency: 3,
+      cacheDir: '.holtkeeper/cache',
+      timeoutMinutes: 30,
+      webhookSecret: 's',
+    })
+  })
+
+  test('rejects invalid infrastructure', () => {
+    expect(() => parseConfigFile({ jobs: { concurrency: 0 } }, { warn: () => {} })).toThrow(
+      ConfigError,
+    )
   })
 })
 
@@ -219,7 +197,7 @@ describe('jobs config', () => {
     expect(message).toContain('unknown group "missing"')
   })
 
-  test('smart schedules: every or cron, windows, time zone; per-forge webhooks', () => {
+  test('smart schedules: every or cron, windows, time zone', () => {
     const config = parseConfig({
       ...base,
       jobs: {
@@ -254,14 +232,12 @@ describe('jobs config', () => {
             windows: { allow: [{ days: ['mon'], from: '25:00', to: '10:00' }] },
           },
         ],
-        webhooks: { nowhere: { secret: 's' } },
       },
     })
     expect(message).toContain('set exactly one of cron and every')
     expect(message).toContain('expected an interval')
     expect(message).toContain('expected an IANA time zone')
     expect(message).toContain('expected HH:MM')
-    expect(message).toContain('unknown forge "nowhere"')
   })
 
   test('looksLikeCron', () => {

@@ -4,7 +4,7 @@ import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { entry, repo } from '../test/entries.ts'
-import { proposeEntry } from './propose.ts'
+import { packageSubject, proposeEntry, sharingDefaults } from './propose.ts'
 import { KnowledgeValidationError } from './schema.ts'
 
 const now = () => new Date('2026-10-30T12:00:00.000Z')
@@ -47,8 +47,8 @@ describe('proposeEntry', () => {
       version: 1,
     })
     expect(await store.knowledge.get(result.entry.id)).toEqual(result.entry)
-    expect((await store.activity.list()).map((e) => [e.action, e.subject])).toEqual([
-      ['knowledge.proposed', result.entry.id],
+    expect((await store.audit.list()).events.map((e) => [e.action, e.target])).toEqual([
+      ['knowledge.propose', { type: 'knowledge', id: result.entry.id, repo: 'work:games/app' }],
     ])
   })
 
@@ -62,7 +62,7 @@ describe('proposeEntry', () => {
       autoAccept: ['quirk'],
     })
     expect(result.entry).toMatchObject({ kind: 'quirk', status: 'accepted', appliesTo: ['*'] })
-    expect((await store.activity.list())[0]?.action).toBe('knowledge.accepted')
+    expect((await store.audit.list()).events[0]?.action).toBe('knowledge.accept')
   })
 
   test('returns the existing entry for duplicates and merges new evidence', async () => {
@@ -102,7 +102,7 @@ describe('proposeEntry', () => {
     const again = await same('Prefer Vitest over Jest', 'x', 'https://forge.test/mr/7')
     expect(again.entry.version).toBe(2)
     expect(await store.knowledge.list()).toHaveLength(1)
-    expect((await store.activity.list()).map((e) => e.action)).toEqual(['knowledge.evidence-added'])
+    expect((await store.audit.list()).events.map((e) => e.action)).toEqual(['knowledge.evidence'])
 
     const different = await same('Snapshot tests are banned', 'Use explicit assertions.')
     expect(different.created).toBeTrue()
@@ -141,5 +141,54 @@ describe('proposeEntry', () => {
     }).catch((caught: unknown) => caught)
     expect(String(migration)).toContain('packages: a migration must name its packages')
     expect(await store.knowledge.list()).toEqual([])
+  })
+})
+
+describe('sharingDefaults', () => {
+  test('a decision about one package is shared with that package as subject', () => {
+    expect(
+      sharingDefaults({ kind: 'decision', packages: [{ ecosystem: 'npm', name: 'widget-kit' }] }),
+    ).toEqual({ subject: 'npm:widget-kit', visibility: 'shared' })
+    expect(
+      sharingDefaults({
+        kind: 'convention',
+        packages: [{ ecosystem: 'go', name: 'example.com/kit' }],
+      }),
+    ).toEqual({ subject: 'Go:example.com/kit', visibility: 'shared' })
+  })
+
+  test('other kinds, several packages and explicit choices stay as they are', () => {
+    expect(
+      sharingDefaults({ kind: 'quirk', packages: [{ ecosystem: 'npm', name: 'widget-kit' }] }),
+    ).toEqual({ subject: 'npm:widget-kit' })
+    expect(
+      sharingDefaults({
+        kind: 'decision',
+        packages: [
+          { ecosystem: 'npm', name: 'a' },
+          { ecosystem: 'npm', name: 'b' },
+        ],
+      }),
+    ).toEqual({})
+    expect(sharingDefaults({ kind: 'decision', subject: 'tool:node', visibility: 'team' })).toEqual(
+      { subject: 'tool:node', visibility: 'team' },
+    )
+  })
+
+  test('agent decisions about a package are proposed as shared', async () => {
+    const result = await proposeEntry({
+      store,
+      input: {
+        title: 'Use widget-kit for forms',
+        body: 'We decided to use widget-kit instead of hand-written forms.',
+        kind: 'decision',
+        packages: [{ ecosystem: 'npm', name: 'widget-kit' }],
+      },
+      actor: 'agent:review',
+      task: { kind: 'review', repo: app },
+      now,
+    })
+    expect(result.entry).toMatchObject({ visibility: 'shared', subject: 'npm:widget-kit' })
+    expect(packageSubject({ ecosystem: 'npm', name: 'widget-kit' })).toBe('npm:widget-kit')
   })
 })

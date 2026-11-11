@@ -31,7 +31,7 @@ export function FixTimeline({ fixes }: { fixes: readonly FixAttempt[] }) {
           key={chain.source}
           {...fadeItem}
           aria-label={`Fixes for ${chain.source}`}
-          className="rounded-2xl border border-border bg-surface p-4 shadow-surface"
+          className="rounded-2xl border border-border bg-surface p-4"
         >
           <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <span className="flex min-w-0 items-center gap-2 font-mono text-[13px]">

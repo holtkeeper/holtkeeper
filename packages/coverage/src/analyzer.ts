@@ -42,6 +42,7 @@ export const coverageAnalyzer = defineAnalyzer<CoverageData, CoverageOptions>({
   kind: 'coverage',
   analysis: coverageAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '1d', heavy: true },
   needs: { checkout: true },
   options: coverageOptionsSchema,
   flags: [

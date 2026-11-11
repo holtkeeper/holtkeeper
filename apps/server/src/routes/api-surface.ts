@@ -10,15 +10,15 @@ import type {
   PublicApiSearchResult,
 } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
-import { libraryApi } from '@holtkeeper/libraries'
+import type { RepoRef } from '@holtkeeper/forge'
+import { createGuideResolver, proposeRule } from '@holtkeeper/guide'
+import { latestVersions, libraryApi } from '@holtkeeper/libraries'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
-import { createApiCatalog } from '../api-surface/catalog.ts'
-import { type McpCommitContext, commitConventionsReader } from '../api-surface/commits.ts'
-import type { McpKnowledgeContext } from '../api-surface/knowledge.ts'
-import { type McpLibraryContext, handleMcpRequest } from '../api-surface/mcp.ts'
+import { type RepoFilter, createApiCatalog } from '../api-surface/catalog.ts'
+import { handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { mcpUsage } from '../api-surface/usage.ts'
 import { createUsageIndex } from '../api-surface/usages.ts'
@@ -42,7 +42,27 @@ import {
   serverLibraryDocs,
   visibleLibraries,
 } from '../libraries.ts'
-import { canSee } from '../visibility.ts'
+import { principalOpsAccess } from '../ops-tools.ts'
+import { releaseToolsAccess } from '../release-steps.ts'
+import { taskToolsAccess } from '../tasks.ts'
+import { storedAssetTools } from '../tools/assets.ts'
+import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
+import type { LibraryIndex } from '../tools/libraries.ts'
+import { storedStackTools } from '../tools/registry.ts'
+import {
+  type CommitConventionsAccess,
+  type RulesAccess,
+  commitConventionsReader,
+  testIdsReader,
+} from '../tools/rules.ts'
+import {
+  type CatalogReach,
+  canReadShared,
+  canSee,
+  catalogReach,
+  scopeOwner,
+} from '../visibility.ts'
+import { dependencyRoutes } from './dependencies.ts'
 import { usageRoutes } from './usages.ts'
 
 const GLOBAL = { kind: 'global' } as const
@@ -50,6 +70,10 @@ const GLOBAL = { kind: 'global' } as const
 const createTokenSchema = z.object({
   name: z.string().trim().min(1).max(80),
   expiresInDays: z.number().int().min(0).max(3650).default(90),
+  scopes: z
+    .array(z.enum(['release', 'tasks']))
+    .max(2)
+    .optional(),
 })
 
 const bearerToken = (request: Request) =>
@@ -83,8 +107,12 @@ export function createApiSurface(deps: ServerDeps) {
   const tokens: McpTokens | undefined = store.kv
     ? mcpTokens({ kv: store.kv, users: store.users, now: deps.now })
     : undefined
-  const readable = (principal: Principal) => (repo: { forge: string; path: string }) =>
-    canSee(principal, 'analyses:read', repoTarget(config, repo))
+  const targetOf = (repo: RepoRef) => repoTarget(config, repo)
+  const reach = catalogReach(store.settings, targetOf)
+  const groupsOf = (repo: RepoRef) => targetOf(repo).groups
+  const readable = async (principal: Principal) => (await reach(principal)).catalog
+  const analysesOf = (principal: Principal) => (repo: RepoRef) =>
+    canSee(principal, 'analyses:read', targetOf(repo))
   const tokensOf = () => {
     if (!tokens) throw new HTTPException(503, { message: 'the store keeps no key-value state' })
     return tokens
@@ -96,20 +124,19 @@ export function createApiSurface(deps: ServerDeps) {
     settings: store.settings,
     now: deps.now,
   })
-  const commitContext = (principal: Principal): McpCommitContext => ({
+  const commitContext = (principal: Principal): CommitConventionsAccess => ({
     conventions: async (value, commits) => {
       const separator = value.indexOf(':')
       if (separator < 1 || separator === value.length - 1) return undefined
       const repo = { forge: value.slice(0, separator), path: value.slice(separator + 1) }
-      if (!config.forges[repo.forge] || !readable(principal)(repo)) return undefined
+      if (!config.forges[repo.forge] || !analysesOf(principal)(repo)) return undefined
       return conventions(repoTarget(config, repo), commits)
     },
   })
 
-  const libraryContext = (principal: Principal): McpLibraryContext | undefined => {
+  const libraryContext = (principal: Principal, canRead: RepoFilter): LibraryIndex | undefined => {
     const artifacts = deps.artifacts
     if (!store.libraries || !artifacts) return undefined
-    const canRead = readable(principal)
     const libraries = visibleLibraries(
       store.libraries,
       libraryReader({ canRead, global: can(principal, 'analyses:read', GLOBAL) }),
@@ -126,7 +153,7 @@ export function createApiSurface(deps: ServerDeps) {
         ),
       summarize: async (repo) => {
         const target = repo ? parseRepo(repo) : undefined
-        if (!target || !deps.agentFor || !canRead(target)) return undefined
+        if (!target || !deps.agentFor || !analysesOf(principal)(target)) return undefined
         if (!(await librariesConfigOf(store.settings))?.digests) return undefined
         const agent = await deps.agentFor(target)
         return agent ? agentSummarize(agent) : undefined
@@ -135,9 +162,14 @@ export function createApiSurface(deps: ServerDeps) {
     return { docs, api: libraryApi({ store: libraries, artifacts }), store: libraries }
   }
 
-  const knowledgeContext = (principal: Principal): McpKnowledgeContext => ({
+  const knowledgeContext = (
+    principal: Principal,
+    reached: CatalogReach,
+  ): KnowledgeToolsContext => ({
     store,
     canReadScope: (scope) => can(principal, 'knowledge:read', { kind: 'scope', scope }),
+    canReadShared: (scope) => canReadShared(principal, scope, reached.policy),
+    ownerOf: (scope) => scopeOwner(scope, groupsOf),
     repoOf: (value) => {
       const separator = value.indexOf(':')
       if (separator < 1 || separator === value.length - 1) return undefined
@@ -151,12 +183,69 @@ export function createApiSurface(deps: ServerDeps) {
     now: deps.now,
   })
 
+  const resolveGuide = createGuideResolver({ store })
+  const testIdsOf = testIdsReader({ store })
+  const rulesContext = (
+    principal: Principal,
+    knowledge: KnowledgeToolsContext,
+  ): Omit<RulesAccess, 'commits'> => ({
+    guide: {
+      resolve: async (value, request) => {
+        const target = knowledge.repoOf(value)
+        return target ? resolveGuide({ repo: target, ...request }) : undefined
+      },
+    },
+    proposals: {
+      propose: async (value, input) => {
+        const target = knowledge.repoOf(value)
+        if (!target) return undefined
+        const repo = `${target.forge}:${target.path}`
+        const at = deps.now().toISOString()
+        const outcome = await proposeRule(store, {
+          repo,
+          rule: input.rule,
+          section: input.section,
+          ...(input.scope && { suggestedScope: input.scope }),
+          reason: input.reason,
+          by: principal.id,
+          at,
+        })
+        if (outcome.status === 'proposed')
+          await store.audit.append({
+            at,
+            actor: { id: principal.id, name: principal.name, provider: principal.provider },
+            via: 'api',
+            action: 'learning.propose',
+            target: { type: 'learning', id: outcome.candidate.id, repo },
+            outcome: 'ok',
+            details: { section: input.section, rule: outcome.candidate.rule, through: 'mcp' },
+          })
+        return outcome
+      },
+    },
+    testIds: {
+      testIds: async (value) => {
+        const separator = value.indexOf(':')
+        if (separator < 1 || separator === value.length - 1) return undefined
+        const repo = { forge: value.slice(0, separator), path: value.slice(separator + 1) }
+        return analysesOf(principal)(repo) ? testIdsOf(repoTarget(config, repo)) : undefined
+      },
+    },
+  })
+
   const routes = new Hono<Env>()
-  routes.route('/', usageRoutes({ catalog, usages, readable }))
+  routes.route('/', usageRoutes({ catalog, usages, reach, groupsOf }))
+  routes.route(
+    '/',
+    dependencyRoutes(deps, { catalog, usages, reach, libraryIndex: libraryContext }),
+  )
 
   routes.get('/api-surface/packages', async (c) => {
     const principal = principalOf(c)
-    const packages = await catalog.packages(readable(principal), c.req.query('q') || undefined)
+    const packages = await catalog.packages(
+      await readable(principal),
+      c.req.query('q') || undefined,
+    )
     const indexedAt = catalog.indexedAt()
     return c.json<PublicApiPackageList>({ packages, ...(indexedAt ? { indexedAt } : {}) })
   })
@@ -164,7 +253,7 @@ export function createApiSurface(deps: ServerDeps) {
   routes.get('/api-surface/package', async (c) => {
     const principal = principalOf(c)
     const name = requireName(c)
-    const found = await catalog.resolve(readable(principal), name, resolveQuery(c))
+    const found = await catalog.resolve(await readable(principal), name, resolveQuery(c))
     if (!found) throw new HTTPException(404, { message: `no recorded version of ${name}` })
     return c.json<PublicApiPackageDetail>({
       repo: found.record.repo,
@@ -181,7 +270,7 @@ export function createApiSurface(deps: ServerDeps) {
   routes.get('/api-surface/package.md', async (c) => {
     const principal = principalOf(c)
     const name = requireName(c)
-    const found = await catalog.resolve(readable(principal), name, resolveQuery(c))
+    const found = await catalog.resolve(await readable(principal), name, resolveQuery(c))
     if (!found) throw new HTTPException(404, { message: `no recorded version of ${name}` })
     const subpath = c.req.query('subpath')
     const markdown = renderPackage(found.package, {
@@ -200,7 +289,7 @@ export function createApiSurface(deps: ServerDeps) {
     const from = c.req.query('from')
     const to = c.req.query('to')
     const repo = c.req.query('repo')
-    const result = await catalog.diff(readable(principal), name, {
+    const result = await catalog.diff(await readable(principal), name, {
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       ...(repo ? { repo } : {}),
@@ -215,7 +304,7 @@ export function createApiSurface(deps: ServerDeps) {
     if (kind && !isApiSymbolKind(kind))
       throw new HTTPException(400, { message: `kind must be one of ${apiSymbolKinds.join(', ')}` })
     const name = c.req.query('package')
-    const result = await catalog.search(readable(principal), c.req.query('q') ?? '', {
+    const result = await catalog.search(await readable(principal), c.req.query('q') ?? '', {
       ...(name ? { package: name } : {}),
       ...(kind && isApiSymbolKind(kind) ? { kind } : {}),
       limit: Math.min(Math.max(Number(c.req.query('limit')) || 30, 1), 100),
@@ -243,15 +332,15 @@ export function createApiSurface(deps: ServerDeps) {
     const result = await tokensOf().create(principal, {
       name: input.name,
       expiresInDays: input.expiresInDays ?? 90,
+      ...(input.scopes?.length ? { scopes: input.scopes } : {}),
     })
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'mcp.token.created',
-      subject: result.token.id,
+    c.set('audit', {
+      action: 'mcp_token.create',
+      target: { type: 'mcp_token', id: result.token.id },
       details: {
         name: result.token.name,
         ...(result.token.expiresAt ? { expiresAt: result.token.expiresAt } : {}),
+        ...(result.token.scopes ? { scopes: result.token.scopes } : {}),
       },
     })
     return c.json<CreateMcpTokenResult>(result, 201)
@@ -263,11 +352,9 @@ export function createApiSurface(deps: ServerDeps) {
       throw new HTTPException(403, { message: 'tokens cannot revoke tokens; sign in instead' })
     if (!(await tokensOf().revoke(principal, c.req.param('id'))))
       throw new HTTPException(404, { message: 'no such token' })
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'mcp.token.revoked',
-      subject: c.req.param('id'),
+    c.set('audit', {
+      action: 'mcp_token.delete',
+      target: { type: 'mcp_token', id: c.req.param('id') },
     })
     return c.body(null, 204)
   })
@@ -285,6 +372,8 @@ export function createApiSurface(deps: ServerDeps) {
     )
   })
 
+  const fromToken = new WeakSet<Principal>()
+
   /** Serves `/mcp`; mount at the application root. */
   const mcp = async (c: AppContext) => {
     if (c.req.method !== 'POST')
@@ -299,24 +388,59 @@ export function createApiSurface(deps: ServerDeps) {
           id: null,
           error: {
             code: -32001,
-            message: 'send Authorization: Bearer <token from the MCP server page>',
+            message: 'send Authorization: Bearer <token from Settings → Access → MCP server>',
           },
         },
         401,
         { 'www-authenticate': 'Bearer realm="holtkeeper"' },
       )
     const client = clientOf(c.req.raw)
-    const library = libraryContext(principal)
+    const scope = await reach(principal)
+    const library = libraryContext(principal, scope.catalog)
+    const knowledge = knowledgeContext(principal, scope)
     return handleMcpRequest(c.req.raw, {
       ...(library ? { library } : {}),
       catalog,
       usages,
       usage,
       store,
-      knowledge: knowledgeContext(principal),
+      knowledge,
       commits: commitContext(principal),
+      ...rulesContext(principal, knowledge),
+      releases: releaseToolsAccess(deps, {
+        principal,
+        canRead: (target) => canSee(principal, 'releases:read', target),
+        steps:
+          fromToken.has(principal) &&
+          principal.grants.some((grant) => grant.actions.includes('releases:run')),
+        channel: 'mcp',
+      }),
+      ops: principalOpsAccess(deps, principal),
+      tasks: taskToolsAccess(
+        { ...deps, readOnly: deps.readOnly ?? (async () => false) },
+        principal,
+        {
+          mayRun: fromToken.has(principal),
+          ...(client ? { client } : {}),
+        },
+      ),
+      assets: storedAssetTools(store, {
+        targetOf: (repo) => repoTarget(config, repo),
+        canRead: (target) => canSee(principal, 'analyses:read', target),
+        canReadScope: (entryScope) =>
+          can(principal, 'settings:read', { kind: 'scope', scope: entryScope }),
+      }),
       principal,
-      canRead: readable(principal),
+      canRead: scope.catalog,
+      canReadSnippets: scope.snippets,
+      ownerOf: groupsOf,
+      stack: storedStackTools(store.analyses, {
+        canRead: scope.catalog,
+        canDetail: analysesOf(principal),
+        groupsOf,
+      }),
+      ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
+      canReadAnalyses: analysesOf(principal),
       canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),
       ...(client ? { client } : {}),
       now: deps.now,
@@ -325,7 +449,7 @@ export function createApiSurface(deps: ServerDeps) {
 
   /**
    * The read-only principal of an MCP token, for requests to `/mcp` and reads of
-   * `/api/api-surface/*` and `/api/libraries/*` that carry one and are otherwise anonymous.
+   * `/api/api-surface/*` and `/api/dependencies*` that carry one and are otherwise anonymous.
    */
   const tokenPrincipal = async (request: Request, path: string) => {
     if (!tokens || !bearerToken(request)) return undefined
@@ -333,9 +457,11 @@ export function createApiSurface(deps: ServerDeps) {
       path === '/mcp' ||
       (request.method === 'GET' &&
         (path.startsWith('/api/api-surface/') ||
-          path === '/api/libraries' ||
-          path.startsWith('/api/libraries/')))
-    return allowed ? tokens.authenticate(request) : undefined
+          path === '/api/dependencies' ||
+          path.startsWith('/api/dependencies/')))
+    const principal = allowed ? await tokens.authenticate(request) : undefined
+    if (principal) fromToken.add(principal)
+    return principal
   }
 
   return { routes, mcp, tokenPrincipal, flush: usage.flush }

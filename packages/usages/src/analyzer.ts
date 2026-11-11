@@ -43,6 +43,7 @@ export const usagesAnalyzer = defineAnalyzer<UsagesData, UsagesOptions>({
   kind: 'usages',
   analysis: usagesAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '6h' },
   needs: { checkout: true },
   options: usagesOptionsSchema,
   flags: [

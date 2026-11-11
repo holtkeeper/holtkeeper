@@ -16,8 +16,14 @@ function splitPattern(pattern: string): { forge?: string; glob: string } {
     : { glob: pattern }
 }
 
-const allows = (grant: Grant, action: Action) =>
-  grant.actions.includes('*') || grant.actions.includes(action)
+/** Actions a grant of the key action also allows. */
+const implied: Partial<Record<Action, Action>> = { 'catalog:read': 'analyses:read' }
+
+function allows(grant: Grant, action: Action): boolean {
+  if (grant.actions.includes('*') || grant.actions.includes(action)) return true
+  const parent = implied[action]
+  return parent !== undefined && grant.actions.includes(parent)
+}
 
 const allOf = (entry: GroupMatch) => (typeof entry === 'string' ? [entry] : entry)
 

@@ -7,21 +7,13 @@ import { analyzeCiJobs } from './analyze.ts'
 import { ciJobsAnalysis, ciJobsReport } from './report.ts'
 import type { CiJobsData } from './types.ts'
 
-const data = (records = quarter(), branch: string | null = 'main'): CiJobsData => ({
+const data = (records = quarter()): CiJobsData => ({
   ...analyzeCiJobs(
     records,
     { from: at(0), to: at(90), defaultBranch: 'main' },
-    {
-      days: 90,
-      ...(branch ? { branch } : {}),
-      recentDays: 14,
-      changePercent: 20,
-      minChangeSeconds: 15,
-    },
+    { days: 90, recentDays: 14, changePercent: 20, minChangeSeconds: 15 },
   ),
   history: { oldest: at(0), newest: at(89), jobs: 301, syncedFrom: at(0) },
-  sync: { mode: 'incremental', after: at(88), fetched: 6, stored: 6 },
-  notes: [],
 })
 
 const blocks = (sectionId: string, current = data()) =>
@@ -30,32 +22,46 @@ const blocks = (sectionId: string, current = data()) =>
 const ofType = <T extends Block['type']>(list: Block[], type: T) =>
   list.filter((b): b is Extract<Block, { type: T }> => b.type === type)
 
+const record = (payload: unknown) => ({
+  id: 'a',
+  repo: { forge: 'gitlab', path: 'g/a' },
+  kind: 'ci-jobs',
+  createdAt: at(90),
+  data: payload as CiJobsData,
+})
+
 describe('ciJobsReport', () => {
-  test('headline metrics with deltas against the previous record', () => {
+  test('three headline numbers with deltas against the previous record', () => {
     const current = data()
-    const previous = { ...current, totals: { ...current.totals, slowerJobs: 0, failureRate: 10 } }
+    const previous = {
+      ...current,
+      pipelines: { ...current.pipelines, successRate: 80 },
+    }
     const report = ciJobsReport(current, { previous })
+    expect(report.metrics.map((m) => m.id)).toEqual(['pipeline-time', 'success-rate', 'queue'])
     const byId = Object.fromEntries(report.metrics.map((m) => [m.id, m]))
-    expect(byId['slower-jobs']).toMatchObject({ value: 1, delta: 1, tone: 'bad', better: 'down' })
-    expect(byId['failure-rate']).toMatchObject({
-      unit: 'percent',
-      delta: current.totals.failureRate! - 10,
-    })
-    expect(byId['wall-time']).toMatchObject({ unit: 'ms', better: 'down' })
-    expect(report.subtitle).toBe('Last 90 days on main')
+    expect(byId['pipeline-time']).toMatchObject({ value: 100_000, unit: 'ms', better: 'down' })
+    expect(byId['success-rate']).toMatchObject({ value: 90, delta: 10, better: 'up' })
   })
 
-  test('slowdowns name the commit and chart the job with a marker', () => {
-    const list = blocks('shifts')
-    const [issues] = ofType(list, 'issues')
-    expect(issues?.items[0]?.title).toBe('build is 60% slower: 1m 40s → 2m 40s')
-    expect(issues?.items[0]?.detail).toContain('Since 2026-09-14 (commit sha')
-    const [chart] = ofType(list, 'chart')
-    expect(chart).toMatchObject({ chart: 'line', bands: [{ low: 'p25', high: 'p75' }] })
-    expect(chart?.markers?.[0]?.x).toBe('Sep 14')
+  test('sections mirror the CI page', () => {
+    expect(ciJobsReport(data()).sections.map((s) => s.id)).toEqual([
+      'problems',
+      'pipeline-time',
+      'jobs',
+      'reliability',
+    ])
+    const [issues] = ofType(blocks('problems'), 'issues')
+    expect(issues?.items.map((i) => i.title)).toEqual([
+      'test: fails in 10% of runs',
+      'build: +60% since 14 Sep (1m 40s → 2m 40s)',
+    ])
+    const [chart] = ofType(blocks('pipeline-time'), 'chart')
+    expect(chart?.data).toHaveLength(14)
+    expect(chart?.series.map((s) => s.key)).toEqual(['median', 'p90'])
   })
 
-  test('the jobs table carries weekly sparklines and sortable values', () => {
+  test('the jobs table carries weekly sparklines', () => {
     const [table] = ofType(blocks('jobs'), 'table')
     const build = table?.rows.find(
       (r) => typeof r['job'] === 'object' && r['job']?.text === 'build',
@@ -63,64 +69,26 @@ describe('ciJobsReport', () => {
     const medianCell = build?.['median']
     expect(medianCell).toMatchObject({ text: '1m 40s', value: 100_000, tone: 'bad' })
     expect(typeof medianCell === 'object' && medianCell?.series).toHaveLength(14)
-    expect(build?.['change']).toMatchObject({ text: '+60%', value: 60 })
   })
 
-  test('heatmaps compare weeks with the job’s own median and show failure rates', () => {
-    const [durations, failures] = ofType(blocks('heatmaps'), 'heatmap')
-    expect(durations?.xLabels).toHaveLength(14)
-    const build = durations?.yRows.find((r) => r.label === 'build')
-    expect(build?.cells.at(-1)).toMatchObject({ value: 60, text: '2m 40s (+60% vs 1m 40s)' })
-    expect(failures?.yRows.map((r) => r.label)).toEqual(['test'])
-    expect(failures?.scale).toEqual({ kind: 'sequential', tone: 'bad' })
-  })
-
-  test('pipelines by branch: groups with weekly sparklines and a line per group', () => {
-    const list = blocks('refs', data(quarter(), null))
-    const [groups, refs] = ofType(list, 'table')
-    expect(groups?.rows.map((r) => r['pipelines'])).toEqual([90, 30, 3])
-    expect(groups?.rows[0]?.['group']).toMatchObject({ text: 'Main branches (default: main)' })
-    expect(groups?.rows[0]?.['change']).toMatchObject({ text: '+60%', tone: 'bad' })
-    const [chart] = ofType(list, 'chart')
-    expect(chart?.series.map((s) => s.key)).toEqual(['main', 'feature', 'tag'])
-    expect(chart?.data).toHaveLength(14)
-    expect(refs?.rows.map((r) => r['ref'])).toEqual([
-      'main',
-      'feature',
-      'v1.29.0',
-      'v1.59.0',
-      'v1.89.0',
-    ])
-    expect(ciJobsReport(data()).metrics[0]).toMatchObject({
-      id: 'main-branch-time',
-      value: 100_000,
-    })
-  })
-
-  test('a quiet window says so instead of listing shifts', () => {
-    const list = blocks('shifts', data([]))
-    expect(ofType(list, 'markdown')[0]?.text).toContain('No job changed its median')
+  test('a quiet window says so', () => {
+    expect(ofType(blocks('problems', data([])), 'markdown')).toHaveLength(1)
     expect(ofType(blocks('reliability', data([])), 'markdown')).toHaveLength(1)
   })
 
-  test('the analysis kind validates data and renders records', () => {
+  test('the analysis kind validates data and drops fields it no longer keeps', () => {
     const current = data()
     expect(ciJobsAnalysis.schema.parse(current)).toEqual(current)
-    const report = ciJobsAnalysis.toReport({
-      id: 'a',
-      repo: { forge: 'gitlab', path: 'g/a' },
-      kind: 'ci-jobs',
-      createdAt: at(90),
-      data: current,
-    })
-    expect(report.sections.map((s) => s.id)).toEqual([
-      'shifts',
-      'pipelines',
-      'refs',
-      'jobs',
-      'heatmaps',
-      'reliability',
-      'notes',
-    ])
+    const extra = { ...current, notes: ['old'], refGroups: [], totals: { runs: 1 } }
+    expect(ciJobsAnalysis.schema.parse(extra)).toEqual(current)
+    expect(ciJobsAnalysis.toReport(record(extra)).sections).toHaveLength(4)
+  })
+
+  test('records in an older shape neither crash lists nor reports', () => {
+    const old = { window: { from: at(0), to: at(90), days: 90 }, totals: { runs: 3 }, stages: [] }
+    expect(ciJobsAnalysis.summarize(old as never)).toEqual([])
+    const report = ciJobsAnalysis.toReport(record(old))
+    expect(report.sections.map((s) => s.id)).toEqual(['outdated'])
+    expect(ciJobsAnalysis.toReport(record(data()), record(old)).metrics[0]?.delta).toBeUndefined()
   })
 })

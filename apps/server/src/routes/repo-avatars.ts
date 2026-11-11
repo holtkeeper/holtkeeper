@@ -209,25 +209,21 @@ export function repoAvatarRoutes(deps: ServerDeps) {
       updatedAt: at,
       updatedBy: principal.id,
     } satisfies StoredAvatar)
-    await store.activity.append({
-      at,
-      actor: principal.id,
-      action: 'repo.avatar.set',
-      subject: `${repo.forge}:${repo.path}`,
+    c.set('audit', {
+      action: 'repo.avatar_set',
+      target: { type: 'repo', repo: `${repo.forge}:${repo.path}` },
       details: { contentType, bytes: data.byteLength },
     })
     return c.json<RepoAvatarInfo>({ source: 'custom', updatedAt: at, updatedBy: principal.id })
   })
 
   app.delete('/repos/avatar', async (c) => {
-    const { repo, principal } = target(c, 'settings:write')
+    const { repo } = target(c, 'settings:write')
     if (!(await stored(repo))) return c.body(null, 204)
     await store.kv?.delete(kvKey(repo))
-    await store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'repo.avatar.removed',
-      subject: `${repo.forge}:${repo.path}`,
+    c.set('audit', {
+      action: 'repo.avatar_delete',
+      target: { type: 'repo', repo: `${repo.forge}:${repo.path}` },
     })
     return c.body(null, 204)
   })

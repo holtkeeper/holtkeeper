@@ -1,4 +1,4 @@
-import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { defineAnalyzer, withDefaultBranchHead } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
 import { analyzeBranches } from './analyze.ts'
@@ -32,42 +32,45 @@ export type BranchesOptions = z.output<typeof branchesOptionsSchema>
  * anything. `now` exists for tests.
  */
 export function createBranchesAnalyzer(settings: { now?: () => Date } = {}) {
-  return defineAnalyzer<BranchesData, BranchesOptions>({
-    kind: 'branches',
-    analysis: branchesAnalysis,
-    scope: 'repo',
-    needs: { forge: true },
-    options: branchesOptionsSchema,
-    flags: [
-      {
-        flag: 'stale-days',
-        option: 'staleDays',
-        description: 'days without commits before a branch is stale (default 90)',
+  return withDefaultBranchHead(
+    defineAnalyzer<BranchesData, BranchesOptions>({
+      kind: 'branches',
+      analysis: branchesAnalysis,
+      scope: 'repo',
+      refresh: { on: 'time', cadence: '7d' },
+      needs: { forge: true },
+      options: branchesOptionsSchema,
+      flags: [
+        {
+          flag: 'stale-days',
+          option: 'staleDays',
+          description: 'days without commits before a branch is stale (default 90)',
+        },
+        {
+          flag: 'ignore',
+          option: 'ignore',
+          description: 'comma-separated globs of branches to skip',
+        },
+        {
+          flag: 'include-protected',
+          option: 'includeProtected',
+          description: 'judge protected branches too',
+          type: 'boolean',
+        },
+      ],
+      async run({ forge, repo, ref, options, log }) {
+        if (!forge) throw new Error('the branches analyzer needs a forge')
+        const data = await analyzeBranches({
+          forge,
+          repo: repo.path,
+          now: settings.now?.() ?? new Date(),
+          ...options,
+          ...(log ? { log } : {}),
+        })
+        return { data, ...(ref ? { ref } : {}) }
       },
-      {
-        flag: 'ignore',
-        option: 'ignore',
-        description: 'comma-separated globs of branches to skip',
-      },
-      {
-        flag: 'include-protected',
-        option: 'includeProtected',
-        description: 'judge protected branches too',
-        type: 'boolean',
-      },
-    ],
-    async run({ forge, repo, ref, options, log }) {
-      if (!forge) throw new Error('the branches analyzer needs a forge')
-      const data = await analyzeBranches({
-        forge,
-        repo: repo.path,
-        now: settings.now?.() ?? new Date(),
-        ...options,
-        ...(log ? { log } : {}),
-      })
-      return { data, ...(ref ? { ref } : {}) }
-    },
-  })
+    }),
+  )
 }
 
 /** The `branches` analyzer with the real clock. */

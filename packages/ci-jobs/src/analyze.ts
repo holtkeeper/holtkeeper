@@ -1,6 +1,5 @@
 import type { CiJobRecord } from '@holtkeeper/store'
 
-import { refGroupOf, refGroups } from './refs.ts'
 import { addDays, groupBy, median, percent, round, spread, weekOf, weeksOf } from './stats.ts'
 import type {
   ChangePoint,
@@ -8,10 +7,7 @@ import type {
   CiJobsOptions,
   JobStats,
   JobTrend,
-  JobWeek,
-  PipelineWeek,
-  RefGroupStats,
-  Spread,
+  PipelineStats,
 } from './types.ts'
 
 /** Successful runs each side needs before a job can count as slower or faster. */
@@ -22,18 +18,8 @@ const MIN_DAYS = 3
 /** The parts of `CiJobsData` computed from stored job attempts alone. */
 export type CiJobsAnalysis = Pick<
   CiJobsData,
-  'window' | 'options' | 'defaultBranch' | 'totals' | 'weeks' | 'refGroups' | 'stages' | 'jobs'
+  'window' | 'options' | 'defaultBranch' | 'lastRunAt' | 'pipelines' | 'weeks' | 'stages' | 'jobs'
 >
-
-/** The p25 to p95 fields of a spread that are set. */
-function quantiles({ p25, median: mid, p75, p95 }: Spread) {
-  return {
-    ...(p25 === undefined ? {} : { p25 }),
-    ...(mid === undefined ? {} : { median: mid }),
-    ...(p75 === undefined ? {} : { p75 }),
-    ...(p95 === undefined ? {} : { p95 }),
-  }
-}
 
 const attemptKey = (r: CiJobRecord) => `${r.pipelineId}\u0000${r.name}`
 const sum = (values: readonly number[]) => values.reduce((total, value) => total + value, 0)
@@ -41,6 +27,7 @@ const mean = (values: readonly number[]) => (values.length ? sum(values) / value
 const defined = (values: readonly (number | undefined)[]) =>
   values.filter((value) => value !== undefined)
 const succeeded = (r: CiJobRecord) => r.status === 'success' && r.durationSeconds !== undefined
+const seconds = (list: readonly CiJobRecord[]) => defined(list.map((r) => r.durationSeconds))
 const byTime = (a: CiJobRecord, b: CiJobRecord) =>
   a.createdAt.localeCompare(b.createdAt) || a.jobId - b.jobId
 
@@ -86,7 +73,6 @@ export function changePoint(
     before: round(median(durations(0, best.index)) ?? 0),
     after: round(median(durations(best.index)) ?? 0),
     ...(first.sha ? { sha: first.sha } : {}),
-    ...(first.ref ? { ref: first.ref } : {}),
     href: first.webUrl,
   }
 }
@@ -117,24 +103,6 @@ function trendOf(
   return { trend: recentMedian > baselineMedian ? 'slower' : 'faster', ...result }
 }
 
-function jobWeek(
-  week: string,
-  runs: readonly CiJobRecord[],
-  finals: ReadonlySet<CiJobRecord>,
-): JobWeek {
-  const considered = counted(runs.filter((r) => finals.has(r)))
-  const failureRate = percent(
-    considered.filter((r) => r.status === 'failed').length,
-    considered.length,
-  )
-  return {
-    week,
-    runs: runs.length,
-    ...quantiles(spread(defined(runs.filter(succeeded).map((r) => r.durationSeconds)))),
-    ...(failureRate === undefined ? {} : { failureRate }),
-  }
-}
-
 function jobStats(
   name: string,
   runs: CiJobRecord[],
@@ -142,7 +110,6 @@ function jobStats(
     finals: ReadonlySet<CiJobRecord>
     weeks: readonly string[]
     recentFrom: string
-    totalCompute: number
     options: CiJobsOptions
   },
 ): JobStats {
@@ -154,7 +121,6 @@ function jobStats(
   const failures = considered.filter((r) => r.status === 'failed').length
   const failureRate = percent(failures, considered.length)
   const successes = ordered.filter(succeeded)
-  const seconds = (list: readonly CiJobRecord[]) => defined(list.map((r) => r.durationSeconds))
   const recent = successes.filter((r) => r.createdAt >= context.recentFrom)
   const baseline = successes.filter((r) => r.createdAt < context.recentFrom)
   const trend = trendOf(seconds(recent), seconds(baseline), context.options)
@@ -162,9 +128,7 @@ function jobStats(
     trend.trend === 'slower' || trend.trend === 'faster'
       ? changePoint(successes, trend.trend === 'slower' ? 1 : -1)
       : undefined
-  const computeSeconds = round(sum(seconds(ordered)))
-  const queueMedian = median(defined(ordered.map((r) => r.queuedSeconds)))
-  const byWeek = groupBy(ordered, (r) => weekOf(r.createdAt))
+  const byWeek = groupBy(successes, (r) => weekOf(r.createdAt))
   return {
     name,
     stage: last.stage,
@@ -177,18 +141,13 @@ function jobStats(
     flaky: flakyPipelines(ordered),
     allowFailure: last.allowFailure,
     duration: spread(seconds(successes)),
-    ...(queueMedian === undefined ? {} : { queueMedian: round(queueMedian) }),
-    computeSeconds,
-    computeShare: percent(computeSeconds, context.totalCompute) ?? 0,
     ...trend,
     ...(point ? { changePoint: point } : {}),
-    weeks: context.weeks.map((week) => jobWeek(week, byWeek.get(week) ?? [], context.finals)),
-    last: {
-      at: last.createdAt,
-      status: last.status,
-      href: last.webUrl,
-      ...(last.ref ? { ref: last.ref } : {}),
-    },
+    weeks: context.weeks.map((week) => {
+      const mid = median(seconds(byWeek.get(week) ?? []))
+      return mid === undefined ? null : round(mid)
+    }),
+    last: { at: last.createdAt, status: last.status, href: last.webUrl },
   }
 }
 
@@ -200,6 +159,7 @@ interface PipelineSpan {
   failed: boolean
   /** Seconds at least one job ran, gaps left out; absent when a job lacks times. */
   wallSeconds?: number
+  jobs: CiJobRecord[]
 }
 
 /**
@@ -229,6 +189,7 @@ function pipelineSpans(
       ...(ref ? { ref } : {}),
       tag: jobs.some((j) => j.tag),
       failed: counted(jobs.filter((j) => finals.has(j))).some((j) => j.status === 'failed'),
+      jobs,
     }
     const intervals = jobs.map((j): [number, number] => [
       j.startedAt ? Date.parse(j.startedAt) : Number.NaN,
@@ -239,104 +200,56 @@ function pipelineSpans(
   })
 }
 
-const TOP_REFS = 5
-
-/** Pipeline time per kind of ref; durations come from pipelines without failures. */
-function refGroupStats(
-  spans: readonly PipelineSpan[],
-  context: { weeks: readonly string[]; recentFrom: string; defaultBranch?: string },
-): RefGroupStats[] {
-  const groupOf = (span: PipelineSpan) =>
-    refGroupOf(span.ref, {
-      tag: span.tag,
-      ...(context.defaultBranch ? { defaultBranch: context.defaultBranch } : {}),
-    })
-  const byGroup = groupBy(spans, groupOf)
-  const defaultGroup = context.defaultBranch
-    ? refGroupOf(context.defaultBranch, { defaultBranch: context.defaultBranch })
-    : undefined
-  const passedSeconds = (list: readonly PipelineSpan[]) =>
-    defined(list.filter((s) => !s.failed).map((s) => s.wallSeconds))
-  return refGroups.flatMap(({ group, label }) => {
-    const list = byGroup.get(group) ?? []
-    if (!list.length) return []
-    const recentMedian = median(
-      passedSeconds(list.filter((s) => s.createdAt >= context.recentFrom)),
-    )
-    const baselineMedian = median(
-      passedSeconds(list.filter((s) => s.createdAt < context.recentFrom)),
-    )
-    const failureRate = percent(list.filter((s) => s.failed).length, list.length)
-    const byWeek = groupBy(list, (s) => weekOf(s.createdAt))
-    const byRef = groupBy(list, (s) => s.ref ?? '')
-    return [
-      {
-        group,
-        hasDefault: defaultGroup === group,
-        label:
-          defaultGroup === group && context.defaultBranch
-            ? `${label} (default: ${context.defaultBranch})`
-            : label,
-        pipelines: list.length,
-        refs: byRef.size,
-        ...(failureRate === undefined ? {} : { failureRate }),
-        duration: spread(passedSeconds(list)),
-        ...(recentMedian === undefined ? {} : { recentMedian: round(recentMedian) }),
-        ...(baselineMedian === undefined ? {} : { baselineMedian: round(baselineMedian) }),
-        ...(recentMedian !== undefined && baselineMedian
-          ? { change: round(((recentMedian - baselineMedian) / baselineMedian) * 100) }
-          : {}),
-        weeks: context.weeks.map((week) => {
-          const inWeek = byWeek.get(week) ?? []
-          const { median: mid, p95 } = spread(passedSeconds(inWeek))
-          return {
-            week,
-            pipelines: inWeek.length,
-            ...(mid === undefined ? {} : { median: mid }),
-            ...(p95 === undefined ? {} : { p95 }),
-          }
-        }),
-        topRefs: [...byRef]
-          .toSorted(([a, x], [b, y]) => y.length - x.length || a.localeCompare(b))
-          .slice(0, TOP_REFS)
-          .map(([ref, runs]) => {
-            const mid = median(passedSeconds(runs))
-            return {
-              ref: ref || '(unknown)',
-              pipelines: runs.length,
-              ...(mid === undefined ? {} : { median: round(mid) }),
-            }
-          }),
-      },
-    ]
-  })
+/**
+ * Stages in run order. Forges number jobs as a pipeline creates them, stage by stage, so within
+ * one pipeline a stage whose first job has the lower id runs earlier. Each stage scores its wins
+ * minus losses against every other stage across pipelines; ties fall back to the name.
+ */
+export function stageOrder(records: readonly CiJobRecord[]): string[] {
+  const score = new Map<string, number>()
+  for (const jobs of groupBy(records, (r) => String(r.pipelineId)).values()) {
+    const first = new Map<string, number>()
+    for (const job of jobs)
+      first.set(job.stage, Math.min(first.get(job.stage) ?? Number.POSITIVE_INFINITY, job.jobId))
+    const stages = [...first]
+    for (const [stage, id] of stages) {
+      const wins = stages.filter(([, other]) => id < other).length
+      const losses = stages.filter(([, other]) => id > other).length
+      score.set(stage, (score.get(stage) ?? 0) + wins - losses)
+    }
+  }
+  return [...score]
+    .toSorted(([a, x], [b, y]) => y - x || a.localeCompare(b))
+    .map(([stage]) => stage)
 }
 
-function pipelineWeek(
-  week: string,
-  runs: readonly CiJobRecord[],
-  spans: readonly PipelineSpan[],
-  finals: ReadonlySet<CiJobRecord>,
-): PipelineWeek {
-  const considered = counted(runs.filter((r) => finals.has(r)))
-  const failures = considered.filter((r) => r.status === 'failed').length
-  const failureRate = percent(failures, considered.length)
-  const queue = median(defined(runs.map((r) => r.queuedSeconds)))
+const passedSeconds = (spans: readonly PipelineSpan[]) =>
+  defined(spans.filter((s) => !s.failed).map((s) => s.wallSeconds))
+
+function pipelineStats(spans: readonly PipelineSpan[], to: string, ref?: string): PipelineStats {
+  const weekAgo = addDays(to, -7)
+  const twoWeeksAgo = addDays(to, -14)
+  const recent = median(passedSeconds(spans.filter((s) => s.createdAt >= weekAgo)))
+  const before = median(
+    passedSeconds(spans.filter((s) => s.createdAt >= twoWeeksAgo && s.createdAt < weekAgo)),
+  )
+  const successRate = percent(spans.filter((s) => !s.failed).length, spans.length)
   return {
-    week,
-    pipelines: spans.length,
-    runs: runs.length,
-    failures,
-    ...(failureRate === undefined ? {} : { failureRate }),
-    ...quantiles(spread(defined(spans.map((s) => s.wallSeconds)))),
-    ...(queue === undefined ? {} : { queueMedian: round(queue) }),
-    computeSeconds: round(sum(defined(runs.map((r) => r.durationSeconds)))),
+    ...(ref ? { ref } : {}),
+    count: spans.length,
+    ...(successRate === undefined ? {} : { successRate }),
+    duration: spread(passedSeconds(spans)),
+    queue: spread(defined(spans.flatMap((s) => s.jobs.map((j) => j.queuedSeconds)))),
+    ...(recent !== undefined && before
+      ? { change: round(((recent - before) / before) * 100) }
+      : {}),
   }
 }
 
 /**
- * Durations, failure and retry rates per job and per week from stored attempts created in the
- * window `[from, to]`, restricted to `options.branch` when set. Pure.
+ * Pipeline time, success rate and queue of the default branch's pipelines (every pipeline when it
+ * has none), plus durations, failure and retry rates and trends per job, from stored attempts
+ * created in the window `[from, to]`, restricted to `options.branch` when set. Pure.
  */
 export function analyzeCiJobs(
   records: readonly CiJobRecord[],
@@ -356,58 +269,51 @@ export function analyzeCiJobs(
   }
   const finals: ReadonlySet<CiJobRecord> = new Set(latest.values())
   const weeks = weeksOf(from, to)
-  const totalCompute = sum(defined(runs.map((r) => r.durationSeconds)))
+  const stages = stageOrder(runs)
+  const stageIndex = new Map(stages.map((stage, index) => [stage, index]))
   const jobs = [...groupBy(runs, (r) => r.name)]
     .map(([name, list]) =>
       jobStats(name, list, {
         finals,
         weeks,
         recentFrom: addDays(to, -options.recentDays),
-        totalCompute,
         options,
       }),
     )
-    .toSorted((a, b) => b.computeSeconds - a.computeSeconds || a.name.localeCompare(b.name))
+    .toSorted(
+      (a, b) =>
+        (stageIndex.get(a.stage) ?? 0) - (stageIndex.get(b.stage) ?? 0) ||
+        a.name.localeCompare(b.name),
+    )
 
   const spans = pipelineSpans(runs, finals)
-  const spansByWeek = groupBy(spans, (s) => weekOf(s.createdAt))
-  const runsByWeek = groupBy(runs, (r) => weekOf(r.createdAt))
-  const considered = counted([...finals])
-  const failures = considered.filter((r) => r.status === 'failed').length
-  const failureRate = percent(failures, considered.length)
-  const pairs = groupBy(runs, attemptKey)
-  const stages = [...groupBy(runs, (r) => r.stage)]
-    .map(([stage, list]) => ({
-      stage,
-      computeSeconds: round(sum(defined(list.map((r) => r.durationSeconds)))),
-    }))
-    .toSorted((a, b) => b.computeSeconds - a.computeSeconds || a.stage.localeCompare(b.stage))
+  const ref =
+    options.branch ??
+    (window.defaultBranch && spans.some((s) => !s.tag && s.ref === window.defaultBranch)
+      ? window.defaultBranch
+      : undefined)
+  const scoped = ref ? spans.filter((s) => s.ref === ref) : spans
+  const byWeek = groupBy(scoped, (s) => weekOf(s.createdAt))
+  const lastRunAt = runs
+    .map((r) => r.createdAt)
+    .toSorted()
+    .at(-1)
 
   return {
     window: { from, to, days: options.days },
     options,
     ...(window.defaultBranch ? { defaultBranch: window.defaultBranch } : {}),
-    totals: {
-      runs: runs.length,
-      pipelines: spans.length,
-      jobs: jobs.length,
-      failures,
-      ...(failureRate === undefined ? {} : { failureRate }),
-      retryRate: percent([...pairs.values()].filter((a) => a.length > 1).length, pairs.size) ?? 0,
-      flakyJobs: jobs.filter((j) => j.flaky > 0).length,
-      slowerJobs: jobs.filter((j) => j.trend === 'slower').length,
-      fasterJobs: jobs.filter((j) => j.trend === 'faster').length,
-      computeSeconds: round(totalCompute),
-      wallTime: spread(defined(spans.map((s) => s.wallSeconds))),
-      queue: spread(defined(runs.map((r) => r.queuedSeconds))),
-    },
-    weeks: weeks.map((week) =>
-      pipelineWeek(week, runsByWeek.get(week) ?? [], spansByWeek.get(week) ?? [], finals),
-    ),
-    refGroups: refGroupStats(spans, {
-      weeks,
-      recentFrom: addDays(to, -options.recentDays),
-      ...(window.defaultBranch ? { defaultBranch: window.defaultBranch } : {}),
+    ...(lastRunAt ? { lastRunAt } : {}),
+    pipelines: pipelineStats(scoped, to, ref),
+    weeks: weeks.map((week) => {
+      const inWeek = byWeek.get(week) ?? []
+      const { median: mid, p90 } = spread(passedSeconds(inWeek))
+      return {
+        week,
+        pipelines: inWeek.length,
+        ...(mid === undefined ? {} : { median: mid }),
+        ...(p90 === undefined ? {} : { p90 }),
+      }
     }),
     stages,
     jobs,

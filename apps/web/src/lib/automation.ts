@@ -1,7 +1,6 @@
 import type {
   ConfigEntryView,
   PutConfigInput,
-  RepoTraitsDocumentData,
   ScheduleDocumentData,
   ScheduleWindows,
   TriggerDocumentData,
@@ -12,7 +11,7 @@ import { validateGroupId } from './repo.ts'
 import { formatGroupMatch, parseGroupMatch } from './scope.ts'
 
 /** Days of the week in the order schedules list them. */
-export const weekdays: readonly Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+const weekdays: readonly Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 const dayNames: Record<Weekday, string> = {
   mon: 'Mon',
@@ -25,7 +24,7 @@ const dayNames: Record<Weekday, string> = {
 }
 
 /** `Mon`, `Tue`, … for a weekday. */
-export const dayLabel = (day: Weekday): string => dayNames[day]
+const dayLabel = (day: Weekday): string => dayNames[day]
 
 const everyPattern = /^([1-9]\d*)(m|h|d)$/
 const hhmmPattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -106,7 +105,7 @@ export function describeWindows(windows: ScheduleWindows | undefined): string[] 
 }
 
 /** One allow or deny window as the schedule dialog edits it. */
-export interface WindowDraft {
+interface WindowDraft {
   days: Weekday[]
   from: string
   to: string
@@ -154,13 +153,6 @@ export type ScheduleDraftErrors = Partial<
     string
   >
 >
-
-/** A new window: weekdays, office hours. */
-export const newWindow = (): WindowDraft => ({
-  days: ['mon', 'tue', 'wed', 'thu', 'fri'],
-  from: '09:00',
-  to: '18:00',
-})
 
 /** The draft of a schedule entry, or a blank one running every day. */
 export function toScheduleDraft(entry?: ConfigEntryView<'schedule'>): ScheduleDraft {
@@ -484,128 +476,3 @@ export function describeTrigger(trigger: TriggerDocumentData): string {
 /** Analyzers a trigger queues; empty for a new repository trigger that runs every read-only one. */
 export const triggerAnalyzers = (trigger: TriggerDocumentData): string[] =>
   trigger.on === 'command' ? [trigger.analyzer] : (trigger.analyzers ?? [])
-
-/** Value types a repository trait can have. */
-export type TraitType = 'string' | 'number' | 'boolean'
-
-/** One trait as the editor holds it: the value as typed. */
-export interface TraitRow {
-  key: string
-  type: TraitType
-  value: string
-}
-
-/** Rows for a trait record, sorted by key. */
-export const toTraitRows = (traits: Record<string, string | number | boolean>): TraitRow[] =>
-  Object.entries(traits)
-    .toSorted(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => ({
-      key,
-      type:
-        typeof value === 'number' ? 'number' : typeof value === 'boolean' ? 'boolean' : 'string',
-      value: String(value),
-    }))
-
-/** The typed value of a row, or an error message. */
-export function parseTraitValue(
-  row: Pick<TraitRow, 'type' | 'value'>,
-): { value: string | number | boolean } | { error: string } {
-  if (row.type === 'string') return { value: row.value }
-  const text = row.value.trim()
-  if (row.type === 'boolean') {
-    if (text === 'true') return { value: true }
-    if (text === 'false') return { value: false }
-    return { error: 'true or false' }
-  }
-  const number = Number(text)
-  return text !== '' && Number.isFinite(number) ? { value: number } : { error: 'A number' }
-}
-
-/** What the repository traits dialog edits. */
-export interface TraitsDraft {
-  pattern: string
-  forge: string
-  rows: TraitRow[]
-}
-
-/** Problems of a traits draft; `rows` holds one message per row index. */
-export interface TraitsDraftErrors {
-  pattern?: string
-  rows?: Record<number, string>
-}
-
-/** The draft of a repository traits entry, or a blank one with one empty trait. */
-export const toTraitsDraft = (data?: RepoTraitsDocumentData): TraitsDraft => ({
-  pattern: data?.pattern ?? '',
-  forge: data?.forge ?? '',
-  rows: data ? toTraitRows(data.traits) : [{ key: '', type: 'string', value: '' }],
-})
-
-/** Problems by field; `taken` are patterns a new entry must not reuse. */
-export function validateTraitsDraft(
-  draft: TraitsDraft,
-  taken: readonly string[] = [],
-): TraitsDraftErrors {
-  const errors: TraitsDraftErrors = {}
-  const pattern = draft.pattern.trim()
-  if (!pattern) errors.pattern = 'Enter a path glob, e.g. games/*'
-  else if (/\s/.test(pattern)) errors.pattern = 'Patterns cannot contain spaces'
-  else if (taken.includes(pattern)) errors.pattern = 'Traits for this pattern exist'
-  const rows: Record<number, string> = {}
-  const seen = new Set<string>()
-  draft.rows.forEach((row, index) => {
-    const key = row.key.trim()
-    if (!key && !row.value.trim()) return
-    if (!key) rows[index] = 'Name the trait'
-    else if (seen.has(key)) rows[index] = 'Duplicate name'
-    else {
-      const parsed = parseTraitValue(row)
-      if ('error' in parsed) rows[index] = parsed.error
-    }
-    seen.add(key)
-  })
-  if (Object.keys(rows).length) errors.rows = rows
-  return errors
-}
-
-/** Whether a traits draft has no problems. */
-export const traitsDraftValid = (errors: TraitsDraftErrors): boolean =>
-  errors.pattern === undefined && errors.rows === undefined
-
-/** The `PUT /api/config/repo-traits/:id` body of a valid draft; blank rows are dropped. */
-export function toTraitsInput(draft: TraitsDraft): PutConfigInput['repoTraits'] {
-  const traits: Record<string, string | number | boolean> = {}
-  for (const row of draft.rows) {
-    const key = row.key.trim()
-    if (!key) continue
-    const parsed = parseTraitValue(row)
-    if ('value' in parsed) traits[key] = parsed.value
-  }
-  return {
-    pattern: draft.pattern.trim(),
-    ...(draft.forge ? { forge: draft.forge } : {}),
-    traits,
-  }
-}
-
-/** A readable document id for new repository traits, unique among `taken`. */
-export function traitsId(pattern: string, taken: readonly string[] = []): string {
-  const base =
-    pattern
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'traits'
-  let candidate = base
-  for (let n = 2; taken.includes(candidate); n++) candidate = `${base}-${n}`
-  return candidate
-}
-
-/** A trait value for display: strings quoted only when they could be read as another type. */
-export function formatTraitValue(value: string | number | boolean): string {
-  if (typeof value !== 'string') return String(value)
-  return value === 'true' ||
-    value === 'false' ||
-    (value.trim() !== '' && Number.isFinite(Number(value)))
-    ? `"${value}"`
-    : value
-}

@@ -83,7 +83,7 @@ export function tail(text: string, lines = 200): string {
  */
 export function createCommandVerifier(options: { timeoutMs?: number } = {}): Verifier {
   return {
-    async verify({ dir, checks, runner, attempt, signal }) {
+    async verify({ dir, checks, runner, signal }) {
       const results: CheckResult[] = []
       for (const check of checks) {
         const started = performance.now()
@@ -109,7 +109,6 @@ export function createCommandVerifier(options: { timeoutMs?: number } = {}): Ver
           ok: exitCode === 0,
           output: tail(output),
           durationMs: Math.round(performance.now() - started),
-          attempt,
         })
         if (check.name === 'install' && exitCode !== 0) break
       }
@@ -121,7 +120,7 @@ export function createCommandVerifier(options: { timeoutMs?: number } = {}): Ver
 /** Verifier with a 20-minute timeout per check. */
 export const defaultVerifier = createCommandVerifier({ timeoutMs: 20 * 60_000 })
 
-/** Detects the checks of `dir` and runs them once; `specs` are what a fix loop re-runs. */
+/** Detects the checks of `dir` and runs them once. */
 export async function verifyCheckout(input: {
   dir: string
   runner: CommandRunner
@@ -140,7 +139,6 @@ export async function verifyCheckout(input: {
     dir: input.dir,
     checks: specs,
     runner: input.runner,
-    attempt: 0,
     ...(input.signal ? { signal: input.signal } : {}),
   })
   return { specs, results }

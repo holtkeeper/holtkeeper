@@ -292,8 +292,8 @@ describe('database routes', () => {
     const reset = await app.request('/api/database/queries/reset', { method: 'POST' })
     expect(reset.status).toBe(200)
     expect(resets).toEqual(['reset'])
-    const [entry] = await store.activity.list({ limit: 1 })
-    expect(entry?.action).toBe('database.queries-reset')
+    const [entry] = (await store.audit.list({ limit: 1 })).events
+    expect(entry?.action).toBe('database.reset')
   })
 
   test('report inspection failures as unavailable', async () => {

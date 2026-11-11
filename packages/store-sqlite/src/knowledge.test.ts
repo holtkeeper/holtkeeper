@@ -96,14 +96,16 @@ describe('knowledge migration', () => {
       db,
       migrations.filter((m) => m.version <= 3),
     )
-    db.run(`INSERT INTO activity (id, at, actor, action) VALUES ('e1', 'now', 'root', 'x')`)
+    db.run(
+      `INSERT INTO settings (id, key, scope, value, secret, updated_at, updated_by) VALUES ('s1', 'k', '{}', '1', 0, 'now', 'root')`,
+    )
     migrate(db)
     const version = db
       .query<{ v: number }, []>('SELECT MAX(version) AS v FROM schema_migrations')
       .get()
     expect(version?.v).toBe(Math.max(...migrations.map((m) => m.version)))
     expect(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM knowledge_fts').get()?.n).toBe(0)
-    expect(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM activity').get()?.n).toBe(1)
+    expect(db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM settings').get()?.n).toBe(1)
     db.close()
   })
 })

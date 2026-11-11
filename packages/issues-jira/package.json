@@ -1,0 +1,13 @@
+{
+  "name": "@holtkeeper/issues-jira",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/issues": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

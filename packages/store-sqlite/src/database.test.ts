@@ -15,19 +15,33 @@ describe('sqlite database inspector', () => {
   })
 
   test('tables have exact row counts and sizes', async () => {
-    await store.activity.append({ at: '2026-10-31T00:00:00.000Z', actor: 'a', action: 'x' })
-    await store.activity.append({ at: '2026-10-31T00:00:01.000Z', actor: 'a', action: 'y' })
+    await store.audit.append({
+      at: '2026-10-31T00:00:00.000Z',
+      actor: { id: 'a', name: 'A', provider: 'users' },
+      via: 'api',
+      action: 'x.a',
+      target: { type: 'x' },
+      outcome: 'ok',
+    })
+    await store.audit.append({
+      at: '2026-10-31T00:00:01.000Z',
+      actor: { id: 'a', name: 'A', provider: 'users' },
+      via: 'api',
+      action: 'x.b',
+      target: { type: 'x' },
+      outcome: 'ok',
+    })
     const tables = await inspector.tables()
-    const activity = tables.find((table) => table.name === 'activity')
-    expect(activity?.rows).toBe(2)
-    expect(activity?.totalBytes).toBe(activity!.dataBytes + activity!.indexBytes)
+    const events = tables.find((table) => table.name === 'audit_events')
+    expect(events?.rows).toBe(2)
+    expect(events?.totalBytes).toBe(events!.dataBytes + events!.indexBytes)
     expect(tables.some((table) => table.name.startsWith('sqlite_'))).toBe(false)
   })
 
   test('indexes include constraint indexes', async () => {
     const indexes = await inspector.indexes()
-    const activity = indexes.filter((index) => index.table === 'activity')
-    expect(activity.some((index) => index.unique)).toBe(true)
+    const events = indexes.filter((index) => index.table === 'audit_events')
+    expect(events.some((index) => index.unique)).toBe(true)
   })
 
   test('no statement statistics or sessions; migrations in order', async () => {

@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { AnyAnalyzer } from '@holtkeeper/analyzer'
+import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { AnalysisRecord, Job, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { z } from 'zod'
 
 import type { ContextFor } from './context.ts'
-import { createWorker, exponentialBackoff } from './worker.ts'
+import { readJobLog } from './log.ts'
+import { createWorker, exponentialBackoff, isBudgetStop } from './worker.ts'
 
 const { runner } = createFakeRunner()
 
@@ -26,6 +28,7 @@ const analyzer = (
 })
 
 let store: Store
+let logs: ArtifactStore
 let clock: Date
 let cleanups: number
 const contextFor: ContextFor = async (job) => ({
@@ -35,8 +38,14 @@ const contextFor: ContextFor = async (job) => ({
   },
 })
 
+const withSha: ContextFor = async (job, target, io) => ({
+  ...(await contextFor(job, target, io)),
+  ...(target.kind !== 'plain' && { sha: 'c0ffee01' }),
+})
+
 beforeEach(() => {
   store = memoryStore()
+  logs = memoryArtifactStore()
   clock = new Date('2026-10-30T10:00:00.000Z')
   cleanups = 0
 })
@@ -53,7 +62,50 @@ const enqueue = (
     ...extra,
   })
 
+const logLines = async (jobId: string, attempt = 1) =>
+  (await readJobLog(logs, jobId, attempt, { tail: 2000 })).lines
+
+const logText = async (jobId: string, attempt = 1) =>
+  (await logLines(jobId, attempt)).map((line) => line.text)
+
 describe('worker', () => {
+  test('a worker claims only the jobs of the pools it serves', async () => {
+    const ran: string[] = []
+    const plain = analyzer('plain', async ({ repo }) => {
+      ran.push(`plain:${repo.path}`)
+      return { data: {} }
+    })
+    const shaper = analyzer(
+      'shaper',
+      async ({ repo }) => {
+        ran.push(`shaper:${repo.path}`)
+        return { data: {} }
+      },
+      { pool: 'write' },
+    )
+    await enqueue('shaper', { repo: { forge: 'work', path: 'games/b' } })
+    await enqueue('plain')
+    const general = createWorker({
+      store,
+      analyzers: [plain, shaper],
+      contextFor,
+      now: () => clock,
+    })
+    const writer = createWorker({
+      store,
+      analyzers: [plain, shaper],
+      contextFor,
+      pools: ['write'],
+      now: () => clock,
+    })
+
+    await general.runNext()
+    expect(await general.runNext()).toBeUndefined()
+    await writer.runNext()
+    expect(await writer.runNext()).toBeUndefined()
+    expect(ran).toEqual(['plain:games/a', 'shaper:games/b'])
+  })
+
   test('runs an analyzer, stores the record and completes the job', async () => {
     const finished: [Job, AnalysisRecord | undefined][] = []
     const size = analyzer('size', async ({ options, ref, log }) => {
@@ -64,6 +116,7 @@ describe('worker', () => {
       store,
       analyzers: [size],
       contextFor,
+      logs,
       now: () => clock,
       onFinished: (job, record) => {
         finished.push([job, record])
@@ -81,7 +134,7 @@ describe('worker', () => {
       actor: 'jane',
       data: { limit: 5, ref: 'v1' },
     })
-    expect((await store.jobs.get(queued.id))?.log).toContain('measuring')
+    expect(await logText(queued.id)).toContain('measuring')
     expect(finished.map(([job, rec]) => [job.status, rec?.id])).toEqual([['succeeded', record?.id]])
     expect(cleanups).toBe(1)
     expect(await worker.runNext()).toBeUndefined()
@@ -104,6 +157,39 @@ describe('worker', () => {
     await enqueue('plain')
     const now = await worker.runNext()
     expect((await store.analyses.get(now?.analysisId ?? ''))?.createdAt).toBe(clock.toISOString())
+  })
+
+  test('keeps only the newest records of analyzers that ask for it', async () => {
+    const snapshot = analyzer('snapshot', async () => ({ data: {} }), { keepRecords: 2 })
+    const worker = createWorker({ store, analyzers: [snapshot], contextFor, now: () => clock })
+    const ids: string[] = []
+    for (let i = 0; i < 4; i++) {
+      clock = new Date(clock.getTime() + 60_000)
+      await enqueue('snapshot')
+      ids.push((await worker.runNext())?.analysisId ?? 'missing')
+    }
+    const kept = await store.analyses.list({ kind: 'snapshot-data' })
+    expect(kept.map((record) => record.id)).toEqual(ids.slice(2).toReversed())
+  })
+
+  test('records the checkout commit, or the commit the analyzer reports', async () => {
+    const checkedOut = analyzer('checked', async () => ({ data: {} }))
+    const reported = analyzer('reported', async () => ({ data: {}, sha: 'f00dfeed' }))
+    const plain = analyzer('plain', async () => ({ data: {} }))
+    const worker = createWorker({
+      store,
+      analyzers: [checkedOut, reported, plain],
+      contextFor: withSha,
+      now: () => clock,
+    })
+    const shaOf = async (kind: string) => {
+      await enqueue(kind)
+      const done = await worker.runNext()
+      return (await store.analyses.get(done?.analysisId ?? ''))?.sha
+    }
+    expect(await shaOf('checked')).toBe('c0ffee01')
+    expect(await shaOf('reported')).toBe('f00dfeed')
+    expect(await shaOf('plain')).toBeUndefined()
   })
 
   test('persists returned artifacts after the record, tagged with it; failures are logged', async () => {
@@ -141,11 +227,12 @@ describe('worker', () => {
       persistArtifacts: async () => {
         throw new Error('disk full')
       },
+      logs,
     })
     await enqueue('assets')
     const second = await failing.runNext()
     expect(second).toMatchObject({ status: 'succeeded' })
-    const logged = (await store.jobs.get(second?.id ?? ''))?.log ?? []
+    const logged = await logText(second?.id ?? '')
     expect(logged.some((line) => line.includes('storing artifacts failed: disk full'))).toBe(true)
   })
 
@@ -173,6 +260,84 @@ describe('worker', () => {
     expect(await worker.runNext()).toMatchObject({ id: queued.id, status: 'failed', attempts: 2 })
     expect(finished.map((j) => j.status)).toEqual(['failed'])
     expect(cleanups).toBe(2)
+  })
+
+  test('logs each attempt separately and records the step that failed', async () => {
+    let attempt = 0
+    const lint = analyzer('lint', async ({ step, log }) => {
+      attempt++
+      if (!step) throw new Error('no step helper')
+      await step('install', async () => log?.('resolving widgets'))
+      return step('check', async () => {
+        if (attempt === 1) throw new Error(`3 problems in /tmp/run-${attempt}/widget.ts`)
+        return { data: {} }
+      })
+    })
+    const worker = createWorker({ store, analyzers: [lint], contextFor, logs, now: () => clock })
+    const queued = await enqueue('lint', { maxAttempts: 2 })
+
+    const failed = await worker.runNext()
+    expect(failed).toMatchObject({
+      status: 'queued',
+      errorSignature: '<n> problems in <path>',
+      attemptsHistory: [{ n: 1, status: 'failed', step: 'check' }],
+    })
+    const first = await logLines(queued.id, 1)
+    expect(first.filter((line) => line.mark).map((line) => `${line.mark} ${line.step}`)).toEqual([
+      'start prepare',
+      'end prepare',
+      'start analyze',
+      'start install',
+      'end install',
+      'start check',
+      'fail check',
+      'fail analyze',
+    ])
+    expect(first.find((line) => line.text === 'resolving widgets')?.step).toBe('install')
+    expect(first.at(-1)).toMatchObject({ level: 'error', text: expect.stringMatching(/^failed: /) })
+
+    clock = new Date('2026-10-30T10:01:00.000Z')
+    const done = await worker.runNext()
+    expect(done?.attemptsHistory.map((a) => a.status)).toEqual(['failed', 'succeeded'])
+    expect(done?.errorSignature).toBeUndefined()
+    expect(await logText(queued.id, 2)).toContain('resolving widgets')
+    expect((await readJobLog(logs, queued.id, 2)).complete).toBeTrue()
+  })
+
+  test('a budget stop blocks the job without retry', async () => {
+    const finished: Job[] = []
+    const budget = Object.assign(new Error('AI budget exceeded: week of 2026-10-26'), {
+      name: 'BudgetExceededError',
+    })
+    const worker = createWorker({
+      store,
+      analyzers: [
+        analyzer('pricey', async () =>
+          Promise.reject(new Error('review failed', { cause: budget })),
+        ),
+      ],
+      contextFor,
+      now: () => clock,
+      onFinished: (job) => {
+        finished.push(job)
+      },
+    })
+    await enqueue('pricey', { maxAttempts: 3 })
+    expect(await worker.runNext()).toMatchObject({
+      status: 'blocked',
+      attempts: 1,
+      error: 'review failed',
+    })
+    expect(finished.map((j) => j.status)).toEqual(['blocked'])
+    expect(await worker.runNext()).toBeUndefined()
+  })
+
+  test('isBudgetStop looks through the cause chain', () => {
+    const budget = Object.assign(new Error('x'), { name: 'BudgetExceededError' })
+    expect(isBudgetStop(budget)).toBeTrue()
+    expect(isBudgetStop(new Error('y', { cause: new Error('z', { cause: budget }) }))).toBeTrue()
+    expect(isBudgetStop(new Error('rate limited'))).toBeFalse()
+    expect(isBudgetStop('BudgetExceededError')).toBeFalse()
   })
 
   test('unknown analyzers and invalid options fail without retry', async () => {
@@ -229,6 +394,7 @@ describe('worker', () => {
       store,
       analyzers: [slow],
       contextFor,
+      logs,
       now: () => clock,
       heartbeatMs: 5,
     })
@@ -238,7 +404,7 @@ describe('worker', () => {
     await store.jobs.cancel(queued.id, clock.toISOString())
     expect(await result).toMatchObject({ status: 'canceled' })
     expect(await store.analyses.list()).toEqual([])
-    expect((await store.jobs.get(queued.id))?.log.at(-1)).toBe('canceled')
+    expect((await logText(queued.id)).at(-1)).toBe('canceled')
   })
 
   test('start recovers stale jobs, runs up to concurrency, stop requeues running jobs', async () => {
@@ -396,4 +562,26 @@ test('a running job whose worker died is recovered while the worker runs, not on
   await done.promise
   await worker.stop()
   expect(lines).toContain(`recovered job ${queued.id} (queued)`)
+})
+
+test('a job recovery fails for good is reported as finished', async () => {
+  const size = analyzer('size', async () => ({ data: {} }))
+  const lost = await enqueue('size', { maxAttempts: 1 })
+  await store.jobs.claim('dead-worker', clock.toISOString())
+  clock = new Date(clock.getTime() + 60_000)
+  const finished: string[] = []
+  const worker = createWorker({
+    store,
+    analyzers: [size],
+    contextFor,
+    now: () => clock,
+    staleMs: 20,
+    pollMs: 60_000,
+    onFinished: (job) => {
+      finished.push(`${job.id} ${job.status}`)
+    },
+  })
+  await worker.start()
+  await worker.stop()
+  expect(finished).toEqual([`${lost.id} failed`])
 })

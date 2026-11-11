@@ -3,10 +3,17 @@ import { stableId } from '@holtkeeper/quality'
 import { listFiles } from '@holtkeeper/quality-tests'
 
 import { analyzeTestIds, type FindUntaggedOptions, findUntagged } from './analyze.ts'
+import { type TestIdOverrides, learnTestIdOptions, testIdConvention } from './learn.ts'
 import { attributeUsage, type TestIdComponent } from './model.ts'
 import { builtinSources } from './sources.ts'
 
-export type TestIdsCheckOptions = Omit<FindUntaggedOptions, 'dir' | 'signal'>
+export interface TestIdsCheckOptions extends Omit<
+  FindUntaggedOptions,
+  'dir' | 'signal' | 'naming'
+> {
+  /** What the team set in the `analyzers.testids` setting; wins over what the catalog shows. */
+  overrides?: TestIdOverrides
+}
 
 /** Tool name of `testIdsCheck` issues; reviews hand these to their agent. */
 export const TESTIDS_TOOL = 'testids'
@@ -17,11 +24,20 @@ const EXAMPLES = 3
 const named = (pool: readonly TestIdComponent[]) =>
   attributeUsage(pool).find((attribute) => attribute.values.length)
 
-function conventionOf(components: readonly TestIdComponent[], file: string) {
+function conventionOf(
+  components: readonly TestIdComponent[],
+  file: string,
+  preferred: string | undefined,
+  suggestion: string | undefined,
+) {
   const local = components.find((component) => component.file === file)
   const used = attributeUsage(components)
-  const own = local ? named([local]) : undefined
-  const main = own ?? named(components) ?? used[0]
+  const found = (local ? named([local]) : undefined) ?? named(components) ?? used[0]
+  const main =
+    preferred && found?.name !== preferred
+      ? (used.find((item) => item.name === preferred) ?? { name: preferred, values: [] })
+      : found
+  const own = local && main ? named([local])?.name === main.name : false
   if (!main) return undefined
   const examples = main.values.slice(0, EXAMPLES).map((value) => `\`${main.name}="${value}"\``)
   const others = used
@@ -32,6 +48,7 @@ function conventionOf(components: readonly TestIdComponent[], file: string) {
     `Tests in this project select elements by \`${main.name}\``,
     examples.length ? `${own ? 'this component already uses' : 'e.g.'} ${examples.join(', ')}` : '',
     others.length ? `other test attributes in use: ${others.join(', ')}` : '',
+    suggestion ? `suggested: \`${main.name}="${suggestion}"\`` : '',
   ]
     .filter(Boolean)
     .join('; ')
@@ -39,8 +56,10 @@ function conventionOf(components: readonly TestIdComponent[], file: string) {
 
 /**
  * The `testids` check: interactive elements without a test attribute, reported only when the
- * project already uses test attributes. Each issue's `help` names the project's attribute and
- * example values, so a reviewer can propose one in the same style.
+ * project already uses test attributes. Which attributes count and which native tags need one
+ * are learned from the project's catalog (`learnTestIdOptions`), with `overrides` on top. Each
+ * issue's `help` names the project's attribute, example values and an id suggested in the
+ * project's naming style, so a reviewer can propose one in the same style.
  */
 export function testIdsCheck(options: TestIdsCheckOptions = {}): QualityCheck {
   return {
@@ -50,13 +69,34 @@ export function testIdsCheck(options: TestIdsCheckOptions = {}): QualityCheck {
       return (await listFiles(dir)).some((file) => sources.some((source) => source.matches(file)))
     },
     async run({ dir, signal }) {
-      const catalog = await analyzeTestIds({ ...options, dir, ...(signal ? { signal } : {}) })
+      const { overrides = {}, ...rest } = options
+      const scope = {
+        ...rest,
+        dir,
+        ...(overrides.attributes && { attributes: overrides.attributes }),
+        ...(overrides.exclude && { exclude: [...(rest.exclude ?? []), ...overrides.exclude] }),
+        ...(signal ? { signal } : {}),
+      }
+      const catalog = await analyzeTestIds(scope)
       if (!catalog.components.length) return { skipped: 'the project uses no test attributes' }
-      const untagged = await findUntagged({ ...options, dir, ...(signal ? { signal } : {}) })
+      const convention = testIdConvention(learnTestIdOptions(catalog), overrides)
+      const untagged = await findUntagged({
+        ...scope,
+        ...(convention && {
+          attributes: convention.attributes,
+          naming: convention.naming,
+          ...(convention.elements && !rest.tags && { tags: convention.elements }),
+        }),
+      })
       const issues = untagged
         .filter((element) => element.status === 'missing')
         .map((element): QualityIssue => {
-          const help = conventionOf(catalog.components, element.file)
+          const help = conventionOf(
+            catalog.components,
+            element.file,
+            convention?.overridden.includes('attributes') ? convention.attribute : undefined,
+            element.suggestion,
+          )
           return {
             id: stableId(TESTIDS_TOOL, 'missing-test-id', element.file, element.tag, element.line),
             tool: TESTIDS_TOOL,

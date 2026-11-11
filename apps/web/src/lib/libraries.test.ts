@@ -13,9 +13,7 @@ import {
   parseEcosystem,
   runProgress,
   runSummary,
-  sortedSources,
   sourceLabel,
-  toneOfStatus,
 } from './libraries.ts'
 
 describe('queries', () => {
@@ -57,18 +55,8 @@ test('orders roles and keeps only present ones', () => {
   expect(formatRoles([])).toEqual([])
 })
 
-test('sorts sources in fetch order with labels and tones', () => {
-  const at = '2026-10-01T00:00:00Z'
-  const list = sortedSources({
-    releases: { status: 'failed', at, message: 'rate limited' },
-    archive: { status: 'ok', at },
-  })
-  expect(list.map((s) => [s.kind, s.label])).toEqual([
-    ['archive', 'Package archive'],
-    ['releases', 'Releases'],
-  ])
-  expect(toneOfStatus('failed')).toBe('danger')
-  expect(toneOfStatus('ok')).toBe('success')
+test('labels source kinds', () => {
+  expect(sourceLabel('archive')).toBe('Package archive')
   expect(sourceLabel('unknown')).toBe('unknown')
 })
 

@@ -6,25 +6,37 @@ The tools are plain `AgentTool`s grouped in `Toolset`s (contract in `@holtkeeper
 
 ```ts
 import { claudeAgent } from '@holtkeeper/agent'
-import { codeTools, docsTools, externalServers, knowledgeTools } from '@holtkeeper/agent-tools'
+import { codeTools, docsTools, knowledgeTools } from '@holtkeeper/agent-tools'
 
 const result = await agent.run({
   dir,
   prompt,
   taskKind: 'review',
-  toolsets: [
-    codeTools({ budget: { maxResultLines: settings.maxResultLines } }),
-    docsTools({ runner }),
-  ],
-  mcpServers: externalServers(settings), // Context7 only when agent.tools.context7 is true
+  toolsets: [codeTools(), docsTools({ runner })],
 })
 ```
 
 ## Contract
 
 - `AgentTool { name; description; input: z.ZodObject; run(input, ctx: { dir, signal }) → string }` — `run` returns compact text and must stay inside `ctx.dir`. A thrown error is reported to the model as an error result; it does not fail the task.
-- `Toolset { name; tools }`. `defineTool({...})` infers `run`'s input type from the schema.
+- `Toolset { name; tools }`. `defineTool({...})` infers `run`'s input type from the schema and returns a `RegistryTool` (see [Registry](#registry)).
+- `ToolError`: a failure whose message is meant for the agent as it is (the server's MCP adapter passes it on without a `Failed:` prefix).
 - `toMcpServer(toolsets, ctx, name = 'holtkeeper')` → `{ server, allowedTools }`: an SDK `createSdkMcpServer` instance (tools always loaded, not deferred behind tool search) and the qualified tool names. Dots become underscores: `code.search` is `mcp__holtkeeper__code_search`.
+
+## Registry
+
+One set of tool definitions serves the internal agents and the server's MCP endpoint (`apps/server/src/tools`, adapter in `api-surface/mcp.ts`). A `RegistryTool` is an `AgentTool` with optional metadata:
+
+- `readOnly` (default `true`): `false` for tools that write; MCP clients see it as `readOnlyHint`.
+- `subject(input)`: what a call is about (a package, a repository), for usage statistics.
+- `defaultLimit`: hits returned when `limit` is not passed.
+
+A `RegistryToolset` adds `instructions`, a sentence or two on when to use its tools; the MCP adapter joins them into the server instructions.
+
+- `mountToolsets(available, names)` → the toolsets named in `names`, in that order; unknown names are skipped. Each task mounts only what it needs, because tool schemas cost prompt tokens.
+- `RESULT_CAPS = { maxChars: 16000, maxSnippets: 20 }`: about 4k tokens and 20 hits per internal agent call.
+- `capText(text, maxChars, hint?)`: the text, or its head cut at a line break followed by `… output cut at about N tokens; <hint>.`
+- `capTool(tool, caps = RESULT_CAPS)` / `capToolsets(toolsets, caps)`: a `limit` argument (passed, else `defaultLimit`, else `maxSnippets`) is clamped to `maxSnippets` and the result to `maxChars`. The server caps every toolset an internal task mounts; MCP results are cut at 80 000 characters with the same `capText`.
 
 ## Budgets
 
@@ -37,7 +49,7 @@ const result = await agent.run({
 | `maxHits`        | 50      | Matches/definitions per search before `… N more` |
 | `snippetLines`   | 5       | Lines shown per structural match                 |
 
-The `agent.tools.maxResultLines` setting maps to `maxResultLines`.
+The server uses the defaults; there is no setting for them.
 
 ## Tools
 
@@ -92,10 +104,6 @@ The `agent.tools.maxResultLines` setting maps to `maxResultLines`.
 | `libraries.source`   | `package`, `ecosystem?`, `version?`, `path?`, `start?`, `end?` | A file listing or lines of one file of the source snapshot                                 |
 
 `ecosystem` is `npm` (default) or `Go`; `limit` is 1–20. The descriptions steer the model to these tools instead of web search or reading `node_modules`.
-
-### External: Context7
-
-`context7Server({ transport?, apiKey? })` returns an SDK `mcpServers` entry named `context7`: by default the hosted server at `https://mcp.context7.com/mcp` (`Authorization: Bearer <key>` when a key is given), or `npx -y @upstash/context7-mcp [--api-key <key>]` with `transport: 'stdio'`. Its tools are `resolve-library-id` and `query-docs`. `externalServers(settings)` returns it only when `agent.tools.context7` is `true`; it is off by default because it calls an external service.
 
 ## Why this saves tokens
 

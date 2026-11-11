@@ -213,7 +213,7 @@ describe('storage routes with worker reports', () => {
     })
     expect(await response.json()).toEqual({ requested: 1 })
     await waitFor(async () => cleared.length === 1)
-    const [entry] = await store.activity.list({ limit: 1 })
-    expect(entry).toMatchObject({ action: 'storage.cleared', details: { requested: 1 } })
+    const [entry] = (await store.audit.list({ limit: 1 })).events
+    expect(entry).toMatchObject({ action: 'storage.clear', details: { requested: 1 } })
   })
 })

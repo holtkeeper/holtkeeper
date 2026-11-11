@@ -20,7 +20,9 @@ import {
 import { z } from 'zod'
 
 import type { ServerDeps } from './context.ts'
+import { previewReleaseStep } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
+import { nextReleaseSteps, stageText } from './tools/releases.ts'
 
 const repoKeyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
@@ -45,7 +47,7 @@ function deploySteps(state: DeployState): CardStep[] {
     return {
       label: environment.name,
       status: shown.status,
-      detail: `${shown.text}${environment.auto ? ', automatic' : ''}`,
+      detail: shown.text,
       ...(url && { url, urlLabel: 'View job' }),
     }
   })
@@ -115,15 +117,6 @@ function releaseFlow(row: ReleaseBoardRow, deploy?: DeployState): CardStep[] {
               ? deployOverall(deploy)
               : 'active',
   }))
-}
-
-const stageText: Record<ReleaseBoardRow['stage'], string> = {
-  candidate: 'Changes wait for a release candidate',
-  proposed: 'The release candidate is open',
-  'awaiting-version': 'Merged changes wait for a version',
-  released: 'Released; nothing waits',
-  idle: 'Nothing released yet',
-  external: 'Released by another tool',
 }
 
 /** A live card that follows the deploys of one version. */
@@ -234,30 +227,23 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
     const failing = [...(view.proposal?.gates ?? []), ...(view.version?.gates ?? [])].filter(
       (gate) => !gate.ok,
     )
-    const actions: CardAction[] = []
-    if (view.can.run && !view.readOnly && row.mode !== 'external') {
-      if (view.proposal)
-        actions.push({
-          label: 'Open the release candidate',
-          command: line(context, repo, 'propose'),
-        })
-      if (view.version) {
-        if (view.settings.acceptance.required && !row.acceptance)
-          actions.push({ label: 'Accept the changes', command: line(context, repo, 'accept') })
-        actions.push({
-          label: `Create ${view.version.tag ?? 'the version'}`,
-          command: line(context, repo, 'version'),
-          style: 'primary',
-        })
-      }
-      for (const environment of view.deploy?.environments ?? [])
-        if (environment.status === 'ready' || environment.status === 'failed')
-          actions.push({
-            label: `Deploy ${view.deploy?.tag} to ${environment.name}`,
-            command: line(context, repo, 'deploy', environment.name, `tag=${view.deploy?.tag}`),
-            style: 'danger',
-          })
-    }
+    const actions: CardAction[] =
+      view.can.run && !view.readOnly
+        ? nextReleaseSteps(view).map((step) => ({
+            label: step.label,
+            command: line(
+              context,
+              repo,
+              step.action,
+              ...(step.environment ? [step.environment, `tag=${step.tag}`] : []),
+            ),
+            ...(step.action === 'version'
+              ? { style: 'primary' as const }
+              : step.action === 'deploy'
+                ? { style: 'danger' as const }
+                : {}),
+          }))
+        : []
     const flow = releaseFlow(row, view.deploy)
     return {
       title: `Release · ${repo.path}`,
@@ -339,7 +325,6 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
         await context.reply({
           title: `Accepted · ${repo.path}`,
           tone: 'good',
-          ...(result.url && { url: result.url }),
           blocks: [
             {
               type: 'fields',
@@ -364,31 +349,22 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
       if (step === 'version') {
         if (!context.options.yes) {
           const view = await releases.view(principal, repo).catch(stepFailure)
-          const plan = view.version
-          if (!plan) throw new ChatUserError('Nothing on the target branch waits for a version.')
-          const included = plan.entries.filter((entry) => entry.included).length
+          const preview = previewReleaseStep(view, { action: 'version' })
+          if (preview.blocked) throw new ChatUserError(preview.blocked)
           await context.reply({
-            title: `Create ${plan.tag ?? plan.version ?? 'a version'} of ${repo.path}?`,
-            tone: plan.gates.every((gate) => gate.ok) ? 'info' : 'warning',
+            title: preview.title,
+            tone: preview.failing.length ? 'warning' : 'info',
             ...(page && { url: page }),
             blocks: [
-              {
-                type: 'fields',
-                fields: [
-                  { label: 'Changes', value: String(included) },
-                  {
-                    label: 'Range',
-                    value: `${plan.range.fromLabel ?? 'start'} → ${plan.range.toLabel}`,
-                  },
-                ],
-              },
-              ...(plan.gates.some((gate) => !gate.ok)
+              { type: 'fields', fields: preview.fields },
+              ...(preview.failing.length
                 ? [
                     {
                       type: 'list' as const,
-                      items: plan.gates
-                        .filter((gate) => !gate.ok)
-                        .map((gate) => ({ text: gate.message, tone: 'bad' as const })),
+                      items: preview.failing.map((gate) => ({
+                        text: gate.message,
+                        tone: 'bad' as const,
+                      })),
                     },
                   ]
                 : []),
@@ -396,7 +372,7 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
                 type: 'actions',
                 actions: [
                   {
-                    label: `Create ${plan.tag ?? 'the version'}`,
+                    label: `Create ${view.version?.tag ?? 'the version'}`,
                     command: line(context, repo, 'version', '--yes'),
                     style: 'primary',
                   },

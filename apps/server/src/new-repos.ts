@@ -6,7 +6,9 @@ import {
   groupRepositories,
   planSchedule,
 } from '@holtkeeper/jobs'
+import { SYSTEM_ACTOR } from '@holtkeeper/store'
 
+import { appendAudit } from './audit.ts'
 import type { ServerDeps } from './context.ts'
 import { automaticJobReady } from './jobs.ts'
 
@@ -33,7 +35,7 @@ export function newRepoAnalyzers(
 /**
  * Queues the `jobs.onNewRepo` analyzers for `repos`, limited to its `groups` and to analyzers
  * whose `appliesTo` matches (a failing check counts as applying) and whose options are valid with
- * the repository's `analyzers.<kind>` setting (so `warmup` waits for a command). Jobs get trigger `new-repo`;
+ * the repository's `analyzers.<kind>` setting. Jobs get trigger `new-repo`;
  * one already queued or running for the same analyzer and repository is skipped. Without `actor`
  * (repositories polling found for the first time) it logs `job.new_repo` per repository that got
  * jobs; with `actor` (a run by hand) the jobs carry it and the caller logs the run. Does nothing
@@ -87,13 +89,15 @@ export async function queueNewRepoJobs(
     const subject = `${job.repo.forge}:${job.repo.path}`
     byRepo.set(subject, [...(byRepo.get(subject) ?? []), job.id])
   }
-  for (const [subject, jobs] of byRepo)
-    // oxlint-disable-next-line no-await-in-loop -- one activity entry per repository, in order
-    await store.activity.append({
+  for (const [repo, jobs] of byRepo)
+    // oxlint-disable-next-line no-await-in-loop -- one audit event per repository, in order
+    await appendAudit(store, {
       at,
-      actor: 'system',
-      action: 'job.new_repo',
-      subject,
+      actor: SYSTEM_ACTOR,
+      via: 'system',
+      action: 'repo.discover',
+      target: { type: 'repo', repo },
+      outcome: 'ok',
       details: { jobs },
     })
   return result

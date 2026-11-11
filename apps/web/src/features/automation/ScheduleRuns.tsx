@@ -11,35 +11,7 @@ import {
   scheduleRunShares,
   scheduleRunState,
 } from '../../lib/jobs.ts'
-import { Button, Chip, Tooltip, notify } from '../../ui/index.ts'
-
-const statusColor = {
-  default: 'var(--sev-unknown)',
-  accent: 'var(--accent)',
-  success: 'var(--success)',
-  danger: 'var(--danger)',
-} as const
-
-/** Jobs of a run by status as one thin stacked bar; `vertical` stacks failures on top. */
-function RunBar({ run, vertical = false }: { run: ScheduleRun; vertical?: boolean }) {
-  return (
-    <div
-      className={`flex overflow-hidden rounded-full bg-default ${vertical ? 'h-6 w-2.5 flex-col-reverse' : 'h-1.5 w-28'}`}
-      aria-hidden
-    >
-      {scheduleRunShares(run).map((share) => (
-        <span
-          key={share.status}
-          style={{
-            [vertical ? 'height' : 'width']: `${share.percent}%`,
-            background: statusColor[jobStatusTone(share.status)],
-          }}
-          className={share.status === 'running' ? 'animate-pulse' : undefined}
-        />
-      ))}
-    </div>
-  )
-}
+import { Button, SegmentBar, Tag, TickStrip, Tooltip, notify } from '../../ui/index.ts'
 
 function RunSummary({ run }: { run: ScheduleRun }) {
   return (
@@ -84,10 +56,19 @@ export function LastRun({ id, run }: { id: string; run: ScheduleRun | undefined 
     <Tooltip content={<RunSummary run={run} />} delay={150}>
       <div tabIndex={0} className="flex flex-col gap-1.5 whitespace-nowrap">
         <span className="flex items-center gap-2">
-          <Chip tone={state.tone}>{state.label}</Chip>
+          <Tag tone={state.tone} dot>
+            {state.label}
+          </Tag>
           <span className="text-xs text-muted">{formatRelative(run.at, now)}</span>
         </span>
-        <RunBar run={run} />
+        <SegmentBar
+          className="w-28"
+          segments={scheduleRunShares(run).map((share) => ({
+            value: share.count,
+            tone: jobStatusTone(share.status),
+            label: jobStatusLabel(share.status),
+          }))}
+        />
         <Link
           to="/jobs"
           search={{ schedule: id }}
@@ -103,19 +84,19 @@ export function LastRun({ id, run }: { id: string; run: ScheduleRun | undefined 
   )
 }
 
-/** Up to ten earlier runs, oldest left, as small bars colored by their outcome. */
+/** Up to ten earlier runs as status ticks, oldest left. */
 export function RunHistory({ runs }: { runs: readonly ScheduleRun[] }) {
   if (runs.length < 2) return <span className="text-sm text-muted">—</span>
+  const ticks = runs.toReversed().map((run) => {
+    const state = scheduleRunState(run)
+    return { tone: state.tone, label: `${formatDateTime(run.at)} · ${state.label}` }
+  })
   return (
-    <div className="flex items-end gap-1" aria-label={`${runs.length} recent runs`}>
-      {runs.toReversed().map((run) => (
-        <Tooltip key={run.at} content={<RunSummary run={run} />} delay={100}>
-          <span tabIndex={0} className="inline-flex">
-            <RunBar run={run} vertical />
-          </span>
-        </Tooltip>
-      ))}
-    </div>
+    <TickStrip
+      className="w-32"
+      ticks={ticks}
+      aria-label={`${runs.length} recent runs, oldest first: ${ticks.map((t) => t.label).join('; ')}`}
+    />
   )
 }
 

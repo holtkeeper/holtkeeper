@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { DepgraphData } from './analyze.ts'
-import { directDependencies, fleetLibraries, ownPackages, versionDrift } from './inventory.ts'
+import {
+  definedPackages,
+  directDependencies,
+  fleetLibraries,
+  ownPackages,
+  versionDrift,
+} from './inventory.ts'
 import type { DepEdge, DepNode } from './model.ts'
 
 const ws = (name: string, version?: string): DepNode => ({
@@ -116,5 +122,25 @@ describe('fleetLibraries', () => {
     expect(libraries[1]?.latest).toBe('2.3.0')
     expect(libraries[1]?.usages[0]?.lag).toBe('minor')
     expect(libraries[1]?.source).toEqual({ origin: 'c', version: '2.3.0' })
+  })
+})
+
+describe('definedPackages', () => {
+  test('lists workspaces with and without a version, once each', () => {
+    const goModule: DepNode = {
+      id: 'example.com/shapes',
+      name: 'example.com/shapes',
+      ecosystem: 'Go',
+      kind: 'workspace',
+    }
+    expect(
+      definedPackages(
+        data([ws('widget-kit', '1.0.0'), ws('app'), goModule, pkg('react', '19.1.0')], []),
+      ),
+    ).toEqual([
+      { ecosystem: 'npm', name: 'app' },
+      { ecosystem: 'Go', name: 'example.com/shapes' },
+      { ecosystem: 'npm', name: 'widget-kit' },
+    ])
   })
 })

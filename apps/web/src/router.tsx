@@ -4,13 +4,18 @@ import {
   createRouter,
   lazyRouteComponent,
   Outlet,
+  redirect,
 } from '@tanstack/react-router'
 
 import { type AuditsSearch, isTrigger } from './features/audits/labels.ts'
 import { LinkPage } from './features/auth/LinkPage.tsx'
 import { AuthGate } from './features/shell/AuthGate.tsx'
 import { NotFound } from './features/shell/NotFound.tsx'
-import { parseEcosystem } from './lib/libraries.ts'
+import { knowledgeSearch } from './lib/guide.ts'
+import { parseJobsSearch } from './lib/jobs.ts'
+import { type SettingsTabId, parseSettingsTab } from './lib/settings-tabs.ts'
+import { type StackTab, parseStackTab } from './lib/stack.ts'
+import { parseTasksSearch } from './lib/tasks.ts'
 import { ToastHost } from './ui/index.ts'
 
 const rootRoute = createRootRoute({
@@ -35,24 +40,15 @@ const page = <P extends string>(path: P, component: ReturnType<typeof lazyRouteC
   createRoute({ getParentRoute: () => appRoute, path, component })
 
 const ChatPage = lazyRouteComponent(() => import('./features/chat/ChatPage.tsx'), 'ChatPage')
-const SlackPage = lazyRouteComponent(() => import('./features/slack/SlackPage.tsx'), 'SlackPage')
-const ClaimPage = lazyRouteComponent(() => import('./features/account/ClaimPage.tsx'), 'ClaimPage')
-const DigestsPage = lazyRouteComponent(
-  () => import('./features/digests/DigestsPage.tsx'),
-  'DigestsPage',
+const ReleasesPage = lazyRouteComponent(
+  () => import('./features/releases/ReleasesPage.tsx'),
+  'ReleasesPage',
 )
-const ReleaseBoardPage = lazyRouteComponent(
-  () => import('./features/releases/ReleaseBoardPage.tsx'),
-  'ReleaseBoardPage',
+const ReleaseTimelinePage = lazyRouteComponent(
+  () => import('./features/releases/ReleaseTimelinePage.tsx'),
+  'ReleaseTimelinePage',
 )
-const ReleaseRepoPage = lazyRouteComponent(
-  () => import('./features/releases/ReleaseRepoPage.tsx'),
-  'ReleaseRepoPage',
-)
-const DashboardPage = lazyRouteComponent(
-  () => import('./features/dashboard/DashboardPage.tsx'),
-  'DashboardPage',
-)
+const HomePage = lazyRouteComponent(() => import('./features/home/HomePage.tsx'), 'HomePage')
 const ReposPage = lazyRouteComponent(() => import('./features/repos/ReposPage.tsx'), 'ReposPage')
 const AuditsPage = lazyRouteComponent(
   () => import('./features/audits/AuditsPage.tsx'),
@@ -62,88 +58,45 @@ const AuditRunPage = lazyRouteComponent(
   () => import('./features/audits/AuditRunPage.tsx'),
   'AuditRunPage',
 )
-const CredentialsPage = lazyRouteComponent(
-  () => import('./features/credentials/CredentialsPage.tsx'),
-  'CredentialsPage',
-)
 const SettingsPage = lazyRouteComponent(
   () => import('./features/settings/SettingsPage.tsx'),
   'SettingsPage',
 )
-const UsersPage = lazyRouteComponent(() => import('./features/users/UsersPage.tsx'), 'UsersPage')
 const AccountPage = lazyRouteComponent(
   () => import('./features/account/AccountPage.tsx'),
   'AccountPage',
-)
-const ReleasesPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'ReleasesPage',
 )
 const BundlesPage = lazyRouteComponent(
   () => import('./features/bundles/BundlesPage.tsx'),
   'BundlesPage',
 )
-const AssetsPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'AssetsPage',
-)
 const DependenciesPage = lazyRouteComponent(
   () => import('./features/dependencies/DependenciesPage.tsx'),
   'DependenciesPage',
 )
-const UpdatesPage = lazyRouteComponent(
-  () => import('./features/updates/UpdatesPage.tsx'),
-  'UpdatesPage',
-)
-const QualityPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'QualityPage',
-)
-const CiJobsPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'CiJobsPage',
-)
+const CiPage = lazyRouteComponent(() => import('./features/ci/CiPage.tsx'), 'CiPage')
+const CiRepoPage = lazyRouteComponent(() => import('./features/ci/CiRepoPage.tsx'), 'CiRepoPage')
 const CoveragePage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
+  () => import('./features/test-coverage/CoveragePage.tsx'),
   'CoveragePage',
-)
-const TestIdsPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'TestIdsPage',
 )
 const BranchesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'BranchesPage',
 )
-const WarmupPage = lazyRouteComponent(
-  () => import('./features/warmup/WarmupPage.tsx'),
-  'WarmupPage',
-)
 const PublicApiPage = lazyRouteComponent(
   () => import('./features/public-api/PublicApiPage.tsx'),
   'PublicApiPage',
 )
-const McpPage = lazyRouteComponent(() => import('./features/mcp/McpPage.tsx'), 'McpPage')
-const LibrariesPage = lazyRouteComponent(
-  () => import('./features/libraries/LibrariesPage.tsx'),
-  'LibrariesPage',
-)
 const LibraryPage = lazyRouteComponent(
-  () => import('./features/libraries/LibraryPage.tsx'),
+  () => import('./features/dependencies/LibraryPage.tsx'),
   'LibraryPage',
 )
 const LicensesPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysesPage.tsx'),
   'LicensesPage',
 )
-const FleetPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'FleetPage',
-)
-const StackPage = lazyRouteComponent(
-  () => import('./features/analyses/AnalysesPage.tsx'),
-  'StackPage',
-)
+const StackPage = lazyRouteComponent(() => import('./features/stack/StackPage.tsx'), 'StackPage')
 const AnalysisPage = lazyRouteComponent(
   () => import('./features/analyses/AnalysisPage.tsx'),
   'AnalysisPage',
@@ -154,33 +107,17 @@ const KnowledgePage = lazyRouteComponent(
   () => import('./features/knowledge/KnowledgePage.tsx'),
   'KnowledgePage',
 )
-const ActivityPage = lazyRouteComponent(
-  () => import('./features/activity/ActivityPage.tsx'),
-  'ActivityPage',
+const HistoryPage = lazyRouteComponent(
+  () => import('./features/history/HistoryPage.tsx'),
+  'HistoryPage',
 )
 
 const JobsPage = lazyRouteComponent(() => import('./features/jobs/JobsPage.tsx'), 'JobsPage')
 const JobPage = lazyRouteComponent(() => import('./features/jobs/JobPage.tsx'), 'JobPage')
+const TasksPage = lazyRouteComponent(() => import('./features/tasks/TasksPage.tsx'), 'TasksPage')
 const AutomationPage = lazyRouteComponent(
   () => import('./features/automation/AutomationPage.tsx'),
   'AutomationPage',
-)
-const AiUsagePage = lazyRouteComponent(() => import('./features/ai/AiUsagePage.tsx'), 'AiUsagePage')
-const AuditLogPage = lazyRouteComponent(
-  () => import('./features/audit-log/AuditLogPage.tsx'),
-  'AuditLogPage',
-)
-const StoragePage = lazyRouteComponent(
-  () => import('./features/storage/StoragePage.tsx'),
-  'StoragePage',
-)
-const DatabasePage = lazyRouteComponent(
-  () => import('./features/database/DatabasePage.tsx'),
-  'DatabasePage',
-)
-const CachesPage = lazyRouteComponent(
-  () => import('./features/caches/CachesPage.tsx'),
-  'CachesPage',
 )
 
 const auditsRoute = createRoute({
@@ -201,10 +138,18 @@ const settingsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'settings',
   component: SettingsPage,
-  validateSearch: (search: Record<string, unknown>): { repo?: string; tab?: string } => ({
-    ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
-    ...(typeof search.tab === 'string' && search.tab ? { tab: search.tab } : {}),
-  }),
+  validateSearch: (search: Record<string, unknown>): { tab?: SettingsTabId } => {
+    const tab = parseSettingsTab(search.tab)
+    return tab ? { tab } : {}
+  },
+})
+
+const chatRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'chat',
+  component: ChatPage,
+  validateSearch: (search: Record<string, unknown>): { thread?: string } =>
+    typeof search.thread === 'string' && search.thread ? { thread: search.thread } : {},
 })
 
 const tabSearch = (search: Record<string, unknown>): { tab?: string } =>
@@ -214,9 +159,13 @@ const repoRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'repos/view',
   component: RepoPage,
-  validateSearch: (search: Record<string, unknown>): { repo?: string; tab?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { repo?: string; tab?: string; file?: string; ref?: string } => ({
     ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
     ...tabSearch(search),
+    ...(typeof search.file === 'string' && search.file ? { file: search.file } : {}),
+    ...(typeof search.ref === 'string' && search.ref ? { ref: search.ref } : {}),
   }),
 })
 
@@ -224,29 +173,32 @@ const groupRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'repos/groups/$groupId',
   component: GroupPage,
-  validateSearch: tabSearch,
+  validateSearch: (search: Record<string, unknown>): { tab?: string; view?: StackTab } => {
+    const view = parseStackTab(search.view)
+    return { ...tabSearch(search), ...(view === 'runtimes' ? {} : { view }) }
+  },
 })
 
 const jobsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'jobs',
   component: JobsPage,
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { repo?: string; status?: string; schedule?: string } => ({
-    ...(typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {}),
-    ...(typeof search.status === 'string' && search.status ? { status: search.status } : {}),
-    ...(typeof search.schedule === 'string' && search.schedule
-      ? { schedule: search.schedule }
-      : {}),
-  }),
+  validateSearch: parseJobsSearch,
+})
+
+const tasksRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'tasks',
+  component: TasksPage,
+  validateSearch: parseTasksSearch,
 })
 
 const automationRoute = createRoute({
   getParentRoute: () => appRoute,
   path: 'automation',
   component: AutomationPage,
-  validateSearch: tabSearch,
+  validateSearch: (search: Record<string, unknown>): { job?: string } =>
+    typeof search.job === 'string' && search.job ? { job: search.job } : {},
 })
 
 const repoSearch = (search: Record<string, unknown>): { repo?: string } =>
@@ -256,6 +208,16 @@ const analysisPage = <P extends string>(
   path: P,
   component: ReturnType<typeof lazyRouteComponent>,
 ) => createRoute({ getParentRoute: () => appRoute, path, component, validateSearch: repoSearch })
+
+const ciRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'ci',
+  component: CiPage,
+  validateSearch: repoSearch,
+  beforeLoad: ({ search }) => {
+    if (search.repo) throw redirect({ to: '/ci/$', params: { _splat: search.repo } })
+  },
+})
 
 const bundlesRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -285,52 +247,47 @@ const publicApiRoute = createRoute({
     ),
 })
 
-const mcpRoute = createRoute({
+const dependenciesRoute = createRoute({
   getParentRoute: () => appRoute,
-  path: 'mcp-server',
-  component: McpPage,
-  validateSearch: (search: Record<string, unknown>): { tab?: string } =>
-    typeof search.tab === 'string' && search.tab ? { tab: search.tab } : {},
-})
-
-const librariesRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: 'libraries',
-  component: LibrariesPage,
-  validateSearch: (search: Record<string, unknown>): { q?: string; ecosystem?: string } => ({
-    ...(typeof search.q === 'string' && search.q ? { q: search.q } : {}),
-    ...(parseEcosystem(search.ecosystem) ? { ecosystem: parseEcosystem(search.ecosystem) } : {}),
-  }),
-})
-
-const libraryRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: 'libraries/view',
-  component: LibraryPage,
+  path: 'dependencies',
+  component: DependenciesPage,
   validateSearch: (
     search: Record<string, unknown>,
-  ): { ecosystem?: string; name?: string; version?: string } =>
+  ): { repo?: string; library?: string; tab?: string } =>
     Object.fromEntries(
-      ['ecosystem', 'name', 'version'].flatMap((key) =>
+      ['repo', 'library', 'tab'].flatMap((key) =>
         typeof search[key] === 'string' && search[key] ? [[key, search[key]]] : [],
       ),
     ),
 })
 
-const releaseBoardRoute = createRoute({
+const stackRoute = createRoute({
   getParentRoute: () => appRoute,
-  path: 'release-board',
-  component: ReleaseBoardPage,
-  validateSearch: (search: Record<string, unknown>): { group?: string } =>
-    typeof search.group === 'string' && search.group ? { group: search.group } : {},
+  path: 'stack',
+  component: StackPage,
+  validateSearch: tabSearch,
 })
 
-const releaseRepoRoute = createRoute({
+const libraryRoute = createRoute({
   getParentRoute: () => appRoute,
-  path: 'release-board/repo',
-  component: ReleaseRepoPage,
-  validateSearch: (search: Record<string, unknown>): { repo?: string } =>
-    typeof search.repo === 'string' && search.repo ? { repo: search.repo } : {},
+  path: 'dependencies/$ecosystem/$',
+  component: LibraryPage,
+  validateSearch: tabSearch,
+})
+
+const releaseTimelineRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'releases/$',
+  component: ReleaseTimelinePage,
+  validateSearch: (search: Record<string, unknown>): { tab?: 'flow' } =>
+    search.tab === 'flow' ? { tab: 'flow' } : {},
+})
+
+const knowledgeRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'knowledge',
+  component: KnowledgePage,
+  validateSearch: knowledgeSearch,
 })
 
 const analysisRoute = createRoute({
@@ -344,51 +301,34 @@ const analysisRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   linkRoute,
   appRoute.addChildren([
-    page('/', DashboardPage),
+    page('/', HomePage),
     page('repos', ReposPage),
     repoRoute,
     groupRoute,
     auditsRoute,
     page('audits/$runId', AuditRunPage),
-    releaseBoardRoute,
-    releaseRepoRoute,
-    analysisPage('releases', ReleasesPage),
+    page('releases', ReleasesPage),
+    releaseTimelineRoute,
     bundlesRoute,
-    analysisPage('assets', AssetsPage),
-    analysisPage('dependencies', DependenciesPage),
-    analysisPage('updates', UpdatesPage),
-    analysisPage('quality', QualityPage),
-    analysisPage('coverage', CoveragePage),
-    analysisPage('testids', TestIdsPage),
-    analysisPage('branches', BranchesPage),
-    analysisPage('ci', CiJobsPage),
-    analysisPage('warmup', WarmupPage),
-    analysisPage('licenses', LicensesPage),
-    analysisPage('fleet', FleetPage),
-    analysisPage('stack', StackPage),
-    publicApiRoute,
-    mcpRoute,
-    librariesRoute,
+    dependenciesRoute,
     libraryRoute,
+    analysisPage('coverage', CoveragePage),
+    analysisPage('branches', BranchesPage),
+    ciRoute,
+    page('ci/$', CiRepoPage),
+    analysisPage('licenses', LicensesPage),
+    stackRoute,
+    publicApiRoute,
     analysisRoute,
     jobsRoute,
     page('jobs/$jobId', JobPage),
-    page('knowledge', KnowledgePage),
+    tasksRoute,
+    knowledgeRoute,
     automationRoute,
-    page('ai', AiUsagePage),
-    page('audit-log', AuditLogPage),
-    page('storage', StoragePage),
-    page('database', DatabasePage),
-    page('caches', CachesPage),
-    page('credentials', CredentialsPage),
+    page('history', HistoryPage),
     settingsRoute,
-    page('users', UsersPage),
     page('account', AccountPage),
-    page('activity', ActivityPage),
-    page('chat', ChatPage),
-    page('digests', DigestsPage),
-    page('slack', SlackPage),
-    page('accounts/claim', ClaimPage),
+    chatRoute,
   ]),
 ])
 

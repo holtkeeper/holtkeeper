@@ -35,7 +35,9 @@ describe('query building', () => {
       scope: null,
       packageName: null,
       ecosystem: null,
+      subject: null,
     })
+    expect(knowledgeFilterParams({ subject: 'npm:widget-kit' }).subject).toBe('npm:widget-kit')
     expect(
       knowledgeFilterParams({ status: 'accepted', kind: ['quirk', 'howto'], package: 'npm:react' }),
     ).toMatchObject({

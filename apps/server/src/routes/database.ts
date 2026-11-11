@@ -75,7 +75,7 @@ export function databaseRoutes(deps: ServerDeps) {
   })
 
   app.post('/database/queries/reset', async (c) => {
-    const principal = authorize(c, 'settings:write', { kind: 'global' })
+    authorize(c, 'settings:write', { kind: 'global' })
     const database = inspector()
     if (!database.resetQueries)
       throw new HTTPException(409, { message: 'this database keeps no statement statistics' })
@@ -84,11 +84,6 @@ export function databaseRoutes(deps: ServerDeps) {
     } catch (error) {
       throw new HTTPException(400, { message: message(error) })
     }
-    await deps.store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'database.queries-reset',
-    })
     return c.json({ ok: true })
   })
 

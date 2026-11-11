@@ -5,9 +5,10 @@ import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useGroups, usePutGroup, useRepos } from '../../api/queries.ts'
-import { fleetView, stackView } from '../../lib/analyses.ts'
 import { formatRelative } from '../../lib/format.ts'
+import { groupTabs, pickTab, visibleTabs } from '../../lib/repo-page.ts'
 import { repoKey } from '../../lib/repo.ts'
+import { parseStackTab } from '../../lib/stack.ts'
 import {
   Button,
   Chip,
@@ -17,18 +18,18 @@ import {
   Page,
   Panel,
   Placeholder,
+  SegmentedTabs,
   TagInput,
-  Tabs,
   notify,
 } from '../../ui/index.ts'
-import { AnalysisRecords } from '../analyses/AnalysesPage.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
-import { ScopedKnowledge } from '../knowledge/ScopedKnowledge.tsx'
 import { ScopedSettings } from '../settings/ScopedSettings.tsx'
 import { useSession } from '../shell/session.ts'
+import { StackView } from '../stack/StackPage.tsx'
 import { GroupListing } from './GroupListing.tsx'
+import { ScopeGuide } from './ScopeGuide.tsx'
 
-/** One group: its repositories and patterns, fleet drift records, settings and knowledge. */
+/** One group: its repositories and patterns, its Guide, its stack and the settings made for it. */
 export function GroupPage() {
   const { can } = useSession()
   const { groupId } = useParams({ from: '/app/repos/groups/$groupId' })
@@ -39,19 +40,40 @@ export function GroupPage() {
   const definition = config.data?.entries.find((entry) => entry.id === groupId)
   const members = (repos.data?.repos ?? []).filter((r) => r.groups.includes(groupId))
   const allGroups = [...new Set((repos.data?.repos ?? []).flatMap((r) => r.groups))].toSorted()
-  const focus = { kind: 'group' as const, group: groupId }
-  const forge = definition?.data.forge ?? members[0]?.repo.forge
+  const tabs = visibleTabs(groupTabs, can)
+  const tab = pickTab(tabs, search.tab) ?? 'repos'
 
-  const tabs = [
-    {
-      id: 'repos',
-      label: (
-        <span className="flex items-center gap-1.5">
+  return (
+    <Page
+      eyebrow={
+        <Link to="/repos" className="hover:underline">
           Repositories
-          {members.length ? <span className="text-xs text-muted">{members.length}</span> : null}
-        </span>
-      ),
-      content: (
+        </Link>
+      }
+      title={`Group ${groupId}`}
+      description={definition ? <span className="mono">{definition.data.forge}</span> : undefined}
+      actions={<RunJobButton group={groupId} />}
+    >
+      <SegmentedTabs
+        aria-label="Group sections"
+        items={tabs.map(({ id, label }) => ({
+          id,
+          label:
+            id === 'repos' && members.length ? (
+              <>
+                {label} <span className="mono text-dim">{members.length}</span>
+              </>
+            ) : (
+              label
+            ),
+        }))}
+        selected={tab}
+        onSelect={(next) =>
+          void navigate({ search: next === 'repos' ? {} : { tab: next }, replace: true })
+        }
+        className="self-start"
+      />
+      {tab === 'repos' ? (
         <div className="flex flex-col gap-4">
           {can('settings:read') ? (
             config.isPending ? (
@@ -96,73 +118,23 @@ export function GroupPage() {
             )}
           </Panel>
         </div>
-      ),
-    },
-    ...(can('analyses:read') && forge
-      ? [
-          {
-            id: 'fleet',
-            label: 'Fleet',
-            content: (
-              <AnalysisRecords page={fleetView} repo={{ forge, path: groupId }} group={groupId} />
-            ),
-          },
-          {
-            id: 'stack',
-            label: 'Stack',
-            content: (
-              <AnalysisRecords page={stackView} repo={{ forge, path: groupId }} group={groupId} />
-            ),
-          },
-        ]
-      : []),
-    ...(can('settings:read')
-      ? [
-          {
-            id: 'settings',
-            label: 'Settings',
-            content: <ScopedSettings focus={focus} groups={allGroups} />,
-          },
-        ]
-      : []),
-    ...(can('knowledge:read')
-      ? [
-          {
-            id: 'knowledge',
-            label: 'Knowledge',
-            content: <ScopedKnowledge focus={focus} groups={allGroups} />,
-          },
-        ]
-      : []),
-  ]
-  const selected = tabs.some((t) => t.id === search.tab) ? search.tab : 'repos'
-
-  return (
-    <Page
-      eyebrow={
-        <Link to="/repos" className="hover:underline">
-          Repositories
-        </Link>
-      }
-      title={`Group ${groupId}`}
-      description={
-        definition ? (
-          <span className="flex items-center gap-1.5">
-            {definition.data.forge}
-            <Chip>{definition.provenance === 'file' ? 'config file' : 'panel'}</Chip>
-          </span>
-        ) : undefined
-      }
-      actions={<RunJobButton group={groupId} />}
-    >
-      <Tabs
-        aria-label="Group sections"
-        selected={selected ?? 'repos'}
-        onSelect={(tab) =>
-          void navigate({ search: (previous) => ({ ...previous, tab }), replace: true })
-        }
-        items={tabs}
-      />
+      ) : null}
+      {tab === 'guide' ? <ScopeGuide space={{ kind: 'group', group: groupId }} /> : null}
+      {tab === 'stack' ? (
+        <StackView
+          group={groupId}
+          tab={parseStackTab(search.view)}
+          onTab={(view) =>
+            void navigate({
+              search: { tab: 'stack', ...(view === 'runtimes' ? {} : { view }) },
+              replace: true,
+            })
+          }
+        />
+      ) : null}
+      {tab === 'settings' ? (
+        <ScopedSettings focus={{ kind: 'group', group: groupId }} groups={allGroups} />
+      ) : null}
     </Page>
   )
 }
@@ -227,11 +199,6 @@ function GroupDefinition({ entry }: { entry: ConfigEntryView<'group'> }) {
           </>
         )}
       </div>
-      {writable && entry.provenance === 'file' && changed ? (
-        <p className="mt-2 text-xs text-muted">
-          Saving makes a panel copy that replaces the group from the config file.
-        </p>
-      ) : null}
     </Panel>
   )
 }

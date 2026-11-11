@@ -78,7 +78,18 @@ const passwordVariable = 'HOLTKEEPER_GIT_PASSWORD'
 // in argv, in the mirror's config or in the remote URL.
 const credentialHelper = `!f() { test "$1" = get || exit 0; printf 'username=%s\\npassword=%s\\n' "$${usernameVariable}" "$${passwordVariable}"; }; f`
 
-const baseEnv = { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: undefined, SSH_ASKPASS: undefined }
+// Repository scripts can write the shared mirror's hooks and config; Holtkeeper's own git runs
+// neither hooks nor an fsmonitor command from there.
+const baseEnv = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: undefined,
+  SSH_ASKPASS: undefined,
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'core.hooksPath',
+  GIT_CONFIG_VALUE_0: '/dev/null',
+  GIT_CONFIG_KEY_1: 'core.fsmonitor',
+  GIT_CONFIG_VALUE_1: 'false',
+}
 
 const remoteGit = (args: string[], credentials: GitCredentials | undefined) =>
   credentials

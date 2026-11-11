@@ -1,18 +1,14 @@
-import type { PublicApiPackageDetail, RepoRef, UsageSite } from '@holtkeeper/api'
+import type { PackageUsageRepo, PublicApiPackageDetail, RepoRef, UsageSite } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { Boxes, Code2, GitBranch, PackageOpen } from 'lucide-react'
 import { useState } from 'react'
 
-import {
-  usePackageUsage,
-  usePublishedPackages,
-  useRepoUsage,
-  useUpgradeImpact,
-  useUsageSites,
-} from '../../api/queries.ts'
+import { usePackageUsage, useUpgradeImpact, useUsageSites } from '../../api/queries.ts'
 import { formatRelative, plural } from '../../lib/format.ts'
+import { foldOtherTeams } from '../../lib/home-scope.ts'
 import { versionKey, versionLabel } from '../../lib/public-api.ts'
 import { repoKey } from '../../lib/repo.ts'
+import { upgradePrompt } from '../../lib/upgrade-prompt.ts'
 import {
   impactTone,
   kindCounts,
@@ -24,8 +20,10 @@ import {
 import {
   Button,
   Chip,
+  CopyButton,
   EmptyState,
   ErrorState,
+  OtherTeams,
   Panel,
   Placeholder,
   Select,
@@ -34,6 +32,7 @@ import {
   Td,
   Th,
 } from '../../ui/index.ts'
+import { useScope } from '../shell/scope.ts'
 
 const importPath = (name: string, subpath: string) =>
   subpath === '.' ? name : `${name}/${subpath.replace(/^\.\//, '')}`
@@ -151,6 +150,7 @@ function NameBars({
 export function UsedByTab({ data }: { data: PublicApiPackageDetail }) {
   const name = data.package.name
   const usage = usePackageUsage(name)
+  const { view: scopeView, homeGroups } = useScope()
   const [repo, setRepo] = useState<string | undefined>(undefined)
   const [selection, setSelection] = useState<Selection | undefined>(undefined)
   const sites = useUsageSites(
@@ -190,6 +190,67 @@ export function UsedByTab({ data }: { data: PublicApiPackageDetail }) {
       }))
     : view.exports
   const uses = view.repos.reduce((sum, r) => sum + r.count, 0)
+  const folded =
+    scopeView === 'mine'
+      ? foldOtherTeams(view.repos, homeGroups, (item) => item.groups)
+      : { mine: view.repos, others: [], teams: [] }
+  const repoTable = (items: readonly PackageUsageRepo[]) => (
+    <Table label="Repositories using the package">
+      <thead>
+        <tr>
+          <Th>Repository</Th>
+          <Th>Version</Th>
+          <Th>Workspaces</Th>
+          <Th align="right">Uses</Th>
+          <Th align="right">Files</Th>
+          <Th align="right">Exports</Th>
+          <Th>Analyzed</Th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((item) => {
+          const key = repoKey(item.repo)
+          return (
+            <tr
+              key={key}
+              className={`cursor-pointer hover:bg-default/40 ${repo === key ? 'bg-default/60' : ''}`}
+              onClick={() => setRepo(repo === key ? undefined : key)}
+            >
+              <Td>
+                <span className="font-medium">{key}</span>
+              </Td>
+              <Td>
+                <div className="flex flex-wrap gap-1">
+                  {(item.versions.length ? item.versions : item.ranges).map((version) => (
+                    <Chip
+                      key={version}
+                      size="sm"
+                      tone={version === view.versions[0] ? 'success' : 'warning'}
+                    >
+                      {version}
+                    </Chip>
+                  ))}
+                </div>
+              </Td>
+              <Td className="text-muted">
+                {item.workspaces.filter((w) => w !== 'root').join(', ') || '—'}
+              </Td>
+              <Td align="right" className="tabular">
+                {item.count}
+              </Td>
+              <Td align="right" className="tabular">
+                {item.files}
+              </Td>
+              <Td align="right" className="tabular">
+                {item.exports.length}
+              </Td>
+              <Td className="whitespace-nowrap text-muted">{formatRelative(item.analyzedAt)}</Td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </Table>
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -221,66 +282,15 @@ export function UsedByTab({ data }: { data: PublicApiPackageDetail }) {
             <Button size="sm" variant="ghost" onPress={() => setRepo(undefined)}>
               All repositories
             </Button>
-          ) : null
+          ) : undefined
         }
       >
-        <Table label="Repositories using the package">
-          <thead>
-            <tr>
-              <Th>Repository</Th>
-              <Th>Version</Th>
-              <Th>Workspaces</Th>
-              <Th align="right">Uses</Th>
-              <Th align="right">Files</Th>
-              <Th align="right">Exports</Th>
-              <Th>Analyzed</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.repos.map((item) => {
-              const key = repoKey(item.repo)
-              return (
-                <tr
-                  key={key}
-                  className={`cursor-pointer hover:bg-default/40 ${repo === key ? 'bg-default/60' : ''}`}
-                  onClick={() => setRepo(repo === key ? undefined : key)}
-                >
-                  <Td>
-                    <span className="font-medium">{key}</span>
-                  </Td>
-                  <Td>
-                    <div className="flex flex-wrap gap-1">
-                      {(item.versions.length ? item.versions : item.ranges).map((version) => (
-                        <Chip
-                          key={version}
-                          size="sm"
-                          tone={version === view.versions[0] ? 'success' : 'warning'}
-                        >
-                          {version}
-                        </Chip>
-                      ))}
-                    </div>
-                  </Td>
-                  <Td className="text-muted">
-                    {item.workspaces.filter((w) => w !== 'root').join(', ') || '—'}
-                  </Td>
-                  <Td align="right" className="tabular">
-                    {item.count}
-                  </Td>
-                  <Td align="right" className="tabular">
-                    {item.files}
-                  </Td>
-                  <Td align="right" className="tabular">
-                    {item.exports.length}
-                  </Td>
-                  <Td className="whitespace-nowrap text-muted">
-                    {formatRelative(item.analyzedAt)}
-                  </Td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </Table>
+        <div className="flex flex-col gap-3">
+          {folded.mine.length ? repoTable(folded.mine) : null}
+          <OtherTeams count={folded.others.length} teams={folded.teams}>
+            {repoTable(folded.others)}
+          </OtherTeams>
+        </div>
       </Panel>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
@@ -422,8 +432,11 @@ export function UsedByTab({ data }: { data: PublicApiPackageDetail }) {
   )
 }
 
-/** What upgrading from an older version to the shown one breaks in the repositories using it. */
-export function ImpactTab({ data }: { data: PublicApiPackageDetail }) {
+/**
+ * What upgrading from an older version to the shown one breaks in the repositories using it, and
+ * a prompt for a coding agent that carries the plan.
+ */
+export function UpgradeTab({ data }: { data: PublicApiPackageDetail }) {
   const current = data.versions.find((v) => v.analysisId === data.analysisId)
   const older = data.versions.filter(
     (v) => !v.head && v.analysisId !== data.analysisId && v.analyzedAt <= data.analyzedAt,
@@ -463,17 +476,45 @@ export function ImpactTab({ data }: { data: PublicApiPackageDetail }) {
           : undefined
       }
       actions={
-        <Select
-          aria-label="Upgrade from"
-          className="w-56"
-          value={fromKey}
-          onChange={setFrom}
-          options={older.map((v) => ({
-            id: versionKey(v),
-            label: `from ${versionLabel(v)}`,
-            text: versionLabel(v),
-          }))}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            aria-label="Upgrade from"
+            className="w-56"
+            value={fromKey}
+            onChange={setFrom}
+            options={older.map((v) => ({
+              id: versionKey(v),
+              label: `from ${versionLabel(v)}`,
+              text: versionLabel(v),
+            }))}
+          />
+          <CopyButton
+            isDisabled={!result}
+            text={() =>
+              result
+                ? upgradePrompt({
+                    name: data.package.name,
+                    from: result.from.version,
+                    to: current ? versionLabel(current) : result.to.version,
+                    impact: {
+                      ...result.impact,
+                      items: result.impact.items.map((item) => ({
+                        ...item,
+                        repos: item.repos.map((entry) => ({
+                          ...entry,
+                          origin: repoKey(entry.origin),
+                        })),
+                      })),
+                      affected: result.impact.affected.map(repoKey),
+                      unaffected: result.impact.unaffected.map(repoKey),
+                    },
+                  })
+                : ''
+            }
+          >
+            Copy as prompt
+          </CopyButton>
+        </div>
       }
     >
       {impact.isPending ? (
@@ -532,145 +573,6 @@ export function ImpactTab({ data }: { data: PublicApiPackageDetail }) {
           />
         )
       ) : null}
-    </Panel>
-  )
-}
-
-/** What one repository publishes and imports: who uses its packages, and which packages it uses. */
-export function RepoPackagesTab({ repo }: { repo: RepoRef }) {
-  return (
-    <div className="flex flex-col gap-4">
-      <PublishedPackages repo={repo} />
-      <UsedPackages repo={repo} />
-    </div>
-  )
-}
-
-function PublishedPackages({ repo }: { repo: RepoRef }) {
-  const published = usePublishedPackages(repoKey(repo))
-  if (published.isPending) return <Placeholder className="h-64" />
-  if (published.isError) return <ErrorState error={published.error} />
-  const list = published.data.packages
-  if (!list.length) return null
-  const used = list.filter((pkg) => pkg.repos > 0).length
-  return (
-    <Panel
-      title="Published here"
-      description={`${plural(list.length, 'package')} defined in this repository, ${used} used by analyzed repositories. Open one to see where and how.`}
-    >
-      <Table label="Published here">
-        <thead>
-          <tr>
-            <Th>Package</Th>
-            <Th>Version</Th>
-            <Th>Folder</Th>
-            <Th align="right">Exports</Th>
-            <Th align="right">Used by</Th>
-            <Th align="right">Uses</Th>
-            <Th align="right">Files</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((pkg) => (
-            <tr key={pkg.name} className="hover:bg-default/40">
-              <Td>
-                <Link
-                  to="/public-api"
-                  search={{ package: pkg.name, repo: repoKey(repo), tab: 'used-by' }}
-                  className="font-mono text-[13px] font-medium hover:underline"
-                >
-                  {pkg.name}
-                </Link>
-                {pkg.private ? (
-                  <Chip className="ml-2" size="sm">
-                    private
-                  </Chip>
-                ) : null}
-              </Td>
-              <Td className="tabular">{pkg.version ?? '—'}</Td>
-              <Td className="font-mono text-xs text-muted">{pkg.dir}</Td>
-              <Td align="right" className="tabular">
-                {pkg.exports}
-              </Td>
-              <Td align="right" className="tabular">
-                {pkg.repos ? plural(pkg.repos, 'repo') : <span className="text-muted">—</span>}
-              </Td>
-              <Td align="right" className="tabular">
-                {pkg.count}
-              </Td>
-              <Td align="right" className="tabular">
-                {pkg.files}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
-    </Panel>
-  )
-}
-
-function UsedPackages({ repo }: { repo: RepoRef }) {
-  const usage = useRepoUsage(repoKey(repo))
-  if (usage.isPending) return <Placeholder className="h-64" />
-  if (usage.isError)
-    return (
-      <EmptyState
-        icon={<PackageOpen />}
-        title="No usage record yet"
-        description="The usages analyzer records which packages this repository imports and what it uses of them; it runs weekly on the default branch."
-      />
-    )
-  const view = usage.data
-  return (
-    <Panel
-      title="Packages used"
-      description={`${plural(view.packages.length, 'package')} imported from ${plural(view.files, 'file')}; analyzed ${formatRelative(view.analyzedAt)}${view.types.status === 'used' ? ', with the type checker' : `, imports only (type checker ${view.types.status}${view.types.reason ? `: ${view.types.reason}` : ''})`}.`}
-    >
-      <Table label="Packages used">
-        <thead>
-          <tr>
-            <Th>Package</Th>
-            <Th>Version</Th>
-            <Th align="right">Uses</Th>
-            <Th align="right">Files</Th>
-            <Th align="right">Exports</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {view.packages.map((pkg) => (
-            <tr key={pkg.name} className="hover:bg-default/40">
-              <Td>
-                <Link
-                  to="/public-api"
-                  search={{ package: pkg.name }}
-                  className="font-mono text-[13px] font-medium hover:underline"
-                >
-                  {pkg.name}
-                </Link>
-                {pkg.local ? (
-                  <Chip className="ml-2" size="sm">
-                    defined here
-                  </Chip>
-                ) : null}
-              </Td>
-              <Td className="tabular">
-                {pkg.versions.join(', ') || (
-                  <span className="text-muted">{pkg.ranges.join(', ') || '—'}</span>
-                )}
-              </Td>
-              <Td align="right" className="tabular">
-                {pkg.count}
-              </Td>
-              <Td align="right" className="tabular">
-                {pkg.files}
-              </Td>
-              <Td align="right" className="tabular">
-                {pkg.exports}
-              </Td>
-            </tr>
-          ))}
-        </tbody>
-      </Table>
     </Panel>
   )
 }

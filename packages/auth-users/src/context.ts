@@ -1,4 +1,4 @@
-import type { ActivityStore, ExternalAccountStore, UserStore } from '@holtkeeper/store'
+import type { AuditStore, ExternalAccountStore, UserStore } from '@holtkeeper/store'
 
 import type { SignedCookie } from './cookies.ts'
 import type { OidcClient } from './oidc-client.ts'
@@ -48,12 +48,23 @@ export interface Context {
   ): Promise<void>
 }
 
-export function activityLogger(
-  activity: ActivityStore | undefined,
+/** Appends what users do to the audit log under their current name; without a log, nothing. */
+export function auditLogger(
+  audit: Pick<AuditStore, 'append'> | undefined,
+  store: UserStore,
   now: () => Date,
 ): Context['log'] {
   return async (actor, action, subject, details) => {
-    if (!activity) return
-    await activity.append({ at: now().toISOString(), actor, action, subject, details })
+    if (!audit) return
+    const user = await store.getUser(actor)
+    await audit.append({
+      at: now().toISOString(),
+      actor: { id: actor, name: user?.name ?? actor, provider: 'users' },
+      via: 'ui',
+      action,
+      target: { type: 'user', ...(subject !== undefined && { id: subject }) },
+      outcome: 'ok',
+      ...(details && { details }),
+    })
   }
 }

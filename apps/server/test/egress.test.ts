@@ -59,16 +59,13 @@ beforeEach(async () => {
     validateOptions: validateEgressSecretOptions,
   })
   tokenId = (
-    await credentials.create(
-      {
-        name: 'Hamster',
-        kind: 'gitlab',
-        url: 'https://gitlab.com',
-        scope: { all: true },
-        secret: 'glpat-first',
-      },
-      'root',
-    )
+    await credentials.create({
+      name: 'Hamster',
+      kind: 'gitlab',
+      url: 'https://gitlab.com',
+      scope: { all: true },
+      secret: 'glpat-first',
+    })
   ).id
   await putForge('cloud', 'https://gitlab.com')
   await putForge('other', 'https://other.test', false)
@@ -98,7 +95,7 @@ describe('egress rules', () => {
         headers: { Authorization: 'Bearer glpat-first' },
       },
     ])
-    await credentials.update(tokenId, { secret: 'glpat-rotated' }, 'root')
+    await credentials.update(tokenId, { secret: 'glpat-rotated' })
     const next = (await (await rules(app, `Bearer ${secret}`)).json()) as EgressRulesResponse
     expect(next.rules[0]?.headers?.Authorization).toBe('Bearer glpat-rotated')
   })
@@ -116,7 +113,7 @@ describe('egress rules', () => {
   })
 
   test('leaves out forges whose credential is gone', async () => {
-    await credentials.remove(tokenId, 'root')
+    await credentials.remove(tokenId)
     const body = (await (
       await rules(appWith({ egress: { secret } }), `Bearer ${secret}`)
     ).json()) as EgressRulesResponse
@@ -124,19 +121,16 @@ describe('egress rules', () => {
   })
 
   test('turns egress secrets into placeholder replacements per host', async () => {
-    await credentials.remove(tokenId, 'root')
+    await credentials.remove(tokenId)
     const placeholder = '6c1d7c9e-3a51-4b8e-9f0a-2d5e8b7c4f10'
-    const created = await credentials.create(
-      {
-        name: 'Turbo cache',
-        kind: 'egress-secret',
-        url: 'http://turbo-cache.internal',
-        scope: { all: true },
-        secret: 'turbo-token',
-        options: { placeholder, hosts: ['*.turbo.example'] },
-      },
-      'root',
-    )
+    const created = await credentials.create({
+      name: 'Turbo cache',
+      kind: 'egress-secret',
+      url: 'http://turbo-cache.internal',
+      scope: { all: true },
+      secret: 'turbo-token',
+      options: { placeholder, hosts: ['*.turbo.example'] },
+    })
     const body = (await (
       await rules(appWith({ egress: { secret } }), `Bearer ${secret}`)
     ).json()) as EgressRulesResponse
@@ -151,7 +145,7 @@ describe('egress rules', () => {
       { host: '*.turbo.example', ...replacement },
     ])
     const refused = await credentials
-      .update(created.id, { options: { placeholder: 'short' } }, 'root')
+      .update(created.id, { options: { placeholder: 'short' } })
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -244,7 +238,10 @@ describe('egress cache', () => {
     )
     expect(await response.json()).toEqual({ removed: 2, bytes: 10 })
     expect(JSON.parse(seen.at(-1)?.body ?? '{}')).toEqual({ kind: 'tools' })
-    const [entry] = await store.activity.list({ limit: 1 })
-    expect(entry).toMatchObject({ action: 'egress-cache.cleared', subject: 'tools' })
+    const [entry] = (await store.audit.list({ limit: 1 })).events
+    expect(entry).toMatchObject({
+      action: 'egress_cache.delete',
+      target: { type: 'egress_cache', id: 'tools' },
+    })
   })
 })

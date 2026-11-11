@@ -1,30 +1,20 @@
 # @holtkeeper/quality
 
-Code quality as one analysis built from independent checks. Each check finds something different; this package defines what they report, merges their results and renders the report (`quality` analysis kind).
+The contract for checks that find problems on a checkout, and the runner that merges their results. The review analyzer runs these checks on changed lines; there is no standalone quality analysis.
 
 ## Checks
 
-| Package                                                           | Check         | Finds                                                                                                                                              |
-| ----------------------------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`quality-conventions`](../../quality-conventions/docs/README.md) | `conventions` | The naming style each kind of name follows in this project (constants, functions, types, files, ...) and the names that break it, with renames     |
-| [`quality-tests`](../../quality-tests/docs/README.md)             | `tests`       | Untested or barely tested code from coverage, ranked by size, complexity and churn; example tests written by the agent in the project's test style |
-| [`quality-lint`](../../quality-lint/docs/README.md)               | `lint`        | Findings and autofixes of the linters the project already uses, through SARIF                                                                      |
-| [`quality-duplication`](../../quality-duplication/docs/README.md) | `duplication` | Copy-pasted code (jscpd)                                                                                                                           |
+| Package                                                   | Check     | Finds                                                     |
+| --------------------------------------------------------- | --------- | --------------------------------------------------------- |
+| [`quality-secrets`](../../quality-secrets/docs/README.md) | `secrets` | Leaked secrets (gitleaks)                                 |
+| [`testids`](../../testids/docs/README.md)                 | `testids` | Interactive elements without the project's test attribute |
 
-A check implements `QualityCheck { name; detect(dir); run(context) }` and returns any of `issues`, `tests`, `conventions`, `coverage`, `duplication` and `changes`. `context` has the directory, a `CommandRunner` and, when an LLM is configured, an `Agent`.
+A check implements `QualityCheck { name; detect(dir); run(context) }` and returns any of `issues` and `changes` (suggested fixes an issue points at through `changeId`). `context` has the directory, a `CommandRunner` and an optional `AbortSignal`.
 
 ## Running
 
 ```ts
-const data = await analyzeQuality({
-  dir,
-  checks: [conventionsCheck(), testGapsCheck(), lintCheck(), duplicationCheck()],
-  agent,
-})
+const data = await analyzeQuality({ dir, checks: [secretsCheck(), testIdsCheck()], runner })
 ```
 
-Checks that do not detect themselves are skipped; a failing check is recorded in `tools` and the others continue. A check that applies but had nothing to run (its tool or the project's dependencies are not installed) returns `skipped: reason`, kept in `tools` and shown as `skipped: …` rather than `ok`. Changes are de-duplicated by id. `qualityDataSchema` validates uploads; `stableId(...parts)` gives issues and changes ids that survive re-runs.
-
-## Report
-
-Metrics: issues, errors, line coverage, places worth testing (only when the `tests` check ran), naming consistency (over established conventions only), duplicated lines, suggested changes — with deltas against the previous run. Kinds of names without an established convention are listed as `none (mostly <style>)` without outliers. Kinds whose names a linter's explicit rule covers get an "Enforced by" column naming the linters. Sections: naming conventions (table, outliers, renames), tests (ranked targets, suggested tests), one section per finding category with fixes, and the tools that ran. Suggested changes appear as `changes` blocks that can be accepted.
+Checks run one after another. Checks that do not detect themselves are skipped; a failing check is recorded in `tools` and the others continue. A check that applies but had nothing to run returns `skipped: reason`, kept in `tools`. Changes are de-duplicated by id. `stableId(...parts)` gives issues and changes ids that survive re-runs.

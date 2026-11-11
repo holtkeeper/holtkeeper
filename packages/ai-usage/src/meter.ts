@@ -1,13 +1,22 @@
 import type { RepoTarget } from '@holtkeeper/access'
-import type { Agent, AgentResult, AgentTask, AgentUsage } from '@holtkeeper/agent'
+import {
+  type Agent,
+  type AgentResult,
+  type AgentTask,
+  type AgentUsage,
+  BudgetExceededError,
+} from '@holtkeeper/agent'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AiUsageRecord, AiUsageStore } from '@holtkeeper/store'
 
 import type { BudgetGuard, BudgetLimitStatus } from './budget.ts'
 import { type ModelPrices, costOf, defaultPrices, emptyUsage } from './cost.ts'
 
-/** Thrown instead of running an agent when a `block` budget is used up. */
-export class BudgetExceededError extends Error {
+/**
+ * Thrown instead of running an agent when a `block` budget would be exceeded. A
+ * `BudgetExceededError` from `@holtkeeper/agent` (and named so) that never used anything.
+ */
+export class BudgetDeniedError extends BudgetExceededError {
   readonly exceeded: BudgetLimitStatus[]
   constructor(exceeded: BudgetLimitStatus[]) {
     const blocking = exceeded.filter((status) => status.action === 'block')
@@ -15,11 +24,10 @@ export class BudgetExceededError extends Error {
       `AI budget exceeded: ${blocking
         .map(
           (s) =>
-            `${s.period}${s.taskKind ? ` ${s.taskKind}` : ''} $${s.spentUsd.toFixed(2)} of $${s.limitUsd}`,
+            `week of ${s.week} $${s.spentUsd.toFixed(2)} spent + $${s.estimateUsd.toFixed(2)} estimated over $${s.limitUsd.toFixed(2)}${s.interactive ? '' : ` (the last $${s.reserveUsd.toFixed(2)} of $${s.weeklyUsd.toFixed(2)} is kept for interactive work)`}`,
         )
         .join(', ')}`,
     )
-    this.name = 'BudgetExceededError'
     this.exceeded = exceeded
   }
 }
@@ -37,6 +45,17 @@ export interface MeteredContext {
   analyzer?: string
   jobId?: string
   analysisId?: string
+  /** A person started the runs; see `BudgetCheck.interactive`. Default `false`. */
+  interactive?: boolean
+}
+
+/** `task` with `maxCostUsd` lowered to `remainingUsd` when that is smaller. */
+export function withCostCap<Output>(
+  task: AgentTask<Output>,
+  remainingUsd: number | undefined,
+): AgentTask<Output> {
+  if (remainingUsd === undefined) return task
+  return { ...task, maxCostUsd: Math.min(task.maxCostUsd ?? Infinity, remainingUsd) }
 }
 
 export interface MeteredAgentOptions {
@@ -72,6 +91,8 @@ export function partialUsage(error: unknown): Pick<AgentResult, 'usage' | 'costU
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+const budgetStop = (error: unknown) => error instanceof BudgetExceededError
+
 /** Builds the record for a finished or failed run. */
 export function usageEntry(
   base: {
@@ -85,6 +106,7 @@ export function usageEntry(
     analyzer?: string
     jobId?: string
     analysisId?: string
+    transcriptRef?: string
     durationMs: number
   },
   outcome: { result: Pick<AgentResult, 'usage' | 'costUsd' | 'turns'> } | { error: unknown },
@@ -110,16 +132,18 @@ export function usageEntry(
     ...costOf(result, base.model, prices),
     durationMs: base.durationMs,
     turns: result.turns,
-    outcome: 'result' in outcome ? 'ok' : 'error',
+    outcome: 'result' in outcome ? 'ok' : budgetStop(outcome.error) ? 'denied-budget' : 'error',
     ...('error' in outcome && { error: message(outcome.error) }),
+    ...(base.transcriptRef !== undefined && { transcriptRef: base.transcriptRef }),
   }
 }
 
 /**
  * Wraps an agent so every run is checked against budgets and recorded. A run a `block` budget
- * denies is recorded as `denied-budget` and throws `BudgetExceededError` without calling the
- * agent. Finished runs are recorded as `ok`, failed ones as `error` with whatever usage the error
- * carries; the original result or error is passed through unchanged.
+ * denies is recorded as `denied-budget` and throws `BudgetDeniedError` without calling the
+ * agent; an allowed run is capped at the budget's remaining USD (`maxCostUsd`). Finished runs
+ * are recorded as `ok`, failed ones as `error` with whatever usage the error carries; the
+ * original result or error is passed through unchanged.
  */
 export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent {
   const { context, budgets, prices = defaultPrices, now = () => new Date() } = options
@@ -151,21 +175,24 @@ export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent 
         ...(context.jobId !== undefined && { jobId: context.jobId }),
         ...(context.analysisId !== undefined && { analysisId: context.analysisId }),
       }
+      let capped = task
       if (budgets) {
-        const decision = await budgets.check({ repo: context.repo, taskKind })
+        const decision = await budgets.check({
+          repo: context.repo,
+          taskKind,
+          ...(context.interactive !== undefined && { interactive: context.interactive }),
+        })
         if (!decision.allowed) {
-          const error = new BudgetExceededError(decision.exceeded)
-          await save({
-            ...usageEntry({ ...base, durationMs: 0 }, { error }, prices),
-            outcome: 'denied-budget',
-          })
+          const error = new BudgetDeniedError(decision.exceeded)
+          await save(usageEntry({ ...base, durationMs: 0 }, { error }, prices))
           throw error
         }
+        capped = withCostCap(task, decision.remainingUsd)
       }
       const elapsed = () => Math.max(0, now().getTime() - started.getTime())
       let result: AgentResult<Output>
       try {
-        result = await agent.run(task)
+        result = await agent.run(capped)
       } catch (error) {
         await save(usageEntry({ ...base, durationMs: elapsed() }, { error }, prices))
         throw error
@@ -192,6 +219,8 @@ export interface AgentRunInfo {
   analysisId?: string
   /** When the run started; default now minus `durationMs`. */
   at?: string
+  /** Artifact id of the run's transcript; stored on the record. */
+  transcriptRef?: string
 }
 
 export interface UsageRecorderOptions {
@@ -205,7 +234,7 @@ export interface UsageRecorderOptions {
 
 /**
  * An `onRun` hook that stores every reported run in `store`. A `BudgetExceededError` is stored as
- * `denied-budget`.
+ * `denied-budget`, with whatever usage it carries.
  */
 export function usageRecorder(
   store: Pick<AiUsageStore, 'append'>,
@@ -224,12 +253,12 @@ export function usageRecorder(
       ...(info.analyzer !== undefined && { analyzer: info.analyzer }),
       ...(info.jobId !== undefined && { jobId: info.jobId }),
       ...(info.analysisId !== undefined && { analysisId: info.analysisId }),
+      ...(info.transcriptRef !== undefined && { transcriptRef: info.transcriptRef }),
       durationMs: info.durationMs,
     }
     const entry = info.result
       ? usageEntry(base, { result: info.result }, prices)
       : usageEntry(base, { error: info.error }, prices)
-    if (info.error instanceof BudgetExceededError) entry.outcome = 'denied-budget'
     await store.append(entry)
     budgets?.note(entry)
   }

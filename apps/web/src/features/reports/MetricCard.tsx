@@ -13,7 +13,7 @@ export function MetricCard({ metric }: { metric: Metric }) {
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, y: 8 }, shown: { opacity: 1, y: 0 } }}
-      className="relative flex flex-col gap-1 overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-surface"
+      className="relative flex flex-col gap-1 overflow-hidden rounded-2xl border border-border bg-surface p-4"
     >
       {metric.tone ? (
         <span

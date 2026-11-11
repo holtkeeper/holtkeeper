@@ -1,5 +1,5 @@
 import type { Scope } from '@holtkeeper/access'
-import type { RotationPolicy, Timestamp } from '@holtkeeper/store'
+import type { CredentialCapabilities, RotationPolicy, Timestamp } from '@holtkeeper/store'
 
 /**
  * Issues a fresh token for a service and inspects existing ones. One rotator per credential `kind`.
@@ -48,6 +48,8 @@ export interface CredentialView {
   rotatable: boolean
   /** Kind-specific, non-secret configuration (e.g. an AI provider's endpoint options). */
   options?: Record<string, unknown>
+  /** Probed provider capabilities; absent until probed and after any change to how it is reached. */
+  capabilities?: CredentialCapabilities
   createdAt: Timestamp
   updatedAt: Timestamp
 }

@@ -18,8 +18,7 @@ import {
 
 import { type ServerDeps, repoTarget } from './context.ts'
 import type { EventDispatcher } from './events.ts'
-import { librariesConfigOf, librariesEnabled } from './libraries.ts'
-import { fileForgeKey, globalLimits } from './limits.ts'
+import { forgeLimitKey, globalLimits } from './limits.ts'
 import { queueNewRepoJobs } from './new-repos.ts'
 
 const seenKey = (repo: RepoRef) => `webhook-seen:${repo.forge}:${repo.path}`
@@ -316,10 +315,7 @@ function createPoller(options: PollerOptions) {
     try {
       const definition = config.forges[repo.forge]
       if (!definition) throw new Error(`forge ${repo.forge} is not configured`)
-      const libraries = await librariesConfigOf(store.settings)
-      const pushesWanted =
-        config.jobs?.onPush !== undefined ||
-        (libraries !== undefined && librariesEnabled(libraries) && libraries.refreshOnPush)
+      const pushesWanted = config.jobs?.onPush !== undefined
       const result = await pollRepository({
         forge: definition.create(),
         repo,
@@ -482,7 +478,7 @@ export function serverPoller(
     dispatch,
     ...(deps.limiter && { limiter: deps.limiter }),
     keyOf: (forgeId) =>
-      deps.configSource?.effective().forges[forgeId]?.credentialId ?? fileForgeKey(forgeId),
+      deps.configSource?.effective().forges[forgeId]?.credentialId ?? forgeLimitKey(forgeId),
     now: deps.now,
     onNewRepos: (repos) => queueNewRepoJobs(deps, repos, { log }),
     log,

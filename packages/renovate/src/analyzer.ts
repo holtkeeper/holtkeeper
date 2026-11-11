@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { defineAnalyzer, withDefaultBranchHead } from '@holtkeeper/analyzer'
 import type { GitForge } from '@holtkeeper/forge'
 
 import { opensMergeRequests, renovateConfig, renovateEnv, renovatePlatform } from './config.ts'
@@ -110,118 +110,121 @@ export async function renovateMergeRequests(input: {
 export function createRenovateAnalyzer(settings: { command?: string[]; now?: () => Date } = {}) {
   const command = settings.command ?? defaultRenovateCommand
   const now = settings.now ?? (() => new Date())
-  return defineAnalyzer<RenovateData, RenovateOptions>({
-    kind: 'renovate',
-    analysis: renovateAnalysis,
-    scope: 'repo',
-    exclusive: true,
-    needs: { forge: true, forgeAccess: true },
-    options: renovateOptionsSchema,
-    presets: renovatePresets,
-    editor: 'renovate',
-    flags: [
-      { flag: 'mode', option: 'mode', description: 'report (default) or merge-requests' },
-      { flag: 'updates', option: 'updates', description: 'all (default) or security' },
-    ],
-    async run({ repo, forge, forgeAccess, runner, options, signal, log }) {
-      if (!forge || !forgeAccess)
-        throw new Error('the renovate analyzer needs a forge and its token')
-      const started = now()
-      const mode = opensMergeRequests(options, forgeAccess) ? 'merge-requests' : 'report'
-      if (options.mode === 'merge-requests' && forgeAccess.readOnly)
-        log?.('renovate: the repository is read-only, looking up updates only')
+  return withDefaultBranchHead(
+    defineAnalyzer<RenovateData, RenovateOptions>({
+      kind: 'renovate',
+      analysis: renovateAnalysis,
+      scope: 'repo',
+      refresh: { on: 'time', cadence: '1d', heavy: true },
+      exclusive: true,
+      needs: { forge: true, forgeAccess: true },
+      options: renovateOptionsSchema,
+      presets: renovatePresets,
+      editor: 'renovate',
+      flags: [
+        { flag: 'mode', option: 'mode', description: 'report (default) or merge-requests' },
+        { flag: 'updates', option: 'updates', description: 'all (default) or security' },
+      ],
+      async run({ repo, forge, forgeAccess, runner, options, signal, log }) {
+        if (!forge || !forgeAccess)
+          throw new Error('the renovate analyzer needs a forge and its token')
+        const started = now()
+        const mode = opensMergeRequests(options, forgeAccess) ? 'merge-requests' : 'report'
+        if (options.mode === 'merge-requests' && forgeAccess.readOnly)
+          log?.('renovate: the repository is read-only, looking up updates only')
 
-      const work = await mkdtemp(join(tmpdir(), 'holtkeeper-renovate-'))
-      let proxy: ForgeProxy | undefined
-      try {
-        if (forgeAccess.fetch)
-          proxy = startForgeProxy({
-            target: renovatePlatform(forgeAccess).endpoint,
-            fetch: forgeAccess.fetch,
+        const work = await mkdtemp(join(tmpdir(), 'holtkeeper-renovate-'))
+        let proxy: ForgeProxy | undefined
+        try {
+          if (forgeAccess.fetch)
+            proxy = startForgeProxy({
+              target: renovatePlatform(forgeAccess).endpoint,
+              fetch: forgeAccess.fetch,
+            })
+          const reportPath = join(work, 'report.json')
+          const configFile = join(work, 'config.json')
+          const config = renovateConfig({
+            options,
+            access: forgeAccess,
+            repo: repo.path,
+            reportPath,
+            baseDir: join(work, 'base'),
+            ...(proxy && { proxy: proxy.origin }),
           })
-        const reportPath = join(work, 'report.json')
-        const configFile = join(work, 'config.json')
-        const config = renovateConfig({
-          options,
-          access: forgeAccess,
-          repo: repo.path,
-          reportPath,
-          baseDir: join(work, 'base'),
-          ...(proxy && { proxy: proxy.origin }),
-        })
-        await Bun.write(configFile, JSON.stringify(config, null, 2))
-        log?.(
-          `renovate ${RENOVATE_VERSION}: ${mode === 'report' ? 'looking up updates' : 'updating merge requests'}`,
-        )
-        const result = await runner.run(command, {
-          cwd: work,
-          env: renovateEnv({ configFile, access: forgeAccess, proxied: Boolean(proxy) }),
-          timeoutMs: options.timeoutMinutes * 60_000,
-          ...(signal && { signal }),
-        })
-        const output = lastLines(
-          [result.stdout, result.stderr].filter(Boolean).join('\n'),
-          80,
-        ).replaceAll(forgeAccess.token, '***')
+          await Bun.write(configFile, JSON.stringify(config, null, 2))
+          log?.(
+            `renovate ${RENOVATE_VERSION}: ${mode === 'report' ? 'looking up updates' : 'updating merge requests'}`,
+          )
+          const result = await runner.run(command, {
+            cwd: work,
+            env: renovateEnv({ configFile, access: forgeAccess, proxied: Boolean(proxy) }),
+            timeoutMs: options.timeoutMinutes * 60_000,
+            ...(signal && { signal }),
+          })
+          const output = lastLines(
+            [result.stdout, result.stderr].filter(Boolean).join('\n'),
+            80,
+          ).replaceAll(forgeAccess.token, '***')
 
-        const base = {
-          mode,
-          readOnly: forgeAccess.readOnly,
-          renovateVersion: RENOVATE_VERSION,
-          startedAt: started.toISOString(),
-          output,
-          ...(proxy && { apiRequests: proxy.requests }),
-        } as const
-        const report = Bun.file(reportPath)
-        if (!(await report.exists())) {
-          log?.(`renovate: exited with ${result.exitCode} and wrote no report`)
+          const base = {
+            mode,
+            readOnly: forgeAccess.readOnly,
+            renovateVersion: RENOVATE_VERSION,
+            startedAt: started.toISOString(),
+            output,
+            ...(proxy && { apiRequests: proxy.requests }),
+          } as const
+          const report = Bun.file(reportPath)
+          if (!(await report.exists())) {
+            log?.(`renovate: exited with ${result.exitCode} and wrote no report`)
+            return {
+              data: {
+                ...base,
+                status: 'failed',
+                durationMs: now().getTime() - started.getTime(),
+                dependencies: 0,
+                outdated: 0,
+                managers: [],
+                updates: [],
+                deprecated: [],
+                mergeRequests: [],
+                problems: [
+                  {
+                    level: 'fatal',
+                    message: `Renovate exited with ${result.exitCode} without a report`,
+                  },
+                ],
+              },
+            }
+          }
+          const { branches, ...parsed } = parseRenovateReport(await report.text(), repo.path)
+          const mergeRequests = await renovateMergeRequests({
+            forge,
+            repo: repo.path,
+            branchPrefix: options.branchPrefix,
+            branches,
+            now: now(),
+          })
+          const failed = result.exitCode !== 0 || parsed.problems.some((p) => p.level === 'fatal')
+          log?.(
+            `renovate: ${parsed.outdated} of ${parsed.dependencies} dependencies outdated, ${parsed.updates.length} updates, ${mergeRequests.filter((mr) => mr.state === 'open').length} open merge requests`,
+          )
           return {
             data: {
               ...base,
-              status: 'failed',
+              ...parsed,
+              status: failed ? 'failed' : 'ok',
               durationMs: now().getTime() - started.getTime(),
-              dependencies: 0,
-              outdated: 0,
-              managers: [],
-              updates: [],
-              deprecated: [],
-              mergeRequests: [],
-              problems: [
-                {
-                  level: 'fatal',
-                  message: `Renovate exited with ${result.exitCode} without a report`,
-                },
-              ],
+              mergeRequests,
             },
           }
+        } finally {
+          await proxy?.stop()
+          await rm(work, { recursive: true, force: true })
         }
-        const { branches, ...parsed } = parseRenovateReport(await report.text(), repo.path)
-        const mergeRequests = await renovateMergeRequests({
-          forge,
-          repo: repo.path,
-          branchPrefix: options.branchPrefix,
-          branches,
-          now: now(),
-        })
-        const failed = result.exitCode !== 0 || parsed.problems.some((p) => p.level === 'fatal')
-        log?.(
-          `renovate: ${parsed.outdated} of ${parsed.dependencies} dependencies outdated, ${parsed.updates.length} updates, ${mergeRequests.filter((mr) => mr.state === 'open').length} open merge requests`,
-        )
-        return {
-          data: {
-            ...base,
-            ...parsed,
-            status: failed ? 'failed' : 'ok',
-            durationMs: now().getTime() - started.getTime(),
-            mergeRequests,
-          },
-        }
-      } finally {
-        await proxy?.stop()
-        await rm(work, { recursive: true, force: true })
-      }
-    },
-  })
+      },
+    }),
+  )
 }
 
 /** The `renovate` analyzer with the pinned Renovate and the real clock. */

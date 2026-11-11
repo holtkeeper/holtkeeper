@@ -1,4 +1,5 @@
 import type {
+  AuditActor,
   AuditEvent,
   AuditEventInput,
   AuditFilter,
@@ -10,6 +11,9 @@ const clone = <T>(value: T): T => structuredClone(value)
 
 /** `prevHash` of the first event in a chain. */
 export const AUDIT_GENESIS_HASH = '0'.repeat(64)
+
+/** The actor of what Holtkeeper does on its own: seeding defaults, scheduled rotations, budgets. */
+export const SYSTEM_ACTOR: AuditActor = { id: 'system', name: 'Holtkeeper', provider: 'system' }
 
 /** Events `AuditStore.export` reads per batch. */
 export const AUDIT_EXPORT_BATCH = 500
@@ -57,6 +61,8 @@ export function matchesAuditFilter(event: AuditEvent, filter: AuditFilter = {}):
     (filter.targetType === undefined || event.target.type === filter.targetType) &&
     (filter.targetId === undefined || event.target.id === filter.targetId) &&
     (filter.repo === undefined || event.target.repo === filter.repo) &&
+    (filter.repos === undefined ||
+      (event.target.repo !== undefined && filter.repos.includes(event.target.repo))) &&
     (filter.outcome === undefined || event.outcome === filter.outcome) &&
     (filter.via === undefined || event.via === filter.via) &&
     (filter.from === undefined || event.at >= filter.from) &&
@@ -220,6 +226,10 @@ export function memoryAudit(): AuditStore {
       }
     },
     count: async (filter = {}) => matching(filter).length,
+    repos: async () =>
+      [
+        ...new Set(events.flatMap((event) => (event.target.repo ? [event.target.repo] : []))),
+      ].toSorted(),
     async *export(filter = {}) {
       for (const event of matching(filter)) yield clone(event)
     },

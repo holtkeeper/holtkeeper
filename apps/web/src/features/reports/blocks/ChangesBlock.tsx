@@ -70,7 +70,7 @@ function ChangeCard({
   return (
     <motion.li
       layout="position"
-      className="relative flex flex-col gap-3 overflow-hidden rounded-2xl border bg-surface p-4 shadow-surface transition-colors"
+      className="relative flex flex-col gap-3 overflow-hidden rounded-2xl border bg-surface p-4 transition-colors"
       style={{
         borderColor: selected ? 'var(--accent)' : conflicts ? 'var(--danger)' : 'var(--border)',
       }}

@@ -1,3 +1,4 @@
 export * from './definitions.ts'
 export * from './resolve.ts'
 export * from './defaults.ts'
+export * from './retired.ts'

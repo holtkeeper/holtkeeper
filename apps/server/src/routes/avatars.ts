@@ -1,15 +1,14 @@
 import { Avatar, Style } from '@dicebear/core'
 import type { Principal } from '@holtkeeper/access'
-import type { ActivityPerson, MePrincipal, SetAvatarInput } from '@holtkeeper/api'
-import type { ActivityEvent } from '@holtkeeper/store'
+import type { PersonView, MePrincipal, SetAvatarInput } from '@holtkeeper/api'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
 import { type Env, type ServerDeps, principalOf, readBody } from '../context.ts'
 
-/** Where the avatar of a seed is served. */
-const avatarUrl = (seed: string) => `/api/avatars/${encodeURIComponent(seed)}.svg`
+/** URL of the generated avatar for `seed`. */
+export const avatarUrl = (seed: string) => `/api/avatars/${encodeURIComponent(seed)}.svg`
 
 const MAX_SEED = 128
 const MIN_SIZE = 16
@@ -58,21 +57,11 @@ export async function withAvatar(
   return { ...principal, avatarUrl: avatarUrl(user?.avatarSeed ?? principal.id) }
 }
 
-/** Names and avatars of the users among events' actors and subjects. */
-export const activityPeople = (
-  deps: Pick<ServerDeps, 'store'>,
-  events: readonly ActivityEvent[],
-): Promise<Record<string, ActivityPerson>> =>
-  peopleOf(
-    deps,
-    events.flatMap((e) => (e.subject ? [e.actor, e.subject] : [e.actor])),
-  )
-
 /** Names and avatars of the ids that are users; other ids (services, `system`) are absent. */
 export async function peopleOf(
   deps: Pick<ServerDeps, 'store'>,
   ids: Iterable<string>,
-): Promise<Record<string, ActivityPerson>> {
+): Promise<Record<string, PersonView>> {
   const unique = new Set(ids)
   const users = await Promise.all([...unique].map((id) => deps.store.users.getUser(id)))
   return Object.fromEntries(

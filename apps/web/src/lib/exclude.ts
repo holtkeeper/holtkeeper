@@ -42,7 +42,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /**
  * The setting entry to write so `option` of `repo` also lists `pattern`. The entry naming the
  * repository is extended in place; otherwise a new entry for the repository starts from the
- * winning broader value, since the most specific entry replaces it as a whole.
+ * winning broader value, since the most specific entry replaces it as a whole. When no entry sets
+ * `option`, the pattern is added to `defaults`, the option's value without one.
  */
 export function excludeEntry(
   key: string,
@@ -50,11 +51,12 @@ export function excludeEntry(
   pattern: string,
   repo: RepoRef,
   effective: SettingView | undefined,
+  defaults: readonly string[] = [],
 ): { id?: string; key: string; scope: Scope; value: Record<string, unknown> } {
   const value = isRecord(effective?.value) ? effective.value : {}
   const current = Array.isArray(value[option])
     ? value[option].filter((item): item is string => typeof item === 'string')
-    : []
+    : [...defaults]
   const next = { ...value, [option]: current.includes(pattern) ? current : [...current, pattern] }
   const own = (effective?.scope.repos ?? []).some(
     (entry) => entry === repoKey(repo) || entry === repo.path,

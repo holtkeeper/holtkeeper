@@ -1,6 +1,8 @@
 import { type RepoTarget, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import type { SettingEntry } from '@holtkeeper/store'
 
+import { isRetiredSetting } from './retired.ts'
+
 /**
  * Every entry for `key` whose scope covers `repo`, in the order they override each other: most
  * specific scope first, and among equally specific ones the most recently updated. The first one
@@ -11,6 +13,7 @@ export function settingCascade(
   key: string,
   repo: RepoTarget,
 ): SettingEntry[] {
+  if (isRetiredSetting(key)) return []
   return entries
     .filter((entry) => entry.key === key && scopeCoversRepo(entry.scope, repo))
     .toSorted(
@@ -56,4 +59,19 @@ export function settingCascades(
     if (cascade.length) result.set(key, cascade)
   }
   return result
+}
+
+/**
+ * The entry for `key` that applies everywhere: among entries scoped `{ all: true }`, the most
+ * recently updated. Entries of narrower scopes and retired keys are ignored; use it for `global`
+ * settings.
+ */
+export function resolveGlobalSetting(
+  entries: readonly SettingEntry[],
+  key: string,
+): SettingEntry | undefined {
+  if (isRetiredSetting(key)) return undefined
+  return entries
+    .filter((entry) => entry.key === key && entry.scope.all === true)
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
 }

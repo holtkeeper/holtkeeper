@@ -149,12 +149,92 @@ describe.skipIf(!url || !admin)('postgres store', () => {
       INSERT INTO ${schema}.jobs (id, analyzer, repo_forge, repo_path, options, trigger, status,
         attempts, max_attempts, run_after, created_at)
       VALUES ('old', 'bundle', 'work', 'games/a', '{}', 'manual', 'running', 1, 3, $1, $1),
-        ('next', 'changelog', 'work', 'games/a', '{}', 'manual', 'queued', 0, 3, $1, $1)`,
+        ('next', 'depgraph', 'work', 'games/a', '{}', 'manual', 'queued', 0, 3, $1, $1)`,
       ['2026-10-30T10:00:00.000Z'],
     )
     expect(await migrate(admin!, schema)).toEqual(migrations.slice(8).map((step) => step.version))
     const store = postgresStore({ url: url!, schema })
     expect((await store.jobs.claim('w1', '2026-10-30T11:00:00.000Z'))?.id).toBe('next')
+    await store.close()
+  })
+
+  test('migration 21 removes what retired analyzers and settings left behind', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((step) => step.version <= 20),
+    )
+    const at = '2026-11-01T00:00:00.000Z'
+    await admin!.unsafe(
+      `
+      INSERT INTO ${schema}.analyses (id, repo_forge, repo_path, kind, created_at, data)
+      VALUES ('a1', 'work', 'shapes/a', 'quality', $1, '{}'),
+        ('a2', 'work', 'shapes/a', 'depgraph', $1, '{}');
+      `,
+      [at],
+    )
+    await admin!.unsafe(
+      `
+      INSERT INTO ${schema}.jobs (id, analyzer, repo_forge, repo_path, options, trigger, status,
+        attempts, max_attempts, run_after, created_at)
+      VALUES ('j1', 'warmup', 'work', 'shapes/a', '{}', 'manual', 'queued', 0, 3, $1, $1),
+        ('j2', 'bundle', 'work', 'shapes/a', '{}', 'manual', 'queued', 0, 3, $1, $1)`,
+      [at],
+    )
+    await admin!.unsafe(
+      `
+      INSERT INTO ${schema}.settings (id, key, scope, value, secret, updated_at)
+      VALUES ('s1', 'analyzers.port', '{"all":true}', '{}', false, $1),
+        ('s2', 'analyzers.bundle', '{"all":true}', '{}', false, $1)`,
+      [at],
+    )
+    await admin!.unsafe(
+      `INSERT INTO ${schema}.kv (key, value)
+       VALUES ('digests', '[]'), ('chat:slack:policy', '{}'), ('chat:slack:connection', '{}')`,
+    )
+    const docs = [
+      [
+        'schedule',
+        'mixed',
+        {
+          name: 'Mixed',
+          enabled: true,
+          analyzers: ['changelog', 'bundle', 'release-risk', 'coverage'],
+          options: { 'release-risk': { x: 1 }, bundle: { y: 2 } },
+        },
+      ],
+      ['schedule', 'gone', { name: 'Gone', enabled: true, analyzers: ['fleet', 'delivery'] }],
+      ['trigger', 'cmd', { on: 'command', command: 'port', analyzer: 'port' }],
+      ['trigger', 'new-repo', { on: 'newRepo' }],
+    ] as const
+    for (const [type, id, data] of docs)
+      // oxlint-disable-next-line no-await-in-loop -- a few rows
+      await admin!.unsafe(
+        `INSERT INTO ${schema}.config_documents (type, id, data, version, updated_at, updated_by)
+         VALUES ($1, $2, '${JSON.stringify(data)}'::jsonb, 1, $3, 'person')`,
+        [type, id, at],
+      )
+
+    expect(await migrate(admin!, schema)).toContain(21)
+    const store = postgresStore({ url: url!, schema })
+    const { kv, config } = store
+    if (!kv || !config) throw new Error('the postgres store has kv and config')
+    expect((await store.analyses.list({})).map((record) => record.id)).toEqual(['a2'])
+    expect((await store.jobs.list()).map((job) => job.id)).toEqual(['j2'])
+    expect((await store.settings.list()).map((entry) => entry.id)).toEqual(['s2'])
+    expect(await kv.get('digests')).toBeUndefined()
+    expect(await kv.get('chat:slack:policy')).toBeUndefined()
+    expect(await kv.get('chat:slack:connection')).toEqual({})
+    expect(await config.get('schedule', 'gone')).toBeUndefined()
+    expect(await config.get('trigger', 'cmd')).toBeUndefined()
+    expect(await config.get('schedule', 'mixed')).toMatchObject({
+      version: 2,
+      updatedBy: 'system',
+      data: { analyzers: ['bundle', 'coverage'], options: { bundle: { y: 2 } } },
+    })
+    expect((await config.history('schedule', 'mixed')).map((each) => each.version)).toEqual([1])
+    expect(await config.get('trigger', 'new-repo')).toMatchObject({ version: 1 })
     await store.close()
   })
 
@@ -172,13 +252,15 @@ describe.skipIf(!url || !admin)('postgres store', () => {
 
   test('timestamps come back in the contract form, whatever offset they were written with', async () => {
     const store = postgresStore({ url: url!, schema: nextSchema() })
-    const event = await store.activity.append({
-      at: '2026-10-01T02:30:00+02:00',
-      actor: 'root',
-      action: 'a.b',
+    const stored = await store.auditRuns.add({
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'manual',
+      startedAt: '2026-10-01T02:00:00+02:00',
+      finishedAt: '2026-10-01T02:30:00+02:00',
+      report: { findings: [], scanned: [], errors: [] } as never,
     })
-    expect(event.at).toBe('2026-10-01T00:30:00.000Z')
-    expect((await store.activity.list())[0]?.at).toBe('2026-10-01T00:30:00.000Z')
+    expect(stored.finishedAt).toBe('2026-10-01T00:30:00.000Z')
+    expect((await store.auditRuns.list())[0]?.finishedAt).toBe('2026-10-01T00:30:00.000Z')
     await store.close()
   })
 

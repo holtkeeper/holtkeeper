@@ -7,25 +7,28 @@ Stores forge accounts and API keys, keeps their secrets sealed, and rotates expi
 ```ts
 const credentials = createCredentialService({
   credentials: store.credentials,
-  activity: store.activity, // optional
+  audit: store.audit, // optional
   vault: aesVault(env('HOLTKEEPER_VAULT_KEY')),
   rotators: [gitlabTokenRotator()],
 })
 ```
 
-| Method                     | Does                                                                                           |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `list()`, `get(id)`        | `CredentialView`s: everything except the secret, plus `rotatable` (a rotator handles the kind) |
-| `create(input, actor)`     | Validates, seals the secret, fills `expiresAt` from the rotator's `inspect` if not given       |
-| `update(id, input, actor)` | Changes given fields; a new secret is sealed, re-inspected and clears `lastError`              |
-| `remove(id, actor)`        | Deletes                                                                                        |
-| `reveal(id)`               | The plaintext secret, for internal callers that use the credential; never send it out          |
-| `rotate(id, actor)`        | Rotates now (see below)                                                                        |
-| `rotateDue()`              | Rotates every credential that is due; returns `{ id, ok, error? }[]`                           |
+| Method                              | Does                                                                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `list()`, `get(id)`                 | `CredentialView`s: everything except the secret, plus `rotatable` (a rotator handles the kind)                        |
+| `create(input)`                     | Validates, seals the secret, fills `expiresAt` from the rotator's `inspect` if not given                              |
+| `update(id, input)`                 | Changes given fields; a new secret is sealed, re-inspected and clears `lastError`                                     |
+| `remove(id)`                        | Deletes                                                                                                               |
+| `reveal(id)`                        | The plaintext secret, for internal callers that use the credential; never send it out                                 |
+| `rotate(id)`                        | Rotates now (see below)                                                                                               |
+| `rotateDue()`                       | Rotates every credential that is due; returns `{ id, ok, error? }[]`                                                  |
+| `setCapabilities(id, capabilities)` | Stores probe results (`{ agentLoop: 'ok' \| 'failed' \| 'unknown', checkedAt, error? }`) without changing `updatedAt` |
+
+`capabilities` are what a probe found the provider can do (the server's credential test fills them for AI providers). `update` drops them whenever the secret, `options`, `kind` or `url` changes, so a stale probe never decides how the new endpoint is used.
 
 Input that fails validation throws `CredentialInputError` with one `field: message` entry per problem; an unknown id throws `CredentialNotFoundError`. Validation requires a non-empty `name`, `kind` and `secret`, an http(s) `url`, a valid `Scope`, an ISO 8601 `expiresAt`, and a rotation policy with positive integer `daysBefore` < `lifetimeDays` (otherwise a fresh token would be due again at once).
 
-Every change appends an activity event — `credential.created`, `credential.updated` (with the changed field names), `credential.removed`, `credential.rotated`, `credential.rotation_failed` — with the acting principal id, or `system` for scheduled rotations. Events and errors never contain secrets.
+Each scheduled rotation (`rotateDue`) appends a `credential.rotate` audit event by the system actor, `outcome: 'error'` with the message when it failed. Changes made through the API are audited by the server around the request, not by the service. Events and errors never contain secrets.
 
 ## Options
 
@@ -92,4 +95,4 @@ Runs `rotateDue()` immediately and then every `intervalMs`, skipping a tick whil
 - **Rotation invalidates the old token immediately.** The new token is stored before anything else can use it, but any process still holding the old plaintext (a running job, another server instance) fails from then on. Callers should `reveal` the secret right before use rather than caching it.
 - If the provider rotated but storing the new token failed, the token is lost: `lastError` says so and the credential must be re-entered by hand.
 - Reusing a revoked token for rotation can make the provider revoke the whole token family (GitLab does). Never rotate the same credential from two places.
-- Secrets are sealed by the `Vault` before they reach the store; views, activity and errors never carry them. `reveal` is for in-process use only.
+- Secrets are sealed by the `Vault` before they reach the store; views, audit events and errors never carry them. `reveal` is for in-process use only.

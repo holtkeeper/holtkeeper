@@ -1,19 +1,28 @@
 import type { Action, Grant, Principal } from '@holtkeeper/access'
 import { grantSchema } from '@holtkeeper/access'
-import type { McpTokenView } from '@holtkeeper/api'
+import type { McpTokenScope, McpTokenView } from '@holtkeeper/api'
 import type { KvStore, UserStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 /**
- * What a token may do, whatever its owner may: read the API catalog, audits and the knowledge
- * base (and propose to it over MCP), nothing else.
+ * What a token may do, whatever its owner may: read the API catalog, audits, release state and
+ * the knowledge base (and propose to it over MCP), nothing else. Cross-team catalog reach follows
+ * the `access.crossTeam` policy at request time, like the owner's.
  */
 const tokenActions: readonly Action[] = [
   'analyses:read',
+  'catalog:read',
   'repos:read',
   'audits:read',
   'knowledge:read',
+  'releases:read',
 ]
+
+/** Actions each scope adds to `tokenActions`. */
+const scopeActions: Record<McpTokenScope, readonly Action[]> = {
+  release: ['releases:run'],
+  tasks: ['tasks:run'],
+}
 
 const prefix = 'hk_mcp_'
 const tokenKey = (hash: string) => `mcp:token:${hash}`
@@ -27,6 +36,7 @@ const ownedTokenSchema = z.object({
   createdAt: z.string(),
   expiresAt: z.string().optional(),
   lastUsedAt: z.string().optional(),
+  scopes: z.array(z.enum(['release', 'tasks'])).optional(),
   hash: z.string(),
 })
 
@@ -55,23 +65,36 @@ const randomSecret = () => {
   return `${prefix}${Buffer.from(bytes).toString('base64url')}`
 }
 
-/** `grants` cut down to `tokenActions`; grants left without actions are dropped. */
-function readOnlyGrants(grants: readonly Grant[]): Grant[] {
+/**
+ * `grants` cut down to `tokenActions` plus what `scopes` add; grants left without actions are
+ * dropped.
+ */
+function tokenGrants(grants: readonly Grant[], scopes: readonly McpTokenScope[] = []): Grant[] {
+  const allowed = [...tokenActions, ...scopes.flatMap((scope) => scopeActions[scope])]
   return grants.flatMap((grant) => {
     const actions = grant.actions.includes('*')
-      ? [...tokenActions]
-      : tokenActions.filter((action) => grant.actions.includes(action))
+      ? [...allowed]
+      : allowed.filter((action) => grant.actions.includes(action))
     return actions.length ? [{ scope: grant.scope, actions }] : []
   })
 }
 
-const view = ({ id, name, prefix: shown, createdAt, expiresAt, lastUsedAt }: McpTokenView) => ({
+const view = ({
+  id,
+  name,
+  prefix: shown,
+  createdAt,
+  expiresAt,
+  lastUsedAt,
+  scopes,
+}: McpTokenView) => ({
   id,
   name,
   prefix: shown,
   createdAt,
   ...(expiresAt ? { expiresAt } : {}),
   ...(lastUsedAt ? { lastUsedAt } : {}),
+  ...(scopes?.length ? { scopes } : {}),
 })
 
 /** Options of `mcpTokens`. */
@@ -84,9 +107,9 @@ export interface McpTokensOptions {
 
 /**
  * Personal access tokens for the MCP endpoint and the API catalog routes. Only a SHA-256 of each
- * secret is stored. A token acts as its owner with read-only grants: for `users` accounts the
- * owner's current grants, and disabling the user or signing them out everywhere revokes it; for
- * other providers the grants at issue time.
+ * secret is stored. A token acts as its owner with read-only grants, plus `releases:run` with the
+ * `release` scope: for `users` accounts the owner's current grants, and disabling the user or
+ * signing them out everywhere revokes it; for other providers the grants at issue time.
  */
 export function mcpTokens({ kv, users, now }: McpTokensOptions) {
   const listOf = async (principalId: string) => {
@@ -110,7 +133,11 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         .map(view),
 
     /** Issues a token; `expiresInDays` 0 never expires. Returns the secret once. */
-    async create(principal: Principal, input: { name: string; expiresInDays: number }) {
+    async create(
+      principal: Principal,
+      input: { name: string; expiresInDays: number; scopes?: readonly McpTokenScope[] },
+    ) {
+      const scopes = [...new Set(input.scopes ?? [])]
       const secret = randomSecret()
       const hash = await hashSecret(secret)
       const createdAt = now()
@@ -124,8 +151,9 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         prefix: secret.slice(0, prefix.length + 4),
         createdAt: createdAt.toISOString(),
         ...(expiresAt ? { expiresAt } : {}),
+        ...(scopes.length ? { scopes } : {}),
         hash,
-        principal: { ...principal, grants: readOnlyGrants(principal.grants) },
+        principal: { ...principal, grants: tokenGrants(principal.grants, scopes) },
         ...(user ? { sessionVersion: user.sessionVersion } : {}),
       }
       await kv.set(
@@ -154,8 +182,8 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
     },
 
     /**
-     * The read-only principal behind `Authorization: Bearer hk_mcp_…`, or `undefined` when the
-     * request carries no valid token.
+     * The principal behind `Authorization: Bearer hk_mcp_…` with the token's grants, or
+     * `undefined` when the request carries no valid token.
      */
     async authenticate(request: Request): Promise<Principal | undefined> {
       const header = request.headers.get('authorization') ?? ''
@@ -175,7 +203,11 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         if (!user || user.disabled) return undefined
         if (stored.sessionVersion !== undefined && user.sessionVersion !== stored.sessionVersion)
           return undefined
-        principal = { ...principal, name: user.name, grants: readOnlyGrants(user.grants) }
+        principal = {
+          ...principal,
+          name: user.name,
+          grants: tokenGrants(user.grants, stored.scopes),
+        }
       }
       if (!stored.lastUsedAt || at.getTime() - Date.parse(stored.lastUsedAt) >= touchEveryMs) {
         const lastUsedAt = at.toISOString()

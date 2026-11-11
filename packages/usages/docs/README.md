@@ -20,7 +20,7 @@ The `usages` analyzer and analysis kind: which packages a repository's code impo
   - `repoPackages(data)` — the packages of one record with versions and counts.
   - `usedByCounts(entries, names)` → `Map<name, UsedByCount { repos, count, files }>` — totals per package without the per-export breakdown; unused names map to zeros.
   - `declaredMembers(signature)` — top-level member names of a declaration.
-- Markdown for agents: `renderPackageUsage(usage, { originLabel })`, `renderSites(found, originLabel?)`, `renderImpact(impact, originLabel?)`, `renderSite(site, label?)`.
+- Markdown for agents: `renderPackageUsage(usage, { originLabel, teamOf? })`, `renderSites(found, originLabel?, teamOf?)` (`teamOf` names each repository's team), `renderImpact(impact, originLabel?)`, `renderSite(site, label?)`.
 - Model: `UsagesData { packages, files, types, problems? }`, `UsedPackage { name, versions, ranges, workspaces, local?, count, files, exports }`, `UsedExport { name, subpath, count, files, kinds, members, props, spread, sites, truncated? }`, `UsageSite { file, line, column, kind, member?, props?, spread?, typed?, snippet, snippetLine }`, `TypeResolution { status, reason?, projects?, sites? }`, `UsageKind`, `usageKinds`, `isUsageKind(value)`, `importPath(name, subpath)`, `usageLimits`.
 
 ## How uses are found

@@ -7,6 +7,7 @@ import type {
   ChatForm,
   ChatStepStatus,
 } from '@holtkeeper/api'
+import { Link } from '@tanstack/react-router'
 import {
   Check,
   CircleCheck,
@@ -14,14 +15,16 @@ import {
   CircleDashed,
   CircleX,
   ExternalLink,
-  LoaderCircle,
   type LucideIcon,
   PauseCircle,
   SkipForward,
 } from 'lucide-react'
 import { useState } from 'react'
 
+import { messageOf } from '../../api/client.ts'
+import { useTaskGroupMutations, useWriteTasks } from '../../api/queries.ts'
 import { type FormValues, formCommand, initialValues, missingFields } from '../../lib/chat.ts'
+import { taskCancellable, taskStatusLabel, taskStatusTone } from '../../lib/tasks.ts'
 import {
   Button,
   ConfirmDialog,
@@ -29,9 +32,12 @@ import {
   MultiToggle,
   Select,
   Switch,
+  Tag,
   TextField,
   buttonClass,
+  notify,
 } from '../../ui/index.ts'
+import { WriteTasksOff } from '../tasks/TaskGroupView.tsx'
 
 const toneBar: Record<ChatCardTone, string> = {
   neutral: 'bg-default',
@@ -53,7 +59,7 @@ const steps: Record<ChatStepStatus, { icon: LucideIcon; className: string }> = {
   pending: { icon: CircleDashed, className: 'text-muted' },
   waiting: { icon: PauseCircle, className: 'text-muted' },
   active: { icon: CircleDot, className: 'text-accent' },
-  running: { icon: LoaderCircle, className: 'animate-spin text-accent' },
+  running: { icon: CircleDot, className: 'animate-pulse text-accent' },
   done: { icon: CircleCheck, className: 'text-success' },
   failed: { icon: CircleX, className: 'text-danger' },
   skipped: { icon: SkipForward, className: 'text-muted' },
@@ -68,7 +74,7 @@ function Steps({ items }: { items: readonly ChatCardStep[] }) {
         return (
           <li key={`${step.label}-${index}`} className="relative flex gap-3 pb-3 last:pb-0">
             {last ? null : (
-              <span aria-hidden className="absolute top-6 bottom-0 left-[9px] w-px bg-default" />
+              <span aria-hidden className="absolute top-6 bottom-0 left-[9px] w-px bg-line" />
             )}
             <Icon className={`relative mt-0.5 size-[19px] shrink-0 ${className}`} aria-hidden />
             <div className="flex min-w-0 flex-1 items-start justify-between gap-3 text-sm">
@@ -100,8 +106,8 @@ const flowDot: Record<ChatStepStatus, string> = {
   skipped: 'bg-default text-muted',
   active: 'bg-accent text-accent-foreground ring-4 ring-accent/20',
   running: 'bg-accent text-accent-foreground',
-  done: 'bg-success text-white',
-  failed: 'bg-danger text-white',
+  done: 'bg-success text-success-foreground',
+  failed: 'bg-danger text-danger-foreground',
 }
 
 /** Short stages in a row: dots joined by lines, the current one ringed. */
@@ -212,7 +218,7 @@ function InlineForm({
   const missing = missingFields(form, values)
   return (
     <form
-      className="flex flex-col gap-3 rounded-xl bg-default/40 p-3"
+      className="flex flex-col gap-3 rounded-[10px] border border-line bg-raise p-3"
       onSubmit={(event) => {
         event.preventDefault()
         if (missing.length === 0) onRun(formCommand(form, values))
@@ -318,7 +324,7 @@ function Block({
         </div>
       )
     case 'divider':
-      return <hr className="border-default/70" />
+      return <hr className="border-line" />
     case 'steps':
       return block.layout === 'flow' ? <Flow items={block.steps} /> : <Steps items={block.steps} />
     case 'list':
@@ -350,9 +356,150 @@ function Block({
       return <Actions actions={block.actions} onRun={onRun} busy={busy} />
     case 'form':
       return <InlineForm form={block.form} onRun={onRun} busy={busy} />
+    case 'task':
+      return <TaskBlock block={block} />
     default:
       return null
   }
+}
+
+type TaskCardBlock = Extract<ChatCardBlock, { type: 'task' }>
+
+/**
+ * A proposed code change: summary, target repositories with their merge requests, the status, a
+ * link to the task on the Tasks page and, while it is proposed, Approve and Cancel. Approving
+ * queues the change for the person who clicked; the server refuses when they may not run tasks
+ * there.
+ */
+function TaskBlock({ block }: { block: TaskCardBlock }) {
+  const tasks = useTaskGroupMutations()
+  const [confirming, setConfirming] = useState<'approve' | 'cancel'>()
+  const write = useWriteTasks(confirming === 'approve')
+  const switchedOff = write.data?.enabled === false
+  const close = () => setConfirming(undefined)
+  const busy = tasks.approve.isPending || tasks.cancel.isPending
+  const groupId = block.groupId
+  const open = groupId !== undefined && block.status === 'proposed'
+  const cancellable = groupId !== undefined && taskCancellable(block.status)
+  const merge = new Map((block.mergeRequests ?? []).map((mr) => [mr.repo, mr]))
+  const cap = block.budgetUsd !== undefined ? `$${block.budgetUsd.toFixed(2)}` : undefined
+  return (
+    <div className="flex flex-col gap-2">
+      <Markdown text={block.summary} className="text-sm" />
+      <ul className="flex flex-col gap-1">
+        {block.repos.map((repo) => {
+          const mr = merge.get(repo)
+          return (
+            <li key={repo} className="flex flex-wrap items-center gap-2 text-xs">
+              <Tag mono>{repo}</Tag>
+              {mr ? (
+                <a
+                  href={mr.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="mono inline-flex items-center gap-1 hover:underline"
+                >
+                  !{mr.id}
+                  {mr.draft ? ' draft' : ''}
+                  <ExternalLink aria-hidden className="size-3" />
+                </a>
+              ) : null}
+            </li>
+          )
+        })}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2">
+        <Tag tone={taskStatusTone[block.status]} dot>
+          {taskStatusLabel[block.status]}
+        </Tag>
+        {open && cap ? <span className="mono text-xs text-muted">cap {cap}</span> : null}
+        {groupId !== undefined ? (
+          <Link
+            to="/tasks"
+            search={{ group: groupId }}
+            className="text-xs text-muted hover:text-foreground hover:underline"
+          >
+            Details
+          </Link>
+        ) : null}
+        {cancellable ? (
+          <div className="ml-auto flex gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              isDisabled={busy}
+              onPress={() => setConfirming('cancel')}
+            >
+              Cancel
+            </Button>
+            {open ? (
+              <Button
+                size="sm"
+                variant="primary"
+                isDisabled={busy}
+                onPress={() => setConfirming('approve')}
+              >
+                Approve
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {open ? (
+        <ConfirmDialog
+          isOpen={confirming === 'approve'}
+          onOpenChange={(isOpen) => !isOpen && close()}
+          title="Run this change?"
+          confirmLabel="Approve and run"
+          isPending={tasks.approve.isPending}
+          isDisabled={switchedOff}
+          onConfirm={() =>
+            tasks.approve.mutate(groupId, {
+              onSuccess: () => {
+                close()
+                notify.success('Queued on the write workers')
+              },
+              onError: (error) => {
+                close()
+                notify.error('Not started', messageOf(error))
+              },
+            })
+          }
+        >
+          An agent changes{' '}
+          {block.repos.length === 1
+            ? 'this repository'
+            : `these ${block.repos.length} repositories`}{' '}
+          and opens draft merge requests for review. It runs as your request
+          {cap ? `, capped at ${cap}` : ''}.{switchedOff ? <WriteTasksOff /> : null}
+        </ConfirmDialog>
+      ) : null}
+      {cancellable ? (
+        <ConfirmDialog
+          isOpen={confirming === 'cancel'}
+          onOpenChange={(isOpen) => !isOpen && close()}
+          title="Cancel this task?"
+          confirmLabel="Cancel it"
+          isPending={tasks.cancel.isPending}
+          onConfirm={() =>
+            tasks.cancel.mutate(groupId, {
+              onSuccess: () => {
+                close()
+                notify.success('Task cancelled')
+              },
+              onError: (error) => {
+                close()
+                notify.error('Not cancelled', messageOf(error))
+              },
+            })
+          }
+        >
+          Queued and running repositories stop. Merge requests already open stay; close them on the
+          forge.
+        </ConfirmDialog>
+      ) : null}
+    </div>
+  )
 }
 
 /**
@@ -370,12 +517,12 @@ export function ChatCard({
 }) {
   const tone = card.tone ?? 'neutral'
   return (
-    <article className="relative overflow-hidden rounded-2xl bg-surface shadow-surface">
+    <article className="relative max-w-2xl overflow-hidden rounded-[12px] border border-line bg-panel">
       <span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${toneBar[tone]}`} />
       <div className="flex flex-col gap-3 py-3.5 pr-4 pl-5">
         {card.title ? (
           <header className="flex items-start justify-between gap-3">
-            <h3 className="text-[15px] font-semibold">
+            <h3 className="text-[13px] font-semibold">
               <span
                 className={`mr-2 inline-block size-2 rounded-full align-middle ${toneBar[tone]}`}
               />

@@ -1,5 +1,10 @@
-import type { JobStore } from '@holtkeeper/store'
-import { claimDueBy, DEFAULT_MAX_ATTEMPTS, JOB_LOG_LIMIT } from '@holtkeeper/store'
+import type { JobAttempt, JobStore } from '@holtkeeper/store'
+import {
+  claimDueBy,
+  DEFAULT_MAX_ATTEMPTS,
+  errorSignature,
+  STALE_JOB_ERROR,
+} from '@holtkeeper/store'
 import { SQL } from 'bun'
 
 import { type JobRow, toJob } from './rows.ts'
@@ -24,6 +29,40 @@ export const statusList = (status: string | string[] | undefined) =>
 
 const one = (rows: JobRow[]) => (rows[0] ? toJob(rows[0]) : undefined)
 
+type AttemptPatch = Omit<Partial<JobAttempt>, 'n' | 'startedAt'>
+
+/** `attempts_history` with `patch` merged into its last attempt while that one is running. */
+const endAttempt = (sql: SQL, patch: AttemptPatch) => sql`
+  CASE WHEN attempts_history -> -1 ->> 'status' = 'running'
+    THEN jsonb_set(attempts_history, ARRAY[(jsonb_array_length(attempts_history) - 1)::text],
+      (attempts_history -> -1) || jsonb_strip_nulls(${sql.json(patch)}::jsonb))
+    ELSE attempts_history END`
+
+/** `repos` as the JSON list `inRepos` compares with, or `null` for any. */
+const repoList = (repos: { forge: string; path: string }[] | undefined) =>
+  repos === undefined ? null : repos.map((repo) => [repo.forge, repo.path])
+
+const inRepos = (sql: SQL, repos: { forge: string; path: string }[] | undefined) => {
+  const list = repoList(repos)
+  return sql`(${list === null ? null : sql.json(list)}::jsonb IS NULL
+    OR jsonb_build_array(repo_forge, repo_path) IN (
+      SELECT jsonb_array_elements(${list === null ? null : sql.json(list)}::jsonb)))`
+}
+
+interface FailureRow {
+  analyzer: string
+  error_signature: string
+  count: number | string
+  repos: number | string
+  first_at: Date | string
+  last_at: Date | string
+  latest_id: string
+  error: string | null
+}
+
+const isoOf = (value: Date | string) =>
+  (value instanceof Date ? value : new Date(value)).toISOString()
+
 /**
  * The Postgres `JobStore`. `claim` locks the first job that may start with `FOR UPDATE SKIP LOCKED`,
  * so concurrent workers never wait on or take the same row, then takes a transaction-level
@@ -39,21 +78,24 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       const { sql, t } = await db()
       const rows: JobRow[] = await sql`
         INSERT INTO ${t.jobs} (id, analyzer, repo_forge, repo_path, group_name, ref, options, trigger,
-          status, attempts, max_attempts, run_after, created_at, log, actor, schedule)
+          status, attempts, max_attempts, run_after, created_at, actor, schedule, reason)
         VALUES (${crypto.randomUUID()}, ${job.analyzer}, ${job.repo.forge}, ${job.repo.path},
           ${job.group ?? null}, ${job.ref ?? null}, ${sql.json(job.options ?? {})}, ${job.trigger},
           'queued', 0, ${job.maxAttempts ?? DEFAULT_MAX_ATTEMPTS}, ${job.runAfter ?? job.createdAt},
-          ${job.createdAt}, '[]', ${job.actor ?? null}, ${job.schedule ?? null})
+          ${job.createdAt}, ${job.actor ?? null}, ${job.schedule ?? null}, ${job.reason ?? null})
         RETURNING *`
       const stored = one(rows)
       if (!stored) throw new Error('job insert returned nothing')
       return stored
     },
-    async claim(workerId, now, { exclusive = [], after = {}, delayMs } = {}) {
+    async claim(workerId, now, { exclusive = [], after = {}, delayMs, only, except = [] } = {}) {
       const { sql, t } = await db()
       const dueBy = claimDueBy(now, delayMs)
       const startable = () => sql`
-        NOT EXISTS (
+        (${only === undefined}::boolean
+          OR j.analyzer IN (SELECT jsonb_array_elements_text(${sql.json(only ?? [])}::jsonb)))
+        AND j.analyzer NOT IN (SELECT jsonb_array_elements_text(${sql.json(except)}::jsonb))
+        AND NOT EXISTS (
           SELECT 1 FROM ${t.jobs} r
           WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
             AND (r.analyzer = j.analyzer
@@ -84,7 +126,10 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
             const rows: JobRow[] = await tx`
               UPDATE ${t.jobs} AS j SET status = 'running', attempts = j.attempts + 1,
                 worker_id = ${workerId}, started_at = ${now}::timestamptz,
-                heartbeat_at = ${now}::timestamptz, finished_at = NULL
+                heartbeat_at = ${now}::timestamptz, finished_at = NULL,
+                attempts_history = j.attempts_history || jsonb_build_array(jsonb_build_object(
+                  'n', j.attempts + 1, 'status', 'running', 'startedAt', ${now}::text,
+                  'workerId', ${workerId}::text))
               WHERE j.id = ${next.id} AND j.status = 'queued' AND ${startable()}
               RETURNING j.*`
             const claimed = one(rows)
@@ -110,18 +155,22 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       return one(
         await sql`
           UPDATE ${t.jobs} SET status = 'succeeded', finished_at = ${at}::timestamptz, error = NULL,
+            error_signature = NULL,
+            attempts_history = ${endAttempt(sql, { status: 'succeeded', finishedAt: at })},
             analysis_id = COALESCE(${analysisId ?? null}::text, analysis_id)
           WHERE id = ${id} AND status = 'running'
           RETURNING *`,
       )
     },
-    async fail(id, { at, error, retryAt }) {
+    async fail(id, { at, error, retryAt, step }) {
       const { sql, t } = await db()
       const retry = () =>
         sql`(${retryAt ?? null}::timestamptz IS NOT NULL AND attempts < max_attempts)`
+      const attempt = endAttempt(sql, { status: 'failed', finishedAt: at, error, step })
       return one(
         await sql`
-          UPDATE ${t.jobs} SET error = ${error},
+          UPDATE ${t.jobs} SET error = ${error}, error_signature = ${errorSignature(error)},
+            attempts_history = ${attempt},
             status = CASE WHEN ${retry()} THEN 'queued' ELSE 'failed' END,
             run_after = CASE WHEN ${retry()} THEN ${retryAt ?? null}::timestamptz ELSE run_after END,
             worker_id = CASE WHEN ${retry()} THEN NULL ELSE worker_id END,
@@ -130,10 +179,22 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
           RETURNING *`,
       )
     },
+    async block(id, { at, error }) {
+      const { sql, t } = await db()
+      return one(
+        await sql`
+          UPDATE ${t.jobs} SET status = 'blocked', finished_at = ${at}::timestamptz, error = ${error},
+            error_signature = NULL,
+            attempts_history = ${endAttempt(sql, { status: 'blocked', finishedAt: at, error })}
+          WHERE id = ${id} AND status = 'running'
+          RETURNING *`,
+      )
+    },
     async cancel(id, at) {
       const { sql, t } = await db()
       const changed: JobRow[] = await sql`
-        UPDATE ${t.jobs} SET status = 'canceled', finished_at = ${at}::timestamptz
+        UPDATE ${t.jobs} SET status = 'canceled', finished_at = ${at}::timestamptz,
+          attempts_history = ${endAttempt(sql, { status: 'canceled', finishedAt: at })}
         WHERE id = ${id} AND status IN ('queued', 'running')
         RETURNING *`
       return one(changed.length ? changed : await sql`SELECT * FROM ${t.jobs} WHERE id = ${id}`)
@@ -141,7 +202,9 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
     async recoverStale(heartbeatBefore, at) {
       const { sql, t } = await db()
       const rows: JobRow[] = await sql`
-        UPDATE ${t.jobs} SET error = 'worker stopped responding',
+        UPDATE ${t.jobs} SET error = ${STALE_JOB_ERROR},
+          error_signature = ${errorSignature(STALE_JOB_ERROR)},
+          attempts_history = ${endAttempt(sql, { status: 'failed', finishedAt: at, error: STALE_JOB_ERROR })},
           status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END,
           run_after = CASE WHEN attempts < max_attempts THEN ${at}::timestamptz ELSE run_after END,
           worker_id = CASE WHEN attempts < max_attempts THEN NULL ELSE worker_id END,
@@ -155,7 +218,9 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       const { sql, t } = await db()
       return one(await sql`SELECT * FROM ${t.jobs} WHERE id = ${id}`)
     },
-    async list({ status, repo, analyzer, schedule, before, limit = 50 } = {}) {
+    async list(query = {}) {
+      const { status, repo, analyzer, schedule, trigger, before, repos, limit = 50 } = query
+      const signature = query.errorSignature ?? null
       const { sql, t } = await db()
       const statuses = statusList(status)
       const rows: JobRow[] = await sql`
@@ -166,22 +231,47 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
             OR (repo_forge = ${repo?.forge ?? null}::text AND repo_path = ${repo?.path ?? null}::text))
           AND (${analyzer ?? null}::text IS NULL OR analyzer = ${analyzer ?? null}::text)
           AND (${schedule ?? null}::text IS NULL OR schedule = ${schedule ?? null}::text)
+          AND (${trigger ?? null}::text IS NULL OR trigger = ${trigger ?? null}::text)
           AND (${before ?? null}::timestamptz IS NULL OR created_at < ${before ?? null}::timestamptz)
+          AND (${signature}::text IS NULL OR error_signature = ${signature}::text)
+          AND ${inRepos(sql, repos)}
         ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
       return rows.map(toJob)
     },
-    async appendLog(id, lines) {
+    async failures({ since, analyzer, repos, limit = 50 }) {
       const { sql, t } = await db()
-      await sql`
-        UPDATE ${t.jobs} AS j SET log = (
-          SELECT COALESCE(jsonb_agg(tail.value ORDER BY tail.ord), '[]'::jsonb)
-          FROM (
-            SELECT e.value, e.ord
-            FROM jsonb_array_elements(j.log || ${sql.json(lines)}::jsonb) WITH ORDINALITY AS e (value, ord)
-            ORDER BY e.ord DESC LIMIT ${JOB_LOG_LIMIT}
-          ) tail
-        )
-        WHERE j.id = ${id}`
+      const rows: FailureRow[] = await sql`
+        SELECT analyzer, error_signature, count(*) AS count,
+          count(DISTINCT (repo_forge, repo_path)) AS repos,
+          min(finished_at) AS first_at, max(finished_at) AS last_at,
+          (array_agg(id ORDER BY finished_at DESC, seq DESC))[1] AS latest_id,
+          (array_agg(error ORDER BY finished_at DESC, seq DESC))[1] AS error
+        FROM ${t.jobs}
+        WHERE status = 'failed' AND error_signature IS NOT NULL
+          AND finished_at >= ${since}::timestamptz
+          AND (${analyzer ?? null}::text IS NULL OR analyzer = ${analyzer ?? null}::text)
+          AND ${inRepos(sql, repos)}
+        GROUP BY analyzer, error_signature
+        ORDER BY last_at DESC LIMIT ${limit}`
+      return rows.map((row) => ({
+        analyzer: row.analyzer,
+        errorSignature: row.error_signature,
+        count: Number(row.count),
+        repos: Number(row.repos),
+        firstAt: isoOf(row.first_at),
+        lastAt: isoOf(row.last_at),
+        latestJobId: row.latest_id,
+        error: row.error ?? '',
+      }))
+    },
+    async targets() {
+      const { sql, t } = await db()
+      const rows: { repo_forge: string; repo_path: string; group_name: string | null }[] =
+        await sql`SELECT DISTINCT repo_forge, repo_path, group_name FROM ${t.jobs}`
+      return rows.map((row) => ({
+        repo: { forge: row.repo_forge, path: row.repo_path },
+        ...(row.group_name !== null && { group: row.group_name }),
+      }))
     },
   }
 }

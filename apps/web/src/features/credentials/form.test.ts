@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   OPENAI_COMPATIBLE,
-  agentModels,
   canRotate,
   filterProviders,
   savedDraft,
@@ -124,12 +123,11 @@ describe('AI provider credentials', () => {
     updatedAt: '2026-10-30T00:00:00.000Z',
   }
 
-  test('round-trips options, keeping the rest as advanced JSON', () => {
+  test('round-trips options, keeping the rest as advanced JSON and dropping model choices', () => {
     const draft = toDraft(stored)
     expect(draft.ai).toMatchObject({
       provider: 'openrouter',
       package: '@openrouter/ai-sdk-provider',
-      model: 'openai/gpt-5',
       baseUrl: '',
       custom: false,
     })
@@ -138,10 +136,9 @@ describe('AI provider credentials', () => {
       headers: { 'X-Team': 'games' },
     })
     expect(validateDraft(draft, false)).toEqual({})
-    expect(toUpdateInput(draft)).toMatchObject({
-      url: 'https://openrouter.ai/api/v1',
-      options: stored.options,
-    })
+    const { model: _model, ...kept } = stored.options
+    expect(toUpdateInput(draft)).toMatchObject({ url: 'https://openrouter.ai/api/v1' })
+    expect(toUpdateInput(draft).options).toEqual(kept)
   })
 
   test('needs a provider, a base URL for your own OpenAI-compatible one and valid JSON', () => {
@@ -157,7 +154,7 @@ describe('AI provider credentials', () => {
     })
     const ready = {
       ...custom,
-      ai: { ...custom.ai, baseUrl: 'https://llm.corp.test/v1', advanced: '', model: 'big' },
+      ai: { ...custom.ai, baseUrl: 'https://llm.corp.test/v1', advanced: '' },
     }
     expect(validateDraft(ready, true)).toEqual({})
     expect(toCreateInput(ready)).toMatchObject({
@@ -167,12 +164,11 @@ describe('AI provider credentials', () => {
         provider: 'corp',
         package: OPENAI_COMPATIBLE,
         baseUrl: 'https://llm.corp.test/v1',
-        model: 'big',
       },
     })
   })
 
-  test('provider search and agent models', () => {
+  test('provider search', () => {
     const providers = [
       { id: 'groq', name: 'Groq' },
       { id: 'openrouter', name: 'OpenRouter' },
@@ -180,13 +176,6 @@ describe('AI provider credentials', () => {
     ]
     expect(filterProviders(providers, 'rout').map((p) => p.id)).toEqual(['openrouter', 'nano-gpt'])
     expect(filterProviders(providers, ' ')).toHaveLength(3)
-    expect(
-      agentModels([
-        { id: 'a', toolCall: true, createdAt: '2026-01-01' },
-        { id: 'b', toolCall: false, createdAt: '2026-09-01' },
-        { id: 'c', createdAt: '2026-06-01' },
-      ]).map((m) => m.id),
-    ).toEqual(['c', 'a'])
   })
 })
 

@@ -92,9 +92,12 @@ describe('language models', () => {
       kind: 'ai-sdk',
       url: 'https://acme.test',
       secret: 'sk_test',
-      options: { provider: 'acme', package: 'acme-ai-provider', model: 'acme/fast' },
+      options: { provider: 'acme', package: 'acme-ai-provider' },
     }
-    const agent = createAgent(credential, { plugins: [plugin] })
+    const agent = createAgent(credential, {
+      plugins: [plugin],
+      tierModels: { fast: 'acme/fast', main: 'acme/fast', deep: 'acme/fast' },
+    })
     const result = await agent.run({ prompt: 'hi', dir: '.' })
     expect(result.text).toBe('OK')
     const ping = await pingAiSdkProvider(credential, 'acme/fast', { plugins: [plugin] })

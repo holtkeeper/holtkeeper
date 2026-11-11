@@ -105,6 +105,10 @@ describe('policies', () => {
       }).tokensPerMinute,
     ).toBe(9)
     expect(defaultLimitPolicy({ id: '4', kind: 'ai' }).tokensPerMinute).toBeUndefined()
+    expect(
+      defaultLimitPolicy({ id: '6', kind: 'ai-sdk', options: { tokensPerMinute: 7 } }),
+    ).toMatchObject({ maxConcurrent: 3, tokensPerMinute: 7 })
+    expect(defaultLimitPolicy({ id: '7', kind: 'anthropic-compatible' }).maxConcurrent).toBe(3)
     expect(defaultLimitPolicy({ id: '5', kind: 'slack' }).maxConcurrent).toBeUndefined()
   })
 

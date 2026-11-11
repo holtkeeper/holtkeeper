@@ -63,7 +63,7 @@ export function storageRoutes(deps: ServerDeps) {
   })
 
   app.post('/storage/:id/clear', async (c) => {
-    const principal = authorize(c, 'settings:write', { kind: 'global' })
+    authorize(c, 'settings:write', { kind: 'global' })
     const id = c.req.param('id')
     const remote = (await reported()).find((view) => view.id === id)
     if (remote && deps.store.kv) {
@@ -71,13 +71,7 @@ export function storageRoutes(deps: ServerDeps) {
         throw new HTTPException(409, { message: `${remote.label} cannot be cleared` })
       const scope = (await readBody(c, clearSchema))?.scope
       const requested = await requestStorageClear(deps.store.kv, id, scope, { now: deps.now() })
-      await deps.store.activity.append({
-        at: deps.now().toISOString(),
-        actor: principal.id,
-        action: 'storage.cleared',
-        subject: id,
-        details: { ...(scope ? { scope } : {}), requested },
-      })
+      c.set('audit', { details: { ...(scope ? { scope } : {}), requested } })
       return c.json<ClearStorageResult>({ requested })
     }
     const provider = providers().find((entry) => entry.id === id)
@@ -93,13 +87,7 @@ export function storageRoutes(deps: ServerDeps) {
         message: error instanceof Error ? error.message : String(error),
       })
     }
-    await deps.store.activity.append({
-      at: deps.now().toISOString(),
-      actor: principal.id,
-      action: 'storage.cleared',
-      subject: provider.id,
-      details: { ...(scope ? { scope } : {}), ...result },
-    })
+    c.set('audit', { details: { ...(scope ? { scope } : {}), ...result } })
     return c.json<ClearStorageResult>(result)
   })
 

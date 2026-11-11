@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type {
-  ActivityList,
   AnalysisDetail,
   AnalysisList,
   AnalysisSummary,
@@ -9,7 +8,6 @@ import type {
   AuditRunList,
   CredentialList,
   CredentialView,
-  DependencyInventory,
   MeResponse,
   RepoList,
   ResolvedSettings,
@@ -20,7 +18,6 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import { analyzeLayer } from '@holtkeeper/depgraph'
 import { defineAnalysis, metric } from '@holtkeeper/report'
 import { builtinSettings, defineSetting } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
@@ -124,29 +121,6 @@ const run = (path: string, finishedAt: string) => ({
   report: report('high'),
 })
 
-const depgraphData = (workspace: string, react: string) => ({
-  layers: [
-    analyzeLayer({
-      id: 'packages',
-      source: 'pnpm-lock.yaml',
-      graph: {
-        nodes: [
-          { id: workspace, name: workspace, ecosystem: 'npm', kind: 'workspace' },
-          {
-            id: `react@${react}`,
-            name: 'react',
-            version: react,
-            ecosystem: 'npm',
-            kind: 'package',
-          },
-        ],
-        edges: [{ from: workspace, to: `react@${react}`, kind: 'prod' }],
-      },
-    }),
-  ],
-  errors: [],
-})
-
 let store: Store
 const tokenSetting = defineSetting({
   key: 'test.token',
@@ -155,6 +129,13 @@ const tokenSetting = defineSetting({
   section: 'Test',
   schema: z.string().min(1),
   secret: true,
+})
+const noteSetting = defineSetting({
+  key: 'test.note',
+  label: 'Note',
+  description: 'A plain text setting',
+  section: 'Test',
+  schema: z.string(),
 })
 
 const setup = (auth: AuthProvider = noAuth()) => {
@@ -166,10 +147,9 @@ const setup = (auth: AuthProvider = noAuth()) => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
-    settings: [...builtinSettings, tokenSetting],
+    settings: [...builtinSettings, tokenSetting, noteSetting],
     analyses: [sizeKind],
     now: () => new Date('2026-10-30T12:00:00.000Z'),
   })
@@ -207,7 +187,11 @@ beforeEach(() => {
 describe('server', () => {
   test('/api/me reports the principal and auth info', async () => {
     const me = (await (await setup().request('/api/me')).json()) as MeResponse
-    expect(me).toMatchObject({ principal: { id: 'root' }, auth: { provider: 'none', methods: [] } })
+    expect(me).toMatchObject({
+      principal: { id: 'root' },
+      auth: { provider: 'none', methods: [] },
+      crossTeam: 'snippets',
+    })
 
     const anonymous = (await (await setup(games).request('/api/me')).json()) as MeResponse
     expect(anonymous.principal).toBeNull()
@@ -240,9 +224,9 @@ describe('server', () => {
 
     const one = await app.request(`/api/audit-runs/${detail.run.id}`)
     expect(((await one.json()) as AuditRunDetail).run.report.findings).toHaveLength(1)
-    expect((await store.activity.list()).map((e) => e.action)).toEqual([
-      'audit.ingested',
-      'audit.ingested',
+    expect((await store.audit.list()).events.map((e) => e.action)).toEqual([
+      'audit_run.ingest',
+      'audit_run.ingest',
     ])
   })
 
@@ -300,6 +284,27 @@ describe('server', () => {
     ])
   })
 
+  test('marks repositories the caller may configure', async () => {
+    const auth = headerAuth({
+      roles: {
+        lead: [
+          { scope: { all: true }, actions: ['repos:read'] },
+          { scope: { groups: ['games'] }, actions: ['settings:write'] },
+        ],
+      },
+    })
+    await store.auditRuns.add({ ...run('games/a', '2026-10-29T10:00:00.000Z'), trigger: 'cli' })
+    const repos = (await (
+      await setup(auth).request('/api/repos', {
+        headers: { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'lead' },
+      })
+    ).json()) as RepoList
+    expect(repos.repos.map((r) => [r.repo.path, r.configurable])).toEqual([
+      ['games/a', true],
+      ['tools/cli', undefined],
+    ])
+  })
+
   test('lists the newest analysis of each kind per repository', async () => {
     await store.auditRuns.add({ ...run('games/a', '2026-10-29T10:00:00.000Z'), trigger: 'cli' })
     await store.analyses.add({
@@ -319,57 +324,17 @@ describe('server', () => {
     expect(repoA?.latestAnalyses?.map((a) => [a.kind, a.metrics[0]?.value])).toEqual([['size', 2]])
   })
 
-  test('builds the dependency inventory from the newest depgraph record per repository', async () => {
-    await Promise.all(
-      [
-        ['games/a', '18.2.0', '2026-10-01T00:00:00.000Z'],
-        ['games/a', '18.3.1', '2026-10-02T00:00:00.000Z'],
-        ['tools/cli', '19.1.0', '2026-10-03T00:00:00.000Z'],
-      ].map(([path = '', react = '', createdAt = '']) =>
-        store.analyses.add({
-          repo: { forge: 'work', path },
-          kind: 'depgraph',
-          createdAt,
-          data: depgraphData(path.split('/')[1] ?? path, react),
-        }),
-      ),
-    )
-
-    const inventory = (await (
-      await setup().request('/api/dependencies')
-    ).json()) as DependencyInventory
-    expect(inventory.repos.map((r) => [r.repo.path, r.dependencies])).toEqual([
-      ['games/a', 1],
-      ['tools/cli', 1],
-    ])
-    expect(inventory.libraries).toMatchObject([
-      { name: 'react', versions: ['18.3.1', '19.1.0'], drift: 'major', behind: 1 },
-    ])
-
-    const scoped = (await (
-      await setup(
-        headerAuth({
-          roles: {
-            games: [{ scope: { groups: ['games'] }, actions: ['analyses:read'] }],
-          },
-        }),
-      ).request('/api/dependencies', { headers: asGames })
-    ).json()) as DependencyInventory
-    expect(scoped.repos.map((r) => r.repo.path)).toEqual(['games/a'])
-    expect(scoped.libraries[0]?.usages.map((u) => u.origin)).toEqual(['work:games/a'])
-  })
-
   test('stores settings per scope, seals secrets and resolves for a repository', async () => {
     const app = setup()
     await send(app, 'PUT', '/api/settings', {
-      key: 'llm.model',
+      key: 'test.note',
       scope: { all: true },
-      value: 'claude-sonnet-5-5',
+      value: 'Flag raw SQL.',
     })
     await send(app, 'PUT', '/api/settings', {
-      key: 'llm.model',
+      key: 'test.note',
       scope: { groups: ['games'] },
-      value: 'claude-opus-5-5',
+      value: 'Money is integer cents.',
     })
     const secret = await send(app, 'PUT', '/api/settings', {
       key: 'test.token',
@@ -389,14 +354,22 @@ describe('server', () => {
       (await send(app, 'PUT', '/api/settings', { key: 'nope', scope: { all: true }, value: 1 }))
         .status,
     ).toBe(400)
+    const narrowProvider = await send(app, 'PUT', '/api/settings', {
+      key: 'llm.provider',
+      scope: { groups: ['games'] },
+      value: 'Anthropic',
+    })
+    expect(narrowProvider.status).toBe(400)
 
     const list = (await (await app.request('/api/settings')).json()) as SettingList
     expect(list.definitions.find((d) => d.key === 'audit.upgrade')?.schema).toMatchObject({
       enum: ['major', 'minor', 'patch'],
     })
-    expect(list.definitions.find((d) => d.key === 'llm.models')?.presets?.map((p) => p.id)).toEqual(
-      ['balanced', 'economy', 'quality'],
+    expect(list.definitions.find((d) => d.key === 'llm.budget')?.presets?.map((p) => p.id)).toEqual(
+      ['default', 'learn', 'small-team'],
     )
+    expect(list.definitions.find((d) => d.key === 'llm.provider')?.global).toBe(true)
+    expect(list.definitions.find((d) => d.key === 'llm.model')).toBeUndefined()
     expect(list.definitions.find((d) => d.key === 'audit.upgrade')?.presets).toBeUndefined()
     expect(list.settings).toHaveLength(3)
 
@@ -404,9 +377,33 @@ describe('server', () => {
       await app.request('/api/settings/resolve?repo=work:games/a')
     ).json()) as ResolvedSettings
     expect(resolved.groups).toEqual(['games'])
-    expect(resolved.settings['llm.model']?.value).toBe('claude-opus-5-5')
+    expect(resolved.settings['test.note']?.value).toBe('Money is integer cents.')
     expect(resolved.settings['test.token']?.value).toBeNull()
-    expect(resolved.cascade['llm.model']?.[0]).toEqual(resolved.settings['llm.model'])
+    expect(resolved.cascade['test.note']?.[0]).toEqual(resolved.settings['test.note'])
+  })
+
+  test('hides stored entries of retired keys and refuses new values for them', async () => {
+    const app = setup()
+    await store.settings.put({
+      id: 'old-model',
+      key: 'llm.model',
+      scope: { all: true },
+      value: { not: 'a model id' },
+      secret: false,
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    const list = (await (await app.request('/api/settings')).json()) as SettingList
+    expect(list.settings.map((entry) => entry.key)).not.toContain('llm.model')
+    const resolved = (await (
+      await app.request('/api/settings/resolve?repo=work:games/a')
+    ).json()) as ResolvedSettings
+    expect(resolved.cascade['llm.model']).toBeUndefined()
+    const put = await send(app, 'PUT', '/api/settings', {
+      key: 'llm.model',
+      scope: { all: true },
+      value: 'any',
+    })
+    expect(put.status).toBe(400)
   })
 
   test('limits setting writes to the caller scope', async () => {
@@ -415,7 +412,7 @@ describe('server', () => {
       app,
       'PUT',
       '/api/settings',
-      { key: 'llm.model', scope: { groups: ['games'] }, value: 'm' },
+      { key: 'test.note', scope: { groups: ['games'] }, value: 'm' },
       asGames,
     )
     expect(own.status).toBe(200)
@@ -423,7 +420,7 @@ describe('server', () => {
       app,
       'PUT',
       '/api/settings',
-      { key: 'llm.model', scope: { all: true }, value: 'm' },
+      { key: 'test.note', scope: { all: true }, value: 'm' },
       asGames,
     )
     expect(global.status).toBe(403)
@@ -459,14 +456,14 @@ describe('server', () => {
   test('lists the models of an AI provider credential', async () => {
     const app = setup()
     const created = await send(app, 'POST', '/api/credentials', {
-      name: 'Bedrock',
-      kind: 'bedrock',
-      url: 'https://bedrock.test',
+      name: 'Anthropic via AI SDK',
+      kind: 'ai-sdk',
+      url: 'https://api.anthropic.com',
       scope: { all: true },
       secret: 'unused',
       options: {
-        region: 'eu-north-1',
-        model: 'claude-opus-5-5',
+        provider: 'anthropic',
+        package: '@ai-sdk/anthropic',
         pricing: { 'claude-opus-5-5': { inputPerMTok: 5, outputPerMTok: 25 } },
       },
     })
@@ -495,7 +492,7 @@ describe('server', () => {
       avatarSeed: 'fox',
     })
     const base = {
-      key: 'llm.model',
+      key: 'test.note',
       value: 'm',
       secret: false,
       updatedAt: '2026-10-30T00:00:00.000Z',
@@ -511,38 +508,6 @@ describe('server', () => {
     expect(list.people).toEqual({ u1: { name: 'Ann', avatarUrl: expect.stringContaining('fox') } })
   })
 
-  test('activity requires global user rights', async () => {
-    expect((await setup().request('/api/activity')).status).toBe(200)
-    expect((await setup(games).request('/api/activity', { headers: asGames })).status).toBe(403)
-  })
-
-  test('activity names the users among actors and subjects', async () => {
-    await store.users.putUser({
-      id: 'u1',
-      name: 'Ann',
-      grants: [],
-      disabled: false,
-      sessionVersion: 0,
-      createdAt: '2026-10-30T00:00:00.000Z',
-      avatarSeed: 'fox',
-    })
-    await store.activity.append({
-      at: '2026-10-30T10:00:00.000Z',
-      actor: 'u1',
-      action: 'user.login',
-      subject: 'u1',
-    })
-    await store.activity.append({
-      at: '2026-10-30T11:00:00.000Z',
-      actor: 'scheduler',
-      action: 'audit.ingested',
-      subject: 'work:games/a',
-    })
-    const list = (await (await setup().request('/api/activity')).json()) as ActivityList
-    expect(list.events).toHaveLength(2)
-    expect(list.people).toEqual({ u1: { name: 'Ann', avatarUrl: '/api/avatars/fox.svg' } })
-  })
-
   test('routes auth endpoints to the provider and 404s unknown API paths', async () => {
     expect((await setup().request('/api/nope')).status).toBe(404)
     expect((await setup().request('/auth/none/anything')).status).toBe(404)
@@ -550,11 +515,12 @@ describe('server', () => {
 
   test('ingests analyses, renders reports and compares with the previous record', async () => {
     const app = setup()
-    const ingest = (ref: string, bytes: number, createdAt: string) =>
+    const ingest = (ref: string, bytes: number, createdAt: string, sha?: string) =>
       send(app, 'POST', '/api/analyses', {
         repo: { forge: 'work', path: 'games/a' },
         kind: 'size',
         ref,
+        ...(sha && { sha }),
         createdAt,
         data: { bytes },
       })
@@ -562,15 +528,17 @@ describe('server', () => {
     const first = (await (
       await ingest('v1.0.0', 100, '2026-10-01T00:00:00.000Z')
     ).json()) as AnalysisSummary
-    const second = await ingest('v1.1.0', 150, '2026-10-02T00:00:00.000Z')
+    const second = await ingest('v1.1.0', 150, '2026-10-02T00:00:00.000Z', 'abc1234def')
     expect(second.status).toBe(201)
     const created = (await second.json()) as AnalysisSummary
     expect(created).toMatchObject({
       kind: 'size',
       label: 'Size',
       ref: 'v1.1.0',
+      sha: 'abc1234def',
       metrics: [{ value: 150 }],
     })
+    expect(first).not.toHaveProperty('sha')
 
     const detail = (await (
       await app.request(`/api/analyses/${created.id}`)
@@ -586,6 +554,8 @@ describe('server', () => {
       await app.request('/api/analyses?repo=work:games/a&kind=size')
     ).json()) as AnalysisList
     expect(list.analyses.map((a) => a.ref)).toEqual(['v1.1.0', 'v1.0.0'])
+    expect(list.analyses[0]?.sha).toBe('abc1234def')
+    expect(detail.analysis.sha).toBe('abc1234def')
     expect(await (await app.request('/api/analyses/kinds')).json()).toEqual({
       kinds: [{ kind: 'size', label: 'Size' }],
     })
@@ -641,8 +611,8 @@ describe('server', () => {
     ).json()) as { mergeRequest: { url: string } }
     expect(mr.mergeRequest.url).toBe('https://forge.test/mr/3')
     expect(openedRequests).toHaveLength(1)
-    expect((await store.activity.list()).map((e) => e.action)).toContain(
-      'changes.merge_request_opened',
+    expect((await store.audit.list()).events.map((e) => e.action)).toContain(
+      'analysis.merge_request',
     )
 
     expect(

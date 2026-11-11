@@ -41,7 +41,7 @@ function download(blob: Blob, name: string) {
 }
 
 /** Generates responsive variants of a repository image and opens a merge request or a ZIP with them. */
-function MediaDialog({
+export function MediaDialog({
   repo,
   isOpen,
   onOpenChange,
@@ -340,21 +340,5 @@ function ApplyOutcome({ outcome }: { outcome: MediaApplyResult }) {
         </Notice>
       ) : null}
     </div>
-  )
-}
-
-/** Opens the media dialog for a repository; hidden without `analyses:run`. */
-export function MediaButton({ repo }: { repo: RepoRef }) {
-  const { can } = useSession()
-  const [open, setOpen] = useState(false)
-  if (!can('analyses:run')) return null
-  return (
-    <>
-      <Button variant="secondary" onPress={() => setOpen(true)}>
-        <ImageDown className="size-4" />
-        Optimize image
-      </Button>
-      {open ? <MediaDialog repo={repo} isOpen onOpenChange={setOpen} /> : null}
-    </>
   )
 }

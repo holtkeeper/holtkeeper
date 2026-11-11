@@ -9,7 +9,7 @@ import type {
   SchedulePreview,
 } from '@holtkeeper/api'
 import { noAuth } from '@holtkeeper/auth-none'
-import { parseConfig } from '@holtkeeper/core'
+import { parseConfig, parseConfigFile } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import {
   type GitForge,
@@ -22,17 +22,13 @@ import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
+import { z } from 'zod'
 
 import { createApp } from '../src/app.ts'
 import { defaultWebhookTargets } from '../src/routes/config.ts'
 
 const vault = aesVault('v'.repeat(32))
-const fileForge = { kind: 'gitlab', url: 'https://file.test', create: () => ({}) as GitForge }
-const file = parseConfig({
-  forges: { work: fileForge },
-  groups: { games: { forge: 'work', include: ['games/*'] } },
-  jobs: { schedules: [{ name: 'nightly', cron: '0 3 * * *', analyzers: ['depgraph'] }] },
-})
+const file = parseConfigFile({}, { warn: () => {} })
 
 let store: Store
 let source: ConfigSource
@@ -100,20 +96,16 @@ beforeEach(async () => {
   removed = []
   const credentials = createCredentialService({
     credentials: store.credentials,
-    activity: store.activity,
     vault,
   })
   credentialId = (
-    await credentials.create(
-      {
-        name: 'cloud',
-        kind: 'gitlab',
-        url: 'https://gitlab.com',
-        scope: { all: true },
-        secret: 'tok',
-      },
-      'root',
-    )
+    await credentials.create({
+      name: 'cloud',
+      kind: 'gitlab',
+      url: 'https://gitlab.com',
+      scope: { all: true },
+      secret: 'tok',
+    })
   ).id
   if (!store.config) throw new Error('memory store has config')
   source = await createConfigSource({
@@ -134,7 +126,7 @@ beforeEach(async () => {
     credentials,
     settings: builtinSettings,
     analyses: [],
-    analyzers: [],
+    analyzers: [{ kind: 'snapshot', scope: 'repo', options: z.object({}) }],
     now: () => new Date('2026-10-30T12:00:00.000Z'),
   })
 })
@@ -146,11 +138,16 @@ const call = (method: string, path: string, body?: unknown, headers: Record<stri
     ...(body !== undefined && { body: JSON.stringify(body) }),
   })
 
-const putForge = () =>
-  call('PUT', '/config/forges/cloud', { kind: 'gitlab', url: 'https://gitlab.com', credentialId })
+const putForge = (body: Record<string, unknown> = {}) =>
+  call('PUT', '/config/forges/cloud', {
+    kind: 'gitlab',
+    url: 'https://gitlab.com',
+    credentialId,
+    ...body,
+  })
 
 describe('config routes', () => {
-  test('CRUD with provenance, validation, history and activity', async () => {
+  test('CRUD with validation, history and audit', async () => {
     expect(
       (
         await call('PUT', '/config/forges/cloud', {
@@ -160,7 +157,8 @@ describe('config routes', () => {
         })
       ).status,
     ).toBe(400)
-    expect((await putForge()).status).toBe(200)
+    expect((await putForge({ botUsername: 'keeper' })).status).toBe(200)
+    expect(source.current().jobs.botUsernames).toEqual({ cloud: 'keeper' })
     expect(
       (await call('PUT', '/config/groups/apps', { forge: 'missing', include: ['apps/*'] })).status,
     ).toBe(400)
@@ -169,18 +167,15 @@ describe('config routes', () => {
       include: ['studio/*'],
     })
     expect(group.status).toBe(200)
-    expect(await group.json()).toMatchObject({ id: 'games', provenance: 'file+panel', version: 1 })
+    expect(await group.json()).toMatchObject({ id: 'games', version: 1 })
     await call('PUT', '/config/groups/games', { forge: 'cloud', include: ['studio/*', 'web/*'] })
 
     const groups = (await (await call('GET', '/config/groups')).json()) as ConfigEntryList<'group'>
-    expect(groups.entries.map((e) => [e.id, e.provenance, e.data.include])).toEqual([
-      ['games', 'file+panel', ['studio/*', 'web/*']],
+    expect(groups.entries.map((e) => [e.id, e.version, e.data.include])).toEqual([
+      ['games', 2, ['studio/*', 'web/*']],
     ])
     const forges = (await (await call('GET', '/config/forges')).json()) as ConfigEntryList<'forge'>
-    expect(forges.entries.map((e) => `${e.id}:${e.provenance}`)).toEqual([
-      'work:file',
-      'cloud:panel',
-    ])
+    expect(forges.entries.map((e) => [e.id, e.data.botUsername])).toEqual([['cloud', 'keeper']])
     const detail = (await (
       await call('GET', '/config/groups/games')
     ).json()) as ConfigEntryDetail<'group'>
@@ -189,14 +184,16 @@ describe('config routes', () => {
 
     expect((await call('DELETE', '/config/forges/cloud')).status).toBe(409)
     expect((await call('DELETE', '/config/groups/games')).status).toBe(204)
-    expect(source.current().groups.games?.forge).toBe('work')
+    expect(source.current().groups.games).toBeUndefined()
     expect((await call('DELETE', '/config/groups/games')).status).toBe(404)
     expect((await call('GET', '/config/nope')).status).toBe(404)
 
-    const actions = (await store.activity.list()).map((e) => `${e.action} ${e.subject}`)
-    expect(actions).toContain('config.forge.created forge:cloud')
-    expect(actions).toContain('config.group.updated group:games')
-    expect(actions).toContain('config.group.removed group:games')
+    const actions = (await store.audit.list({ limit: 500 })).events.map(
+      (e) => `${e.action} ${e.target.type}:${e.target.id}`,
+    )
+    expect(actions).toContain('forge.create forge:cloud')
+    expect(actions).toContain('group.update group:games')
+    expect(actions).toContain('group.delete group:games')
   })
 
   test('schedules, previews and triggers', async () => {
@@ -205,7 +202,7 @@ describe('config routes', () => {
       every: '1h',
       timezone: 'UTC',
       windows: { allow: [{ days: ['fri'], from: '13:00', to: '15:00' }] },
-      analyzers: ['quality'],
+      analyzers: ['snapshot'],
     })
     expect(put.status).toBe(200)
     const preview = (await (
@@ -216,7 +213,6 @@ describe('config routes', () => {
       timezone: 'UTC',
       runs: ['2026-10-30T13:00:00.000Z', '2026-10-30T14:00:00.000Z', '2026-11-06T13:00:00.000Z'],
     })
-    expect((await call('GET', '/schedules/nightly/preview?count=1')).status).toBe(200)
     expect((await call('GET', '/schedules/none/preview')).status).toBe(404)
     expect(
       (
@@ -230,29 +226,28 @@ describe('config routes', () => {
     ).toBe(400)
 
     expect(
-      (await call('PUT', '/config/triggers/tag', { on: 'label', label: 'x', analyzers: ['port'] }))
-        .status,
+      (
+        await call('PUT', '/config/triggers/tag', {
+          on: 'label',
+          label: 'x',
+          analyzers: ['snapshot'],
+        })
+      ).status,
     ).toBe(400)
     expect(
       (
         await call('PUT', '/config/triggers/label:x', {
           on: 'label',
           label: 'x',
-          analyzers: ['port'],
+          analyzers: ['snapshot'],
         })
       ).status,
     ).toBe(200)
-    expect(source.current().jobs?.onLabel).toEqual({ x: ['port'] })
+    expect(source.current().jobs?.onLabel).toEqual({ x: ['snapshot'] })
     const triggers = (await (
       await call('GET', '/config/triggers')
     ).json()) as ConfigEntryList<'trigger'>
-    expect(triggers.entries).toMatchObject([{ id: 'label:x', provenance: 'panel' }])
-
-    const exported = await call('GET', '/config/export')
-    expect(exported.headers.get('content-type')).toContain('typescript')
-    const text = await exported.text()
-    expect(text).toContain("every: '1h'")
-    expect(text).toContain("x: ['port']")
+    expect(triggers.entries).toMatchObject([{ id: 'label:x', version: 1 }])
   })
 
   test('webhook secret: generate, register, receive, rotate', async () => {
@@ -261,8 +256,8 @@ describe('config routes', () => {
       forge: 'cloud',
       include: ['studio/*', 'tools/cli'],
     })
-    await call('PUT', '/config/triggers/tag', { on: 'tag', analyzers: ['changelog'] })
-    expect((await call('POST', '/forges/work/webhook', {})).status).toBe(409)
+    await call('PUT', '/config/triggers/tag', { on: 'tag', analyzers: ['snapshot'] })
+    expect((await call('POST', '/forges/work/webhook', {})).status).toBe(404)
 
     const created = await call(
       'POST',
@@ -298,7 +293,7 @@ describe('config routes', () => {
     expect((await tagPush(result.secret)).status).toBe(202)
     expect(
       (await store.jobs.list()).map((j) => `${j.analyzer} ${j.repo.forge}:${j.repo.path} ${j.ref}`),
-    ).toEqual(['changelog cloud:studio/a v1.0.0'])
+    ).toEqual(['snapshot cloud:studio/a v1.0.0'])
     expect((await call('POST', '/webhooks/work', {})).status).toBe(404)
 
     registrations = []
@@ -322,9 +317,9 @@ describe('config routes', () => {
     await call('DELETE', '/config/triggers/tag')
     expect((await call('DELETE', '/config/forges/cloud')).status).toBe(204)
     expect(removed).toHaveLength(3)
-    const actions = (await store.activity.list()).map((e) => e.action)
-    expect(actions).toContain('config.forge.webhook_created')
-    expect(actions).toContain('config.forge.webhook_rotated')
+    const actions = (await store.audit.list({ limit: 500 })).events.map((e) => e.action)
+    expect(actions).toContain('forge.webhook_create')
+    expect(actions).toContain('forge.webhook_rotate')
   })
 
   test('member repositories of a forge', async () => {
@@ -334,7 +329,6 @@ describe('config routes', () => {
     expect(((await response.json()) as ForgeRepositoryList).entries).toEqual([
       { path: 'tools/cli', name: 'cli', webUrl: 'https://gitlab.com/tools/cli' },
     ])
-    expect((await call('GET', '/forges/work/repositories')).status).toBe(409)
     expect((await call('GET', '/forges/missing/repositories')).status).toBe(409)
   })
 
@@ -358,6 +352,12 @@ describe('config routes', () => {
   })
 
   test('defaultWebhookTargets', () => {
-    expect(defaultWebhookTargets(file, 'work')).toEqual([{ group: 'games' }])
+    const config = parseConfig({
+      forges: {
+        work: { kind: 'gitlab', url: 'https://work.test', create: () => ({}) as GitForge },
+      },
+      groups: { games: { forge: 'work', include: ['games/*'] } },
+    })
+    expect(defaultWebhookTargets(config, 'work')).toEqual([{ group: 'games' }])
   })
 })

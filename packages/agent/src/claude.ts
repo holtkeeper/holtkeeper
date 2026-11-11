@@ -1,6 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 
 import {
   type CanUseTool,
@@ -10,22 +8,25 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { resolveSecret, type Secret } from '@holtkeeper/forge'
 
+import { commandAllowed } from './commands.ts'
+import { BudgetExceededError, budgetExceededFrom } from './errors.ts'
 import { toMcpServer, mcpToolName } from './mcp.ts'
 import { parseAgentOutput, validateAgentOutput } from './output.ts'
 import { isInside } from './paths.ts'
 import { costFromPricing, mapModel, type ModelPricing } from './provider.ts'
+import {
+  DEFAULT_TIER,
+  FALLBACK_TIER_MODELS,
+  type ModelTier,
+  TIERS,
+  type TierModels,
+} from './tiers.ts'
+import type { TranscriptSink, TranscriptToolCall } from './transcript.ts'
 import type { Agent, AgentCapability, AgentResult, AgentTask, AgentUsage } from './types.ts'
-
-/** Model used when neither `ClaudeAgentOptions.models` nor `model` picks one. */
-export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5'
-
-/** Model for `taskKind: 'triage'` when `ClaudeAgentOptions.models` has no `triage` entry. */
-export const DEFAULT_TRIAGE_MODEL = 'claude-haiku-5-5'
 
 /**
  * Where Claude Code sends model requests. `anthropic` is the Anthropic API (optionally at another
- * `baseUrl`); `anthropic-compatible` is a gateway speaking the Messages API; `bedrock` and
- * `vertex` are the cloud platforms, with credentials from the server environment or the secret.
+ * `baseUrl`); `anthropic-compatible` is a gateway speaking the Messages API.
  */
 export type ClaudeConnection =
   | { kind: 'anthropic'; baseUrl?: string }
@@ -36,42 +37,20 @@ export type ClaudeConnection =
       /** Sent with every request; values are final (no placeholders). */
       headers?: Record<string, string>
     }
-  | { kind: 'bedrock'; region: string; baseUrl?: string; credentials?: 'env' | 'secret' }
-  | {
-      kind: 'vertex'
-      region: string
-      projectId: string
-      baseUrl?: string
-      credentials?: 'env' | 'secret'
-    }
-
-/** Model selection shared by the adapters: a default model and models per task kind. */
-export interface ModelRouting {
-  model?: string
-  models?: Record<string, string>
-}
 
 export interface ClaudeAgentOptions {
-  /**
-   * The provider secret: an Anthropic API key or gateway token, a Bedrock API key or AWS key JSON,
-   * or a Google service account key JSON. Optional only for cloud connections with `env` credentials.
-   */
-  apiKey?: Secret
+  /** The provider secret: an Anthropic API key or gateway token. */
+  apiKey: Secret
   /** Default: the Anthropic API. */
   connection?: ClaudeConnection
-  /** Logical model id → the provider's name for it; applied after routing. */
+  /** Logical model id → the provider's name for it; applied after tier resolution. */
   modelMap?: Record<string, string>
   /** Prices per model; when the task's model has an entry, cost is computed from usage with it. */
   pricing?: Record<string, ModelPricing>
   /** Timeout of one model request. */
   timeoutMs?: number
-  /** Default `DEFAULT_CLAUDE_MODEL`. */
-  model?: string
-  /**
-   * Model per task kind (`AgentTask.taskKind`), e.g. `{ review: 'claude-opus-5-5' }`. A kind
-   * without an entry uses `model`; `triage` falls back to `DEFAULT_TRIAGE_MODEL` instead.
-   */
-  models?: Record<string, string>
+  /** Model of each tier, e.g. from `resolveTierModels`. Default `FALLBACK_TIER_MODELS`. */
+  tierModels?: TierModels
   /** Turn limit for tasks that do not set their own. */
   maxTurns?: number
   /** Claude Code binary to run instead of the one bundled with the SDK. */
@@ -101,32 +80,6 @@ const DEFAULT_CAPABILITIES: readonly AgentCapability[] = ['read', 'search']
 /** Host variables the agent process inherits; everything else (tokens, credentials) stays out. */
 const INHERITED_ENV = ['PATH', 'HOME', 'USER', 'SHELL', 'TMPDIR', 'LANG', 'LC_ALL', 'TERM'] as const
 
-/** Host variables a Bedrock connection with `env` credentials inherits. */
-const AWS_ENV = [
-  'AWS_REGION',
-  'AWS_DEFAULT_REGION',
-  'AWS_PROFILE',
-  'AWS_ACCESS_KEY_ID',
-  'AWS_SECRET_ACCESS_KEY',
-  'AWS_SESSION_TOKEN',
-  'AWS_BEARER_TOKEN_BEDROCK',
-  'AWS_CONFIG_FILE',
-  'AWS_SHARED_CREDENTIALS_FILE',
-  'AWS_WEB_IDENTITY_TOKEN_FILE',
-  'AWS_ROLE_ARN',
-  'AWS_ROLE_SESSION_NAME',
-  'AWS_CONTAINER_CREDENTIALS_FULL_URI',
-  'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
-  'AWS_CONTAINER_AUTHORIZATION_TOKEN',
-] as const
-
-/** Host variables a Vertex connection with `env` credentials inherits. */
-const GOOGLE_ENV = [
-  'GOOGLE_APPLICATION_CREDENTIALS',
-  'GOOGLE_CLOUD_PROJECT',
-  'CLOUDSDK_CONFIG',
-] as const
-
 const ANTHROPIC_API_HOST = 'api.anthropic.com'
 
 const PATH_KEYS = ['file_path', 'path', 'notebook_path'] as const
@@ -136,27 +89,38 @@ export function toolsFor(capabilities: readonly AgentCapability[]): string[] {
   return [...new Set(capabilities.flatMap((capability) => CAPABILITY_TOOLS[capability]))]
 }
 
-/** The model a task runs on: its kind's entry in `models`, then `model`, then the defaults. */
-export function modelFor(options: ModelRouting, taskKind?: string): string {
-  const routed = taskKind === undefined ? undefined : options.models?.[taskKind]
-  if (routed) return routed
-  if (taskKind === 'triage') return DEFAULT_TRIAGE_MODEL
-  return options.model ?? DEFAULT_CLAUDE_MODEL
+/** The logical model a tier runs on: its entry in `tierModels`, else the tier's fallback. */
+export function modelFor(
+  options: { tierModels?: TierModels },
+  tier: ModelTier = DEFAULT_TIER,
+): string {
+  return (options.tierModels ?? FALLBACK_TIER_MODELS)[tier]
 }
 
 /**
- * Allows only the granted tools (and tools of the given MCP server prefixes), and only on paths
- * inside `dir`.
+ * Allows only the granted tools (and tools of the given MCP server prefixes), only on paths
+ * inside `dir`, and with `commands` only those Bash commands.
  */
 function permissionGate(
   dir: string,
   tools: readonly string[],
   prefixes: readonly string[] = [],
+  commands?: readonly string[],
 ): CanUseTool {
   const allowed = new Set(tools)
   return async (toolName, input) => {
     if (!allowed.has(toolName) && !prefixes.some((prefix) => toolName.startsWith(prefix)))
       return { behavior: 'deny', message: `${toolName} is not available for this task` }
+    const command = input['command']
+    if (
+      toolName === 'Bash' &&
+      commands &&
+      (typeof command !== 'string' || !commandAllowed(command, commands))
+    )
+      return {
+        behavior: 'deny',
+        message: `Only these commands may run, with plain arguments: ${commands.join(', ')}`,
+      }
     for (const key of PATH_KEYS) {
       const value = input[key]
       if (typeof value === 'string' && !isInside(dir, value)) {
@@ -229,71 +193,31 @@ function inherit(names: readonly string[]): Record<string, string> {
   return env
 }
 
-function secretOf(options: ClaudeAgentOptions): string {
-  if (options.apiKey === undefined)
-    throw new Error('claude agent needs an apiKey for this connection')
-  return resolveSecret(options.apiKey)
-}
-
-function awsSecretEnv(secret: string): Record<string, string> {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(secret)
-  } catch {
-    return { AWS_BEARER_TOKEN_BEDROCK: secret }
-  }
-  const field = (name: string) => {
-    const value: unknown =
-      typeof parsed === 'object' && parsed !== null ? Reflect.get(parsed, name) : undefined
-    return typeof value === 'string' && value ? value : undefined
-  }
-  const accessKeyId = field('accessKeyId')
-  const secretAccessKey = field('secretAccessKey')
-  if (!accessKeyId || !secretAccessKey)
-    throw new Error(
-      'bedrock secret must be an API key or JSON with accessKeyId and secretAccessKey',
-    )
-  const sessionToken = field('sessionToken')
-  return {
-    AWS_ACCESS_KEY_ID: accessKeyId,
-    AWS_SECRET_ACCESS_KEY: secretAccessKey,
-    ...(sessionToken ? { AWS_SESSION_TOKEN: sessionToken } : {}),
-  }
-}
-
-/** Files a run prepares outside the checkout, e.g. a Vertex service account key. */
-export interface ClaudeRunFiles {
-  googleCredentialsFile?: string
-}
-
 /**
  * The Claude Code process environment for `options`: the inherited basics plus exactly the
  * provider variables the connection needs. `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` makes Claude Code
  * strip provider credentials from the environment of Bash and other subprocesses, so tools never
  * see them.
  */
-export function claudeEnv(
-  options: ClaudeAgentOptions,
-  files: ClaudeRunFiles = {},
-): Record<string, string> {
+export function claudeEnv(options: ClaudeAgentOptions): Record<string, string> {
   const connection = options.connection ?? { kind: 'anthropic' }
   const env: Record<string, string> = {
     ...inherit(INHERITED_ENV),
     CLAUDE_AGENT_SDK_CLIENT_APP: 'holtkeeper',
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
   }
   if (options.timeoutMs !== undefined) env['API_TIMEOUT_MS'] = String(options.timeoutMs)
-  const haiku = options.modelMap?.[DEFAULT_TRIAGE_MODEL]
-  if (haiku) env['ANTHROPIC_DEFAULT_HAIKU_MODEL'] = haiku
+  env['ANTHROPIC_DEFAULT_HAIKU_MODEL'] = mapModel(modelFor(options, 'fast'), options.modelMap)
+  const secret = resolveSecret(options.apiKey)
   switch (connection.kind) {
     case 'anthropic': {
-      env['ANTHROPIC_API_KEY'] = secretOf(options)
+      env['ANTHROPIC_API_KEY'] = secret
       if (connection.baseUrl && new URL(connection.baseUrl).host !== ANTHROPIC_API_HOST)
         env['ANTHROPIC_BASE_URL'] = connection.baseUrl
       break
     }
     case 'anthropic-compatible': {
-      const secret = secretOf(options)
       env['ANTHROPIC_BASE_URL'] = connection.baseUrl
       if (connection.authHeader === 'bearer') env['ANTHROPIC_AUTH_TOKEN'] = secret
       else env['ANTHROPIC_API_KEY'] = secret
@@ -305,49 +229,8 @@ export function claudeEnv(
       env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
       break
     }
-    case 'bedrock': {
-      Object.assign(
-        env,
-        connection.credentials === 'secret' ? awsSecretEnv(secretOf(options)) : inherit(AWS_ENV),
-      )
-      env['CLAUDE_CODE_USE_BEDROCK'] = '1'
-      env['AWS_REGION'] = connection.region
-      if (connection.baseUrl) env['ANTHROPIC_BEDROCK_BASE_URL'] = connection.baseUrl
-      env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
-      break
-    }
-    case 'vertex': {
-      if (connection.credentials === 'secret') {
-        if (!files.googleCredentialsFile)
-          throw new Error('vertex secret credentials need a prepared key file')
-        env['GOOGLE_APPLICATION_CREDENTIALS'] = files.googleCredentialsFile
-      } else Object.assign(env, inherit(GOOGLE_ENV))
-      env['CLAUDE_CODE_USE_VERTEX'] = '1'
-      env['CLOUD_ML_REGION'] = connection.region
-      env['ANTHROPIC_VERTEX_PROJECT_ID'] = connection.projectId
-      if (connection.baseUrl) env['ANTHROPIC_VERTEX_BASE_URL'] = connection.baseUrl
-      env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] = '1'
-      break
-    }
   }
   return env
-}
-
-/** Writes what `claudeEnv` needs on disk for one run; `cleanup` removes it. */
-async function prepareFiles(
-  options: ClaudeAgentOptions,
-): Promise<{ files: ClaudeRunFiles; cleanup: () => Promise<void> }> {
-  const connection = options.connection
-  if (connection?.kind !== 'vertex' || connection.credentials !== 'secret')
-    return { files: {}, cleanup: async () => {} }
-  const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-vertex-'))
-  const file = join(dir, 'credentials.json')
-  await writeFile(file, secretOf(options), { mode: 0o600 })
-  await chmod(dir, 0o700)
-  return {
-    files: { googleCredentialsFile: file },
-    cleanup: () => rm(dir, { recursive: true, force: true }),
-  }
 }
 
 /** SDK options for one task; exposed so the mapping is testable without running Claude Code. */
@@ -355,7 +238,6 @@ export function claudeOptionsFor(
   options: ClaudeAgentOptions,
   task: AgentTask,
   abortController: AbortController,
-  files: ClaudeRunFiles = {},
 ): Options {
   const dir = resolve(task.dir)
   const capabilities = task.capabilities ?? DEFAULT_CAPABILITIES
@@ -369,12 +251,14 @@ export function claudeOptionsFor(
     throw new Error(`MCP server name ${mounted.name} is reserved for toolsets`)
   const mcpTools = mounted?.allowedTools ?? []
   const prefixes = Object.keys(external).map((name) => `mcp__${mcpToolName(name)}__`)
+  const tier = task.tier ?? DEFAULT_TIER
   return {
     cwd: dir,
-    model: mapModel(modelFor(options, task.taskKind), options.modelMap),
+    model: mapModel(modelFor(options, tier), options.modelMap),
+    effort: TIERS[tier].effort,
     tools,
     allowedTools: [...mcpTools],
-    canUseTool: permissionGate(dir, [...tools, ...mcpTools], prefixes),
+    canUseTool: permissionGate(dir, [...tools, ...mcpTools], prefixes, task.commands),
     permissionMode: 'default',
     systemPrompt: {
       type: 'preset',
@@ -387,9 +271,10 @@ export function claudeOptionsFor(
     mcpServers: { ...external, ...(mounted ? { [mounted.name]: mounted.server } : {}) },
     strictMcpConfig: true,
     persistSession: false,
-    env: claudeEnv(options, files),
+    env: { ...task.env, ...claudeEnv(options) },
     abortController,
     ...(maxTurns !== undefined ? { maxTurns } : {}),
+    ...(task.maxCostUsd !== undefined ? { maxBudgetUsd: task.maxCostUsd } : {}),
     ...(options.pathToClaudeCodeExecutable
       ? { pathToClaudeCodeExecutable: options.pathToClaudeCodeExecutable }
       : {}),
@@ -425,6 +310,61 @@ export function usageOf(result: ResultMessage): AgentUsage | undefined {
   }
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const blocksOf = (value: unknown): Record<string, unknown>[] =>
+  isRecord(value) && Array.isArray(value['content']) ? value['content'].filter(isRecord) : []
+
+const resultText = (content: unknown): string =>
+  typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content
+          .filter(isRecord)
+          .map((part) =>
+            typeof part['text'] === 'string' ? part['text'] : `[${String(part['type'])}]`,
+          )
+          .join('\n')
+      : ''
+
+/** Writes the model text, tool calls and tool results of one SDK message to `sink`. */
+export function transcribeSdkMessage(message: SDKMessage, sink: TranscriptSink): void {
+  if (message.type === 'assistant') {
+    const blocks = blocksOf(message.message)
+    const text = blocks
+      .flatMap((block) =>
+        block['type'] === 'text' && typeof block['text'] === 'string' ? [block['text']] : [],
+      )
+      .join('\n')
+    const toolCalls = blocks.flatMap((block): TranscriptToolCall[] =>
+      block['type'] === 'tool_use'
+        ? [{ id: String(block['id']), name: String(block['name']), input: block['input'] }]
+        : [],
+    )
+    if (text || toolCalls.length)
+      sink.write({
+        type: 'assistant',
+        ...(text && { text }),
+        ...(toolCalls.length && { toolCalls }),
+      })
+    return
+  }
+  if (message.type === 'user') {
+    for (const block of blocksOf(message.message)) {
+      if (block['type'] !== 'tool_result') continue
+      sink.write({
+        type: 'tool-result',
+        id: String(block['tool_use_id']),
+        output: resultText(block['content']),
+        ...(block['is_error'] === true && { isError: true }),
+      })
+    }
+  }
+}
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
 /**
  * `claudeAgent` with an injectable `query`, so tests can drive the adapter with scripted SDK
  * messages instead of a real Claude Code process.
@@ -433,61 +373,115 @@ export function createClaudeAgent(
   options: ClaudeAgentOptions,
   { query }: ClaudeAgentDependencies,
 ): Agent {
-  return {
+  const agent: Agent = {
     name: 'claude',
     async run<Output>(task: AgentTask<Output>): Promise<AgentResult<Output>> {
       task.signal?.throwIfAborted()
       const controller = linkedController(task.signal)
-      const prepared = await prepareFiles(options)
-      let last: ResultMessage | undefined
+      const sdkOptions = claudeOptionsFor(options, task, controller)
+      const sink = task.transcript
+      const preset = sdkOptions.systemPrompt
+      const system =
+        typeof preset === 'object' && !Array.isArray(preset) && preset.type === 'preset'
+          ? preset.append
+          : undefined
+      sink?.write({
+        type: 'start',
+        runtime: 'claude-sdk',
+        model: sdkOptions.model ?? '',
+        tier: task.tier ?? DEFAULT_TIER,
+        ...(task.taskKind && { taskKind: task.taskKind }),
+        tools: [
+          ...(Array.isArray(sdkOptions.tools) ? sdkOptions.tools : []),
+          ...(sdkOptions.allowedTools ?? []),
+        ],
+        ...(system && { system }),
+        prompt: task.prompt,
+      })
       try {
-        const sdkOptions = claudeOptionsFor(options, task, controller, prepared.files)
-        for await (const message of query({ prompt: task.prompt, options: sdkOptions })) {
-          if (message.type === 'result') last = message
-        }
-      } finally {
-        await prepared.cleanup()
+        const result = await runQuery<Output>(task, sdkOptions, sink)
+        sink?.write({
+          type: 'end',
+          outcome: 'ok',
+          turns: result.turns,
+          ...(result.usage && { usage: result.usage }),
+          ...(result.costUsd !== undefined && { costUsd: result.costUsd }),
+        })
+        return result
+      } catch (error) {
+        sink?.write({
+          type: 'end',
+          outcome: 'error',
+          error: messageOf(error),
+          ...(error instanceof BudgetExceededError && {
+            ...(error.turns !== undefined && { turns: error.turns }),
+            ...(error.usage && { usage: error.usage }),
+            ...(error.costUsd !== undefined && { costUsd: error.costUsd }),
+          }),
+        })
+        throw error
       }
-      task.signal?.throwIfAborted()
-      if (!last) throw new Error('claude agent finished without a result')
-      if (last.subtype !== 'success' || last.is_error) {
-        const detail = last.subtype === 'success' ? last.result : last.errors.join('; ')
-        throw new Error(`claude agent failed (${last.subtype})${detail ? `: ${detail}` : ''}`)
-      }
-
-      const result: AgentResult<Output> = {
-        text: last.result,
-        turns: last.num_turns,
-        costUsd: last.total_cost_usd,
-      }
-      const usage = usageOf(last)
-      if (usage) {
-        result.usage = usage
-        const logical = modelFor(options, task.taskKind)
-        const priced = costFromPricing(
-          usage,
-          options.pricing,
-          mapModel(logical, options.modelMap),
-          logical,
-        )
-        if (priced !== undefined) result.costUsd = priced
-      }
-      if (task.output) {
-        result.output =
-          last.structured_output === undefined
-            ? parseAgentOutput(last.result, task.output)
-            : validateAgentOutput(last.structured_output, task.output, last.result)
-      }
-      return result
     },
+  }
+  return agent
+
+  async function runQuery<Output>(
+    task: AgentTask<Output>,
+    sdkOptions: Options,
+    sink: TranscriptSink | undefined,
+  ): Promise<AgentResult<Output>> {
+    let last: ResultMessage | undefined
+    for await (const message of query({ prompt: task.prompt, options: sdkOptions })) {
+      if (message.type === 'result') last = message
+      else if (sink) transcribeSdkMessage(message, sink)
+    }
+    task.signal?.throwIfAborted()
+    if (!last) throw new Error('claude agent finished without a result')
+    if (last.subtype === 'error_max_budget_usd') {
+      const usage = usageOf(last)
+      throw new BudgetExceededError(
+        `AI budget exceeded: the run spent $${last.total_cost_usd.toFixed(2)} of its $${task.maxCostUsd?.toFixed(2) ?? '?'} cap`,
+        { costUsd: last.total_cost_usd, turns: last.num_turns, ...(usage && { usage }) },
+      )
+    }
+    if (last.subtype !== 'success' || last.is_error) {
+      const detail = last.subtype === 'success' ? last.result : last.errors.join('; ')
+      const failure = new Error(
+        `claude agent failed (${last.subtype})${detail ? `: ${detail}` : ''}`,
+      )
+      throw budgetExceededFrom(failure) ?? failure
+    }
+
+    const logical = modelFor(options, task.tier)
+    const model = mapModel(logical, options.modelMap)
+    const result: AgentResult<Output> = {
+      text: last.result,
+      turns: last.num_turns,
+      costUsd: last.total_cost_usd,
+      model,
+      runtime: 'claude-sdk',
+    }
+    const usage = usageOf(last)
+    if (usage) {
+      result.usage = usage
+      const priced = costFromPricing(usage, options.pricing, model, logical)
+      if (priced !== undefined) result.costUsd = priced
+    }
+    if (task.output) {
+      result.output =
+        last.structured_output === undefined
+          ? parseAgentOutput(last.result, task.output)
+          : validateAgentOutput(last.structured_output, task.output, last.result)
+    }
+    return result
   }
 }
 
 /**
  * An `Agent` backed by Claude Code through the Claude Agent SDK. It works only inside
  * `task.dir`, gets only the tools its capabilities map to (`CAPABILITY_TOOLS`) plus the task's
- * toolsets and MCP servers, runs without host settings or MCP servers, routes the model by
- * `task.taskKind` (then `modelMap`), and sandboxes shell commands when `run` is granted. The
+ * toolsets and MCP servers, runs without host settings or MCP servers, runs `task.tier`'s model
+ * (then `modelMap`) at the tier's effort, and sandboxes shell commands when `run` is granted. The
  * secret is resolved per task and passed to the Claude Code process only, as the variables of
  * `options.connection` (see `claudeEnv`); its subprocesses do not inherit it.
  */

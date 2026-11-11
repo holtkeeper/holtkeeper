@@ -5,7 +5,7 @@ import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 import type { FileChange, GitForge } from '@holtkeeper/forge'
 
 import { trimText } from './notes.ts'
-import type { AgentReport, Bump, CheckResult, PackageTarget, ReleaseNotes } from './types.ts'
+import type { Bump, CheckResult, PackageTarget, ReleaseNotes } from './types.ts'
 
 /** A file that differs from `HEAD` in a checkout. */
 export interface ChangedFile {
@@ -67,12 +67,6 @@ export async function snapshot(dir: string, runner: CommandRunner): Promise<Map<
   return result
 }
 
-/** Paths whose state differs between two snapshots. */
-export function touchedBetween(before: Map<string, string>, after: Map<string, string>): string[] {
-  const paths = new Set([...before.keys(), ...after.keys()])
-  return [...paths].filter((path) => before.get(path) !== after.get(path)).toSorted()
-}
-
 const slug = (text: string) =>
   text
     .toLowerCase()
@@ -99,16 +93,13 @@ export interface DescriptionInput {
   /** Leading sections, e.g. what was updated or ported. */
   sections?: { title: string; body: string }[]
   checks: CheckResult[]
-  /** The fixer's last report, its attempts and the files it changed. */
-  fix?: { report: AgentReport; attempts: number; files: string[] }
   /** Collapsed sections at the end, e.g. release notes or the source diff. */
   details?: { summary: string; body: string }[]
 }
 
 /**
  * Markdown merge request description: the given sections, a check results table, the tail of
- * each failing check's output, what the fixer changed and its remaining problems, then details.
- * When checks fail without a fix report it adds a "Needs attention" section.
+ * each failing check's output, then details. Failing checks add a "Needs attention" section.
  */
 export function describeMergeRequest(input: DescriptionInput): string {
   const parts: string[] = []
@@ -131,21 +122,7 @@ export function describeMergeRequest(input: DescriptionInput): string {
     parts.push(
       `<details><summary>${check.name} output</summary>\n\n\`\`\`\n${trimText(check.output.split('\n').slice(-60).join('\n'), 4000)}\n\`\`\`\n\n</details>`,
     )
-  if (input.fix) {
-    const { report, attempts, files } = input.fix
-    parts.push(
-      `## Changes by the agent (${attempts} attempt${attempts === 1 ? '' : 's'})`,
-      report.summary,
-      ...(report.changes.length ? [report.changes.map((change) => `- ${change}`).join('\n')] : []),
-      ...(files.length ? [`Files: ${files.map((file) => `\`${file}\``).join(', ')}`] : []),
-    )
-    if (report.remainingProblems.length)
-      parts.push(
-        '## Remaining problems',
-        report.remainingProblems.map((problem) => `- ${problem}`).join('\n'),
-      )
-  } else if (failing.length)
-    parts.push('## Needs attention', 'Checks fail and no automatic fix was attempted.')
+  if (failing.length) parts.push('## Needs attention', 'Checks fail after this change.')
   for (const detail of input.details ?? [])
     parts.push(
       `<details><summary>${detail.summary}</summary>\n\n${trimText(detail.body, 3000)}\n\n</details>`,
@@ -157,13 +134,10 @@ export function describeMergeRequest(input: DescriptionInput): string {
 export interface MergeRequestBodyInput {
   bumps: Bump[]
   checks: CheckResult[]
-  attempts: number
-  agent?: AgentReport
-  fixedFiles: string[]
   notes: ReleaseNotes[]
 }
 
-/** Description of a bump merge request: bumped packages, checks, agent changes, release notes. */
+/** Description of a bump merge request: bumped packages, checks, release notes. */
 export function mergeRequestBody(input: MergeRequestBodyInput): string {
   return describeMergeRequest({
     sections: [
@@ -180,9 +154,6 @@ export function mergeRequestBody(input: MergeRequestBodyInput): string {
       },
     ],
     checks: input.checks,
-    ...(input.agent
-      ? { fix: { report: input.agent, attempts: input.attempts, files: input.fixedFiles } }
-      : {}),
     details: input.notes.map((note) => ({
       summary: `Release notes: ${note.package} ${note.from ?? ''} → ${note.to}`,
       body: note.text,

@@ -1,6 +1,6 @@
 # Agent access
 
-An AI agent with a browser can drive the web UI like any user: open pages, run analyses, edit settings. It gets there through its own account and a single-use login link, so it never needs a passkey and every action it takes is attributed to it in the activity log.
+An AI agent with a browser can drive the web UI like any user: open pages, run analyses, edit settings. It gets there through its own account and a single-use login link, so it never needs a passkey and every action it takes is attributed to it in History.
 
 This needs `users` sign-in (`HOLTKEEPER_AUTH=users`, see [@holtkeeper/auth-users](../packages/auth-users/docs/README.md)) and `server.publicUrl`. The commands run wherever the config and its secrets are, which makes whoever runs them an operator: they skip the delegation checks of the web UI. Full reference: [`holtkeeper users`](../apps/cli/docs/README.md#users-action).
 
@@ -39,6 +39,6 @@ A used or expired link answers 410: issue a new one. Login links never register 
 
 ## Audit and revocation
 
-- The activity log records `user.invited` and `user.link_issued` with actor `cli`, then `user.login` (method `link`) and everything the agent does under its own user id.
+- History (the audit log) records `user.invited` and `user.link_issued` with actor `cli`, then `user.login` (method `link`) and everything the agent does under its own user id.
 - To end the agent's sessions, disable the account or change its grants in the web UI. Both bump its `sessionVersion`, so existing cookies stop working at once. Links of a disabled user answer 403.
 - `POST /auth/users/logout` ends the session on that browser only.

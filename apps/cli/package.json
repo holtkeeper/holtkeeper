@@ -10,25 +10,10 @@
     ".": "./src/cli.ts"
   },
   "dependencies": {
-    "@holtkeeper/agent": "workspace:*",
-    "@holtkeeper/analyzer": "workspace:*",
-    "@holtkeeper/analyzers": "workspace:*",
     "@holtkeeper/auth-users": "workspace:*",
-    "@holtkeeper/changelog": "workspace:*",
     "@holtkeeper/core": "workspace:*",
-    "@holtkeeper/exec": "workspace:*",
-    "@holtkeeper/forge": "workspace:*",
-    "@holtkeeper/jobs": "workspace:*",
-    "@holtkeeper/release": "workspace:*",
-    "@holtkeeper/report": "workspace:*",
     "@holtkeeper/server": "workspace:*",
-    "@holtkeeper/settings": "workspace:*",
-    "@holtkeeper/store": "workspace:*",
-    "@holtkeeper/vuln": "workspace:*",
-    "@holtkeeper/vuln-go": "workspace:*",
-    "@holtkeeper/vuln-js": "workspace:*",
-    "@holtkeeper/vuln-osv": "workspace:*",
-    "zod": "^4.6.7"
+    "@holtkeeper/store": "workspace:*"
   },
   "devDependencies": {
     "@holtkeeper/auth-none": "workspace:*"

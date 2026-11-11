@@ -1,3 +1,5 @@
+import type { Scope } from '@holtkeeper/api'
+
 import { type JsonSchema, initialValue, resolve } from './schema-form.ts'
 
 /** A merge request condition as the editor holds it: lists already normalized. */
@@ -19,7 +21,7 @@ export interface ConditionValue {
   not?: ConditionValue
 }
 
-export interface GlobSetsValue {
+interface GlobSetsValue {
   all?: string[]
   any?: string[]
   none?: string[]
@@ -42,9 +44,7 @@ export interface PolicyValue {
   scope?: unknown
 }
 
-/** Leaf condition fields, in the order the editor offers them. */
-export type ConditionField = Exclude<keyof ConditionValue, 'all' | 'any' | 'not'>
-
+/** Merge request events a policy can react to. */
 export const MERGE_REQUEST_EVENTS = [
   'open',
   'update',
@@ -54,43 +54,6 @@ export const MERGE_REQUEST_EVENTS = [
   'approve',
   'command',
 ] as const
-
-export const PIPELINE_STATES = ['success', 'failed', 'running', 'none'] as const
-
-/** What each leaf condition is called and how it is explained. */
-export const CONDITION_FIELDS: Record<ConditionField, { label: string; hint: string }> = {
-  event: { label: 'Event', hint: 'The webhook event is one of these.' },
-  targetBranch: { label: 'Target branch', hint: 'Globs, e.g. main or release/*.' },
-  sourceBranch: { label: 'Source branch', hint: 'Globs, e.g. renovate/*.' },
-  author: { label: 'Author', hint: 'Usernames or globs; optionally only bots or only people.' },
-  labels: { label: 'Labels', hint: 'Exact label names the merge request has.' },
-  labelAdded: { label: 'Label added', hint: 'This event added one of these labels.' },
-  title: { label: 'Title', hint: 'Regular expression: pattern or /pattern/flags.' },
-  draft: { label: 'Draft', hint: 'Whether the merge request is a draft.' },
-  command: { label: 'Command', hint: 'A /command in a comment, without the slash.' },
-  changedPaths: { label: 'Changed paths', hint: 'Globs over changed files. Loads the diff.' },
-  size: { label: 'Size', hint: 'Changed lines and files. Loads the diff.' },
-  pipeline: { label: 'Pipeline', hint: 'State of the latest pipeline for the head commit.' },
-}
-
-export const CONDITION_FIELD_ORDER: readonly ConditionField[] = [
-  'event',
-  'targetBranch',
-  'sourceBranch',
-  'author',
-  'labels',
-  'labelAdded',
-  'title',
-  'draft',
-  'command',
-  'changedPaths',
-  'size',
-  'pipeline',
-]
-
-/** Whether `name` is a leaf condition field. */
-export const isConditionField = (name: string): name is ConditionField =>
-  (CONDITION_FIELD_ORDER as readonly string[]).includes(name)
 
 /** What each built-in action does, for its block header. */
 export const ACTION_HINTS: Record<string, string> = {
@@ -193,27 +156,6 @@ export function normalizePolicies(value: unknown): PolicyValue[] {
   })
 }
 
-/** A starting value for a newly added leaf condition. */
-export function emptyField(field: ConditionField): ConditionValue[ConditionField] {
-  switch (field) {
-    case 'title':
-      return ''
-    case 'draft':
-      return false
-    case 'author':
-      return { users: [] }
-    case 'labels':
-    case 'changedPaths':
-      return { any: [] }
-    case 'size':
-      return { maxLines: 200 }
-    case 'event':
-      return ['open', 'update']
-    default:
-      return []
-  }
-}
-
 /** A new policy whose id does not clash with `taken`. */
 export function newPolicy(taken: readonly string[]): PolicyValue {
   let n = taken.length + 1
@@ -311,15 +253,6 @@ export function describeCondition(condition: ConditionValue): string[] {
   return out
 }
 
-/** A one-line reading of a policy: `If … → approve, merge`. */
-export function summarizePolicy(policy: PolicyValue): string {
-  const when = describeCondition(policy.when)
-  const then = policy.actions.map((action) => action.type)
-  if (policy.skipAnalyzers === '*') then.push('skip all analyzers')
-  else if (policy.skipAnalyzers?.length) then.push(`skip ${policy.skipAnalyzers.join(', ')}`)
-  return `${when.length ? `If ${when.join(' and ')}` : 'Always'} → ${then.length ? then.join(', ') : 'nothing'}`
-}
-
 const ID_PATTERN = /^[\w.-]+$/
 
 /** Problems that would make the server reject the policies, by policy index. */
@@ -398,5 +331,45 @@ export function cleanCondition(condition: ConditionValue): ConditionValue {
 }
 
 /** Policies as the setting stores them. */
-export const serializePolicies = (policies: readonly PolicyValue[]): PolicyValue[] =>
+const serializePolicies = (policies: readonly PolicyValue[]): PolicyValue[] =>
   policies.map((policy) => ({ ...policy, when: cleanCondition(policy.when) }))
+
+/**
+ * Stored policies with `policy` saved: it replaces the one with id `previousId` (its own id when
+ * absent) in place, or is appended when there is none. The result is ready to store.
+ */
+export function withPolicy(
+  stored: unknown,
+  policy: PolicyValue,
+  previousId: string = policy.id,
+): PolicyValue[] {
+  const policies = normalizePolicies(stored)
+  const index = policies.findIndex((candidate) => candidate.id === previousId)
+  const next = index < 0 ? [...policies, policy] : policies.with(index, policy)
+  return serializePolicies(next)
+}
+
+/** Stored policies without the one with id `id`, ready to store. */
+export const withoutPolicy = (stored: unknown, id: string): PolicyValue[] =>
+  serializePolicies(normalizePolicies(stored).filter((policy) => policy.id !== id))
+
+/**
+ * The policies entry a new policy of a team goes to: the one scoped to exactly that group (every
+ * repository when `group` is absent), or `undefined` when a new entry is needed.
+ */
+export function policiesEntryFor<E extends { key: string; scope: Scope }>(
+  entries: readonly E[],
+  key: string,
+  group: string | undefined,
+): E | undefined {
+  return entries.find(
+    (entry) =>
+      entry.key === key &&
+      (group === undefined
+        ? entry.scope.all === true
+        : !entry.scope.all &&
+          !entry.scope.repos?.length &&
+          entry.scope.groups?.length === 1 &&
+          entry.scope.groups[0] === group),
+  )
+}

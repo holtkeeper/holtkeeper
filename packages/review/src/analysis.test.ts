@@ -73,20 +73,6 @@ const record = (d: ReviewData, createdAt = '2026-10-30T00:00:00Z') => ({
   data: d,
 })
 
-const reviewTest = (verdict: 'passes' | 'flaky') => ({
-  id: `t-${verdict}`,
-  target: { path: 'src/p.ts', symbol: 'price', startLine: 1, endLine: 3, hash: 'h' },
-  testFile: `src/p.${verdict}.test.ts`,
-  framework: 'bun:test',
-  command: ['bun', 'test'],
-  cwd: '.',
-  verdict,
-  head: { passed: 1, runs: 2, durationMs: 10 },
-  attempts: 1,
-  content: 'x\n',
-  ranAt: HEAD,
-})
-
 const reviewWith = async (
   change: { sourceBranch?: string; targetBranch?: string; author?: string },
   options: Record<string, unknown> = {},
@@ -153,29 +139,6 @@ describe('reviewAnalysis', () => {
     expect(report.metrics.find((m) => m.id === 'cost')?.value).toBe('$0.12')
   })
 
-  test('passing tests become applicable changes into the source branch', () => {
-    const d = data({ tests: { items: [reviewTest('passes'), reviewTest('flaky')], notTested: [] } })
-    expect(reviewAnalysis.schema.safeParse(d).success).toBe(true)
-    expect(reviewAnalysis.changes?.(d)).toEqual([
-      {
-        id: 't-passes',
-        title: 'Add a test for price',
-        confidence: 'review',
-        source: 'review-tests',
-        base: 'f',
-        edits: [{ kind: 'create', file: 'src/p.passes.test.ts', newText: 'x\n' }],
-      },
-    ])
-    const report = reviewAnalysis.toReport(record(d))
-    const section = report.sections.find((s) => s.id === 'tests')
-    const changes = section?.blocks.find((b) => b.type === 'changes')
-    expect(changes?.type === 'changes' && changes.applicable).toBe(true)
-    expect(report.metrics.find((m) => m.id === 'tests')?.value).toBe(1)
-    expect(reviewAnalysis.toReport(record(data())).sections.some((s) => s.id === 'tests')).toBe(
-      false,
-    )
-  })
-
   test('does not compare with another merge request', () => {
     const other = data({ mergeRequest: { ...data().mergeRequest, id: 8 } })
     const report = reviewAnalysis.toReport(record(data()), record(other))
@@ -188,7 +151,7 @@ describe('review analyzer', () => {
   test('options: defaults and string forms from commands', () => {
     const parsed = reviewOptionsSchema.parse({
       mergeRequest: '7',
-      includeChecks: 'lint,secrets',
+      includeChecks: 'secrets,testids',
       media: 'false',
     })
     expect(parsed).toMatchObject({
@@ -197,12 +160,9 @@ describe('review analyzer', () => {
       maxComments: 15,
       minSeverity: 'minor',
       approve: 'never',
-      includeChecks: ['lint', 'secrets'],
+      includeChecks: ['secrets', 'testids'],
       media: false,
-      tests: false,
-      maxTests: 2,
     })
-    expect(reviewOptionsSchema.parse({ mergeRequest: 1, tests: 'true' }).tests).toBe(true)
     expect(parsed.ignore).toContain('**/*.lock')
     expect(
       reviewOptionsSchema.parse({ mergeRequest: 1, includeChecks: 'true' }).includeChecks,
@@ -216,7 +176,13 @@ describe('review analyzer', () => {
       files: [{ oldPath: 'a.ts', newPath: 'a.ts', status: 'added', diff: addedFile(['x']) }],
       discussions: [],
     })
-    const analyzer = createReviewAnalyzer({ instructionsFor: () => 'Team rule.' })
+    const asked: unknown[] = []
+    const analyzer = createReviewAnalyzer({
+      guideFor: async (target, request) => {
+        asked.push({ target, request })
+        return '# Repository guide\n\nTeam rule.'
+      },
+    })
     const { agent, tasks } = fakeAgent({
       review: [{ comments: [], summary: 'Fine.', verdict: 'looks-good' }],
     })
@@ -232,6 +198,9 @@ describe('review analyzer', () => {
     expect(result.ref).toBe('!7')
     expect(result.data.verdict).toBe('looks-good')
     expect(tasks[0]?.context).toContain('Team rule.')
+    expect(asked).toEqual([
+      { target: repo, request: { docs: [], query: expect.stringContaining('a.ts') } },
+    ])
     expect(submissions).toHaveLength(1)
   })
 
@@ -301,7 +270,7 @@ describe('review analyzer', () => {
     expect(submissions).toEqual([])
   })
 
-  test('replyTo proposes what the author taught to the knowledge base', async () => {
+  test('replyTo answers with the Guide as context', async () => {
     const { forge } = fakeForge({
       files: [],
       discussions: [
@@ -322,29 +291,10 @@ describe('review analyzer', () => {
         },
       ],
     })
-    const { agent } = fakeAgent({
-      review: [
-        {
-          action: 'concede',
-          body: 'Right.',
-          resolve: false,
-          learning: { title: 'Prices are cents', body: 'Do not ask for rounding.' },
-        },
-      ],
+    const { agent, tasks } = fakeAgent({
+      review: [{ action: 'concede', body: 'Right.', resolve: false }],
     })
-    const proposals: unknown[] = []
-    const analyzer = createReviewAnalyzer({
-      knowledge: {
-        access: {
-          search: async () => [],
-          propose: async (input, ctx) => {
-            proposals.push({ input, ctx })
-            return { id: 'k1', status: 'proposed' }
-          },
-        },
-        groupsOf: () => ['games'],
-      },
-    })
+    const analyzer = createReviewAnalyzer({ guideFor: async () => 'Prices are integer cents.' })
     const result = await analyzer.run({
       repo,
       forge,
@@ -352,20 +302,7 @@ describe('review analyzer', () => {
       runner: createFakeRunner().runner,
       options: reviewOptionsSchema.parse({ mergeRequest: 7, replyTo: 'd1' }),
     })
-    expect(proposals).toEqual([
-      {
-        input: {
-          title: 'Prices are cents',
-          body: expect.stringContaining('#note_2'),
-        },
-        ctx: {
-          actor: 'agent:review',
-          repo: { ...repo, groups: ['games'] },
-          taskKind: 'review',
-        },
-      },
-    ])
-    expect(result.data.threads[0]?.learning).toEqual({ id: 'k1', status: 'proposed' })
-    expect(result.data.summary).toContain('Knowledge entry k1 is proposed.')
+    expect(tasks[0]?.context).toBe('Prices are integer cents.')
+    expect(result.data.summary).toBe('Answered thread d1 (concede).')
   })
 })

@@ -108,7 +108,7 @@ function setup(oidc: { options: OidcProviderOptions; client: OidcClient }[] = []
   const auth = createUsersAuth(
     {
       store: store.users,
-      activity: store.activity,
+      audit: store.audit,
       sessionSecret: secret,
       origin,
       oidc: oidc.map((o) => o.options),
@@ -346,15 +346,9 @@ describe('usersAuth', () => {
     expect(await annBrowser.principal(auth)).toBeUndefined()
     expect((await newDevice.principal(auth))?.id).toBe(ann.user.id)
     expect(await store.users.listPasskeys(ann.user.id)).toHaveLength(2)
-    const actions = (await store.activity.list()).map((e) => e.action)
+    const actions = (await store.audit.list({ limit: 500 })).events.map((e) => e.action)
     expect(actions).toEqual(
-      expect.arrayContaining([
-        'user.invited',
-        'passkey.registered',
-        'user.recovery_issued',
-        'user.recovered',
-        'user.login',
-      ]),
+      expect.arrayContaining(['passkey.registered', 'user.recovered', 'user.login']),
     )
   })
 
@@ -626,7 +620,7 @@ describe('own account', () => {
 
     expect((await browser.send(auth, 'DELETE', '/me/passkeys/pk-phone')).status).toBe(204)
     expect((await store.users.listPasskeys(root.id)).map((p) => p.id)).toEqual([passkeyId])
-    const actions = (await store.activity.list()).map((e) => e.action)
+    const actions = (await store.audit.list({ limit: 500 })).events.map((e) => e.action)
     expect(actions).toEqual(
       expect.arrayContaining(['passkey.registered', 'passkey.renamed', 'passkey.removed']),
     )
@@ -832,8 +826,7 @@ describe('external accounts', () => {
       (await browser.send(auth, 'DELETE', `${path}/${account.id}`, undefined, root)).status,
     ).toBe(204)
     expect(await store.externalAccounts?.listByUser(dev.user.id)).toEqual([])
-    const events = await store.activity.list()
-    expect(events.map((e) => e.action)).toContain('account.unlinked')
+    expect(await store.audit.count({ action: 'account' })).toBe(0)
   })
 
   test('sign-in through a GitLab forge issuer links the subject as a verified account', async () => {
@@ -882,7 +875,7 @@ describe('external accounts', () => {
 describe('login links', () => {
   test('sign in once without a passkey and are no enrollment links', async () => {
     const { store, auth, now, advance } = setup()
-    const manage = { store: store.users, activity: store.activity, actor: 'cli', now }
+    const manage = { store: store.users, audit: store.audit, actor: 'cli', now }
     const user = await createUser(manage, { name: 'Claude', grants: adminGrants })
     const { link } = await issueUserLink(manage, {
       user,
@@ -906,7 +899,7 @@ describe('login links', () => {
     advance(1)
     const lateToken = late.link.split('/link/')[1]?.replace(/\/login$/, '') ?? ''
     expect((await new Browser().send(auth, 'GET', `/link/${lateToken}/login`)).status).toBe(410)
-    expect((await store.activity.list({})).map((entry) => entry.action)).toContain(
+    expect((await store.audit.list()).events.map((entry) => entry.action)).toContain(
       'user.link_issued',
     )
   })

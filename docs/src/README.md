@@ -25,7 +25,7 @@ The site renders the repository's markdown where it lives; nothing is copied.
 
 ## Landing
 
-`src/pages/index.astro` assembles `src/components/landing/*`. The only hydrated island is the "how it works" pipeline (`pipeline/Pipeline.tsx`, React + Motion, `client:visible`); the terminal demo, copy buttons and theme toggle are small inline scripts. Terminal output follows the CLI's own formatters (`formatReport`, `formatReportText`); keep `minute.ts` in step when they change.
+`src/pages/index.astro` assembles `src/components/landing/*`. The only hydrated island is the "how it works" pipeline (`pipeline/Pipeline.tsx`, React + Motion, `client:visible`); copy buttons and the theme toggle are small inline scripts.
 
 Colors are tokens in `src/styles/landing.css` (landing) and `src/styles/theme.css` (Starlight), each with a light variant under `[data-theme='light']`. Both pages share Starlight's `starlight-theme` key in `localStorage`; with nothing stored the site is dark.
 

@@ -6,8 +6,10 @@ import type { AnalysisStore, AuditRunStore, CiJobStore } from '@holtkeeper/store
 import type { z } from 'zod'
 
 import type { Applicability } from './applies.ts'
+import { defaultBranchHead } from './head.ts'
 
 export * from './applies.ts'
+export * from './head.ts'
 
 /**
  * Bytes kept between runs, e.g. on S3, under keys the analyzer derives from its inputs (source
@@ -107,8 +109,16 @@ export interface AnalyzerContext<Options> {
   /** Release, tag or commit being analyzed, when the trigger knows it. */
   ref?: string
   options: Options
+  /** Id of the job this run belongs to; absent outside the task engine. */
+  jobId?: string
   signal?: AbortSignal
   log?: (line: string) => void
+  /**
+   * Runs `run` as a named step of the job's log: start and end are marked with the duration, lines
+   * logged meanwhile belong to the step, and a step that throws is recorded as the failing step of
+   * the attempt (the error is rethrown). Absent outside the task engine; then call `run` directly.
+   */
+  step?: <T>(name: string, run: () => Promise<T>) => Promise<T>
 }
 
 /** A binary file a run produced, kept outside the JSON data. */
@@ -139,9 +149,23 @@ export interface AnalyzerPreset<Options = Record<string, unknown>> {
   options: Partial<Options>
 }
 
+/** A duration such as `30m`, `6h` or `7d`. */
+export type RefreshInterval = `${number}${'m' | 'h' | 'd'}`
+
 /**
- * Something that produces analysis data: the CLI runs analyzers on demand, the task engine on
- * schedules and events. Analyzers declare what they need; runners provide exactly that.
+ * When the freshness sweeper queues an analyzer on its own. `change`: the default branch moved
+ * past the commit the latest record describes, at most once per `minInterval`; with `paths`, only
+ * changes to matching files (globs from the repository root) count. `time`: the data changes
+ * without commits (registries, advisories, end-of-life dates, CI history), so it reruns once
+ * `cadence` has passed since the latest record. `heavy` holds the run to the night window.
+ */
+export type AnalyzerRefresh =
+  | { on: 'change'; minInterval: RefreshInterval; paths?: readonly string[]; heavy?: boolean }
+  | { on: 'time'; cadence: RefreshInterval; heavy?: boolean }
+
+/**
+ * Something that produces analysis data, run by the task engine on schedules, events and demand.
+ * Analyzers declare what they need; runners provide exactly that.
  */
 export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   kind: string
@@ -150,8 +174,8 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
   /** `repo`: one repository at a time. `group`: all repositories of a config group at once. */
   scope: 'repo' | 'group'
   /**
-   * `true`: the runner must provide it. `'optional'`: provided when the runner can (the task
-   * engine always can; the CLI provides neither forge nor history), and `run` copes without it.
+   * `true`: the runner must provide it. `'optional'`: provided when the runner can, and `run`
+   * copes without it.
    */
   needs: {
     checkout?: boolean
@@ -168,10 +192,32 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
    */
   exclusive?: boolean
   /**
+   * Worker pool that alone runs its jobs, e.g. `write` for tasks that change code. Workers serve
+   * the pools they are started with (`DEFAULT_POOL` unless told otherwise) and never claim jobs
+   * of other pools. Absent: `DEFAULT_POOL`.
+   */
+  pool?: string
+  /**
+   * The run reads only the default branch and rejects a `ref`, so event triggers and merge request
+   * policies, whose jobs carry one, never queue it.
+   */
+  defaultBranchOnly?: boolean
+  /**
    * Kinds whose results of the same `repo` the run reads from `history`. The queue starts its job
    * only once jobs of these kinds of that repository queued ahead of it have ended.
    */
   after?: string[]
+  /**
+   * After storing a new record, runners delete this kind's older records of the same `repo`,
+   * keeping the newest `keepRecords`. Absent: every record is kept.
+   */
+  keepRecords?: number
+  /**
+   * How the freshness sweeper keeps this analyzer's records current. Absent: never automatically,
+   * only on events, schedules people create and demand (merge request review, write tasks).
+   * Group analyzers have no commit of their own and use `time`.
+   */
+  refresh?: AnalyzerRefresh
   /** Validates options from config or flags; numbers should use `z.coerce`. */
   options: z.ZodType<Options>
   flags?: AnalyzerFlag[]
@@ -196,15 +242,45 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
    * Produces the data. `artifacts` are binary files the data refers to by `id` (e.g. the
    * `artifact` of `write-binary` edits); runners store them after the record, tagged with it.
    * `at` (ISO 8601) is when the analyzed subject happened, such as a release's tag date; runners
-   * record the analysis at that time instead of the time of the run.
+   * record the analysis at that time instead of the time of the run. `sha` is the commit the data
+   * describes; runners record the checkout's commit when it is absent, so analyzers without a
+   * checkout set it to the forge head they read.
    */
-  run(
-    context: AnalyzerContext<Options>,
-  ): Promise<{ data: Data; ref?: string; at?: string; artifacts?: AnalyzerArtifact[] }>
+  run(context: AnalyzerContext<Options>): Promise<{
+    data: Data
+    ref?: string
+    sha?: string
+    at?: string
+    artifacts?: AnalyzerArtifact[]
+  }>
 }
+
+/** The pool of analyzers that name none, served by every worker started without `pools`. */
+export const DEFAULT_POOL = 'default'
 
 export const defineAnalyzer = <Data, Options>(analyzer: Analyzer<Data, Options>) => analyzer
 
 /** An analyzer whose data and option types are not known statically, e.g. in a registry. */
 // oxlint-disable-next-line typescript/no-explicit-any -- registries hold analyzers of many types
 export type AnyAnalyzer = Analyzer<any, any>
+
+/**
+ * `analyzer` reporting the default-branch head as its record's `sha` when it ran on the default
+ * branch without a checkout and returned none, so freshness can compare it with later heads. The
+ * head is read before the run: a push during the run leaves the record stale, never falsely fresh.
+ */
+export function withDefaultBranchHead<Data, Options>(
+  analyzer: Analyzer<Data, Options>,
+): Analyzer<Data, Options> {
+  return {
+    ...analyzer,
+    async run(context) {
+      const sha =
+        context.forge && context.ref === undefined && context.repos === undefined
+          ? await defaultBranchHead(context.forge, context.repo.path)
+          : undefined
+      const result = await analyzer.run(context)
+      return result.sha !== undefined || sha === undefined ? result : { ...result, sha }
+    },
+  }
+}

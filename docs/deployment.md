@@ -15,7 +15,7 @@ holtkeeper serve --role web|worker|scheduler|all   # also HOLTKEEPER_ROLE; defau
 
 Roles combine with commas: `--role web,scheduler` is the API plus the scheduler, which is what the Helm chart runs in its web pods by default.
 
-Scheduler duties are schedules, credential rotation, artifact retention and audit retention. Every process with the scheduler role contends for a lease in the store (`kv.acquireLease`, key `leader:scheduler`, TTL 30 s, renewed every 10 s); only the holder runs the duties. When the holder dies, another process takes over within one TTL. When a renewal fails (store unreachable), the holder stops its duties at once, so two leaders do not overlap past one lease.
+Scheduler duties are the freshness sweep (the main source of automatic work), schedules, repository polling, webhook sync, the library index, credential rotation, artifact retention and audit retention. Every process with the scheduler role contends for a lease in the store (`kv.acquireLease`, key `leader:scheduler`, TTL 30 s, renewed every 10 s); only the holder runs the duties. When the holder dies, another process takes over within one TTL. When a renewal fails (store unreachable), the holder stops its duties at once, so two leaders do not overlap past one lease.
 
 Worker flags:
 
@@ -23,6 +23,7 @@ Worker flags:
 | ------------------------ | -------------------------- | --------------------------------------------------------------------------- |
 | `--concurrency <n>`      | `HOLTKEEPER_CONCURRENCY`   | Jobs at once in this process (default `jobs.concurrency`)                   |
 | `--claim-delay <time>`   | `HOLTKEEPER_CLAIM_DELAY`   | Take only jobs queued this long, e.g. `15s`: workers without one go first   |
+| `--pool <pools>`         | `HOLTKEEPER_WORKER_POOL`   | Worker pools served, e.g. `write`, `default,write` (default `default`)      |
 | `--max-jobs <n>`         | `HOLTKEEPER_MAX_JOBS`      | Claim `n` jobs, finish them, exit 0: a fresh process or pod per job         |
 | `--drain-timeout <time>` | `HOLTKEEPER_DRAIN_TIMEOUT` | On SIGTERM, how long running jobs may finish (`30s` default, `2m`, `500ms`) |
 
@@ -51,7 +52,7 @@ Store-backed series are reported only by processes with the API (web, all); ever
 
 ## Requirements for more than one process
 
-- **Postgres** (`@holtkeeper/store-postgres`). SQLite is a local file; it works for one process (or several in one container sharing the file), not for pods on different nodes. For the Database page's statements, sessions and replica lag, load `pg_stat_statements` and grant the Holtkeeper role `pg_read_all_stats` ([rights](../packages/store-postgres/docs/README.md#rights)); on CloudNativePG a `pg_stat_statements.*` parameter and a managed role with `inRoles: [pg_read_all_stats]` do it.
+- **Postgres** (`@holtkeeper/store-postgres`). SQLite is a local file; it works for one process (or several in one container sharing the file), not for pods on different nodes. For the statements, sessions and replica lag under Settings → System → Database → **Diagnostics**, load `pg_stat_statements` and grant the Holtkeeper role `pg_read_all_stats` ([rights](../packages/store-postgres/docs/README.md#rights)); on CloudNativePG a `pg_stat_statements.*` parameter and a managed role with `inRoles: [pg_read_all_stats]` do it.
 - **S3-compatible artifacts** (`server.artifacts: { kind: 's3', ... }`: any S3-compatible storage — AWS S3, Cloudflare R2, Garage, Ceph, MinIO, Versity S3 Gateway — including one you already run). Workers write artifacts, web pods serve them.
 - **Distributed limits**: `limits: { distributed: true }` keeps credential limiter counters in the store's `kv` (compare-and-set), so several workers share one token's rate and concurrency limits. Slots held by a process that dies are returned after 2 minutes without its heartbeat.
 - The same `server.vaultKey` everywhere.
@@ -66,6 +67,10 @@ docker build -t holtkeeper:latest .          # --build-arg BASE_IMAGE=... for an
 ```
 
 The image runs as uid 10001, works with a read-only root filesystem (writable: `/tmp`, `/data`, `/workspace`, `/mise`), has a `HEALTHCHECK` on `/healthz` and the entrypoint `holtkeeper serve`. The config is mounted at `/app/config/holtkeeper.config.ts` (inside `/app` so its `@holtkeeper/*` imports resolve); [deploy/holtkeeper.config.ts](../deploy/holtkeeper.config.ts) is a starting point that reads every secret from the environment and picks Postgres and S3 when their variables are set. Listen on `0.0.0.0` in containers.
+
+### What the config file holds
+
+`holtkeeper.config.ts` holds infrastructure only: `server` (auth, store, `vaultKey`, listener, `publicUrl`, artifacts, retention, the egress rules secret, credential rotation), `jobs` (`execution` with its egress proxy, `concurrency`, `cacheDir`, `timeoutMinutes`, the shared `webhookSecret`), `limits.distributed`, `ai.providers` and `dryRun`. Everything else is set in the panel and stored in the database: forges (with their tokens as credentials, webhook secrets and bot username), groups, repository traits, schedules, triggers, merge request policies, analyzer options, the AI budget and the rest of the settings. A config file that still has `forges`, `groups`, `repos`, `plugins`, `jobs.schedules`, `jobs.on*`, `jobs.commands`, `jobs.botUsername` or `jobs.webhooks` starts anyway: each such key gets one warning in the log and is ignored. Add the forge and groups again in the panel. The job engine always runs, with defaults when the file has no `jobs` section.
 
 ### Single container
 
@@ -95,16 +100,17 @@ Jobs run inside the worker container in `mise` execution mode: the container is 
 
 The chart [deploy/helm/holtkeeper](../deploy/helm/holtkeeper) renders:
 
-- a ConfigMap with `holtkeeper.config.ts` (`config.content`, default the chart's `files/holtkeeper.config.ts`; or `config.existingConfigMap`), mounted read-only; pods restart when it changes;
-- `existingSecret` → environment of every container (`HOLTKEEPER_VAULT_KEY`, `HOLTKEEPER_DATABASE_URL`, `HOLTKEEPER_S3_*`, `HOLTKEEPER_ROOT_PASSWORD`, `HOLTKEEPER_SESSION_SECRET`, `HOLTKEEPER_WEBHOOK_SECRET`, `GITLAB_TOKEN`, ...); `env` for plain values (`HOLTKEEPER_AUTH=users` switches the default config from the `root` password to accounts with passkeys: the first start logs the admin's setup link, `HOLTKEEPER_ADMIN_NAME`/`HOLTKEEPER_ADMIN_EMAIL` name that admin, `HOLTKEEPER_PUBLIC_URL` is required; accounts for AI agents: [Agent access](agent-access.md));
+- a ConfigMap with `holtkeeper.config.ts` (`config.content`, default the chart's `files/holtkeeper.config.ts`; or `config.existingConfigMap`), mounted read-only; pods restart when it changes. The default config has no forge: add the GitLab forge, its token credential and groups in the panel after the first sign-in ([what the file holds](#what-the-config-file-holds));
+- `existingSecret` → environment of every container (`HOLTKEEPER_VAULT_KEY`, `HOLTKEEPER_DATABASE_URL`, `HOLTKEEPER_S3_*`, `HOLTKEEPER_ROOT_PASSWORD`, `HOLTKEEPER_SESSION_SECRET`, `HOLTKEEPER_WEBHOOK_SECRET`, ...; forge tokens are credentials stored in the panel, not variables); `env` for plain values (`HOLTKEEPER_AUTH=users` switches the default config from the `root` password to accounts with passkeys: the first start logs the admin's setup link, `HOLTKEEPER_ADMIN_NAME`/`HOLTKEEPER_ADMIN_EMAIL` name that admin, `HOLTKEEPER_PUBLIC_URL` is required; accounts for AI agents: [Agent access](agent-access.md));
 - `web` Deployment + Service (+ Ingress, + HPA on CPU, + PodDisruptionBudget), roles `web,scheduler`;
 - `worker` Deployment (`replicas`, `concurrency`, `maxJobs`, `drainTimeout`, resources) with a headless Service for metrics, PDB; or, with `worker.pools`, one Deployment per pool (`<release>-worker-<name>`, label `holtkeeper.dev/worker-pool`), each `worker` with the pool's own fields on top, e.g. 2 jobs per small node and 4 on a big one; `claimDelay: 15s` makes a pool take only jobs no other pool claimed within that time, so the pools without one fill first; `spread: true` keeps a pool's pods on different nodes, counting only the current ReplicaSet so pods of a finishing rollout do not push two onto one node;
 - optional `scheduler` Deployment (`scheduler.enabled`; the web pods then run `web` only);
+- optional write worker Deployment (`writeWorker.enabled`, see [Write workers](#write-workers));
 - optional ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies;
 - optional egress proxy (`egressProxy.enabled`, see below) with a download cache;
 - a ServiceAccount without any Role: nothing talks to the Kubernetes API and no pod-creation rights are needed. Tokens are not mounted.
 
-Every pod runs non-root (10001) with `readOnlyRootFilesystem`, no capabilities, `RuntimeDefault` seccomp; `/tmp` (also `HOME`, so bun, npm and Go caches of dependency installs; `tmpSizeLimit`, default 8Gi), `/workspace` (checkouts, mirror cache) and `/mise` (tools) are emptyDirs, `/mise` optionally a PVC (`worker.miseCache.type: pvc`, ReadWriteMany to share between workers). The git mirror cache can move to its own PVC (`worker.mirrorCache.type: pvc`, default 50Gi ReadWriteMany): mirrors then survive restarts and deploys instead of being cloned again by every new pod, and workers share them, taking a lock file per mirror (NFS works). Pods set `fsGroupChangePolicy: OnRootMismatch`, so such volumes are not re-owned file by file on every start. Workers report what their mirror and tool caches use to the store, and the panel's Storage page shows it per worker (a shared volume once). Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
+Every pod runs non-root (10001) with `readOnlyRootFilesystem`, no capabilities, `RuntimeDefault` seccomp; `/tmp` (also `HOME`, so bun, npm and Go caches of dependency installs; `tmpSizeLimit`, default 8Gi), `/workspace` (checkouts, mirror cache) and `/mise` (tools) are emptyDirs, `/mise` optionally a PVC (`worker.miseCache.type: pvc`, ReadWriteMany to share between workers). The git mirror cache can move to its own PVC (`worker.mirrorCache.type: pvc`, default 50Gi ReadWriteMany): mirrors then survive restarts and deploys instead of being cloned again by every new pod, and workers share them, taking a lock file per mirror (NFS works). Pods set `fsGroupChangePolicy: OnRootMismatch`, so such volumes are not re-owned file by file on every start. Workers report what their mirror and tool caches use to the store, and Settings → System → Storage shows it per worker (a shared volume once). Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
 
 ```sh
 kubectl create secret generic holtkeeper --from-env-file=holtkeeper.env
@@ -119,7 +125,7 @@ helm install holtkeeper deploy/helm/holtkeeper --set existingSecret=holtkeeper \
 ### Scaling
 
 - **Web**: stateless; scale with `web.replicas` or `web.hpa`. Only one web pod runs the scheduler at a time (lease).
-- **Workers**: `worker.replicas` × `concurrency` (summed over `worker.pools`) is the job parallelism. A worker hands a free slot to the job it claimed first among those its credential limits admit, so a long-waiting job is not starved by a stream of short ones. With `keda.enabled` a ScaledObject scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus (`keda.threshold` queued jobs per replica). The queue runs at most one job per analyzer and repository at a time; jobs of analyzers that change repositories (`port`, `propagate`) run alone on their repository or group, and `release-risk` waits for the changelog, bundle, quality, depgraph and audit jobs of its repository queued before it. Other analyzers of one repository run side by side, so more workers help until every repository runs one job per queued analyzer.
+- **Workers**: `worker.replicas` × `concurrency` (summed over `worker.pools`) is the job parallelism. A worker hands a free slot to the job it claimed first among those its credential limits admit, so a long-waiting job is not starved by a stream of short ones. With `keda.enabled` a ScaledObject scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus (`keda.threshold` queued jobs per replica). The queue runs at most one job per analyzer and repository at a time; jobs of analyzers that change repositories (`propagate`) run alone on their repository or group. Other analyzers of one repository run side by side, so more workers help until every repository runs one job per queued analyzer.
 - **Limits**: set `limits.distributed: true` (the default config does when Postgres is used) so forge and AI tokens are rate-limited across all workers, not per pod.
 
 ### Isolation: one job per worker pod
@@ -138,6 +144,32 @@ Job commands do not inherit the worker's secrets: in `mise` mode they start from
 Closing the gap needs the commands out of the worker's process tree, which the chart does not do yet: run them in a sidecar container of the worker pod with its own uid, no `envFrom` and only `/workspace` and `/mise` shared (pods keep separate PID namespaces per container), or mark the worker process non-dumpable (`prctl(PR_SET_DUMPABLE, 0)` makes its `/proc` files root-owned). Until then, analyze only repositories whose code you would let run with the worker's credentials, or use ScaledJob plus NetworkPolicies to limit what a stolen credential reaches.
 
 Combine with `networkPolicy.enabled`: worker and scheduler pods accept only metrics scrapes (`metricsFrom`) and reach only DNS, `workerEgress` ports (443/80/22 — forge, package registries, LLM APIs) and `extraEgress` (Postgres, object store); web pods accept traffic only from `webIngressFrom` (the ingress controller).
+
+### Write workers
+
+Write tasks ([@holtkeeper/write-task](../packages/write-task/docs/README.md)) let an agent edit a checkout, run the repository's checks, push a branch and open a draft merge request. Only workers of the `write` pool claim them, so they never run on the regular workers. `writeWorker.enabled` (off by default, needs `egressProxy.enabled`) adds that pool:
+
+```yaml
+writeWorker:
+  enabled: true
+  replicas: 1
+  concurrency: 1
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: '1', memory: 2Gi }
+egressProxy:
+  enabled: true
+networkPolicy:
+  enabled: true
+  extraEgress: [] # Postgres and the object store, as for the other workers
+```
+
+- A Deployment `<release>-write-worker` (component `write-worker`, label `holtkeeper.dev/worker-pool: write`) running `--role worker --pool write`; fields it does not set come from `worker` (drain timeout, volumes, caches). No KEDA scaling and no Service; it is not part of `worker.pools`.
+- The process gets `HTTP_PROXY`/`HTTPS_PROXY` (lower case too) pointing at the egress proxy, `NO_PROXY` with in-cluster names, `egressProxy.noProxy` and `writeWorker.noProxy`, and the proxy CA: `NODE_EXTRA_CA_CERTS` for Node and Bun, and a bundle of the system store plus the CA (`SSL_CERT_FILE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, built by an init container) for git and other clients, since the proxy intercepts TLS to rule hosts such as the forge. Forge API calls, git over HTTPS, LLM requests, the agent's commands and package installs all go through the proxy, which adds the registry tokens it holds; nothing new is stored in the pod.
+- With `networkPolicy.enabled` a NetworkPolicy lets the pods reach only DNS, the egress proxy, `networkPolicy.extraEgress` (database, object store) and `writeWorker.extraEgress`, and accept only metrics scrapes. Git over SSH needs port 22 to the forge in `writeWorker.extraEgress`; without it use HTTPS clones. The egress proxy's own NetworkPolicy then also accepts the write workers.
+- Write tasks stay refused until an admin turns on the `tasks.write` setting (Settings → System → Write tasks). People approve them on the Tasks page, from chat task cards, the Dependencies **Roll out** button, `POST /api/task-groups` or MCP `start_task`, and need `tasks:run` on every repository; read-only repositories (`repo.readOnly`) are refused when the task is queued and again when it starts.
+- Write workers refuse to start, and write tasks refuse to run, while `jobs.execution.mode` is `host` (the default): checks run repository scripts the agent may edit, so they need the `mise` or `container` sandbox. Holtkeeper's own git ignores hooks and `core.fsmonitor` from the shared mirror, but a script can still rewrite the mirror's other config; `container` mode isolates it best.
+- Caveat: the agent's commands run as the worker's uid, like every job command, so the `/proc` limits under [Isolation](#isolation-one-job-per-worker-pod) apply. Keep `writeWorker.replicas` × `concurrency` small and the pool's secrets to what the worker needs.
 
 ### Egress proxy
 
@@ -184,10 +216,10 @@ egressProxy:
 
 A `dir` store on an `emptyDir` is lost when the proxy pod is replaced, and each replica has its own. For `replicas` above 1 use `s3` or a ReadWriteMany `pvc`. S3 downloads are spooled to an `emptyDir` (`s3.spoolSizeLimit`) until complete. `cache.rules` adds cacheable URLs (`{ kind, host, paths, private }`); `enabled: false` sets `EGRESS_CACHE=off`.
 
-The **Caches** page of the panel (System → Caches, `settings:read`) shows what is cached, its size, hits and expiry, and removes entries (`settings:write`). The web pods reach the proxy for it (`HOLTKEEPER_EGRESS_CACHE`, turned into `server.egress.proxy`) with `HOLTKEEPER_EGRESS_SECRET`, so the page needs the top-level `existingSecret` with that key. With `networkPolicy.enabled` the proxy then also accepts the web pods.
+The **Caches** section of the panel (**Settings → System**, global `settings:read`) shows what is cached, its size, hits and expiry, and removes entries (global `settings:write`). The web pods reach the proxy for it (`HOLTKEEPER_EGRESS_CACHE`, turned into `server.egress.proxy`) with `HOLTKEEPER_EGRESS_SECRET`, so the page needs the top-level `existingSecret` with that key. With `networkPolicy.enabled` the proxy then also accepts the web pods.
 
 > [!WARNING]
-> A cached download is served to every job until it expires, whoever fetched it and whatever changed since. A version unpublished or yanked upstream (for example a malicious one taken down), or a GitHub asset replaced under the same tag, is still served. With **Cache packages** on a panel forge (off by default) or `private` cache rules, packages fetched with a forge token stay available after the token is revoked, the forge's **Packages for jobs** is switched off, or the project's access changes, and every job can read what another job's credentials fetched. Keep `private` rules off unless every job may see every such package. Remove entries on the Caches page when something has to go at once. Give only the proxy write access to the cache volume or bucket: whoever can write it can serve any file under a cached URL.
+> A cached download is served to every job until it expires, whoever fetched it and whatever changed since. A version unpublished or yanked upstream (for example a malicious one taken down), or a GitHub asset replaced under the same tag, is still served. With **Cache packages** on a panel forge (off by default) or `private` cache rules, packages fetched with a forge token stay available after the token is revoked, the forge's **Packages for jobs** is switched off, or the project's access changes, and every job can read what another job's credentials fetched. Keep `private` rules off unless every job may see every such package. Remove entries in Settings → System → Caches when something has to go at once. Give only the proxy write access to the cache volume or bucket: whoever can write it can serve any file under a cached URL.
 
 ### Webhooks behind an Ingress
 

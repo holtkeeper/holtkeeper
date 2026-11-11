@@ -135,9 +135,9 @@ describe('browserslist analyzer', () => {
   test('takes the commit message from a template', async () => {
     const root = await repository({ 'package.json': '{}', 'bun.lock': lockfile('1.0.30001600') })
     const { forge, created } = fakeForge()
-    await run(root, forge, { commitMessage: 'chore: [GTW-1] caniuse-lite {version}', dirs: [] })
+    await run(root, forge, { commitMessage: 'chore: [ABC-1] caniuse-lite {version}', dirs: [] })
 
-    expect(created[0]?.title).toBe('chore: [GTW-1] caniuse-lite 1.0.30001700')
+    expect(created[0]?.title).toBe('chore: [ABC-1] caniuse-lite 1.0.30001700')
   })
 
   test('sets auto-merge on the merge request, retrying while the forge refuses', async () => {

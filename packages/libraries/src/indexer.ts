@@ -12,6 +12,7 @@ import type {
 import type { GitHubClient } from './github/client.ts'
 import { libraryOfModule } from './go/module.ts'
 import { indexIssues } from './issues/index-issues.ts'
+import type { LatestVersion, LatestVersions } from './latest.ts'
 import { versionMatrix } from './matrix.ts'
 import { compareSemver, majorOf } from './semver.ts'
 import { type ApiExtractor, apiSource, defaultApiExtractors } from './sources/api.ts'
@@ -76,6 +77,11 @@ export interface IndexLibrariesOptions {
   log?: (line: string) => void
   /** Told before each library and once when every library is done, e.g. to show how far a run is. */
   onProgress?: (progress: LibraryIndexProgress) => void
+  /**
+   * Receives the registry's newest release of every third-party library in use: indexed ones from
+   * the metadata the run fetches, excluded ones from a registry lookup of their own.
+   */
+  latest?: LatestVersions
 }
 
 /**
@@ -159,6 +165,7 @@ export async function indexLibraries(options: IndexLibrariesOptions): Promise<Li
   const excluded = matcher(settings.exclude)
   const included = matcher(settings.include)
   const groups = new Map<string, { ref: LibraryRef; uses: LibraryUse[] }>()
+  const lookups = new Map<string, LibraryRef>()
   const group = (ref: LibraryRef) => {
     const key = libraryKey(ref)
     let value = groups.get(key)
@@ -168,7 +175,10 @@ export async function indexLibraries(options: IndexLibrariesOptions): Promise<Li
   for (const raw of options.uses) {
     const use = raw.ecosystem === 'Go' ? { ...raw, name: libraryOfModule(raw.name) } : raw
     if (options.isInternal?.(use) || options.isInternal?.(raw)) continue
-    if (excluded(use) && !included(use)) continue
+    if (excluded(use) && !included(use)) {
+      lookups.set(libraryKey(use), refOf(use))
+      continue
+    }
     group(use).uses.push(use)
   }
   for (const pattern of settings.include) {
@@ -202,6 +212,7 @@ export async function indexLibraries(options: IndexLibrariesOptions): Promise<Li
     summary,
     resolveTag,
     repositoryKb: new Map(),
+    found: new Map(),
   }
   const keys = [...groups.keys()].toSorted()
   const active: string[] = []
@@ -243,7 +254,41 @@ export async function indexLibraries(options: IndexLibrariesOptions): Promise<Li
   if (failure) throw failure.error
   report()
   await dropUnused(run, new Set(groups.keys()))
+  if (options.latest) {
+    for (const key of groups.keys()) lookups.delete(key)
+    await lookUpLatest(run, [...lookups.values()], workers)
+    await options.latest.record(
+      [...run.found.values()],
+      new Set([...groups.keys(), ...lookups.keys()]),
+    )
+  }
   return summary
+}
+
+/** Registry lookups for libraries the run does not index, only for their newest release. */
+async function lookUpLatest(run: RunContext, refs: readonly LibraryRef[], workers: number) {
+  let next = 0
+  const worker = async () => {
+    while (next < refs.length) {
+      run.signal?.throwIfAborted()
+      const ref = refs[next++]
+      const registry = ref ? run.registries[ref.ecosystem] : undefined
+      if (!ref || !registry) continue
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- each worker takes one library after another
+        const published = await registry.library(ref)
+        if (published?.latest)
+          run.found.set(libraryKey(ref), {
+            ...ref,
+            latest: published.latest,
+            checkedAt: run.now().toISOString(),
+          })
+      } catch (error) {
+        run.log?.(`libraries: ${libraryKey(ref)} latest version: ${errorText(error)}`)
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(workers, refs.length)) }, worker))
 }
 
 interface RunContext extends IndexLibrariesOptions {
@@ -251,6 +296,8 @@ interface RunContext extends IndexLibrariesOptions {
   summary: LibraryIndexSummary
   resolveTag: TagResolver | undefined
   repositoryKb: Map<string, Promise<number | undefined>>
+  /** Newest releases the registry reported in this run, by `<ecosystem>:<name>`. */
+  found: Map<string, LibraryRef & LatestVersion>
 }
 
 const fail = (
@@ -317,6 +364,7 @@ async function indexLibrary(run: RunContext, ref: LibraryRef, uses: LibraryUse[]
     updatedAt: at,
   }
   await store.putLibrary(library)
+  if (latest) run.found.set(libraryKey(ref), { ...refOf(ref), latest, checkedAt: at })
 
   const existing = new Map(
     (await store.listVersions(ref)).map((record) => [record.version, record]),

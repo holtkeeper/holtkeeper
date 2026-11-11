@@ -38,13 +38,17 @@ Repositories are addressed by their full path (`games/app-x`), merge requests by
 | Account (optional)    | `getCurrentUser`: the token's user with the email commits should use (`ForgeUser`)                                                                                                                                    |
 | Insights (optional)   | `listMergeRequests`, `listPipelineRuns`, `listJobRuns`, `listProjectJobRuns`, `listDeployments`, `listTags`, `listBranches`, `listCiVariables`, `listImageTags`, `npmRegistry`                                        |
 
+### Reactions
+
+`listNoteReactions?(repo, mergeRequest, noteId): Promise<NoteReaction[]>` (optional) reads the emoji reactions on one merge request note as `{ name, user }`, names as the forge has them (`thumbsup` on GitLab, `+1` on GitHub). `reactionCounts(reactions)` counts 👍 and 👎 under every known name and ignores other emoji. Forges without reactions leave the method out; the server then counts nothing. Review learnings use it to count reactions on Holtkeeper's review comments.
+
 ### Listing files
 
 `listFiles?(repo, { path?, ref?, recursive?, limit? }): Promise<TreeEntry[]>` lists `{ path, type: 'file' | 'dir' }` entries below `path` (root by default) at `ref` (default branch by default), direct children unless `recursive`, at most `limit` entries (default 10 000). Paths are relative to the repository root. A missing path or ref gives an empty list; submodules are left out. Used to expand workspace globs without a clone.
 
 ### Insight reads
 
-Optional, read-only history for delivery analytics (`@holtkeeper/delivery`). Adapters may lag behind, so callers check that a method exists before calling it. Lists are newest first, times are ISO 8601, durations are seconds and absent while unknown, and `limit` caps the result (all matching items when omitted).
+Optional, read-only history for analyses of CI jobs, branches and releases. Adapters may lag behind, so callers check that a method exists before calling it. Lists are newest first, times are ISO 8601, durations are seconds and absent while unknown, and `limit` caps the result (all matching items when omitted).
 
 | Method                                                                      | Returns                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -55,6 +59,7 @@ Optional, read-only history for delivery analytics (`@holtkeeper/delivery`). Ada
 | `getRepositoryAvatar(repo)`                                                 | `ForgeImage { data, contentType }`: the project's avatar, else the nearest parent group's; `undefined` when none has one. `imageType(bytes)` tells PNG, JPEG, GIF, WebP and SVG apart by signature                                    |
 | `listDeployments(repo, { environment?, after?, limit? })`                   | `Deployment`: `id`, `environment`, `status` (`pending`, `running`, `success`, `failed`, `canceled`, `skipped`, `blocked`), `sha`, `ref`, `createdAt`, `finishedAt?`; `after` filters by update time                                   |
 | `listTags(repo, { limit? })`                                                | `TagRecord`: a `Tag` plus `committedAt` (date of the tagged commit) and `createdAt?` (annotated tags)                                                                                                                                 |
+| `headCommit(repo)`                                                          | The sha the default branch points at, in one request; `undefined` for an empty repository. Freshness reads heads with it                                                                                                              |
 | `listBranches(repo)`                                                        | `BranchRecord`: every branch with `name`, head `sha`, `committedAt`, `authorName?`, `authorEmail?`, `merged` (head reachable from the default branch; squash merges do not count), `protected`, `default`, `webUrl?`                  |
 | `listCiVariables({ kind, path })`                                           | `CiVariable { key, value, environmentScope }` defined directly on a repository or group (no inherited ones); masked, hidden and file variables are left out. `undefined` when the token may not read them or the scope does not exist |
 | `listImageTags(image)`                                                      | Tags of an image (`registry/path`, no tag) in the forge's own container registry; `undefined` when the forge does not serve it or the token may not read it                                                                           |

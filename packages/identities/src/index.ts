@@ -15,4 +15,4 @@ export {
   parseVerifyCommand,
   verifyCommand,
 } from './challenge.ts'
-export { type LinkInput, forgeProvider, linkInputSchema, slackProvider } from './providers.ts'
+export { type LinkInput, forgeProvider, linkInputSchema } from './providers.ts'

@@ -4,7 +4,7 @@ import type { ConfigDocumentType, TriggerDocumentData } from '@holtkeeper/store'
 import { Cron } from 'croner'
 import { z } from 'zod'
 
-/** Ids of forges, groups and schedules follow the file config's rule. */
+/** Ids of forges, groups and schedules: lowercase letters, digits and dashes. */
 export const configIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
@@ -34,6 +34,8 @@ export const forgeDataSchema = z.object({
    * Default off; needs `packages`.
    */
   cachePackages: z.boolean().optional(),
+  /** Username Holtkeeper posts as on this forge; its own events and merge requests are ignored. */
+  botUsername: z.string().trim().min(1).optional(),
 })
 
 export const groupDataSchema = z.object({

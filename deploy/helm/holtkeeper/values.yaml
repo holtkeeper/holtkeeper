@@ -13,7 +13,8 @@ image:
 port: 7420
 
 config:
-  # Content of holtkeeper.config.ts, mounted read-only at /app/config/holtkeeper.config.ts.
+  # Content of holtkeeper.config.ts, mounted read-only at /app/config/holtkeeper.config.ts. It holds
+  # infrastructure only; forges, groups, triggers and analyzer options are set in the panel.
   # Empty: the chart's files/holtkeeper.config.ts (Postgres when HOLTKEEPER_DATABASE_URL is set,
   # S3 when HOLTKEEPER_S3_BUCKET is set, secrets from the environment).
   content: ''
@@ -135,6 +136,30 @@ worker:
   #     - { name: small, replicas: 3, concurrency: 2, spread: true, claimDelay: 15s }
   #     - { name: big, replicas: 1, concurrency: 4, nodeSelector: { kubernetes.io/hostname: big } }
   pools: []
+
+# Workers that alone run write tasks (`serve --pool write`): agents that change code, push a branch
+# and open a merge request. Off by default; write tasks also need the `tasks.write` setting turned
+# on in the panel. Needs `egressProxy.enabled`: the pods get HTTP(S)_PROXY for every connection
+# (forge API, git over HTTPS, LLM API, package registries) and, with `networkPolicy.enabled`, reach
+# only DNS, the proxy, `networkPolicy.extraEgress` (database, object store) and `extraEgress` below.
+# Fields not set here come from `worker` (image args, volumes, caches).
+writeWorker:
+  enabled: false
+  replicas: 1
+  concurrency: 1
+  drainTimeout: 120s
+  terminationGracePeriodSeconds: 150
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: '1', memory: 2Gi }
+  # Hosts the process reaches without the proxy (added to NO_PROXY); allow them in extraEgress too.
+  noProxy: []
+  # More egress rules for these pods only, e.g. git over SSH (port 22) to the forge.
+  extraEgress: []
+  extraArgs: []
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 # A separate scheduler Deployment. Disabled: the web pods run the scheduler under the same leader
 # lease (only one of them acts at a time).

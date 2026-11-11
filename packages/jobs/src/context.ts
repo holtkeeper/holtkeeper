@@ -30,9 +30,15 @@ interface AgentJobInfo {
   jobId: string
   analyzer: string
   actor?: string
+  /** A person asked for the job (`isInteractiveJob`), so its agent may spend the budget reserve. */
+  interactive: boolean
   /** Runs commands the way the job does (host, mise or container). */
   runner: CommandRunner
 }
+
+/** Whether a person asked for the job: queued from the panel or API, or by a comment command. */
+const isInteractiveJob = (job: Pick<Job, 'trigger'>): boolean =>
+  job.trigger === 'manual' || job.trigger === 'command'
 
 export type AgentFor = (
   repo: RepoRef,
@@ -55,7 +61,9 @@ export type GitKeyFor = (forgeId: string) => Promise<ForgeGitKey | undefined>
 
 /** An analyzer context without options, plus whatever must be released after the run. */
 export interface PreparedContext {
-  context: Omit<AnalyzerContext<unknown>, 'options' | 'signal' | 'log'>
+  context: Omit<AnalyzerContext<unknown>, 'options' | 'signal' | 'log' | 'step'>
+  /** Commit of the job's own checkout, when the analyzer has one. */
+  sha?: string
   cleanup(): Promise<void>
 }
 
@@ -66,7 +74,13 @@ export interface PreparedContext {
 export type ContextFor = (
   job: Job,
   analyzer: AnyAnalyzer,
-  io: { signal: AbortSignal; log: (line: string) => void; options: unknown },
+  io: {
+    signal: AbortSignal
+    log: (line: string) => void
+    options: unknown
+    /** Marks a part of the preparation as a log step; see `AnalyzerContext.step`. */
+    step?: AnalyzerContext<unknown>['step']
+  },
 ) => Promise<PreparedContext>
 
 export interface ContextFactoryOptions {
@@ -182,7 +196,8 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
     return client
   }
 
-  return async (job, analyzer, { signal, log, options }) => {
+  return async (job, analyzer, { signal, log, options, step: logStep }) => {
+    const step = <T>(name: string, run: () => Promise<T>) => (logStep ? logStep(name, run) : run())
     definitionOf(job.repo.forge)
     const forgeClient = () => clientOf(job.repo.forge)
     const checkouts = new Set<Checkout>()
@@ -247,6 +262,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
       ...(job.ref !== undefined && { ref: job.ref }),
       ...(factory.cache && { cache: factory.cache }),
     }
+    let sha: string | undefined
     const cleanup = async () => {
       await Promise.allSettled([...runners].map((r) => r.stop()))
       runners.clear()
@@ -285,6 +301,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
           jobId: job.id,
           analyzer: job.analyzer,
           ...(job.actor ? { actor: job.actor } : {}),
+          interactive: isInteractiveJob(job),
           // The job's runner is prepared with the checkout below; resolve it when the agent runs a command.
           runner: { run: (command, runOptions) => context.runner.run(command, runOptions) },
         })
@@ -297,7 +314,9 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
         context.repos = await resolveRepos(job.group ?? job.repo.path)
         log(`group ${job.group ?? job.repo.path}: ${context.repos.length} repositories`)
       } else if (analyzer.needs.checkout) {
-        context.dir = (await checkoutOf(job.repo, job.ref)).dir
+        const own = await step('checkout', () => checkoutOf(job.repo, job.ref))
+        context.dir = own.dir
+        sha = own.sha
       }
 
       const extra = analyzer.requiredCheckouts?.(options, job.repo) ?? []
@@ -319,7 +338,7 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
           log,
         })
         runners.add(sandbox)
-        await sandbox.start()
+        await step('toolchain', () => sandbox.start())
         context.runner = sandbox
       }
       if (signal.aborted) throw signal.reason
@@ -327,6 +346,6 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
       await cleanup()
       throw error
     }
-    return { context, cleanup }
+    return { context, ...(sha !== undefined && { sha }), cleanup }
   }
 }

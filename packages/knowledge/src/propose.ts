@@ -4,6 +4,7 @@ import type {
   KnowledgeKind,
   KnowledgeLink,
   KnowledgePackage,
+  KnowledgeVisibility,
   Store,
 } from '@holtkeeper/store'
 
@@ -23,6 +24,9 @@ export interface ProposalInput {
   /** Defaults to the proposing task's repository. */
   scope?: Scope
   evidence?: KnowledgeLink[]
+  /** Default: see `sharingDefaults`. */
+  visibility?: KnowledgeVisibility
+  subject?: string
 }
 
 /** The task that proposes; used for classification and the default scope. */
@@ -33,7 +37,7 @@ export interface ProposalTask {
 }
 
 export interface ProposeEntryOptions {
-  store: Pick<Store, 'knowledge'> & Partial<Pick<Store, 'activity'>>
+  store: Pick<Store, 'knowledge'> & Partial<Pick<Store, 'audit'>>
   input: ProposalInput
   /** Agent actor id stored as `author`, e.g. `agent:review`. */
   actor: string
@@ -50,6 +54,29 @@ export interface ProposeResult {
   entry: KnowledgeEntry
   created: boolean
   duplicateOf?: string
+}
+
+/** `npm:react` or `Go:github.com/acme/kit`: the `subject` of an entry about one package. */
+export const packageSubject = (pkg: Pick<KnowledgePackage, 'ecosystem' | 'name'>): string =>
+  `${pkg.ecosystem.toLowerCase() === 'go' ? 'Go' : pkg.ecosystem}:${pkg.name}`
+
+/**
+ * The subject and visibility an entry gets when its author sets none: an entry about exactly one
+ * package has that package as its subject, and decisions and conventions with a subject are
+ * `shared`, so other teams see what a team decided about a library. Everything else stays `team`.
+ */
+export function sharingDefaults(draft: {
+  kind: KnowledgeKind
+  packages?: readonly KnowledgePackage[] | undefined
+  subject?: string | undefined
+  visibility?: KnowledgeVisibility | undefined
+}): { subject?: string; visibility?: KnowledgeVisibility } {
+  const [only, ...rest] = draft.packages ?? []
+  const subject = draft.subject ?? (only && !rest.length ? packageSubject(only) : undefined)
+  const visibility =
+    draft.visibility ??
+    (subject && (draft.kind === 'decision' || draft.kind === 'convention') ? 'shared' : undefined)
+  return { ...(subject && { subject }), ...(visibility && { visibility }) }
 }
 
 const repoScope = (repo: RepoTarget): Scope => ({ repos: [`${repo.forge}:${repo.path}`] })
@@ -77,8 +104,9 @@ function findDuplicate(
  * creates nothing: its new evidence links are added to that entry and its id comes back as
  * `duplicateOf`. Otherwise the proposal is classified (`classifyProposal`), validated
  * (`validateEntry`, throwing `KnowledgeValidationError`) and stored as a `proposed` agent entry —
- * or `accepted` when its kind is in `autoAccept`. Both outcomes go to the activity log when the
- * store has one.
+ * or `accepted` when its kind is in `autoAccept`. Both outcomes are audited (`knowledge.propose`,
+ * `knowledge.accept`, `knowledge.evidence`) against the task's repository when the store has an
+ * audit log.
  */
 export async function proposeEntry({
   store,
@@ -90,6 +118,20 @@ export async function proposeEntry({
   duplicateOverlap = 0.8,
 }: ProposeEntryOptions): Promise<ProposeResult> {
   const at = now().toISOString()
+  const audit = (action: string, id: string, details: Record<string, unknown>) =>
+    store.audit?.append({
+      at,
+      actor: { id: actor, name: actor, provider: 'agent' },
+      via: 'job',
+      action,
+      target: {
+        type: 'knowledge',
+        id,
+        ...(task.repo && { repo: `${task.repo.forge}:${task.repo.path}` }),
+      },
+      outcome: 'ok',
+      details,
+    })
   const candidates = await store.knowledge.list({ status: ['proposed', 'accepted', 'rejected'] })
   const duplicate = findDuplicate(input, candidates, duplicateOverlap)
 
@@ -105,13 +147,7 @@ export async function proposeEntry({
         updatedAt: at,
         updatedBy: actor,
       })
-      await store.activity?.append({
-        at,
-        actor,
-        action: 'knowledge.evidence-added',
-        subject: entry.id,
-        details: { urls: added.map((link) => link.url) },
-      })
+      await audit('knowledge.evidence', entry.id, { urls: added.map((link) => link.url) })
     }
     return { entry, created: false, duplicateOf: duplicate.id }
   }
@@ -128,6 +164,8 @@ export async function proposeEntry({
     scope,
     evidence: input.evidence ?? [],
     ...classification,
+    ...(input.visibility && { visibility: input.visibility }),
+    ...(input.subject && { subject: input.subject }),
   })
   if (!validation.success) throw new KnowledgeValidationError(validation.issues)
 
@@ -135,6 +173,7 @@ export async function proposeEntry({
   const status = autoAccept.includes(draft.kind) ? 'accepted' : 'proposed'
   const entry = await store.knowledge.put({
     ...draft,
+    ...sharingDefaults(draft),
     id: crypto.randomUUID(),
     status,
     source: 'agent',
@@ -142,12 +181,10 @@ export async function proposeEntry({
     createdAt: at,
     updatedAt: at,
   })
-  await store.activity?.append({
-    at,
-    actor,
-    action: status === 'accepted' ? 'knowledge.accepted' : 'knowledge.proposed',
-    subject: entry.id,
-    details: { kind: entry.kind, source: 'agent', ...(task.kind && { task: task.kind }) },
+  await audit(status === 'accepted' ? 'knowledge.accept' : 'knowledge.propose', entry.id, {
+    title: entry.title,
+    kind: entry.kind,
+    ...(task.kind && { task: task.kind }),
   })
   return { entry, created: true }
 }

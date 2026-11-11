@@ -1,6 +1,6 @@
 import type { CommitRecord, GitForge, Pipeline, RepoRef } from '@holtkeeper/forge'
 
-import type { ReleaseSettings } from './settings.ts'
+import { type ReleaseSettings, acceptanceLabel } from './settings.ts'
 import type {
   Acceptance,
   PipelineState,
@@ -14,6 +14,7 @@ import { latestVersion, versionTags } from './version.ts'
 export const commitCap = 300
 
 const TAGS = 100
+const TAG_MAX = 3200
 
 /** A forge commit in the shape the release assistant uses. */
 export const toReleaseCommit = (commit: CommitRecord): ReleaseCommit => {
@@ -50,11 +51,12 @@ export interface CollectFactsOptions {
 }
 
 /**
- * Reads what the release flow needs from the forge: branch heads, version tags, commits waiting
+ * Reads what the release flow needs from the forge: branch heads, version tags (more pages while
+ * none of the newest is a version), commits waiting
  * on the source and target branches (at most `commitCap` each), the open and the last merged
  * release merge request, latest pipelines and blocking merge requests. Acceptance comes from
- * `recorded`, else from the acceptance label on the merged merge request or the merge itself, as
- * the settings' signals allow.
+ * `recorded` (a person), else from `acceptanceLabel` on the merged merge request or the merge
+ * itself, as the settings' `acceptance` says.
  */
 export async function collectFacts({
   forge,
@@ -79,10 +81,24 @@ export async function collectFacts({
   const latestPipeline = async (ref: string) =>
     toPipeline((await forge.listPipelines(repo.path, { ref }).catch(() => []))[0])
 
+  const readTags = async () => {
+    if (!forge.listTags) return []
+    for (let limit = TAGS; ; limit *= 2) {
+      // oxlint-disable-next-line no-await-in-loop -- a page doubles only while no version is found
+      const tags = await forge.listTags(repo.path, { limit })
+      if (
+        tags.length < limit ||
+        limit >= TAG_MAX ||
+        latestVersion(settings, versionTags(settings, tags))
+      )
+        return tags
+    }
+  }
+
   const [targetHead, sourceHead, tags] = await Promise.all([
     head(targetName),
     mergeRequestMode && sourceName !== targetName ? head(sourceName) : undefined,
-    forge.listTags ? forge.listTags(repo.path, { limit: TAGS }) : [],
+    readTags(),
   ])
   if (!targetHead) throw new Error(`branch ${targetName} does not exist`)
   const versions = versionTags(settings, tags)
@@ -153,27 +169,26 @@ export async function collectFacts({
     : undefined
 
   const target = { name: targetName, sha: targetHead.sha, date: targetHead.authoredAt }
-  const signals = settings.acceptance.signals
-  const acceptance: Acceptance | undefined =
-    recorded && signals.includes('manual')
-      ? recorded
-      : merged && signals.includes('label') && merged.labels.includes(settings.acceptance.label)
+  const mode = settings.acceptance
+  const acceptance: Acceptance | undefined = recorded
+    ? recorded
+    : merged && mode === 'label' && merged.labels.includes(acceptanceLabel)
+      ? {
+          sha: target.sha,
+          by: merged.author,
+          at: merged.mergedAt ?? '',
+          via: 'label',
+          channel: 'forge',
+        }
+      : merged && mode === 'merge'
         ? {
             sha: target.sha,
             by: merged.author,
             at: merged.mergedAt ?? '',
-            via: 'label',
+            via: 'merge',
             channel: 'forge',
           }
-        : merged && signals.includes('merge')
-          ? {
-              sha: target.sha,
-              by: merged.author,
-              at: merged.mergedAt ?? '',
-              via: 'merge',
-              channel: 'forge',
-            }
-          : undefined
+        : undefined
 
   const blocking = settings.gates.blockingLabels
   return {

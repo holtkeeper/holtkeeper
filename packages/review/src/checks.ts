@@ -12,8 +12,8 @@ import type { ReviewCategory, ReviewSeverity } from './schema.ts'
 import type { FileScope } from './scope.ts'
 import type { Candidate } from './validate.ts'
 
-/** Quality checks a review may run, restricted to changed lines. */
-export const reviewCheckNames = ['lint', 'secrets', 'conventions', 'testids'] as const
+/** Checks a review may run, restricted to changed lines. */
+export const reviewCheckNames = ['secrets', 'testids'] as const
 export type ReviewCheckName = (typeof reviewCheckNames)[number]
 
 /**

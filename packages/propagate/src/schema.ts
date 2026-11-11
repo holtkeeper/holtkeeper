@@ -23,28 +23,19 @@ const check = z.object({
   ok: z.boolean(),
   output: z.string(),
   durationMs: z.number(),
-  attempt: z.number(),
 })
 
 const repoOutcome = z.object({
   repo: z.string(),
   webUrl: z.string().optional(),
-  status: z.enum(['unchanged', 'skipped', 'updated', 'fixed', 'failed', 'error']),
+  status: z.enum(['unchanged', 'skipped', 'updated', 'failed', 'error']),
   usages: z.array(usage),
   bumps: z.array(
     z.object({ package: z.string(), from: z.string(), to: z.string(), manifest: z.string() }),
   ),
   checks: z.array(check),
-  attempts: z.number(),
-  agent: z
-    .object({
-      summary: z.string(),
-      changes: z.array(z.string()),
-      remainingProblems: z.array(z.string()),
-    })
-    .optional(),
   changedFiles: z.array(z.string()),
-  fixedFiles: z.array(z.string()),
+  fixTask: z.string().optional(),
   mergeRequest: z.object({ id: z.number(), url: z.string(), draft: z.boolean() }).optional(),
   notes: z.array(z.string()),
   error: z.string().optional(),
@@ -67,4 +58,5 @@ export const propagationDataSchema: z.ZodType<PropagationData> = z.object({
       text: z.string(),
     }),
   ),
+  fixGroup: z.string().optional(),
 })

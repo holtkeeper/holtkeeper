@@ -245,7 +245,7 @@ function TrackerBlock({
   return (
     <section
       aria-label={`Tracker ${tracker.name || index + 1}`}
-      className="flex flex-col gap-4 rounded-2xl border border-separator bg-surface p-4 shadow-surface"
+      className="flex flex-col gap-4 rounded-2xl border border-separator bg-surface p-4"
     >
       <header className="flex flex-wrap items-start gap-3">
         <span className="mt-2 grid size-6 shrink-0 place-items-center rounded-full bg-default text-xs font-semibold">
@@ -468,7 +468,7 @@ const TONE_BORDER = { default: 'var(--border)', warning: 'var(--warning)', dange
 function PartNode({ data }: NodeProps<FlowNode>) {
   return (
     <div
-      className="flex h-full w-full flex-col justify-center overflow-hidden rounded-xl border bg-surface px-3 shadow-surface"
+      className="flex h-full w-full flex-col justify-center overflow-hidden rounded-xl border bg-surface px-3"
       style={{ borderColor: TONE_BORDER[data.tone] }}
       title={`${data.title}: ${data.detail}`}
     >

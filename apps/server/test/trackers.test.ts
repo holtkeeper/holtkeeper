@@ -83,7 +83,6 @@ const setup = (auth: AuthProvider = noAuth(), sinks = true) => {
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -112,7 +111,7 @@ beforeEach(() => {
 })
 
 describe('POST /api/trackers/:analysisId/publish', () => {
-  test('publishes planned sections, reports conflicts and records activity', async () => {
+  test('publishes planned sections, reports conflicts and audits', async () => {
     const record = await store.analyses.add({
       repo: { forge: 'work', path: 'games' },
       kind: 'tracker',
@@ -127,10 +126,9 @@ describe('POST /api/trackers/:analysisId/publish', () => {
       ['stale', 'conflict'],
     ])
     expect(writes).toEqual(['1#holtkeeper:flags@3'])
-    const [event] = await store.activity.list()
-    expect(event).toMatchObject({
-      action: 'tracker.published',
-      subject: 'work:games',
+    const published = (await store.audit.list({ action: 'tracker.publish' })).events
+    expect(published.find((event) => event.target.repo === 'work:games')).toMatchObject({
+      target: { type: 'analysis', id: record.id },
       details: { analysis: record.id, tracker: 'flags' },
     })
 

@@ -313,6 +313,8 @@ function StringField({
       aria-label={props.label}
       value={text}
       type={node.format === 'date' ? 'date' : node.format === 'uri' ? 'url' : 'text'}
+      multiline={node.multiline === true}
+      mono={node.multiline === true}
       error={error}
       description={describedAs(props.schema, props.root)}
       onChange={props.onChange}

@@ -10,6 +10,7 @@ export interface ScheduleRunSummary {
   running: number
   succeeded: number
   failed: number
+  blocked: number
   canceled: number
   analyzers: string[]
   startedAt?: Timestamp
@@ -44,6 +45,7 @@ export function scheduleRuns(jobs: readonly Job[], limit = 10): ScheduleRunSumma
         running: count('running'),
         succeeded: count('succeeded'),
         failed: count('failed'),
+        blocked: count('blocked'),
         canceled: count('canceled'),
         analyzers: [...new Set(run.map((job) => job.analyzer))].toSorted(),
         ...(starts[0] ? { startedAt: starts[0] } : {}),

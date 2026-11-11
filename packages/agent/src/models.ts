@@ -206,32 +206,17 @@ function remoteModels(
         },
         deps,
       )
-    case 'openai-compatible': {
-      const headers = renderHeaders(options.headers, provider.secret)
-      const auth = Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')
-      return openAIModels(
-        baseUrl,
-        { ...(!auth && { authorization: `Bearer ${provider.secret}` }), ...headers },
-        deps,
-      )
-    }
     default:
       return undefined
   }
 }
 
-/** Model names the provider's options mention: `model`, `models`, `modelMap` targets and `pricing`. */
+/** Model names the provider's options mention: `modelMap` targets and `pricing` keys. */
 function configuredModels(options: ProviderOptions): string[] {
-  const named = [
-    options.model,
-    ...Object.values(options.models ?? {}),
-    ...Object.values(options.modelMap ?? {}),
-    ...Object.keys(options.pricing ?? {}),
-  ]
+  const named = [...Object.values(options.modelMap ?? {}), ...Object.keys(options.pricing ?? {})]
   return [
     ...new Set(
       named
-        .filter((name): name is string => name !== undefined)
         .map((name) => options.modelMap?.[name] ?? name)
         .filter((name) => !name.endsWith(LATEST_SUFFIX)),
     ),
@@ -240,7 +225,7 @@ function configuredModels(options: ProviderOptions): string[] {
 
 /**
  * The models of an AI provider: what its API lists (Anthropic and Anthropic-compatible
- * `/v1/models`, OpenAI-compatible `/models`; Bedrock and Vertex have none; `ai-sdk` providers from
+ * `/v1/models`; `ai-sdk` providers from
  * `deps.catalog`, else their OpenAI-compatible `/models`), plus every model its
  * options name. Prices come from the `pricing` option (by provider or logical name), else from the
  * listing when it carries OpenRouter-style per-token prices. A failing API call is reported in
@@ -299,62 +284,59 @@ const compareVersions = (a: number[], b: number[]) => {
   return 0
 }
 
+const splitVendor = (id: string) => {
+  const slash = id.lastIndexOf('/')
+  return slash < 0
+    ? { vendor: undefined, name: id }
+    : { vendor: id.slice(0, slash), name: id.slice(slash + 1) }
+}
+
+const dotsToDashes = (name: string) => name.replace(/(?<=\d)\.(?=\d)/g, '-')
+
 /**
  * The newest listed model for `reference`: `<prefix>@latest` picks, among models named `<prefix>`
  * followed only by numeric version parts (`claude-opus@latest` → `claude-opus-5-5`, not
  * `claude-opus-5-5-mini`), the highest version, then the latest date suffix (`-20261001`), then
- * the latest `createdAt`. Any other reference is returned as is; `undefined` when nothing matches.
+ * the latest `createdAt`. Dots and dashes between digits are the same separator
+ * (`claude-sonnet-4.6` is version 4.6, matched by `claude-sonnet-4-6@latest`). A vendor prefix in
+ * the listing (`vendor/claude-opus-5-5`) is matched by a reference without one; a reference with a
+ * vendor matches only that vendor's models. When the same version is listed with and without a
+ * vendor, the id without one wins. Any other reference is returned as is; `undefined`
+ * when nothing matches.
  */
 export function resolveLatestModel(
   reference: string,
   models: readonly Pick<ProviderModel, 'id' | 'createdAt'>[],
 ): string | undefined {
   if (!reference.endsWith(LATEST_SUFFIX)) return reference
-  const prefix = reference.slice(0, -LATEST_SUFFIX.length)
+  const wanted = splitVendor(reference.slice(0, -LATEST_SUFFIX.length))
+  const prefix = dotsToDashes(wanted.name)
   const candidates = models.flatMap((model) => {
-    if (!model.id.startsWith(prefix)) return []
-    const parsed = versionOf(model.id.slice(prefix.length))
-    return parsed ? [{ ...parsed, id: model.id, createdAt: model.createdAt ?? '' }] : []
+    const { vendor, name } = splitVendor(model.id)
+    if (wanted.vendor !== undefined && wanted.vendor !== vendor) return []
+    const normalized = dotsToDashes(name)
+    if (!normalized.startsWith(prefix)) return []
+    const parsed = versionOf(name.slice(prefix.length))
+    return parsed
+      ? [
+          {
+            ...parsed,
+            id: model.id,
+            vendored: vendor !== undefined,
+            createdAt: model.createdAt ?? '',
+          },
+        ]
+      : []
   })
   const [newest] = candidates.toSorted(
     (a, b) =>
       compareVersions(b.version, a.version) ||
       b.date - a.date ||
-      b.createdAt.localeCompare(a.createdAt),
+      Number(a.vendored) - Number(b.vendored) ||
+      b.createdAt.localeCompare(a.createdAt) ||
+      a.id.localeCompare(b.id),
   )
   return newest?.id
-}
-
-/** Whether `reference` asks for the newest version (`...@latest`). */
-export const isLatestReference = (reference: string | undefined): reference is string =>
-  reference?.endsWith(LATEST_SUFFIX) === true
-
-/**
- * `model` and `models` with every `@latest` reference resolved against `models` listed for the
- * provider. Throws naming the references nothing matches.
- */
-export function resolveLatestRouting(
-  routing: { model?: string; models?: Record<string, string> },
-  listed: readonly Pick<ProviderModel, 'id' | 'createdAt'>[],
-): { model?: string; models?: Record<string, string> } {
-  const missing: string[] = []
-  const resolve = (reference: string) => {
-    const resolved = resolveLatestModel(reference, listed)
-    if (resolved === undefined) missing.push(reference)
-    return resolved ?? reference
-  }
-  const result = {
-    ...(routing.model !== undefined && { model: resolve(routing.model) }),
-    ...(routing.models && {
-      models: Object.fromEntries(
-        Object.entries(routing.models).map(([kind, reference]) => [kind, resolve(reference)]),
-      ),
-    }),
-  }
-  if (missing.length) {
-    throw new Error(`no listed model matches ${[...new Set(missing)].join(', ')}`)
-  }
-  return result
 }
 
 /** Caches `listProviderModels` per key (e.g. the credential id) for `ttlMs`. */
@@ -379,56 +361,5 @@ export function modelCatalog(
       )
       return listing
     },
-  }
-}
-
-/**
- * The routing an agent of `provider` runs with — `routing` over the provider's own `model` and
- * `models` — with `@latest` references resolved by `list` (called only when there is one). Throws
- * when a reference matches no listed model, with the listing error if the API failed.
- * `fallbacks` are models for task kinds neither `routing` nor the provider names; one is used only
- * when the listing has it, so a provider without it keeps routing the kind to `model`.
- */
-export async function resolveProviderRouting(
-  provider: Pick<AiProvider, 'kind' | 'options'>,
-  routing: { model?: string; models?: Record<string, string> },
-  list: () => Promise<ModelListing>,
-  fallbacks: Readonly<Record<string, string>> = {},
-): Promise<{ model?: string; models?: Record<string, string> }> {
-  const parsed = parseProviderOptions(provider)
-  const model = routing.model ?? parsed.model
-  const models =
-    routing.models || parsed.models ? { ...parsed.models, ...routing.models } : undefined
-  const effective = { ...(model !== undefined && { model }), ...(models && { models }) }
-  const unrouted = Object.entries(fallbacks).filter(([kind]) => models?.[kind] === undefined)
-  const latest = [model, ...Object.values(models ?? {})].some(isLatestReference)
-  if (!latest && !unrouted.length) return routing
-  let listing: ModelListing
-  try {
-    listing = await list()
-  } catch (error) {
-    if (latest) throw error
-    return routing
-  }
-  const fallback: Record<string, string> = {}
-  for (const [kind, reference] of unrouted) {
-    const resolved = isLatestReference(reference)
-      ? resolveLatestModel(reference, listing.models)
-      : listing.models.some((listed) => listed.id === reference)
-        ? reference
-        : undefined
-    if (resolved !== undefined) fallback[kind] = resolved
-  }
-  const withFallback = (result: { model?: string; models?: Record<string, string> }) =>
-    Object.keys(fallback).length ? { ...result, models: { ...fallback, ...result.models } } : result
-  if (!latest) return withFallback(routing)
-  try {
-    return withFallback(resolveLatestRouting(effective, listing.models))
-  } catch (error) {
-    if (listing.error === undefined) throw error
-    throw new Error(
-      `${error instanceof Error ? error.message : String(error)} (${listing.error})`,
-      { cause: error },
-    )
   }
 }

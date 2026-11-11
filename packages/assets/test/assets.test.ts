@@ -186,16 +186,14 @@ test('optimizeIgnore keeps files in totals and budgets but out of checks and sug
   expect(data.suggestions.filter((suggestion) => skipped(suggestion.path))).toEqual([])
   expect(data.suggestions.map((suggestion) => suggestion.path)).toContain('public/copy.png')
   expect(
-    assetsAnalysis
-      .toReport({
-        id: '1',
-        repo: { forge: 'w', path: 'game' },
-        kind: 'assets',
-        createdAt: '2026-10-31T00:00:00.000Z',
-        data,
-      })
-      .exclude?.options.map((option) => option.option),
-  ).toEqual(['optimizeIgnore', 'ignore'])
+    assetsAnalysis.toReport({
+      id: '1',
+      repo: { forge: 'w', path: 'game' },
+      kind: 'assets',
+      createdAt: '2026-10-31T00:00:00.000Z',
+      data,
+    }).exclude,
+  ).toMatchObject({ setting: 'assets.policy', options: [{ option: 'ignore' }] })
 })
 
 test('the analyzer validates options and passes the runner for tool measurements', async () => {
@@ -215,4 +213,34 @@ test('the analyzer validates options and passes the runner for tool measurements
   expect(new Set(calls.map((call) => call.command[0]))).toEqual(
     new Set(['cwebp', 'ffmpeg', 'woff2_compress']),
   )
+})
+
+test('the analyzer checks files against the policy it is given', async () => {
+  const options = assetsAnalyzer.options.parse({
+    convert: 'estimate',
+    roots: ['public/**'],
+    policy: {
+      formats: { raster: 'webp', allowed: ['png', 'jpg', 'json', 'wav', 'ttf'] },
+      maxBytes: { warn: 25_000, error: 1_000_000 },
+      maxDimension: 4096,
+      ignore: ['public/sprites/**'],
+      budgets: { perKind: { audio: 10_000 } },
+    },
+  })
+  const { data } = await assetsAnalyzer.run({
+    repo: { forge: 'gitlab', path: 'games/app' },
+    dir,
+    runner: createFakeRunner(() => ({ exitCode: 127 })).runner,
+    options,
+  })
+  const ids = data.violations?.map((violation) => violation.id) ?? []
+  expect(data.policy?.maxBytes.warn).toBe(25_000)
+  expect(ids).toContain('format:public/orphan.gif')
+  expect(ids).toContain('max-bytes:public/background.png')
+  expect(ids).toContain('max-dimension:public/background.png')
+  expect(ids).toContain('modern-format:public/photo.jpg')
+  expect(ids).toContain('budget:audio')
+  expect(ids.some((id) => id.includes('public/sprites/'))).toBe(false)
+  expect(data.assets.some((asset) => asset.path.startsWith('public/sprites/'))).toBe(false)
+  expect(data.violations?.[0]?.severity).toBe('error')
 })

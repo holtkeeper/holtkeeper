@@ -125,7 +125,6 @@ const setup = (auth: AuthProvider = noAuth(), extra: { artifacts?: ArtifactStore
     vault,
     credentials: createCredentialService({
       credentials: store.credentials,
-      activity: store.activity,
       vault,
     }),
     settings: builtinSettings,
@@ -321,7 +320,7 @@ describe('media apply', () => {
       },
       { action: 'update', path: 'src/page.html', content: '<picture></picture>\n' },
     ])
-    expect((await store.activity.list({ limit: 5 }))[0]?.action).toBe('media.merge_request_opened')
+    expect((await store.audit.list({ limit: 1 })).events[0]?.action).toBe('media.merge_request')
   })
 
   test('replaces the original only while it is unchanged', async () => {
@@ -417,7 +416,7 @@ describe('analyses with artifacts', () => {
 })
 
 describe('storage', () => {
-  test('reports usage per provider and clears with an activity event', async () => {
+  test('reports usage per provider and clears with an audit event', async () => {
     await artifacts.put(bytesOf('abc'), {
       contentType: 'image/png',
       tags: { repo: 'work:games/a' },
@@ -433,9 +432,9 @@ describe('storage', () => {
     })
     const cleared = await app.request('/api/storage/artifacts/clear', { method: 'POST' })
     expect(await cleared.json()).toEqual({ removed: 1, bytes: 3 })
-    expect((await store.activity.list({ limit: 1 }))[0]).toMatchObject({
-      action: 'storage.cleared',
-      subject: 'artifacts',
+    expect((await store.audit.list({ limit: 1 })).events[0]).toMatchObject({
+      action: 'storage.clear',
+      target: { type: 'storage', id: 'artifacts' },
     })
     expect((await app.request('/api/storage/nope/clear', { method: 'POST' })).status).toBe(404)
     expect((await setup(headerAuth()).request('/api/storage')).status).toBe(401)

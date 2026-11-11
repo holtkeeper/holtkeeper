@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/changes": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "@holtkeeper/toolchain": "workspace:*",

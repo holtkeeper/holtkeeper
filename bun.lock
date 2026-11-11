@@ -21,25 +21,10 @@
         "holtkeeper": "./src/bin.ts",
       },
       "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/analyzers": "workspace:*",
         "@holtkeeper/auth-users": "workspace:*",
-        "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/core": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/jobs": "workspace:*",
-        "@holtkeeper/release": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
         "@holtkeeper/server": "workspace:*",
-        "@holtkeeper/settings": "workspace:*",
         "@holtkeeper/store": "workspace:*",
-        "@holtkeeper/vuln": "workspace:*",
-        "@holtkeeper/vuln-go": "workspace:*",
-        "@holtkeeper/vuln-js": "workspace:*",
-        "@holtkeeper/vuln-osv": "workspace:*",
-        "zod": "^4.6.7",
       },
       "devDependencies": {
         "@holtkeeper/auth-none": "workspace:*",
@@ -55,29 +40,32 @@
         "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/agent-tools": "workspace:*",
         "@holtkeeper/ai-usage": "workspace:*",
+        "@holtkeeper/analyzer": "workspace:*",
         "@holtkeeper/analyzers": "workspace:*",
         "@holtkeeper/api": "workspace:*",
         "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/artifacts": "workspace:*",
+        "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
-        "@holtkeeper/browserslist": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
-        "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/chat": "workspace:*",
-        "@holtkeeper/chat-slack": "workspace:*",
+        "@holtkeeper/ci-jobs": "workspace:*",
         "@holtkeeper/commit-conventions": "workspace:*",
         "@holtkeeper/confluence": "workspace:*",
         "@holtkeeper/core": "workspace:*",
+        "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/credentials": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
-        "@holtkeeper/digest": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
-        "@holtkeeper/fleet": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/forge-gitlab": "workspace:*",
+        "@holtkeeper/guide": "workspace:*",
+        "@holtkeeper/guide-generator": "workspace:*",
         "@holtkeeper/identities": "workspace:*",
+        "@holtkeeper/issues": "workspace:*",
+        "@holtkeeper/issues-jira": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
         "@holtkeeper/knowledge": "workspace:*",
         "@holtkeeper/libraries": "workspace:*",
@@ -93,13 +81,16 @@
         "@holtkeeper/review": "workspace:*",
         "@holtkeeper/settings": "workspace:*",
         "@holtkeeper/ssh-keys": "workspace:*",
+        "@holtkeeper/stack": "workspace:*",
         "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
         "@holtkeeper/updates": "workspace:*",
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
         "@holtkeeper/workspace": "workspace:*",
+        "@holtkeeper/write-task": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
         "hono": "^4.13.14",
         "zod": "^4.6.7",
@@ -280,31 +271,20 @@
         "@holtkeeper/branches": "workspace:*",
         "@holtkeeper/browserslist": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
-        "@holtkeeper/changelog": "workspace:*",
         "@holtkeeper/ci-jobs": "workspace:*",
         "@holtkeeper/coverage": "workspace:*",
-        "@holtkeeper/delivery": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-go": "workspace:*",
         "@holtkeeper/depgraph-js": "workspace:*",
-        "@holtkeeper/fleet": "workspace:*",
+        "@holtkeeper/guide-generator": "workspace:*",
         "@holtkeeper/i18n": "workspace:*",
         "@holtkeeper/libraries": "workspace:*",
         "@holtkeeper/licenses": "workspace:*",
-        "@holtkeeper/port": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-        "@holtkeeper/quality-conventions": "workspace:*",
-        "@holtkeeper/quality-deadcode": "workspace:*",
-        "@holtkeeper/quality-duplication": "workspace:*",
-        "@holtkeeper/quality-lint": "workspace:*",
         "@holtkeeper/quality-secrets": "workspace:*",
-        "@holtkeeper/quality-tests": "workspace:*",
-        "@holtkeeper/release-risk": "workspace:*",
         "@holtkeeper/renovate": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/review": "workspace:*",
-        "@holtkeeper/review-tests": "workspace:*",
         "@holtkeeper/stack": "workspace:*",
         "@holtkeeper/testids": "workspace:*",
         "@holtkeeper/tracker": "workspace:*",
@@ -313,7 +293,7 @@
         "@holtkeeper/vuln-go": "workspace:*",
         "@holtkeeper/vuln-js": "workspace:*",
         "@holtkeeper/vuln-osv": "workspace:*",
-        "@holtkeeper/warmup": "workspace:*",
+        "@holtkeeper/write-task": "workspace:*",
         "zod": "^4.6.7",
       },
       "devDependencies": {
@@ -325,14 +305,19 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/api-surface": "workspace:*",
+        "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/chat": "workspace:*",
-        "@holtkeeper/depgraph": "workspace:*",
-        "@holtkeeper/digest": "workspace:*",
+        "@holtkeeper/ci-jobs": "workspace:*",
+        "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/guide": "workspace:*",
+        "@holtkeeper/issues": "workspace:*",
+        "@holtkeeper/jobs": "workspace:*",
         "@holtkeeper/release": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
@@ -451,15 +436,6 @@
         "zod": "^4.6.7",
       },
     },
-    "packages/changelog": {
-      "name": "@holtkeeper/changelog",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
     "packages/changes": {
       "name": "@holtkeeper/changes",
       "version": "0.0.0",
@@ -482,9 +458,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/chat": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/notify": "workspace:*",
-        "zod": "^4.6.7",
       },
     },
     "packages/ci-jobs": {
@@ -547,16 +521,6 @@
         "@holtkeeper/vault": "workspace:*",
       },
     },
-    "packages/delivery": {
-      "name": "@holtkeeper/delivery",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
     "packages/depgraph": {
       "name": "@holtkeeper/depgraph",
       "version": "0.0.0",
@@ -582,19 +546,6 @@
         "@holtkeeper/depgraph": "workspace:*",
       },
     },
-    "packages/digest": {
-      "name": "@holtkeeper/digest",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/access": "workspace:*",
-        "@holtkeeper/chat": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "@holtkeeper/store": "workspace:*",
-        "croner": "^9",
-        "zod": "^4.6.7",
-      },
-    },
     "packages/exec": {
       "name": "@holtkeeper/exec",
       "version": "0.0.0",
@@ -605,18 +556,6 @@
       "dependencies": {
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/toolchain": "workspace:*",
-      },
-    },
-    "packages/fleet": {
-      "name": "@holtkeeper/fleet",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/changes": "workspace:*",
-        "@holtkeeper/depgraph": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "zod": "^4.6.7",
       },
     },
     "packages/forge": {
@@ -630,6 +569,43 @@
         "@holtkeeper/credentials": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "zod": "^4.6.7",
+      },
+    },
+    "packages/guide": {
+      "name": "@holtkeeper/guide",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/assets": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
+        "@holtkeeper/knowledge": "workspace:*",
+        "@holtkeeper/settings": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/testids": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/guide-generator": {
+      "name": "@holtkeeper/guide-generator",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
+        "@holtkeeper/coverage": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/guide": "workspace:*",
+        "@holtkeeper/quality-tests": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/testids": "workspace:*",
+        "@holtkeeper/toolchain": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@holtkeeper/exec": "workspace:*",
       },
     },
     "packages/i18n": {
@@ -652,12 +628,28 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/issues": {
+      "name": "@holtkeeper/issues",
+      "version": "0.0.0",
+      "dependencies": {
+        "zod": "^4.6.7",
+      },
+    },
+    "packages/issues-jira": {
+      "name": "@holtkeeper/issues-jira",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/issues": "workspace:*",
+        "zod": "^4.6.7",
+      },
+    },
     "packages/jobs": {
       "name": "@holtkeeper/jobs",
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/artifacts": "workspace:*",
         "@holtkeeper/core": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/exec-container": "workspace:*",
@@ -749,24 +741,10 @@
         "zod": "^4.6.7",
       },
     },
-    "packages/port": {
-      "name": "@holtkeeper/port",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/forge": "workspace:*",
-        "@holtkeeper/propagate": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
     "packages/propagate": {
       "name": "@holtkeeper/propagate",
       "version": "0.0.0",
       "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/analyzer": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
@@ -779,58 +757,8 @@
       "name": "@holtkeeper/quality",
       "version": "0.0.0",
       "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
-    "packages/quality-conventions": {
-      "name": "@holtkeeper/quality-conventions",
-      "version": "0.0.0",
-      "dependencies": {
-        "@ast-grep/lang-go": "^0.0.6",
-        "@ast-grep/lang-java": "^0.0.7",
-        "@ast-grep/lang-kotlin": "^0.0.7",
-        "@ast-grep/lang-php": "^0.0.7",
-        "@ast-grep/lang-python": "^0.0.6",
-        "@ast-grep/lang-rust": "^0.0.7",
-        "@ast-grep/napi": "^0.51.0",
-        "@holtkeeper/changes": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-      },
-    },
-    "packages/quality-deadcode": {
-      "name": "@holtkeeper/quality-deadcode",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/changes": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-        "knip": "^6.44.0",
-        "zod": "^4.6.7",
-      },
-    },
-    "packages/quality-duplication": {
-      "name": "@holtkeeper/quality-duplication",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-        "jscpd": "^5.4.2",
-        "zod": "^4.6.7",
-      },
-    },
-    "packages/quality-lint": {
-      "name": "@holtkeeper/quality-lint",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/changes": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-        "@types/sarif": "^2.1.7",
-        "zod": "^4.6.7",
       },
     },
     "packages/quality-secrets": {
@@ -846,11 +774,7 @@
       "name": "@holtkeeper/quality-tests",
       "version": "0.0.0",
       "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-        "zod": "^4.6.7",
       },
     },
     "packages/release": {
@@ -858,21 +782,10 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/changelog": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/issues": "workspace:*",
         "@holtkeeper/notify": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
-    "packages/release-risk": {
-      "name": "@holtkeeper/release-risk",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "@holtkeeper/store": "workspace:*",
-        "@holtkeeper/vuln": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -913,19 +826,6 @@
         "zod": "^4.6.7",
       },
     },
-    "packages/review-tests": {
-      "name": "@holtkeeper/review-tests",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/agent": "workspace:*",
-        "@holtkeeper/coverage": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/quality": "workspace:*",
-        "@holtkeeper/quality-tests": "workspace:*",
-        "@holtkeeper/review": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
     "packages/settings": {
       "name": "@holtkeeper/settings",
       "version": "0.0.0",
@@ -950,6 +850,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/toolchain": "workspace:*",
@@ -961,6 +862,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/chat": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
       },
@@ -1073,22 +975,26 @@
         "zod": "^4.6.7",
       },
     },
-    "packages/warmup": {
-      "name": "@holtkeeper/warmup",
-      "version": "0.0.0",
-      "dependencies": {
-        "@holtkeeper/analyzer": "workspace:*",
-        "@holtkeeper/exec": "workspace:*",
-        "@holtkeeper/report": "workspace:*",
-        "zod": "^4.6.7",
-      },
-    },
     "packages/workspace": {
       "name": "@holtkeeper/workspace",
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/ssh-keys": "workspace:*",
+      },
+    },
+    "packages/write-task": {
+      "name": "@holtkeeper/write-task",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/agent-tools": "workspace:*",
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "zod": "^4.6.7",
       },
     },
   },
@@ -1161,18 +1067,6 @@
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@1.3.0", "", { "dependencies": { "@opentelemetry/api": "^1.4.1", "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-k7z9BlLLPxfZH+ov7dS6EnaN/wiZeV8YNT1LZfrpAHIy7oY7pHr4UzirF9f2OlHtFEnRBOX+AZQ91Y5fK+TPTw=="],
 
-    "@ast-grep/lang-go": ["@ast-grep/lang-go@0.0.6", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"], "hasInstallScript": true }, "sha512-PZap9Rp6t+YKbLjRnFRF5aGBX3/HV9s5Rp7ZPsCM+o3tlTZDo1IqDYnFu+Oeh5Razs2U8K8ccPSJ+GBxalVhWg=="],
-
-    "@ast-grep/lang-java": ["@ast-grep/lang-java@0.0.7", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"], "hasInstallScript": true }, "sha512-7muXd2MqUxJ8SrLrXU+JbvU6qSASZ5BZqH/eCDkIIjXge5wMl7kIYxKEgP375W8lnTXQYjM+VgeOkYSU9EexJg=="],
-
-    "@ast-grep/lang-kotlin": ["@ast-grep/lang-kotlin@0.0.7", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"], "hasInstallScript": true }, "sha512-+rXVbmESlE5c3QQGl/si0BRj/aC/v6P8Tw//8UxojoqlfZDISG95bHeVRZxb4NuEkt0kFFRn7Lbi9DsHXn8MbA=="],
-
-    "@ast-grep/lang-php": ["@ast-grep/lang-php@0.0.7", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"], "hasInstallScript": true }, "sha512-cDCcgSRj4eL8QnEivUbxYVSUn4PESyLdp6RuFvYw2gMOb8qzfR1FTq503D9tZ5pqvZCALR3KrbVNzc8SHaQs7Q=="],
-
-    "@ast-grep/lang-python": ["@ast-grep/lang-python@0.0.6", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"], "hasInstallScript": true }, "sha512-eF/bEBspmrxdVuPNihvZDyyJx5qtIpGEMz9l1nNQmrji7NZcUiRNC8WwzYyQCBdy1mj8HZ0Tn4I2q3gp/6Bkiw=="],
-
-    "@ast-grep/lang-rust": ["@ast-grep/lang-rust@0.0.7", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"], "hasInstallScript": true }, "sha512-CF6jv8XmlVQgr/pFKADM87EkoGiHIrHKsG1wcX2iqgdBX5kW8wH+Zd4GP6SMme2eZogD49f19vRoRTF44iZqzg=="],
-
     "@ast-grep/napi": ["@ast-grep/napi@0.51.0", "", { "optionalDependencies": { "@ast-grep/napi-darwin-arm64": "0.51.0", "@ast-grep/napi-darwin-x64": "0.51.0", "@ast-grep/napi-linux-arm64-gnu": "0.51.0", "@ast-grep/napi-linux-arm64-musl": "0.51.0", "@ast-grep/napi-linux-x64-gnu": "0.51.0", "@ast-grep/napi-linux-x64-musl": "0.51.0", "@ast-grep/napi-win32-arm64-msvc": "0.51.0", "@ast-grep/napi-win32-ia32-msvc": "0.51.0", "@ast-grep/napi-win32-x64-msvc": "0.51.0" } }, "sha512-thHIZoygVkwW/6yBFBgqPtmKpAnEfwsJyIFliKo6hxkXlYLLfvwReDH2le/5zk358ir/97IJdTB7xv309LYbSQ=="],
 
     "@ast-grep/napi-darwin-arm64": ["@ast-grep/napi-darwin-arm64@0.51.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-jKzwYtHqVAY3F6Ch9sE4zRc2iDP74U2bJB2AucRDpQe3HrHUz4rCCfXS4PZpq9FL+kI6YS+qglZG3LRgnv1JsA=="],
@@ -1192,8 +1086,6 @@
     "@ast-grep/napi-win32-ia32-msvc": ["@ast-grep/napi-win32-ia32-msvc@0.51.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-RF49CWQslYIx1DGq090a3gqBQEYxLBmg8CsVRgnEyF0KDlcGinCDeRg/EqxVyDQ+e9VT3ycKpUjby+V7aMujXg=="],
 
     "@ast-grep/napi-win32-x64-msvc": ["@ast-grep/napi-win32-x64-msvc@0.51.0", "", { "os": "win32", "cpu": "x64" }, "sha512-OlGEtNSx1q2NdRXOSHBEGtuyZXS6Ix3bE2HdGepuYnNZJoafvX/WljkO+kzNimJGGSXTs6/t+o7XeGsB8vL/Bw=="],
-
-    "@ast-grep/setup-lang": ["@ast-grep/setup-lang@0.0.6", "", {}, "sha512-aSYZNF5nGQMxnwiA3Lcc8zi0AtpGlug47ADgqCgP/2n7p922FbnW7vo1rbW4kKjW72B/3mDdN7uvYidv8JnPnw=="],
 
     "@astrojs/compiler-binding": ["@astrojs/compiler-binding@0.5.2", "", { "optionalDependencies": { "@astrojs/compiler-binding-android-arm64": "0.5.2", "@astrojs/compiler-binding-darwin-arm64": "0.5.2", "@astrojs/compiler-binding-darwin-x64": "0.5.2", "@astrojs/compiler-binding-linux-arm64-gnu": "0.5.2", "@astrojs/compiler-binding-linux-arm64-musl": "0.5.2", "@astrojs/compiler-binding-linux-x64-gnu": "0.5.2", "@astrojs/compiler-binding-linux-x64-musl": "0.5.2", "@astrojs/compiler-binding-wasm32-wasi": "0.5.2", "@astrojs/compiler-binding-win32-arm64-msvc": "0.5.2", "@astrojs/compiler-binding-win32-x64-msvc": "0.5.2" } }, "sha512-lEn76+0JcMQ5RDXU0wSMWJg2ZppiZvSULpghC29cfv4o9bhvWFDbQjsCtvjjXN9iVLFQ7fL3wTR2L2UU13mP8g=="],
 
@@ -1355,8 +1247,6 @@
 
     "@holtkeeper/bundles": ["@holtkeeper/bundles@workspace:packages/bundles"],
 
-    "@holtkeeper/changelog": ["@holtkeeper/changelog@workspace:packages/changelog"],
-
     "@holtkeeper/changes": ["@holtkeeper/changes@workspace:packages/changes"],
 
     "@holtkeeper/chat": ["@holtkeeper/chat@workspace:packages/chat"],
@@ -1377,15 +1267,11 @@
 
     "@holtkeeper/credentials": ["@holtkeeper/credentials@workspace:packages/credentials"],
 
-    "@holtkeeper/delivery": ["@holtkeeper/delivery@workspace:packages/delivery"],
-
     "@holtkeeper/depgraph": ["@holtkeeper/depgraph@workspace:packages/depgraph"],
 
     "@holtkeeper/depgraph-go": ["@holtkeeper/depgraph-go@workspace:packages/depgraph-go"],
 
     "@holtkeeper/depgraph-js": ["@holtkeeper/depgraph-js@workspace:packages/depgraph-js"],
-
-    "@holtkeeper/digest": ["@holtkeeper/digest@workspace:packages/digest"],
 
     "@holtkeeper/docs": ["@holtkeeper/docs@workspace:docs"],
 
@@ -1395,15 +1281,21 @@
 
     "@holtkeeper/exec-container": ["@holtkeeper/exec-container@workspace:packages/exec-container"],
 
-    "@holtkeeper/fleet": ["@holtkeeper/fleet@workspace:packages/fleet"],
-
     "@holtkeeper/forge": ["@holtkeeper/forge@workspace:packages/forge"],
 
     "@holtkeeper/forge-gitlab": ["@holtkeeper/forge-gitlab@workspace:packages/forge-gitlab"],
 
+    "@holtkeeper/guide": ["@holtkeeper/guide@workspace:packages/guide"],
+
+    "@holtkeeper/guide-generator": ["@holtkeeper/guide-generator@workspace:packages/guide-generator"],
+
     "@holtkeeper/i18n": ["@holtkeeper/i18n@workspace:packages/i18n"],
 
     "@holtkeeper/identities": ["@holtkeeper/identities@workspace:packages/identities"],
+
+    "@holtkeeper/issues": ["@holtkeeper/issues@workspace:packages/issues"],
+
+    "@holtkeeper/issues-jira": ["@holtkeeper/issues-jira@workspace:packages/issues-jira"],
 
     "@holtkeeper/jobs": ["@holtkeeper/jobs@workspace:packages/jobs"],
 
@@ -1423,19 +1315,9 @@
 
     "@holtkeeper/notify": ["@holtkeeper/notify@workspace:packages/notify"],
 
-    "@holtkeeper/port": ["@holtkeeper/port@workspace:packages/port"],
-
     "@holtkeeper/propagate": ["@holtkeeper/propagate@workspace:packages/propagate"],
 
     "@holtkeeper/quality": ["@holtkeeper/quality@workspace:packages/quality"],
-
-    "@holtkeeper/quality-conventions": ["@holtkeeper/quality-conventions@workspace:packages/quality-conventions"],
-
-    "@holtkeeper/quality-deadcode": ["@holtkeeper/quality-deadcode@workspace:packages/quality-deadcode"],
-
-    "@holtkeeper/quality-duplication": ["@holtkeeper/quality-duplication@workspace:packages/quality-duplication"],
-
-    "@holtkeeper/quality-lint": ["@holtkeeper/quality-lint@workspace:packages/quality-lint"],
 
     "@holtkeeper/quality-secrets": ["@holtkeeper/quality-secrets@workspace:packages/quality-secrets"],
 
@@ -1443,15 +1325,11 @@
 
     "@holtkeeper/release": ["@holtkeeper/release@workspace:packages/release"],
 
-    "@holtkeeper/release-risk": ["@holtkeeper/release-risk@workspace:packages/release-risk"],
-
     "@holtkeeper/renovate": ["@holtkeeper/renovate@workspace:packages/renovate"],
 
     "@holtkeeper/report": ["@holtkeeper/report@workspace:packages/report"],
 
     "@holtkeeper/review": ["@holtkeeper/review@workspace:packages/review"],
-
-    "@holtkeeper/review-tests": ["@holtkeeper/review-tests@workspace:packages/review-tests"],
 
     "@holtkeeper/server": ["@holtkeeper/server@workspace:apps/server"],
 
@@ -1489,11 +1367,11 @@
 
     "@holtkeeper/waibee-ai-provider": ["@holtkeeper/waibee-ai-provider@0.1.0", "", { "dependencies": { "@ai-sdk/anthropic": "^4.0.92", "@ai-sdk/openai-compatible": "^3.0.81", "@ai-sdk/provider": "^4.0.34", "@ai-sdk/provider-utils": "^5.0.71" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ScN/VbVS2v0Rytbp47LNVb8KUcD2ajGsU2tREiGDNvQ0mzQkQXVsnQR8tA3/DHuN3DPhTsx+ClIp51H5atoN+Q=="],
 
-    "@holtkeeper/warmup": ["@holtkeeper/warmup@workspace:packages/warmup"],
-
     "@holtkeeper/web": ["@holtkeeper/web@workspace:apps/web"],
 
     "@holtkeeper/workspace": ["@holtkeeper/workspace@workspace:packages/workspace"],
+
+    "@holtkeeper/write-task": ["@holtkeeper/write-task@workspace:packages/write-task"],
 
     "@hono/node-server": ["@hono/node-server@2.1.5", "", { "peerDependencies": { "hono": "^4 || ^5.0.0-0" } }, "sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q=="],
 
@@ -2045,8 +1923,6 @@
 
     "@types/react-dom": ["@types/react-dom@19.3.0", "", { "peerDependencies": { "@types/react": "^19.3.0" } }, "sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q=="],
 
-    "@types/sarif": ["@types/sarif@2.1.7", "", {}, "sha512-kRz0VEkJqWLf1LLVN4pT1cg1Z9wAuvI6L97V3m2f5B76Tg8d413ddvLBPTEHAZJlnn4XSvu0FkZtViCQGVyrXQ=="],
-
     "@types/sax": ["@types/sax@1.2.7", "", { "dependencies": { "@types/node": "*" } }, "sha512-rO73L89PJxeYM3s3pPPjiPgVVcymqU490g0YO5n5By0k2Erzj6tay/4lr1CHAAU4JyOWd1rpQ8bCf6cZfHU96A=="],
 
     "@types/trusted-types": ["@types/trusted-types@2.0.7", "", {}, "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw=="],
@@ -2546,24 +2422,6 @@
     "js-tokens": ["js-tokens@4.0.0", "", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
 
     "js-yaml": ["js-yaml@4.3.2", "", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.js" } }, "sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA=="],
-
-    "jscpd": ["jscpd@5.4.2", "", { "optionalDependencies": { "jscpd-darwin-arm64": "5.4.2", "jscpd-darwin-x64": "5.4.2", "jscpd-linux-arm64-gnu": "5.4.2", "jscpd-linux-arm64-musl": "5.4.2", "jscpd-linux-x64-gnu": "5.4.2", "jscpd-linux-x64-musl": "5.4.2", "jscpd-windows-arm64-msvc": "5.4.2", "jscpd-windows-x64-msvc": "5.4.2" }, "bin": { "jscpd": "run-jscpd.js" } }, "sha512-bxZ1ObA4NyWBcM7Zh+QoGrdcMovbCxrDofFaLo2Lwgk/Axe/e45VYu8EM+mpPx2CpU/QGCoktONRnaRZl8Yq2w=="],
-
-    "jscpd-darwin-arm64": ["jscpd-darwin-arm64@5.4.2", "", { "os": "darwin", "cpu": "arm64" }, "sha512-EGoPYQZqESW2kJfxKZrUYsYWhzq2Irk6sBQQWZ7VPAGj2wwk3n8HtDP2FnJOiHWZtSz55I8zQWldzIrD55B5Vw=="],
-
-    "jscpd-darwin-x64": ["jscpd-darwin-x64@5.4.2", "", { "os": "darwin", "cpu": "x64" }, "sha512-/bz/rgoahqeK0p5r+KjeTTS59d7bZpMxD7hQ4CaQ0qKZWBZIyu7hRdExzJ7/KrCEJ5cmRogvXX1jhFqldYLNXw=="],
-
-    "jscpd-linux-arm64-gnu": ["jscpd-linux-arm64-gnu@5.4.2", "", { "os": "linux", "cpu": "arm64", "libc": "glibc" }, "sha512-YW/eX+mOYZmT/A3QEARYmJQoVQNV/cfecKCobNXZcD3mE57drpKHmJnvuL9uS85z0cUKWGCM57JVkVz6Y9oxxw=="],
-
-    "jscpd-linux-arm64-musl": ["jscpd-linux-arm64-musl@5.4.2", "", { "os": "linux", "cpu": "arm64", "libc": "musl" }, "sha512-jOLTO8YVRz65NaeYNeXoIf13yOPWhbM61xKXpv51DXQ2BXce6XfgPaJVeDCOM5s+8mt6aDtq0BZ8zptNeqGuIw=="],
-
-    "jscpd-linux-x64-gnu": ["jscpd-linux-x64-gnu@5.4.2", "", { "os": "linux", "cpu": "x64", "libc": "glibc" }, "sha512-eAmKLxx+pIOEX4lZ342CCCjL5bvf+a3gdmaaVHXiGIx2Zr3zKkF32YkfuN2sCvCui5I/wnely80XsRvVVFO47Q=="],
-
-    "jscpd-linux-x64-musl": ["jscpd-linux-x64-musl@5.4.2", "", { "os": "linux", "cpu": "x64", "libc": "musl" }, "sha512-ers9YFscD6DrmhyjBDXo/L+yBKcclHdWTFLMulYVGLcoGRKfBFhmK08MI3ajN/GMmCpJu7rkDYKL3egdfE8OIw=="],
-
-    "jscpd-windows-arm64-msvc": ["jscpd-windows-arm64-msvc@5.4.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-kOhVw4cVhN8T9jr3OVThB3pPpbff0ITHTwpJ/+4EGzMkbf0y6QtPpHDzRgiHJj7u1FSTBXTI6VhPhDUhT/os1g=="],
-
-    "jscpd-windows-x64-msvc": ["jscpd-windows-x64-msvc@5.4.2", "", { "os": "win32", "cpu": "x64" }, "sha512-BuR5DCV7F/G5ukMEIzCrz43ea5C0t0ALcP7v+opOWefoi4aiQYCEmtoRwfXMM/zjOmNYmvJBDDfeH05U9uuzEg=="],
 
     "json-bigint": ["json-bigint@1.0.0", "", { "dependencies": { "bignumber.js": "^9.0.0" } }, "sha512-SiPv/8VpZuWbvLSMtTDU8hEfrZWg/mH/nV/b4o0CYbSxu1UIQPLdwKOCIyLQX+VIPO5vrLX3i8qtqFyhdPSUSQ=="],
 

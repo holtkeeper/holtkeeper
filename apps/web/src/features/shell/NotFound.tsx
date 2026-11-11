@@ -11,7 +11,7 @@ export function NotFound() {
         description="The address does not match any page."
         action={
           <LinkButton to="/" variant="secondary">
-            Go to dashboard
+            Go to Home
           </LinkButton>
         }
       />

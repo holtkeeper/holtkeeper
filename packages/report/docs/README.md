@@ -16,7 +16,7 @@ interface Report {
 }
 ```
 
-`Report.exclude` (`ReportExclude { setting, options: { option, label, description? }[] }`) says that files of the report can be left out of later runs by adding globs to a list option of an analyzer setting, e.g. `analyzers.assets` → `optimizeIgnore` or `ignore`; renderers offer it on cells of `path` columns.
+`Report.exclude` (`ReportExclude { setting, options: { option, label, description?, defaults? }[] }`) says that files of the report can be left out of later runs by adding globs to a list option of an analyzer setting, e.g. `assets.policy` → `ignore`. `defaults` is the option's value when no entry sets it, so the first added glob extends it instead of replacing it; renderers offer it on cells of `path` columns.
 
 `Metric` has a `value`, a `unit` (`count`, `bytes`, `percent`, `ms`, `version`, `text`), an optional `delta` against the compared report, and `better: 'up' | 'down'` so renderers know whether growth is good (more fixes) or bad (bigger bundle).
 

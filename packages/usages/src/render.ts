@@ -29,12 +29,21 @@ export function renderSite(site: UsageSite, label?: string): string {
 /** Who uses a package and which parts of it, as Markdown for agents. */
 export function renderPackageUsage<Origin>(
   usage: PackageUsage<Origin>,
-  options: { originLabel: (origin: Origin) => string; exports?: number } = {
+  options: {
+    originLabel: (origin: Origin) => string
+    exports?: number
+    /** The owning team of a repository, appended to its line. */
+    teamOf?: (origin: Origin) => string | undefined
+  } = {
     originLabel: String,
   },
 ): string {
   if (!usage.repos.length) return `No analyzed repository uses ${usage.name}.`
   const label = options.originLabel
+  const team = (origin: Origin) => {
+    const owner = options.teamOf?.(origin)
+    return owner ? ` (team ${owner})` : ''
+  }
   const lines = [
     `# ${usage.name}: ${usage.repos.length} repositor${usage.repos.length === 1 ? 'y' : 'ies'}`,
     `Versions in use: ${usage.versions.join(', ') || 'unknown'}.`,
@@ -42,7 +51,7 @@ export function renderPackageUsage<Origin>(
     '## Repositories',
     ...usage.repos.map(
       (repo) =>
-        `- \`${label(repo.origin)}\` — ${repo.versions.join(', ') || repo.ranges.join(', ') || 'version unknown'}, ${repo.count} uses in ${repo.files} files, ${repo.exports.length} exports${repo.workspaces.length > 1 || repo.workspaces[0] !== 'root' ? ` (workspaces ${repo.workspaces.join(', ')})` : ''}`,
+        `- \`${label(repo.origin)}\`${team(repo.origin)} — ${repo.versions.join(', ') || repo.ranges.join(', ') || 'version unknown'}, ${repo.count} uses in ${repo.files} files, ${repo.exports.length} exports${repo.workspaces.length > 1 || repo.workspaces[0] !== 'root' ? ` (workspaces ${repo.workspaces.join(', ')})` : ''}`,
     ),
     '',
     '## Exports used',
@@ -67,6 +76,7 @@ export function renderPackageUsage<Origin>(
 export function renderSites<Origin>(
   found: { sites: FoundSite<Origin>[]; total: number; more: number },
   originLabel: (origin: Origin) => string = String,
+  teamOf?: (origin: Origin) => string | undefined,
 ): string {
   if (!found.sites.length) return 'No matching use.'
   const lines: string[] = []
@@ -75,7 +85,7 @@ export function renderSites<Origin>(
     if (item.origin !== current) {
       current = item.origin
       lines.push(
-        `## \`${originLabel(item.origin)}\`${item.versions.length ? ` (${item.versions.join(', ')})` : ''}`,
+        `## \`${originLabel(item.origin)}\`${item.versions.length ? ` (${item.versions.join(', ')})` : ''}${teamOf?.(item.origin) ? ` — team ${teamOf(item.origin)}` : ''}`,
       )
     }
     lines.push(renderSite(item.site, `**${item.export}**`))

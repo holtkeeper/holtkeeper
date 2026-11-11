@@ -21,7 +21,9 @@ type GroupMatch = string | string[]
 
 A repository can sit in several groups, so groups work as tags. A `groups` entry is a group name or a list of groups the repository must belong to all at once; entries combine with OR. `{ groups: ['tools', ['frontend', 'storefront']] }` covers every repository of `tools` and the repositories that are both `frontend` and `storefront`.
 
-Actions: `repos:read`, `audits:read`, `audits:run`, `audits:allowlist`, `releases:read`, `releases:run`, `settings:read`, `settings:write`, `credentials:read`, `credentials:write`, `knowledge:read`, `knowledge:write`, `ai:read`, `ai:admin` (includes `ai:read` for the AI usage views), `users:read`, `users:invite`, `users:write`, `audit:read` (the tamper-evident audit log; only checked globally); `*` allows all.
+Actions: `repos:read`, `audits:read`, `audits:run`, `audits:allowlist`, `analyses:read`, `analyses:run`, `catalog:read` (implied by `analyses:read` on the same scope), `releases:read`, `releases:run`, `tasks:run` (approve [write tasks](../../write-task/docs/README.md) that push a branch and open a merge request on the repository; for another team's repository the grant must cover it explicitly, see the server's agent tasks), `settings:read`, `settings:write`, `credentials:read`, `credentials:write`, `knowledge:read`, `knowledge:write`, `ai:read`, `ai:admin` (includes `ai:read` for the AI usage views), `users:read`, `users:invite`, `users:write`, `audit:read` (the tamper-evident audit log; only checked globally); `*` allows all.
+
+`catalog:read` covers derived, low-sensitivity metadata about a repository: its package and version inventory, public API, stack and tool versions, usage counts and knowledge entries marked `shared`. It never covers findings, audits, jobs, releases, review output or code. The server widens it across teams under the _Cross-team catalog_ setting; see `apps/server/docs/README.md`.
 
 ## Checks
 

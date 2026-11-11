@@ -4,6 +4,7 @@ import type { AuditTrigger } from '@holtkeeper/api'
 export const triggerLabel: Record<AuditTrigger, string> = {
   cli: 'CLI',
   schedule: 'Schedule',
+  freshness: 'Freshness',
   manual: 'Manual',
   webhook: 'Webhook',
 }

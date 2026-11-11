@@ -12,7 +12,6 @@ import {
   type GitPublisher,
   parseStatus,
   publishChanges,
-  touchedBetween,
 } from './publish.ts'
 import type { CheckResult, PackageTarget } from './types.ts'
 
@@ -27,7 +26,6 @@ const check = (name: string, ok: boolean, output = ''): CheckResult => ({
   ok,
   output,
   durationMs: 1500,
-  attempt: 0,
 })
 
 describe('helpers', () => {
@@ -55,22 +53,9 @@ describe('helpers', () => {
   test('branch names and titles', () => {
     expect(branchName('holtkeeper/update/', targets)).toBe('holtkeeper/update/acme-ui-2.0.0')
     expect(mergeRequestTitle(targets)).toBe('chore(deps): update @acme/ui to 2.0.0')
-    expect(
-      touchedBetween(
-        new Map([
-          ['a', '1'],
-          ['b', '1'],
-        ]),
-        new Map([
-          ['a', '1'],
-          ['b', '2'],
-          ['c', '1'],
-        ]),
-      ),
-    ).toEqual(['b', 'c'])
   })
 
-  test('generic description without a fix asks for attention', () => {
+  test('generic description asks for attention when checks fail', () => {
     const body = describeMergeRequest({
       sections: [{ title: 'Ported', body: 'from games/a!12' }],
       checks: [check('test', false, 'boom')],
@@ -114,13 +99,6 @@ describe('publishChanges', () => {
   const body = mergeRequestBody({
     bumps: [{ package: '@acme/ui', from: '^1.2.0', to: '^2.0.0', manifest: 'package.json' }],
     checks: [check('typecheck', true), check('test', false, 'expected 1\nreceived 2')],
-    attempts: 2,
-    agent: {
-      summary: 'Migrated greet calls.',
-      changes: ['src.ts: options object'],
-      remainingProblems: ['one test'],
-    },
-    fixedFiles: ['src.ts'],
     notes: [
       {
         package: '@acme/ui',
@@ -180,9 +158,7 @@ describe('publishChanges', () => {
     expect(mr.description).toContain('| `@acme/ui` | `^1.2.0` | `^2.0.0` | `package.json` |')
     expect(mr.description).toContain('| test `bun run test` | **failed** | 2 | 1.5 s |')
     expect(mr.description).toContain('received 2')
-    expect(mr.description).toContain('## Changes by the agent (2 attempts)')
-    expect(mr.description).toContain('Files: `src.ts`')
-    expect(mr.description).toContain('## Remaining problems\n\n- one test')
+    expect(mr.description).toContain('## Needs attention')
     expect(mr.description).toContain('Release notes: @acme/ui 1.2.0 → 2.0.0')
   })
 

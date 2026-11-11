@@ -22,6 +22,8 @@ interface KnowledgeRow {
   topics: string
   applies_to: string
   packages: string | null
+  visibility: KnowledgeEntry['visibility'] | null
+  subject: string | null
   evidence: string
   supersedes: string | null
   created_at: string
@@ -44,6 +46,7 @@ type FilterParams = [
   string | null,
   string | null,
   string | null,
+  string | null,
 ]
 
 const toEntry = (r: KnowledgeRow): KnowledgeEntry => ({
@@ -55,6 +58,8 @@ const toEntry = (r: KnowledgeRow): KnowledgeEntry => ({
   topics: JSON.parse(r.topics),
   appliesTo: JSON.parse(r.applies_to),
   ...(r.packages !== null && { packages: JSON.parse(r.packages) }),
+  ...(r.visibility !== null && { visibility: r.visibility }),
+  ...(r.subject !== null && { subject: r.subject }),
   status: r.status,
   evidence: JSON.parse(r.evidence),
   ...(r.supersedes !== null && { supersedes: r.supersedes }),
@@ -74,6 +79,8 @@ const content = (entry: KnowledgeEntry): KnowledgeContent => ({
   topics: entry.topics,
   appliesTo: entry.appliesTo,
   ...(entry.packages !== undefined && { packages: entry.packages }),
+  ...(entry.visibility !== undefined && { visibility: entry.visibility }),
+  ...(entry.subject !== undefined && { subject: entry.subject }),
   status: entry.status,
   evidence: entry.evidence,
   ...(entry.supersedes !== undefined && { supersedes: entry.supersedes }),
@@ -92,6 +99,7 @@ function filterParams(filter: KnowledgeFilter = {}): FilterParams {
     filter.scope ?? null,
     pkg === undefined ? null : separator > 0 ? pkg.slice(separator + 1) : pkg,
     pkg !== undefined && separator > 0 ? pkg.slice(0, separator) : null,
+    filter.subject ?? null,
   ]
 }
 
@@ -105,7 +113,8 @@ const filterSql = `
     OR EXISTS (SELECT 1 FROM json_each(k.scope, '$.repos') WHERE instr(lower(value), lower(?4)) > 0))
   AND (?5 IS NULL OR EXISTS (
     SELECT 1 FROM json_each(k.packages)
-    WHERE json_extract(value, '$.name') = ?5 AND (?6 IS NULL OR json_extract(value, '$.ecosystem') = ?6)))`
+    WHERE json_extract(value, '$.name') = ?5 AND (?6 IS NULL OR json_extract(value, '$.ecosystem') = ?6)))
+  AND (?7 IS NULL OR k.subject = ?7)`
 
 /**
  * Turns free text into an FTS5 query that cannot fail to parse: every word becomes a quoted
@@ -140,6 +149,8 @@ export function sqliteKnowledge(db: Database): KnowledgeStore {
         string,
         string,
         string | null,
+        string | null,
+        string | null,
         string,
         string | null,
         string,
@@ -150,12 +161,12 @@ export function sqliteKnowledge(db: Database): KnowledgeStore {
       ]
     >(
       `INSERT INTO knowledge (id, title, body, kind, status, source, author, scope, topics, applies_to, packages,
-         evidence, supersedes, tags, created_at, updated_at, updated_by, version)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+         visibility, subject, evidence, supersedes, tags, created_at, updated_at, updated_by, version)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
        ON CONFLICT (id) DO UPDATE SET title = excluded.title, body = excluded.body, kind = excluded.kind,
          status = excluded.status, source = excluded.source, author = excluded.author, scope = excluded.scope,
          topics = excluded.topics, applies_to = excluded.applies_to, packages = excluded.packages,
-         evidence = excluded.evidence, supersedes = excluded.supersedes, tags = excluded.tags,
+         visibility = excluded.visibility, subject = excluded.subject, evidence = excluded.evidence, supersedes = excluded.supersedes, tags = excluded.tags,
          created_at = excluded.created_at, updated_at = excluded.updated_at, updated_by = excluded.updated_by,
          version = excluded.version
        RETURNING *`,
@@ -172,8 +183,8 @@ export function sqliteKnowledge(db: Database): KnowledgeStore {
     search: db.query<KnowledgeRow & { rank: number }, [...FilterParams, string, number]>(
       `SELECT k.*, bm25(knowledge_fts, 5.0, 3.0, 1.0) AS rank
        FROM knowledge_fts JOIN knowledge k ON k.seq = knowledge_fts.rowid
-       WHERE knowledge_fts MATCH ?7 AND ${filterSql}
-       ORDER BY rank, k.seq DESC LIMIT ?8`,
+       WHERE knowledge_fts MATCH ?8 AND ${filterSql}
+       ORDER BY rank, k.seq DESC LIMIT ?9`,
     ),
     remove: db.prepare('DELETE FROM knowledge WHERE id = ?'),
   }
@@ -202,6 +213,8 @@ export function sqliteKnowledge(db: Database): KnowledgeStore {
       JSON.stringify(input.topics),
       JSON.stringify(input.appliesTo),
       input.packages ? JSON.stringify(input.packages) : null,
+      input.visibility ?? null,
+      input.subject ?? null,
       JSON.stringify(input.evidence),
       input.supersedes ?? null,
       tags(input),

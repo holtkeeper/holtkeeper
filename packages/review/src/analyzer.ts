@@ -7,6 +7,7 @@ import { z } from 'zod'
 
 import { reviewAnalysis } from './analysis.ts'
 import { type ReviewCheckName, reviewCheckNames } from './checks.ts'
+import { type Guideline, readGuidelines } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
 import {
   type ReviewOptions,
@@ -18,8 +19,7 @@ import {
 import { type ReviewData, type ReviewUsage, severities } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
 import { DEFAULT_RELEASE_BRANCHES, skipReason, skippedReview } from './skip.ts'
-import { type MergeRequestTester, defaultReviewTestOptions } from './tests.ts'
-import { type ThreadLearning, type ThreadReplyResult, replyToThread } from './thread.ts'
+import { replyToThread } from './thread.ts'
 
 const flag = z.preprocess(
   (value) => (value === 'true' ? true : value === 'false' ? false : value),
@@ -44,20 +44,15 @@ export const reviewOptionsSchema = z.object({
   mode: z.enum(['auto', 'full', 'incremental']).default('auto'),
   maxComments: z.coerce.number().int().min(0).default(15),
   minSeverity: z.enum(severities).default('minor'),
-  includeChecks: z.union([flag, list(z.enum(reviewCheckNames))]).default(false),
+  includeChecks: z.union([flag, list(z.enum(reviewCheckNames))]).default(['testids']),
   approve: z.enum(['never', 'when-clean']).default('never'),
+  depth: z.enum(['standard', 'deep']).default('standard'),
   ignore: list(z.string().min(1)).default([...DEFAULT_IGNORE]),
   maxDiffLines: z.coerce.number().int().positive().default(3000),
   language: z.string().min(1).optional(),
   instructions: z.string().optional(),
   replyTo: z.string().min(1).optional(),
   media: flag.default(true),
-  tests: flag.default(false),
-  maxTests: z.coerce.number().int().min(1).default(defaultReviewTestOptions.maxTests),
-  testRepeat: z.coerce.number().int().min(1).default(defaultReviewTestOptions.repeat),
-  testTimeoutMs: z.coerce.number().int().positive().default(defaultReviewTestOptions.timeoutMs),
-  testAttempts: z.coerce.number().int().min(1).default(defaultReviewTestOptions.attempts),
-  testComponents: flag.default(false),
   releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
   reviewOwn: flag.default(false),
   force: flag.default(false),
@@ -67,11 +62,22 @@ export const reviewOptionsSchema = z.object({
 export interface ReviewAnalyzerDeps {
   /** Quality checks `includeChecks` may run, by name. */
   checks?: Partial<Record<ReviewCheckName, QualityCheck>>
-  /** The `review.instructions` setting that applies to the repository. */
-  instructionsFor?: (repo: RepoRef) => Promise<string | undefined> | string | undefined
   /**
-   * The team knowledge base: entries matching the merge request are put into the agent's context
-   * and the `knowledge` toolset is mounted. `groupsOf` gives the repository's config groups.
+   * The checks for one repository, e.g. built with its settings; wins over `checks`. A failure
+   * falls back to `checks`.
+   */
+  checksFor?: (repo: RepoRef) => Promise<Partial<Record<ReviewCheckName, QualityCheck>>>
+  /**
+   * The repository's Guide for a review or thread reply, from its rules files (read from the
+   * checkout) and the text knowledge notes are ranked by; it becomes the agent's stable context.
+   */
+  guideFor?: (
+    repo: RepoRef,
+    request: { docs: readonly Guideline[]; query?: string },
+  ) => Promise<string | undefined>
+  /**
+   * The team knowledge base: the `knowledge` toolset is mounted. `groupsOf` gives the repository's
+   * config groups.
    */
   knowledge?: { access: KnowledgeAccess; groupsOf?: (repo: RepoRef) => string[] }
   /**
@@ -80,19 +86,12 @@ export interface ReviewAnalyzerDeps {
    */
   toolsetsFor?: (context: { repo: RepoRef; dir: string }) => readonly Toolset[]
   mediaReviewer?: MediaReviewer
-  /** Writes and runs tests for changed functions when the `tests` option is on. */
-  tester?: MergeRequestTester
-  /** Username Holtkeeper posts as; markers in note bodies identify our notes either way. */
-  botUsername?: string
+  /**
+   * Username Holtkeeper posts as, or a function giving it per repository (forges differ);
+   * markers in note bodies identify our notes either way.
+   */
+  botUsername?: string | ((repo: RepoRef) => string | undefined)
   steps?: Partial<ReviewSteps>
-}
-
-function learningNote(learning: ThreadReplyResult['learning']): string {
-  if (!learning) return ''
-  if ('error' in learning) return `Proposing a knowledge entry failed: ${learning.error}.`
-  if (learning.duplicateOf)
-    return `The rule is already known as knowledge entry ${learning.duplicateOf}.`
-  return `Knowledge entry ${learning.id} is ${learning.status}.`
 }
 
 async function headCheckout(context: AnalyzerContext<ReviewOptions>, headSha: string) {
@@ -134,14 +133,9 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       {
         flag: 'checks',
         option: 'includeChecks',
-        description: 'true or a list: lint,secrets,conventions,testids',
+        description: 'true or a list: secrets,testids',
       },
       { flag: 'approve', option: 'approve', description: 'never or when-clean (default never)' },
-      {
-        flag: 'tests',
-        option: 'tests',
-        description: 'write and run tests for changed functions (default false)',
-      },
       {
         flag: 'language',
         option: 'language',
@@ -153,7 +147,8 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       const forge = requireReviewForge(context.forge)
       const { options, repo } = context
       const mr = await forge.getMergeRequest(repo.path, options.mergeRequest)
-      const botUsername = deps.botUsername
+      const botUsername =
+        typeof deps.botUsername === 'function' ? deps.botUsername(repo) : deps.botUsername
       const skip =
         options.replyTo || options.force
           ? undefined
@@ -189,6 +184,16 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
       if (options.replyTo) {
         if (!context.agent) throw new Error('answering a thread needs an agent')
         const usage: ReviewUsage = { turns: 0 }
+        const guide = deps.guideFor
+          ? await deps
+              .guideFor(repo, { docs: dir ? await readGuidelines(dir) : [], query: mr.title })
+              .catch((error: unknown) => {
+                context.log?.(
+                  `guide lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+                )
+                return undefined
+              })
+          : undefined
         const reply = await replyToThread({
           forge,
           repo,
@@ -199,18 +204,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           ...(botUsername ? { botUsername } : {}),
           ...(options.language ? { language: options.language } : {}),
           ...(toolsets ? { toolsets } : {}),
-          ...(knowledge
-            ? {
-                learn: (learning: ThreadLearning) =>
-                  knowledge.access.propose(
-                    {
-                      title: learning.title,
-                      body: `${learning.body.trim()}\n\nLearned in ${mr.webUrl}#note_${learning.noteId}`,
-                    },
-                    { actor: 'agent:review', repo: knowledgeRepo, taskKind: 'review' },
-                  ),
-              }
-            : {}),
+          ...(guide ? { context: guide } : {}),
           usage,
           ...(context.signal ? { signal: context.signal } : {}),
         })
@@ -227,12 +221,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           mode: 'reply',
           verdict: 'skipped',
           summary: reply.replied
-            ? [
-                `Answered thread ${reply.discussionId} (${reply.action}).`,
-                learningNote(reply.learning),
-              ]
-                .filter(Boolean)
-                .join(' ')
+            ? `Answered thread ${reply.discussionId} (${reply.action}).`
             : `Did not answer: ${reply.reason ?? 'nothing to do'}.`,
           comments: [],
           threads: reply.replied
@@ -241,7 +230,6 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
                   discussionId: reply.discussionId,
                   action: reply.resolved ? 'resolved' : 'replied',
                   reason: reply.action,
-                  ...(reply.learning ? { learning: reply.learning } : {}),
                 },
               ]
             : [],
@@ -258,7 +246,15 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         return { data, ref: reviewRef(mr.id) }
       }
 
-      const instructions = await deps.instructionsFor?.(repo)
+      const guideFor = deps.guideFor
+      const checks = deps.checksFor
+        ? await deps.checksFor(repo).catch((error: unknown) => {
+            context.log?.(
+              `checks setup failed: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            return deps.checks
+          })
+        : deps.checks
       const data = await reviewMergeRequest({
         repo,
         forge,
@@ -267,22 +263,11 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         ...(context.agent ? { agent: context.agent } : {}),
         ...(context.history ? { analyses: context.history.analyses } : {}),
         options,
-        ...(deps.checks ? { checks: deps.checks } : {}),
-        ...(instructions ? { instructions } : {}),
-        ...(knowledge
-          ? {
-              knowledge: async (files: string[]) =>
-                knowledge.access.search(`${mr.title}\n${files.slice(0, 30).join('\n')}`, {
-                  repo: knowledgeRepo,
-                  taskKind: 'review',
-                  limit: 5,
-                }),
-            }
-          : {}),
+        ...(checks ? { checks } : {}),
+        ...(guideFor ? { guide: (docs, query) => guideFor(repo, { docs, query }) } : {}),
         ...(toolsets ? { toolsets } : {}),
         ...(botUsername ? { botUsername } : {}),
         ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),
-        ...(deps.tester ? { tester: deps.tester } : {}),
         ...(deps.steps ? { steps: deps.steps } : {}),
         ...(context.log ? { log: context.log } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
@@ -292,5 +277,5 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
   })
 }
 
-/** The `review` analyzer without checks, instructions or knowledge. */
+/** The `review` analyzer without checks, a Guide or knowledge. */
 export const reviewAnalyzer = createReviewAnalyzer()

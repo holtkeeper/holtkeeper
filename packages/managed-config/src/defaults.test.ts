@@ -1,158 +1,164 @@
 import { describe, expect, test } from 'bun:test'
 
-import { parseConfig } from '@holtkeeper/core'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import {
-  SCHEDULES_MARKER,
+  RETIRED_SCHEDULES_MARKER,
   defaultMarker,
-  defaultSchedules,
   defaultTriggers,
+  retireSeededSchedules,
+  retiredScheduleIds,
   seedDefaults,
 } from './defaults.ts'
-import { scheduleDataSchema, triggerDataSchema } from './documents.ts'
+import { triggerDataSchema } from './documents.ts'
 
-const file = parseConfig({ forges: {}, groups: {} })
 const now = () => new Date('2026-10-30T12:00:00.000Z')
-const kinds = [
-  'ci-jobs',
-  'delivery',
-  'depgraph',
-  'quality',
-  'coverage',
-  'testids',
-  'branches',
-  'assets',
-  'changelog',
-]
+const kinds = ['ci-jobs', 'depgraph', 'licenses', 'api-surface']
 
 describe('seedDefaults', () => {
   test('every default is a valid document', () => {
-    for (const schedule of defaultSchedules)
-      expect(scheduleDataSchema.parse(schedule.data)).toEqual(schedule.data)
     for (const trigger of defaultTriggers)
       expect(triggerDataSchema.parse(trigger.data)).toEqual(trigger.data)
   })
 
-  test('writes each default once, dropping analyzers the server lacks', async () => {
+  test('writes each default trigger once and no schedule', async () => {
     const store = memoryStore()
-    expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
-      'schedule:ci-jobs-nightly',
-      'schedule:delivery-weekly',
-      'schedule:security-weekly',
-      'schedule:quality-weekly',
-      'schedule:tests-weekly',
-      'schedule:branches-weekly',
-      'schedule:assets-weekly',
+    expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual([
       'trigger:tag',
       'trigger:new-repo',
     ])
-    expect(await store.config?.get('schedule', 'security-weekly')).toMatchObject({
-      updatedBy: 'system',
-      data: { analyzers: ['depgraph'] },
-    })
-    expect((await store.config?.get('schedule', 'quality-weekly'))?.data).toMatchObject({
-      analyzers: ['quality'],
-      options: { quality: { coverage: 'skip' } },
-    })
     expect((await store.config?.get('trigger', 'tag'))?.data).toEqual({
       on: 'tag',
-      analyzers: ['changelog'],
+      analyzers: ['api-surface'],
     })
-    expect((await store.activity.list())[0]?.action).toBe('config.defaults.seeded')
+    expect(await store.config?.list('schedule')).toEqual([])
+    expect((await store.audit.list()).events[0]?.action).toBe('config.seed')
 
-    await store.config?.remove('schedule', 'ci-jobs-nightly')
-    expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([])
-    expect(await store.config?.get('schedule', 'ci-jobs-nightly')).toBeUndefined()
-  })
-
-  test('installs seeded before add only the newer defaults', async () => {
-    const store = memoryStore()
-    await store.kv?.set(SCHEDULES_MARKER, { at: '2026-10-29T00:00:00.000Z' })
-    expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
-      'schedule:quality-weekly',
-      'schedule:tests-weekly',
-      'schedule:branches-weekly',
-      'schedule:assets-weekly',
-      'trigger:tag',
-      'trigger:new-repo',
-    ])
+    await store.config?.remove('trigger', 'new-repo')
+    expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual([])
+    expect(await store.config?.get('trigger', 'new-repo')).toBeUndefined()
   })
 
   test('a later default reaches installs that saw the earlier ones', async () => {
     const store = memoryStore()
-    for (const id of ['ci-jobs-nightly', 'delivery-weekly', 'security-weekly', 'quality-weekly'])
-      // oxlint-disable-next-line no-await-in-loop
-      await store.kv?.set(defaultMarker('schedule', id), { at: '2026-10-29T00:00:00.000Z' })
-    await store.kv?.set(defaultMarker('trigger', 'tag'), { at: '2026-10-29T00:00:00.000Z' })
-    expect(await seedDefaults({ store, file, analyzers: kinds, now })).toEqual([
-      'schedule:tests-weekly',
-      'schedule:branches-weekly',
-      'schedule:assets-weekly',
-      'trigger:new-repo',
-    ])
+    await store.kv?.set(defaultMarker('tag'), { at: '2026-10-29T00:00:00.000Z' })
+    expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual(['trigger:new-repo'])
     expect((await store.config?.get('trigger', 'new-repo'))?.data).toEqual({ on: 'newRepo' })
-    expect((await store.config?.get('schedule', 'tests-weekly'))?.data).toMatchObject({
-      analyzers: ['coverage', 'testids'],
-      cron: '0 1 * * 3',
-    })
   })
 
-  test('keeps panel documents and file-configured schedules and tag triggers', async () => {
+  test('keeps panel documents', async () => {
     const panel = memoryStore()
     await panel.config?.put({
-      type: 'schedule',
-      id: 'ci-jobs-nightly',
-      data: { name: 'own', enabled: false, analyzers: ['ci-jobs'], every: '1d' },
+      type: 'trigger',
+      id: 'tag',
+      data: { on: 'tag', analyzers: ['depgraph', 'api-surface'] },
       updatedAt: now().toISOString(),
     })
-    await seedDefaults({ store: panel, file, analyzers: kinds, now })
-    expect((await panel.config?.get('schedule', 'ci-jobs-nightly'))?.data.name).toBe('own')
-    expect(await panel.kv?.get(defaultMarker('schedule', 'ci-jobs-nightly'))).toBeDefined()
-
-    const store = memoryStore()
-    const withFile = parseConfig({
-      forges: {},
-      groups: {},
-      jobs: {
-        schedules: [{ name: 'mine', cron: '0 3 * * *', analyzers: ['delivery'] }],
-        onTag: { analyzers: ['changelog'] },
-        onNewRepo: { exclude: ['quality'] },
-      },
+    await seedDefaults({ store: panel, analyzers: kinds, now })
+    expect((await panel.config?.get('trigger', 'tag'))?.data).toEqual({
+      on: 'tag',
+      analyzers: ['depgraph', 'api-surface'],
     })
-    expect(await seedDefaults({ store, file: withFile, analyzers: kinds, now })).toEqual([])
+    expect(await panel.kv?.get(defaultMarker('tag'))).toBeDefined()
   })
 
   test('adds later analyzers to an existing tag trigger once', async () => {
     const store = memoryStore()
-    const analyzers = [...kinds, 'api-surface']
-    await store.kv?.set(defaultMarker('trigger', 'tag'), { at: now().toISOString() })
+    await store.kv?.set(defaultMarker('tag'), { at: now().toISOString() })
     await store.config?.put({
       type: 'trigger',
       id: 'tag',
-      data: { on: 'tag', analyzers: ['changelog'] },
+      data: { on: 'tag', analyzers: ['depgraph'] },
       updatedAt: now().toISOString(),
     })
-    expect(await seedDefaults({ store, file, analyzers, now, schedules: [] })).toEqual([
+    expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual([
       'trigger:new-repo',
       'trigger:tag+api-surface',
     ])
     expect((await store.config?.get('trigger', 'tag'))?.data).toEqual({
       on: 'tag',
-      analyzers: ['changelog', 'api-surface'],
+      analyzers: ['depgraph', 'api-surface'],
     })
     await store.config?.put({
       type: 'trigger',
       id: 'tag',
-      data: { on: 'tag', analyzers: ['changelog'] },
+      data: { on: 'tag', analyzers: ['depgraph'] },
       updatedAt: now().toISOString(),
     })
-    expect(await seedDefaults({ store, file, analyzers, now, schedules: [] })).toEqual([])
+    expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual([])
+  })
+})
 
-    const fresh = memoryStore()
-    expect(await seedDefaults({ store: fresh, file, analyzers, now, schedules: [] })).toEqual([
-      'trigger:tag',
-      'trigger:new-repo',
+const schedule = (id: string) => ({
+  type: 'schedule' as const,
+  id,
+  data: { name: id, enabled: true, cron: '0 3 * * *', analyzers: ['depgraph'] },
+  updatedAt: now().toISOString(),
+  updatedBy: 'system',
+})
+
+describe('retireSeededSchedules', () => {
+  test('removes the old seeded schedules once and audits it', async () => {
+    const store = memoryStore()
+    for (const id of ['ci-jobs-nightly', 'guide-weekly', 'renovate-nightly', 'nightly-widgets'])
+      // oxlint-disable-next-line no-await-in-loop -- test setup
+      await store.config?.put(schedule(id))
+    expect(await retireSeededSchedules({ store, now })).toEqual([
+      'ci-jobs-nightly',
+      'guide-weekly',
+      'renovate-nightly',
     ])
+    expect((await store.config?.list('schedule'))?.map((doc) => doc.id)).toEqual([
+      'nightly-widgets',
+    ])
+    expect(await store.kv?.get(RETIRED_SCHEDULES_MARKER)).toBeDefined()
+    const [event] = (await store.audit.list()).events
+    expect(event?.action).toBe('config.retire-schedules')
+    expect(event?.via).toBe('system')
+    expect(event?.details).toEqual({
+      schedules: ['ci-jobs-nightly', 'guide-weekly', 'renovate-nightly'],
+    })
+
+    await store.config?.put(schedule('api-weekly'))
+    expect(await retireSeededSchedules({ store, now })).toEqual([])
+    expect(await store.config?.get('schedule', 'api-weekly')).toBeDefined()
+  })
+
+  test('covers every schedule id the earlier defaults seeded', () => {
+    expect(retiredScheduleIds).toContain('tests-weekly')
+    expect(retiredScheduleIds).toHaveLength(13)
+  })
+
+  test('tries again on the next start when a delete fails', async () => {
+    const store = memoryStore()
+    const config = store.config
+    if (!config) throw new Error('memory store has config')
+    await config.put(schedule('ci-jobs-nightly'))
+    const remove = config.remove.bind(config)
+    config.remove = () => Promise.reject(new Error('store hiccup'))
+    let failure: unknown
+    try {
+      await retireSeededSchedules({ store, now })
+    } catch (error) {
+      failure = error
+    }
+    expect(String(failure)).toContain('store hiccup')
+    config.remove = remove
+    expect(await store.kv?.get(RETIRED_SCHEDULES_MARKER)).toBeUndefined()
+    expect(await retireSeededSchedules({ store, now })).toEqual(['ci-jobs-nightly'])
+  })
+
+  test('keeps a seeded schedule a person edited', async () => {
+    const store = memoryStore()
+    await store.config?.put(schedule('guide-weekly'))
+    await store.config?.put({ ...schedule('ci-jobs-nightly'), updatedBy: 'user:alex' })
+    expect(await retireSeededSchedules({ store, now })).toEqual(['guide-weekly'])
+    expect(await store.config?.get('schedule', 'ci-jobs-nightly')).toBeDefined()
+  })
+
+  test('audits nothing when no old schedule is stored', async () => {
+    const store = memoryStore()
+    expect(await retireSeededSchedules({ store, now })).toEqual([])
+    expect((await store.audit.list()).events).toEqual([])
   })
 })

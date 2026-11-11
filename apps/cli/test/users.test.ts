@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 
 import { noAuth } from '@holtkeeper/auth-none'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { HoltkeeperFileConfig } from '@holtkeeper/core'
 import { memoryStore } from '@holtkeeper/store/memory'
 
-import { UsageError } from '../src/audit.ts'
+import { UsageError } from '../src/serve.ts'
 import { type UsersFlags, usersCommand } from '../src/users.ts'
 
 const setup = (publicUrl?: string) => {
@@ -13,7 +13,7 @@ const setup = (publicUrl?: string) => {
     forges: {},
     groups: {},
     server: { auth: noAuth(), store, vaultKey: 'v'.repeat(32), ...(publicUrl && { publicUrl }) },
-  } as unknown as HoltkeeperConfig
+  } as unknown as HoltkeeperFileConfig
   const run = async (args: string[], flags: UsersFlags = {}) => {
     const out: string[] = []
     await usersCommand(config, args, flags, (line) => out.push(line))
@@ -37,7 +37,7 @@ test('adds an admin and issues a login link that expires in 15 minutes', async (
   expect(new Date(issued.expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(15 * 60_000)
   const [enroll = ''] = await run(['enroll-link', 'Claude'], { ttl: '2h' })
   expect(enroll).toMatch(/^https:\/\/keeper\.example\.com\/link\/[\w-]{43}$/)
-  expect((await store.activity.list()).map((entry) => entry.action).toSorted()).toEqual([
+  expect((await store.audit.list()).events.map((entry) => entry.action).toSorted()).toEqual([
     'user.invited',
     'user.link_issued',
     'user.link_issued',

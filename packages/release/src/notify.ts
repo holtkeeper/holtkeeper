@@ -1,4 +1,4 @@
-import { type Notification, type Notifier, genericWebhook, slackWebhook } from '@holtkeeper/notify'
+import { type Notification, type Notifier, genericWebhook } from '@holtkeeper/notify'
 
 import type { ReleaseNotifySettings } from './settings.ts'
 import type { ReleaseEvent } from './types.ts'
@@ -24,7 +24,7 @@ const tones: Record<ReleaseEvent['kind'], Notification['tone']> = {
   'deploy-failed': 'bad',
 }
 
-/** Who caused an event and where, e.g. `Jane Doe (Slack)`. */
+/** Who caused an event and where, e.g. `Jane Doe (CLI)`. */
 export function actorLabel(event: {
   actor: string
   actorName?: string | undefined
@@ -41,8 +41,8 @@ export const channelLabels: Readonly<Record<string, string>> = {
   api: 'API',
   cli: 'CLI',
   forge: 'forge',
-  slack: 'Slack',
   web: 'panel chat',
+  mcp: 'MCP',
 }
 
 /** A channel-independent message for a release event. */
@@ -62,18 +62,14 @@ export function releaseNotification(event: ReleaseEvent): Notification {
   }
 }
 
-/** Notifiers of the targets that subscribe to `kind`. */
+/** Webhook notifiers of the targets that subscribe to `kind`. */
 export function releaseNotifiers(
   settings: ReleaseNotifySettings | undefined,
   kind: ReleaseEvent['kind'],
 ): Notifier[] {
   return (settings?.targets ?? [])
     .filter((target) => !target.events?.length || target.events.includes(kind))
-    .map((target) =>
-      target.kind === 'slack'
-        ? slackWebhook({ url: target.url, button: 'Open' })
-        : genericWebhook({ url: target.url }),
-    )
+    .map((target) => genericWebhook({ url: target.url }))
 }
 
 /** Sends an event to every subscribed target; failures are returned, never thrown. */

@@ -267,6 +267,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "worker") | nindent 14 }}
+        {{- if .Values.writeWorker.enabled }}
+        - podSelector:
+            matchLabels:
+              {{- include "holtkeeper.selectorLabels" (dict "ctx" $ "component" "write-worker") | nindent 14 }}
+        {{- end }}
         {{- if $cache.enabled }}
         - podSelector:
             matchLabels:

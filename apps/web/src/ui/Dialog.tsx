@@ -51,7 +51,7 @@ export function Dialog({
   )
 }
 
-/** Asks before a destructive action. */
+/** Asks before a destructive action; `isDisabled` keeps the confirm button off. */
 export function ConfirmDialog({
   isOpen,
   onOpenChange,
@@ -60,6 +60,7 @@ export function ConfirmDialog({
   confirmLabel = 'Delete',
   onConfirm,
   isPending,
+  isDisabled,
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -68,6 +69,7 @@ export function ConfirmDialog({
   confirmLabel?: string
   onConfirm: () => void
   isPending?: boolean
+  isDisabled?: boolean
 }) {
   return (
     <Dialog
@@ -80,7 +82,13 @@ export function ConfirmDialog({
           <Button variant="tertiary" onPress={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button variant="danger" onPress={onConfirm} isPending={isPending === true} autoFocus>
+          <Button
+            variant="danger"
+            onPress={onConfirm}
+            isPending={isPending === true}
+            isDisabled={isDisabled === true}
+            autoFocus
+          >
             {confirmLabel}
           </Button>
         </>

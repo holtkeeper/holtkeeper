@@ -386,6 +386,7 @@ export const bundleAnalyzer = defineAnalyzer({
   kind: 'bundle',
   analysis: bundleAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '1d', heavy: true },
   needs: { checkout: true, forge: 'optional', forgeAccess: 'optional', history: 'optional' },
   options: bundleOptions,
   appliesTo: anyOf(

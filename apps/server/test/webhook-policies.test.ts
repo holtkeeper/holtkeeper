@@ -48,7 +48,7 @@ const config = parseConfig({
   groups: { games: { forge: 'work', include: ['games/*'] } },
   jobs: {
     webhookSecret: 'hook-secret',
-    botUsername: 'holtkeeper',
+    botUsernames: { work: 'holtkeeper' },
     onMergeRequest: { analyzers: ['review', 'quality'] },
   },
 })
@@ -57,6 +57,7 @@ const analyzers = [
   { kind: 'review', scope: 'repo' as const, options: z.object({}).passthrough() },
   { kind: 'quality', scope: 'repo' as const, options: z.object({}).passthrough() },
   { kind: 'port', scope: 'repo' as const, options: z.object({}).passthrough() },
+  { kind: 'write-task', scope: 'repo' as const, options: z.object({}).passthrough() },
 ]
 
 const policies = [
@@ -75,6 +76,7 @@ const policies = [
     actions: [
       { type: 'label', add: ['docs-only'] },
       { type: 'enqueue', analyzer: 'port', options: { targets: 'web' } },
+      { type: 'enqueue', analyzer: 'write-task', options: { taskId: 'abcd1', prompt: 'Grow.' } },
     ],
     skipAnalyzers: ['review'],
   },
@@ -173,7 +175,7 @@ describe('merge request policies in webhooks', () => {
     expect(mergeRequestAction('close', false, [])).toBeUndefined()
   })
 
-  test('actions run, outcomes are logged, analyzers are skipped and intents queued', async () => {
+  test('actions run, outcomes are logged, analyzers are skipped and intents queued, never write tasks', async () => {
     const response = await hook('Merge Request Hook', mergeRequestHook('open'))
     expect(response.status).toBe(202)
     expect(labelUpdates).toEqual([['docs-only']])
@@ -181,7 +183,7 @@ describe('merge request policies in webhooks', () => {
       'port {"targets":"web","mergeRequest":7}',
       'quality {"mergeRequest":7}',
     ])
-    const events = (await store.activity.list()).map(
+    const events = (await store.audit.list()).events.map(
       (e) => `${e.action} ${JSON.stringify(e.details?.policy ?? '')}`,
     )
     expect(events).toContain('mr_policy.done "docs"')
@@ -196,7 +198,7 @@ describe('merge request policies in webhooks', () => {
       ignored: 'policies skipped every analyzer',
     })
     expect(reviews).toEqual([])
-    expect((await store.activity.list()).map((e) => e.action)).toContain('mr_policy.deferred')
+    expect((await store.audit.list()).events.map((e) => e.action)).toContain('mr_policy.deferred')
 
     expect(await (await hook('Pipeline Hook', pipelineHook('running'))).json()).toMatchObject({
       ignored: 'pipeline is running',

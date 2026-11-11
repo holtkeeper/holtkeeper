@@ -1,6 +1,6 @@
 import type { Grant } from '@holtkeeper/access'
 import type { Secret } from '@holtkeeper/forge'
-import type { ActivityStore, ExternalAccountStore, UserStore } from '@holtkeeper/store'
+import type { AuditStore, ExternalAccountStore, UserStore } from '@holtkeeper/store'
 
 /** One OpenID Connect provider users can sign in with. */
 export interface OidcProviderOptions {
@@ -38,8 +38,12 @@ export interface ForgeIssuer {
 /** Configuration of `usersAuth`. */
 export interface UsersAuthOptions {
   store: UserStore
-  /** Receives `user.*`, `passkey.*` and `identity.*` events when given. */
-  activity?: ActivityStore
+  /**
+   * Receives sign-ins and what users change about themselves (`user.*`, `passkey.*`,
+   * `identity.*`, `account.linked`) when given. Admin changes are audited by the server's
+   * middleware around the request instead.
+   */
+  audit?: Pick<AuditStore, 'append'>
   /** Signs session and flow cookies; at least 32 characters. */
   sessionSecret: Secret
   /**

@@ -9,7 +9,6 @@ import {
   createClaudeAgent,
   modelFor,
 } from './claude.ts'
-import { createOpenAICompatibleAgent, type OpenAICompatibleAgentDependencies } from './openai.ts'
 import { type AiProviderPlugin, aiSdkPackages } from './plugin.ts'
 import {
   type AiProvider,
@@ -20,7 +19,70 @@ import {
   parseProviderOptions,
   renderHeaders,
 } from './provider.ts'
+import { FALLBACK_TIER_MODELS, type ModelTier, type TierModels } from './tiers.ts'
+import { type AgentRuntime, redactingSink } from './transcript.ts'
 import type { Agent, AgentResult, AgentTask } from './types.ts'
+
+/**
+ * What a probe of the provider found about Messages tool use, which the Claude Agent SDK loop
+ * needs: `ok`, `failed`, or `unknown` when no probe ran yet.
+ */
+export type AgentLoopStatus = 'ok' | 'failed' | 'unknown'
+
+/**
+ * Whether a task needs a tool loop: it may touch the checkout (any capability; none given means
+ * the default `read` and `search`), or mounts toolsets or MCP servers. Everything else is a
+ * one-shot call.
+ */
+export function needsToolLoop(task: Pick<AgentTask, 'capabilities' | 'toolsets' | 'mcpServers'>) {
+  return (
+    task.capabilities === undefined ||
+    task.capabilities.length > 0 ||
+    (task.toolsets ?? []).some((toolset) => toolset.tools.length > 0) ||
+    Object.keys(task.mcpServers ?? {}).length > 0
+  )
+}
+
+/**
+ * The loop a task runs on. `ai-sdk` providers always use the AI SDK. Anthropic and
+ * Anthropic-compatible providers run tool-loop tasks (`needsToolLoop`) on the Claude Agent SDK
+ * unless a probe found their Messages tool use broken (`agentLoop: 'failed'`), and one-shots on
+ * the AI SDK's Anthropic provider.
+ */
+export function runtimeFor(
+  kind: AiProviderKind,
+  task: Pick<AgentTask, 'capabilities' | 'toolsets' | 'mcpServers'>,
+  agentLoop: AgentLoopStatus = 'unknown',
+): AgentRuntime {
+  if (kind === 'ai-sdk' || !needsToolLoop(task)) return 'ai-sdk'
+  return agentLoop === 'failed' ? 'ai-sdk' : 'claude-sdk'
+}
+
+/** The Messages API root an Anthropic or Anthropic-compatible provider is reached at, without `/v1`. */
+const messagesRoot = (baseUrl: string) => baseUrl.replace(/\/+$/, '').replace(/\/v1$/, '')
+
+/**
+ * The `@ai-sdk/anthropic` connection of an Anthropic or Anthropic-compatible provider at
+ * `baseUrl` (the Messages root Claude Code uses, with or without `/v1`): same endpoint, auth
+ * header and rendered headers as the Claude Agent SDK gets.
+ */
+export function anthropicMessagesConnection(
+  provider: AiProvider,
+  parsed: Exclude<ProviderOptions, { kind: 'ai-sdk' }>,
+  baseUrl: string,
+): AiSdkConnection {
+  const bearer = parsed.kind === 'anthropic-compatible' && parsed.authHeader === 'bearer'
+  const headers =
+    parsed.kind === 'anthropic-compatible' ? renderHeaders(parsed.headers, provider.secret) : {}
+  return {
+    package: '@ai-sdk/anthropic',
+    name: parsed.kind,
+    secret: bearer ? '' : provider.secret,
+    baseUrl: `${messagesRoot(baseUrl)}/v1`,
+    ...(Object.keys(headers).length > 0 && { headers }),
+    ...(bearer && { settings: { authToken: provider.secret } }),
+  }
+}
 
 type AiSdkOptions = Extract<ProviderOptions, { kind: 'ai-sdk' }>
 
@@ -74,21 +136,22 @@ export async function pingAiSdkProvider(
   return { text: result.text.trim(), latencyMs: Date.now() - started }
 }
 
-/** An agent built from a provider, telling which provider kind and model a task kind runs on. */
+/** An agent built from a provider, telling which provider kind and model a tier runs on. */
 export interface ProviderAgent extends Agent {
   readonly provider: AiProviderKind
-  /** The provider's model name for tasks of `taskKind` (routing and `modelMap` applied). */
-  modelFor(taskKind?: string): string
+  /** The provider's model name for tasks of `tier` (default `main`; `modelMap` applied). */
+  modelFor(tier?: ModelTier): string
+  /** The loop `task` would run on (`runtimeFor` with the provider's kind and probe result). */
+  runtimeFor(task: AgentTask): AgentRuntime
 }
 
 export interface CreateAgentOptions {
-  /** Runs `run_command` for the OpenAI-compatible adapter (e.g. the job's container runner). */
+  /** Runs `run_command` for the AI SDK tool loop (e.g. the job's container runner). */
   runner?: CommandRunner
   /** Turn limit for tasks without their own. */
   maxTurns?: number
-  /** Overrides the provider's default model and per-kind models (e.g. from settings). */
-  model?: string
-  models?: Record<string, string>
+  /** Model of each tier, e.g. `resolveTierModels` of the provider's listing. Default `FALLBACK_TIER_MODELS`. */
+  tierModels?: TierModels
   /**
    * Limiter for `maxConcurrency`, shared by every agent built for the same provider; default a new
    * one per agent.
@@ -98,9 +161,10 @@ export interface CreateAgentOptions {
   pricing?: Record<string, ModelPricing>
   /** Providers `ai-sdk` credentials may name by `package` besides the shipped ones. */
   plugins?: readonly AiProviderPlugin[]
+  /** The stored probe result of an Anthropic or Anthropic-compatible provider; see `runtimeFor`. */
+  agentLoop?: AgentLoopStatus
   /** Test seams. */
   query?: ClaudeQuery
-  fetch?: OpenAICompatibleAgentDependencies['fetch']
   languageModel?: (modelId: string) => LanguageModel
 }
 
@@ -162,57 +226,55 @@ export function limitConcurrency<A extends Agent>(agent: A, limit: number | Conc
 /**
  * The agent for an AI provider credential. `kind` and `options` are validated with
  * `providerOptionsSchema` (throws listing every problem); the endpoint is `options.baseUrl`, else
- * the credential `url`. Anthropic, Anthropic-compatible, Bedrock and Vertex providers run on the
- * Claude Agent SDK; OpenAI-compatible ones on the built-in tool loop; `ai-sdk` ones on the Vercel
- * AI SDK through their package (the OpenAI-compatible package falls back to the credential `url`).
- * `maxConcurrency` limits parallel runs of the returned agent. An `ai-sdk` package must ship or be
- * one of `options.plugins`.
+ * the credential `url`. Each task runs on the loop `runtimeFor` picks with `options.agentLoop`:
+ * Anthropic and Anthropic-compatible providers run tool loops on the Claude Agent SDK and one-shots
+ * (or tool loops their probe failed) on the AI SDK's Anthropic provider at the same endpoint;
+ * `ai-sdk` ones always run on the Vercel AI SDK through their package (the OpenAI-compatible
+ * package falls back to the credential `url`). Tasks run on their tier's model from
+ * `options.tierModels`. `maxConcurrency` limits parallel runs of the returned agent. An `ai-sdk`
+ * package must ship or be one of `options.plugins`. A task's `transcript` never receives the
+ * provider secret or rendered header values.
  */
 export function createAgent(provider: AiProvider, options: CreateAgentOptions = {}): ProviderAgent {
   const parsed = parseWithPlugins(provider, options.plugins)
-  const routing = {
-    ...((options.model ?? parsed.model) !== undefined && { model: options.model ?? parsed.model }),
-    ...((options.models ?? parsed.models) !== undefined && {
-      models: { ...parsed.models, ...options.models },
-    }),
-  }
+  const tierModels = options.tierModels ?? FALLBACK_TIER_MODELS
   const shared = {
-    ...routing,
+    tierModels,
     ...(parsed.modelMap && { modelMap: parsed.modelMap }),
-    ...((parsed.pricing || options.pricing) && {
-      pricing: { ...options.pricing, ...parsed.pricing },
-    }),
     ...(parsed.timeoutMs !== undefined && { timeoutMs: parsed.timeoutMs }),
     ...(options.maxTurns !== undefined && { maxTurns: options.maxTurns }),
   }
+  const pricing =
+    parsed.pricing || options.pricing ? { ...options.pricing, ...parsed.pricing } : undefined
   const baseUrl = parsed.baseUrl ?? provider.url
-
-  let agent: Agent
-  if (parsed.kind === 'ai-sdk') {
-    const connection = aiSdkConnection(provider, parsed)
-    agent = createAiSdkAgent({
+  const aiSdkAgent = (connection: AiSdkConnection) =>
+    createAiSdkAgent({
       ...shared,
+      ...(pricing && { pricing }),
       languageModel:
         options.languageModel ??
         ((modelId) => aiSdkLanguageModel(connection, modelId, options.plugins)),
       ...(options.runner && { runner: options.runner }),
     })
-  } else if (parsed.kind === 'openai-compatible') {
-    const headers = renderHeaders(parsed.headers, provider.secret)
-    const auth = Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')
-    agent = createOpenAICompatibleAgent(
-      {
-        ...shared,
-        baseUrl,
-        headers,
-        ...(!auth && { apiKey: provider.secret }),
-        ...(parsed.jsonMode !== undefined && { jsonMode: parsed.jsonMode }),
-        ...(options.runner && { runner: options.runner }),
-      },
-      options.fetch ? { fetch: options.fetch } : {},
-    )
+
+  const secrets = [
+    provider.secret,
+    ...Object.values(
+      parsed.kind === 'ai-sdk' || parsed.kind === 'anthropic-compatible'
+        ? renderHeaders(parsed.headers, provider.secret)
+        : {},
+    ),
+  ]
+  let route: (task: AgentTask) => Agent
+  if (parsed.kind === 'ai-sdk') {
+    const agent = aiSdkAgent(aiSdkConnection(provider, parsed))
+    route = () => agent
   } else {
-    const claude: ClaudeAgentOptions = { ...shared, apiKey: provider.secret }
+    const claude: ClaudeAgentOptions = {
+      ...shared,
+      ...(parsed.pricing && { pricing: parsed.pricing }),
+      apiKey: provider.secret,
+    }
     switch (parsed.kind) {
       case 'anthropic':
         claude.connection = { kind: 'anthropic', baseUrl }
@@ -225,40 +287,24 @@ export function createAgent(provider: AiProvider, options: CreateAgentOptions = 
           headers: renderHeaders(parsed.headers, provider.secret),
         }
         break
-      case 'bedrock':
-        claude.connection = {
-          kind: 'bedrock',
-          region: parsed.region,
-          credentials: parsed.credentials,
-          ...(parsed.baseUrl && { baseUrl: parsed.baseUrl }),
-        }
-        break
-      case 'vertex':
-        claude.connection = {
-          kind: 'vertex',
-          region: parsed.region,
-          projectId: parsed.projectId,
-          credentials: parsed.credentials,
-          ...(parsed.baseUrl && { baseUrl: parsed.baseUrl }),
-        }
-        break
     }
-    agent = options.query
+    const sdk = options.query
       ? createClaudeAgent(claude, { query: options.query })
       : claudeAgent(claude)
+    const messages = aiSdkAgent(anthropicMessagesConnection(provider, parsed, baseUrl))
+    route = (task) =>
+      runtimeFor(parsed.kind, task, options.agentLoop) === 'claude-sdk' ? sdk : messages
   }
 
   const withProvider: ProviderAgent = {
-    name: agent.name,
+    name: parsed.kind === 'ai-sdk' ? 'ai-sdk' : 'claude',
     provider: parsed.kind,
-    modelFor: (taskKind) =>
-      mapModel(
-        parsed.kind === 'ai-sdk'
-          ? (taskKind !== undefined && routing.models?.[taskKind]) || routing.model || ''
-          : modelFor(routing, taskKind),
-        parsed.modelMap,
+    modelFor: (tier) => mapModel(modelFor({ tierModels }, tier), parsed.modelMap),
+    runtimeFor: (task) => runtimeFor(parsed.kind, task, options.agentLoop),
+    run: (task) =>
+      route(task).run(
+        task.transcript ? { ...task, transcript: redactingSink(task.transcript, secrets) } : task,
       ),
-    run: (task) => agent.run(task),
   }
   if (!parsed.maxConcurrency) return withProvider
   return limitConcurrency(withProvider, options.limiter ?? parsed.maxConcurrency)

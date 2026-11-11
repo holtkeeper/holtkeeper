@@ -16,9 +16,9 @@ describe('defaultSettings', () => {
     }
   })
 
-  test('routes triage to Haiku and review to Opus through @latest references', () => {
-    const models = defaultSettings.find((entry) => entry.key === 'llm.models')?.value
-    expect(models).toMatchObject({ triage: 'claude-haiku@latest', review: 'claude-opus@latest' })
+  test('chooses no model: tasks run on fixed tiers', () => {
+    expect(defaultSettings.map((entry) => entry.key)).not.toContain('llm.provider')
+    expect(builtinSettings.map((definition) => definition.key)).not.toContain('llm.model')
   })
 })
 
@@ -41,9 +41,16 @@ describe('seedDefaultSettings', () => {
     const entries = await store.settings.list()
     expect(entries).toHaveLength(keys.length)
     expect(entries.every((entry) => entry.scope.all === true && !entry.secret)).toBe(true)
-    expect((await store.settings.get('default:llm.model'))?.value).toBe('claude-opus@latest')
-    const [event] = await store.activity.list()
-    expect(event).toMatchObject({ actor: 'system', action: 'settings.seeded', details: { keys } })
+    expect((await store.settings.get('default:agent.tools'))?.value).toEqual({
+      knowledgeTokens: 1500,
+    })
+    const [event] = (await store.audit.list()).events
+    expect(event).toMatchObject({
+      actor: { id: 'system' },
+      via: 'system',
+      action: 'setting.seed',
+      details: { keys },
+    })
   })
 
   test('seeds once, even after every setting was removed', async () => {
@@ -58,9 +65,9 @@ describe('seedDefaultSettings', () => {
     const store = memoryStore()
     const entry = {
       id: 'mine',
-      key: 'llm.model',
+      key: 'audit.upgrade',
       scope: { all: true },
-      value: 'gpt-5',
+      value: 'patch',
       secret: false,
       updatedAt: '2026-10-01T00:00:00Z',
     }
@@ -79,7 +86,7 @@ describe('seedDefaultSettings', () => {
       seedDefaultSettings({ store, definitions: builtinSettings, now }),
     ])
     expect(results.filter((keys) => keys.length > 0)).toHaveLength(1)
-    expect(await store.activity.list()).toHaveLength(1)
+    expect(await store.audit.count()).toBe(1)
   })
 
   test('without kv relies on the store being empty', async () => {

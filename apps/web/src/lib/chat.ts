@@ -1,4 +1,14 @@
-import type { ChatForm, ChatMessageView, ChatStepStatus } from '@holtkeeper/api'
+import type {
+  AgentTranscriptView,
+  ChatForm,
+  ChatMessageList,
+  ChatMessageView,
+  ChatStepStatus,
+  ChatThreadView,
+  GroupMatch,
+} from '@holtkeeper/api'
+
+import { type ScopeView, inHomeGroups } from './home-scope.ts'
 
 /** Values of a form being filled in, by field name. */
 export type FormValues = Record<string, string | string[] | boolean | undefined>
@@ -51,7 +61,7 @@ export function hasLiveCards(messages: readonly ChatMessageView[], now: Date, wi
   const since = now.getTime() - windowHours * 3_600_000
   return messages.some(
     (message) =>
-      Date.parse(message.updatedAt ?? message.at) >= since &&
+      Date.parse(message.updatedAt ?? message.createdAt) >= since &&
       message.card?.blocks.some(
         (block) =>
           block.type === 'steps' && block.steps.some((step) => liveStatuses.has(step.status)),
@@ -71,3 +81,239 @@ export function matchingCommands<T extends { name: string }>(
   if (withoutPrefix(text).includes(' ')) return []
   return commands.filter((command) => command.name.startsWith(word))
 }
+
+/** `incoming` folded into `current` by id, newer copies winning, ordered by `seq`. */
+export function mergeMessages(
+  current: readonly ChatMessageView[],
+  incoming: readonly ChatMessageView[],
+): ChatMessageView[] {
+  const byId = new Map(current.map((message) => [message.id, message]))
+  for (const message of incoming) byId.set(message.id, message)
+  return [...byId.values()].toSorted((a, b) => a.seq - b.seq)
+}
+
+/**
+ * A cached page after a poll: new and changed messages folded in, the poll's thread, cursor and
+ * time.
+ */
+export const withNewer = (current: ChatMessageList, poll: ChatMessageList): ChatMessageList => ({
+  thread: poll.thread,
+  messages: mergeMessages(current.messages, poll.messages),
+  hasMore: current.hasMore,
+  cursor: Math.max(current.cursor, poll.cursor),
+  serverTime: poll.serverTime,
+})
+
+/** A cached page with an older page in front of it. */
+export const withOlder = (current: ChatMessageList, older: ChatMessageList): ChatMessageList => ({
+  ...current,
+  messages: mergeMessages(current.messages, older.messages),
+  hasMore: older.hasMore,
+})
+
+/** Consecutive messages of one author shown under one header. */
+export interface MessageGroup {
+  key: string
+  authorType: ChatMessageView['authorType']
+  authorId?: string
+  /** Set on the first group of a calendar day: that day as `YYYY-MM-DD` in local time. */
+  day?: string
+  messages: ChatMessageView[]
+}
+
+const localDay = (at: string) => new Date(at).toLocaleDateString('en-CA')
+
+/**
+ * Messages in groups: one author in a row, each within `gapMinutes` of the previous one, on one
+ * day. Messages with a card always start a group, so a card keeps its own header.
+ */
+export function groupMessages(
+  messages: readonly ChatMessageView[],
+  gapMinutes = 5,
+): MessageGroup[] {
+  const groups: MessageGroup[] = []
+  let lastDay: string | undefined
+  for (const message of messages) {
+    const day = localDay(message.createdAt)
+    const group = groups.at(-1)
+    const previous = group?.messages.at(-1)
+    const joins =
+      group !== undefined &&
+      previous !== undefined &&
+      day === lastDay &&
+      !message.card &&
+      !previous.card &&
+      group.authorType === message.authorType &&
+      group.authorId === message.authorId &&
+      Date.parse(message.createdAt) - Date.parse(previous.createdAt) <= gapMinutes * 60_000
+    if (joins) group.messages.push(message)
+    else
+      groups.push({
+        key: message.id,
+        authorType: message.authorType,
+        ...(message.authorId !== undefined && { authorId: message.authorId }),
+        ...(day !== lastDay && { day }),
+        messages: [message],
+      })
+    lastDay = day
+  }
+  return groups
+}
+
+/**
+ * The first message the viewer has not read, given the thread's unread count. Unread counts every
+ * message but the viewer's own, so walk back from the newest and skip those.
+ */
+export function firstUnreadId(
+  messages: readonly ChatMessageView[],
+  unread: number,
+  me: string,
+): string | undefined {
+  if (unread <= 0) return undefined
+  let left = unread
+  let oldest: string | undefined
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (!message || (message.authorType === 'human' && message.authorId === me)) continue
+    oldest = message.id
+    left -= 1
+    if (left === 0) break
+  }
+  return oldest
+}
+
+/** The handle that asks the agent for a reply. */
+const AGENT_HANDLE = 'holtkeeper'
+
+/** Handles a body mentions, lowercased and without trailing dots, as the server reads them. */
+export function parseMentions(body: string): string[] {
+  const found = body.matchAll(/(?<![\w.@])@([\w.-]+)(?![\w./@-])/g)
+  const names = [...found].map((match) => (match[1] ?? '').replace(/[.-]+$/, '').toLowerCase())
+  return [...new Set(names.filter(Boolean))]
+}
+
+/** Whether posting `text` asks the agent: not a command, and a mention or a thread on auto reply. */
+export const asksAgent = (text: string, autoReply: boolean): boolean =>
+  text.trim() !== '' &&
+  !text.trimStart().startsWith('/') &&
+  (autoReply || parseMentions(text).includes(AGENT_HANDLE))
+
+/** The `@word` being typed at `caret`: where its `@` is and what follows it so far. */
+export function mentionAt(
+  text: string,
+  caret: number,
+): { start: number; query: string } | undefined {
+  const match = /(?:^|[^\w.@])@([\w.-]*)$/.exec(text.slice(0, caret))
+  if (!match) return undefined
+  const query = match[1] ?? ''
+  return { start: caret - query.length - 1, query }
+}
+
+/** A person or the agent the mention list offers. */
+export interface MentionOption {
+  handle: string
+  name: string
+  avatarUrl?: string
+  agent?: true
+}
+
+/** Options whose handle or a word of the name starts with `query`, the agent first. */
+export function mentionOptions(
+  people: readonly { handle: string; name: string; avatarUrl: string }[],
+  query: string,
+  limit = 6,
+): MentionOption[] {
+  const q = query.toLowerCase()
+  const matches = (option: MentionOption) =>
+    option.handle.startsWith(q) ||
+    option.name
+      .toLowerCase()
+      .split(/\s+/)
+      .some((word) => word.startsWith(q))
+  const agent: MentionOption = { handle: AGENT_HANDLE, name: 'Holtkeeper', agent: true }
+  return [agent, ...people.filter((person) => person.handle !== AGENT_HANDLE)]
+    .filter(matches)
+    .slice(0, limit)
+}
+
+/** `text` with the mention typed from `start` to `caret` replaced by `@handle `, and the new caret. */
+export function insertMention(
+  text: string,
+  start: number,
+  caret: number,
+  handle: string,
+): { text: string; caret: number } {
+  const inserted = `@${handle} `
+  const rest = text.slice(caret).replace(/^[\w.-]*\s?/, '')
+  return { text: text.slice(0, start) + inserted + rest, caret: start + inserted.length }
+}
+
+/** What a thread is about, for its list row and header: the repository path, the group or `Team`. */
+export const threadScope = (thread: Pick<ChatThreadView, 'repo' | 'group'>): string =>
+  thread.repo ? thread.repo.slice(thread.repo.indexOf(':') + 1) : (thread.group ?? 'Team')
+
+/**
+ * Threads for a scope switch position. Team-wide threads count as the viewer's own team. Unlike
+ * other lists, *Other teams* lists the threads, since reading another team's thread is the point.
+ */
+export function scopeThreads<T extends Pick<ChatThreadView, 'groups'>>(
+  threads: readonly T[],
+  view: ScopeView,
+  homeGroups: readonly GroupMatch[],
+): { shown: T[]; counts: Record<ScopeView, number> } {
+  const mine: T[] = []
+  const rest: T[] = []
+  for (const thread of threads)
+    (thread.groups.length === 0 || inHomeGroups(homeGroups, thread.groups) ? mine : rest).push(
+      thread,
+    )
+  return {
+    shown: view === 'mine' ? mine : view === 'all' ? [...threads] : rest,
+    counts: { mine: mine.length, all: threads.length, others: rest.length },
+  }
+}
+
+/** The tool trace of a reply in one line, e.g. `knowledge ×2 · catalog`. */
+export const toolSummary = (trace: readonly { tool: string; calls: number }[]): string =>
+  trace.map((use) => (use.calls > 1 ? `${use.tool} ×${use.calls}` : use.tool)).join(' · ')
+
+/** One tool call of a reply's transcript with its result. */
+export interface ToolCallView {
+  id: string
+  name: string
+  input: string
+  output?: string
+  isError?: boolean
+}
+
+/** The tool calls of a transcript in order, each with its result once one was written. */
+export function toolCalls(lines: AgentTranscriptView['lines']): ToolCallView[] {
+  const calls: ToolCallView[] = []
+  const byId = new Map<string, ToolCallView>()
+  for (const line of lines) {
+    if (line.type === 'assistant')
+      for (const call of line.toolCalls ?? []) {
+        const view: ToolCallView = {
+          id: call.id,
+          name: call.name,
+          input: typeof call.input === 'string' ? call.input : JSON.stringify(call.input),
+        }
+        calls.push(view)
+        byId.set(call.id, view)
+      }
+    else if (line.type === 'tool-result') {
+      const view = byId.get(line.id)
+      if (!view) continue
+      view.output = line.output
+      if (line.isError) view.isError = true
+    }
+  }
+  return calls
+}
+
+/** Cost of a reply in dollars: three decimals below a dollar, two above. */
+export const formatCost = (usd: number): string => `$${usd.toFixed(usd < 1 ? 3 : 2)}`
+
+/** Text of an unread badge: empty for none, `99+` past 99. */
+export const unreadBadge = (count: number): string =>
+  count <= 0 ? '' : count > 99 ? '99+' : String(count)

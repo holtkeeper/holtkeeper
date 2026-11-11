@@ -36,7 +36,7 @@ function ReportNode({ data }: NodeProps<ReportFlowNode>) {
   return (
     <div
       title={node.detail ?? node.label}
-      className="flex h-full w-full items-center gap-2 overflow-hidden rounded-xl border bg-surface px-3 shadow-surface"
+      className="flex h-full w-full items-center gap-2 overflow-hidden rounded-xl border bg-surface px-3"
       style={{
         borderColor: hot ? 'var(--danger)' : 'var(--border)',
         boxShadow: hot

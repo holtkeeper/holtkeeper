@@ -1,4 +1,4 @@
-import type { Action, Grant, Principal } from '@holtkeeper/api'
+import type { Action, CrossTeamLevel, Grant, Principal } from '@holtkeeper/api'
 
 /** Every action a grant can name, in the order the UI lists them. Mirrors `Action` exactly. */
 export const actions = [
@@ -8,8 +8,10 @@ export const actions = [
   'audits:allowlist',
   'analyses:read',
   'analyses:run',
+  'catalog:read',
   'releases:read',
   'releases:run',
+  'tasks:run',
   'settings:read',
   'settings:write',
   'credentials:read',
@@ -37,6 +39,35 @@ export function can(principal: Principal | null | undefined, action: Action): bo
   return principal.grants.some(
     (grant) => grant.actions.includes('*') || grant.actions.includes(action),
   )
+}
+
+/**
+ * Whether a grant over every repository (`scope.all`) allows `action`: what the server asks for on
+ * global objects such as the config, storage and the database. Only decides what the UI shows.
+ */
+export function canGlobal(principal: Principal | null | undefined, action: Action): boolean {
+  if (!principal) return false
+  return principal.grants.some(
+    (grant) =>
+      grant.scope.all === true && (grant.actions.includes('*') || grant.actions.includes(action)),
+  )
+}
+
+/**
+ * Whether the principal reaches some team's catalog (Dependencies, Public API, Stack): a
+ * `catalog:read` or `analyses:read` grant, or any read grant while `crossTeam` is not `off`.
+ * Mirrors the server's catalog check; only decides what the UI shows.
+ */
+export function canCatalog(
+  principal: Principal | null | undefined,
+  crossTeam: CrossTeamLevel,
+): boolean {
+  if (!principal) return false
+  const reads: readonly Action[] =
+    crossTeam === 'off'
+      ? ['catalog:read', 'analyses:read']
+      : ['catalog:read', 'analyses:read', 'repos:read']
+  return reads.some((action) => can(principal, action))
 }
 
 /** Short human summary of grants, e.g. `everything: all actions` or `2 grants, 7 actions`. */

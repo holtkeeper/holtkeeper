@@ -1,28 +1,37 @@
 import { type RepoTarget, type Scope, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
-import type {
-  ActivityStore,
-  AiUsageRecord,
-  AiUsageStore,
-  SettingEntry,
-  SettingStore,
+import {
+  type AiUsageRecord,
+  type AiUsageStore,
+  type AuditStore,
+  type SettingEntry,
+  type SettingStore,
+  SYSTEM_ACTOR,
 } from '@holtkeeper/store'
 import { z } from 'zod'
 
-import { type BudgetPeriod, periodRange, projectMonthEnd } from './period.ts'
+import { type PeriodRange, instanceTimeZone, projectPeriodEnd, weekRange } from './period.ts'
 
 /** Setting key holding budgets. */
 export const budgetKey = 'llm.budget'
 
+/** Weekly spend limit when a budget does not set one. */
+export const DEFAULT_WEEKLY_USD = 150
+
+/** Part of the weekly limit kept for interactive work when a budget does not set one. */
+export const DEFAULT_RESERVE_USD = 25
+
 /** Value of an `llm.budget` setting. Same shape as the definition in `@holtkeeper/settings`. */
 export const budgetSchema = z.object({
-  monthlyUsd: z.number().positive().optional(),
-  dailyUsd: z.number().positive().optional(),
-  action: z.enum(['warn', 'block']),
-  /** Monthly USD limit per task kind. */
-  perTaskKind: z.record(z.string().min(1), z.number().positive()).optional(),
+  weeklyUsd: z.number().positive().default(DEFAULT_WEEKLY_USD),
+  /** Capped at `weeklyUsd`: a reserve as large as the budget leaves automatic work nothing. */
+  reserveUsd: z.number().min(0).default(DEFAULT_RESERVE_USD),
+  action: z.enum(['block', 'warn']).default('block'),
 })
 
 export type Budget = z.infer<typeof budgetSchema>
+
+/** Id of the budget that applies to everything when no valid global `llm.budget` entry exists. */
+export const DEFAULT_BUDGET_ID = 'default'
 
 /** A budget as stored: the setting entry's id and scope with its parsed value. */
 export interface ScopedBudget {
@@ -32,28 +41,45 @@ export interface ScopedBudget {
   updatedAt: string
 }
 
-/** One limit of one budget and how much of it is used in the current period. */
+/** One budget a run would exceed, with the numbers that decided it. */
 export interface BudgetLimitStatus {
   budgetId: string
   scope: Scope
   action: Budget['action']
-  period: BudgetPeriod
-  /** Set for `perTaskKind` limits. */
-  taskKind?: string
+  /** Monday the week started, in the instance time zone (`2026-11-09`). */
+  week: string
+  weeklyUsd: number
+  reserveUsd: number
+  /** What the run may bring spend up to: `weeklyUsd`, minus `reserveUsd` for automatic work. */
   limitUsd: number
   spentUsd: number
+  /** Expected cost of the run that was checked. */
+  estimateUsd: number
+  interactive: boolean
 }
 
 /** What a budget check decided for a run that is about to start. */
 export interface BudgetDecision {
   allowed: boolean
-  /** Every limit already reached, warn and block alike. */
+  /** Every budget the run would exceed, warn and block alike. */
   exceeded: BudgetLimitStatus[]
+  /**
+   * USD the run may spend before a `block` budget's limit is reached; absent when no `block`
+   * budget applies. Agents stop a run once it spends this much.
+   */
+  remainingUsd?: number
 }
 
 export interface BudgetCheck {
   repo: RepoTarget
   taskKind: string
+  /**
+   * A person started the work (a click in the panel, chat, a command on a merge request): it may
+   * spend the reserve. Automatic work (schedules, triggers, webhooks) may not. Default `false`.
+   */
+  interactive?: boolean
+  /** Expected cost of the run; default the mean cost of this week's runs of `taskKind`. */
+  estimateUsd?: number
 }
 
 /** Decides whether a run may start and keeps cached spend current as runs are recorded. */
@@ -74,6 +100,18 @@ export function parseBudgets(entries: readonly SettingEntry[]): ScopedBudget[] {
   })
 }
 
+/** The default budget for everything, used when no valid global entry exists. */
+export const defaultBudget = (): ScopedBudget => ({
+  id: DEFAULT_BUDGET_ID,
+  scope: { all: true },
+  budget: budgetSchema.parse({}),
+  updatedAt: '1970-01-01T00:00:00.000Z',
+})
+
+/** `budgets` plus `defaultBudget()` when none of them is global. */
+export const withDefaultBudget = (budgets: readonly ScopedBudget[]): ScopedBudget[] =>
+  budgets.some((b) => b.scope.all) ? [...budgets] : [...budgets, defaultBudget()]
+
 /**
  * The budgets that apply to a repository: the most specific one covering it (newest among equally
  * specific ones), plus the newest global (`all`) budget when that is a different one.
@@ -92,184 +130,205 @@ export function applicableBudgets(
   )
 }
 
-/** The limits a budget sets for a run of `taskKind` (every task kind when omitted). */
-export function budgetLimits(
-  budget: Budget,
-  taskKind?: string,
-): { period: BudgetPeriod; limitUsd: number; taskKind?: string }[] {
-  const limits: { period: BudgetPeriod; limitUsd: number; taskKind?: string }[] = []
-  if (budget.monthlyUsd !== undefined) limits.push({ period: 'month', limitUsd: budget.monthlyUsd })
-  if (budget.dailyUsd !== undefined) limits.push({ period: 'day', limitUsd: budget.dailyUsd })
-  for (const [kind, limitUsd] of Object.entries(budget.perTaskKind ?? {}))
-    if (taskKind === undefined || kind === taskKind)
-      limits.push({ period: 'month', limitUsd, taskKind: kind })
-  return limits
-}
-
-/** Whether a limit stops runs: the spend already reached it. */
-export const limitReached = (status: Pick<BudgetLimitStatus, 'limitUsd' | 'spentUsd'>) =>
-  status.spentUsd >= status.limitUsd
+/** What a run may bring a budget's weekly spend up to. */
+export const limitFor = (budget: Budget, interactive: boolean) =>
+  interactive ? budget.weeklyUsd : Math.max(budget.weeklyUsd - budget.reserveUsd, 0)
 
 export interface BudgetGuardOptions {
   settings: Pick<SettingStore, 'list'>
   usage: Pick<AiUsageStore, 'aggregate'>
-  /** Receives `ai.budget.exceeded` once per limit and period. */
-  activity?: Pick<ActivityStore, 'append'>
+  /** Receives an `ai.budget_exceeded` event once per budget, week and kind of work. */
+  audit?: Pick<AuditStore, 'append'>
   now?: () => Date
+  /** Where weeks start on Monday 00:00. Default: the instance time zone. */
+  timeZone?: string
   /** How long computed spend is reused. Default 30 seconds. */
   cacheMs?: number
 }
 
-/** Spend of a scope in a period, from `aggregate`. */
+/** Cost and run count of a scope's runs in a range, from `aggregate`. */
 async function spendOf(
   usage: Pick<AiUsageStore, 'aggregate'>,
-  scope: Scope,
   range: { from: string; to: string },
-  taskKind?: string,
-): Promise<number> {
+  filter: { scope?: Scope; taskKind?: string },
+): Promise<{ costUsd: number; runs: number }> {
   const [bucket] = await usage.aggregate({
     from: range.from,
     to: range.to,
-    filter: { scopes: [scope], ...(taskKind !== undefined && { taskKind }) },
+    filter: {
+      ...(filter.scope && { scopes: [filter.scope] }),
+      ...(filter.taskKind !== undefined && { taskKind: filter.taskKind }),
+    },
   })
-  return bucket?.costUsd ?? 0
+  return { costUsd: bucket?.costUsd ?? 0, runs: (bucket?.runs ?? 0) - (bucket?.denied ?? 0) }
 }
 
 /**
- * Checks budgets from the `llm.budget` settings against recorded spend. Spend per limit is cached
- * for `cacheMs` and bumped by `note`, so a burst of runs costs one aggregate per limit. A `warn`
- * limit only reports; a reached `block` limit denies. The activity event is deduplicated in
- * process memory, so a restart may emit it once more in the same period.
+ * Checks the weekly budgets from the `llm.budget` settings against recorded spend. Without a
+ * valid global entry the default budget ($150 a week, $25 reserve, `block`) applies to
+ * everything. A run exceeds a budget when this week's spend plus its estimate goes above the
+ * budget's limit: `weeklyUsd - reserveUsd` for automatic work, `weeklyUsd` for interactive work.
+ * A `warn` budget only reports; an exceeded `block` budget denies. Spend is cached for `cacheMs`
+ * and bumped by `note`. The audit event is deduplicated in process memory, so a restart may
+ * emit it once more in the same week.
  */
 export function budgetGuard({
   settings,
   usage,
-  activity,
+  audit,
   now = () => new Date(),
+  timeZone = instanceTimeZone(),
   cacheMs = 30_000,
 }: BudgetGuardOptions): BudgetGuard {
   const cache = new Map<
     string,
-    { spent: number; expires: number; scope: Scope; from: string; to: string; taskKind?: string }
+    {
+      costUsd: number
+      runs: number
+      expires: number
+      scope?: Scope
+      taskKind?: string
+      from: string
+      to: string
+    }
   >()
   const reported = new Set<string>()
 
-  async function spent(
-    budget: ScopedBudget,
-    period: BudgetPeriod,
+  async function cached(
+    range: PeriodRange,
     at: Date,
-    taskKind?: string,
-  ): Promise<number> {
-    const range = periodRange(period, at)
-    const id = JSON.stringify([budget.scope, period, range.key, taskKind ?? null])
+    filter: { scope?: Scope; taskKind?: string },
+  ) {
+    const id = JSON.stringify([filter.scope ?? null, filter.taskKind ?? null, range.key])
     const hit = cache.get(id)
-    if (hit && hit.expires > at.getTime()) return hit.spent
-    const value = await spendOf(usage, budget.scope, range, taskKind)
-    cache.set(id, {
-      spent: value,
+    if (hit && hit.expires > at.getTime()) return hit
+    const value = {
+      ...(await spendOf(usage, range, filter)),
       expires: at.getTime() + cacheMs,
-      scope: budget.scope,
+      ...filter,
       from: range.from,
       to: range.to,
-      ...(taskKind !== undefined && { taskKind }),
-    })
+    }
+    cache.set(id, value)
     return value
   }
 
   return {
-    async check({ repo, taskKind }) {
+    async check({ repo, taskKind, interactive = false, estimateUsd }) {
       const at = now()
-      const budgets = applicableBudgets(parseBudgets(await settings.list(budgetKey)), repo)
+      const week = weekRange(at, timeZone)
+      const budgets = applicableBudgets(
+        withDefaultBudget(parseBudgets(await settings.list(budgetKey))),
+        repo,
+      )
+      let estimate = estimateUsd
+      if (estimate === undefined) {
+        const history = await cached(week, at, { taskKind })
+        estimate = history.runs > 0 ? history.costUsd / history.runs : 0
+      }
       const exceeded: BudgetLimitStatus[] = []
+      let remaining: number | undefined
       for (const scoped of budgets) {
-        for (const limit of budgetLimits(scoped.budget, taskKind)) {
-          const status: BudgetLimitStatus = {
-            budgetId: scoped.id,
-            scope: scoped.scope,
-            action: scoped.budget.action,
-            ...limit,
-            spentUsd: await spent(scoped, limit.period, at, limit.taskKind),
-          }
-          if (!limitReached(status)) continue
-          exceeded.push(status)
-          const once = JSON.stringify([
-            status.budgetId,
-            status.period,
-            status.taskKind ?? null,
-            periodRange(status.period, at).key,
-          ])
-          if (activity && !reported.has(once)) {
-            reported.add(once)
-            await activity.append({
-              at: at.toISOString(),
-              actor: 'system',
-              action: 'ai.budget.exceeded',
-              subject: status.budgetId,
-              details: { ...status, repo: `${repo.forge}:${repo.path}` },
-            })
-          }
+        const { budget } = scoped
+        const limitUsd = limitFor(budget, interactive)
+        const { costUsd: spentUsd } = await cached(week, at, { scope: scoped.scope })
+        if (budget.action === 'block')
+          remaining = Math.min(remaining ?? Infinity, Math.max(limitUsd - spentUsd, 0))
+        if (spentUsd + estimate <= limitUsd) continue
+        const status: BudgetLimitStatus = {
+          budgetId: scoped.id,
+          scope: scoped.scope,
+          action: budget.action,
+          week: week.key,
+          weeklyUsd: budget.weeklyUsd,
+          reserveUsd: budget.reserveUsd,
+          limitUsd,
+          spentUsd,
+          estimateUsd: estimate,
+          interactive,
+        }
+        exceeded.push(status)
+        const once = JSON.stringify([status.budgetId, week.key, interactive])
+        if (audit && !reported.has(once)) {
+          reported.add(once)
+          await audit.append({
+            at: at.toISOString(),
+            actor: SYSTEM_ACTOR,
+            via: 'system',
+            action: 'ai.budget_exceeded',
+            target: { type: 'budget', id: status.budgetId, repo: `${repo.forge}:${repo.path}` },
+            outcome: status.action === 'block' ? 'denied' : 'ok',
+            details: { ...status, taskKind },
+          })
         }
       }
-      return { allowed: !exceeded.some((s) => s.action === 'block'), exceeded }
+      return {
+        allowed: !exceeded.some((s) => s.action === 'block'),
+        exceeded,
+        ...(remaining !== undefined && { remainingUsd: remaining }),
+      }
     },
     note(record) {
       for (const entry of cache.values()) {
         if (record.at < entry.from || record.at >= entry.to) continue
-        if (entry.taskKind !== undefined && entry.taskKind !== record.taskKind) continue
-        if (!scopeCoversRepo(entry.scope, { ...record.repo, groups: record.groups })) continue
-        entry.spent += record.costUsd
+        if (entry.taskKind !== undefined) {
+          if (entry.taskKind !== record.taskKind) continue
+          if (record.outcome !== 'denied-budget') entry.runs += 1
+        }
+        if (entry.scope && !scopeCoversRepo(entry.scope, { ...record.repo, groups: record.groups }))
+          continue
+        entry.costUsd += record.costUsd
       }
     },
   }
 }
 
-/** Usage of one limit for display: share used and, for monthly limits, projected month-end spend. */
-export interface BudgetLimitView {
-  period: BudgetPeriod
-  taskKind?: string
-  limitUsd: number
-  spentUsd: number
-  /** `spentUsd / limitUsd * 100`. */
-  percent: number
-  /** Monthly limits only. */
-  projectedUsd?: number
-}
-
-/** A budget with the state of each of its limits. */
+/** A budget with this week's spend, for display. */
 export interface BudgetStatus {
+  /** Setting entry id, or `DEFAULT_BUDGET_ID` for the implicit default. */
   id: string
   scope: Scope
   action: Budget['action']
-  limits: BudgetLimitView[]
+  weeklyUsd: number
+  reserveUsd: number
+  spentUsd: number
+  /** `spentUsd / weeklyUsd * 100`. */
+  percent: number
+  /** Linear projection of this week's spend to its end. */
+  projectedUsd: number
+  /** The current week, Monday 00:00 to Monday 00:00 in the instance time zone. */
+  week: PeriodRange
 }
 
-/** Current state of every valid budget among `entries`, at `now`. */
+/**
+ * This week's state of every valid budget among `entries`, at `now`; the default budget stands in
+ * for a missing global one when `includeDefault` is set.
+ */
 export async function budgetStatuses(
   entries: readonly SettingEntry[],
   usage: Pick<AiUsageStore, 'aggregate'>,
   now: Date,
+  {
+    timeZone = instanceTimeZone(),
+    includeDefault = false,
+  }: { timeZone?: string; includeDefault?: boolean } = {},
 ): Promise<BudgetStatus[]> {
+  const week = weekRange(now, timeZone)
+  const parsed = parseBudgets(entries)
   return Promise.all(
-    parseBudgets(entries).map(async (scoped) => ({
-      id: scoped.id,
-      scope: scoped.scope,
-      action: scoped.budget.action,
-      limits: await Promise.all(
-        budgetLimits(scoped.budget).map(async (limit) => {
-          const spentUsd = await spendOf(
-            usage,
-            scoped.scope,
-            periodRange(limit.period, now),
-            limit.taskKind,
-          )
-          return {
-            ...limit,
-            spentUsd,
-            percent: (spentUsd / limit.limitUsd) * 100,
-            ...(limit.period === 'month' && { projectedUsd: projectMonthEnd(spentUsd, now) }),
-          }
-        }),
-      ),
-    })),
+    (includeDefault ? withDefaultBudget(parsed) : parsed).map(async ({ id, scope, budget }) => {
+      const { costUsd: spentUsd } = await spendOf(usage, week, { scope })
+      return {
+        id,
+        scope,
+        action: budget.action,
+        weeklyUsd: budget.weeklyUsd,
+        reserveUsd: budget.reserveUsd,
+        spentUsd,
+        percent: (spentUsd / budget.weeklyUsd) * 100,
+        projectedUsd: projectPeriodEnd(spentUsd, week, now),
+        week,
+      }
+    }),
   )
 }

@@ -21,12 +21,12 @@ export function StatCard({
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, y: 8 }, shown: { opacity: 1, y: 0 } }}
-      className="relative overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-surface"
+      className="relative overflow-hidden rounded-2xl border border-line bg-panel px-3.5 py-3"
     >
       {accent ? (
         <span
           aria-hidden
-          className="absolute inset-y-0 left-0 w-1"
+          className="absolute inset-y-3 left-0 w-0.5 rounded-r-full"
           style={{ background: accent }}
         />
       ) : null}
@@ -38,7 +38,7 @@ export function StatCard({
           </span>
         ) : null}
       </div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight">
+      <div className="mt-1 text-[22px] font-semibold tracking-tight">
         <AnimatedNumber value={value} />
       </div>
       {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}

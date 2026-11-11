@@ -5,7 +5,14 @@ import { join } from 'node:path'
 import type { Agent } from '@holtkeeper/agent'
 import type { LibraryIndexRun } from '@holtkeeper/api'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
-import { fleetDataSchema } from '@holtkeeper/fleet'
+import {
+  compareVersions,
+  definedPackages,
+  directDependencies,
+  latestDepgraphs,
+  ownPackages,
+} from '@holtkeeper/depgraph'
+import type { RepoRef } from '@holtkeeper/forge'
 import {
   type GitHubClient,
   type GitHubEvent,
@@ -19,7 +26,9 @@ import {
   digestOnDemand,
   goRegistry,
   indexLibraries,
+  latestVersions,
   libraryDocs,
+  libraryOfModule,
   libraryIssues,
   liveIssueSearch,
   npmRegistry,
@@ -37,12 +46,12 @@ import type {
   SettingEntry,
   SettingStore,
 } from '@holtkeeper/store'
-import { newestRecords } from '@holtkeeper/store'
 import { intervalMs } from '@holtkeeper/updates'
 import { z } from 'zod'
 
-import { createApiCatalog } from './api-surface/catalog.ts'
-import { createUsageIndex } from './api-surface/usages.ts'
+import { type ApiCatalog, createApiCatalog } from './api-surface/catalog.ts'
+import { type UsageIndex, createUsageIndex } from './api-surface/usages.ts'
+import { libraryKeyOf } from './dependencies.ts'
 import { githubReferences, githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
 import { libraryProgressWriter } from './library-progress.ts'
 
@@ -59,7 +68,7 @@ const tokensOf = async (credentials: CredentialSource, config: LibrariesConfig) 
 const RUNNING_TTL_S = 900
 const MAX_STORED_FAILURES = 200
 const CHANGE_DEBOUNCE_MS = 600_000
-const USE_KINDS = new Set(['usages', 'fleet'])
+const USE_KINDS = new Set(['usages', 'depgraph'])
 
 const globSchema = z.array(z.string().trim().min(1))
 
@@ -87,8 +96,6 @@ const librariesSchema = z.object({
     .optional(),
   /** LLM digests of issue threads agents hit, charged to the AI budget. */
   digests: z.boolean().optional(),
-  /** Queue `usages` and `fleet` when a push to a default branch changes a manifest or lockfile. */
-  refreshOnPush: z.boolean().optional(),
   exclude: globSchema.optional(),
   include: globSchema.optional(),
   maxVersions: z.number().int().min(1).max(50).optional(),
@@ -113,12 +120,11 @@ export const librariesSetting = defineSetting({
   description:
     'Index version-exact docs, release notes, API and issues of the third-party libraries the fleet uses, for agents and the MCP endpoint.',
   section: 'Libraries',
-  help: `Holtkeeper reads the newest \`usages\` and \`fleet\` records, keeps a few versions of every npm and Go library they name (the ones in use and the ones an upgrade would land on) and indexes their docs. Only the value for **All repositories** counts; without one the index runs with the defaults below (anonymous GitHub), and \`enabled: false\` turns it off. Changing the GitHub tokens starts a new run at once.
+  help: `Holtkeeper reads the newest \`depgraph\` and \`usages\` records, keeps a few versions of every npm and Go library they name (the ones in use and the ones an upgrade would land on) and indexes their docs. Only the value for **All repositories** counts; without one the index runs with the defaults below (anonymous GitHub), and \`enabled: false\` turns it off. Changing the GitHub tokens starts a new run at once.
 
 - **interval** (default \`1d\`, at least \`1h\`): how often to look for new releases; a run also starts about two minutes after the server starts.
-- **github**: leave it unset to use every credential of kind \`github\` (add one on the Credentials page and it is picked up), or list the ones to use; \`[]\` reads GitHub anonymously. They are GitHub tokens for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
-- **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. The model is the \`library-digest\` entry of **Models per task**; without one, \`claude-haiku@latest\` when the provider lists it, else **Model**.
-- **refreshOnPush** (default on): when a push to a repository's default branch changes a manifest or lockfile (\`package.json\`, \`bun.lock\`, \`pnpm-lock.yaml\`, \`go.mod\`, ...), queue \`usages\` for it and \`fleet\` for its groups, so the index learns new packages and versions minutes after the merge instead of at the weekly runs.
+- **github**: leave it unset to use every credential of kind \`github\` (add one under Settings → Integrations → Credentials and it is picked up), or list the ones to use; \`[]\` reads GitHub anonymously. They are GitHub tokens for repository docs, release notes, issues and source snapshots. Requests go to the token with the most of its limit left; tokens of the same GitHub account share one limit, so only tokens of different accounts (or GitHub Apps) add capacity. Without any GitHub is read anonymously (60 requests an hour), which is rarely enough.
+- **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. They run on the fast tier: the newest Haiku the provider lists.
 - **concurrency** (default 3, at most 8): libraries indexed at the same time; a run mostly waits for the network, so a few at once make it several times faster while the GitHub limit lasts.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
@@ -146,7 +152,6 @@ export interface LibrariesConfig {
   /** Credential references of the GitHub tokens, without duplicates; every `github` credential when unset. */
   github?: string[]
   digests: boolean
-  refreshOnPush: boolean
 }
 
 /** The effective config of a stored value; `undefined` when unset or invalid (nothing is indexed). */
@@ -169,7 +174,6 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
     intervalMs: intervalMs(data.interval ?? DEFAULT_INTERVAL) ?? 86_400_000,
     ...(data.github ? { github: [...new Set(data.github)] } : {}),
     digests: data.digests ?? false,
-    refreshOnPush: data.refreshOnPush ?? true,
   }
 }
 
@@ -254,61 +258,100 @@ export async function githubClientFor(
 /** Third-party libraries the fleet uses, and the ones it defines itself. */
 export interface FleetLibraryUses {
   uses: LibraryUse[]
-  /** `<ecosystem>:<name>` of libraries defined in the fleet: `fleet`'s `definedIn` and the API catalog's packages. */
+  /**
+   * `<ecosystem>:<name>` of packages the fleet defines: workspaces of every repository's newest
+   * `depgraph` record (Go modules also without their `/vN` suffix), local packages of `usages`
+   * records and the API catalog's packages. Computed over every repository, whatever `accept` says.
+   */
   internal: Set<string>
+  /**
+   * The latest version of each internal package, by `<ecosystem>:<name>` (Go without `/vN`): the
+   * highest version it carries in its own repository, else (Go modules carry none) the highest
+   * version any repository requires.
+   */
+  defined: Map<string, string>
+}
+
+const higher = (into: Map<string, string>, key: string, version: string) => {
+  const known = into.get(key)
+  if (!known || compareVersions(known, version) < 0) into.set(key, version)
 }
 
 const exactVersion = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$/
 
+const ecosystemOf = (value: string): LibraryEcosystem | undefined =>
+  value === 'npm' ? 'npm' : value.toLowerCase() === 'go' ? 'Go' : undefined
+
 /**
- * Uses from the newest `usages` record of every repository (npm, exact resolved versions, local
- * workspaces left out) and the newest `fleet` record of every group (npm and Go, the resolved
- * version, else the one compared with the latest).
+ * Who uses which library at which exact version, one entry per repository and version: direct
+ * dependencies (npm and Go, the resolved version) from the newest `depgraph` record of every
+ * repository, and packages the code imports (npm, resolved versions) from the newest `usages`
+ * record. Only repositories `accept` allows contribute uses; uses of internal packages stay in
+ * `uses`, so callers decide whether to drop them (the index does) or show them as internal.
  */
-export async function fleetLibraryUses(analyses: AnalysisStore): Promise<FleetLibraryUses> {
+export async function fleetLibraryUses(
+  analyses: AnalysisStore,
+  options: {
+    accept?: (repo: RepoRef) => boolean
+    /** Reused instead of reading the `usages` and `api-surface` records again. */
+    usages?: UsageIndex
+    catalog?: ApiCatalog
+  } = {},
+): Promise<FleetLibraryUses> {
+  const accept = options.accept ?? (() => true)
   const uses = new Map<string, LibraryUse>()
   const internal = new Set<string>()
+  const defined = new Map<string, string>()
   const add = (ecosystem: LibraryEcosystem, name: string, version: string, repo: string) => {
     if (!exactVersion.test(version)) return
     const key = `${ecosystem}\u0000${name}\u0000${version}\u0000${repo}`
     if (!uses.has(key)) uses.set(key, { ecosystem, name, version, repo })
   }
 
-  for (const record of await createUsageIndex({ analyses }).records(() => true)) {
+  const required = new Map<string, string>()
+  for (const { record, data } of (await latestDepgraphs(analyses)).values()) {
+    for (const own of definedPackages(data)) {
+      const ecosystem = ecosystemOf(own.ecosystem)
+      if (!ecosystem) continue
+      internal.add(`${ecosystem}:${own.name}`)
+      if (ecosystem === 'Go') internal.add(`Go:${libraryOfModule(own.name)}`)
+    }
+    for (const own of ownPackages(data)) {
+      const ecosystem = ecosystemOf(own.ecosystem)
+      if (ecosystem) higher(defined, libraryKeyOf({ ecosystem, name: own.name }), own.version)
+    }
+    const direct = directDependencies(data)
+    for (const dep of direct)
+      if (ecosystemOf(dep.ecosystem) === 'Go' && exactVersion.test(dep.version))
+        higher(required, libraryKeyOf({ ecosystem: 'Go', name: dep.name }), dep.version)
+    if (!accept(record.repo)) continue
     const repo = `${record.repo.forge}:${record.repo.path}`
+    for (const dep of direct) {
+      const ecosystem = ecosystemOf(dep.ecosystem)
+      if (ecosystem) add(ecosystem, dep.name, dep.version, repo)
+    }
+  }
+
+  const usages = options.usages ?? createUsageIndex({ analyses })
+  for (const record of await usages.records(() => true)) {
+    const repo = `${record.repo.forge}:${record.repo.path}`
+    const accepted = accept(record.repo)
     for (const pkg of record.data.packages) {
       if (pkg.local) {
         internal.add(`npm:${pkg.name}`)
         continue
       }
-      if (pkg.name.startsWith('node:')) continue
+      if (!accepted || pkg.name.startsWith('node:')) continue
       for (const version of pkg.versions) add('npm', pkg.name, version, repo)
     }
   }
 
-  const fleets = await newestRecords(
-    analyses,
-    'fleet',
-    (record) => fleetDataSchema.safeParse(record.data).data,
-  )
-  for (const { record, value } of fleets.values()) {
-    for (const library of value.libraries) {
-      if (library.definedIn) {
-        internal.add(`${library.ecosystem}:${library.name}`)
-        continue
-      }
-      for (const usage of library.usages) {
-        const version = usage.resolved ?? usage.version
-        if (version)
-          add(library.ecosystem, library.name, version, `${record.repo.forge}:${usage.repo}`)
-      }
-    }
-  }
+  const catalog = options.catalog ?? createApiCatalog({ analyses })
+  for (const pkg of await catalog.packages(() => true)) internal.add(`npm:${pkg.name}`)
+  for (const [key, version] of required)
+    if (internal.has(key) && !defined.has(key)) defined.set(key, version)
 
-  for (const pkg of await createApiCatalog({ analyses }).packages(() => true))
-    internal.add(`npm:${pkg.name}`)
-
-  return { uses: [...uses.values()], internal }
+  return { uses: [...uses.values()], internal, defined }
 }
 
 /** The last finished indexing run, from `store.kv`. */
@@ -338,7 +381,7 @@ const requestedAfter = (value: unknown) =>
     : undefined
 
 /**
- * Notes that an analysis record landed: a new `usages` or `fleet` record asks for a run 10
+ * Notes that an analysis record landed: a new `usages` or `depgraph` record asks for a run 10
  * minutes later, each further one moving it again, so a batch of jobs leads to one run. Explicit
  * requests (`requestLibraryIndex`) stay immediate. Other kinds are ignored.
  */
@@ -386,7 +429,7 @@ export interface LibraryIndexOptions {
 }
 
 /**
- * One indexing run with the current `libraries` setting: uses from `usages` and `fleet` records,
+ * One indexing run with the current `libraries` setting: uses from `depgraph` and `usages` records,
  * npm and Go registries, GitHub from the setting's credential. Records the run in `store.kv`
  * (`libraries:last-run`) and returns it; `undefined` when indexing is off or impossible.
  */
@@ -431,6 +474,7 @@ export async function runLibraryIndex(
       uses,
       settings: config.index,
       isInternal: (ref) => internal.has(`${ref.ecosystem}:${ref.name}`),
+      ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
       ...(config.index.sources.site ? { siteSource: siteSource() } : {}),
       now: deps.now,
       ...(options.signal ? { signal: options.signal } : {}),
@@ -561,7 +605,7 @@ export function startLibraryIndex(
   }
 }
 
-/** A `Summarize` over an agent: one turn without tools in an empty folder, task kind `library-digest`. */
+/** A `Summarize` over an agent: one `fast`-tier turn without tools in an empty folder, task kind `library-digest`. */
 export function agentSummarize(agent: Agent): Summarize {
   return async (prompt, signal) => {
     const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-digest-'))
@@ -572,6 +616,7 @@ export function agentSummarize(agent: Agent): Summarize {
         capabilities: [],
         maxTurns: 1,
         taskKind: 'library-digest',
+        tier: 'fast',
         ...(signal ? { signal } : {}),
       })
       return result.text
@@ -626,7 +671,7 @@ export function serverLibraryDocs(options: ServerLibraryDocsOptions): LibraryDoc
 /**
  * Who may see which library: a library is visible when some repository the caller may read uses
  * it, and libraries no repository uses are visible to callers with global read access. Shared by
- * the `/api/libraries` routes and the MCP tools.
+ * the `/api/dependencies` routes and the MCP tools.
  */
 export interface LibraryReader {
   /** Whether the caller may read a repository, as `forge:path`. */

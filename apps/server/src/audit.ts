@@ -89,8 +89,8 @@ export const auditActorOf = (principal: Principal | undefined, provider: string)
 export type AuditAppend = Omit<AuditEventInput, 'at'> & { at?: Timestamp }
 
 /**
- * Appends one event to `store.audit` and returns it; `undefined` when the store has no audit log
- * or the append failed (logged, never thrown, so auditing cannot break the action itself).
+ * Appends one event to `store.audit` and returns it; `undefined` when the append failed (logged,
+ * never thrown, so auditing cannot break the action itself).
  * Webhooks and jobs use it with `via: 'webhook' | 'job'` and an actor such as
  * `{ id: 'gitlab:work:42', name: 'jane', provider: 'gitlab:work' }` or
  * `{ id: 'system', name: 'scheduler', provider: 'job' }`.
@@ -99,7 +99,6 @@ export async function appendAudit(
   store: Pick<Store, 'audit'>,
   event: AuditAppend,
 ): Promise<AuditEvent | undefined> {
-  if (!store.audit) return undefined
   try {
     return await store.audit.append({ ...event, at: event.at ?? new Date().toISOString() })
   } catch (error) {
@@ -189,12 +188,25 @@ function authRoute(path: string): { route: string; params: Record<string, string
   return { route: route.join('/'), params }
 }
 
+/** The event target: a denied request never names a repository, whoever set it. */
+function targetOf(
+  derived: AuditTarget,
+  repo: string | undefined,
+  enriched: Partial<AuditTarget> | undefined,
+  outcome: AuditOutcome,
+): AuditTarget {
+  const target: AuditTarget = { ...derived, ...(repo && { repo }), ...enriched }
+  if (outcome !== 'denied') return target
+  const { repo: _dropped, ...rest } = target
+  return rest
+}
+
 const outcomeOf = (status: number): AuditOutcome =>
   status === 401 || status === 403 ? 'denied' : status >= 400 ? 'error' : 'ok'
 
 /** How a request reached the server: `webhook`, `ui` (a browser) or `api`. */
 export function viaOf(c: AppContext, path: string): AuditVia {
-  if (path.startsWith('/api/webhooks') || path.startsWith('/api/chat/slack')) return 'webhook'
+  if (path.startsWith('/api/webhooks')) return 'webhook'
   return c.req.header('sec-fetch-site') !== undefined ? 'ui' : 'api'
 }
 
@@ -236,7 +248,10 @@ function isAudited(method: string, path: string, provider: string) {
  * Audits every mutating request under `/api` and `/auth/<provider>/admin` once the response is
  * ready: actor, route template and params, status, duration and outcome (401/403 are `denied`).
  * Routes enrich the event with `c.set('audit', …)`; user changes made through the `users`
- * provider get field-level `changes` from the stored user before and after.
+ * provider get field-level `changes` from the stored user before and after. The event names a
+ * repository (`target.repo`) only when the route sets it or a permission check of the request
+ * allowed it (the `?repo=` one when several were): a denied request never names one, so nobody
+ * can plant events in the History of a repository they cannot act on.
  */
 export function auditMiddleware(
   deps: Pick<ServerDeps, 'store' | 'auth' | 'now'>,
@@ -244,7 +259,7 @@ export function auditMiddleware(
   return async (c, next) => {
     const method = c.req.method
     const path = c.req.path
-    if (!deps.store.audit || !isAudited(method, path, deps.auth.name)) return next()
+    if (!isAudited(method, path, deps.auth.name)) return next()
 
     const started = performance.now()
     const auth = path.startsWith('/auth/') ? authRoute(path) : undefined
@@ -266,7 +281,11 @@ export function auditMiddleware(
         userFields(await deps.store.users.getUser(userId)),
       )
     }
-    const repo = c.req.query('repo')
+    const outcome = outcomeOf(status)
+    const queried = c.req.query('repo')
+    const allowed = outcome === 'denied' ? [] : [...new Set(c.get('allowedRepos'))]
+    const repo =
+      queried && allowed.includes(queried) ? queried : allowed.length === 1 ? allowed[0] : undefined
     const ip = ipOf(c)
     const userAgent = c.req.header('user-agent')
     await appendAudit(deps.store, {
@@ -274,12 +293,8 @@ export function auditMiddleware(
       actor: auditActorOf(c.get('principal'), deps.auth.name),
       via: viaOf(c, path),
       action: enrichment?.action ?? derived.action,
-      target: {
-        ...derived.target,
-        ...(repo && { repo }),
-        ...enrichment?.target,
-      },
-      outcome: outcomeOf(status),
+      target: targetOf(derived.target, repo, enrichment?.target, outcome),
+      outcome,
       status,
       request: {
         method,
@@ -308,7 +323,7 @@ export function startAuditRetention(
 ): () => void {
   const audit = store.audit
   const days = options.retentionDays ?? 365
-  if (!audit || !(days > 0)) return () => {}
+  if (!(days > 0)) return () => {}
   const now = options.now ?? (() => new Date())
   const sweep = async () => {
     try {

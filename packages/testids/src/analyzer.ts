@@ -1,23 +1,23 @@
 import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
-import { analyzeTestIds, defaultAttributes } from './analyze.ts'
+import { testIdsAnalysis } from './analysis.ts'
+import { analyzeTestIds } from './analyze.ts'
+import { defaultAttributes } from './defaults.ts'
 import type { TestIdsData } from './model.ts'
-import { testIdsAnalysis } from './report.ts'
 import { builtinSources } from './sources.ts'
+
+const split = (value: unknown) =>
+  typeof value === 'string'
+    ? value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : value
 
 /** A list option that also accepts a comma-separated string, as flags pass it. */
 const list = (fallback: readonly string[]) =>
-  z.preprocess(
-    (value) =>
-      typeof value === 'string'
-        ? value
-            .split(',')
-            .map((item) => item.trim())
-            .filter(Boolean)
-        : value,
-    z.array(z.string().min(1)).default([...fallback]),
-  )
+  z.preprocess(split, z.array(z.string().min(1)).default([...fallback]))
 
 /** Options of the `testids` analyzer. */
 export const testIdsOptionsSchema = z.object({
@@ -27,6 +27,11 @@ export const testIdsOptionsSchema = z.object({
   sources: list(Object.keys(builtinSources)),
   /** Glob patterns of files to leave out. */
   exclude: list([]),
+  /**
+   * Native tags that need a test id, for the review check and `suggest_test_ids`; unset, they are
+   * learned from the catalog. The catalog itself ignores it.
+   */
+  elements: z.preprocess(split, z.array(z.string().min(1))).optional(),
 })
 
 export type TestIdsOptions = z.output<typeof testIdsOptionsSchema>
@@ -62,6 +67,7 @@ export const testIdsAnalyzer = defineAnalyzer<TestIdsData, TestIdsOptions>({
   kind: 'testids',
   analysis: testIdsAnalysis,
   scope: 'repo',
+  refresh: { on: 'change', minInterval: '1d' },
   needs: { checkout: true },
   options: testIdsOptionsSchema,
   flags: [

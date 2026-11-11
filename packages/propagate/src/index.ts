@@ -1,7 +1,6 @@
 export * from './analyzer.ts'
 export * from './bump.ts'
 export * from './checks.ts'
-export * from './fix.ts'
 export * from './notes.ts'
 export * from './pipeline.ts'
 export * from './plan.ts'
