@@ -160,7 +160,6 @@ export function createBrowserslistAnalyzer(
     kind: 'browserslist',
     analysis: browserslistAnalysis,
     scope: 'repo',
-    refresh: { on: 'time', cadence: '7d' },
     exclusive: true,
     needs: { forge: true },
     options: browserslistOptionsSchema,

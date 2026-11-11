@@ -18,9 +18,9 @@ test('default triggers only name analyzers the server ships', () => {
   expect(named).not.toContain('guide')
 })
 
-test('every shipped analyzer but merge request review and write tasks declares freshness', () => {
+test('every shipped analyzer declares freshness except review and those that write to repositories', () => {
   const manual = builtinAnalyzers.filter((analyzer) => !analyzer.refresh).map((a) => a.kind)
-  expect(manual.toSorted()).toEqual(['propagate', 'review', 'write-task'])
+  expect(manual.toSorted()).toEqual(['browserslist', 'propagate', 'review', 'write-task'])
   for (const analyzer of builtinAnalyzers) {
     if (analyzer.scope === 'group' && analyzer.refresh) expect(analyzer.refresh.on).toBe('time')
     if (analyzer.needs.agent && analyzer.refresh?.on === 'change')

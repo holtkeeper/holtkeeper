@@ -313,14 +313,14 @@ Analyses stay current without schedules: every analyzer declares `refresh` ([@ho
 
 Settings (section `Automation`): `freshness` (scoped, one entry per team = config group) `{ mode: 'on' | 'off' | 'slower', factor }`, default on, `slower` multiplies every interval and cadence by `factor` (default 3); `freshness.sweep` (global) `{ maxJobsPerHour, maxAiJobsPerHour, nightWindow: { from, to }, headPollMinutes }`, night window default 01:00–07:00 in the instance time zone. `freshnessStatus(deps, target)` evaluates one target without queuing or reading heads, for the `analysis_status` tool. Each sweep also keeps its decisions per analyzer and target in `freshness:summary` (one day); `freshnessSummary(deps, visible)` sums them per team (every repository, and each config group of each repository) for `GET /api/automation/freshness`, the Automation page's Freshness cards, with the next sweep five minutes after the last.
 
-| Analyzer                        | Refresh                             |     | Analyzer                      | Refresh             |
-| ------------------------------- | ----------------------------------- | --- | ----------------------------- | ------------------- |
-| `depgraph`                      | change, 6h, manifests and lockfiles |     | `audit`                       | every 1d            |
-| `api-surface`, `usages`, `i18n` | change, 6h                          |     | `ci-jobs`, `stack`, `tracker` | every 1d            |
-| `licenses`                      | change, 1d, manifests and lockfiles |     | `renovate`                    | every 1d, heavy     |
-| `testids`                       | change, 1d                          |     | `branches`, `browserslist`    | every 7d            |
-| `coverage`, `bundle`, `assets`  | change, 1d, heavy                   |     | `review`, `propagate`         | never automatically |
-| `guide`                         | change, 7d, LLM                     |     |                               |                     |
+| Analyzer                        | Refresh                             |     | Analyzer                              | Refresh                                                        |
+| ------------------------------- | ----------------------------------- | --- | ------------------------------------- | -------------------------------------------------------------- |
+| `depgraph`                      | change, 6h, manifests and lockfiles |     | `audit`                               | every 1d                                                       |
+| `api-surface`, `usages`, `i18n` | change, 6h                          |     | `ci-jobs`, `stack`, `tracker`         | every 1d                                                       |
+| `licenses`                      | change, 1d, manifests and lockfiles |     | `renovate`                            | every 1d, heavy                                                |
+| `testids`                       | change, 1d                          |     | `branches`                            | every 7d                                                       |
+| `coverage`, `bundle`, `assets`  | change, 1d, heavy                   |     | `review`, `propagate`, `browserslist` | never automatically (they write to repositories or run on MRs) |
+| `guide`                         | change, 7d, LLM                     |     |                                       |                                                                |
 
 ### GitLab webhook
 
