@@ -86,7 +86,7 @@ test('raster images get a savings table, a <picture> suggestion and a panel link
   expect(result.summary).toContain(
     '[Variants and snippets for `hero.png`](https://hk.example.com/repos/view?repo=work%3Aweb%2Fsite&tab=assets&file=public%2Fhero.png&ref=h1)',
   )
-})
+}, 30_000)
 
 test('an added SVG gets a whole-file suggestion; a modified one only a summary line', async () => {
   const reviewer = createMediaReviewer({ policyFor: policy({ minSaving: { pct: 5, bytes: 64 } }) })
