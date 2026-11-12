@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import type { ReviewData } from '@holtkeeper/review'
 
-import { defaultSlackEmoji } from './connection.ts'
+import { fallbackSlackEmoji } from './connection.ts'
 import { reviewStatusOf, statusListText, worstStatus } from './status.ts'
 
 const finding = (severity: 'info' | 'minor' | 'major' | 'critical', posted = true) => ({
@@ -69,7 +69,7 @@ test('the status list has one line per merge request with emoji, English name an
         { url: `${url}9`, label: 'widget!9' },
         { status: 'reviewing', url: `${url}10`, label: 'widget!10 Tidy' },
       ],
-      { ...defaultSlackEmoji, reviewing: 'thumbsup::skin-tone-2' },
+      { ...fallbackSlackEmoji, reviewing: 'thumbsup::skin-tone-2' },
     ),
   ).toBe(
     [

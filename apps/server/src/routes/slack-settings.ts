@@ -8,6 +8,7 @@ import {
   SLACK_CONNECTION_KEY,
   type StoredSlackConnection,
   defaultSlackEmoji,
+  fallbackSlackEmoji,
   slackEmojiOverridesSchema,
   storedSlackConnection,
 } from '../slack/connection.ts'
@@ -46,7 +47,11 @@ export function slackSettingsRoutes(deps: ServerDeps) {
 
   const view = async (): Promise<SlackSettingsView> => {
     const stored = await storedSlackConnection(deps.store)
-    const common = { defaultEmoji: { ...defaultSlackEmoji }, eventsPath: SLACK_EVENTS_PATH }
+    const common = {
+      defaultEmoji: { ...defaultSlackEmoji },
+      fallbackEmoji: { ...fallbackSlackEmoji },
+      eventsPath: SLACK_EVENTS_PATH,
+    }
     return stored
       ? {
           configured: true,

@@ -14,8 +14,20 @@ const slackReviewStatuses = [
   'skipped',
 ] as const satisfies readonly SlackReviewStatus[]
 
-/** The emoji each status shows when the Slack credential overrides none. */
+/**
+ * The emoji each status shows when the Slack credential overrides none: Holtkeeper's custom set,
+ * which a workspace uploads from the holtkeeper/.github repository (`slack/emoji`).
+ */
 export const defaultSlackEmoji: Readonly<Record<SlackReviewStatus, string>> = {
+  reviewing: 'hk-reviewing',
+  clean: 'hk-clean',
+  minor: 'hk-minor',
+  changes: 'hk-changes',
+  skipped: 'hk-skipped',
+}
+
+/** The standard emoji a status shows instead of its default when the workspace lacks it. */
+export const fallbackSlackEmoji: Readonly<Record<SlackReviewStatus, string>> = {
   reviewing: 'eyes',
   clean: 'large_green_circle',
   minor: 'large_orange_circle',
@@ -67,18 +79,13 @@ export async function storedSlackConnection(
   return storedSchema.safeParse(await store.kv?.get(SLACK_CONNECTION_KEY)).data
 }
 
-/** The Slack credential ready to use: tokens opened, emoji with defaults filled in. */
+/** The Slack credential ready to use: tokens opened, and the emoji a person set per status. */
 export interface SlackConnection {
   botToken: string
   signingSecret: string
-  emoji: Record<SlackReviewStatus, string>
+  /** Used as given; a status without one uses `defaultSlackEmoji` or its fallback. */
+  overrides: SlackEmojiOverrides
 }
-
-/** Emoji per status: the overrides over `defaultSlackEmoji`. */
-const slackEmojiOf = (overrides: SlackEmojiOverrides | undefined) => ({
-  ...defaultSlackEmoji,
-  ...overrides,
-})
 
 /**
  * The stored Slack credential with its tokens opened, or `undefined` when none is stored or the
@@ -94,7 +101,7 @@ export async function slackConnection(deps: {
     return {
       botToken: await deps.vault.open(stored.botToken),
       signingSecret: await deps.vault.open(stored.signingSecret),
-      emoji: slackEmojiOf(stored.emoji),
+      overrides: stored.emoji ?? {},
     }
   } catch {
     return undefined

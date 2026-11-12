@@ -480,7 +480,7 @@ Authorization goes through [@holtkeeper/identities](../../../packages/identities
 
 | Route                          | Needs                   | Does                                                                                                                                                                    |
 | ------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/slack`               | global `settings:read`  | `configured`, `connectedAt` and `connectedBy` when stored, `emoji` (the overrides), `defaultEmoji` and `eventsPath`                                                     |
+| `GET /api/slack`               | global `settings:read`  | `configured`, `connectedAt` and `connectedBy` when stored, `emoji` (the overrides), `defaultEmoji`, `fallbackEmoji` and `eventsPath`                                    |
 | `PUT /api/slack/connection`    | global `settings:write` | Stores `{ botToken, signingSecret, emoji? }` sealed; 400 when the token is not an `xoxb-…`; without `emoji` the stored overrides stay                                   |
 | `PUT /api/slack/emoji`         | global `settings:write` | `{ emoji }` replaces the overrides (Slack emoji names, colons stripped); 409 while no credential is stored. Audited as `slack.emoji`                                    |
 | `DELETE /api/slack/connection` | global `settings:write` | Forgets the credential with its emoji                                                                                                                                   |

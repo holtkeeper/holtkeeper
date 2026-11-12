@@ -64,11 +64,16 @@ let posts: { channel: string; threadTs?: string; text: string; ts: string }[]
 let updates: { channel: string; ts: string; text: string }[]
 let postFailing: { post?: string; update?: string }
 let logs: string[]
+let workspaceEmoji: Set<string>
+let attempts: string[]
 
 const fakeSlack: SlackApi = {
   addReaction: async ({ channel, ts, name }) => {
     if (slowMs) await Bun.sleep(slowMs)
+    attempts.push(name)
     if (failing.add) return { ok: false, error: failing.add }
+    if (name.startsWith('hk-') && !workspaceEmoji.has(name))
+      return { ok: false, error: 'invalid_name' }
     reactions.push(`+${name} ${channel}/${ts}`)
     return { ok: true }
   },
@@ -291,6 +296,8 @@ beforeEach(async () => {
   postFailing = {}
   postCount = 0
   logs = []
+  workspaceEmoji = new Set()
+  attempts = []
   titleLookups = []
   titleFailing = false
   mr = {
@@ -804,5 +811,126 @@ describe('slack status reply', () => {
         `:large_green_circle: Clean — <${MR_URL}/8|widget!8 Add gizmo>`,
       ].join('\n'),
     )
+  })
+})
+
+const HK_SET = ['hk-reviewing', 'hk-clean', 'hk-minor', 'hk-changes', 'hk-skipped']
+const TS = '1700000000.000100'
+
+describe('slack custom emoji', () => {
+  test("a workspace with Holtkeeper's emoji shows them", async () => {
+    workspaceEmoji = new Set(HK_SET)
+    await storeReview(review({ comments: [majorFinding] }))
+    await message(`ready ${link()}`)
+    expect(reactions).toEqual([`+hk-changes ${BOUND}/${TS}`])
+    const [tracked] = (await store.slackMessages?.ofMergeRequest('acme:shapes/widget', 7)) ?? []
+    expect(tracked).toMatchObject({ status: 'changes', reaction: 'hk-changes' })
+    await queueReview(NEXT)
+    expect(reactions).toEqual([
+      `+hk-changes ${BOUND}/${TS}`,
+      `-hk-changes ${BOUND}/${TS}`,
+      `+hk-reviewing ${BOUND}/${TS}`,
+    ])
+  })
+
+  test('a missing custom emoji falls back and is not tried again, also by another process', async () => {
+    await storeReview(review())
+    await message(`ready ${link()}`)
+    expect(attempts).toEqual(['hk-clean', 'large_green_circle'])
+    expect(reactions).toEqual([`+large_green_circle ${BOUND}/${TS}`])
+    const [tracked] = (await store.slackMessages?.ofMergeRequest('acme:shapes/widget', 7)) ?? []
+    expect(tracked?.reaction).toBe('large_green_circle')
+
+    attempts = []
+    await message(`again ${link()}`, { ts: '1700000000.000200' })
+    expect(attempts).toEqual(['large_green_circle'])
+
+    attempts = []
+    const other = createSlackReviews(deps, { log: (line) => logs.push(line) })
+    await other.handleMessage({ channel: BOUND, ts: '1700000000.000300', text: link() })
+    expect(attempts).toEqual(['large_green_circle'])
+    expect(logs).toEqual([])
+  })
+
+  test('an unchanged status keeps its fallback once the missing emoji is forgotten', async () => {
+    await storeReview(review())
+    await message(`ready ${link()}`)
+    attempts = []
+    const later = createSlackReviews(
+      { ...deps, now: () => new Date(NOW.getTime() + 7 * 60 * 60 * 1000) },
+      { log: (line) => logs.push(line) },
+    )
+    await later.reviewChanged({ repo: widget, mergeRequest: 7 })
+    expect(attempts).toEqual([])
+    expect(reactions).toEqual([`+large_green_circle ${BOUND}/${TS}`])
+  })
+
+  test('an add that was never confirmed is removed on the next swap, custom and fallback alike', async () => {
+    workspaceEmoji = new Set(HK_SET)
+    await storeReview(review())
+    await message(`ready ${link()}`)
+    const [tracked] = (await store.slackMessages?.ofMergeRequest('acme:shapes/widget', 7)) ?? []
+    if (!tracked) throw new Error('no tracked message')
+    await store.slackMessages?.put({ ...tracked, reaction: 'hk-clean|large_green_circle' })
+    reactions = []
+    await queueReview(NEXT)
+    expect(reactions).toEqual([
+      `-hk-clean ${BOUND}/${TS}`,
+      `-large_green_circle ${BOUND}/${TS}`,
+      `+hk-reviewing ${BOUND}/${TS}`,
+    ])
+    const [after] = (await store.slackMessages?.ofMergeRequest('acme:shapes/widget', 7)) ?? []
+    expect(after?.reaction).toBe('hk-reviewing')
+  })
+
+  test('a swap removes the emoji actually added', async () => {
+    await storeReview(review())
+    await message(`ready ${link()}`)
+    await queueReview(NEXT)
+    expect(reactions).toEqual([
+      `+large_green_circle ${BOUND}/${TS}`,
+      `-large_green_circle ${BOUND}/${TS}`,
+      `+eyes ${BOUND}/${TS}`,
+    ])
+    expect(attempts).toEqual(['hk-clean', 'large_green_circle', 'hk-reviewing', 'eyes'])
+    expect(shownOn()).toEqual({ [`${BOUND}/${TS}`]: ['eyes'] })
+  })
+
+  test('an override the workspace lacks is not replaced and is logged once', async () => {
+    await connect({ clean: 'hk-widget-ok' })
+    await storeReview(review())
+    await message(`ready ${link()}`)
+    await message(`again ${link()}`, { ts: '1700000000.000200' })
+    expect(attempts).toEqual(['hk-widget-ok', 'hk-widget-ok'])
+    expect(reactions).toEqual([])
+    expect(logs).toEqual([
+      'slack reviews: the workspace has no emoji hk-widget-ok; fix the override under Settings › Integrations › Slack',
+    ])
+  })
+
+  test('the status reply shows the emoji the reactions use', async () => {
+    workspaceEmoji = new Set(HK_SET)
+    await storeReview(review())
+    await storeSecond({ verdict: 'needs-changes' })
+    await message(`${link('shapes/widget', 7)} and ${link('shapes/widget', 8)}`)
+    expect(reactions).toEqual([`+hk-changes ${BOUND}/${TS}`])
+    expect(posts.map((post) => post.text)).toEqual([
+      [
+        `:hk-clean: Clean — <${MR_URL}/7|widget!7 Add widget>`,
+        `:hk-changes: Needs changes — <${MR_URL}/8|widget!8 Add gizmo>`,
+      ].join('\n'),
+    ])
+  })
+
+  test('without the set the status reply shows the fallbacks', async () => {
+    await storeReview(review())
+    await storeSecond({ verdict: 'needs-changes' })
+    await message(`${link('shapes/widget', 7)} and ${link('shapes/widget', 8)}`)
+    expect(posts.map((post) => post.text)).toEqual([
+      [
+        `:large_green_circle: Clean — <${MR_URL}/7|widget!7 Add widget>`,
+        `:red_circle: Needs changes — <${MR_URL}/8|widget!8 Add gizmo>`,
+      ].join('\n'),
+    ])
   })
 })

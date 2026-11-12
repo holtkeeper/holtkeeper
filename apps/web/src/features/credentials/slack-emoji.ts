@@ -10,3 +10,11 @@ export function slackEmojiError(value: string | undefined): string | undefined {
   if (name.length <= 100 && emojiName.test(name)) return undefined
   return 'A Slack emoji name such as eyes or large_green_circle'
 }
+
+/** Where Holtkeeper's custom review status emoji are kept, ready to upload to a workspace. */
+export const slackEmojiSetUrl = 'https://github.com/holtkeeper/.github/tree/main/slack/emoji'
+
+/** What a status without an override shows: its default, and the standard emoji it falls back to. */
+export function slackEmojiPlaceholder(defaultName: string, fallback: string): string {
+  return defaultName === fallback ? defaultName : `${defaultName}, falls back to ${fallback}`
+}

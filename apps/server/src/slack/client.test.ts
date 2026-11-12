@@ -39,6 +39,23 @@ test('adds and removes reactions, treating already done as success', async () =>
   ])
 })
 
+test('an unknown emoji fails an add without a log line and counts as removed', async () => {
+  const lines: string[] = []
+  const { fetch } = recording([
+    answer({ ok: false, error: 'invalid_name' }),
+    answer({ ok: false, error: 'invalid_name' }),
+  ])
+  const api = slackWebApi({ token: 'xoxb-widget', fetch, log: (line) => lines.push(line) })
+  expect(await api.addReaction({ channel: 'C0123ABCD', ts: '1.2', name: 'hk-widget' })).toEqual({
+    ok: false,
+    error: 'invalid_name',
+  })
+  expect(await api.removeReaction({ channel: 'C0123ABCD', ts: '1.2', name: 'hk-widget' })).toEqual({
+    ok: true,
+  })
+  expect(lines).toEqual([])
+})
+
 test('waits out a rate limit, then gives up without throwing', async () => {
   const waits: number[] = []
   const lines: string[] = []

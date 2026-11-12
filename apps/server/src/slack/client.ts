@@ -8,9 +8,12 @@ interface SlackResult {
 
 /** The Slack Web API calls the review status needs: reactions only. Implementations never throw. */
 export interface SlackApi {
-  /** `reactions.add`; `already_reacted` counts as success. */
+  /**
+   * `reactions.add`; `already_reacted` counts as success. An emoji the workspace lacks answers
+   * `invalid_name`.
+   */
   addReaction(input: { channel: string; ts: string; name: string }): Promise<SlackResult>
-  /** `reactions.remove`; `no_reaction` counts as success. */
+  /** `reactions.remove`; `no_reaction` and `invalid_name` (no such emoji) count as success. */
   removeReaction(input: { channel: string; ts: string; name: string }): Promise<SlackResult>
 }
 
@@ -89,6 +92,7 @@ function slackCaller(options: SlackWebApiOptions) {
     method: string,
     body: Record<string, unknown>,
     harmless: readonly string[] = [],
+    quiet: readonly string[] = [],
   ): Promise<SlackPostResult> => {
     for (let attempt = 0; ; attempt++) {
       let response: Response
@@ -133,7 +137,7 @@ function slackCaller(options: SlackWebApiOptions) {
         }
       const error = answer.error ?? `HTTP ${response.status}`
       if (harmless.includes(error)) return { ok: true }
-      log(`slack ${method}: ${error}`)
+      if (!quiet.includes(error)) log(`slack ${method}: ${error}`)
       return { ok: false, error }
     }
   }
@@ -149,16 +153,25 @@ const resultOf = async (pending: Promise<SlackPostResult>): Promise<SlackResult>
 /**
  * A `SlackApi` over `fetch` with a bot token. A 429 is retried after its `Retry-After`, within
  * the client's wait budget; failures
- * (HTTP, network, Slack errors other than the harmless ones) are logged and answered as
- * `{ ok: false, error }`, never thrown.
+ * (HTTP, network, Slack errors other than the harmless ones) are logged, except `invalid_name`
+ * of `reactions.add` that callers handle, and answered as `{ ok: false, error }`, never thrown.
  */
 export function slackWebApi(options: SlackWebApiOptions): SlackApi {
   const call = slackCaller(options)
   return {
     addReaction: ({ channel, ts, name }) =>
-      resultOf(call('reactions.add', { channel, timestamp: ts, name }, ['already_reacted'])),
+      resultOf(
+        call(
+          'reactions.add',
+          { channel, timestamp: ts, name },
+          ['already_reacted'],
+          ['invalid_name'],
+        ),
+      ),
     removeReaction: ({ channel, ts, name }) =>
-      resultOf(call('reactions.remove', { channel, timestamp: ts, name }, ['no_reaction'])),
+      resultOf(
+        call('reactions.remove', { channel, timestamp: ts, name }, ['no_reaction', 'invalid_name']),
+      ),
   }
 }
 

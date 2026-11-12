@@ -45,6 +45,13 @@ beforeEach(() => {
 const common = {
   emoji: {},
   defaultEmoji: {
+    reviewing: 'hk-reviewing',
+    clean: 'hk-clean',
+    minor: 'hk-minor',
+    changes: 'hk-changes',
+    skipped: 'hk-skipped',
+  },
+  fallbackEmoji: {
     reviewing: 'eyes',
     clean: 'large_green_circle',
     minor: 'large_orange_circle',

@@ -783,7 +783,8 @@ export type SlackReviewStatusName = 'reviewing' | 'clean' | 'minor' | 'changes' 
 
 /**
  * `GET /api/slack`: whether the Slack app credential (bot token and signing secret) is stored,
- * and the status emoji: the credential's overrides and the defaults they replace.
+ * and the status emoji: the credential's overrides, the defaults they replace and the standard
+ * emoji a default falls back to when the workspace lacks it.
  */
 export interface SlackSettingsView {
   configured: boolean
@@ -791,7 +792,10 @@ export interface SlackSettingsView {
   connectedBy?: string
   /** Emoji names (no colons) the credential overrides; absent statuses use `defaultEmoji`. */
   emoji: Partial<Record<SlackReviewStatusName, string>>
+  /** Holtkeeper's custom emoji, uploaded to the workspace from the holtkeeper/.github repository. */
   defaultEmoji: Record<SlackReviewStatusName, string>
+  /** What a status without an override shows when the workspace lacks its default emoji. */
+  fallbackEmoji: Record<SlackReviewStatusName, string>
   /** Path of the Events API request URL, e.g. `/api/slack/events`. */
   eventsPath: string
 }

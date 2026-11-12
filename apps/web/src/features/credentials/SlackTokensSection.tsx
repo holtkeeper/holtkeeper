@@ -17,7 +17,7 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
-import { slackEmojiError } from './slack-emoji.ts'
+import { slackEmojiError, slackEmojiPlaceholder, slackEmojiSetUrl } from './slack-emoji.ts'
 
 const statusLabels: Readonly<Record<SlackReviewStatusName, string>> = {
   reviewing: 'Reviewing',
@@ -68,7 +68,10 @@ function SlackEmojiForm({ view }: { view: SlackSettingsView }) {
             label={statusLabels[status]}
             value={draft[status] ?? ''}
             onChange={(value) => setDraft((current) => ({ ...current, [status]: value }))}
-            placeholder={view.defaultEmoji[status]}
+            placeholder={slackEmojiPlaceholder(
+              view.defaultEmoji[status],
+              view.fallbackEmoji[status],
+            )}
             error={slackEmojiError(draft[status])}
             autoComplete="off"
             mono
@@ -76,7 +79,11 @@ function SlackEmojiForm({ view }: { view: SlackSettingsView }) {
         ))}
       </div>
       <p className="text-xs text-muted">
-        Slack emoji names without colons; blank fields use the default shown.
+        Slack emoji names without colons; blank fields use the default shown. The defaults are{' '}
+        <a href={slackEmojiSetUrl} target="_blank" rel="noreferrer" className="underline">
+          Holtkeeper's emoji set
+        </a>
+        : upload it to the workspace under its file names, or the standard fallbacks show instead.
       </p>
       <div>
         <Button
@@ -103,7 +110,8 @@ function SlackEmojiList({ view }: { view: SlackSettingsView }) {
           <div key={status}>
             <dt className="text-xs text-muted">{statusLabels[status]}</dt>
             <dd className="font-mono text-[13px]">
-              {view.emoji[status] ?? view.defaultEmoji[status]}
+              {view.emoji[status] ??
+                slackEmojiPlaceholder(view.defaultEmoji[status], view.fallbackEmoji[status])}
             </dd>
           </div>
         ))}

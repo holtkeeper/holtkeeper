@@ -13,6 +13,7 @@ import {
 } from '../mr-status.ts'
 import { type SlackApi, type SlackPoster, slackWebApi, slackWebPoster } from './client.ts'
 import { type SlackConnection, slackConnection } from './connection.ts'
+import { type SlackEmojiChoice, slackEmojiCatalog } from './emoji.ts'
 import { type MergeRequestLink, mergeRequestLinks } from './links.ts'
 import { latestReview, reviewStatusOf, statusListText, worstStatus } from './status.ts'
 
@@ -24,6 +25,15 @@ const LOCK_POLL_MS = 200
 const LOCK_WAIT_MS = 60_000
 
 /** Slack errors meaning the message can no longer carry a reaction from the bot. */
+const TRACKED_SEPARATOR = '|'
+
+/**
+ * The emoji a stored reaction stands for. Before an add, both the custom emoji and its fallback
+ * are recorded, so an add that succeeded but was never confirmed is still removed next time.
+ */
+const trackedNames = (reaction: string | undefined) =>
+  reaction ? reaction.split(TRACKED_SEPARATOR).filter(Boolean) : []
+
 const goneErrors = new Set(['message_not_found', 'channel_not_found', 'not_in_channel'])
 
 /** Slack errors meaning the bot token cannot post: the app lacks `chat:write`. */
@@ -116,7 +126,9 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
  * in its thread listing each one's status, edited in place as they change and kept (listing
  * what is left) when the set shrinks, and left as it was once none is; without `chat:write` only the reaction is set. Updates of
  * one message, reaction and reply together, are applied one at a time, across processes sharing
- * the store. Without a stored Slack credential or a
+ * the store. Statuses without an override show Holtkeeper's custom emoji where the workspace
+ * has them and the standard fallback where it does not (learned from `reactions.add`, see
+ * `SlackEmojiCatalog`); overrides are used as given. Without a stored Slack credential or a
  * store for messages it does nothing. Nothing here throws: failures are logged.
  */
 export function createSlackReviews(
@@ -134,6 +146,16 @@ export function createSlackReviews(
       deps.slackPoster?.(connection.botToken) ??
       slackWebPoster({ token: connection.botToken, log: posterLog }),
   })
+
+  const catalog = slackEmojiCatalog(deps)
+  const invalidLogged = new Set<string>()
+  const noteInvalidOverride = (name: string) => {
+    if (invalidLogged.has(name)) return
+    invalidLogged.add(name)
+    log(
+      `slack reviews: the workspace has no emoji ${name}; fix the override under Settings › Integrations › Slack`,
+    )
+  }
 
   let scopeLogged = false
   const noteFailedPost = (error: string | undefined) => {
@@ -206,7 +228,7 @@ export function createSlackReviews(
   const syncReply = async (
     messages: SlackMessageStore,
     poster: SlackPoster,
-    connection: SlackConnection,
+    emoji: Readonly<Record<SlackReviewStatus, string>>,
     channel: string,
     ts: string,
     links: readonly SlackMessageLink[],
@@ -230,7 +252,7 @@ export function createSlackReviews(
           label: title ? `${label} ${title}` : label,
         }
       }),
-      connection.emoji,
+      emoji,
     )
     if (existing?.text === text) return titles
     const at = deps.now().toISOString()
@@ -293,9 +315,38 @@ export function createSlackReviews(
   }
 
   /**
+   * Adds the emoji `choice` names, its standard fallback when the workspace lacks that default
+   * custom one. Resolves with the emoji added (none when the add failed), or `gone` for a message Slack no
+   * longer has.
+   */
+  const addStatusReaction = async (
+    api: SlackApi,
+    connection: SlackConnection,
+    channel: string,
+    ts: string,
+    choice: SlackEmojiChoice,
+  ): Promise<{ gone: true } | { name?: string }> => {
+    let name = choice.name
+    let added = await api.addReaction({ channel, ts, name })
+    if (added.error === 'invalid_name') {
+      if (!choice.fallback) noteInvalidOverride(name)
+      else {
+        await catalog.remember(connection, name, false)
+        name = choice.fallback
+        added = await api.addReaction({ channel, ts, name })
+      }
+    } else if (added.ok && choice.fallback && choice.known === undefined)
+      await catalog.remember(connection, name, true)
+    if (added.error && goneErrors.has(added.error)) return { gone: true }
+    return added.ok ? { name } : {}
+  }
+
+  /**
    * Applies `change` to a message's links and makes its reaction and status reply match them,
    * under the message's lock. A failed remove keeps the old emoji tracked and adds nothing, so
-   * the next update retries the swap; a message Slack no longer has is forgotten.
+   * the next update retries the swap; a message Slack no longer has is forgotten. The emoji
+   * tracked is the one actually added; a fallback already shown is kept while the workspace is
+   * not known to have the custom emoji.
    */
   const settle = (
     { api, poster }: SlackClients,
@@ -312,27 +363,37 @@ export function createSlackReviews(
       await change(before)
       const links = await messages.ofMessage(channel, ts)
       const worst = worstStatus(links.map((link) => link.status))
-      const wanted = worst && connection.emoji[worst]
+      const choice = worst ? await catalog.choose(connection, worst) : undefined
+      const keptFallback =
+        current !== undefined && choice?.known !== true && choice?.fallback === current
       let shown = current
-      if (wanted !== current) {
-        const removed = current
-          ? await api.removeReaction({ channel, ts, name: current })
-          : undefined
+      if (choice?.name !== current && !keptFallback) {
+        let removed: Awaited<ReturnType<SlackApi['removeReaction']>> | undefined
+        for (const name of trackedNames(current)) {
+          // oxlint-disable-next-line no-await-in-loop -- at most two names, removed in order
+          removed = await api.removeReaction({ channel, ts, name })
+          if (!removed.ok) break
+        }
         if (removed?.error && goneErrors.has(removed.error)) {
           await messages.delete(channel, ts)
           return
         }
         if (!removed || removed.ok) {
-          shown = undefined
-          const added = wanted ? await api.addReaction({ channel, ts, name: wanted }) : undefined
-          if (added?.error && goneErrors.has(added.error)) {
+          const intended = choice
+            ? [choice.name, choice.fallback].filter(Boolean).join(TRACKED_SEPARATOR)
+            : undefined
+          if (intended)
+            await Promise.all(links.map((link) => messages.put({ ...link, reaction: intended })))
+          const added = choice ? await addStatusReaction(api, connection, channel, ts, choice) : {}
+          if ('gone' in added) {
             await messages.delete(channel, ts)
             return
           }
-          if (added?.ok) shown = wanted
+          shown = added.name ?? intended
         }
       }
-      const titles = await syncReply(messages, poster, connection, channel, ts, links)
+      const emoji = await catalog.textEmoji(connection)
+      const titles = await syncReply(messages, poster, emoji, channel, ts, links)
       await Promise.all(
         links
           .filter((link) => link.reaction !== shown || titles.has(rowKey(link)))
