@@ -9,15 +9,17 @@ import {
   useState,
 } from 'react'
 
-import { type ScopeView, foldOtherTeams } from '../lib/home-scope.ts'
+import { usePreferences } from '../api/queries.ts'
+import { type ScopeView, foldScope } from '../lib/home-scope.ts'
 import { fleetKeyCommand, stepKey } from '../lib/repos.ts'
 import { isEditableTarget } from '../lib/slash-focus.ts'
 import type { SortState } from '../lib/table-sort.ts'
+import { Loading } from './Feedback.tsx'
 import { type LegendItem, Legend } from './Legend.tsx'
 import { ListFooter } from './ListFooter.tsx'
 import { Kbd } from './Misc.tsx'
 import { OtherTeams } from './OtherTeams.tsx'
-import { ScopeSwitch } from './ScopeSwitch.tsx'
+import { ChooseTeamsLink, NoTeamsState, ScopeSwitch } from './ScopeSwitch.tsx'
 import { type StripCell, Strip } from './Strip.tsx'
 import { Table, Td, Th } from './Table.tsx'
 
@@ -45,7 +47,9 @@ const fromControl = (target: EventTarget | null) =>
  * The fleet list every workspace shares: a toolbar with the scope switch ("My teams | All I can
  * see"), the caller's filters and a legend; a summary `Strip` over the rows in scope; a sortable
  * table; and, in *My teams*, other teams' rows folded into one "Other teams · N" row that opens
- * them in place. `rows` arrive filtered and sorted; the table only splits them by home groups.
+ * them in place. A group position shows that group's rows, nothing folded; *My teams* waits for
+ * preferences, and without home groups keeps only rows in no group and links to choosing them. `rows` arrive filtered and sorted; the table only
+ * splits them by scope.
  * With `onOpen`, J and K select the next and previous row, Enter and a click open it.
  *
  * @public
@@ -100,9 +104,12 @@ export function FleetTable<T extends { groups: readonly string[] }, K extends st
 }) {
   const view = scope?.value ?? 'all'
   const homeGroups = scope?.homeGroups ?? []
-  const folded = foldOtherTeams(rows, homeGroups, (row) => row.groups)
-  const shown = view === 'mine' ? folded.mine : rows
-  const others = view === 'mine' ? folded.others : []
+  const folded = foldScope(rows, view, homeGroups, (row) => row.groups)
+  const { shown, others } = folded
+  const preferences = usePreferences()
+  const mineScope = scope !== undefined && view === 'mine'
+  const pending = mineScope && preferences.isPending
+  const noTeams = mineScope && preferences.isSuccess && !homeGroups.length
   const [othersOpen, setOthersOpen] = useState(false)
   const [selected, setSelected] = useState<string>()
   const body = useRef<HTMLTableSectionElement>(null)
@@ -181,8 +188,8 @@ export function FleetTable<T extends { groups: readonly string[] }, K extends st
     )
   }
 
-  const cells = strip?.(shown, view)
-  const total = view === 'mine' ? shown.length : rows.length
+  const cells = pending ? undefined : strip?.(shown, view)
+  const total = view === 'all' ? rows.length : shown.length
 
   return (
     <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel">
@@ -192,11 +199,13 @@ export function FleetTable<T extends { groups: readonly string[] }, K extends st
             <ScopeSwitch
               value={scope.value}
               onChange={scope.onChange}
-              counts={{ mine: folded.mine.length, all: rows.length }}
+              counts={folded.counts}
+              teamsLink={false}
             />
           ) : null}
           {scope && toolbar ? <span aria-hidden className="mx-1 h-4 w-px bg-line" /> : null}
           {toolbar}
+          {scope ? <ChooseTeamsLink /> : null}
           {legend?.length ? (
             <Legend items={legend} label="Status legend" className="ms-auto" />
           ) : null}
@@ -204,8 +213,12 @@ export function FleetTable<T extends { groups: readonly string[] }, K extends st
       ) : null}
       {cells?.length ? <Strip cells={cells} /> : null}
       {stripExtra ? <div className="border-b border-line">{stripExtra}</div> : null}
-      {shown.length === 0 && others.length === 0 && empty ? (
-        <div className="p-4">{empty}</div>
+      {pending ? (
+        <div className="p-4">
+          <Loading />
+        </div>
+      ) : shown.length === 0 && others.length === 0 && (empty || noTeams) ? (
+        <div className="p-4">{noTeams ? <NoTeamsState /> : empty}</div>
       ) : (
         <Table label={label}>
           <thead>

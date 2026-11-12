@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { CredentialView } from '@holtkeeper/api'
+import type { CredentialView, LimitUsageRow } from '@holtkeeper/api'
 
 import {
   credentialGroup,
   credentialStatus,
   lastUsedLabel,
-  limitRows,
+  limitStatus,
+  limitUsageViews,
   needsAttention,
   sortCredentials,
   usedByLabel,
@@ -147,41 +148,137 @@ describe('table helpers', () => {
   })
 })
 
-describe('limitRows', () => {
-  test('lists configured limits with only the fields set', () => {
-    const rows = limitRows(
+const usage = (overrides: Partial<LimitUsageRow> = {}): LimitUsageRow => ({
+  key: 'c1',
+  credentialId: 'c1',
+  name: 'widget-bot',
+  kind: 'gitlab',
+  policy: { maxConcurrent: 8, requestsPerMinute: 300 },
+  source: 'default',
+  requestsLastHour: 412,
+  tokensLastHour: 0,
+  inFlight: 3,
+  dayTokens: 0,
+  dayCostUsd: 0,
+  ...overrides,
+})
+
+describe('limitUsageViews', () => {
+  test('converts per-minute policies to hourly limits with clear units', () => {
+    const [row] = limitUsageViews([usage()], now)
+    expect(row).toEqual({
+      key: 'c1',
+      name: 'widget-bot',
+      kind: 'gitlab',
+      missing: false,
+      limit: '18,000 requests / hour',
+      limitDetail: '300 per minute · kind default',
+      meter: { unit: 'requests', used: 412, max: 18_000, share: 412 / 18_000 },
+      used: '412 · 2%',
+      atOnce: '3 / 8',
+      daily: '—',
+      status: { state: 'within', label: 'Within limit', tone: 'success' },
+    })
+  })
+
+  test('AI keys show tokens per hour and their daily caps', () => {
+    const [row] = limitUsageViews(
       [
-        {
-          id: 'l1',
-          key: 'limits.credentials',
-          secret: false,
-          value: {
-            c1: { requestsPerMinute: 300, maxConcurrent: 8 },
-            'gadget-key': { costPerDayUsd: 20, backoff: { onStatus: [429], baseMs: 1, maxMs: 2 } },
-            unknown: {},
+        usage({
+          kind: 'anthropic',
+          source: 'configured',
+          policy: {
+            maxConcurrent: 3,
+            tokensPerMinute: 40_000,
+            tokensPerDay: 1_000_000,
+            costPerDayUsd: 150,
           },
-        },
-        { id: 'x', key: 'trackers', secret: false, value: {} },
+          requestsLastHour: 0,
+          tokensLastHour: 1_200_000,
+          dayTokens: 300_000,
+          dayCostUsd: 12.5,
+          inFlight: 0,
+        }),
       ],
-      [
-        { id: 'c1', name: 'widget-bot', kind: 'gitlab' },
-        { id: 'c2', name: 'gadget-key', kind: 'anthropic' },
-      ],
+      now,
     )
-    expect(rows).toEqual([
-      {
-        settingId: 'l1',
-        key: 'c1',
-        credential: { id: 'c1', name: 'widget-bot', kind: 'gitlab' },
-        limit: '300 requests/min · 8 at once',
-      },
-      {
-        settingId: 'l1',
-        key: 'gadget-key',
-        credential: { id: 'c2', name: 'gadget-key', kind: 'anthropic' },
-        limit: '$20/day · custom backoff',
-      },
-      { settingId: 'l1', key: 'unknown', limit: 'Kind defaults' },
-    ])
+    expect(row).toMatchObject({
+      limit: '2,400,000 tokens / hour',
+      limitDetail: '40,000 tokens per minute · set here',
+      used: '1,200,000 · 50%',
+      atOnce: '0 / 3',
+      daily: '300,000 of 1,000,000 tokens · $12.50 of $150',
+    })
+  })
+
+  test('without limits the counts stay readable', () => {
+    const [row] = limitUsageViews([usage({ policy: {}, requestsLastHour: 7 })], now)
+    expect(row).toMatchObject({
+      limit: 'No rate limit',
+      used: '7 requests',
+      atOnce: '3',
+      status: { state: 'unlimited', label: 'No limit' },
+    })
+    expect(row?.meter).toBeUndefined()
+  })
+
+  test('sorts the most urgent first and unknown keys last', () => {
+    const rows = limitUsageViews(
+      [
+        usage({ key: 'a', name: 'alpha' }),
+        usage({ key: 'ghost', name: 'ghost', missing: true, policy: { requestsPerMinute: 1 } }),
+        usage({ key: 'b', name: 'beta', requestsLastHour: 17_000 }),
+      ],
+      now,
+    )
+    expect(rows.map((row) => row.key)).toEqual(['b', 'a', 'ghost'])
+  })
+})
+
+describe('limitStatus', () => {
+  test('a used-up daily cap wins', () => {
+    expect(
+      limitStatus(
+        usage({
+          policy: { costPerDayUsd: 10 },
+          dayCostUsd: 10,
+          coolDownUntil: '2026-11-12T12:05:00.000Z',
+        }),
+        now,
+      ),
+    ).toMatchObject({ state: 'capped', label: 'Daily cap reached', tone: 'danger' })
+  })
+
+  test('an active cool-down names when it ends', () => {
+    const until = '2026-11-12T12:05:00.000Z'
+    const time = new Date(until).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })
+    expect(limitStatus(usage({ coolDownUntil: until }), now)).toMatchObject({
+      state: 'cooling',
+      label: `Cooling down until ${time}`,
+      tone: 'warning',
+    })
+    expect(limitStatus(usage({ coolDownUntil: '2026-11-12T11:59:00.000Z' }), now).state).toBe(
+      'within',
+    )
+  })
+
+  test('near the limit from 90% of an hourly or daily limit', () => {
+    expect(limitStatus(usage({ requestsLastHour: 16_200 }), now)).toMatchObject({
+      state: 'near',
+      label: 'Near limit',
+      why: '90% of the hourly requests limit used',
+    })
+    expect(limitStatus(usage({ requestsLastHour: 16_199 }), now).state).toBe('within')
+    expect(
+      limitStatus(usage({ policy: { tokensPerDay: 1000 }, dayTokens: 950 }), now),
+    ).toMatchObject({ state: 'near', why: '95% of the daily cap used' })
+  })
+
+  test('a rate-limit answer within the last hour reads as near the limit', () => {
+    expect(limitStatus(usage({ last429At: '2026-11-12T11:40:00.000Z' }), now)).toMatchObject({
+      state: 'near',
+      why: 'Rate limited 20 minutes ago',
+    })
+    expect(limitStatus(usage({ last429At: '2026-11-12T10:30:00.000Z' }), now).state).toBe('within')
   })
 })

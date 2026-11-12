@@ -1,9 +1,10 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronRight, FolderGit2, Plus } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
-import { useGroups, useRepos } from '../../api/queries.ts'
+import { useGroups, useGroupTitles, useRepos } from '../../api/queries.ts'
 import { plural } from '../../lib/format.ts'
+import { type GroupTitleOf, groupMatchesQuery } from '../../lib/group-titles.ts'
 import { type GroupRow, groupHealthText, groupRows } from '../../lib/repos.ts'
 import { type SortState, sortRows } from '../../lib/table-sort.ts'
 import {
@@ -21,8 +22,12 @@ import { AddRepoDialog } from './AddRepoDialog.tsx'
 
 type GroupSortKey = 'group' | 'members' | 'failing'
 
-const sortValue = (row: GroupRow, key: GroupSortKey) =>
-  key === 'group' ? row.id : key === 'members' ? row.members.length : -row.counts.failing
+const sortValueOf = (titleOf: GroupTitleOf) => (row: GroupRow, key: GroupSortKey) =>
+  key === 'group'
+    ? titleOf(row.id).toLowerCase()
+    : key === 'members'
+      ? row.members.length
+      : -row.counts.failing
 
 /**
  * Every group the viewer can see: configured ones (with global `settings:read`) and those its
@@ -37,16 +42,18 @@ export function GroupsPage() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortState<GroupSortKey>>(null)
   const [adding, setAdding] = useState(false)
+  const titleOf = useGroupTitles()
+  const columns = useMemo(() => columnsFor(titleOf), [titleOf])
   const needle = query.trim().toLowerCase()
   const rows = sortRows(
     groupRows(repos.data?.repos ?? [], config.data?.entries ?? []).filter(
       (row) =>
         !needle ||
-        row.id.includes(needle) ||
+        groupMatchesQuery(row.id, titleOf, needle) ||
         row.include?.some((pattern) => pattern.toLowerCase().includes(needle)),
     ),
     sort,
-    sortValue,
+    sortValueOf(titleOf),
   )
   const canAdd = canGlobal('settings:write')
 
@@ -58,7 +65,7 @@ export function GroupsPage() {
         value: query,
         onChange: setQuery,
         'aria-label': 'Filter groups',
-        placeholder: 'Filter by name or pattern',
+        placeholder: 'Filter by name, key or pattern',
       }}
       {...(canAdd
         ? { primary: { label: 'Add repository', icon: Plus, onPress: () => setAdding(true) } }
@@ -109,7 +116,7 @@ export function GroupsPage() {
   )
 }
 
-const columns: readonly FleetColumn<GroupRow, GroupSortKey>[] = [
+const columnsFor = (titleOf: GroupTitleOf): readonly FleetColumn<GroupRow, GroupSortKey>[] => [
   {
     id: 'group',
     header: 'Group',
@@ -121,9 +128,15 @@ const columns: readonly FleetColumn<GroupRow, GroupSortKey>[] = [
           params={{ groupId: row.id }}
           className="font-medium hover:underline"
         >
-          {row.id}
+          {titleOf(row.id)}
         </Link>
-        {row.forge ? <span className="mono text-[11px] text-dim">{row.forge}</span> : null}
+        {titleOf(row.id) !== row.id || row.forge ? (
+          <span className="mono text-[11px] text-dim">
+            {[titleOf(row.id) !== row.id ? row.id : undefined, row.forge]
+              .filter(Boolean)
+              .join(' · ')}
+          </span>
+        ) : null}
       </div>
     ),
   },
@@ -177,7 +190,7 @@ const columns: readonly FleetColumn<GroupRow, GroupSortKey>[] = [
       <Link
         to="/repos/groups/$groupId"
         params={{ groupId: row.id }}
-        aria-label={`Open group ${row.id}`}
+        aria-label={`Open group ${titleOf(row.id)}`}
         className="inline-flex text-muted hover:text-foreground"
       >
         <ChevronRight className="size-4" />

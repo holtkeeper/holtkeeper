@@ -142,6 +142,13 @@ export interface MeResponse {
   version?: string
   /** The instance's own address (`server.publicUrl`), when configured. */
   publicUrl?: string
+  /**
+   * Display titles of the titled config groups the principal may know about, by group key: every
+   * group with global `settings:read`, otherwise the groups its grants name and the groups of the
+   * repositories it may list; empty when signed out. Show the title wherever a group is shown to
+   * people; the key stays the identity.
+   */
+  groupTitles: Record<string, string>
 }
 
 /** Levels of the `access.crossTeam` setting. */
@@ -523,6 +530,8 @@ export interface RepoSummary {
   updates?: RepoUpdatesSummary
   /** The newest audit run, when the caller holds `audits:read`. */
   latestAudit?: AuditRunSummary
+  /** Set when `repo.tests` says the repository has no tests by design. */
+  noTests?: { reason?: string }
 }
 
 /**
@@ -559,6 +568,11 @@ export interface ChatParticipantView {
 export interface ChatThreadView {
   id: string
   title: string
+  /**
+   * Present while `title` is a placeholder: the thread was created without a title and is named
+   * from its first message shortly after it is posted.
+   */
+  titlePending?: true
   /** `forge:path` of the repository it is about. */
   repo?: string
   /** Config group it is about. */
@@ -664,7 +678,12 @@ export interface ChatPeopleView {
  * repositories (`forge:path`) attached as context; each must be readable by the caller (403).
  */
 export interface ChatThreadInput {
-  title: string
+  /**
+   * Optional: when missing or blank the thread starts with a placeholder title (`titlePending`)
+   * and the server names it from its first message, in that message's language, at most 60
+   * characters. A title set later with `PATCH` is never replaced.
+   */
+  title?: string
   repo?: string
   group?: string
   autoReply?: boolean
@@ -1195,6 +1214,28 @@ export interface RepoCoverageView {
   changes: CoverageFileChange[]
   /** The job that produced the card's record; absent for uploads, pruned jobs or without access. */
   job?: AnalysisJobSummary
+  /**
+   * How `repo.tests` applies: present when tests are not expected, or when the caller may change
+   * it for this repository (`configurable`).
+   */
+  tests?: RepoCoverageTests
+}
+
+/** `repo.tests` for one repository, as `GET /api/coverage/repo` describes it. */
+export interface RepoCoverageTests {
+  expected: boolean
+  reason?: string
+  /** Scope of the entry that decides it; absent for the default or without `settings:read` on it. */
+  scope?: Scope
+  /**
+   * Id of the repository's own entry (scoped to exactly `forge:path`), whether or not it decides;
+   * only for `configurable` callers and only when such an entry exists.
+   */
+  entryId?: string
+  /** What applies once that own entry is removed; set together with `entryId`. */
+  inherited?: boolean
+  /** Set when the caller may write `repo.tests` for exactly this repository and its own entry. */
+  configurable?: true
 }
 
 /** Total bytes and policy violations of one assets record. */
@@ -3503,6 +3544,39 @@ export interface AiSpendForecast {
   automaticWeeklyMeanUsd: number
   /** Full past weeks the forecast averages, 0 to 4; 0 when it extends this week's pace instead. */
   weeks: number
+  /**
+   * The rest of the week by day, today first, on `GET /api/ai/overview`: `usd` sums to
+   * `forecastUsd - spentUsd`, `automaticUsd` to `automaticForecastUsd - automaticUsd`.
+   */
+  days?: AiForecastDay[]
+}
+
+/** Expected spend of one remaining day of the budget week. */
+export interface AiForecastDay {
+  /** Local date in the instance time zone, `YYYY-MM-DD`. */
+  day: string
+  /** Expected spend of what is left of that day. */
+  usd: number
+  /** Part of `usd` expected from automatic work. */
+  automaticUsd: number
+}
+
+/**
+ * Spend caps fixed in code, outside the weekly budgets: what one write task and one chat reply may
+ * spend. Read-only; budgets narrow spend further.
+ */
+export interface AiSpendCaps {
+  /** Cap of a write task that names none, in USD. */
+  writeTaskUsd: number
+  /** Highest cap a write task may ask for, in USD. */
+  writeTaskMaxUsd: number
+  /** Cap of one chat reply, in USD. */
+  chatReplyUsd: number
+  /**
+   * Mean cost of a chat reply that ran in the overview's current period, over what the caller may
+   * read (narrowing filters left out); absent without replies.
+   */
+  chatReplyAvgUsd?: number
 }
 
 /** The spans `GET /api/ai/overview` reports: this budget week, this UTC month, the last 30 days. */
@@ -3520,9 +3594,12 @@ export interface AiUsagePeriod {
 }
 
 /**
- * `GET /api/ai/overview?period=week|month|30d&groups=`: one period at a glance, limited to what the
- * caller may see; `groups` (comma list of config groups) narrows it further and never widens it.
- * The default period is `week`.
+ * `GET /api/ai/overview?period=week|month|30d&groups=&feature=&origin=&model=&taskKind=`: one
+ * period at a glance, limited to what the caller may see; `groups` (comma list of config groups)
+ * narrows it further and never widens it. `feature` (a feature's task kinds), `origin`, `model` and
+ * `taskKind` narrow the totals, top lists and forecast as well; `budgets` (and so
+ * `automaticStopsAt`) and `caps` always show the real, unnarrowed figures. The default period is
+ * `week`.
  */
 export interface AiUsageOverview {
   period: AiUsagePeriodKind
@@ -3551,6 +3628,7 @@ export interface AiUsageOverview {
   automaticStopsAt?: Timestamp
   /** This budget week's forecast over everything the overview covers, whatever `period` is. */
   forecast: AiSpendForecast
+  caps: AiSpendCaps
 }
 
 /**
@@ -4271,12 +4349,47 @@ export interface McpUsageOverview {
   tools: { tool: string; calls: number; errors: number }[]
   packages: { name: string; calls: number }[]
   clients: { client: string; calls: number }[]
-  /** Per principal; only for callers with `users:read`, else just the caller. */
-  people: { id: string; name: string; calls: number }[]
+  /** Per principal, most calls first; only for callers with `users:read`, else just the caller. */
+  people: McpPersonUsage[]
+  /** The caller's own calls; zero when it made none. */
+  me: McpPersonUsage
+  /** Calls per token of the caller's own tokens, most first; other people's tokens never show. */
+  tokens: McpTokenUsage[]
   /** Newest first; other people's calls only for callers with `users:read`. */
   recent: McpCallView[]
   /** URL to configure in MCP clients. */
   endpoint: string
+}
+
+/** One person's MCP calls over the days of an `McpUsageOverview`. */
+export interface McpPersonUsage {
+  id: string
+  name: string
+  calls: number
+  errors: number
+  /** Newest call; absent when the person made none in the window. */
+  lastAt?: Timestamp
+  /** The 10 most used tools, most first. */
+  tools: { tool: string; calls: number }[]
+  /** The 10 packages the person's calls asked about most, most first. */
+  packages: { name: string; calls: number }[]
+  /** The 10 MCP clients the person called from most, most first. */
+  clients: { client: string; calls: number }[]
+  /** Calls per day, aligned with `McpUsageOverview.days`. */
+  daily: number[]
+  /** Failed calls per day, aligned with `McpUsageOverview.days`. */
+  dailyErrors: number[]
+  /** The person's home groups (picked, else from their grants); empty when unknown. */
+  teams: GroupMatch[]
+  /** MCP tokens the person holds that have not expired. */
+  activeTokens: number
+}
+
+/** Calls one MCP token made over the days of an `McpUsageOverview`. */
+export interface McpTokenUsage {
+  /** `McpTokenView.id`. */
+  id: string
+  calls: number
 }
 
 /** A library row of `GET /api/system/library-index`. */
@@ -4831,4 +4944,54 @@ export interface AgentTaskGroupInput {
   run?: boolean
   /** Where the request came from; chat sources are set by the server only. */
   source?: Exclude<AgentTaskSource, { type: 'chat' }>
+}
+
+// Request limits usage (Settings › Integrations › Request limits)
+
+/** The effective limits of one limiter key; omitted fields are unlimited. */
+export interface LimitUsagePolicy {
+  maxConcurrent?: number
+  requestsPerMinute?: number
+  /** Request units that may be spent at once; defaults to `requestsPerMinute`. */
+  burst?: number
+  tokensPerMinute?: number
+  tokensPerDay?: number
+  costPerDayUsd?: number
+}
+
+/** Live usage of one credential's request limits. */
+export interface LimitUsageRow {
+  /** The limiter key: a credential id, `forge:<id>` for a forge without one, or a configured key. */
+  key: string
+  credentialId?: string
+  /** The credential's name, `Forge <id>`, or the configured key when nothing matches it. */
+  name: string
+  kind?: string
+  /** A `limits.credentials` entry names a key no credential or forge has. */
+  missing?: boolean
+  policy: LimitUsagePolicy
+  /** `configured` when a `limits.credentials` entry sets any field, else the kind defaults. */
+  source: 'configured' | 'default'
+  /** Request units granted over the last 60 minutes. */
+  requestsLastHour: number
+  /** AI tokens of finished work over the last 60 minutes. */
+  tokensLastHour: number
+  /** Leases held now. */
+  inFlight: number
+  /** ISO 8601; present while a cool-down after a rate-limit answer is active. */
+  coolDownUntil?: string
+  /** ISO 8601 time of the last rate-limit answer. */
+  last429At?: string
+  /** AI tokens and USD counted for the current UTC day. */
+  dayTokens: number
+  dayCostUsd: number
+}
+
+/** `GET /api/limits/usage`. */
+export interface LimitUsageList {
+  rows: LimitUsageRow[]
+  /** True when the counters are shared by every server process; false when they cover this one only. */
+  shared: boolean
+  /** ISO 8601 time the counters were read; the answer may be cached for a few seconds. */
+  readAt: string
 }

@@ -2,13 +2,13 @@ import { type LinkProps, useLocation } from '@tanstack/react-router'
 import { SlidersHorizontal } from 'lucide-react'
 import { type ComponentType, type ReactNode, useRef } from 'react'
 
-import type { ScopeView } from '../lib/home-scope.ts'
+import type { ScopeCounts, ScopeView } from '../lib/home-scope.ts'
 import { currentTab } from '../lib/page-header.ts'
 import { Button, LinkButton } from './Button.tsx'
 import { type Crumb, Crumbs } from './Crumbs.tsx'
 import { Kbd, SearchInput } from './Misc.tsx'
 import { type MoreMenuItem, MoreMenu } from './MoreMenu.tsx'
-import { ScopeSwitch } from './ScopeSwitch.tsx'
+import { ChooseTeamsLink, ScopeSwitch } from './ScopeSwitch.tsx'
 import { SegmentedTabs } from './SegmentedTabs.tsx'
 import { useShell } from './shell.ts'
 import { useSlashFocus } from './useSlashFocus.ts'
@@ -113,7 +113,7 @@ export function Page({
   scope?: {
     value: ScopeView
     onChange: (view: ScopeView) => void
-    counts?: Record<ScopeView, number>
+    counts?: ScopeCounts
   }
   /** A search field that `/` focuses; the hint shows `/` unless `hint` says otherwise. */
   search?: {
@@ -144,12 +144,9 @@ export function Page({
         {trail?.length ? <Crumbs items={trail} /> : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="min-w-0">
-              <h1 className="truncate text-[14px] font-semibold leading-tight">
-                {title ?? workspace?.title}
-              </h1>
-              {description ? <p className="mt-0.5 text-sm text-muted">{description}</p> : null}
-            </div>
+            <h1 className="min-w-0 truncate text-[14px] font-semibold leading-tight">
+              {title ?? workspace?.title}
+            </h1>
             {tabs === false ? null : tabs?.length ? (
               <WorkspaceTabs tabs={tabs} label={tabsLabel ?? 'Sections'} />
             ) : (
@@ -170,12 +167,14 @@ export function Page({
             </div>
           ) : null}
         </div>
+        {description ? <p className="-mt-1 text-sm text-muted">{description}</p> : null}
         {scope || search || filters ? (
           <div className="flex flex-wrap items-center gap-2">
             {scope ? (
               <ScopeSwitch
                 value={scope.value}
                 onChange={scope.onChange}
+                teamsLink={false}
                 {...(scope.counts ? { counts: scope.counts } : {})}
               />
             ) : null}
@@ -197,6 +196,7 @@ export function Page({
               </div>
             ) : null}
             {filters}
+            {scope ? <ChooseTeamsLink /> : null}
           </div>
         ) : null}
       </header>

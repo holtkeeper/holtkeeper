@@ -6,6 +6,7 @@ import {
   useConfigEntries,
   useFreshnessOverview,
   useGroups,
+  useGroupTitles,
   useJobAnalyzers,
   useScheduleRuns,
   useSettings,
@@ -52,6 +53,7 @@ const views = [
  * Settings › Analyzers.
  */
 export function AutomationPage() {
+  const titleOf = useGroupTitles()
   const { canGlobal } = useSession()
   const writable = canGlobal('settings:write')
   const search = useSearch({ from: '/app/ops/automation' })
@@ -123,6 +125,7 @@ export function AutomationPage() {
     schedules: schedules.data.entries,
     settings: entries,
     analyzers: analyzers.data.analyzers,
+    titleOf,
   }
   const model: AutomationModel = {
     triggers: input.triggers,
@@ -164,7 +167,7 @@ export function AutomationPage() {
         onClose={done}
         title={
           creating?.kind === 'policy' && creating.group
-            ? `New rule for ${creating.group}`
+            ? `New rule for ${titleOf(creating.group)}`
             : 'New rule'
         }
         tabs={{

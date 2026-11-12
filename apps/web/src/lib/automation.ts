@@ -10,7 +10,14 @@ import type {
 } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
-import { inHomeGroups } from './home-scope.ts'
+import {
+  type ScopeCounts,
+  type ScopeView,
+  groupCounts,
+  groupView,
+  inHomeGroups,
+  viewGroup,
+} from './home-scope.ts'
 import { validateGroupId } from './repo.ts'
 import { formatGroupMatch, parseGroupMatch } from './scope.ts'
 
@@ -348,6 +355,36 @@ const EVERY_REPOSITORY = 'all'
  */
 export const inMyTeams = (lanes: readonly string[], homeGroups: readonly GroupMatch[]): boolean =>
   lanes.includes(EVERY_REPOSITORY) || inHomeGroups(homeGroups, lanes)
+
+/**
+ * Whether a rule with `lanes` belongs to a scope position: rules covering every repository belong
+ * to *My teams* and to every group.
+ */
+export function laneInView(
+  lanes: readonly string[],
+  view: ScopeView,
+  homeGroups: readonly GroupMatch[],
+): boolean {
+  if (view === 'all') return true
+  const group = viewGroup(view)
+  if (group === undefined) return inMyTeams(lanes, homeGroups)
+  return lanes.includes(EVERY_REPOSITORY) || lanes.includes(group)
+}
+
+/** Scope switch counts of rules by their lanes, as `laneInView` places them. */
+export const laneScopeCounts = (
+  lanesOf: readonly (readonly string[])[],
+  homeGroups: readonly GroupMatch[],
+): ScopeCounts => ({
+  mine: lanesOf.filter((lanes) => inMyTeams(lanes, homeGroups)).length,
+  all: lanesOf.length,
+  groups: groupCounts(
+    lanesOf.map((lanes) => lanes.filter((lane) => lane !== EVERY_REPOSITORY)),
+  ).map(({ group }) => ({
+    group,
+    count: lanesOf.filter((lanes) => laneInView(lanes, groupView(group), homeGroups)).length,
+  })),
+})
 
 /** What the schedule list filters by. */
 export interface ScheduleFilter {

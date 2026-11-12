@@ -1,5 +1,11 @@
 import { groupMatchSchema } from '@holtkeeper/access'
-import { everyPattern, isTimeZone, looksLikeCron, weekdays } from '@holtkeeper/core'
+import {
+  everyPattern,
+  groupTitleSchema,
+  isTimeZone,
+  looksLikeCron,
+  weekdays,
+} from '@holtkeeper/core'
 import type { ConfigDocumentType, TriggerDocumentData } from '@holtkeeper/store'
 import { Cron } from 'croner'
 import { z } from 'zod'
@@ -39,6 +45,7 @@ export const forgeDataSchema = z.object({
 })
 
 export const groupDataSchema = z.object({
+  title: groupTitleSchema.optional(),
   forge: configIdSchema,
   include: z.array(z.string().min(1)).min(1),
   exclude: z.array(z.string().min(1)).default([]),

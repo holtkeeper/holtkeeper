@@ -65,6 +65,10 @@ export interface KeySnapshot {
   last429At?: string
   dayTokens: number
   dayCostUsd: number
+  /** Request units granted over the last 60 minutes, in every process sharing the state. */
+  requestsLastHour: number
+  /** AI tokens of leases released over the last 60 minutes, in every process sharing the state. */
+  tokensLastHour: number
 }
 
 /**
@@ -89,6 +93,11 @@ export interface Limiter {
    * queued, all slots in use, or a daily cap used up.
    */
   saturated(key: string): Promise<boolean>
+  /**
+   * Metrics of every key this limiter or its shared state knows. Bucket levels are refilled with
+   * the policies configured in this process, so configure the keys first when another process
+   * did the work.
+   */
   snapshot(): Promise<Record<string, KeySnapshot>>
 }
 
@@ -101,6 +110,7 @@ export interface LimiterOptions {
 }
 
 const MINUTE = 60_000
+const WINDOW_MINUTES = 60
 
 type Decision =
   | { type: 'grant' }
@@ -141,6 +151,44 @@ function rollDay(state: KeyState, now: number) {
   state.day = day
   state.dayTokens = 0
   state.dayCostUsd = 0
+}
+
+const minuteOf = (ms: number) => Math.floor(ms / MINUTE)
+
+function recordUsage(
+  state: KeyState,
+  now: number,
+  add: { requests?: number; tokens?: number },
+  at = now,
+) {
+  const oldest = minuteOf(now) - WINDOW_MINUTES
+  const kept = (state.usage ?? []).filter((entry) => entry.minute > oldest)
+  const minute = minuteOf(at)
+  if (minute > oldest) {
+    const index = kept.findIndex((entry) => entry.minute === minute)
+    const entry = kept[index] ?? { minute, requests: 0, tokens: 0 }
+    const next = {
+      minute,
+      requests: Math.max(0, entry.requests + (add.requests ?? 0)),
+      tokens: Math.max(0, entry.tokens + (add.tokens ?? 0)),
+    }
+    if (index >= 0) kept[index] = next
+    else kept.push(next)
+    kept.sort((a, b) => a.minute - b.minute)
+  }
+  state.usage = kept
+}
+
+function lastHour(state: KeyState, now: number) {
+  const oldest = minuteOf(now) - WINDOW_MINUTES
+  let requests = 0
+  let tokens = 0
+  for (const entry of state.usage ?? []) {
+    if (entry.minute <= oldest) continue
+    requests += entry.requests
+    tokens += entry.tokens
+  }
+  return { requests, tokens }
 }
 
 function refill(state: KeyState, policy: LimitPolicy, now: number) {
@@ -204,6 +252,7 @@ function decide(state: KeyState, policy: LimitPolicy, need: Need, now: number): 
   if (state.requestLevel !== undefined) state.requestLevel -= need.requests
   if (state.tokenLevel !== undefined) state.tokenLevel -= need.tokens
   state.reservedTokens += need.tokens
+  recordUsage(state, now, { requests: need.requests })
   return { type: 'grant' }
 }
 
@@ -212,7 +261,7 @@ function settleLease(
   policy: LimitPolicy,
   need: Need,
   now: number,
-  outcome: { usage?: LeaseUsage; throttled: boolean; refund: boolean },
+  outcome: { usage?: LeaseUsage; throttled: boolean; refund: boolean; grantedAt: number },
 ) {
   rollDay(state, now)
   refill(state, policy, now)
@@ -222,6 +271,7 @@ function settleLease(
     if (state.requestLevel !== undefined) state.requestLevel += need.requests
     if (state.tokenLevel !== undefined) state.tokenLevel += need.tokens
     refill(state, policy, now)
+    recordUsage(state, now, { requests: -need.requests }, outcome.grantedAt)
     return
   }
   const actual = outcome.usage?.tokens ?? need.tokens
@@ -230,6 +280,7 @@ function settleLease(
   }
   state.dayTokens += actual
   state.dayCostUsd += outcome.usage?.costUsd ?? 0
+  recordUsage(state, now, { tokens: actual })
   if (!outcome.throttled) state.strikes = 0
 }
 
@@ -276,7 +327,11 @@ export function createLimiter(options: LimiterOptions = {}): Limiter {
     }, ms)
   }
 
-  function makeLease(key: string, need: Need): { lease: Lease; refund: () => Promise<void> } {
+  function makeLease(
+    key: string,
+    need: Need,
+    grantedAt: number,
+  ): { lease: Lease; refund: () => Promise<void> } {
     let released = false
     let throttled = false
     const finish = async (usage: LeaseUsage | undefined, refund: boolean) => {
@@ -285,7 +340,12 @@ export function createLimiter(options: LimiterOptions = {}): Limiter {
       const now = clock.now()
       try {
         await state.transact(key, (s) =>
-          settleLease(s, policyOf(key), need, now, { ...(usage && { usage }), throttled, refund }),
+          settleLease(s, policyOf(key), need, now, {
+            ...(usage && { usage }),
+            throttled,
+            refund,
+            grantedAt,
+          }),
         )
       } finally {
         wake(key)
@@ -331,7 +391,7 @@ export function createLimiter(options: LimiterOptions = {}): Limiter {
             break
           }
           if (decision.type === 'grant') {
-            const { lease, refund } = makeLease(key, head.need)
+            const { lease, refund } = makeLease(key, head.need, now)
             if (head.settled) {
               await refund()
               continue
@@ -429,6 +489,7 @@ export function createLimiter(options: LimiterOptions = {}): Limiter {
       for (const key of [...keys].toSorted()) {
         const current = await read(key)
         const queued = lanes.get(key)?.queue.length ?? 0
+        const hour = lastHour(current, now)
         result[key] = {
           inFlight: current.inFlight ?? 0,
           queued,
@@ -447,6 +508,8 @@ export function createLimiter(options: LimiterOptions = {}): Limiter {
           }),
           dayTokens: current.dayTokens ?? 0,
           dayCostUsd: current.dayCostUsd ?? 0,
+          requestsLastHour: hour.requests,
+          tokensLastHour: hour.tokens,
         }
       }
       return result

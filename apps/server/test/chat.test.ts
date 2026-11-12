@@ -609,6 +609,134 @@ describe('team chat threads', () => {
     ])
   })
 
+  test('threads without a title are named once from their first message on the fast tier', async () => {
+    await putUser('header:omar', 'Omar Vale', ['games'])
+    const thread = await createThread({ title: '  ', repo: 'work:g/app' })
+    expect(thread.title).toBe('New thread')
+    expect(thread.titlePending).toBe(true)
+    respond = () => ({ text: '"Calmer widget grid layout."\nExtra line', turns: 1, costUsd: 0.001 })
+
+    await post(
+      thread.id,
+      'Omar, the widget grid needs a calmer layout. Mail jane.quill@example.test',
+    )
+    await settle()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.task).toMatchObject({
+      taskKind: 'chat-summary',
+      tier: 'fast',
+      maxTurns: 1,
+      capabilities: [],
+    })
+    expect(calls[0]?.run.interactive).toBe(true)
+    const prompt = calls[0]?.task.prompt ?? ''
+    expect(prompt).toContain('the widget grid needs a calmer layout')
+    for (const leak of ['Omar', 'Jane', 'Quill', 'example.test', 'header:'])
+      expect(prompt).not.toContain(leak)
+    const named = await json<ChatThreadView>(
+      await call('GET', `/chat/threads/${thread.id}`, asAdmin),
+    )
+    expect(named.title).toBe('Calmer widget grid layout')
+    expect(named.titlePending).toBeUndefined()
+
+    await post(thread.id, 'Another message about something else entirely')
+    await settle()
+    expect(calls).toHaveLength(1)
+  })
+
+  test('without budget or agent the title falls back to the first line of the message', async () => {
+    respond = () => {
+      throw new BudgetDeniedError([])
+    }
+    const blocked = await createThread({})
+    await post(
+      blocked.id,
+      'Should the gadget dashboard load its charts lazily when the page opens slowly?\nMore detail',
+    )
+    await settle()
+    expect((await store.chat.getThread(blocked.id))?.title).toBe(
+      'Should the gadget dashboard load its charts lazily when…',
+    )
+    expect((await messages(blocked.id)).messages.map((message) => message.authorType)).toEqual([
+      'human',
+    ])
+
+    withAgent = false
+    const offline = await createThread({ title: '' })
+    await post(offline.id, '**Widget** release plan')
+    await settle()
+    expect((await store.chat.getThread(offline.id))?.title).toBe('Widget release plan')
+  })
+
+  test('a title a person set is never replaced by a generated one', async () => {
+    const thread = await createThread({})
+    const gate = Promise.withResolvers<void>()
+    respond = async () => {
+      await gate.promise
+      return { text: 'Generated name', turns: 1 }
+    }
+    await post(thread.id, 'The widget grid needs a calmer layout')
+    const renamed = await call('PATCH', `/chat/threads/${thread.id}`, asAdmin, {
+      title: 'Grid talk',
+    })
+    expect(renamed.status).toBe(200)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    gate.resolve()
+    await settle()
+    expect((await store.chat.getThread(thread.id))?.title).toBe('Grid talk')
+
+    const titled = await createThread({ title: 'Gadgets' })
+    await post(titled.id, 'Hello there')
+    await settle()
+    expect(titled.titlePending).toBeUndefined()
+    expect((await store.chat.getThread(titled.id))?.title).toBe('Gadgets')
+  })
+
+  test('generated titles map participant labels back and never keep anonymized tokens', async () => {
+    respond = () => ({ text: 'Participant A plans the widget grid', turns: 1 })
+    const labelled = await createThread({})
+    await post(labelled.id, 'I want to plan the widget grid')
+    await settle()
+    expect((await store.chat.getThread(labelled.id))?.title).toBe(
+      'Jane Quill plans the widget grid',
+    )
+
+    await putUser('header:omar', 'Omar Vale', ['games'])
+    respond = () => ({ text: 'a teammate checks the gadget list', turns: 1 })
+    const teammate = await createThread({})
+    await post(teammate.id, 'Omar, can you check the gadget list?')
+    await settle()
+    const title = (await store.chat.getThread(teammate.id))?.title
+    expect(title).toBe('Omar, can you check the gadget list?')
+    expect(title).not.toContain('Participant')
+  })
+
+  test('commands never name a thread and a later message repairs a stuck title', async () => {
+    respond = () => ({ text: 'Widget release', turns: 1 })
+    const thread = await createThread({ repo: 'work:g/app' })
+    await post(thread.id, '/release')
+    await settle()
+    expect(calls).toHaveLength(0)
+    expect((await store.chat.getThread(thread.id))?.titlePending).toBe(true)
+
+    const stuck = await createThread({})
+    await store.chat.addMessage({
+      id: 'stuck-first',
+      threadId: stuck.id,
+      authorType: 'human',
+      authorId: 'header:jane',
+      body: 'The gadget shelf sorts badly',
+      mentions: [],
+      refs: [],
+      createdAt: now().toISOString(),
+    })
+    await post(stuck.id, 'Any news?')
+    await settle()
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.task.prompt).toContain('The gadget shelf sorts badly')
+    expect((await store.chat.getThread(stuck.id))?.title).toBe('Widget release')
+  })
+
   test('unread counts follow read markers; own messages are read', async () => {
     const thread = await createThread({ title: 'Arcade', repo: 'work:g/app' })
     await post(thread.id, 'One', asMember)

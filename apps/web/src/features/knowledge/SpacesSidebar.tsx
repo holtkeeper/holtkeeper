@@ -21,7 +21,15 @@ import {
   spaceKey,
 } from '../../lib/guide.ts'
 import { repoKey, repoName } from '../../lib/repo.ts'
-import { Button, Count, ScopeSwitch, Tooltip, notify } from '../../ui/index.ts'
+import {
+  Button,
+  Count,
+  GroupName,
+  NoTeamsState,
+  notify,
+  ScopeSwitch,
+  Tooltip,
+} from '../../ui/index.ts'
 import { useScope } from '../shell/scope.ts'
 import { FamilyDialog, similarityText } from './FamilyDialog.tsx'
 
@@ -67,6 +75,11 @@ const toggled = (previous: ReadonlySet<string>, key: string): ReadonlySet<string
  * Knowledge counts. Long teams fold behind "N more"; under *My teams* other teams fold into one
  * collapsed row. Family suggestions wait below for a person to confirm or dismiss them.
  */
+
+const MEMBERS_SHOWN = 4
+
+const repoPathOf = (member: string): string => member.slice(member.indexOf(':') + 1)
+
 export function SpacesSidebar({
   selected,
   onSelect,
@@ -82,7 +95,7 @@ export function SpacesSidebar({
   counts: KnowledgeCounts | undefined
   canEditFamilies: boolean
 }) {
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeGroups, noTeams } = useScope()
   const tree = buildSpaceTree(repos, families, view, homeGroups)
   const current = spaceKey(selected)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
@@ -176,7 +189,9 @@ export function SpacesSidebar({
             onClick={() => onSelect(space)}
           >
             <Users className="size-3.5 shrink-0" />
-            <span className="truncate">{team.group}</span>
+            <span className="truncate">
+              <GroupName group={team.group} />
+            </span>
             <SpaceBadge counts={counts} space={space} />
           </button>
         </div>
@@ -215,6 +230,7 @@ export function SpacesSidebar({
 
       <ScopeSwitch value={view} onChange={setView} counts={tree.counts} />
 
+      {noTeams ? <NoTeamsState /> : null}
       <ul className="flex flex-col gap-0.5">
         {tree.teams.map(teamItem)}
         {tree.others.length ? (
@@ -327,14 +343,30 @@ function Suggestions({
                   {similarityText(suggestion.similarity)}
                 </span>
               </div>
-              <span
-                className="mono truncate text-[11px] text-muted"
-                title={suggestion.members.join('\n')}
-              >
+              <span className="mono truncate text-[11px] text-muted">
                 {suggestion.members.length} repos
                 {suggestion.framework ? ` · ${suggestion.framework}` : ''}
                 {suggestion.toolchain.length ? ` · ${suggestion.toolchain.join(', ')}` : ''}
               </span>
+              <ul
+                className="flex flex-col gap-0.5"
+                aria-label={`Repositories of ${suggestion.name}`}
+              >
+                {suggestion.members.slice(0, MEMBERS_SHOWN).map((member) => (
+                  <li
+                    key={member}
+                    className="mono truncate text-[11px] text-foreground/80"
+                    title={member}
+                  >
+                    {repoPathOf(member)}
+                  </li>
+                ))}
+                {suggestion.members.length > MEMBERS_SHOWN ? (
+                  <li className="text-[11px] text-dim">
+                    +{suggestion.members.length - MEMBERS_SHOWN} more · Edit to see all
+                  </li>
+                ) : null}
+              </ul>
               <div className="flex gap-1">
                 <Button
                   variant="secondary"

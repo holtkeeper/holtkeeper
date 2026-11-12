@@ -1,8 +1,15 @@
-import type { CoverageRepoCard, RepoRef, SettingList } from '@holtkeeper/api'
+import type { CoverageRepoCard, RepoCoverageTests, RepoRef, SettingList } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
 import type { Segment } from '../ui/SegmentBar.tsx'
-import { type Freshness, compareFreshness, freshnessLabel, freshnessOf } from './freshness.ts'
+import {
+  type Freshness,
+  compareFreshness,
+  freshnessLabel,
+  freshnessOf,
+  freshnessTone,
+} from './freshness.ts'
+import { type GroupTitleOf, groupMatchesQuery, keyAsTitle } from './group-titles.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
 import { defined, median } from './stats.ts'
@@ -113,45 +120,67 @@ export interface CoverageRow {
   repo: RepoRef
   groups: readonly string[]
   card?: CoverageRepoCard
+  /** Set when the repository has no tests by design (`repo.tests`). */
+  noTests?: { reason?: string }
 }
 
 /**
  * Every repository with a coverage record plus every other readable repository as "Not
- * measured", lowest line coverage first, records without lines to cover next, unmeasured last.
+ * measured", lowest line coverage first, records without lines to cover next, unmeasured after
+ * them and repositories with no tests by design (`noTests` of the repository list) last.
  */
 export function coverageRows(
   cards: readonly CoverageRepoCard[],
-  repos: readonly { repo: RepoRef; groups: readonly string[] }[],
+  repos: readonly { repo: RepoRef; groups: readonly string[]; noTests?: { reason?: string } }[],
 ): CoverageRow[] {
   const measured = new Set(cards.map((card) => repoKey(card.repo)))
+  const noTests = new Map(
+    repos.flatMap((summary) => (summary.noTests ? [[repoKey(summary.repo), summary.noTests]] : [])),
+  )
+  const withNoTests = (row: CoverageRow): CoverageRow => {
+    const marked = noTests.get(repoKey(row.repo))
+    return marked ? { ...row, noTests: marked } : row
+  }
   const rows: CoverageRow[] = [
-    ...cards.map((card) => ({ repo: card.repo, groups: card.groups, card })),
+    ...cards.map((card) => withNoTests({ repo: card.repo, groups: card.groups, card })),
     ...repos
       .filter((summary) => !measured.has(repoKey(summary.repo)))
-      .map((summary) => ({ repo: summary.repo, groups: summary.groups })),
+      .map((summary) => withNoTests({ repo: summary.repo, groups: summary.groups })),
   ]
-  const rank = (row: CoverageRow) => (row.card ? (lineShare(row) ?? 101) : 102)
+  const rank = (row: CoverageRow) => (row.noTests ? 103 : row.card ? (lineShare(row) ?? 101) : 102)
   return rows.toSorted(
     (a, b) => rank(a) - rank(b) || repoKey(a.repo).localeCompare(repoKey(b.repo)),
   )
 }
 
-const lineShare = (row: CoverageRow) => percentOf(row.card?.totals.lines)
-const branchShare = (row: CoverageRow) => percentOf(row.card?.totals.branches)
+const lineShare = (row: CoverageRow) =>
+  row.noTests ? undefined : percentOf(row.card?.totals.lines)
+const branchShare = (row: CoverageRow) =>
+  row.noTests ? undefined : percentOf(row.card?.totals.branches)
 
-/** How current a row's record is; `never` without one. */
-export const coverageFreshness = (row: CoverageRow, now: Date = new Date()): Freshness =>
-  row.card ? freshnessOf(row.card, row.card.head, now) : 'never'
+/** How current a coverage row is: `no-tests` for a repository with no tests by design. */
+type CoverageFreshness = Freshness | 'no-tests'
+
+/** How current a row's record is; `never` without one, `no-tests` with no tests by design. */
+export const coverageFreshness = (row: CoverageRow, now: Date = new Date()): CoverageFreshness =>
+  row.noTests ? 'no-tests' : row.card ? freshnessOf(row.card, row.card.head, now) : 'never'
 
 /** Freshness labels on coverage pages: a repository without a record reads "Not measured". */
-export const coverageFreshnessLabel: Record<Freshness, string> = {
+export const coverageFreshnessLabel: Record<CoverageFreshness, string> = {
   ...freshnessLabel,
   never: 'Not measured',
+  'no-tests': 'No tests by design',
+}
+
+/** Tag tones of `coverageFreshness` states. */
+export const coverageFreshnessTone: Record<CoverageFreshness, StatusTone> = {
+  ...freshnessTone,
+  'no-tests': 'default',
 }
 
 /**
  * Whether a measured row's line coverage is under its repository's own target, else `target`;
- * unmeasured rows never are.
+ * unmeasured rows and rows with no tests by design never are.
  */
 export const belowTarget = (row: CoverageRow, target: number): boolean => {
   const lines = lineShare(row)
@@ -160,35 +189,40 @@ export const belowTarget = (row: CoverageRow, target: number): boolean => {
 
 /** Headline figures of the coverage rows in scope. */
 export interface CoverageKpis {
+  /** Rows of repositories meant to have tests. */
   repos: number
   measured: number
   medianLines?: number
   medianBranches?: number
   below: number
   untested: number
+  /** Rows of repositories with no tests by design, left out of every other figure. */
+  noTests: number
   freshness: Record<'current' | 'behind' | 'aging' | 'stale' | 'never', number>
 }
 
-/** `CoverageKpis` of `rows` against `target`; medians over measured rows only. */
+/** `CoverageKpis` of `rows` against `target`; medians over measured rows that expect tests only. */
 export function coverageKpis(
   rows: readonly CoverageRow[],
   target: number,
   now: Date = new Date(),
 ): CoverageKpis {
+  const tested = rows.filter((row) => !row.noTests)
   const freshness = { current: 0, behind: 0, aging: 0, stale: 0, never: 0 }
-  for (const row of rows) {
+  for (const row of tested) {
     const state = coverageFreshness(row, now)
-    if (state !== 'failed') freshness[state] += 1
+    if (state !== 'failed' && state !== 'no-tests') freshness[state] += 1
   }
-  const medianLines = median(defined(rows.map(lineShare)))
-  const medianBranches = median(defined(rows.map(branchShare)))
+  const medianLines = median(defined(tested.map(lineShare)))
+  const medianBranches = median(defined(tested.map(branchShare)))
   return {
-    repos: rows.length,
-    measured: rows.filter((row) => row.card).length,
+    repos: tested.length,
+    measured: tested.filter((row) => row.card).length,
     ...(medianLines === undefined ? {} : { medianLines }),
     ...(medianBranches === undefined ? {} : { medianBranches }),
-    below: rows.filter((row) => belowTarget(row, target)).length,
-    untested: rows.reduce((sum, row) => sum + (row.card?.totals.untested ?? 0), 0),
+    below: tested.filter((row) => belowTarget(row, target)).length,
+    untested: tested.reduce((sum, row) => sum + (row.card?.totals.untested ?? 0), 0),
+    noTests: rows.length - tested.length,
     freshness,
   }
 }
@@ -198,7 +232,14 @@ export const trendValues = (card: Pick<CoverageRepoCard, 'trend'>): (number | nu
   card.trend.map((point) => point.lines ?? null)
 
 /** Freshness states the Freshness filter offers. */
-export const coverageFreshnessStates = ['current', 'behind', 'aging', 'stale', 'never'] as const
+export const coverageFreshnessStates = [
+  'current',
+  'behind',
+  'aging',
+  'stale',
+  'never',
+  'no-tests',
+] as const
 
 type FreshnessFilter = (typeof coverageFreshnessStates)[number]
 
@@ -210,13 +251,12 @@ export type CoverageSortKey = (typeof coverageSortKeys)[number]
 
 /**
  * Search parameters of Quality › Coverage: `repo` (`forge:path`) opens one repository's sheet;
- * `q`, `group`, `freshness` and `below` filter the table; `sort` and `dir` order it (lowest line
+ * `q`, `freshness` and `below` filter the table; `sort` and `dir` order it (lowest line
  * coverage first without).
  */
 export interface CoverageSearch {
   repo?: string
   q?: string
-  group?: string[]
   freshness?: FreshnessFilter[]
   below?: true
   sort?: CoverageSortKey
@@ -229,7 +269,6 @@ export function parseCoverageSearch(search: Record<string, unknown>): CoverageSe
   return {
     ...searchEntry('repo', searchText(search.repo)),
     ...searchEntry('q', searchText(search.q)),
-    ...searchEntry('group', searchList(search.group)),
     ...searchEntry('freshness', searchList(search.freshness, coverageFreshnessStates)),
     ...(search.below === true || search.below === 'true' ? { below: true as const } : {}),
     ...(sort ? { sort, dir: search.dir === 'desc' ? ('desc' as const) : ('asc' as const) } : {}),
@@ -249,11 +288,12 @@ export function withCoverageSort(
   return sort ? { ...rest, sort: sort.key, dir: sort.direction } : rest
 }
 
-/** The rows `search` keeps: path or group text, groups (any of), freshness states, below target. */
+/** The rows `search` keeps: path or group title or key, freshness states, below target. */
 export function filterCoverageRows(
   rows: readonly CoverageRow[],
   search: CoverageSearch,
   target: number,
+  titleOf: GroupTitleOf = keyAsTitle,
   now: Date = new Date(),
 ): CoverageRow[] {
   const needle = search.q?.trim().toLowerCase()
@@ -261,25 +301,52 @@ export function filterCoverageRows(
     (row) =>
       (!needle ||
         repoKey(row.repo).toLowerCase().includes(needle) ||
-        row.groups.some((group) => group.toLowerCase().includes(needle))) &&
-      (!search.group?.length || row.groups.some((group) => search.group?.includes(group))) &&
+        row.groups.some((group) => groupMatchesQuery(group, titleOf, needle))) &&
       (!search.freshness?.length ||
         search.freshness.some((state) => state === coverageFreshness(row, now))) &&
       (!search.below || belowTarget(row, target)),
   )
 }
 
-/** What a column sorts a row by; unmeasured rows stay last. */
+/** What a column sorts a row by; unmeasured rows and rows with no tests by design stay last. */
 export function coverageSortValue(
   row: CoverageRow,
   key: CoverageSortKey,
   now: Date = new Date(),
 ): SortValue {
   if (key === 'repo') return repoKey(row.repo)
+  if (row.noTests) return undefined
   if (key === 'lines') return lineShare(row)
   if (key === 'branches') return branchShare(row)
   if (key === 'change') return row.card?.change
   if (key === 'untested') return row.card?.totals.untested
   const state = coverageFreshness(row, now)
-  return state === 'never' ? undefined : compareFreshness(state, 'failed')
+  return state === 'never' || state === 'no-tests' ? undefined : compareFreshness(state, 'failed')
 }
+
+/**
+ * What the `repo.tests` quick toggle on one repository does; `entryId` names the repository's own
+ * entry, which a write updates instead of adding another.
+ */
+type TestsToggle =
+  | { kind: 'mark'; entryId?: string }
+  | { kind: 'remove'; entryId: string }
+  | { kind: 'override'; entryId?: string; overrides?: RepoCoverageTests['scope'] }
+
+/**
+ * The quick toggle a person who may change `repo.tests` gets, or `undefined` otherwise: `mark`
+ * (turn tests off on the repository's own entry) while tests are expected, `remove` when dropping
+ * the own entry brings tests back, and `override` (turn them on in the own entry) when a broader
+ * entry would still turn them off.
+ */
+export function testsToggle(tests: RepoCoverageTests | undefined): TestsToggle | undefined {
+  if (!tests?.configurable) return undefined
+  const own = tests.entryId ? { entryId: tests.entryId } : {}
+  if (tests.expected) return { kind: 'mark', ...own }
+  if (tests.entryId && tests.inherited) return { kind: 'remove', entryId: tests.entryId }
+  return { kind: 'override', ...own, ...(tests.scope && { overrides: tests.scope }) }
+}
+
+/** The `repo.tests` entry value the toggle writes for one repository. */
+export const testsEntryValue = (expected: boolean, reason?: string) =>
+  expected || !reason?.trim() ? { expected } : { expected, reason: reason.trim() }

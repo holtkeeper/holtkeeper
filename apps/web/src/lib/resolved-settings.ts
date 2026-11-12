@@ -6,6 +6,7 @@ import type {
   SettingView,
 } from '@holtkeeper/api'
 
+import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { type ScopeFocus, namesFocus } from './scope.ts'
 
 /** Which rows the resolver shows: every key, those set on the focus itself, those not at their default. */
@@ -65,7 +66,11 @@ export function layerCounts(rows: readonly ResolvedSettingRow[]): Record<Setting
 }
 
 /** Who a source is, in words: `Default`, `Org`, `Group web`, `This repo`, `This group`. */
-export function sourceLabel(source: SettingSource, focus: ScopeFocus): string {
+export function sourceLabel(
+  source: SettingSource,
+  focus: ScopeFocus,
+  titleOf: GroupTitleOf = keyAsTitle,
+): string {
   if (source.layer === 'default') return 'Default'
   if (source.layer === 'org') return 'Org'
   if (source.layer === 'repo')
@@ -73,7 +78,7 @@ export function sourceLabel(source: SettingSource, focus: ScopeFocus): string {
       ? 'This repo'
       : 'Repo pattern'
   if (focus.kind === 'group' && source.groups?.includes(focus.group)) return 'This group'
-  return `Group ${(source.groups ?? []).join(' + ')}`.trim()
+  return `Group ${(source.groups ?? []).map(titleOf).join(' + ')}`.trim()
 }
 
 /** A key as it applies to the whole organization, with how many narrower entries replace it somewhere. */

@@ -1,5 +1,13 @@
 import { Link, type LinkProps } from '@tanstack/react-router'
-import { ChevronDown, ChevronUp, Copy, Maximize2, X } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronUp,
+  ChevronsLeftRight,
+  ChevronsRightLeft,
+  Copy,
+  Maximize2,
+  X,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   type ComponentType,
@@ -7,10 +15,17 @@ import {
   useEffect,
   useEffectEvent,
   useRef,
+  useState,
   useSyncExternalStore,
 } from 'react'
 import { createPortal } from 'react-dom'
 
+import {
+  type SheetSize,
+  readSheetWidths,
+  sheetIsWide,
+  writeSheetWidth,
+} from '../lib/sheet-width.ts'
 import { sheetCommand, sheetPosition } from '../lib/sheet.ts'
 import { isEditableTarget } from '../lib/slash-focus.ts'
 import { Button, buttonClass } from './Button.tsx'
@@ -94,6 +109,11 @@ interface SideSheetProps {
   }
   /** Actions pinned under the body, e.g. a wizard's Back and Continue. */
   footer?: ReactNode
+  /**
+   * `wide` (up to 760px) for records with a lot of data; the viewer can widen or narrow any sheet
+   * from its header, and that choice is remembered per size.
+   */
+  size?: SheetSize
   children: ReactNode
 }
 
@@ -124,9 +144,15 @@ export function SideSheet({
   progress,
   tabs,
   footer,
+  size = 'default',
   children,
 }: SideSheetProps) {
   const { sheet: slot } = useShell()
+  const [wide, setWide] = useState(() => sheetIsWide(size, readSheetWidths()))
+  const toggleWidth = () => {
+    writeSheetWidth(size, !wide)
+    setWide(!wide)
+  }
   const heading = useRef<HTMLHeadingElement>(null)
   const narrow = useNarrow()
   const onKey = useEffectEvent((event: KeyboardEvent) => {
@@ -188,6 +214,7 @@ export function SideSheet({
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: 16, opacity: 0 }}
           transition={{ duration: 0.16, ease: 'easeOut' }}
+          data-sheet-size={wide ? 'wide' : 'default'}
           className="flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-line bg-panel"
         >
           <header className="flex shrink-0 flex-col border-b border-line">
@@ -245,6 +272,24 @@ export function SideSheet({
                   <ChevronDown className="size-4" />
                 </Button>
               </Tooltip>
+              {narrow ? null : (
+                <Tooltip content={wide ? 'Narrower' : 'Wider'}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    isIconOnly
+                    aria-label={wide ? 'Make the sheet narrower' : 'Make the sheet wider'}
+                    aria-pressed={wide}
+                    onPress={toggleWidth}
+                  >
+                    {wide ? (
+                      <ChevronsRightLeft className="size-4" />
+                    ) : (
+                      <ChevronsLeftRight className="size-4" />
+                    )}
+                  </Button>
+                </Tooltip>
+              )}
               {openAsPage ? (
                 <Tooltip content="Open as page">
                   <Link

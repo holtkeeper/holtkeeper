@@ -8,7 +8,7 @@ import {
   isArtifactInfo,
   isArtifactRef,
 } from './core.ts'
-import type { ArtifactInfo, ArtifactStore } from './types.ts'
+import type { ArtifactInfo, ArtifactLocation, ArtifactStore } from './types.ts'
 
 export interface S3ArtifactStoreOptions extends StoreOptions {
   bucket: string
@@ -49,10 +49,20 @@ const orMissing = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
 
 const quoteFilename = (name: string) => name.replace(/["\\\r\n]/g, '_')
 
+const endpointHost = (endpoint: string) => {
+  try {
+    return new URL(endpoint).host || undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * An `ArtifactStore` in an S3-compatible bucket (AWS S3, MinIO, Cloudflare R2, Garage) through
  * Bun's built-in client. Metadata lives in a `<key>.json` sidecar object; `presign` gives
- * short-lived download URLs; `usage` lists the bucket, so it is cached for a minute by default.
+ * short-lived download URLs; `usage` lists the bucket, so it is cached for a minute by default,
+ * and also reports every object under the prefix as `objects`. `location` names the bucket,
+ * region, prefix and endpoint host, never the keys.
  */
 export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore {
   const client = new S3Client({
@@ -76,7 +86,42 @@ export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore 
       return isArtifactInfo(parsed) ? parsed : undefined
     })
 
-  return createArtifactStore(
+  const endpoint = options.endpoint ? endpointHost(options.endpoint) : undefined
+  const location: ArtifactLocation = {
+    kind: 's3',
+    bucket: options.bucket,
+    ...(endpoint ? { endpoint } : {}),
+    ...(options.region ? { region: options.region } : {}),
+    ...(root ? { prefix: root.slice(0, -1) } : {}),
+  }
+
+  const listObjects = async () => {
+    const ids: string[] = []
+    const objects = { count: 0, bytes: 0 }
+    let continuationToken: string | undefined
+    do {
+      const page = await client.list({
+        prefix: root,
+        ...(continuationToken ? { continuationToken } : {}),
+      })
+      for (const { key, size } of page.contents ?? []) {
+        objects.count += 1
+        objects.bytes += size ?? 0
+        const id = key.slice(key.lastIndexOf('/') + 1, -'.json'.length)
+        if (key.endsWith('.json') && isArtifactId(id) && key === metaKey(id)) ids.push(id)
+      }
+      continuationToken = page.isTruncated ? page.nextContinuationToken : undefined
+    } while (continuationToken)
+
+    const items: ArtifactInfo[] = []
+    for (let i = 0; i < ids.length; i += concurrency) {
+      const batch = await Promise.all(ids.slice(i, i + concurrency).map(readMeta))
+      for (const info of batch) if (info) items.push(info)
+    }
+    return { items, objects }
+  }
+
+  const store = createArtifactStore(
     {
       readMeta,
       async writeMeta(info) {
@@ -95,28 +140,8 @@ export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore 
         await orMissing(() => client.delete(metaKey(id)))
         await orMissing(() => client.delete(dataKey(id)))
       },
-      async listMeta() {
-        const ids: string[] = []
-        let continuationToken: string | undefined
-        do {
-          const page = await client.list({
-            prefix: root,
-            ...(continuationToken ? { continuationToken } : {}),
-          })
-          for (const { key } of page.contents ?? []) {
-            const id = key.slice(key.lastIndexOf('/') + 1, -'.json'.length)
-            if (key.endsWith('.json') && isArtifactId(id) && key === metaKey(id)) ids.push(id)
-          }
-          continuationToken = page.isTruncated ? page.nextContinuationToken : undefined
-        } while (continuationToken)
-
-        const infos: ArtifactInfo[] = []
-        for (let i = 0; i < ids.length; i += concurrency) {
-          const batch = await Promise.all(ids.slice(i, i + concurrency).map(readMeta))
-          for (const info of batch) if (info) infos.push(info)
-        }
-        return infos
-      },
+      listMeta: async () => (await listObjects()).items,
+      listObjects,
       async ping() {
         await client.list({ prefix: root, maxKeys: 1 })
       },
@@ -142,4 +167,5 @@ export function s3ArtifactStore(options: S3ArtifactStoreOptions): ArtifactStore 
     },
     { usageCacheMs: 60_000, ...options },
   )
+  return { ...store, location }
 }

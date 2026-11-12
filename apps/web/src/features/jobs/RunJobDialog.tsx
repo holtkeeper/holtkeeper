@@ -4,7 +4,13 @@ import { Play } from 'lucide-react'
 import { type ReactNode, useCallback, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useGroups, useJobAnalyzers, useJobMutations, useRepos } from '../../api/queries.ts'
+import {
+  useGroups,
+  useGroupTitles,
+  useJobAnalyzers,
+  useJobMutations,
+  useRepos,
+} from '../../api/queries.ts'
 import { analyzersFor } from '../../lib/jobs.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { defaultValue } from '../../lib/schema.ts'
@@ -38,6 +44,7 @@ function RunJobForm({
   onClose,
 }: Target & { onClose: () => void }) {
   const navigate = useNavigate()
+  const titleOf = useGroupTitles()
   const analyzers = useJobAnalyzers()
   const { create } = useJobMutations()
   const available = analyzersFor(analyzers.data?.analyzers ?? [], { repo, group })
@@ -101,7 +108,11 @@ function RunJobForm({
       size="lg"
       title="Run analyzer"
       description={
-        repo ? repo.path : group ? `Group ${group}` : 'Queue a background run of an analyzer'
+        repo
+          ? repo.path
+          : group
+            ? `Group ${titleOf(group)}`
+            : 'Queue a background run of an analyzer'
       }
       footer={
         <>
@@ -231,6 +242,7 @@ function GroupPicker({
   onChange: (value: string) => void
 }) {
   const groups = useGroups()
+  const titleOf = useGroupTitles()
   if (groups.isPending) return <Placeholder className="h-14" />
   if (groups.isError)
     return (
@@ -242,7 +254,18 @@ function GroupPicker({
     <Select
       label="Group"
       placeholder="Pick a group…"
-      options={groups.data.entries.map((entry) => ({ id: entry.id, label: entry.id }))}
+      options={groups.data.entries.map((entry) => ({
+        id: entry.id,
+        label: (
+          <span className="flex items-baseline gap-2">
+            {titleOf(entry.id)}
+            {titleOf(entry.id) === entry.id ? null : (
+              <span className="mono text-[11px] text-muted">{entry.id}</span>
+            )}
+          </span>
+        ),
+        text: titleOf(entry.id),
+      }))}
       value={value}
       onChange={onChange}
     />

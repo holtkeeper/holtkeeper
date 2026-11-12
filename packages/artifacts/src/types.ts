@@ -51,7 +51,24 @@ export interface UsageBucket {
 export interface ArtifactUsage extends UsageBucket {
   byContentType: Record<string, UsageBucket>
   byTag: Record<string, Record<string, UsageBucket>>
+  /**
+   * Every object under the store's root as its listing saw it: artifacts plus metadata sidecars,
+   * refs and anything else kept there. Present only on stores that list objects (S3).
+   */
+  objects?: UsageBucket
 }
+
+/** Where a store keeps its data, without credentials; for admin views. */
+export type ArtifactLocation =
+  | {
+      kind: 's3'
+      bucket: string
+      /** Host (and port) of the configured endpoint, no scheme, path or user info; absent for AWS. */
+      endpoint?: string
+      region?: string
+      prefix?: string
+    }
+  | { kind: 'fs'; dir: string }
 
 /**
  * What `sweep` removes: artifacts not accessed since `olderThan`, then the least recently accessed
@@ -113,6 +130,7 @@ export interface ArtifactStore {
    * holds, unlike `list`, which reads every artifact's metadata; for health checks.
    */
   ping(): Promise<void>
+  /** Concurrent calls share one measurement. */
   usage(): Promise<ArtifactUsage>
   sweep(options: SweepOptions): Promise<SweepResult>
   /**
@@ -120,6 +138,8 @@ export interface ArtifactStore {
    * on stores that support it (S3). Resolves `undefined` for unknown ids.
    */
   presign?(id: string, options?: PresignOptions): Promise<string | undefined>
+  /** Where the data lives; present on the fs and S3 stores. */
+  location?: ArtifactLocation
   /**
    * The ref `name` points at; `undefined` when the name is unknown or malformed, or its artifact
    * is gone (deleted or swept). Does not count as an access of the artifact.

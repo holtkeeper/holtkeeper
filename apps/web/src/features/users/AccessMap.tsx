@@ -13,7 +13,7 @@ import { ShieldCheck } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useGroups, useUserMutations } from '../../api/queries.ts'
+import { useGroups, useGroupTitles, useUserMutations } from '../../api/queries.ts'
 import { accessMap, withGrant, withoutGrant } from '../../lib/access-map.ts'
 import { layeredLayout } from '../../lib/graph.ts'
 import { Avatar, type LinkEdge, LinkLine, Panel, notify, useTheme } from '../../ui/index.ts'
@@ -83,6 +83,7 @@ export function AccessMap({
   const { can, principal } = useSession()
   const writable = can('users:write')
   const groups = useGroups(can('settings:read'))
+  const titleOf = useGroupTitles()
   const { update } = useUserMutations()
   const [focus, setFocus] = useState<string | null>(null)
   const map = useMemo(
@@ -90,8 +91,9 @@ export function AccessMap({
       accessMap(
         users,
         (groups.data?.entries ?? []).map((group) => group.id),
+        titleOf,
       ),
-    [users, groups.data],
+    [users, groups.data, titleOf],
   )
   const editable = writable && !update.isPending
   const userOf = (id: string) => users.find((user) => `user:${user.id}` === id)

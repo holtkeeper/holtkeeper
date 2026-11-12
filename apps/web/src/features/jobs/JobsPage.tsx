@@ -18,15 +18,17 @@ import {
 import { type ReactNode, useState } from 'react'
 
 import {
+  useGroupTitles,
   useJob,
   useJobAnalyzers,
   useJobCount,
   useJobFailures,
+  useJobs,
   useJobStats,
   useJobTargets,
-  useJobs,
 } from '../../api/queries.ts'
 import { formatDateTime, formatDuration, formatRef } from '../../lib/format.ts'
+import { scopeLabel } from '../../lib/home-scope.ts'
 import {
   type JobTrigger,
   type JobsSearch,
@@ -55,6 +57,7 @@ import { useNow } from '../../lib/use-now.ts'
 import {
   Avatar,
   EmptyState,
+  NoTeamsState,
   ErrorState,
   FilterButton,
   Kbd,
@@ -135,6 +138,7 @@ function RunRow({
   now: Date
   onOpen: () => void
 }) {
+  const titleOf = useGroupTitles()
   const duration = jobDuration(job, now)
   const subline = runSubline(job, wait, now, labelOf)
   const TriggerIcon = triggerIcons[job.trigger] ?? Clock
@@ -159,7 +163,7 @@ function RunRow({
       </Td>
       <Td className="max-w-[18rem]">
         <span className="mono block truncate text-xs" title={job.repo.path}>
-          {job.group !== undefined ? `group ${job.group}` : job.repo.path}
+          {job.group !== undefined ? `group ${titleOf(job.group)}` : job.repo.path}
           {job.ref ? <span className="text-dim"> {formatRef(job.ref)}</span> : null}
         </span>
       </Td>
@@ -218,9 +222,10 @@ const segmentCaptions: Record<RunsSegment, string> = {
  * failures under the table. A row opens the run in the side sheet (J/K step through the list).
  */
 export function JobsPage() {
+  const titleOf = useGroupTitles()
   const search = useSearch({ from: '/app/ops/runs' })
   const navigate = useNavigate({ from: '/ops/runs' })
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeGroups, ready: scopeReady, noTeams } = useScope()
   const { canGlobal } = useSession()
   const targets = useJobTargets()
   const analyzers = useJobAnalyzers()
@@ -233,8 +238,8 @@ export function JobsPage() {
   const filter = runsFilter({ ...search, q: searchText })
   const repo = parseRepoKey(search.repo)
   const scoped = repo ? undefined : jobScopeRepos(view, targets.data?.targets, homeGroups)
-  const ready = view === 'all' || repo !== undefined || targets.isSuccess
-  const nothingInScope = scoped !== undefined && scoped.length === 0
+  const ready = repo !== undefined || (scopeReady && (view === 'all' || targets.isSuccess))
+  const nothingInScope = ready && scoped !== undefined && scoped.length === 0
   const scopeRepos = repo ? [search.repo ?? ''] : scoped
 
   const jobQuery = { ...filter, ...(repo && { repo }), ...(scoped && { repos: scoped }) }
@@ -366,7 +371,7 @@ export function JobsPage() {
             single
             options={(targets.data?.targets ?? []).map((target) => ({
               id: target.repo,
-              label: target.group !== undefined ? `group ${target.group}` : target.repo,
+              label: target.group !== undefined ? `group ${titleOf(target.group)}` : target.repo,
             }))}
             value={search.repo ? [search.repo] : []}
             onChange={(value) => set({ repo: value[0] })}
@@ -405,6 +410,8 @@ export function JobsPage() {
 
         {targets.isError ? (
           <ErrorState error={targets.error} />
+        ) : nothingInScope && noTeams ? (
+          <NoTeamsState />
         ) : nothingInScope ? (
           <EmptyState
             icon={<ListChecks />}
@@ -417,7 +424,7 @@ export function JobsPage() {
               <h2 className="text-[13px] font-semibold">
                 {segment === 'failures' ? 'Failures' : segment === 'queue' ? 'Queue' : 'Runs'}
                 <span className="ms-2 text-xs font-normal text-muted">
-                  {segmentCaptions[segment]} · {view === 'mine' ? 'My teams' : 'All I can see'}
+                  {segmentCaptions[segment]} · {scopeLabel(view, titleOf)}
                 </span>
               </h2>
               <span className="flex-1" />

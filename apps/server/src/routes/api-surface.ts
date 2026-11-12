@@ -3,6 +3,7 @@ import type {
   CreateMcpTokenInput,
   CreateMcpTokenResult,
   McpTokenList,
+  McpPersonUsage,
   McpUsageOverview,
   PublicApiDiff,
   PublicApiPackageDetail,
@@ -22,7 +23,7 @@ import { z } from 'zod'
 import { type RepoFilter, cachedCatalog, createApiCatalog } from '../api-surface/catalog.ts'
 import { handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
-import { mcpUsage } from '../api-surface/usage.ts'
+import { type McpPersonCalls, mcpUsage } from '../api-surface/usage.ts'
 import { createUsageIndex } from '../api-surface/usages.ts'
 import {
   type AppContext,
@@ -30,6 +31,7 @@ import {
   type ServerDeps,
   authorize,
   forgeFor,
+  groupLabeler,
   principalOf,
   publicUrlOf,
   parseRepo,
@@ -68,6 +70,7 @@ import {
   scopeOwner,
 } from '../visibility.ts'
 import { dependencyRoutes } from './dependencies.ts'
+import { homeGroupsOf } from './preferences.ts'
 import { usageRoutes } from './usages.ts'
 
 const GLOBAL = { kind: 'global' } as const
@@ -159,6 +162,8 @@ export function createApiSurface(
   const targetOf = (repo: RepoRef) => repoTarget(config, repo)
   const reach = catalogReach(store.settings, targetOf)
   const groupsOf = (repo: RepoRef) => targetOf(repo).groups
+  const groupLabel = groupLabeler(config)
+  const ownerOf = (repo: RepoRef) => groupsOf(repo).map(groupLabel)
   const readable = async (principal: Principal) => (await reach(principal)).catalog
   const analysesOf = (principal: Principal) => (repo: RepoRef) =>
     canSee(principal, 'analyses:read', targetOf(repo))
@@ -218,7 +223,8 @@ export function createApiSurface(
     store,
     canReadScope: (scope) => can(principal, 'knowledge:read', { kind: 'scope', scope }),
     canReadShared: (scope) => canReadShared(principal, scope, reached.policy),
-    ownerOf: (scope) => scopeOwner(scope, groupsOf),
+    ownerOf: (scope) => scopeOwner(scope, groupsOf).map(groupLabel),
+    groupLabel,
     repoOf: (value) => {
       const separator = value.indexOf(':')
       if (separator < 1 || separator === value.length - 1) return undefined
@@ -445,20 +451,36 @@ export function createApiSurface(
     return c.body(null, 204)
   })
 
+  const describePerson = async (
+    person: McpPersonCalls,
+    self: Principal,
+  ): Promise<McpPersonUsage> => {
+    const grants =
+      person.id === self.id ? self.grants : (await store.users?.getUser(person.id))?.grants
+    const [teams, activeTokens] = await Promise.all([
+      grants ? homeGroupsOf(deps, { ...self, id: person.id, grants }) : [],
+      tokens ? tokens.active(person.id) : 0,
+    ])
+    return { ...person, teams, activeTokens }
+  }
+
   routes.get('/api-surface/mcp/usage', async (c) => {
     const principal = principalOf(c)
     const days = Math.min(Math.max(Number(c.req.query('days')) || 30, 1), 90)
-    return c.json<McpUsageOverview>(
-      await usage.overview({
-        days,
-        self: principal.id,
-        everyone: can(principal, 'users:read', GLOBAL),
-        endpoint: endpointOf(c),
-      }),
-    )
+    const overview = await usage.overview({
+      days,
+      self: { id: principal.id, name: principal.name },
+      everyone: can(principal, 'users:read', GLOBAL),
+      endpoint: endpointOf(c),
+    })
+    const [people, me] = await Promise.all([
+      Promise.all(overview.people.map((person) => describePerson(person, principal))),
+      describePerson(overview.me, principal),
+    ])
+    return c.json<McpUsageOverview>({ ...overview, people, me })
   })
 
-  const fromToken = new WeakSet<Principal>()
+  const fromToken = new WeakMap<Principal, string>()
 
   /** Serves `/mcp`; mount at the application root. */
   const mcp = async (c: AppContext) => {
@@ -481,6 +503,7 @@ export function createApiSurface(
         { 'www-authenticate': 'Bearer realm="holtkeeper"' },
       )
     const client = clientOf(c.req.raw)
+    const token = fromToken.get(principal)
     const scope = await reach(principal)
     const library = libraryContext(principal, scope.catalog)
     const knowledge = knowledgeContext(principal, scope)
@@ -515,21 +538,24 @@ export function createApiSurface(
         canRead: (target) => canSee(principal, 'analyses:read', target),
         canReadScope: (entryScope) =>
           can(principal, 'settings:read', { kind: 'scope', scope: entryScope }),
+        groupLabel,
       }),
       supply: supplyFor(principal),
       principal,
       canRead: scope.catalog,
       canReadSnippets: scope.snippets,
-      ownerOf: groupsOf,
+      ownerOf,
       stack: storedStackTools(store.analyses, {
         canRead: scope.catalog,
         canDetail: analysesOf(principal),
         groupsOf,
+        groupLabel,
       }),
       ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
       canReadAnalyses: analysesOf(principal),
       canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),
       ...(client ? { client } : {}),
+      ...(token ? { token } : {}),
       now: deps.now,
     })
   }
@@ -546,9 +572,10 @@ export function createApiSurface(
         (path.startsWith('/api/api-surface/') ||
           path === '/api/dependencies' ||
           path.startsWith('/api/dependencies/')))
-    const principal = allowed ? await tokens.authenticate(request) : undefined
-    if (principal) fromToken.add(principal)
-    return principal
+    const found = allowed ? await tokens.authenticate(request) : undefined
+    if (!found) return undefined
+    fromToken.set(found.principal, found.token)
+    return found.principal
   }
 
   return { routes, mcp, tokenPrincipal, flush: usage.flush }

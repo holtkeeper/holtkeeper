@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 
-import { createCommandVerifier, detectChecks, tail } from './checks.ts'
+import { createCommandVerifier, detectChecks, tail, withoutTests } from './checks.ts'
 
 const dirs: string[] = []
 afterAll(() => Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true }))))
@@ -50,6 +50,22 @@ describe('detectChecks', () => {
     })
     const [install] = await detectChecks(dir, { allowInstallScripts: true })
     expect(install?.command).toBe('bun install')
+  })
+  test('a repository with no tests by design runs no test script and only builds Go', async () => {
+    const dir = await project({
+      'package.json': JSON.stringify({ scripts: { lint: 'oxlint', test: 'vitest' } }),
+      'bun.lock': '',
+    })
+    const checks = await detectChecks(dir, { checks: withoutTests(), go: true })
+    expect(checks.map((check) => [check.name, check.command])).toEqual([
+      ['install', 'bun install --ignore-scripts'],
+      ['lint', 'bun run lint'],
+      ['go', 'go build ./...'],
+    ])
+    expect(withoutTests({ test: 'make check' })).toEqual({
+      test: 'make check',
+      go: 'go build ./...',
+    })
   })
 })
 

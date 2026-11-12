@@ -1,3 +1,13 @@
+/** What leases of one key used during one minute of the rolling hour. */
+export interface UsageMinute {
+  /** Minutes since the epoch (`floor(ms / 60_000)`). */
+  minute: number
+  /** Request units of leases granted in this minute, minus refunded ones. */
+  requests: number
+  /** AI tokens of leases released in this minute (actual usage, else the estimate). */
+  tokens: number
+}
+
 /**
  * Counters of one limiter key. Plain JSON data so a shared store can persist it. Bucket levels are
  * `undefined` until the key is first used with that rate (a fresh bucket is full).
@@ -19,6 +29,8 @@ export interface KeyState {
   day: string
   dayTokens: number
   dayCostUsd: number
+  /** Usage per minute over the last 60 minutes, oldest first; missing minutes had none. */
+  usage?: UsageMinute[]
 }
 
 /**

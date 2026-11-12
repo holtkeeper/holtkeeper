@@ -17,6 +17,7 @@ export function TagInput({
   description,
   hideLabel,
   isDisabled = false,
+  labelOf,
 }: {
   label: ReactNode
   values: readonly string[]
@@ -28,6 +29,8 @@ export function TagInput({
   /** Keeps the label for screen readers only, for inputs labelled by their surroundings. */
   hideLabel?: boolean
   isDisabled?: boolean
+  /** What people read for a value, e.g. a group's title; shown with the value as secondary text. */
+  labelOf?: (value: string) => string
 }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
@@ -63,7 +66,14 @@ export function TagInput({
               exit={{ opacity: 0, scale: 0.9 }}
               className="inline-flex items-center gap-1 rounded-lg bg-default px-2 py-0.5 font-mono text-xs"
             >
-              {value}
+              {labelOf && labelOf(value) !== value ? (
+                <>
+                  <span className="font-sans">{labelOf(value)}</span>
+                  <span className="text-muted">{value}</span>
+                </>
+              ) : (
+                value
+              )}
               {isDisabled ? null : (
                 <button
                   type="button"
@@ -104,7 +114,7 @@ export function TagInput({
             {suggestions
               .filter((s) => !values.includes(s))
               .map((s) => (
-                <option key={s} value={s} />
+                <option key={s} value={s} label={labelOf?.(s)} />
               ))}
           </datalist>
         ) : null}

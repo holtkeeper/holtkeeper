@@ -271,6 +271,7 @@ export function ReviewSheet({
   return (
     <>
       <SideSheet
+        size="wide"
         open
         onClose={onClose}
         id={`!${row.mergeRequest.iid}`}

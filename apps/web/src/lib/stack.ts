@@ -11,7 +11,7 @@ import type {
 } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
-import { type ScopeView, scopeList } from './home-scope.ts'
+import { type ScopeCounts, type ScopeView, scopeList } from './home-scope.ts'
 import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
 
 /** The views of the Stack page: the repository × tool matrix, or the conventions grid. */
@@ -44,8 +44,6 @@ export interface StackSearch {
   /** Support segment; every cell when omitted. */
   segment?: StackSegment
   kind?: StackComponentKind[]
-  /** Config groups the repositories must be in. */
-  group?: string[]
   /** The version line open in the sheet, as `lineKey` writes it. */
   line?: string
   /** `forge:path` of the selected matrix cell's repository. */
@@ -59,7 +57,6 @@ export const parseStackSearch = (search: Record<string, unknown>): StackSearch =
   ...searchEntry('tab', searchText(search.tab)),
   ...searchEntry('segment', searchEnum(search.segment, ['eol', 'eol-soon'] as const)),
   ...searchEntry('kind', searchList(search.kind, componentKinds)),
-  ...searchEntry('group', searchList(search.group)),
   ...searchEntry('line', searchText(search.line)),
   ...searchEntry('repo', searchText(search.repo)),
   ...searchEntry('pane', searchEnum(search.pane, ['where', 'cell'] as const)),
@@ -70,7 +67,7 @@ const keyOf = (forge: string, path: string) => `${forge}:${path}`
 /** The groups as a scope position shows them: each limited to the repositories it keeps. */
 export interface ScopedStack {
   groups: StackGroupView[]
-  counts: Record<ScopeView, number>
+  counts: ScopeCounts
 }
 
 function narrowGroup(
@@ -115,24 +112,19 @@ export function scopeStack(
 }
 
 /**
- * The groups limited to repositories in one of `filter.group` (config groups) and to tools of
- * `filter.kind`, or to one repository (`forge:path`); an empty filter keeps everything.
+ * The groups limited to tools of `filter.kind`, or to one repository (`forge:path`); an empty
+ * filter keeps everything.
  */
 export function narrowStack(
   groups: readonly StackGroupView[],
-  filter: { kind?: readonly StackComponentKind[]; group?: readonly string[]; repo?: string },
+  filter: { kind?: readonly StackComponentKind[]; repo?: string },
 ): StackGroupView[] {
   const kinds = filter.kind?.length ? new Set(filter.kind) : undefined
-  const wanted = filter.group?.length ? new Set(filter.group) : undefined
   return groups
     .map((group) => {
       const inGroups = new Set(
         group.repos
-          .filter(
-            (repo) =>
-              (!wanted || repo.groups.some((name) => wanted.has(name))) &&
-              (!filter.repo || keyOf(group.forge, repo.path) === filter.repo),
-          )
+          .filter((repo) => !filter.repo || keyOf(group.forge, repo.path) === filter.repo)
           .map((repo) => repo.path),
       )
       return narrowGroup(

@@ -44,7 +44,7 @@ const documents: AnyConfigDocument[] = [
   doc({
     type: 'group',
     id: 'tools',
-    data: { forge: 'work', include: ['tools/*'], exclude: ['tools/old'] },
+    data: { title: 'Tooling crew', forge: 'work', include: ['tools/*'], exclude: ['tools/old'] },
   }),
   doc({ type: 'repoTraits', id: 'r1', data: { pattern: 'tools/*', traits: { lang: 'go' } } }),
   doc({
@@ -87,6 +87,7 @@ describe('effectiveConfig', () => {
     expect(config.jobs.botUsernames).toEqual({ cloud: 'keeper' })
     expect(config.jobs.concurrency).toBe(3)
     expect(config.groups.games).toEqual({ forge: 'cloud', include: ['studio/*'], exclude: [] })
+    expect(config.groups.tools?.title).toBe('Tooling crew')
     expect(config.repos['tools/*']).toEqual({ traits: { lang: 'go' } })
     expect(config.jobs?.schedules.map((s) => [s.name, s.enabled, s.title])).toEqual([
       ['nightly', false, 'Nightly'],

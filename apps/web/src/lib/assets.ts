@@ -12,6 +12,7 @@ import {
 } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
+import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchText } from './search-params.ts'
 
@@ -86,13 +87,18 @@ export const savingPercent = (row: Pick<AssetsOverviewRow, 'bytes' | 'suggestion
     : 0
 
 /** Where the effective policy comes from, as shown next to it. */
-export function policySource(source: AssetsPolicySource): string {
+export function policySource(
+  source: AssetsPolicySource,
+  titleOf: GroupTitleOf = keyAsTitle,
+): string {
   if (source.level === 'default')
     return 'Default policy: nothing set for this repository or its groups'
   if (source.level === 'all') return 'Inherited from the entry for every repository'
   if (source.level === 'repo') return 'Set for this repository'
   const groups = source.entry?.scope.groups?.flat()
-  return groups?.length ? `Inherited from group ${groups.join(', ')}` : 'Inherited from a group'
+  return groups?.length
+    ? `Inherited from group ${groups.map(titleOf).join(', ')}`
+    : 'Inherited from a group'
 }
 
 const formatsLabel = (formats: readonly string[]) =>
@@ -327,7 +333,6 @@ const sorts: readonly AssetsSort[] = ['severity', 'saving', 'size']
 export interface AssetsSearch {
   /** `forge:path` the page narrows to. */
   repo?: string
-  group?: string
   status?: Exclude<AssetsStatusFilter, 'policy'>
   kind?: AssetKind
   format?: string
@@ -343,7 +348,6 @@ export function parseAssetsSearch(search: Record<string, unknown>): AssetsSearch
   const format = searchText(search.format)?.toLowerCase()
   return {
     ...searchEntry('repo', searchText(search.repo)),
-    ...searchEntry('group', searchText(search.group)),
     ...searchEntry('status', status === 'policy' ? undefined : status),
     ...searchEntry('kind', searchEnum(search.kind, assetKinds)),
     ...searchEntry('format', format),
@@ -359,7 +363,6 @@ export function toAssetsQuery(search: AssetsSearch): Omit<AssetsQuery, 'cursor'>
     status: search.status ?? 'policy',
     sort: search.sort ?? 'severity',
     ...searchEntry('repo', search.repo),
-    ...searchEntry('group', search.group),
     ...searchEntry('kind', search.kind),
     ...searchEntry('format', search.format),
     ...searchEntry('problem', search.problem),

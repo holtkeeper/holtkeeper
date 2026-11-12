@@ -1,7 +1,8 @@
 import type { GroupMatch } from '@holtkeeper/api'
 
 import { messageOf } from '../../api/client.ts'
-import { usePreferences, useRepos, useSetPreferences } from '../../api/queries.ts'
+import { useGroupTitles, usePreferences, useRepos, useSetPreferences } from '../../api/queries.ts'
+import { groupMatchTitle } from '../../lib/group-titles.ts'
 import { scopeList } from '../../lib/home-scope.ts'
 import { healthLabels, healthOrder, healthTones } from '../../lib/home.ts'
 import { type TeamRow, homeCombinations, teamRows, toggleHomeGroup } from '../../lib/my-teams.ts'
@@ -12,12 +13,13 @@ import {
   Dot,
   EmptyState,
   ErrorState,
+  GroupName,
+  notify,
   Placeholder,
   Table,
   TagInput,
   Td,
   Th,
-  notify,
 } from '../../ui/index.ts'
 
 const validateCombination = (text: string) =>
@@ -32,6 +34,7 @@ export function HomeGroups() {
   const preferences = usePreferences()
   const repos = useRepos()
   const save = useSetPreferences()
+  const titleOf = useGroupTitles()
   const update = (homeGroups: GroupMatch[] | null) =>
     save.mutate(
       { homeGroups },
@@ -79,13 +82,15 @@ export function HomeGroups() {
               <tr key={row.group}>
                 <Td>
                   <Checkbox
-                    label={<span className="sr-only">{`${row.group} in My teams`}</span>}
+                    label={<span className="sr-only">{`${titleOf(row.group)} in My teams`}</span>}
                     isSelected={row.inMyTeams}
                     isDisabled={save.isPending}
                     onChange={(on) => update(toggleHomeGroup(home, row.group, on))}
                   />
                 </Td>
-                <Td className="font-medium">{row.group}</Td>
+                <Td className="font-medium">
+                  <GroupName group={row.group} />
+                </Td>
                 <Td align="right" className="tabular">
                   {row.repos}
                 </Td>
@@ -111,6 +116,7 @@ export function HomeGroups() {
         }
         validate={validateCombination}
         suggestions={rows.map((row) => row.group)}
+        labelOf={(text) => groupMatchTitle(parseGroupMatch(text), titleOf)}
         placeholder="Add a combination, e.g. web + payments"
         description="Groups joined with + match repositories in all of them."
       />

@@ -24,6 +24,7 @@ import {
   useAuthMutations,
   useChatThreads,
   useDependencySearch,
+  useGroupTitles,
   usePublicApiSearch,
   useRepos,
   useSettings,
@@ -62,7 +63,7 @@ import { isRepoHubTab, repoSplat } from '../../lib/repo.ts'
 import { settingsIndex } from '../../lib/settings-search.ts'
 import { useDebounced } from '../../lib/use-debounced.ts'
 import type { StatusTone } from '../../ui/colors.ts'
-import { Count, Dot, Tag, notify, useTheme } from '../../ui/index.ts'
+import { Count, Dot, GroupName, notify, Tag, useTheme } from '../../ui/index.ts'
 import { NewThreadDialog } from '../chat/ThreadList.tsx'
 import { docsUrl, groupByWorkspace, navKey, navLink, paletteNav, visibleNav } from './nav.ts'
 import { setPaletteOpen, usePaletteOpen } from './palette.ts'
@@ -222,7 +223,9 @@ function RepoPreview({
       <div className="flex flex-wrap items-center gap-1.5">
         <Tag tone={tagTones[repo.tone]}>{toneLabels[repo.tone]}</Tag>
         {repo.groups.map((group) => (
-          <Tag key={group}>{group}</Tag>
+          <Tag key={group}>
+            <GroupName group={group} />
+          </Tag>
         ))}
         <span className="mono text-xs text-muted">{repo.forge}</span>
       </div>
@@ -299,6 +302,7 @@ function PaletteBody({ onClose, onNewThread }: { onClose: () => void; onNewThrea
 
   const visible = useMemo(() => visibleNav(principal, crossTeam), [principal, crossTeam])
   const repos = useRepos(canRepos)
+  const titleOf = useGroupTitles()
   const dependencies = useDependencySearch(wantsLibraries ? debounced : '')
   const symbols = usePublicApiSearch({
     q: wantsLibraries && debounced.length >= 2 ? debounced : '',
@@ -308,7 +312,7 @@ function PaletteBody({ onClose, onNewThread }: { onClose: () => void; onNewThrea
 
   const sources = useMemo((): Partial<Record<PaletteKind, PaletteItem[]>> => {
     const reachable = {
-      repos: repoItems(repos.data?.repos ?? []),
+      repos: repoItems(repos.data?.repos ?? [], titleOf),
       libraries: wantsLibraries
         ? [
             ...libraryItems(dependencies.data?.libraries ?? []),
@@ -341,6 +345,7 @@ function PaletteBody({ onClose, onNewThread }: { onClose: () => void; onNewThrea
     }
   }, [
     repos.data,
+    titleOf,
     wantsLibraries,
     dependencies.data,
     symbols.data,

@@ -132,6 +132,13 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
         .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
         .map(view),
 
+    /** How many tokens of `principalId` have not expired. Read-only: never prunes the list. */
+    active: async (principalId: string) => {
+      const at = now().toISOString()
+      return (await listOf(principalId)).filter((token) => !token.expiresAt || token.expiresAt > at)
+        .length
+    },
+
     /** Issues a token; `expiresInDays` 0 never expires. Returns the secret once. */
     async create(
       principal: Principal,
@@ -182,10 +189,12 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
     },
 
     /**
-     * The principal behind `Authorization: Bearer hk_mcp_…` with the token's grants, or
-     * `undefined` when the request carries no valid token.
+     * The principal behind `Authorization: Bearer hk_mcp_…` with the token's grants and the
+     * token's id, or `undefined` when the request carries no valid token.
      */
-    async authenticate(request: Request): Promise<Principal | undefined> {
+    async authenticate(
+      request: Request,
+    ): Promise<{ principal: Principal; token: string } | undefined> {
       const header = request.headers.get('authorization') ?? ''
       const secret = /^Bearer\s+(hk_mcp_[\w-]+)$/i.exec(header.trim())?.[1]
       if (!secret) return undefined
@@ -221,7 +230,7 @@ export function mcpTokens({ kv, users, now }: McpTokensOptions) {
           tokens.map((token) => (token.id === stored.id ? { ...token, lastUsedAt } : token)),
         )
       }
-      return principal
+      return { principal, token: stored.id }
     },
   }
 }

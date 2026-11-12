@@ -7,6 +7,7 @@ import {
   useCheckRepoAccess,
   useForges,
   useGroups,
+  useGroupTitles,
   usePutGroup,
   useRepos,
 } from '../../api/queries.ts'
@@ -44,6 +45,7 @@ const steps = ['Forge', 'Paths', 'Group'] as const
  * Opens as a side sheet beside the list. Needs global `settings:write`.
  */
 export function AddRepoDialog({ onClose }: { onClose: () => void }) {
+  const titleOf = useGroupTitles()
   const forges = useForges()
   const groups = useGroups()
   const repos = useRepos()
@@ -145,7 +147,7 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
         onSuccess: () => {
           notify.success(
             `${plural(ready.length, 'repository', 'repositories')} added`,
-            `Group ${target} on ${selectedForge}`,
+            `Group ${titleOf(target)} on ${selectedForge}`,
           )
           onClose()
         },
@@ -396,13 +398,18 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
                   id: entry.id,
                   label: (
                     <span className="flex items-baseline gap-2">
-                      {entry.id}
+                      {titleOf(entry.id)}
                       <span className="truncate font-mono text-[11px] text-muted">
-                        {entry.data.include.join(', ')}
+                        {[
+                          titleOf(entry.id) === entry.id ? undefined : entry.id,
+                          ...entry.data.include,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')}
                       </span>
                     </span>
                   ),
-                  text: entry.id,
+                  text: titleOf(entry.id),
                 }))}
                 value={chosenGroup}
                 onChange={setGroupId}

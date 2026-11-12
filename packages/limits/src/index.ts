@@ -24,7 +24,7 @@ export {
   limitsCredentialsSetting,
   resolveLimitPolicy,
 } from './policy.ts'
-export { type KeyState, type LimiterState, memoryLimiterState } from './state.ts'
+export { type KeyState, type LimiterState, type UsageMinute, memoryLimiterState } from './state.ts'
 export {
   type LimiterKv,
   type StoreLimiterState,

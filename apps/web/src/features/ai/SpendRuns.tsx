@@ -1,10 +1,10 @@
+import { type FilterableFeature, featureLabel, featureOf } from '@holtkeeper/ai-usage/features'
 import type { AiUsageRecord, AiUsageTotals, PersonView } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { Sparkles } from 'lucide-react'
 import { useState } from 'react'
 
 import { useAiRuns } from '../../api/queries.ts'
-import { featureLabel, featureOf } from '../../lib/ai-features.ts'
 import { formatTokens, formatUsd, runStarter, tokensNote, totalTokens } from '../../lib/ai-usage.ts'
 import { formatDateTime, formatDuration, formatRelative, shortId } from '../../lib/format.ts'
 import { repoSplat } from '../../lib/repo.ts'
@@ -148,7 +148,8 @@ function RunRow({ run, people }: { run: AiUsageRecord; people: Record<string, Pe
 /** What the page's toolbar narrows the runs to. */
 export interface SpendRunsFilter {
   origin?: 'interactive' | 'automatic'
-  taskKind?: string
+  /** A feature with a fixed list of task kinds. */
+  feature?: FilterableFeature
   model?: string
   /** Comma list of config groups. */
   groups?: string
@@ -156,8 +157,8 @@ export interface SpendRunsFilter {
 
 /**
  * Every model run since `from`, newest first, paged by time: outcome segments with the period's
- * counts, narrowed by the page's toolbar (`filter`: who started it, task kind, model and scope)
- * through `GET /api/ai/runs`. The counts show only while nothing but the scope narrows.
+ * counts, narrowed by the page's toolbar (`filter`: who started it, feature, model and scope)
+ * through `GET /api/ai/runs`. `totals` are the period's, narrowed the same way.
  */
 export function SpendRuns({
   from,
@@ -173,7 +174,6 @@ export function SpendRuns({
   const list = runs.data?.pages.flatMap((page) => page.runs) ?? []
   const people: Record<string, PersonView> = {}
   for (const page of runs.data?.pages ?? []) Object.assign(people, page.people)
-  const counted = !filter.origin && !filter.taskKind && !filter.model
   const total =
     outcome === 'error' ? totals.errors : outcome === 'denied-budget' ? totals.denied : totals.runs
   const more = runs.hasNextPage ? (
@@ -185,7 +185,6 @@ export function SpendRuns({
       Load older
     </LoadMore>
   ) : null
-  const count = (value: number) => (counted ? <Count>{value.toLocaleString('en')}</Count> : null)
 
   return (
     <section className="flex min-w-0 flex-col gap-3 border-t border-line pt-3">
@@ -200,9 +199,30 @@ export function SpendRuns({
         <SegmentedTabs
           aria-label="Run outcome"
           items={[
-            { id: 'all', label: <>All {count(totals.runs)}</> },
-            { id: 'error', label: <>Errors {count(totals.errors)}</> },
-            { id: 'denied-budget', label: <>Blocked by budget {count(totals.denied)}</> },
+            {
+              id: 'all',
+              label: (
+                <>
+                  All <Count>{totals.runs.toLocaleString('en')}</Count>
+                </>
+              ),
+            },
+            {
+              id: 'error',
+              label: (
+                <>
+                  Errors <Count>{totals.errors.toLocaleString('en')}</Count>
+                </>
+              ),
+            },
+            {
+              id: 'denied-budget',
+              label: (
+                <>
+                  Blocked by budget <Count>{totals.denied.toLocaleString('en')}</Count>
+                </>
+              ),
+            },
           ]}
           selected={outcome}
           onSelect={(id) => setOutcome(outcomes.find((o) => o === id) ?? 'all')}
@@ -241,17 +261,13 @@ export function SpendRuns({
               ))}
             </tbody>
           </Table>
-          {counted ? (
-            <ListFooter
-              shown={list.length}
-              total={Math.max(total, list.length)}
-              noun="runs"
-              caption="· Tokens = input, output and cache"
-              more={more}
-            />
-          ) : runs.hasNextPage ? (
-            <div className="px-3.5 py-2.5">{more}</div>
-          ) : null}
+          <ListFooter
+            shown={list.length}
+            total={Math.max(total, list.length)}
+            noun="runs"
+            caption="· Tokens = input, output and cache"
+            more={more}
+          />
         </div>
       )}
     </section>

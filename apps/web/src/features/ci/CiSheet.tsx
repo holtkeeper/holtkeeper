@@ -25,6 +25,7 @@ import {
   Button,
   EmptyState,
   ErrorState,
+  GroupName,
   KeyValue,
   Placeholder,
   SideSheet,
@@ -461,7 +462,9 @@ export function CiSummary({ view, card }: { view: CiRepoView; card: CiRepoCard |
         </Tag>
       ) : null}
       {card?.groups.map((group) => (
-        <Tag key={group}>{group}</Tag>
+        <Tag key={group}>
+          <GroupName group={group} />
+        </Tag>
       ))}
       {data?.pipelines.ref ? <span className="mono">{data.pipelines.ref}</span> : null}
       {data ? (

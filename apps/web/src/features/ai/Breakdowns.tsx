@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import type { AiUsageQuery } from '../../api/endpoints.ts'
 import { useAiUsage } from '../../api/queries.ts'
 import { featureItems } from '../../lib/ai-features.ts'
 import {
@@ -110,22 +111,21 @@ const repoLimit = 8
 
 /**
  * Spend of the overview's period split three ways: by feature (task kinds mapped by
- * `featureOf`), by repository (the top ones, the rest folded) and by model with its provider.
+ * `featureOf`), by repository (the top ones, the rest folded) and by model with its provider,
+ * narrowed by the page's toolbar (`filter`).
  */
 export function Breakdowns({
   from,
   period,
-  groups,
+  filter,
 }: {
   from: string
   period: AiUsagePeriodKind
-  /** Comma list of config groups the scope switch narrows to. */
-  groups?: string
+  filter: Omit<AiUsageQuery, 'from' | 'to'>
 }) {
-  const scope = groups ? { groups } : {}
-  const features = useAiUsage({ groupBy: 'taskKind', from, ...scope })
-  const repos = useAiUsage({ groupBy: 'repo', from, ...scope })
-  const models = useAiUsage({ groupBy: 'model,provider', from, ...scope })
+  const features = useAiUsage({ groupBy: 'taskKind', from, ...filter })
+  const repos = useAiUsage({ groupBy: 'repo', from, ...filter })
+  const models = useAiUsage({ groupBy: 'model,provider', from, ...filter })
 
   const featureRows: CostItem[] = features.data
     ? featureItems(features.data.buckets).map((item) => ({

@@ -44,6 +44,7 @@ import {
   Button,
   Count,
   EmptyState,
+  NoTeamsState,
   ErrorState,
   FilterButton,
   Kbd,
@@ -411,7 +412,7 @@ export function TasksPage() {
   const groups = useTaskGroups()
   const caps = useWriteTasks()
   const repos = useRepos()
-  const { view: scopeView, setView: setScopeView, scope } = useScope()
+  const { view: scopeView, setView: setScopeView, scope, noTeams } = useScope()
   const decisions = useGroupDecisions()
   const { canGlobal } = useSession()
   const now = useNow()
@@ -569,6 +570,8 @@ export function TasksPage() {
           <div className="p-3">
             <ErrorState error={groups.error} />
           </div>
+        ) : !sections.length && !ended && all.length && noTeams ? (
+          <NoTeamsState />
         ) : !sections.length && !ended ? (
           <EmptyState
             icon={<Bot className="size-5" />}
@@ -655,6 +658,7 @@ export function TasksPage() {
         />
       ) : (
         <SideSheet
+          size="wide"
           open
           onClose={() => openGroup(undefined)}
           id={`task ${shortId(search.group)}`}

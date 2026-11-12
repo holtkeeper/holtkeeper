@@ -10,7 +10,8 @@ import type {
 } from '@holtkeeper/api'
 
 import { shortId } from './format.ts'
-import { type ScopeView, foldOtherTeams } from './home-scope.ts'
+import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
+import { type FoldedScope, type ScopeView, foldScope } from './home-scope.ts'
 import { kbId } from './knowledge.ts'
 
 const pathOf = (repo: string) => repo.slice(repo.indexOf(':') + 1)
@@ -260,28 +261,26 @@ export function insertMention(
   return { text: text.slice(0, start) + inserted + rest, caret: start + inserted.length }
 }
 
-/** What a thread is about, for its list row and header: the repository path, the group or `Team`. */
-export const threadScope = (thread: Pick<ChatThreadView, 'repo' | 'group'>): string =>
-  thread.repo ? pathOf(thread.repo) : (thread.group ?? 'Team')
+/**
+ * What a thread is about, for its list row and header: the repository path, the group (by
+ * `titleOf`) or `Team`.
+ */
+export const threadScope = (
+  thread: Pick<ChatThreadView, 'repo' | 'group'>,
+  titleOf: GroupTitleOf = keyAsTitle,
+): string => (thread.repo ? pathOf(thread.repo) : thread.group ? titleOf(thread.group) : 'Team')
 
 /**
  * Threads for a scope switch position. Team-wide threads count as the viewer's own teams; on
- * *My teams* the threads of other teams fold into `others` (with the groups they are in), on *All
- * I can see* nothing folds. Without home groups every thread is the viewer's own.
+ * *My teams* the threads of other teams fold into `others` (with the groups they are in), a group
+ * position keeps that group's threads, *All I can see* everything. Without home groups *My teams*
+ * shows only the team-wide threads.
  */
-export function scopeThreads<T extends Pick<ChatThreadView, 'groups'>>(
+export const scopeThreads = <T extends Pick<ChatThreadView, 'groups'>>(
   threads: readonly T[],
   view: ScopeView,
   homeGroups: readonly GroupMatch[],
-): { shown: T[]; others: T[]; teams: string[]; counts: Record<ScopeView, number> } {
-  const folded = foldOtherTeams(threads, homeGroups, (thread) => thread.groups)
-  return {
-    shown: view === 'mine' ? folded.mine : [...threads],
-    others: view === 'mine' ? folded.others : [],
-    teams: view === 'mine' ? folded.teams : [],
-    counts: { mine: folded.mine.length, all: threads.length },
-  }
-}
+): FoldedScope<T> => foldScope(threads, view, homeGroups, (thread) => thread.groups)
 
 /** The tool trace of a reply in one line, e.g. `knowledge ×2 · catalog`. */
 export const toolSummary = (trace: readonly { tool: string; calls: number }[]): string =>
@@ -331,6 +330,16 @@ export const unreadBadge = (count: number): string =>
 /** The unread badge of a thread row: none for threads the viewer muted. */
 export const threadBadge = (thread: Pick<ChatThreadView, 'unread' | 'muted'>): string =>
   thread.muted ? '' : unreadBadge(thread.unread)
+
+/** What a new thread sends as its title: the trimmed text, or nothing so the server names it. */
+export const newThreadTitle = (text: string): { title?: string } => {
+  const title = text.trim()
+  return title ? { title } : {}
+}
+
+/** Whether the thread is being named: its title is pending and it already has a message. */
+export const isNaming = (thread: Pick<ChatThreadView, 'titlePending' | 'messageCount'>): boolean =>
+  thread.titlePending === true && thread.messageCount > 0
 
 /** One stable key per ref, so lists can drop repeats and render keys. */
 export const refKey = (ref: ChatMessageRef): string =>

@@ -16,6 +16,16 @@ export interface CheckOptions {
   go?: string | false
 }
 
+/**
+ * Check options for a repository with no tests by design: no `test` script and `go build ./...`
+ * only; options set in `checks` still win.
+ */
+export const withoutTests = (checks: CheckOptions = {}): CheckOptions => ({
+  test: false,
+  go: 'go build ./...',
+  ...checks,
+})
+
 const scriptCandidates: [keyof CheckOptions, string[]][] = [
   ['typecheck', ['typecheck', 'type-check', 'tsc']],
   ['lint', ['lint']],

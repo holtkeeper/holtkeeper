@@ -41,7 +41,6 @@ test('parseLicensesSearch keeps known values', () => {
     repo: 'gitlab:acme/ledger-api',
     verdict: ['denied', 'unlisted'],
     ecosystem: ['Go'],
-    group: ['Payments', 'Web'],
     sort: 'repos',
     q: 'gpl',
     package: 'npm:some-lib',
@@ -112,13 +111,12 @@ const repoRow = (repo: string, overrides: Partial<LicensesRepoRow> = {}): Licens
 })
 
 describe('violations', () => {
-  test('filters by verdict, ecosystem, group, repository and text', () => {
+  test('filters by verdict, ecosystem, repository and text', () => {
     expect(names(filterViolations(violations, { verdict: ['denied', 'unknown'] }))).toEqual([
       'copyleft-kit',
       'mystery',
     ])
     expect(names(filterViolations(violations, { ecosystem: ['Go'] }))).toEqual(['mystery'])
-    expect(names(filterViolations(violations, { group: ['Payments'] }))).toEqual(['mystery'])
     expect(names(filterViolations(violations, { repo: 'gitlab:acme/ledger-api' }))).toEqual([
       'mystery',
     ])
@@ -173,9 +171,7 @@ test('filterLicenseRepos filters and puts the worst first', () => {
     'gitlab:acme/a',
     'gitlab:acme/c',
   ])
-  expect(filterLicenseRepos(rows, { group: ['Web'], q: 'acme/c' }).map((r) => r.repo)).toEqual([
-    'gitlab:acme/c',
-  ])
+  expect(filterLicenseRepos(rows, { q: 'acme/c' }).map((r) => r.repo)).toEqual(['gitlab:acme/c'])
 })
 
 test('mixParts keeps the largest licenses and folds the rest', () => {

@@ -66,6 +66,7 @@ import {
   Tr,
   notify,
 } from '../../ui/index.ts'
+import { WritesOffNotice, useWritesOff } from '../tasks/WritesOff.tsx'
 import { type Decide, useDecide } from './decide.ts'
 import { InboxSheetBody, sheetTabs } from './InboxSheetBody.tsx'
 
@@ -112,6 +113,7 @@ function Row({
   decide,
   onSnooze,
   busy,
+  writesOff,
 }: {
   item: InboxItem
   feed: InboxFeed
@@ -124,6 +126,8 @@ function Row({
   decide: Decide
   onSnooze: () => void
   busy: boolean
+  /** Write tasks are off, so a task proposal cannot be approved. */
+  writesOff: boolean
 }) {
   const Icon = kindIcons[item.kind]
   const person = item.proposedBy ? personOf(feed.people, item.proposedBy) : undefined
@@ -175,7 +179,7 @@ function Row({
             <Button
               size="sm"
               variant="secondary"
-              isDisabled={busy}
+              isDisabled={busy || (item.kind === 'task' && writesOff)}
               onPress={() =>
                 decide(
                   item,
@@ -250,6 +254,7 @@ function InboxSheet({
   ]
   return (
     <SideSheet
+      size="wide"
       open
       onClose={onClose}
       id={shortId}
@@ -352,6 +357,7 @@ export function InboxPage() {
       })
     : []
   const rows = sections.flatMap((section) => section.items)
+  const writesOff = useWritesOff()
   const ids = rows.map((item) => item.id)
   const all = feed ? [...feed.mine, ...feed.teams] : []
   const current = all.find((item) => item.id === search.item)
@@ -614,6 +620,11 @@ export function InboxPage() {
           ) : null}
         </div>
         {bulk ? <BulkErrors result={bulk} onDismiss={() => setBulk(undefined)} /> : null}
+        {writesOff && rows.some((row) => row.kind === 'task') ? (
+          <div className="px-3 pt-3">
+            <WritesOffNotice />
+          </div>
+        ) : null}
         {inbox.isPending ? (
           <div className="flex flex-col gap-1 p-3">
             {Array.from({ length: 6 }, (_, i) => (
@@ -664,6 +675,7 @@ export function InboxPage() {
                         decide={decide}
                         onSnooze={() => snooze(item)}
                         busy={busy}
+                        writesOff={writesOff}
                         {...(errors[item.id] && { error: errors[item.id] })}
                       />
                     ))}

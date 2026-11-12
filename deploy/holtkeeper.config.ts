@@ -11,6 +11,7 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
  *
  * - `HOLTKEEPER_DATABASE_URL` set: Postgres (required for more than one process), else SQLite in /data.
  * - `HOLTKEEPER_S3_BUCKET` set: artifacts in any S3-compatible storage (required for more than one process), else /data.
+ *   Optional `HOLTKEEPER_S3_QUOTA` (bytes) is the space the bucket offers, shown against usage in Settings › System.
  */
 const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
 const port = Number(process.env.HOLTKEEPER_PORT ?? 7420)
@@ -40,6 +41,9 @@ export default defineConfig({
             ? { endpoint: process.env.HOLTKEEPER_S3_ENDPOINT }
             : {}),
           ...(process.env.HOLTKEEPER_S3_REGION ? { region: process.env.HOLTKEEPER_S3_REGION } : {}),
+          ...(process.env.HOLTKEEPER_S3_QUOTA
+            ? { quotaBytes: Number(process.env.HOLTKEEPER_S3_QUOTA) }
+            : {}),
         }
       : { kind: 'fs', dir: '/data/artifacts' },
     retention: { days: 90 },

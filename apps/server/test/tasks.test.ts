@@ -14,6 +14,7 @@ import { aesVault } from '@holtkeeper/vault'
 import { WRITE_TASK_KIND, type WriteTaskData, writeTaskOptionsSchema } from '@holtkeeper/write-task'
 
 import { createApp } from '../src/app.ts'
+import { repoTestsFor } from '../src/repo-tests.ts'
 import {
   createTaskGroup,
   decideRepoRequest,
@@ -81,6 +82,13 @@ const deps = () => ({
   config,
   now: () => now,
   readOnly: async (repo: { path: string }) => repo.path === 'shapes/vendored',
+})
+
+const coverRequest = (kind: 'tests' | 'fix') => ({
+  kind,
+  title: 'Cover the widget',
+  prompt: 'Do it.',
+  repos: ['work:shapes/a'],
 })
 
 const setting = (key: string, value: unknown, scope: Record<string, unknown> = { all: true }) =>
@@ -195,7 +203,7 @@ describe('task group routes', () => {
 
     const refused = await call('POST', `/task-groups/${group.id}/approve`)
     expect(refused.status).toBe(409)
-    expect(await refused.text()).toContain('turned off')
+    expect(await refused.text()).toContain('write tasks are off')
     expect(await store.jobs.list()).toEqual([])
   })
 
@@ -705,6 +713,25 @@ describe('task lifecycle', () => {
     expect((await store.chat.listMessages('th1')).at(-1)?.body).toContain('budget stop')
   })
 
+  test('a tests task on a repository with no tests by design is refused', async () => {
+    await setting('repo.tests', { expected: false }, { repos: ['work:shapes/a'] })
+    expect(createTaskGroup(deps(), jane, coverRequest('tests'))).rejects.toMatchObject({
+      status: 409,
+      message: 'work:shapes/a has no tests by design (repo.tests)',
+    })
+    expect((await createTaskGroup(deps(), jane, coverRequest('fix'))).kind).toBe('fix')
+  })
+
+  test('approving a tests task proposed before the repository lost its tests is refused', async () => {
+    await setting('tasks.write', { enabled: true })
+    const group = await createTaskGroup(deps(), jane, coverRequest('tests'))
+    await setting('repo.tests', { expected: false }, { repos: ['work:shapes/a'] })
+    const refused = await call('POST', `/task-groups/${group.id}/approve`)
+    expect(refused.status).toBe(409)
+    expect(await refused.text()).toContain('work:shapes/a has no tests by design (repo.tests)')
+    expect(await store.jobs.list()).toEqual([])
+  })
+
   test('retries add up their spend and stay within the group cap', async () => {
     await setting('tasks.write', { enabled: true, perGroupUsd: 2.5 })
     const group = await createTaskGroup(deps(), jane, {
@@ -943,6 +970,21 @@ describe('writeTaskPolicy', () => {
       dryRun: true,
       unsandboxed: true,
       weeklyCapReached: true,
+    })
+  })
+
+  test('passes on that a repository has no tests by design', async () => {
+    const policy = writeTaskPolicy({
+      store,
+      readOnly: async () => false,
+      tests: repoTestsFor(store, () => config),
+      dryRun: () => false,
+      executionMode: () => 'mise',
+      now: () => now,
+    })
+    await setting('repo.tests', { expected: false, reason: 'Config only' }, { groups: ['shapes'] })
+    expect((await policy({ forge: 'work', path: 'shapes/a' })).noTests).toEqual({
+      reason: 'Config only',
     })
   })
 })

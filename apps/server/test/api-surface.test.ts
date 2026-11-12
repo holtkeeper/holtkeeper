@@ -733,6 +733,58 @@ describe('MCP endpoint', () => {
     expect(own.people).toEqual([])
     expect(own.recent).toEqual([])
   })
+
+  test('usage per person and token stays with its owner unless the viewer may read users', async () => {
+    const created = await app.request('/api/api-surface/mcp/tokens', {
+      method: 'POST',
+      headers: { ...asGames, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'laptop' }),
+    })
+    const { secret, token } = (await created.json()) as CreateMcpTokenResult
+    const bearer = { authorization: `Bearer ${secret}` }
+    await callTool('list_packages', {}, bearer)
+    expect(await callTool('get_package_api', { package: 'nope' }, bearer)).toMatchObject({
+      isError: true,
+    })
+    await callTool('list_packages', {}, asGames)
+    await callTool('list_packages', {}, asAdmin)
+
+    const own = await get<McpUsageOverview>('/api/api-surface/mcp/usage?days=7', asGames)
+    const bob = {
+      id: 'header:bob',
+      name: 'bob',
+      calls: 3,
+      errors: 1,
+      lastAt: '2026-10-30T12:00:00.000Z',
+      tools: [
+        { tool: 'list_packages', calls: 2 },
+        { tool: 'get_package_api', calls: 1 },
+      ],
+      packages: [{ name: 'nope', calls: 1 }],
+      clients: [{ client: 'claude-code/2.1.0', calls: 3 }],
+      daily: [0, 0, 0, 0, 0, 0, 3],
+      dailyErrors: [0, 0, 0, 0, 0, 0, 1],
+      teams: ['games'],
+      activeTokens: 1,
+    }
+    expect(own.people).toEqual([bob])
+    expect(own.me).toEqual(bob)
+    expect(own.tokens).toEqual([{ id: token.id, calls: 2 }])
+    expect(own.recent.map((call) => call.principal)).toEqual([
+      'header:bob',
+      'header:bob',
+      'header:bob',
+    ])
+
+    const all = await get<McpUsageOverview>('/api/api-surface/mcp/usage?days=7')
+    expect(all.people.map((person) => [person.id, person.calls])).toEqual([
+      ['header:bob', 3],
+      ['header:jane', 1],
+    ])
+    expect(all.people[0]).toMatchObject({ teams: [], activeTokens: 1 })
+    expect(all.me).toMatchObject({ id: 'header:jane', calls: 1, errors: 0, activeTokens: 0 })
+    expect(all.tokens).toEqual([])
+  })
 })
 
 const gameUsage = (version: string): UsagesData => ({

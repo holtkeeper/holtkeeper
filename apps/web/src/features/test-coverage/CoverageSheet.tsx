@@ -4,11 +4,17 @@ import { FolderGit2, Play, Plus, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useRepoCoverage, useResolvedSettings, useSettingMutations } from '../../api/queries.ts'
+import {
+  useDescribeScope,
+  useRepoCoverage,
+  useResolvedSettings,
+  useSettingMutations,
+} from '../../api/queries.ts'
 import {
   coverageExcludes,
   coverageFreshness,
   coverageFreshnessLabel,
+  coverageFreshnessTone,
   coverageSetting,
   coverageTone,
   formatPercent,
@@ -20,10 +26,8 @@ import {
 } from '../../lib/coverage.ts'
 import { unexcludeEntry } from '../../lib/exclude.ts'
 import { formatDateTime, formatRelative, plural, shortSha } from '../../lib/format.ts'
-import { freshnessTone } from '../../lib/freshness.ts'
 import { jobStatusLabel, jobStatusTone, jobTriggerLabel } from '../../lib/jobs.ts'
 import { repoSplat } from '../../lib/repo.ts'
-import { describeScope } from '../../lib/scope.ts'
 import { statusColor } from '../../ui/colors.ts'
 import {
   Button,
@@ -42,6 +46,7 @@ import {
 import { RunJobButton, useRunJob } from '../jobs/RunJobDialog.tsx'
 import { ExcludeDialog } from '../reports/ExcludeDialog.tsx'
 import { useSession } from '../shell/session.ts'
+import { NoTestsNotice, useTestsToggle } from './TestsToggle.tsx'
 
 interface Counts {
   covered: number
@@ -103,8 +108,19 @@ export function useCoverageOptions(repo: RepoRef | undefined, fallback: number) 
   }
 }
 
-/** Line, branch and function shares of a record with its change and the target, over its bar. */
-export function CoverageHeadline({ card, target }: { card: CoverageRepoCard; target: number }) {
+/**
+ * Line, branch and function shares of a record with its change and the target, over its bar;
+ * with `noTests` (no tests by design) the target is not judged.
+ */
+export function CoverageHeadline({
+  card,
+  target,
+  noTests,
+}: {
+  card: CoverageRepoCard
+  target: number
+  noTests?: boolean
+}) {
   const { totals } = card
   const lines = percentOf(totals.lines)
   const freshness = coverageFreshness({ repo: card.repo, groups: card.groups, card })
@@ -115,7 +131,7 @@ export function CoverageHeadline({ card, target }: { card: CoverageRepoCard; tar
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-        <Tag tone={freshnessTone[freshness]} dot>
+        <Tag tone={coverageFreshnessTone[freshness]} dot>
           {coverageFreshnessLabel[freshness]}
         </Tag>
         <span>
@@ -136,7 +152,7 @@ export function CoverageHeadline({ card, target }: { card: CoverageRepoCard; tar
             {change}
           </Tag>
         ) : null}
-        {lines !== undefined && lines < target ? (
+        {!noTests && lines !== undefined && lines < target ? (
           <Tag tone="warning">Below {formatPercent(target)} target</Tag>
         ) : null}
       </div>
@@ -432,6 +448,7 @@ function Exclusions({
   onAdd: () => void
 }) {
   const { put } = useSettingMutations()
+  const describeScope = useDescribeScope()
   const { resolved, entry, excludes } = options
   if (resolved.isPending) return <Placeholder className="h-24" />
   if (resolved.isError) return <ErrorState error={resolved.error} />
@@ -532,10 +549,40 @@ export function CoverageTabBody({
 }
 
 /**
+ * "Not measured yet" with Run coverage, and "Mark as no tests by design…" for callers who may
+ * change `repo.tests`.
+ */
+export function NotMeasured({
+  repo,
+  tests,
+}: {
+  repo: RepoRef
+  tests: ReturnType<typeof useTestsToggle>
+}) {
+  return (
+    <EmptyState
+      title="Not measured yet"
+      description="The coverage analyzer has not stored a record for this repository."
+      action={
+        <span className="flex flex-wrap items-center justify-center gap-2">
+          <RunJobButton repo={repo} analyzer="coverage" label="Run coverage" />
+          {tests.toggle?.kind === 'mark' ? (
+            <Button variant="tertiary" onPress={tests.openMark}>
+              Mark as no tests by design…
+            </Button>
+          ) : null}
+        </span>
+      }
+    />
+  )
+}
+
+/**
  * One repository's coverage in a side sheet: freshness, shares and change against the target over
  * the covered / uncovered / untested bar, then Breakdown, Files, Changes and Exclusions tabs, with
- * Run coverage. `target` is the fallback until the repository's own target loads.
- * Closed while `repo` is unset.
+ * Run coverage. A repository with no tests by design (`repo.tests`) shows that notice instead of
+ * Run coverage, with any stored record below it. `target` is the fallback until the repository's
+ * own target loads. Closed while `repo` is unset.
  */
 export function CoverageSheet({
   repo,
@@ -561,12 +608,16 @@ export function CoverageSheet({
   const [tab, setTab] = useState<CoverageTab>('breakdown')
   const data = coverage.data
   const card = data?.card
-  const runAction = run.action?.onPress
-    ? { label: 'Run coverage', icon: Play, onPress: run.action.onPress }
-    : undefined
+  const tests = useTestsToggle(repo, data?.tests)
+  const noTests = data?.tests?.expected === false ? data.tests : undefined
+  const runAction =
+    run.action?.onPress && !noTests
+      ? { label: 'Run coverage', icon: Play, onPress: run.action.onPress }
+      : undefined
   return (
     <>
       <SideSheet
+        size="wide"
         open={repo !== undefined}
         onClose={onClose}
         title={repo?.path ?? 'Coverage'}
@@ -597,6 +648,7 @@ export function CoverageSheet({
                     search: { tab: 'quality', section: 'coverage' },
                   }).href,
                 },
+                ...(tests.markItem ? [tests.markItem] : []),
               ],
             }
           : {})}
@@ -619,20 +671,27 @@ export function CoverageSheet({
           </div>
         ) : coverage.isError ? (
           <ErrorState error={coverage.error} />
+        ) : noTests ? (
+          <div className="flex flex-col gap-4">
+            <NoTestsNotice tests={noTests} control={tests} />
+            {coverage.data.card ? (
+              <>
+                <CoverageHeadline card={coverage.data.card} target={options.target} noTests />
+                <CoverageTabBody repo={repo} data={coverage.data} tab={tab} options={options} />
+              </>
+            ) : null}
+          </div>
         ) : coverage.data.card ? (
           <div className="flex flex-col gap-4">
             <CoverageHeadline card={coverage.data.card} target={options.target} />
             <CoverageTabBody repo={repo} data={coverage.data} tab={tab} options={options} />
           </div>
         ) : (
-          <EmptyState
-            title="Not measured yet"
-            description="The coverage analyzer has not stored a record for this repository."
-            action={<RunJobButton repo={repo} analyzer="coverage" label="Run coverage" />}
-          />
+          <NotMeasured repo={repo} tests={tests} />
         )}
       </SideSheet>
       {run.dialog}
+      {tests.dialog}
     </>
   )
 }

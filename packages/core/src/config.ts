@@ -35,11 +35,18 @@ const secretSchema = z.custom<Secret>(
   'expected a string or env("NAME")',
 )
 
+/**
+ * Space the operator says the storage offers, in bytes; Settings › System shows usage against it.
+ * Declared, not measured: S3 has no quota API.
+ */
+const quotaBytesSchema = z.number().int().positive().optional()
+
 /** Where generated files (image variants, optimized SVGs) are kept, see `@holtkeeper/artifacts`. */
 const artifactsSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('fs'), dir: z.string().min(1) }),
+  z.object({ kind: z.literal('fs'), dir: z.string().min(1), quotaBytes: quotaBytesSchema }),
   z.object({
     kind: z.literal('s3'),
+    quotaBytes: quotaBytesSchema,
     bucket: z.string().min(1),
     /** AWS by default; set it for MinIO, Cloudflare R2, Garage and other S3-compatible services. */
     endpoint: z.url().optional(),
@@ -362,7 +369,12 @@ const limitsSchema = z.object({
   distributed: z.boolean().default(false),
 })
 
+/** A group's display name: trimmed, 1–60 characters. Its key stays the identity everywhere. */
+export const groupTitleSchema = z.string().trim().min(1).max(60)
+
 const groupSchema = z.object({
+  /** Shown to people instead of the key. */
+  title: groupTitleSchema.optional(),
   forge: z.string(),
   include: z.array(z.string()).min(1),
   exclude: z.array(z.string()).default([]),
@@ -505,6 +517,21 @@ export type HoltkeeperConfigInput = z.input<typeof configFileSchema>
 export type HoltkeeperFileConfig = z.output<typeof configFileSchema>
 /** The effective config: the file config with panel documents applied. */
 export type HoltkeeperConfig = z.output<typeof configSchema>
+
+/** The configured groups, or anything shaped like them, by key. */
+type GroupTitles = Readonly<Record<string, { title?: string | undefined }>>
+
+/** What people see for group `key`: its title, or the key when it has none or is unknown. */
+export const groupTitle = (groups: GroupTitles, key: string): string => groups[key]?.title ?? key
+
+/**
+ * Group `key` for text a reader may act on: `Title (key)` when it has a title, else the key, so
+ * the key needed for tool calls and settings is always there.
+ */
+export function groupLabel(groups: GroupTitles, key: string): string {
+  const title = groups[key]?.title
+  return title && title !== key ? `${title} (${key})` : key
+}
 
 /** Identity helper that types a config module's default export. */
 export const defineConfig = (config: HoltkeeperConfigInput): HoltkeeperConfigInput => config

@@ -181,7 +181,7 @@ describe('space tree', () => {
     expect(shapes?.repos.map((r) => r.path)).toEqual(['shapes/tools'])
     expect(tree.teams[1]?.repos.map((r) => r.path)).toEqual(['shapes/tools', 'tools/lint'])
     expect(tree.ungrouped.repos.map((r) => r.path)).toEqual(['loose/one'])
-    expect(tree.counts).toEqual({ mine: 0, all: 2 })
+    expect(tree.counts).toMatchObject({ mine: 0, all: 5 })
     expect(tree.folded).toBe(0)
   })
 
@@ -189,10 +189,24 @@ describe('space tree', () => {
     const tree = buildSpaceTree(repos, [widgets], 'mine', [['shapes', 'other']])
     expect(tree.teams.map((t) => t.group)).toEqual(['shapes'])
     expect(tree.ungrouped.repos).toEqual([])
-    expect(tree.counts).toEqual({ mine: 1, all: 2 })
+    expect(tree.counts).toMatchObject({ mine: 3, all: 5 })
     expect(tree.folded).toBe(1)
     expect(tree.others.map((t) => t.group)).toEqual(['tools'])
     expect(tree.otherRepos).toBe(1)
+  })
+
+  test('a group keeps that one team and folds nothing', () => {
+    const tree = buildSpaceTree(repos, [widgets], 'group:tools', [['shapes', 'other']])
+    expect(tree.teams.map((t) => t.group)).toEqual(['tools'])
+    expect(tree.others).toEqual([])
+    expect(tree.ungrouped.repos).toEqual([])
+    expect(tree.counts.groups).toContainEqual({ group: 'tools', count: 2 })
+  })
+
+  test('My teams without home groups shows and folds nothing', () => {
+    const tree = buildSpaceTree(repos, [widgets], 'mine', [])
+    expect(tree.teams).toEqual([])
+    expect(tree.others).toEqual([])
   })
 
   test('family members the viewer cannot see are left out', () => {

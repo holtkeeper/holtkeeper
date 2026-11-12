@@ -2,7 +2,7 @@ import type { CiRepoCard } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Timer } from 'lucide-react'
 
-import { useCiOverview } from '../../api/queries.ts'
+import { useCiOverview, useGroupTitles } from '../../api/queries.ts'
 import {
   type CiKpis,
   type CiSearch,
@@ -22,7 +22,7 @@ import {
   worstCiFirst,
 } from '../../lib/ci.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat, splitRepoPath } from '../../lib/repo.ts'
 import { pageSettingKeys } from '../../lib/settings-sections.ts'
 import { sortRows } from '../../lib/table-sort.ts'
@@ -226,16 +226,17 @@ export function CiPage() {
   const navigate = useNavigate({ from: '/quality/ci' })
   const setSearch = (next: CiSearch) => void navigate({ search: next, replace: true })
   const { view, setView, homeGroups } = useScope()
+  const titleOf = useGroupTitles()
   const settings = useConfigure('CI settings', pageSettingKeys.ci)
   const run = useRunJob({ analyzer: 'ci-jobs', label: 'Run CI analysis' })
 
   const all = overview.data?.repos ?? []
   const sort = ciSort(search)
-  const rows = sortRows(worstCiFirst(filterCiCards(all, search)), sort, ciSortValue)
+  const rows = sortRows(worstCiFirst(filterCiCards(all, search, titleOf)), sort, ciSortValue)
   const filtered = Boolean(search.q || search.status?.length || search.problems)
 
-  const folded = foldOtherTeams(rows, homeGroups, (card) => card.groups)
-  const order = view === 'mine' ? [...folded.mine, ...folded.others] : rows
+  const folded = foldScope(rows, view, homeGroups, (card) => card.groups)
+  const order = [...folded.shown, ...folded.others]
   const selected = parseRepoKey(search.repo)
   const index = selected ? order.findIndex((card) => repoKey(card.repo) === repoKey(selected)) : -1
   const selectedCard = selected

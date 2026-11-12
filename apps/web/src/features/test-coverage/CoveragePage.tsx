@@ -1,7 +1,7 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { FlaskConical } from 'lucide-react'
 
-import { useCoverageOverview, useRepos, useSettings } from '../../api/queries.ts'
+import { useCoverageOverview, useGroupTitles, useRepos, useSettings } from '../../api/queries.ts'
 import {
   type CoverageKpis,
   type CoverageRow,
@@ -11,6 +11,7 @@ import {
   coverageFreshness,
   coverageFreshnessLabel,
   coverageFreshnessStates,
+  coverageFreshnessTone,
   coverageKpis,
   coverageRows,
   coverageSort,
@@ -27,8 +28,7 @@ import {
   withCoverageSort,
 } from '../../lib/coverage.ts'
 import { formatDateTime, formatRelative, shortSha } from '../../lib/format.ts'
-import { freshnessTone } from '../../lib/freshness.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat, splitRepoPath } from '../../lib/repo.ts'
 import { pageSettingKeys } from '../../lib/settings-sections.ts'
 import { sortRows } from '../../lib/table-sort.ts'
@@ -71,7 +71,18 @@ function kpiCells(kpis: CoverageKpis, target: number): StripCell[] {
     { value: kpis.freshness.aging, label: 'over a week', tone: 'warning' },
     { value: kpis.freshness.stale, label: 'over a month', tone: 'danger' },
     { value: kpis.freshness.never, label: 'not measured', tone: 'none' },
+    ...(kpis.noTests
+      ? [{ value: kpis.noTests, label: 'no tests by design', tone: 'none' as const }]
+      : []),
   ]
+}
+
+function NoTests({ reason }: { reason?: string | undefined }) {
+  return (
+    <span title={reason ?? 'No tests by design'}>
+      <Tag>No tests by design</Tag>
+    </span>
+  )
 }
 
 function RepoName({ row }: { row: CoverageRow }) {
@@ -116,6 +127,7 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
       className: 'min-w-36',
       cell: (row) => {
         const { card } = row
+        if (row.noTests) return <NoTests reason={row.noTests.reason} />
         if (!card) return dash
         const lines = percentOf(card.totals.lines)
         return (
@@ -138,8 +150,8 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
       header: 'Branches',
       sortKey: 'branches',
       align: 'right',
-      cell: ({ card }) => {
-        const branches = percentOf(card?.totals.branches)
+      cell: ({ card, noTests }) => {
+        const branches = noTests ? undefined : percentOf(card?.totals.branches)
         return branches === undefined ? (
           dash
         ) : (
@@ -150,8 +162,8 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
     {
       id: 'trend',
       header: 'Last 12 records',
-      cell: ({ card }) =>
-        card && card.trend.length > 1 ? (
+      cell: ({ card, noTests }) =>
+        !noTests && card && card.trend.length > 1 ? (
           <MiniSparkline
             values={trendValues(card)}
             color="var(--info)"
@@ -167,8 +179,8 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
       header: 'Change',
       sortKey: 'change',
       align: 'right',
-      cell: ({ card }) =>
-        !card || card.change === undefined ? (
+      cell: ({ card, noTests }) =>
+        noTests || !card || card.change === undefined ? (
           dash
         ) : (
           <span className="mono tabular" style={{ color: statusColor[pointsTone(card.change)] }}>
@@ -181,8 +193,8 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
       header: 'Untested files',
       sortKey: 'untested',
       align: 'right',
-      cell: ({ card }) =>
-        card ? (
+      cell: ({ card, noTests }) =>
+        card && !noTests ? (
           <span className="tabular">
             {card.totals.untested}
             <span className="text-dim"> of {card.totals.files}</span>
@@ -200,14 +212,16 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
         const state = coverageFreshness(row)
         return (
           <div className="flex flex-col gap-0.5 leading-tight">
-            <Tag tone={freshnessTone[state]} dot>
+            <Tag tone={coverageFreshnessTone[state]} dot>
               {coverageFreshnessLabel[state]}
             </Tag>
             <span
               className="text-[11px] text-dim"
               {...(row.card ? { title: formatDateTime(row.card.createdAt) } : {})}
             >
-              {row.card ? (
+              {row.noTests ? (
+                (row.noTests.reason ?? 'Coverage is not measured')
+              ) : row.card ? (
                 <>
                   {formatRelative(row.card.createdAt)}
                   {row.card.sha ? <span className="mono"> · {shortSha(row.card.sha)}</span> : null}
@@ -225,8 +239,9 @@ function columns(target: number): FleetColumn<CoverageRow, CoverageSortKey>[] {
 
 /**
  * Quality › Coverage: every readable repository as a fleet table row, measured ones by their
- * newest coverage record (lowest line coverage first), the rest as "Not measured". A KPI strip
- * sums the rows in scope against the coverage target; filters and sort live in the URL, and a row
+ * newest coverage record (lowest line coverage first), the rest as "Not measured", and
+ * repositories with no tests by design (`repo.tests`) last, left out of the KPI strip, which sums
+ * the other rows in scope against the coverage target; filters and sort live in the URL, and a row
  * opens `CoverageSheet` (`?repo=`).
  */
 export function CoveragePage() {
@@ -237,22 +252,20 @@ export function CoveragePage() {
   const navigate = useNavigate({ from: '/quality/coverage' })
   const setSearch = (next: CoverageSearch) => void navigate({ search: next, replace: true })
   const { view, setView, homeGroups } = useScope()
+  const titleOf = useGroupTitles()
   const settings = useConfigure('Coverage settings', pageSettingKeys.coverage)
   const run = useRunJob({ analyzer: 'coverage', label: 'Run coverage' })
 
   const target = orgCoverageTarget(settingsList.data)
   const all = coverageRows(overview.data?.repos ?? [], repos.data?.repos ?? [])
   const sort = coverageSort(search)
-  const rows = sortRows(filterCoverageRows(all, search, target), sort, (row, key) =>
+  const rows = sortRows(filterCoverageRows(all, search, target, titleOf), sort, (row, key) =>
     coverageSortValue(row, key),
   )
-  const groups = [...new Set(all.flatMap((row) => row.groups))].toSorted()
-  const filtered = Boolean(
-    search.q || search.group?.length || search.freshness?.length || search.below,
-  )
+  const filtered = Boolean(search.q || search.freshness?.length || search.below)
 
-  const folded = foldOtherTeams(rows, homeGroups, (row) => row.groups)
-  const order = view === 'mine' ? [...folded.mine, ...folded.others] : rows
+  const folded = foldScope(rows, view, homeGroups, (row) => row.groups)
+  const order = [...folded.shown, ...folded.others]
   const selected = parseRepoKey(search.repo)
   const index = selected ? order.findIndex((row) => repoKey(row.repo) === repoKey(selected)) : -1
   const open = (row: CoverageRow | undefined) =>
@@ -294,14 +307,6 @@ export function CoveragePage() {
           ]}
           toolbar={
             <>
-              <FilterButton
-                label="Group"
-                options={groups.map((id) => ({ id, label: id }))}
-                value={search.group ?? []}
-                onChange={(group) =>
-                  setSearch({ ...search, group: group.length ? group : undefined })
-                }
-              />
               <FilterButton
                 label="Freshness"
                 options={coverageFreshnessStates.map((id) => ({

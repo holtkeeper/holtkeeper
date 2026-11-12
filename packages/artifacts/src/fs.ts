@@ -35,7 +35,8 @@ const listDir = (path: string) => readdir(path).catch(() => [] as string[])
 
 /**
  * An `ArtifactStore` on the local filesystem. Writes go to a temporary file renamed into place, so
- * readers never see partial content, and the metadata sidecar is written last.
+ * readers never see partial content, and the metadata sidecar is written last. `location` is
+ * the directory.
  */
 export function fsArtifactStore(options: FsArtifactStoreOptions): ArtifactStore {
   const { dir } = options
@@ -54,7 +55,7 @@ export function fsArtifactStore(options: FsArtifactStoreOptions): ArtifactStore 
     }
   }
 
-  return createArtifactStore(
+  const store = createArtifactStore(
     {
       readMeta,
       writeMeta: (info) => writeAtomically(metaPath(info.id), JSON.stringify(info)),
@@ -106,4 +107,5 @@ export function fsArtifactStore(options: FsArtifactStoreOptions): ArtifactStore 
     },
     options,
   )
+  return { ...store, location: { kind: 'fs', dir } }
 }

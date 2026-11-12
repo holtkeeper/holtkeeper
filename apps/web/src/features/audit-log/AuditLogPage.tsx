@@ -36,6 +36,7 @@ import { isEditableTarget } from '../../lib/slash-focus.ts'
 import {
   Avatar,
   EmptyState,
+  NoTeamsState,
   ErrorState,
   FilterButton,
   Kbd,
@@ -147,7 +148,7 @@ function EventRow({
  */
 export function AuditLogPage() {
   const scope = useHistoryScope()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeGroups, ready: scopeReady, noTeams } = useScope()
   const search = useSearch({ from: '/app/settings/$section' })
   const [filters, setFilters] = useState<HistoryFilters>(() => ({
     ...emptyHistoryFilters,
@@ -159,8 +160,8 @@ export function AuditLogPage() {
   const [now] = useState(() => new Date())
   const repos = scopeRepos(view, scope.data, homeGroups)
   const query = historyQueryOf(filters, repos, now)
-  const nothingInScope = repos !== undefined && repos.length === 0 && !filters.repo
-  const ready = scope.isSuccess && !nothingInScope
+  const nothingInScope = scopeReady && repos !== undefined && repos.length === 0 && !filters.repo
+  const ready = scope.isSuccess && scopeReady && !nothingInScope
   const instance = scope.data?.instance === true
   const history = useHistory(query, ready)
   const summary = useHistorySummary(query, ready)
@@ -349,6 +350,8 @@ export function AuditLogPage() {
 
         {scope.isError ? (
           <ErrorState error={scope.error} />
+        ) : nothingInScope && noTeams ? (
+          <NoTeamsState />
         ) : nothingInScope ? (
           <EmptyState
             icon={<History />}

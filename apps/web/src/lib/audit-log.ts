@@ -3,7 +3,7 @@ import type { AuditEvent, GroupMatch, HistoryScope } from '@holtkeeper/api'
 import type { HistoryQuery } from '../api/endpoints.ts'
 import type { StatusTone } from '../ui/colors.ts'
 import { auditActionLabel } from './audit-labels.ts'
-import { type ScopeView, inHomeGroups } from './home-scope.ts'
+import { type ScopeView, inView } from './home-scope.ts'
 
 /** Areas of the audit log filter: an action prefix each. */
 export const historyAreas = [
@@ -53,7 +53,7 @@ const rangeMs: Record<Exclude<HistoryRange, 'all'>, number> = {
 
 /**
  * The repositories a scope switch position narrows the audit log to, or `undefined` for no narrowing.
- * *My teams* keeps the visible repositories in the home groups.
+ * *My teams* keeps the visible repositories in the home groups, a group position those in the group.
  */
 export function scopeRepos(
   view: ScopeView,
@@ -62,7 +62,7 @@ export function scopeRepos(
 ): string[] | undefined {
   if (view === 'all' || !scope) return undefined
   return scope.repos
-    .filter((entry) => inHomeGroups(homeGroups, entry.groups))
+    .filter((entry) => inView(view, homeGroups, entry.groups))
     .map((entry) => entry.repo)
 }
 

@@ -15,11 +15,13 @@ import { useEffect, useEffectEvent, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import {
   useAcceptLearnings,
+  useGroupTitles,
   useLearningMutations,
   useLearnings,
   useRepos,
 } from '../../api/queries.ts'
 import { plural } from '../../lib/format.ts'
+import { type GroupTitleOf } from '../../lib/group-titles.ts'
 import { type Space, guideSections, scopeLabel, sectionLabel, spaceKey } from '../../lib/guide.ts'
 import { foldOtherTeams } from '../../lib/home-scope.ts'
 import {
@@ -466,9 +468,13 @@ const suggestedKinds: Record<LearningCandidateView['suggestedScope'], string> = 
   group: 'its team',
 }
 
-const suggestedLabel = (candidate: LearningCandidateView, families: readonly Family[]) => {
+const suggestedLabel = (
+  candidate: LearningCandidateView,
+  families: readonly Family[],
+  titleOf: GroupTitleOf,
+) => {
   const key = suggestedScopeOf(candidate)
-  return key ? scopeLabel(key, families) : suggestedKinds[candidate.suggestedScope]
+  return key ? scopeLabel(key, families, titleOf) : suggestedKinds[candidate.suggestedScope]
 }
 
 const CandidateColumns = () => (
@@ -568,6 +574,7 @@ function CandidateRow({
   onScope: (scope: GuideScopeKey) => void
   error?: string
 }) {
+  const titleOf = useGroupTitles()
   const { accept, edit, reject } = useLearningMutations()
   const [draft, setDraft] = useState<{ rule: string; section: GuideSectionName } | null>(null)
   const pending = accept.isPending || edit.isPending || reject.isPending
@@ -650,9 +657,12 @@ function CandidateRow({
       <Td valign="top">
         {candidate.canDecide && candidate.scopes.length ? (
           <Select
-            aria-label={`Promote to: ${scope ? scopeLabel(scope, families) : 'choose a scope'}`}
+            aria-label={`Promote to: ${scope ? scopeLabel(scope, families, titleOf) : 'choose a scope'}`}
             className="w-44"
-            options={candidate.scopes.map((key) => ({ id: key, label: scopeLabel(key, families) }))}
+            options={candidate.scopes.map((key) => ({
+              id: key,
+              label: scopeLabel(key, families, titleOf),
+            }))}
             value={scope}
             onChange={(key) => {
               const next = candidate.scopes.find((k) => k === key)
@@ -661,7 +671,7 @@ function CandidateRow({
           />
         ) : (
           <span className="text-xs text-muted">
-            suggested: {suggestedLabel(candidate, families)}
+            suggested: {suggestedLabel(candidate, families, titleOf)}
           </span>
         )}
       </Td>

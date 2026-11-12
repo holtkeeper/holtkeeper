@@ -1484,6 +1484,29 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect(games?.runs).toBe(2)
     })
 
+    test('ai usage: taskKinds matches any of several task kinds', async () => {
+      await store.aiUsage.append(usage({ taskKind: 'review', costUsd: 1 }))
+      await store.aiUsage.append(usage({ taskKind: 'triage', costUsd: 2 }))
+      await store.aiUsage.append(usage({ taskKind: 'chat', costUsd: 4 }))
+
+      const kinds = async (taskKinds: string[]) =>
+        (await store.aiUsage.list({ taskKinds })).map((r) => r.taskKind).toSorted()
+      expect(await kinds(['review', 'triage'])).toEqual(['review', 'triage'])
+      expect(await kinds(['chat', 'unknown'])).toEqual(['chat'])
+      expect(await kinds([])).toEqual([])
+      expect(
+        (await store.aiUsage.list({ taskKinds: ['review', 'triage'], taskKind: 'triage' })).map(
+          (r) => r.taskKind,
+        ),
+      ).toEqual(['triage'])
+      const [sum] = await store.aiUsage.aggregate({ filter: { taskKinds: ['review', 'chat'] } })
+      expect(sum).toMatchObject({ runs: 2, costUsd: 5 })
+      const scoped = await store.aiUsage.aggregate({
+        filter: { taskKinds: ['triage'], scopes: [{ groups: ['games'] }] },
+      })
+      expect(scoped[0]).toMatchObject({ runs: 1, costUsd: 2 })
+    })
+
     test('ai usage: unknownCost counts runs without a cost, not denied ones', async () => {
       await store.aiUsage.append(usage())
       await store.aiUsage.append(usage({ costUsd: 0, costSource: 'unknown', model: 'mystery' }))

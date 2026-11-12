@@ -3,9 +3,10 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 
-import { useUsers } from '../../api/queries.ts'
+import { useGroupTitles, useUsers } from '../../api/queries.ts'
 import { usePeopleSummary } from '../../api/settings-people.ts'
 import { plural } from '../../lib/format.ts'
+import { type GroupTitleOf } from '../../lib/group-titles.ts'
 import {
   type PeopleFilter,
   type SignInKind,
@@ -63,8 +64,12 @@ const statusFilter: { id: UserStatus; label: string }[] = [
   { id: 'disabled', label: 'Disabled' },
 ]
 
-const appliesTo = (user: UserView, match: ReturnType<typeof roleOf>): string => {
-  if ('scope' in match) return scopeLabel(match.scope)
+const appliesTo = (
+  user: UserView,
+  match: ReturnType<typeof roleOf>,
+  titleOf: GroupTitleOf,
+): string => {
+  if ('scope' in match) return scopeLabel(match.scope, titleOf)
   return user.grants.length ? plural(user.grants.length, 'grant') : 'Nothing'
 }
 
@@ -97,6 +102,7 @@ function PeopleStrip() {
  * map), a fold for disabled people, the invite dialog and a side sheet per person.
  */
 export function People() {
+  const titleOf = useGroupTitles()
   const { auth, can, principal } = useSession()
   const enabled = auth.provider === 'users'
   const users = useUsers(enabled && can('users:read'))
@@ -256,7 +262,7 @@ export function People() {
                   </Td>
                   <Td className="text-muted">{(user.teams ?? []).join(', ') || '—'}</Td>
                   <Td>{roleNames[match.role]}</Td>
-                  <Td className="text-muted">{appliesTo(user, match)}</Td>
+                  <Td className="text-muted">{appliesTo(user, match, titleOf)}</Td>
                   <Td className="whitespace-nowrap text-muted">{lastSeenLabel(user, now)}</Td>
                   <Td
                     className={`whitespace-nowrap ${signInKindOf(user) === 'none' ? 'text-warning' : ''}`}

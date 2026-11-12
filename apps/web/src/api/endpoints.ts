@@ -248,6 +248,8 @@ export interface AiUsageQuery {
   model?: string
   provider?: string
   taskKind?: string
+  /** A feature with a fixed list of task kinds (`FilterableFeature`); narrows to those kinds. */
+  feature?: string
   analyzer?: string
   outcome?: string
   /** `interactive` or `automatic`. */
@@ -264,6 +266,11 @@ export interface AiOverviewQuery {
   period?: AiUsagePeriodKind
   /** Comma list of config groups. */
   groups?: string
+  /** Narrows everything but budgets and caps, as `AiUsageQuery.feature`. */
+  feature?: string
+  /** `interactive` or `automatic`. */
+  origin?: string
+  model?: string
 }
 
 /** A job filter as the query string of `GET /api/jobs` and `GET /api/jobs/count`. */

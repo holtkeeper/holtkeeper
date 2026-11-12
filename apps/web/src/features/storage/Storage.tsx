@@ -24,6 +24,7 @@ import {
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
+import { ArtifactStoreCard } from './ArtifactStoreCard.tsx'
 import { SystemPanel } from './SystemPanel.tsx'
 
 const th = 'border-b border-line px-3 py-2 text-left text-[11.5px] font-medium text-muted'
@@ -121,8 +122,9 @@ function AreaRow({
 
 /**
  * Settings › System › Storage and caches: the total over every area with its change in seven
- * days (from `health`), a stacked bar with a legend, and a table of areas with size, items, share,
- * weekly change and Clear for caches when the viewer has a global `settings:write`.
+ * days (from `health`), a stacked bar with a legend, a table of areas with size, items, share,
+ * weekly change and Clear for caches when the viewer has a global `settings:write`, and beside it
+ * the artifact store card (`ArtifactStoreCard`).
  */
 export function Storage({ health }: { health: SystemHealth | undefined }) {
   const { canGlobal } = useSession()
@@ -243,6 +245,11 @@ export function Storage({ health }: { health: SystemHealth | undefined }) {
               </table>
             </div>
             <div className="flex flex-col gap-2 border-t border-line px-3.5 py-3 xl:border-s xl:border-t-0">
+              {health?.artifactStore ? (
+                <div className="-mx-3.5 -mt-3 mb-1 border-b border-line px-3.5 py-3">
+                  <ArtifactStoreCard health={health} />
+                </div>
+              ) : null}
               <span className="text-[11.5px] font-medium text-muted">What Clear does</span>
               <p className="m-0 text-xs leading-normal text-muted">
                 Only caches can be cleared. The space is freed on every worker within seconds;

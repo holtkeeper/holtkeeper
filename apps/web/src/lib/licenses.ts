@@ -26,7 +26,6 @@ export interface LicensesSearch {
   repo?: string
   verdict?: ViolationVerdict[]
   ecosystem?: string[]
-  group?: string[]
   sort?: Exclude<LicensesSort, 'verdict'>
   q?: string
   /** The violation open in the sheet: `<ecosystem>:<package>`. */
@@ -42,7 +41,6 @@ export function parseLicensesSearch(search: Record<string, unknown>): LicensesSe
     ...searchEntry('repo', searchText(search.repo)),
     ...searchEntry('verdict', searchList(search.verdict, verdicts)),
     ...searchEntry('ecosystem', searchList(search.ecosystem)),
-    ...searchEntry('group', searchList(search.group)),
     ...searchEntry('sort', sort === 'verdict' ? undefined : sort),
     ...searchEntry('q', searchText(search.q)),
     ...searchEntry('package', searchText(search.package)),
@@ -118,17 +116,15 @@ const matchesText = (violation: LicenseViolation, q: string): boolean => {
   ].some((value) => value.toLowerCase().includes(needle))
 }
 
-/** Violations matching the search's verdict, ecosystem, group, repository and text filters. */
+/** Violations matching the search's verdict, ecosystem, repository and text filters. */
 export function filterViolations(
   violations: readonly LicenseViolation[],
-  search: Pick<LicensesSearch, 'verdict' | 'ecosystem' | 'group' | 'repo' | 'q'>,
+  search: Pick<LicensesSearch, 'verdict' | 'ecosystem' | 'repo' | 'q'>,
 ): LicenseViolation[] {
   return violations.filter(
     (violation) =>
       (!search.verdict?.length || search.verdict.includes(violation.verdict)) &&
       (!search.ecosystem?.length || search.ecosystem.includes(violation.ecosystem)) &&
-      (!search.group?.length ||
-        violation.repos.some((repo) => repo.groups.some((g) => search.group?.includes(g)))) &&
       (!search.repo || violation.repos.some((repo) => repo.repo === search.repo)) &&
       matchesText(violation, search.q ?? ''),
   )
@@ -163,16 +159,15 @@ export function sortViolations(
     .map((entry) => entry.violation)
 }
 
-/** Repository rows matching the group, repository and text filters; worst first. */
+/** Repository rows matching the repository and text filters; worst first. */
 export function filterLicenseRepos(
   rows: readonly LicensesRepoRow[],
-  search: Pick<LicensesSearch, 'group' | 'repo' | 'q'>,
+  search: Pick<LicensesSearch, 'repo' | 'q'>,
 ): LicensesRepoRow[] {
   const needle = (search.q ?? '').trim().toLowerCase()
   return rows
     .filter(
       (row) =>
-        (!search.group?.length || row.groups.some((g) => search.group?.includes(g))) &&
         (!search.repo || row.repo === search.repo) &&
         (!needle || row.repo.toLowerCase().includes(needle)),
     )

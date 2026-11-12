@@ -14,6 +14,7 @@ export {
 export {
   type CheckResult,
   DEFAULT_TASK_BUDGET_USD,
+  MAX_TASK_BUDGET_USD,
   WRITE_POOL,
   WRITE_TASK_KIND,
   type WriteTaskData,

@@ -118,6 +118,12 @@ export interface ReviewRun {
   guide?: (docs: readonly Guideline[], query: string) => Promise<ReviewGuide | undefined>
   /** Passed to the agent as `toolsets`, e.g. code navigation and knowledge tools. */
   toolsets?: readonly Toolset[]
+  /**
+   * `false` for a repository with no tests by design: the agent is not asked about tests and its
+   * findings of category `tests` are dropped, except those completing a requested check finding
+   * (test ids stay checked).
+   */
+  tests?: false
   botUsername?: string
   /** Reviews images when `options.media` is on. Default: a reviewer that reports nothing. */
   mediaReviewer?: MediaReviewer
@@ -326,6 +332,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       mode: planned.mode,
       ...(planned.previousHead ? { previousHead: planned.previousHead } : {}),
       guidelines: planned.guidelines,
+      ...(run.tests === false && { tests: false as const }),
       ...(guide?.text ? { guide: guide.text } : {}),
       ...(instructions ? { instructions } : {}),
       ...(pathRules.length ? { pathInstructions: pathRules } : {}),
@@ -566,9 +573,15 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
   const deterministicValid = validate(
     agentOutcome ? found.candidates.filter((c) => !requests.includes(c)) : found.candidates,
   )
+  const requested = new Set(requests.map((request) => `${request.path}:${request.line}`))
   const agentValid = validate([
     ...(mediaOutcome?.candidates ?? []),
-    ...(agentOutcome?.candidates ?? []),
+    ...(agentOutcome?.candidates ?? []).filter(
+      (candidate) =>
+        run.tests !== false ||
+        candidate.category !== 'tests' ||
+        requested.has(`${candidate.path}:${candidate.line}`),
+    ),
   ])
 
   const fixedDeterministic = dedupe(deterministicValid, {

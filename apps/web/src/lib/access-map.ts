@@ -1,5 +1,6 @@
 import type { Action, Grant, Scope, UserView } from '@holtkeeper/api'
 
+import { type GroupTitleOf, keyAsTitle } from './group-titles.ts'
 import { describeScope, normalizeScope } from './scope.ts'
 
 /** Node id of a scope: `scope:<describeScope text>`. */
@@ -23,8 +24,13 @@ export interface AccessMap {
 /**
  * Users linked to the scopes of their grants. `groups` add a scope per config group, and
  * everything is always offered, so an editor can grant there; scopes nobody holds are `idle`.
+ * Labels name groups by `titleOf`; node ids keep their keys.
  */
-export function accessMap(users: readonly UserView[], groups: readonly string[] = []): AccessMap {
+export function accessMap(
+  users: readonly UserView[],
+  groups: readonly string[] = [],
+  titleOf: GroupTitleOf = keyAsTitle,
+): AccessMap {
   const scopes = new Map<string, AccessMap['scopes'][number]>()
   const edges = new Map<string, AccessMap['edges'][number]>()
   for (const user of users) {
@@ -32,7 +38,7 @@ export function accessMap(users: readonly UserView[], groups: readonly string[] 
       const scope = normalizeScope(grant.scope)
       const to = scopeNode(scope)
       if (!scopes.has(to))
-        scopes.set(to, { id: to, label: describeScope(scope), scope, idle: false })
+        scopes.set(to, { id: to, label: describeScope(scope, titleOf), scope, idle: false })
       const from = `user:${user.id}`
       const key = `${from}->${to}`
       const merged = [...new Set([...(edges.get(key)?.actions ?? []), ...grant.actions])]
@@ -41,7 +47,8 @@ export function accessMap(users: readonly UserView[], groups: readonly string[] 
   }
   for (const scope of [{ all: true }, ...groups.map((group) => ({ groups: [group] }))]) {
     const id = scopeNode(scope)
-    if (!scopes.has(id)) scopes.set(id, { id, label: describeScope(scope), scope, idle: true })
+    if (!scopes.has(id))
+      scopes.set(id, { id, label: describeScope(scope, titleOf), scope, idle: true })
   }
   return {
     users: users.map((user) => ({

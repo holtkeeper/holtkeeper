@@ -5,7 +5,7 @@ import { ToolError } from '@holtkeeper/agent-tools'
 import type { ForbiddenError, JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
-import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
+import { type HoltkeeperConfig, groupLabel, resolveRepo } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
@@ -200,6 +200,15 @@ export function authorizeRecord(c: AppContext, action: Action, target: Target): 
     c.set('allowedRepos', [...(c.get('allowedRepos') ?? []), repoKey(target.repo)])
   return principal
 }
+
+/**
+ * Names group keys in chat, agent and MCP text: `Title (key)` when the group has a title, else the
+ * key. Reads `config` on every call, so a live config stays current.
+ */
+export const groupLabeler =
+  (config: Pick<HoltkeeperConfig, 'groups'>) =>
+  (key: string): string =>
+    groupLabel(config.groups, key)
 
 /** A repository with the groups the config assigns to it. */
 export const repoTarget = (config: HoltkeeperConfig, repo: RepoRef): RepoTarget => ({

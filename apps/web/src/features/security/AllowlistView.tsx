@@ -5,10 +5,9 @@ import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { api } from '../../api/endpoints.ts'
-import { keys, useFindings, useRepos, useSettings } from '../../api/queries.ts'
+import { keys, useDescribeScope, useFindings, useRepos, useSettings } from '../../api/queries.ts'
 import { formatDate, isoDay, plural } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
-import { describeScope } from '../../lib/scope.ts'
 import {
   type AllowlistRow,
   type AllowlistState,
@@ -116,6 +115,7 @@ function Entries({
   people: Record<string, { name: string }>
   canWrite: boolean
 }) {
+  const describeScope = useDescribeScope()
   return (
     <Table label="Allowlist entries">
       <thead>

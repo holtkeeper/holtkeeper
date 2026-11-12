@@ -8,7 +8,7 @@ import type {
   UpgradeImpact,
 } from '@holtkeeper/api'
 
-import { type ScopeView, inHomeGroups } from './home-scope.ts'
+import { type ScopeView, inHomeGroups, viewGroup } from './home-scope.ts'
 import { parseEcosystem } from './libraries.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchText } from './search-params.ts'
@@ -285,7 +285,8 @@ export type LibraryFleetRow = DependencyRow & { groups: string[] }
  * Library rows ready for `FleetTable`. Under *My teams* a library some home-group repository
  * uses is narrowed to those repositories and carries a home group's groups, and a library only
  * other teams use is narrowed to theirs and carries their groups, so the table folds it away.
- * Under *All I can see* rows stay whole. A UI default, not a permission.
+ * A group position keeps the libraries that group's repositories use, narrowed to them. Under
+ * *All I can see* rows stay whole. A UI default, not a permission.
  */
 export function scopeLibraryRows(
   rows: readonly DependencyRow[],
@@ -300,6 +301,12 @@ export function scopeLibraryRows(
     if (mine) return groupsOf.get(mine.repo) ?? []
     return [...new Set(row.usedBy.flatMap((used) => groupsOf.get(used.repo) ?? []))].toSorted()
   }
+  const group = viewGroup(view)
+  if (group !== undefined)
+    return rows.flatMap((row) => {
+      const narrowed = narrowRow(row, (repo) => (groupsOf.get(repo) ?? []).includes(group))
+      return narrowed ? [{ ...narrowed, groups: groupsFor(narrowed) }] : []
+    })
   return rows.flatMap((row) => {
     if (view === 'all' || !homeGroups.length) return [{ ...row, groups: groupsFor(row) }]
     const usedByMine = row.usedBy.some((used) => isMine(used.repo))

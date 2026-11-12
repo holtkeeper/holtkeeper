@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { BookOpen, Link2 } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
-import { useKnowledge } from '../../api/queries.ts'
+import { useGroupTitles, useKnowledge } from '../../api/queries.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import { type Space, scopeLabel, settingScopeOfSpace, spaceKey } from '../../lib/guide.ts'
@@ -86,6 +86,7 @@ export function NotesTable({
   creating: boolean
   onCreating: (open: boolean) => void
 }) {
+  const titleOf = useGroupTitles()
   const { can } = useSession()
   const { homeGroups } = useScope()
   const note = useSearch({ strict: false, select: (search) => search.note })
@@ -208,7 +209,7 @@ export function NotesTable({
       <Strip
         label="Notes summary"
         cells={[
-          { prefix: 'Space', value: scopeLabel(spaceKey(space), families), label: '' },
+          { prefix: 'Space', value: scopeLabel(spaceKey(space), families, titleOf), label: '' },
           { value: totals.accepted, label: 'accepted' },
           ...(totals.proposed
             ? [

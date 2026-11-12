@@ -12,6 +12,7 @@ import type {
 import type { StatusTone } from '../ui/colors.ts'
 import type { Segment } from '../ui/SegmentBar.tsx'
 import { formatDuration } from './format.ts'
+import { type GroupTitleOf, groupMatchesQuery, keyAsTitle } from './group-titles.ts'
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
 import { defined, median } from './stats.ts'
@@ -217,14 +218,18 @@ export function withCiSort(search: CiSearch, sort: SortState<CiSortKey>): CiSear
   return sort ? { ...rest, sort: sort.key, dir: sort.direction } : rest
 }
 
-/** The cards `search` keeps: path or group text, states (any of), only those with problem jobs. */
-export function filterCiCards<T extends CiRepoCard>(cards: readonly T[], search: CiSearch): T[] {
+/** The cards `search` keeps: path or group title or key, states (any of), only problem jobs. */
+export function filterCiCards<T extends CiRepoCard>(
+  cards: readonly T[],
+  search: CiSearch,
+  titleOf: GroupTitleOf = keyAsTitle,
+): T[] {
   const needle = search.q?.trim().toLowerCase()
   return cards.filter(
     (card) =>
       (!needle ||
         repoKey(card.repo).toLowerCase().includes(needle) ||
-        card.groups.some((group) => group.toLowerCase().includes(needle))) &&
+        card.groups.some((group) => groupMatchesQuery(group, titleOf, needle))) &&
       (!search.status?.length || search.status.includes(card.status)) &&
       (!search.problems || card.problems > 0),
   )

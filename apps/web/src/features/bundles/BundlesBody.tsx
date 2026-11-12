@@ -25,7 +25,7 @@ import {
 } from '../../lib/bundles.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative, plural } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
 import { sortRows } from '../../lib/table-sort.ts'
 import { formatValue } from '../../lib/units.ts'
@@ -233,8 +233,8 @@ export function BundlesBody({
     sort,
     bundleSortValue,
   )
-  const mine = !narrowed && !key && view === 'mine'
-  const keys = (mine ? foldOtherTeams(rows, homeGroups, (row) => row.groups).mine : rows).map(
+  const scoped = !narrowed && !key
+  const keys = (scoped ? foldScope(rows, view, homeGroups, (row) => row.groups).shown : rows).map(
     (row) => row.key,
   )
   const openKey =

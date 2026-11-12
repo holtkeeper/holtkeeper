@@ -14,7 +14,7 @@ import {
 } from './context.ts'
 import type { ToolchainFor } from './execution.ts'
 import { type ResolveRepos, groupRepositories } from './repos.ts'
-import { type Scheduler, createScheduler } from './scheduler.ts'
+import { type Scheduler, type SchedulerOptions, createScheduler } from './scheduler.ts'
 import { type Worker, type WorkerOptions, createWorker } from './worker.ts'
 
 export interface JobEngineOptions {
@@ -35,6 +35,8 @@ export interface JobEngineOptions {
   toolchainFor?: ToolchainFor
   /** Scoped `analyzers.<kind>` setting for a job; see `WorkerOptions.settingOptions`. */
   settingOptions?: WorkerOptions['settingOptions']
+  /** Repositories a schedule leaves out of an analyzer; see `SchedulerOptions.skip`. */
+  skip?: SchedulerOptions['skip']
   /** Whether a claimed job may start now; see `WorkerOptions.admission`. */
   admission?: WorkerOptions['admission']
   /** Stores the artifacts of runs; see `WorkerOptions.persistArtifacts`. */
@@ -68,7 +70,14 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
     ...(options.log && { log: options.log }),
   }
 
-  const scheduler = createScheduler({ config, store, analyzers, resolveRepos, ...shared })
+  const scheduler = createScheduler({
+    config,
+    store,
+    analyzers,
+    resolveRepos,
+    ...(options.skip && { skip: options.skip }),
+    ...shared,
+  })
   const worker = createWorker({
     store,
     analyzers,

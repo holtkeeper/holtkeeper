@@ -14,7 +14,8 @@ import {
   spaceTrail,
   tableLayerKinds,
 } from '../../lib/guide.ts'
-import { ErrorState, Legend, Placeholder, Table, Tag, Td, Th, Tr } from '../../ui/index.ts'
+import { repoKey } from '../../lib/repo.ts'
+import { ErrorState, Legend, Notice, Placeholder, Table, Tag, Td, Th, Tr } from '../../ui/index.ts'
 import { SectionDetail } from './SectionDetail.tsx'
 
 const spaceKindLabel: Record<Space['kind'], string> = {
@@ -27,7 +28,8 @@ const spaceKindLabel: Record<Space['kind'], string> = {
 /**
  * The Guide of a space: its identity and the broader spaces it inherits from, a summary strip, a table of sections (which layers give each section text,
  * this space's rules, version, last edit, status) and, for the picked section, its `SectionDetail`
- * with the layers in agent reading order.
+ * with the layers in agent reading order. For a repository with no tests by design (`noTests` of
+ * `repos`) the Testing section says agents skip it.
  */
 export function GuideTab({
   space,
@@ -60,6 +62,9 @@ export function GuideTab({
   const learned = sections.reduce((sum, s) => sum + s.learnings.length, 0)
   const waiting = sections.filter((s) => pendingGenerated(s)).length
 
+  const noTests = repo
+    ? repos?.find((summary) => repoKey(summary.repo) === repoKey(repo))?.noTests
+    : undefined
   const trail = repos ? spaceTrail(space, repos, families) : []
   const here = trail.at(-1)
   const parents = trail.slice(0, -1)
@@ -155,6 +160,9 @@ export function GuideTab({
             >
               <Td>
                 <span className="font-medium">{row.label}</span>
+                {noTests && row.section === 'testing' ? (
+                  <Tag className="ml-2">No tests by design</Tag>
+                ) : null}
               </Td>
               <Td>
                 <span
@@ -207,6 +215,12 @@ export function GuideTab({
         </tbody>
       </Table>
 
+      {noTests && picked?.section === 'testing' ? (
+        <Notice title="No tests by design">
+          {noTests.reason ? `${noTests.reason}. ` : ''}Agents never read this section for this
+          repository, and the Guide generator skips it (setting repo.tests).
+        </Notice>
+      ) : null}
       {picked ? (
         <SectionDetail
           key={`${scope}/${picked.section}/${picked.version}`}

@@ -112,6 +112,7 @@
         "@fontsource-variable/geist": "^5.3.0",
         "@fontsource-variable/geist-mono": "^5.3.0",
         "@heroui/react": "^3.2.7",
+        "@holtkeeper/ai-usage": "workspace:*",
         "@holtkeeper/api": "workspace:*",
         "@holtkeeper/brand": "workspace:*",
         "@internationalized/date": "^3.12.4",

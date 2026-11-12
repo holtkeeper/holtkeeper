@@ -32,11 +32,13 @@ import {
   canSeeThread,
   hasChatAccess,
 } from '../chat-threads.ts'
+import { PLACEHOLDER_TITLE, chatTitles } from '../chat-titles.ts'
 import { chatFor } from '../chat.ts'
 import {
   type AppContext,
   type Env,
   type ServerDeps,
+  groupLabeler,
   parseRepo,
   principalOf,
   readBody,
@@ -58,7 +60,7 @@ const contextReposSchema = z.array(repoField).max(MAX_CONTEXT_REPOS).optional()
 
 const threadSchema = z
   .object({
-    title: z.string().trim().min(1).max(120),
+    title: z.string().trim().max(120).optional(),
     repo: repoKey,
     group: z.string().min(1).optional(),
     autoReply: z.boolean().optional(),
@@ -229,8 +231,9 @@ function exportMarkdown(
   people: readonly { id: string; label: string; name?: string }[],
   now: Date,
   readable: (repo: string) => boolean,
+  groupLabel: (key: string) => string,
 ): string {
-  const scope = thread.repo ?? (thread.group ? `group ${thread.group}` : 'whole team')
+  const scope = thread.repo ?? (thread.group ? `group ${groupLabel(thread.group)}` : 'whole team')
   const authorOf = (message: ChatMessage) => {
     if (message.authorType === 'agent') return 'Holtkeeper'
     if (message.authorType === 'system') return 'Holtkeeper (system)'
@@ -260,7 +263,8 @@ function exportMarkdown(
  *
  * - `GET /chat/threads?archived=true&q=` — visible threads with unread and message counts, the
  *   archived count, and the commands.
- * - `POST /chat/threads` `{ title, repo?, group?, autoReply?, contextRepos? }` — a new thread.
+ * - `POST /chat/threads` `{ title?, repo?, group?, autoReply?, contextRepos? }` — a new thread;
+ *   without a title (or a blank one) it is named from its first message (`chatTitles`).
  * - `GET /chat/threads/:id` and `PATCH /chat/threads/:id`
  *   `{ title?, archived?, autoReply?, contextRepos?, muted? }`; `muted` is the caller's own.
  * - `GET /chat/threads/:id/context` — totals of the whole thread for its context column.
@@ -279,6 +283,7 @@ function exportMarkdown(
 export function chatRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
   const chat = deps.store.chat
+  const titles = chatTitles(deps)
 
   const visibleThread = async (principal: Principal, id: string): Promise<ChatThread> => {
     const thread = await chat.getThread(id)
@@ -370,6 +375,7 @@ export function chatRoutes(deps: ServerDeps) {
   ): Promise<ChatThreadView> => ({
     id: thread.id,
     title: thread.title,
+    ...(thread.titlePending && { titlePending: true }),
     ...(thread.repo && { repo: thread.repo }),
     ...(thread.group && { group: thread.group }),
     groups: groupsOf(thread),
@@ -452,7 +458,8 @@ export function chatRoutes(deps: ServerDeps) {
     const contextRepos = checkedRepos(principal, input.contextRepos ?? [])
     const thread = await chat.createThread({
       id: crypto.randomUUID(),
-      title: input.title,
+      title: input.title || PLACEHOLDER_TITLE,
+      ...(!input.title && { titlePending: true }),
       ...scope,
       createdBy: principal.id,
       createdAt: deps.now().toISOString(),
@@ -545,7 +552,14 @@ export function chatRoutes(deps: ServerDeps) {
       if (!last || page.length < EXPORT_PAGE) break
       after = last.seq
     }
-    const markdown = exportMarkdown(thread, messages, people, deps.now(), readable(principal))
+    const markdown = exportMarkdown(
+      thread,
+      messages,
+      people,
+      deps.now(),
+      readable(principal),
+      groupLabeler(deps.config),
+    )
     c.set('audit', { action: 'chat.thread.export', target: { type: 'chat', id: thread.id } })
     return c.body(markdown, 200, {
       'content-type': 'text/markdown; charset=utf-8',
@@ -652,6 +666,7 @@ export function chatRoutes(deps: ServerDeps) {
     })
     await chat.markRead(thread.id, principal.id, message.id)
     c.set('audit', { action: 'chat.message', target: { type: 'chat', id: thread.id } })
+    if (!command) titles.nameFrom(thread, principal)
 
     const server = chatFor(deps)
     let replying = false

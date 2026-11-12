@@ -27,7 +27,9 @@ config:
 
 # Secret whose keys become environment variables (HOLTKEEPER_VAULT_KEY, HOLTKEEPER_DATABASE_URL, ...).
 existingSecret: ''
-# Extra environment for every container, e.g. HOLTKEEPER_S3_BUCKET.
+# Extra environment for every container, e.g. HOLTKEEPER_S3_BUCKET. Optional HOLTKEEPER_S3_QUOTA:
+# the bucket's space in bytes as you know it (S3 has no quota API); Settings › System shows usage
+# against it. Example: [{ name: HOLTKEEPER_S3_QUOTA, value: '107374182400' }]
 env: []
 envFrom: []
 

@@ -5,7 +5,7 @@ import {
   commitConventionsKey,
   commitConventionsSchema,
 } from '@holtkeeper/commit-conventions'
-import { resolveSetting } from '@holtkeeper/settings'
+import { resolveRepoTests, resolveSetting } from '@holtkeeper/settings'
 import type { SettingEntry } from '@holtkeeper/store'
 import { type TestIdOverrides, testIdOverridesOf } from '@holtkeeper/testids'
 
@@ -65,9 +65,13 @@ export function testIdPolicyFacts(overrides: TestIdOverrides): string {
     .join('\n')
 }
 
+const noTestsPolicyFact = (reason?: string) =>
+  `- This repository has no tests by design${reason ? ` (${reason})` : ''}: do not add test files, test frameworks or test scripts, do not run tests, and do not ask for tests in reviews.`
+
 /**
- * Policies of `repo` from settings, rendered as plain facts: commit conventions, test ids and the
- * asset policy when an `assets.policy` entry covers the repository.
+ * Policies of `repo` from settings, rendered as plain facts: commit conventions, test ids, the
+ * asset policy when an `assets.policy` entry covers the repository, and a `general` line when
+ * `repo.tests` says it has no tests by design.
  */
 export function policiesFor(entries: readonly SettingEntry[], repo: RepoTarget): GuidePolicy[] {
   const parsed = commitConventionsSchema.safeParse(
@@ -78,7 +82,11 @@ export function policiesFor(entries: readonly SettingEntry[], repo: RepoTarget):
   const assetsEntry = resolveSetting(entries, assetsPolicyKey, repo)
   const assetsPolicy = assetsEntry && assetsPolicySchema.safeParse(assetsEntry.value)
   const assets = assetsPolicy?.success ? assetsPolicyFacts(assetsPolicy.data) : ''
+  const tests = resolveRepoTests(entries, repo)
   return [
+    ...(tests.expected
+      ? []
+      : [{ section: 'general' as const, text: noTestsPolicyFact(tests.reason) }]),
     ...(testids ? [{ section: 'testids' as const, text: testids }] : []),
     ...(assets ? [{ section: 'assets' as const, text: assets }] : []),
     ...(commits ? [{ section: 'commits' as const, text: commits }] : []),

@@ -9,6 +9,9 @@ export const WRITE_POOL = 'write'
 /** Default spend cap of one write task on one repository, in USD. */
 export const DEFAULT_TASK_BUDGET_USD = 1.5
 
+/** Highest spend cap one write task may ask for, in USD. */
+export const MAX_TASK_BUDGET_USD = 5
+
 /** What kind of change a task makes; it shapes the agent's instructions, nothing else. */
 const writeTaskKinds = ['change', 'fix', 'port', 'tests'] as const
 
@@ -28,7 +31,7 @@ export const writeTaskOptionsSchema = z.object({
   /** Check commands to run instead of the detected ones; `[]` runs none. */
   checks: z.array(z.string().trim().min(1)).max(10).optional(),
   /** Spend cap of the agent run in USD. */
-  budgetUsd: z.coerce.number().positive().max(5).default(DEFAULT_TASK_BUDGET_USD),
+  budgetUsd: z.coerce.number().positive().max(MAX_TASK_BUDGET_USD).default(DEFAULT_TASK_BUDGET_USD),
   maxTurns: z.coerce.number().int().min(1).max(100).default(40),
   /** The whole task is aborted after this long. */
   timeoutMinutes: z.coerce.number().int().min(1).max(60).default(20),

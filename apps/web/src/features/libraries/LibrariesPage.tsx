@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { Braces, Copy, Download, Package, Rocket } from 'lucide-react'
 import { useState } from 'react'
 
-import { useDependencies, useDependency } from '../../api/queries.ts'
+import { useDependencies, useDependency, useGroupTitles } from '../../api/queries.ts'
 import {
   type DependencyFilter,
   type LibrariesSearch,
@@ -28,7 +28,7 @@ import {
 } from '../../lib/dependencies.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatRelative, plural } from '../../lib/format.ts'
-import { type ScopeView, foldOtherTeams } from '../../lib/home-scope.ts'
+import { type ScopeView, foldScope, scopeSuffix } from '../../lib/home-scope.ts'
 import { type LibraryEcosystem, libraryEcosystems } from '../../lib/libraries.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import { pageSettingKeys } from '../../lib/settings-sections.ts'
@@ -195,8 +195,7 @@ function useLibraryRows(
   if (!table) return undefined
   const view = options.repo ? 'all' : options.view
   const scoped = scopeLibraryRows(table.libraries, table.repos, view, homeGroups)
-  const inView =
-    view === 'mine' ? foldOtherTeams(scoped, homeGroups, (row) => row.groups).mine : scoped
+  const inView = foldScope(scoped, view, homeGroups, (row) => row.groups).shown
   const filter = {
     query: state.query,
     ecosystem: state.ecosystem,
@@ -262,14 +261,14 @@ function Toolbar({
 }
 
 const strip =
-  (read: string | undefined, mine: boolean) =>
+  (read: string | undefined, suffix: string) =>
   (shown: readonly LibraryFleetRow[]): StripCell[] => {
     const totals = libraryTotals(shown)
     return [
       {
         value: totals.libraries,
         label: totals.libraries === 1 ? 'library' : 'libraries',
-        caption: `in ${plural(totals.repos, 'repository', 'repositories')}${mine ? ' of my teams' : ''}`,
+        caption: `in ${plural(totals.repos, 'repository', 'repositories')}${suffix}`,
       },
       { value: totals.behindMajor, label: 'behind a major', tone: 'warning' },
       { value: totals.withAdvisories, label: 'with advisories', tone: 'danger' },
@@ -303,6 +302,7 @@ const emptyState = (filtered: boolean) => (
  * Overview, Upgrade and Docs, and **Open as page** shows all its tabs.
  */
 export function LibrariesPage() {
+  const titleOf = useGroupTitles()
   const search: LibrariesSearch = useSearch({ strict: false })
   const navigate = useNavigate()
   const repo = parseRepoKey(search.repo)
@@ -395,9 +395,9 @@ export function LibrariesPage() {
   const data = table.data
   const shown = useLibraryRows(data, state, { view, ...(repo ? { repo: repoKey(repo) } : {}) })
   const keys = shown
-    ? (view === 'mine' && !repo
-        ? foldOtherTeams(shown.rows, shown.homeGroups, (row) => row.groups).mine
-        : shown.rows
+    ? (repo
+        ? shown.rows
+        : foldScope(shown.rows, view, shown.homeGroups, (row) => row.groups).shown
       ).map(libraryKey)
     : []
   const step = neighbours(keys, search.library)
@@ -458,7 +458,7 @@ export function LibrariesPage() {
           {...(repo
             ? {}
             : { scope: { value: view, onChange: setView, homeGroups: shown.homeGroups } })}
-          strip={strip(newestRead(data), view === 'mine' && !repo)}
+          strip={strip(newestRead(data), repo ? '' : scopeSuffix(view, titleOf))}
           legend={behindLegend}
           toolbar={
             <Toolbar
@@ -477,6 +477,7 @@ export function LibrariesPage() {
       {settingsSheet}
       {run.dialog}
       <SideSheet
+        size="wide"
         open={open !== undefined}
         onClose={() => goLibrary({})}
         id={open?.ecosystem}
@@ -582,7 +583,7 @@ export function RepoLibraries({ repo }: { repo: RepoRef }) {
       columns={columns}
       sort={state.sort}
       onSort={(sort) => setState({ ...state, sort })}
-      strip={strip(undefined, false)}
+      strip={strip(undefined, '')}
       legend={behindLegend}
       toolbar={
         <Toolbar

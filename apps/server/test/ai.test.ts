@@ -316,6 +316,49 @@ describe('ai routes', () => {
     )
   })
 
+  test('overview: feature, origin and model narrow everything but budgets and caps', async () => {
+    await seedWeeks({ weeklyUsd: 10, reserveUsd: 2 })
+    const app = setup(noAuth(), thursday)
+    const all = await getOverview(app, '/api/ai/overview')
+    expect(all.body.caps).toEqual({
+      writeTaskUsd: 1.5,
+      writeTaskMaxUsd: 5,
+      chatReplyUsd: 0.4,
+      chatReplyAvgUsd: 3,
+    })
+    const days = all.body.forecast.days ?? []
+    expect(days.length).toBeGreaterThan(0)
+    expect(days.reduce((sum, day) => sum + day.usd, 0)).toBeCloseTo(
+      all.body.forecast.forecastUsd - all.body.forecast.spentUsd,
+      10,
+    )
+
+    const chat = await getOverview(app, '/api/ai/overview?feature=chat')
+    expect(chat.status).toBe(200)
+    expect(chat.body.current).toMatchObject({ automaticUsd: 0, totals: { runs: 1, costUsd: 3 } })
+    expect(chat.body.topTaskKinds.map((b) => b.key.taskKind)).toEqual(['chat'])
+    expect(chat.body.forecast).toMatchObject({ spentUsd: 3, weeks: 0 })
+    expect(chat.body.budgets.find((b) => b.id === 'global-budget')).toMatchObject({ spentUsd: 5 })
+    expect(chat.body.automaticStopsAt).toBe(all.body.automaticStopsAt)
+    expect(chat.body.caps).toEqual(all.body.caps)
+
+    const people = await getOverview(app, '/api/ai/overview?origin=interactive')
+    expect(people.body.current).toMatchObject({ automaticUsd: 0, totals: { costUsd: 3 } })
+    const priced = await getOverview(app, '/api/ai/overview?feature=reviews&model=mystery-model')
+    expect(priced.body.current.totals).toMatchObject({ runs: 1, unknownCost: 1 })
+    expect(priced.body.topModels.map((b) => b.key.model)).toEqual(['mystery-model'])
+
+    expect((await get(app, '/api/ai/overview?feature=other')).status).toBe(400)
+    expect((await get(app, '/api/ai/usage?feature=widgets')).status).toBe(400)
+    const usage = await getUsage(
+      app,
+      '/api/ai/usage?from=2026-11-01T00:00:00Z&feature=reviews&groupBy=taskKind',
+    )
+    expect(usage.body.buckets.map((b) => [b.key.taskKind, b.runs])).toEqual([['review', 4]])
+    const runs = await getRuns(app, '/api/ai/runs?feature=chat')
+    expect(runs.body.runs.map((r) => r.taskKind)).toEqual(['chat'])
+  })
+
   test('week: spend by task kind, analyzer and provider within what the caller may read', async () => {
     await seedWeeks({ weeklyUsd: 100, reserveUsd: 25 })
     const week = weekRange(new Date(thursday))

@@ -197,6 +197,24 @@ describe('repoHealth cells', () => {
     })
   })
 
+  test('a repository with no tests by design gets a neutral coverage cell', () => {
+    const heads = [head('coverage', { percent: 12, delta: -4, target: 60, files: 3, untested: 2 })]
+    const settings = [
+      setting('repo.tests', { groups: ['shapes'] }, { expected: false, reason: 'Config only' }),
+    ]
+    expect(cellOf('coverage', { heads, settings })).toEqual({
+      value: 'No tests',
+      sub: 'Config only',
+      tone: 'none',
+    })
+    expect(classify({ heads, settings }).health).not.toBe('failing')
+    expect(
+      cellOf('coverage', {
+        settings: [setting('repo.tests', { groups: ['shapes'] }, { expected: false })],
+      }),
+    ).toEqual({ value: 'No tests', sub: 'by design', tone: 'none' })
+  })
+
   test('bundles sum gzip per target and check the budgets of analyzers.bundle', () => {
     const heads = [
       head('bundle', {
@@ -451,6 +469,22 @@ describe('repoHealth', () => {
     expect(classify({}, square).health).toBe('not-analysed')
     const old = classify({ heads: [head('coverage', undefined, { createdAt: hoursAgo(15 * 24) })] })
     expect(old.freshness).toEqual({ current: 0, total: 1 })
+  })
+
+  test('test analyses of a repository with no tests by design are left out of freshness', () => {
+    const heads = [
+      audit(),
+      head(
+        'coverage',
+        { percent: 10, target: 60, files: 1, untested: 1 },
+        {
+          createdAt: hoursAgo(30 * 24),
+        },
+      ),
+    ]
+    const settings = [setting('repo.tests', { groups: ['shapes'] }, { expected: false })]
+    expect(classify({ heads, settings }).freshness).toEqual({ current: 1, total: 1 })
+    expect(classify({ heads }).freshness).toEqual({ current: 1, total: 2 })
   })
 
   test('healthOf takes the worst tone', () => {

@@ -21,6 +21,7 @@ import { z } from 'zod'
 
 import { assetsPolicyFor } from './assets.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
+import { TEST_ANALYZERS, testsExpectedFor } from './repo-tests.ts'
 import { RUN_ONLY_ANALYZERS, jobTarget } from './routes/jobs.ts'
 
 export type { AgentFor, AnyAnalyzer } from '@holtkeeper/jobs'
@@ -193,19 +194,38 @@ export async function scopedAnalyzerOptions(
 }
 
 /**
- * Whether an automatically queued job would get valid options: its own merged with the
- * `analyzers.<kind>` setting that applies to it, as the worker merges them for non-manual jobs.
- * False when an analyzer with required options is not set up for
- * the repository, so triggers can leave it out instead of queuing a job bound to fail.
+ * Why an automatically queued job should not be queued, or `undefined` when it may: `no-tests` for
+ * test analyzers on a repository with no tests by design (`repo.tests`), `options` when its own
+ * options merged with the `analyzers.<kind>` setting that applies to it (as the worker merges them
+ * for non-manual jobs) do not validate, so triggers can leave it out instead of queuing a job
+ * bound to fail.
  */
+export async function automaticJobBlocker(
+  config: HoltkeeperConfig,
+  store: Store,
+  analyzer: { options: z.ZodType },
+  request: Pick<Job, 'analyzer' | 'repo'> & { group?: string; options?: Record<string, unknown> },
+): Promise<'no-tests' | 'options' | undefined> {
+  if (
+    request.group === undefined &&
+    TEST_ANALYZERS.has(request.analyzer) &&
+    !(await testsExpectedFor(store, () => config)(request.repo))
+  )
+    return 'no-tests'
+  const scoped = (await scopedAnalyzerOptions(config, store, request)) ?? {}
+  return analyzer.options.safeParse({ ...request.options, ...scoped }).success
+    ? undefined
+    : 'options'
+}
+
+/** Whether an automatically queued job may be queued: `automaticJobBlocker` finds nothing. */
 export async function automaticJobReady(
   config: HoltkeeperConfig,
   store: Store,
   analyzer: { options: z.ZodType },
   request: Pick<Job, 'analyzer' | 'repo'> & { group?: string; options?: Record<string, unknown> },
 ): Promise<boolean> {
-  const scoped = (await scopedAnalyzerOptions(config, store, request)) ?? {}
-  return analyzer.options.safeParse({ ...request.options, ...scoped }).success
+  return (await automaticJobBlocker(config, store, analyzer, request)) === undefined
 }
 
 const auditTriggers: Partial<Record<Job['trigger'], AuditTrigger>> = {
@@ -264,6 +284,8 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),
     toolchainFor: (repo) => scopedToolchain(config, store, repo),
+    skip: async (analyzer, repo) =>
+      TEST_ANALYZERS.has(analyzer) && !(await testsExpectedFor(store, () => config)(repo)),
     ...(options.artifacts && {
       logs: options.artifacts,
       persistArtifacts: persistArtifactsTo(options.artifacts),

@@ -37,6 +37,7 @@ import {
   buttonClass,
   notify,
 } from '../../ui/index.ts'
+import { WritesOffNotice, useWritesOff } from '../tasks/WritesOff.tsx'
 
 const toneBar: Record<ChatCardTone, string> = {
   neutral: 'bg-default',
@@ -364,18 +365,50 @@ function Block({
 
 type TaskCardBlock = Extract<ChatCardBlock, { type: 'task' }>
 
+type TaskDecision = 'approve' | 'reject' | 'cancel'
+
+const decisions: Record<
+  TaskDecision,
+  { title: string; confirm: string; done: string; failed: string; body: string }
+> = {
+  approve: {
+    title: 'Approve this task?',
+    confirm: 'Approve and run',
+    done: 'Task approved',
+    failed: 'Not approved',
+    body: 'The agent starts on every repository of the task and opens merge requests for review.',
+  },
+  reject: {
+    title: 'Reject this task?',
+    confirm: 'Reject it',
+    done: 'Task rejected',
+    failed: 'Not rejected',
+    body: 'Nothing runs. The proposal leaves the Inbox and the card shows it as cancelled.',
+  },
+  cancel: {
+    title: 'Cancel this task?',
+    confirm: 'Cancel it',
+    done: 'Task cancelled',
+    failed: 'Not cancelled',
+    body: 'Queued and running repositories stop. Merge requests already open stay; close them on the forge.',
+  },
+}
+
 /**
  * A code change: summary, a step per repository as the server updates it (or the repositories
- * with their merge requests on cards without steps), the status, links to its Inbox item while it
- * waits and to the task, and Cancel while something can still stop. Approval happens in the Inbox
- * only.
+ * with their merge requests on cards without steps), the status, links to the task and its Inbox
+ * item. While it waits anyone in the thread can approve or reject it here, with the same checks
+ * and audit as the Inbox; later Cancel stops what still runs.
  */
 function TaskBlock({ block }: { block: TaskCardBlock }) {
   const tasks = useTaskGroupMutations()
-  const [confirming, setConfirming] = useState(false)
+  const [confirming, setConfirming] = useState<TaskDecision>()
   const groupId = block.groupId
   const waiting = groupId !== undefined && block.status === 'proposed'
-  const cancellable = groupId !== undefined && taskCancellable(block.status)
+  const writesOff = useWritesOff(waiting)
+  const cancellable = groupId !== undefined && !waiting && taskCancellable(block.status)
+  const mutation = confirming ? tasks[confirming] : undefined
+  const pending = tasks.approve.isPending || tasks.reject.isPending || tasks.cancel.isPending
   const merge = new Map((block.mergeRequests ?? []).map((mr) => [mr.repo, mr]))
   const cap = block.budgetUsd !== undefined ? `$${block.budgetUsd.toFixed(2)}` : undefined
   return (
@@ -414,13 +447,31 @@ function TaskBlock({ block }: { block: TaskCardBlock }) {
         {waiting && cap ? <span className="mono text-xs text-muted">cap {cap}</span> : null}
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {waiting ? (
-            <Link
-              to="/inbox"
-              search={{ item: `task:${groupId}`, kind: 'task' }}
-              className={buttonClass('secondary', 'sm', 'no-underline')}
-            >
-              Review in Inbox
-            </Link>
+            <>
+              <Button
+                size="sm"
+                variant="primary"
+                isDisabled={pending || writesOff}
+                onPress={() => setConfirming('approve')}
+              >
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                isDisabled={pending}
+                onPress={() => setConfirming('reject')}
+              >
+                Reject
+              </Button>
+              <Link
+                to="/inbox"
+                search={{ item: `task:${groupId}`, kind: 'task' }}
+                className={buttonClass('ghost', 'sm', 'no-underline')}
+              >
+                Open in Inbox
+              </Link>
+            </>
           ) : null}
           {groupId !== undefined ? (
             <Link
@@ -435,41 +486,40 @@ function TaskBlock({ block }: { block: TaskCardBlock }) {
             <Button
               size="sm"
               variant="ghost"
-              isDisabled={tasks.cancel.isPending}
-              onPress={() => setConfirming(true)}
+              isDisabled={pending}
+              onPress={() => setConfirming('cancel')}
             >
               Cancel task
             </Button>
           ) : null}
         </span>
       </div>
-      {waiting ? (
-        <p className="text-xs text-muted">
-          Approvals live in the Inbox, next to everything else waiting on people.
-        </p>
-      ) : null}
-      {cancellable ? (
+      {waiting && writesOff ? <WritesOffNotice /> : null}
+      {groupId !== undefined && confirming ? (
         <ConfirmDialog
-          isOpen={confirming}
-          onOpenChange={setConfirming}
-          title="Cancel this task?"
-          confirmLabel="Cancel it"
-          isPending={tasks.cancel.isPending}
-          onConfirm={() =>
-            tasks.cancel.mutate(groupId, {
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setConfirming(undefined)
+          }}
+          title={decisions[confirming].title}
+          confirmLabel={decisions[confirming].confirm}
+          isPending={mutation?.isPending ?? false}
+          onConfirm={() => {
+            const decision = decisions[confirming]
+            mutation?.mutate(groupId, {
               onSuccess: () => {
-                setConfirming(false)
-                notify.success('Task cancelled')
+                setConfirming(undefined)
+                notify.success(decision.done)
               },
               onError: (error) => {
-                setConfirming(false)
-                notify.error('Not cancelled', messageOf(error))
+                setConfirming(undefined)
+                notify.error(decision.failed, messageOf(error))
               },
             })
-          }
+          }}
         >
-          Queued and running repositories stop. Merge requests already open stay; close them on the
-          forge.
+          {decisions[confirming].body}
+          {confirming === 'approve' && cap ? ` It may spend up to ${cap}.` : ''}
         </ConfirmDialog>
       ) : null}
     </div>

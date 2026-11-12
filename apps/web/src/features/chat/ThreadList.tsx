@@ -3,10 +3,10 @@ import { Archive, BellOff, Bot, FolderGit2, Plus, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useChatMutations, useRepos } from '../../api/queries.ts'
-import { threadBadge, threadScope } from '../../lib/chat.ts'
+import { useChatMutations, useGroupTitles, useRepos } from '../../api/queries.ts'
+import { isNaming, newThreadTitle, threadBadge, threadScope } from '../../lib/chat.ts'
 import { formatRelative } from '../../lib/format.ts'
-import type { ScopeView } from '../../lib/home-scope.ts'
+import type { ScopeCounts, ScopeView } from '../../lib/home-scope.ts'
 import { repoKey } from '../../lib/repo.ts'
 import {
   Button,
@@ -14,6 +14,7 @@ import {
   ErrorState,
   OtherTeams,
   Placeholder,
+  NoTeamsState,
   ScopeSwitch,
   SearchInput,
   Segmented,
@@ -38,6 +39,7 @@ export function NewThreadDialog({
   groups: readonly string[]
   onCreated: (id: string) => void
 }) {
+  const titleOf = useGroupTitles()
   const repos = useRepos(isOpen)
   const { create } = useChatMutations()
   const [title, setTitle] = useState('')
@@ -46,13 +48,13 @@ export function NewThreadDialog({
   const [group, setGroup] = useState<string>()
   const [autoReply, setAutoReply] = useState(false)
   const target = kind === 'repo' ? repo : kind === 'group' ? group : 'team'
-  const ready = title.trim() !== '' && target !== undefined && !create.isPending
+  const ready = target !== undefined && !create.isPending
 
   const submit = () => {
     if (!ready) return
     create.mutate(
       {
-        title: title.trim(),
+        ...newThreadTitle(title),
         autoReply,
         ...(kind === 'repo' && repo && { repo }),
         ...(kind === 'group' && group && { group }),
@@ -87,7 +89,13 @@ export function NewThreadDialog({
           submit()
         }}
       >
-        <TextField label="Title" value={title} onChange={setTitle} autoFocus />
+        <TextField
+          label="Title"
+          placeholder="Optional — named from the first message"
+          value={title}
+          onChange={setTitle}
+          autoFocus
+        />
         <div className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">About</span>
           <Segmented<ScopeKind>
@@ -120,7 +128,7 @@ export function NewThreadDialog({
             placeholder="Pick a group"
             value={group}
             onChange={setGroup}
-            options={groups.map((id) => ({ id, label: id }))}
+            options={groups.map((id) => ({ id, label: titleOf(id) }))}
           />
         ) : null}
         <Switch
@@ -149,6 +157,7 @@ function ThreadRow({
   onSelect: () => void
 }) {
   const badge = threadBadge(thread)
+  const titleOf = useGroupTitles()
   return (
     <li>
       <button
@@ -160,12 +169,18 @@ function ThreadRow({
         }`}
       >
         <span className="min-w-0 flex-1">
-          <span className={`block truncate text-[13px] ${badge ? 'font-semibold' : 'font-medium'}`}>
-            {thread.title}
-          </span>
+          {isNaming(thread) ? (
+            <span className="block truncate text-[13px] text-muted italic">Naming…</span>
+          ) : (
+            <span
+              className={`block truncate text-[13px] ${badge ? 'font-semibold' : 'font-medium'} ${thread.titlePending ? 'text-muted' : ''}`}
+            >
+              {thread.title}
+            </span>
+          )}
           <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted">
             <ScopeIcon thread={thread} />
-            <span className="mono truncate">{threadScope(thread)}</span>
+            <span className="mono truncate">{threadScope(thread, titleOf)}</span>
             <span aria-hidden>·</span>
             <span className="shrink-0">{formatRelative(thread.updatedAt)}</span>
           </span>
@@ -210,6 +225,7 @@ export function ThreadList({
   counts,
   view,
   onView,
+  noTeams = false,
   query,
   onQuery,
   archived,
@@ -224,9 +240,11 @@ export function ThreadList({
   threads: readonly ChatThreadView[]
   others: readonly ChatThreadView[]
   otherTeams: readonly string[]
-  counts: Record<ScopeView, number> | undefined
+  counts: ScopeCounts | undefined
   view: ScopeView
   onView: (view: ScopeView) => void
+  /** *My teams* without home groups: the empty list links to choosing them. */
+  noTeams?: boolean
   query: string
   onQuery: (query: string) => void
   archived: boolean
@@ -276,6 +294,8 @@ export function ThreadList({
           <Placeholder className="h-32" />
         ) : error ? (
           <ErrorState error={error} />
+        ) : threads.length === 0 && others.length === 0 && noTeams && !query.trim() ? (
+          <NoTeamsState />
         ) : threads.length === 0 && others.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs text-muted">
             {query.trim()

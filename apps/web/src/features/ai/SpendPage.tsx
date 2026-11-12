@@ -1,9 +1,9 @@
+import { featureLabel, filterableFeatures } from '@holtkeeper/ai-usage/features'
 import type { AiBudgetStatus, AiUsageOverview, AiUsagePeriodKind } from '@holtkeeper/api'
 import { Cpu } from 'lucide-react'
 import { useState } from 'react'
 
-import { useAiOverview } from '../../api/queries.ts'
-import { featureLabel, featureOf } from '../../lib/ai-features.ts'
+import { useAiOverview, useAiUsage } from '../../api/queries.ts'
 import {
   comparisonLabel,
   formatDelta,
@@ -15,9 +15,11 @@ import {
   totalTokens,
 } from '../../lib/ai-usage.ts'
 import { formatDateTime } from '../../lib/format.ts'
+import { viewGroups } from '../../lib/home-scope.ts'
 import {
   EmptyState,
   ErrorState,
+  NoTeamsState,
   FilterButton,
   Page,
   Placeholder,
@@ -25,6 +27,7 @@ import {
   Strip,
   type StripCell,
 } from '../../ui/index.ts'
+import { McpPeople } from '../mcp/McpPeople.tsx'
 import { copyLinkItem } from '../shell/copy-link.ts'
 import { useScope } from '../shell/scope.ts'
 import { useSession } from '../shell/session.ts'
@@ -44,7 +47,11 @@ const isPeriod = (id: string): id is AiUsagePeriodKind => periods.some((p) => p.
 const broadest = (budgets: readonly AiBudgetStatus[]) =>
   budgets.find((budget) => budget.id === 'default' || budget.scope.all === true) ?? budgets[0]
 
-function stripCells(overview: AiUsageOverview, budget: AiBudgetStatus | undefined): StripCell[] {
+function stripCells(
+  overview: AiUsageOverview,
+  budget: AiBudgetStatus | undefined,
+  narrowed: boolean,
+): StripCell[] {
   const now = overview.current
   const before = overview.comparison
   const people = now.totals.costUsd - now.automaticUsd
@@ -54,7 +61,10 @@ function stripCells(overview: AiUsageOverview, budget: AiBudgetStatus | undefine
     {
       prefix: label[0]?.toUpperCase() + label.slice(1),
       value: formatUsd(now.totals.costUsd),
-      label: overview.period === 'week' && budget ? <>of {formatUsd(budget.weeklyUsd)}</> : null,
+      label:
+        overview.period === 'week' && budget && !narrowed ? (
+          <>of {formatUsd(budget.weeklyUsd)}</>
+        ) : null,
     },
     { prefix: 'Forecast', value: formatUsd(overview.forecast.forecastUsd), label: 'by week end' },
     {
@@ -96,11 +106,12 @@ function stripCells(overview: AiUsageOverview, budget: AiBudgetStatus | undefine
 function Body({ overview, filter }: { overview: AiUsageOverview; filter: SpendRunsFilter }) {
   const { canGlobal } = useSession()
   const budget = broadest(overview.budgets)
+  const narrowed = Boolean(filter.origin || filter.feature || filter.model)
   return (
     <>
       <Strip
         label="AI spend summary"
-        cells={stripCells(overview, budget)}
+        cells={stripCells(overview, budget, narrowed)}
         className="-mx-4 -mt-4"
       />
       <div className="grid gap-5 xl:grid-cols-2">
@@ -108,6 +119,7 @@ function Body({ overview, filter }: { overview: AiUsageOverview; filter: SpendRu
           <BudgetCard
             budget={budget}
             narrower={overview.budgets.filter((entry) => entry !== budget)}
+            caps={overview.caps}
             writable={canGlobal('settings:write')}
           />
         ) : (
@@ -116,19 +128,18 @@ function Body({ overview, filter }: { overview: AiUsageOverview; filter: SpendRu
             description="Budgets show here for the scopes you may read AI spend of."
           />
         )}
-        <DailyCost overview={overview} />
+        <DailyCost overview={overview} filter={filter} />
       </div>
-      <Breakdowns
-        from={overview.current.from}
-        period={overview.period}
-        {...(filter.groups && { groups: filter.groups })}
-      />
+      <Breakdowns from={overview.current.from} period={overview.period} filter={filter} />
       <SpendRuns
         key={`${overview.period}:${overview.current.from}`}
         from={overview.current.from}
         totals={overview.current.totals}
         filter={filter}
       />
+      <div className="-mx-4 -mb-4">
+        <McpPeople />
+      </div>
     </>
   )
 }
@@ -138,47 +149,50 @@ const starters = [
   { id: 'automatic', label: 'Automatic' },
 ] as const
 
-const taskOptions = (overview: AiUsageOverview | undefined) =>
-  (overview?.topTaskKinds ?? []).flatMap((bucket) =>
-    bucket.key.taskKind
-      ? [
-          {
-            id: bucket.key.taskKind,
-            label: `${featureLabel[featureOf(bucket.key.taskKind)]} · ${bucket.key.taskKind}`,
-          },
-        ]
-      : [],
-  )
-
-const modelOptions = (overview: AiUsageOverview | undefined) =>
-  (overview?.topModels ?? []).flatMap((bucket) =>
-    bucket.key.model ? [{ id: bucket.key.model, label: bucket.key.model }] : [],
-  )
+const featureOptions = filterableFeatures.map((feature) => ({
+  id: feature,
+  label: featureLabel[feature],
+}))
 
 /**
- * Ops › AI spend: the period's figures, the weekly budget with its inline editor, four weeks of
- * daily cost split into people and automatic work, spend by feature, repository and model, and
- * every model run. The scope switch narrows everything to the groups of My teams; Started by, Task
- * and Model narrow the runs.
+ * Ops › AI spend: the period's figures, the weekly budget with its inline editor and caps, four
+ * weeks of daily cost split into people and automatic work with forecast bars for the rest of the
+ * week, spend by feature, repository and model, every model run and MCP usage by person. The scope
+ * switch, Feature, Model and Started by narrow everything but the budget card, which always shows
+ * the real budget (and MCP usage, which is no model spend).
  */
 export function SpendPage() {
   const { canGlobal } = useSession()
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeGroups, ready, noTeams } = useScope()
   const [period, setPeriod] = useState<AiUsagePeriodKind>('week')
   const [origin, setOrigin] = useState<string[]>([])
-  const [taskKind, setTaskKind] = useState<string[]>([])
+  const [feature, setFeature] = useState<string[]>([])
   const [model, setModel] = useState<string[]>([])
-  const groups =
-    view === 'mine' && homeGroups.length ? [...new Set(homeGroups.flat())].join(',') : undefined
-  const overview = useAiOverview(true, { period, ...(groups && { groups }) })
-  const data = overview.data
+  const groups = viewGroups(view, homeGroups)?.join(',') || undefined
   const started = starters.find((each) => each.id === origin[0])?.id
+  const narrowTo = filterableFeatures.find((each) => each === feature[0])
   const filter: SpendRunsFilter = {
     ...(started && { origin: started }),
-    ...(taskKind[0] && { taskKind: taskKind[0] }),
+    ...(narrowTo && { feature: narrowTo }),
     ...(model[0] && { model: model[0] }),
     ...(groups && { groups }),
   }
+  const scoped = ready && !noTeams && (view === 'all' || groups !== undefined)
+  const overview = useAiOverview(scoped, { period, ...filter })
+  const data = overview.data
+  const models = useAiUsage(
+    {
+      groupBy: 'model',
+      ...(data && { from: data.current.from }),
+      ...(groups && { groups }),
+    },
+    scoped,
+  )
+  const modelOptions = (models.data?.buckets ?? [])
+    .toSorted((a, b) => b.costUsd - a.costUsd)
+    .flatMap((bucket) =>
+      bucket.key.model ? [{ id: bucket.key.model, label: bucket.key.model }] : [],
+    )
   return (
     <Page
       crumbs={[{ label: 'AI spend' }]}
@@ -204,24 +218,24 @@ export function SpendPage() {
           />
           <FilterButton
             single
-            label="Started by"
-            options={starters}
-            value={origin}
-            onChange={setOrigin}
-          />
-          <FilterButton
-            single
-            label="Task"
-            options={taskOptions(data)}
-            value={taskKind}
-            onChange={setTaskKind}
+            label="Feature"
+            options={featureOptions}
+            value={feature}
+            onChange={setFeature}
           />
           <FilterButton
             single
             label="Model"
-            options={modelOptions(data)}
+            options={modelOptions}
             value={model}
             onChange={setModel}
+          />
+          <FilterButton
+            single
+            label="Started by"
+            options={starters}
+            value={origin}
+            onChange={setOrigin}
           />
           {data ? (
             <span className="text-xs text-muted">{formatDateTime(data.current.from)} – now</span>
@@ -229,7 +243,9 @@ export function SpendPage() {
         </>
       }
     >
-      {overview.isError ? (
+      {noTeams ? (
+        <NoTeamsState />
+      ) : overview.isError ? (
         <ErrorState error={overview.error} />
       ) : data ? (
         <Body overview={data} filter={filter} />

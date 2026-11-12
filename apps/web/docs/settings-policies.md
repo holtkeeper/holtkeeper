@@ -2,7 +2,7 @@
 
 Part of the web app's [Settings](README.md#settings) docs.
 
-Route `/settings/policies`, body `features/settings/sections/PoliciesSection.tsx`, draft logic in `lib/policy-draft.ts`, endpoints and hooks in `api/settings-analyzers.ts`. The pages that own these keys (Licenses, Security, Stack, Assets, Reviews) keep editing the same entries; `knowledge.autoAccept` has no page and lives only here.
+Route `/settings/policies`, body `features/settings/sections/PoliciesSection.tsx`, draft logic in `lib/policy-draft.ts`, endpoints and hooks in `api/settings-analyzers.ts`. The pages that own these keys (Licenses, Security, Stack, Assets, Reviews, Coverage) keep editing the same entries; `knowledge.autoAccept` has no page and lives only here.
 
 ## Editing for a scope
 
@@ -16,6 +16,7 @@ Edits gather into one draft over every card (`PolicyDraft`: key → new value, o
 - **Security allowlist** (`audit.allowlistPolicy` and `audit.allowlist`): the longest an entry may last (`maxDays`, empty for no limit) and whether a reason is required, then the entries at the scope with Extend (expiry 30 days from today, or `maxDays` when shorter) and remove, and a form to add one. Entries added or changed in the draft show the problem the server would refuse them for (`allowlistRowProblem`, the same rule as the server).
 - **Vulnerability fixes** (`audit.fix`, `audit.upgrade`): the fix switch and the largest upgrade.
 - **Stack conventions** (`analyzers.stack`), **Asset policy** (`assets.policy`), **Commit conventions** (`commits.conventions`) and **Test ids** (`analyzers.testids`): the setting's own editor (`ValueEditor`, as in the entry dialog).
+- **Tests** (`repo.tests`, homed on Quality › Coverage): a **Repositories have tests** switch and, while it is off, a reason field; it writes `{ expected }` or `{ expected: false, reason }` at the scope. A repository turns tests back on in the Resolver or from the Coverage sheet.
 - **Agent knowledge** (`knowledge.autoAccept`, homed here: `settingsSections.policies.keys`): the kinds of agent-proposed knowledge accepted without review, linking to Knowledge › Notes, where the rest wait. Knowledge's Configure on the Notes tab lands here.
 - Cards carry `setting-<key>` anchors (`settingAnchor`), so settings search and the resolver land on them.
 - Commit conventions add **Try a title**: a repository of the scope and a title, checked against the saved conventions by `POST /api/commit-conventions/check`, listing each broken rule as Fails (error) or Unusual (history only).

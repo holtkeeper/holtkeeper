@@ -68,6 +68,8 @@ export interface ReviewAnalyzerDeps {
    * falls back to `checks`.
    */
   checksFor?: (repo: RepoRef) => Promise<Partial<Record<ReviewCheckName, QualityCheck>>>
+  /** Whether the repository is meant to have tests (`repo.tests`); without it, always. */
+  testsExpected?: (repo: RepoRef) => Promise<boolean>
   /**
    * The repository's Guide for a review or thread reply, from its rules files (read from the
    * checkout) and the text knowledge notes are ranked by; it becomes the agent's stable context.
@@ -260,6 +262,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
             return deps.checks
           })
         : deps.checks
+      const tests = deps.testsExpected ? await deps.testsExpected(repo) : true
       const data = await reviewMergeRequest({
         repo,
         forge,
@@ -271,6 +274,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         ...(checks ? { checks } : {}),
         ...(guideFor ? { guide: (docs, query) => guideFor(repo, { docs, query }) } : {}),
         ...(toolsets ? { toolsets } : {}),
+        ...(!tests && { tests: false as const }),
         ...(botUsername ? { botUsername } : {}),
         ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),
         ...(deps.steps ? { steps: deps.steps } : {}),

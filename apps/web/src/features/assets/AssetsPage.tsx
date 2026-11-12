@@ -3,7 +3,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { ImageDown, X } from 'lucide-react'
 import { useState } from 'react'
 
-import { useRepoAssets, useSettings } from '../../api/queries.ts'
+import { useGroupTitles, useRepoAssets, useSettings } from '../../api/queries.ts'
 import {
   type AssetsSearch,
   fleetPolicy,
@@ -30,12 +30,13 @@ function EditPolicy({ onPress }: { onPress: (() => void) | undefined }) {
 }
 
 function RepoPolicy({ repo, onEdit }: { repo: RepoRef; onEdit: (() => void) | undefined }) {
+  const titleOf = useGroupTitles()
   const assets = useRepoAssets(repo)
   if (!assets.data) return null
   return (
     <AssetsPolicyCard
       lines={policyLines(assets.data.policy)}
-      source={policySource(assets.data.policySource)}
+      source={policySource(assets.data.policySource, titleOf)}
       space={`repo:${repoKey(repo)}`}
       actions={<EditPolicy onPress={onEdit} />}
     />

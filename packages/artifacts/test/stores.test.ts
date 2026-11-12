@@ -119,7 +119,8 @@ for (const [name, create] of stores) {
       expect(second.cursor).toBeUndefined()
       expect([...first.items, ...second.items].map((i) => i.id)).toEqual(ids.toSorted())
 
-      expect(await store.usage()).toEqual({
+      const { objects: _objects, ...usage } = await store.usage()
+      expect(usage).toEqual({
         count: 3,
         bytes: 18,
         byContentType: {
@@ -233,4 +234,62 @@ test('s3 store uses the prefix and presigns downloads', async () => {
   expect(url).toContain(`/bucket/hk/${id.slice(0, 2)}/`)
   expect(url).toContain('X-Amz-Expires=60')
   expect(await store.presign?.('f'.repeat(64))).toBeUndefined()
+})
+
+test('s3 usage counts every object under the prefix in the same listing', async () => {
+  const store = s3ArtifactStore({
+    bucket: 'bucket',
+    endpoint: s3.endpoint,
+    region: 'us-east-1',
+    accessKeyId: 'key',
+    secretAccessKey: 'secret',
+    prefix: 'hk',
+  })
+  const { id } = await store.put(text('abcd'))
+  await store.put(text('ef'))
+  await store.setRef('cache/widget', { id })
+  s3.objects.set('elsewhere/x', {
+    data: text('outside'),
+    type: 'text/plain',
+    modified: new Date(),
+  })
+  const underPrefix = [...s3.objects]
+    .filter(([key]) => key.startsWith('hk/'))
+    .reduce((sum, [, object]) => sum + object.data.byteLength, 0)
+  s3.requests.length = 0
+  const [usage, again] = await Promise.all([store.usage(), store.usage()])
+  expect(again).toBe(usage)
+  expect(s3.requests.filter((request) => /^GET \/bucket\/?\?/.test(request))).toHaveLength(1)
+  expect(usage.count).toBe(2)
+  expect(usage.bytes).toBe(6)
+  expect(usage.objects).toEqual({ count: 5, bytes: underPrefix })
+})
+
+test('stores name their location without credentials', async () => {
+  const store = s3ArtifactStore({
+    bucket: 'bucket',
+    endpoint: 'https://user:pass@s3.example.test:9000/some/path?x=1',
+    region: 'eu-north-1',
+    accessKeyId: 'key',
+    secretAccessKey: 'secret',
+    prefix: 'hk/artifacts/',
+  })
+  expect(store.location).toEqual({
+    kind: 's3',
+    bucket: 'bucket',
+    endpoint: 's3.example.test:9000',
+    region: 'eu-north-1',
+    prefix: 'hk/artifacts',
+  })
+  expect(
+    s3ArtifactStore({
+      bucket: 'b',
+      accessKeyId: 'key',
+      secretAccessKey: 'secret',
+    }).location,
+  ).toEqual({ kind: 's3', bucket: 'b' })
+  const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-artifacts-'))
+  dirs.push(dir)
+  expect(fsArtifactStore({ dir }).location).toEqual({ kind: 'fs', dir })
+  expect(memoryArtifactStore().location).toBeUndefined()
 })

@@ -8,6 +8,7 @@ import type {
 } from '@holtkeeper/api'
 import type { LinkProps } from '@tanstack/react-router'
 
+import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { healthCells } from './home.ts'
 import { repoKey, repoSplat } from './repo.ts'
 import type { SettingsSearchEntry } from './settings-search.ts'
@@ -246,7 +247,10 @@ export const toneLabels: Record<PaletteTone, string> = {
  * One result per readable repository, toned by its overall health. The subtitle names its groups
  * and the health cells that need attention.
  */
-export function repoItems(repos: readonly RepoSummary[]): PaletteItem[] {
+export function repoItems(
+  repos: readonly RepoSummary[],
+  titleOf: GroupTitleOf = keyAsTitle,
+): PaletteItem[] {
   return repos.map((summary): PaletteItem => {
     const key = repoKey(summary.repo)
     const tone = healthTones[summary.health]
@@ -258,11 +262,13 @@ export function repoItems(repos: readonly RepoSummary[]): PaletteItem[] {
       id: `repos:${key}`,
       kind: 'repos',
       title: summary.repo.path,
-      subtitle: [summary.groups.join(', '), toneLabels[tone], ...notes].filter(Boolean).join(' · '),
+      subtitle: [summary.groups.map(titleOf).join(', '), toneLabels[tone], ...notes]
+        .filter(Boolean)
+        .join(' · '),
       meta: toneLabels[tone],
       tone,
       mono: true,
-      keywords: `${summary.repo.forge} ${summary.groups.join(' ')}`,
+      keywords: `${summary.repo.forge} ${summary.groups.map((group) => `${group} ${titleOf(group)}`).join(' ')}`,
       link: { to: '/repos/$', params: { _splat: repoSplat(summary.repo) } },
       repo: { key, ...summary.repo, groups: summary.groups, tone, cells: summary.cells },
     }

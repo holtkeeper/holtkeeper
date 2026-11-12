@@ -1,6 +1,7 @@
-import type { Action, RepoTarget } from '@holtkeeper/access'
+import { type Action, type Principal, type RepoTarget, can, groupNames } from '@holtkeeper/access'
 import type { ReleaseCard, RepoList, RepoSummary } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
+import { resolveRepoTests } from '@holtkeeper/settings'
 import { Hono } from 'hono'
 
 import { type Env, type ServerDeps, principalOf, repoKey, repoTarget } from '../context.ts'
@@ -11,6 +12,25 @@ import { canSee } from '../visibility.ts'
 
 /** Any of these on a repository lists it. */
 const LISTING_ACTIONS: Action[] = ['repos:read', 'audits:read', 'analyses:read', 'releases:read']
+
+/**
+ * Config groups `principal` may know about: every group with global `settings:read`, otherwise the
+ * groups its grants name plus the groups of listed repositories it holds a listing permission on.
+ */
+export async function reachableGroups(
+  deps: Pick<ServerDeps, 'store' | 'config'>,
+  principal: Principal,
+): Promise<Set<string>> {
+  const configured = Object.keys(deps.config.groups)
+  if (can(principal, 'settings:read', { kind: 'global' })) return new Set(configured)
+  const reach = new Set(principal.grants.flatMap((grant) => groupNames(grant.scope.groups ?? [])))
+  for (const repo of await listedRepos(deps.store.kv, deps.config)) {
+    const target = repoTarget(deps.config, repo)
+    if (LISTING_ACTIONS.some((action) => canSee(principal, action, target)))
+      for (const group of target.groups) reach.add(group)
+  }
+  return new Set(configured.filter((group) => reach.has(group)))
+}
 
 /** What `repoSummaries` reads from the server; `analyses` lets health compute missing metrics. */
 type FleetDeps = Pick<ServerDeps, 'store' | 'config' | 'analyzers' | 'now'> &
@@ -27,7 +47,7 @@ export interface FleetReader {
  * Every member of the configured groups (from the stored listings plus exact include paths) that
  * `reader` holds a listing permission on, sorted by `forge:path`, with the health cells, freshness,
  * updates and newest audit run it may read; whatever it may not read is absent. Repositories
- * without any record are listed as `not-analysed`.
+ * without any record are listed as `not-analysed`; `noTests` marks those `repo.tests` turns off.
  */
 export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promise<RepoSummary[]> {
   const { config, store } = deps
@@ -69,6 +89,7 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
     )
     const run = audited.has(key) ? indexed.audits.get(key) : undefined
     const updated = updates?.get(key)
+    const tests = resolveRepoTests(sources.settings, target)
     return {
       repo: { forge: target.forge, path: target.path },
       groups: target.groups,
@@ -76,6 +97,9 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
       ...health,
       ...(updated && { updates: updated }),
       ...(run && { latestAudit: run }),
+      ...(!tests.expected && {
+        noTests: tests.reason === undefined ? {} : { reason: tests.reason },
+      }),
     }
   })
 }

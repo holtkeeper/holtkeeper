@@ -110,7 +110,13 @@ export function mcpToolsets(context: McpToolsetsContext): RegistryToolset[] {
  */
 export const storedStackTools = (
   analyses: Pick<Store['analyses'], 'latest' | 'list'>,
-  access: { canRead: RepoFilter; canDetail: RepoFilter; groupsOf: (repo: RepoRef) => string[] },
+  access: {
+    canRead: RepoFilter
+    canDetail: RepoFilter
+    groupsOf: (repo: RepoRef) => string[]
+    /** How a group key is named in tool output; default the key itself. */
+    groupLabel?: (key: string) => string
+  },
 ): StackToolsContext => ({
   views: () =>
     stackGroupViews(analyses, {
@@ -119,7 +125,10 @@ export const storedStackTools = (
       canDetail: access.canDetail,
       groupsOf: access.groupsOf,
     }),
-  ownerOf: access.groupsOf,
+  ownerOf: (repo) => {
+    const groups = access.groupsOf(repo)
+    return access.groupLabel ? groups.map(access.groupLabel) : groups
+  },
   dependencies: async (repo) => (access.canRead(repo) ? repoDependencies(analyses, repo) : []),
 })
 
@@ -133,6 +142,8 @@ export interface AgentCatalogOptions {
   repo: RepoTarget
   /** A repository with its config groups. */
   targetOf: (repo: RepoRef) => RepoTarget
+  /** How a group key is named in tool output; default the key itself. */
+  groupLabel?: (key: string) => string
   /** The `access.crossTeam` level. */
   policy: CrossTeamCatalog
   /** The person the task answers; their grants then bound what the agent reads. */
@@ -164,6 +175,8 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     ? reach.snippets
     : (other) => policy === 'snippets' || sameTeam(other)
   const groupsOf = (other: RepoRef) => targetOf(other).groups
+  const label = options.groupLabel ?? ((group: string) => group)
+  const ownerOf = (other: RepoRef) => groupsOf(other).map(label)
   const canReadAnalyses: RepoFilter = (other) =>
     requester
       ? can(requester, 'analyses:read', { kind: 'repo', repo: targetOf(other) })
@@ -179,7 +192,8 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
         (!requester || can(requester, 'knowledge:read', { kind: 'scope', scope })),
       canReadShared: (scope) =>
         requester ? canReadShared(requester, scope, policy) : policy !== 'off',
-      ownerOf: (scope) => scopeOwner(scope, groupsOf),
+      ownerOf: (scope) => scopeOwner(scope, groupsOf).map(label),
+      groupLabel: label,
       repoOf: (value) => (value === key ? repo : undefined),
       actor: 'agent',
       now: options.now,
@@ -190,12 +204,13 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     canReadAudits: (other) =>
       repoKey(other) === key &&
       (!requester || can(requester, 'audits:read', { kind: 'repo', repo: targetOf(other) })),
-    ownerOf: groupsOf,
+    ownerOf,
     ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
     stack: storedStackTools(store.analyses, {
       canRead,
       canDetail: canReadAnalyses,
       groupsOf,
+      groupLabel: label,
     }),
     ...(requester && options.supply ? { supply: options.supply(requester) } : {}),
     ...(store.libraries && artifacts

@@ -76,6 +76,9 @@ test('withRepos adds paths once and lifts their exclusion', () => {
   expect(withRepos(withRepos(group, 'work', ['games/app']), 'work', ['games/app']).include).toEqual(
     ['games/*', 'games/app'],
   )
+  expect(withRepos({ ...group, title: 'Game studio' }, 'work', ['games/app']).title).toBe(
+    'Game studio',
+  )
 })
 
 describe('parsePastedPaths', () => {

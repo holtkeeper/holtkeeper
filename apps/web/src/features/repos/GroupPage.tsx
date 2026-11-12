@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { FolderGit2 } from 'lucide-react'
 import { useState } from 'react'
 
-import { useGroupListing, useGroups, useRepos } from '../../api/queries.ts'
+import { useGroupListing, useGroups, useGroupTitles, useRepos } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
 import { repoKey, repoSplat } from '../../lib/repo.ts'
 import {
@@ -46,6 +46,7 @@ export function GroupPage() {
   const search = useSearch({ from: '/app/repos/groups/$groupId' })
   const navigate = useNavigate({ from: '/repos/groups/$groupId' })
   const repos = useRepos()
+  const titleOf = useGroupTitles()
   const config = useGroups(canGlobal('settings:read'))
   const definition = config.data?.entries.find((entry) => entry.id === groupId)
   const listing = useGroupListing(groupId, can('settings:read'))
@@ -54,6 +55,8 @@ export function GroupPage() {
   const allGroups = [...new Set(all.flatMap((r) => r.groups))].toSorted()
   const { tabs, tab } = pickGroupTab(can, search.tab, canGlobal)
   const forge = definition?.data.forge ?? listing.data?.forge ?? members[0]?.repo.forge
+  const title = definition?.data.title ?? titleOf(groupId)
+  const subtitle = [title !== groupId ? groupId : undefined, forge].filter(Boolean).join(' · ')
   const counts = countHealth(members)
   const membership =
     definition && listing.data && forge
@@ -104,9 +107,9 @@ export function GroupPage() {
 
   return (
     <Page
-      crumbs={[{ label: 'Groups', link: { to: '/repos/groups' } }, { label: groupId }]}
-      title={groupId}
-      description={forge ? <span className="mono">{forge}</span> : undefined}
+      crumbs={[{ label: 'Groups', link: { to: '/repos/groups' } }, { label: title }]}
+      title={title}
+      description={subtitle ? <span className="mono">{subtitle}</span> : undefined}
       tabs={false}
       actions={
         <RunJobButton group={groupId} label="Run job for group" size="sm" variant="secondary" />
@@ -164,7 +167,11 @@ export function GroupPage() {
         ) : config.isError ? (
           <ErrorState error={config.error} />
         ) : definition ? (
-          <GroupMembership key={definition.version ?? 0} entry={definition} members={members} />
+          <GroupMembership
+            key={`${definition.id}:${definition.version ?? 0}`}
+            entry={definition}
+            members={members}
+          />
         ) : (
           <Notice tone="warning" title="Not in the config">
             {canGlobal('settings:read')

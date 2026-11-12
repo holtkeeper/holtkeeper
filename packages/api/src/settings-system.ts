@@ -28,12 +28,43 @@ export interface SystemHealth {
     /** Bytes per storage area id (`StorageProviderView.id`) in that snapshot. */
     weekAgo?: Record<string, number>
   }
+  /** The artifact store's location and fill; absent when the server has none. */
+  artifactStore?: ArtifactStoreView
   /** Workers that reported their disks in the last 15 minutes. */
   workers: number
   /** The running release, `HOLTKEEPER_VERSION`; absent when unknown. */
   version?: string
   /** When the answering process started. */
   startedAt: Timestamp
+}
+
+/**
+ * The artifact store in Settings › System › Storage: where it is (never credentials), how full it
+ * is and how Holtkeeper ages artifacts out. Whether it answers is the `artifacts` check.
+ */
+export interface ArtifactStoreView {
+  kind: 's3' | 'fs'
+  /** S3: host (and port) of the endpoint; absent for the AWS default. */
+  endpoint?: string
+  bucket?: string
+  region?: string
+  /** S3: key prefix the store keeps everything under. */
+  prefix?: string
+  /** fs: the directory. */
+  dir?: string
+  /**
+   * Bytes under the store's root: on S3 every object under the prefix (artifacts, metadata, refs),
+   * else the artifacts. Absent when measuring failed.
+   */
+  usedBytes?: number
+  /** Objects under the prefix (S3), else artifacts. */
+  objects?: number
+  /** `server.artifacts.quotaBytes`: declared by the operator, not measured. */
+  quotaBytes?: number
+  /** `server.retention`; absent when artifacts are kept forever. */
+  retention?: { days?: number; maxBytes?: number }
+  /** Why measuring failed. */
+  error?: string
 }
 
 /**

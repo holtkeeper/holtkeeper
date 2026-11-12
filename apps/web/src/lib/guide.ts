@@ -20,7 +20,8 @@ import type {
 } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
-import type { ScopeView } from './home-scope.ts'
+import { type GroupTitleOf, keyAsTitle } from './group-titles.ts'
+import { type ScopeCounts, type ScopeView, groupCounts, viewGroup } from './home-scope.ts'
 import { parseRepoKey, repoKey } from './repo.ts'
 import { namesFocus } from './scope.ts'
 
@@ -124,11 +125,15 @@ export function parseSpace(key: string | undefined): Space | undefined {
 }
 
 /** A scope key in words: `All repositories`, `Team games`, the family's name, a repository path. */
-export function scopeLabel(key: GuideScopeKey, families: readonly Family[]): string {
+export function scopeLabel(
+  key: GuideScopeKey,
+  families: readonly Family[],
+  titleOf: GroupTitleOf = keyAsTitle,
+): string {
   const space = parseSpace(key)
   if (!space) return key
   if (space.kind === 'all') return 'All repositories'
-  if (space.kind === 'group') return `Team ${space.group}`
+  if (space.kind === 'group') return `Team ${titleOf(space.group)}`
   if (space.kind === 'family')
     return families.find((f) => f.id === space.family)?.name ?? 'Unknown family'
   return space.repo.path
@@ -154,10 +159,10 @@ export interface SpaceTree {
   others: TeamNode[]
   /** Repositories of the folded teams that no shown team holds. */
   otherRepos: number
-  /** Repositories in no group, shown unless the view is *My teams*. */
+  /** Repositories in no group, shown on *All I can see* only. */
   ungrouped: { families: FamilyNode[]; repos: RepoRef[] }
-  /** Teams per scope switch position. */
-  counts: Record<ScopeView, number>
+  /** Teams per scope position, repositories per group. */
+  counts: ScopeCounts
   /** Teams the view hides. */
   folded: number
 }
@@ -186,7 +191,8 @@ function nest(repos: readonly RepoRef[], families: readonly Family[]) {
  * Teams → families → repositories for the spaces sidebar. A repository in several groups shows
  * under each; a family shows under every team holding a member, listing the members of that team.
  * *My teams* keeps the viewer's home teams (a team named in a `frontend + storefront` home entry
- * counts).
+ * counts) and folds the rest, nothing without home groups; a group position keeps that one team
+ * and folds nothing. Every count of the switch counts repositories.
  */
 export function buildSpaceTree(
   repos: readonly RepoSummary[],
@@ -196,7 +202,9 @@ export function buildSpaceTree(
 ): SpaceTree {
   const groups = [...new Set(repos.flatMap((r) => r.groups))].toSorted()
   const home = groups.filter((group) => isHomeTeam(homeGroups, group))
-  const shown = view === 'mine' ? home : groups
+  const picked = viewGroup(view)
+  const shown =
+    view === 'mine' ? home : picked === undefined ? groups : groups.filter((g) => g === picked)
   const node = (group: string): TeamNode => ({
     group,
     ...nest(
@@ -205,9 +213,10 @@ export function buildSpaceTree(
     ),
   })
   const teams = shown.map(node)
-  const others = groups.filter((group) => !shown.includes(group)).map(node)
+  const others =
+    view === 'mine' && homeGroups.length ? groups.filter((g) => !shown.includes(g)).map(node) : []
   const ungrouped =
-    view === 'mine'
+    view !== 'all'
       ? { families: [], repos: [] }
       : nest(
           repos.filter((r) => r.groups.length === 0).map((r) => r.repo),
@@ -221,7 +230,11 @@ export function buildSpaceTree(
     others,
     otherRepos,
     ungrouped,
-    counts: { mine: home.length, all: groups.length },
+    counts: {
+      mine: repos.filter((r) => r.groups.some((group) => home.includes(group))).length,
+      all: repos.length,
+      groups: groupCounts(repos.map((r) => r.groups)),
+    },
     folded: others.length,
   }
 }

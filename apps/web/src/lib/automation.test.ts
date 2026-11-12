@@ -11,6 +11,8 @@ import {
   describeEvery,
   filterSchedules,
   inMyTeams,
+  laneInView,
+  laneScopeCounts,
   parseAutomationSearch,
   runCounts,
   runOutcome,
@@ -439,6 +441,21 @@ describe('schedule list', () => {
     expect(inMyTeams(['toys'], ['games'])).toBe(false)
     expect(inMyTeams(['toys', 'games'], [['toys', 'games']])).toBe(true)
     expect(inMyTeams(['toys'], [['toys', 'games']])).toBe(false)
+  })
+
+  test('a group position keeps its rules and every-repository ones', () => {
+    expect(laneInView(['toys'], 'group:toys', [])).toBe(true)
+    expect(laneInView(['all'], 'group:toys', [])).toBe(true)
+    expect(laneInView(['games'], 'group:toys', ['games'])).toBe(false)
+    expect(laneInView(['games'], 'all', [])).toBe(true)
+    expect(laneScopeCounts([['all'], ['toys'], ['games', 'toys']], ['games'])).toEqual({
+      mine: 2,
+      all: 3,
+      groups: [
+        { group: 'games', count: 2 },
+        { group: 'toys', count: 3 },
+      ],
+    })
   })
 })
 

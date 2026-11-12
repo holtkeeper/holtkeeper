@@ -4,6 +4,8 @@ import type { StorageProviderView } from '@holtkeeper/api'
 
 import {
   clearedMessage,
+  quotaUse,
+  retentionLabel,
   shareLabel,
   shareOf,
   sortProviders,
@@ -70,5 +72,33 @@ describe('shareLabel and storageShade', () => {
   test('fade by index and stop at the last shade', () => {
     expect(storageShade(0)).toBe('color-mix(in oklab, var(--fg) 86%, transparent)')
     expect(storageShade(20)).toBe('color-mix(in oklab, var(--fg) 9%, transparent)')
+  })
+})
+
+describe('quotaUse', () => {
+  test('is absent without a quota or a figure', () => {
+    expect(quotaUse(100, undefined)).toBeUndefined()
+    expect(quotaUse(undefined, 1000)).toBeUndefined()
+    expect(quotaUse(100, 0)).toBeUndefined()
+  })
+
+  test('fills the bar and turns warning from 80% and danger from 95%', () => {
+    expect(quotaUse(250, 1000)).toEqual({ width: 25, label: '25%', tone: 'default' })
+    expect(quotaUse(800, 1000)?.tone).toBe('warning')
+    expect(quotaUse(950, 1000)?.tone).toBe('danger')
+    expect(quotaUse(1, 1000)?.label).toBe('<1%')
+    expect(quotaUse(1120, 1000)).toEqual({ width: 100, label: '112%', tone: 'danger' })
+  })
+})
+
+describe('retentionLabel', () => {
+  test('describes days, a size cap, both or neither', () => {
+    expect(retentionLabel({ days: 90 })).toBe('unused for 90 days')
+    expect(retentionLabel({ days: 1 })).toBe('unused for 1 day')
+    expect(retentionLabel({ maxBytes: 50 * 1024 ** 3 })).toBe('least used beyond 50.0 GB')
+    expect(retentionLabel({ days: 30, maxBytes: 1024 })).toBe(
+      'unused for 30 days · least used beyond 1.0 kB',
+    )
+    expect(retentionLabel(undefined)).toBe('kept forever')
   })
 })

@@ -231,6 +231,42 @@ Set it for everything to make Holtkeeper a pure analytics tool, or for a group o
   schema: repoFreezeSchema,
 })
 
+/**
+ * Value of `repo.tests`: whether the repository is meant to have tests and, when it is not, why.
+ * The most specific entry wins, so a repository entry can turn tests back on under a group.
+ */
+export const repoTestsSchema = z.object({
+  expected: z.boolean().default(true),
+  reason: z.string().trim().min(1).max(500).optional(),
+})
+
+/** A parsed `repo.tests` value; `expected` is always set, `reason` only when given. */
+export type RepoTests = z.infer<typeof repoTestsSchema>
+
+/** Per-repository `repo.tests` setting: the most specific entry wins; tests are expected by default. */
+export const repoTests = defineSetting({
+  key: 'repo.tests',
+  label: 'Tests',
+  description:
+    'Whether repositories are meant to have tests. Off marks them as having no tests by design: coverage is skipped and agents neither write nor ask for tests.',
+  section: 'Repositories',
+  help: `Turn tests off for repositories that have no tests by design: configuration, documentation, prototypes, generated code.
+
+- **expected** (default on): off marks the covered repositories as having no tests by design.
+- **reason** says why; the panel shows it wherever it says "No tests by design".
+
+Set it for everything, a group or a repository pattern. The most specific entry wins, so a repository entry with tests on lifts a group entry with tests off.
+
+When tests are off:
+- Coverage is never queued automatically (events, new repositories, freshness, schedules), counts as skipped in Ops › Automation and leaves repository freshness; a manual run still goes ahead. Quality › Coverage, repository health and the repository overview show "No tests by design" instead of a coverage figure.
+- The Guide drops its Testing section for the repository, the Guide generator skips it, and agents are told not to add or run tests.
+- AI reviews never ask for tests (test-id comments still come), write tasks and propagation fixes leave out test checks, and test write tasks are refused, also when proposed before tests were turned off.
+
+Test ids (\`analyzers.testids\`) are unaffected: end-to-end suites in other repositories read them.`,
+  default: { expected: true },
+  schema: repoTestsSchema,
+})
+
 /** Value of `tasks.write`; every field has a default, so `{ enabled: true }` is enough. */
 export const tasksWriteSchema = z.object({
   enabled: z.boolean().default(false),
@@ -308,6 +344,7 @@ export const builtinSettings: SettingDefinition[] = [
   auditAllowlist,
   auditAllowlistPolicy,
   repoFreeze,
+  repoTests,
   accessCrossTeam,
   tasksWrite,
 ]

@@ -1,7 +1,6 @@
-import { useAccount } from '../../api/queries.ts'
+import { useAccount, useDescribeScope } from '../../api/queries.ts'
 import { actionLabels, roleLabel, summarizeGrants } from '../../lib/access.ts'
 import { formatDate } from '../../lib/format.ts'
-import { describeScope } from '../../lib/scope.ts'
 import { Avatar, EmptyState, KeyValue, Panel, Table, Tag, Td, Th } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
 
@@ -30,6 +29,7 @@ function GivenBy() {
 
 /** Account › My access: the viewer's role and each grant with where it applies and what it allows. */
 export function MyAccess() {
+  const describeScope = useDescribeScope()
   const { principal, auth } = useSession()
   const { grants } = principal
   return (

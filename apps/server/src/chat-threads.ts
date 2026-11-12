@@ -26,7 +26,7 @@ import { TaskError, createTaskGroup, postTaskCard, proposalBudget } from './task
 import { readTranscript } from './transcripts.ts'
 
 /** Limits of one chat reply: tier `main`, at most 12 turns and $0.40. */
-const CHAT_REPLY_LIMITS = { tier: 'main', maxTurns: 12, maxCostUsd: 0.4 } as const
+export const CHAT_REPLY_LIMITS = { tier: 'main', maxTurns: 12, maxCostUsd: 0.4 } as const
 
 /** Limits of one summary refresh: a single `fast` one-shot. */
 const CHAT_SUMMARY_LIMITS = { tier: 'fast', maxTurns: 1, maxCostUsd: 0.02 } as const
@@ -103,7 +103,7 @@ export const bodyRefs = (config: HoltkeeperConfig, body: string) =>
   textRefs(body, (forge) => config.forges[forge] !== undefined)
 
 /** The target the agent of a thread works for (see `ChatAgentFor`). */
-function agentTarget(
+export function agentTarget(
   config: HoltkeeperConfig,
   thread: Pick<ChatThread, 'repo' | 'group'>,
 ): RepoTarget {

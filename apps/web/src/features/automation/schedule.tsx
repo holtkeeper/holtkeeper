@@ -4,7 +4,7 @@ import { Pause, Play } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useConfigMutations, useRunSchedule } from '../../api/queries.ts'
+import { useConfigMutations, useGroupTitles, useRunSchedule } from '../../api/queries.ts'
 import {
   cronFields,
   describeCadence,
@@ -17,8 +17,8 @@ import {
   toScheduleInput,
 } from '../../lib/automation.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
+import { groupMatchTitle } from '../../lib/group-titles.ts'
 import { jobStatusLabel, jobStatusTone, scheduleRunShares } from '../../lib/jobs.ts'
-import { formatGroupMatch } from '../../lib/scope.ts'
 import {
   KeyValue,
   Legend,
@@ -211,6 +211,7 @@ const tagList = (items: readonly string[], mono = false) =>
  * breakdown, the next five run times and the rule in When / Where / If / Then / Limits terms.
  */
 export function ScheduleOverview({ row }: { row: ScheduleRow }) {
+  const titleOf = useGroupTitles()
   const data = row.entry.data
   const fields = data.cron ? cronFields(data.cron) : undefined
   const windows = describeWindows(data.windows)
@@ -288,7 +289,7 @@ export function ScheduleOverview({ row }: { row: ScheduleRow }) {
             {
               label: 'Groups',
               value: data.groups?.length
-                ? tagList(data.groups.map(formatGroupMatch))
+                ? tagList(data.groups.map((entry) => groupMatchTitle(entry, titleOf)))
                 : 'Every repository',
             },
             { label: 'Repositories', value: tagList(data.repos ?? [], true) },

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { createHash, createHmac } from 'node:crypto'
+import { closeSync, openSync, readSync } from 'node:fs'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -512,6 +513,17 @@ for (const backend of ['dir', 's3'] as const)
       throw new Error(`${path} was never stored`)
     }
 
+    const storedCount = async () =>
+      ((await (await admin('/v1/cache')).json()) as { stats: { stored: number } }).stats.stored
+
+    const committed = async (before: number) => {
+      for (let attempt = 0; attempt < 50; attempt++) {
+        if ((await storedCount()) > before) return
+        await Bun.sleep(100)
+      }
+      throw new Error('the download was never stored')
+    }
+
     const metaReads = () =>
       (s3?.requests ?? []).filter(
         (r) => r.startsWith('GET ') && decodeURIComponent(r).endsWith('/=meta.json'),
@@ -571,10 +583,12 @@ for (const backend of ['dir', 's3'] as const)
 
     test('goes upstream again once an entry is unused for its TTL', async () => {
       await Bun.sleep(4_000)
+      const before = await storedCount()
       const expired = await get('/redirect/tool.tar.gz')
       expect(expired.headers.get('x-egress-cache')).toBe('miss')
       await expired.arrayBuffer()
       expect(served.get('/redirect/tool.tar.gz')).toBe(2)
+      await committed(before)
     }, 15_000)
 
     test('syncs without reading back the meta files it wrote', async () => {
@@ -612,3 +626,84 @@ for (const backend of ['dir', 's3'] as const)
       expect(served.get('/files/a.tgz')).toBe(2)
     })
   })
+
+/** The interpreter mitmproxy runs on, from the `mitmdump` script's shebang; `null` for a frozen binary. */
+function mitmPython() {
+  const bin = Bun.which('mitmdump')
+  if (!bin) return null
+  const head = Buffer.alloc(512)
+  const fd = openSync(bin, 'r')
+  try {
+    readSync(fd, head, 0, head.length, 0)
+  } finally {
+    closeSync(fd)
+  }
+  const line = head.toString('utf8').split('\n')[0] ?? ''
+  return line.startsWith('#!') ? line.slice(2).trim().split(/\s+/) : null
+}
+
+const raceScript = `
+import sys, threading, time
+sys.path.insert(0, sys.argv[1])
+from cache import Cache, Spool
+
+class Store:
+    def __init__(self):
+        self.files = {}
+        self.reads = 0
+        self.writes = 0
+        self.flushing = threading.Event()
+        self.release = threading.Event()
+        self.body = threading.Event()
+    def write_meta(self, path, meta):
+        if meta["hits"] and not self.release.is_set():
+            self.flushing.set()
+            self.release.wait(5)
+        self.writes += 1
+        token = f"t{self.writes}"
+        self.files[path] = (token, dict(meta))
+        return token
+    def put_body(self, path, spooled):
+        self.body.set()
+    def list_meta(self):
+        return {path: token for path, (token, _) in self.files.items()}
+    def read_meta(self, path):
+        self.reads += 1
+        return self.files[path][1]
+
+store = Store()
+cache = Cache(store, {"packages": 86400, "tools": 86400}, None, 1 << 30, 3600, [], (), "")
+path = "packages/example.test/widget.tgz"
+cache.index[path] = {"url": "https://example.test/widget.tgz", "kind": "packages", "size": 1, "headers": {},
+    "storedAt": "2026-01-01T00:00:00Z", "lastUsedAt": "2026-01-02T00:00:00Z", "hits": 3}
+cache.dirty.add(path)
+flush = threading.Thread(target=cache.flush)
+flush.start()
+assert store.flushing.wait(5)
+spool = Spool(path="unused", entry=path, kind="packages", url="https://example.test/widget.tgz", headers={}, expected=None, size=2)
+commit = threading.Thread(target=cache.commit, args=(spool,))
+commit.start()
+assert store.body.wait(5)
+time.sleep(0.3)
+store.release.set()
+flush.join(5)
+commit.join(5)
+token, stored = store.files[path]
+assert stored["hits"] == 0 and stored["size"] == 2, stored
+assert cache.index[path] == stored and cache.tokens[path] == token and path not in cache.dirty
+cache.flush()
+assert store.files[path][0] == token
+cache.sync()
+assert store.reads == 0, store.reads
+print("ok")
+`
+
+const python = mitmPython()
+
+describe.skipIf(!python)('egress cache writes', () => {
+  test('never lets a use record overwrite a newer stored entry', () => {
+    const run = Bun.spawnSync([...(python ?? []), '-c', raceScript, import.meta.dir])
+    expect(run.stderr.toString()).toBe('')
+    expect(run.stdout.toString().trim()).toBe('ok')
+  }, 30_000)
+})

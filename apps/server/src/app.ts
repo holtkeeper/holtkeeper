@@ -38,12 +38,13 @@ import { knowledgeRoutes } from './routes/knowledge.ts'
 import { learningRoutes } from './routes/learnings.ts'
 import { libraryIndexRoutes } from './routes/library-index.ts'
 import { licensesRoutes } from './routes/licenses.ts'
+import { limitRoutes } from './routes/limits.ts'
 import { mediaRoutes } from './routes/media.ts'
 import { preferenceRoutes } from './routes/preferences.ts'
 import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { repoPageRoutes } from './routes/repo-page.ts'
-import { repoRoutes } from './routes/repos.ts'
+import { reachableGroups, repoRoutes } from './routes/repos.ts'
 import { reviewRoutes } from './routes/reviews.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
@@ -112,12 +113,20 @@ export function createApp(deps: ServerDeps) {
   const version = releaseVersion(deps.version)
   api.get('/me', async (c) => {
     const publicUrl = deps.config.server?.publicUrl?.replace(/\/+$/, '')
+    const principal = c.get('principal')
+    const groupTitles: Record<string, string> = {}
+    if (principal) {
+      const reach = await reachableGroups(deps, principal)
+      for (const [key, group] of Object.entries(deps.config.groups))
+        if (group.title && reach.has(key)) groupTitles[key] = group.title
+    }
     return c.json<MeResponse>({
-      principal: await withAvatar(deps, c.get('principal')),
+      principal: await withAvatar(deps, principal),
       auth: deps.auth.info(),
       crossTeam: await crossTeamPolicy(deps.store.settings),
       ...(version && { version }),
       ...(publicUrl && { publicUrl }),
+      groupTitles,
     })
   })
   api.route('/', avatarRoutes(deps))
@@ -135,6 +144,7 @@ export function createApp(deps: ServerDeps) {
   api.route('/', stackRoutes(deps))
   api.route('/', licensesRoutes(supply))
   api.route('/', credentialRoutes(deps))
+  api.route('/', limitRoutes(deps))
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))
   api.route('/', taskRoutes(deps))

@@ -91,6 +91,7 @@ import { startOperations } from './operations.ts'
 import { agentOpsAccess } from './ops-tools.ts'
 import { agentReleaseAccess } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
+import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
 import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
@@ -285,6 +286,8 @@ export async function startServer(
   })
   // The review analyzer needs server state: the Guide and the knowledge base.
   const resolveGuide = createGuideResolver({ store: server.store })
+  const testsOf = repoTestsFor(server.store, () => config)
+  const testsExpected = testsExpectedFor(server.store, () => config)
   const review = createReviewAnalyzer({
     checks: reviewChecks(),
     checksFor: async (repo) =>
@@ -294,6 +297,7 @@ export async function startServer(
           repoTarget(config, repo),
         ),
       }),
+    testsExpected,
     botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
     mediaReviewer: createMediaReviewer({
       cache: mediaCache,
@@ -330,6 +334,7 @@ export async function startServer(
   const guide = createGuideAnalyzer({
     store: server.store,
     groupsOf: (repo) => repoTarget(config, repo).groups,
+    testsExpected,
   })
   const conventionsOf = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),
@@ -341,6 +346,7 @@ export async function startServer(
     policy: writeTaskPolicy({
       store: server.store,
       readOnly: managed.readOnly,
+      tests: testsOf,
       dryRun: () => config.dryRun,
       executionMode: () => config.jobs.execution?.mode,
       now: () => new Date(),
@@ -358,6 +364,7 @@ export async function startServer(
   })
   const propagate = createPropagateAnalyzer({
     fixes: { propose: (input) => proposePropagateFixes(taskDeps, input) },
+    testsExpected,
   })
   const replacements: Record<string, AnyAnalyzer> = {
     review,

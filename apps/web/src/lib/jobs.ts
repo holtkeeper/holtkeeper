@@ -17,7 +17,7 @@ import type {
 
 import { formatUsd } from './ai-usage.ts'
 import { formatDuration, formatRelative } from './format.ts'
-import { type ScopeView, inHomeGroups } from './home-scope.ts'
+import { type ScopeView, inView } from './home-scope.ts'
 import { repoKey } from './repo.ts'
 
 export type JobStatus = Job['status']
@@ -200,8 +200,8 @@ export function scheduleRunShares(
 }
 
 /**
- * The `repos` filter of a scope position: every target in the home groups for *My teams*;
- * `undefined` (no filter) for *All I can see* or before targets loaded.
+ * The `repos` filter of a scope position: every target in the home groups for *My teams*, in the
+ * group for a group position; `undefined` (no filter) for *All I can see* or before targets loaded.
  */
 export function jobScopeRepos(
   view: ScopeView,
@@ -210,7 +210,7 @@ export function jobScopeRepos(
 ): string[] | undefined {
   if (view === 'all' || !targets) return undefined
   return targets
-    .filter((target) => inHomeGroups(homeGroups, target.groups))
+    .filter((target) => inView(view, homeGroups, target.groups))
     .map((target) => target.repo)
 }
 

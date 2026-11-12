@@ -25,6 +25,8 @@ export interface AssetToolsAccess {
   ) => Promise<{ policy: AssetsPolicy; source: AssetsPolicySource } | undefined>
   /** The Assets view of a `forge:path` the caller may read; `undefined` otherwise. */
   assets: (repo: string) => Promise<RepoAssetsView | undefined>
+  /** How a group key is named in tool output; default the key itself. */
+  groupLabel?: (key: string) => string
 }
 
 /**
@@ -38,6 +40,7 @@ export function storedAssetTools(
     targetOf: (repo: RepoRef) => RepoTarget
     canRead: (target: RepoTarget) => boolean
     canReadScope: (scope: Scope) => boolean
+    groupLabel?: (key: string) => string
   },
 ): AssetToolsAccess {
   const readable = (value: string) => {
@@ -60,6 +63,7 @@ export function storedAssetTools(
       const found = readable(value)
       return found && repoAssetsView(store, found.ref, found.target, access.canReadScope)
     },
+    ...(access.groupLabel && { groupLabel: access.groupLabel }),
   }
 }
 
@@ -69,12 +73,14 @@ const parseRepo = (value: string): RepoRef | undefined => {
   return { forge: value.slice(0, separator), path: value.slice(separator + 1) }
 }
 
-const fromText = (source: AssetsPolicySource) => {
+const fromText = (source: AssetsPolicySource, label: (key: string) => string) => {
   if (source.level === 'default') return 'the default policy (nothing set)'
   if (source.level === 'all') return 'the entry for every repository'
   if (source.level === 'repo') return `the repository's own entry`
   const groups = source.entry?.scope.groups
-  return groups?.length ? `the entry of group ${groups.join(', ')}` : 'an inherited group entry'
+  return groups?.length
+    ? `the entry of group ${groups.map((group) => (typeof group === 'string' ? label(group) : group.map(label).join(' & '))).join(', ')}`
+    : 'an inherited group entry'
 }
 
 /** What the policy says about one file path: ignored, allowed, limits and siblings it needs. */
@@ -177,7 +183,7 @@ export function assetsToolset(access: AssetToolsAccess): RegistryToolset {
           const effective = await access.policy(repo)
           if (!effective) throw new ToolError(`No repository ${repo} you can read.`)
           const lines = [
-            `# Asset policy of \`${repo}\`, from ${fromText(effective.source)}`,
+            `# Asset policy of \`${repo}\`, from ${fromText(effective.source, access.groupLabel ?? ((key) => key))}`,
             assetsPolicyFacts(effective.policy),
             ...(path
               ? [

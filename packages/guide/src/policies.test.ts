@@ -96,3 +96,25 @@ test('an asset policy entry becomes facts of the assets section; without one not
   expect(policy?.text).toContain('- Images and videos are at most 4096 px wide or tall.')
   expect(policiesFor([assets({ groups: ['other'] }, {})], repo)).toEqual([])
 })
+
+const tests = (scope: object, value: unknown) => ({ ...entry(scope, value), key: 'repo.tests' })
+
+test('a repository with no tests by design gets a general policy line', () => {
+  expect(
+    policiesFor([tests({ groups: ['games'] }, { expected: false, reason: 'Config only' })], repo),
+  ).toEqual([
+    {
+      section: 'general',
+      text: '- This repository has no tests by design (Config only): do not add test files, test frameworks or test scripts, do not run tests, and do not ask for tests in reviews.',
+    },
+  ])
+  expect(
+    policiesFor(
+      [
+        tests({ groups: ['games'] }, { expected: false }),
+        tests({ repos: ['work:games/a'] }, { expected: true }),
+      ],
+      repo,
+    ),
+  ).toEqual([])
+})

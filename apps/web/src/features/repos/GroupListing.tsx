@@ -9,8 +9,14 @@ import { ChevronRight, RefreshCw, X } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useGroupListing, useListGroup, usePutGroup } from '../../api/queries.ts'
+import { useGroupListing, useGroupTitles, useListGroup, usePutGroup } from '../../api/queries.ts'
 import { formatDateTime, formatDuration, formatRelative, plural } from '../../lib/format.ts'
+import {
+  type GroupTitleOf,
+  MAX_GROUP_TITLE,
+  validateGroupTitle,
+  withGroupTitle,
+} from '../../lib/group-titles.ts'
 import { dotToTagTone, healthLabels, healthTones } from '../../lib/home.ts'
 import { repoKey, repoSplat, splitRepoPath } from '../../lib/repo.ts'
 import {
@@ -36,6 +42,7 @@ import {
   Table,
   Tag,
   Td,
+  TextField,
   Th,
   notify,
 } from '../../ui/index.ts'
@@ -45,9 +52,10 @@ import { ListingAttempts } from './Attempts.tsx'
 type Patterns = Pick<GroupDocumentData, 'include' | 'exclude'>
 
 /**
- * The group's Membership tab: its include and exclude patterns (editable with global
- * `settings:write`, unsaved changes previewed on the last listing), the listing on the forge with
- * when it runs next, and every repository the patterns resolve to, excluded ones included.
+ * The group's Membership tab: its display name and its include and exclude patterns (editable
+ * with global `settings:write`, unsaved pattern changes previewed on the last listing), the
+ * listing on the forge with when it runs next, and every repository the patterns resolve to,
+ * excluded ones included.
  */
 export function GroupMembership({
   entry,
@@ -66,9 +74,11 @@ export function GroupMembership({
     ? [...(listing.data.matched ?? []), ...listing.data.repos]
     : members.map((summary) => summary.repo)
   const membership = groupMembership(entry.data.forge, matched, entry.data, draft)
+  const titleOf = useGroupTitles()
 
   return (
     <div className="flex flex-col gap-4">
+      <DisplayNamePanel key={`title-${entry.version ?? 0}`} entry={entry} />
       <div className="grid gap-4 lg:grid-cols-2">
         <PatternsPanel
           key={entry.version ?? 0}
@@ -87,11 +97,74 @@ export function GroupMembership({
       </div>
       <ResolvedPanel
         group={entry.id}
+        titleOf={titleOf}
         membership={membership}
         members={members}
         preview={patternChanges(entry.data, draft) > 0}
       />
     </div>
+  )
+}
+
+/** The group's display name, shown instead of its key; the key itself never changes. */
+function DisplayNamePanel({ entry }: { entry: ConfigEntryView<'group'> }) {
+  const { canGlobal } = useSession()
+  const put = usePutGroup()
+  const writable = canGlobal('settings:write')
+  const saved = entry.data.title ?? ''
+  const [draft, setDraft] = useState(saved)
+  const error = validateGroupTitle(draft)
+  const changed = draft.trim() !== saved
+  const save = () =>
+    put.mutate(
+      { id: entry.id, data: withGroupTitle(entry.data, draft) },
+      {
+        onSuccess: () => notify.success('Display name saved', draft.trim() || entry.id),
+        onError: (failure) => notify.error('Not saved', messageOf(failure)),
+      },
+    )
+
+  return (
+    <Panel
+      title="Display name"
+      description={
+        <>
+          Shown instead of the key <span className="mono">{entry.id}</span> wherever the group
+          appears. Grants, settings, home groups and guides keep using the key.
+        </>
+      }
+    >
+      <form
+        className="flex flex-wrap items-start gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (changed && !error) save()
+        }}
+      >
+        <TextField
+          label="Display name"
+          value={draft}
+          onChange={setDraft}
+          placeholder={entry.id}
+          description={`Up to ${MAX_GROUP_TITLE} characters; empty shows the key.`}
+          isDisabled={!writable}
+          className="min-w-64 flex-1"
+          error={error}
+        />
+        {writable && changed ? (
+          <Button
+            variant="primary"
+            size="sm"
+            type="submit"
+            className="mt-6"
+            isDisabled={error !== undefined}
+            isPending={put.isPending}
+          >
+            Save name
+          </Button>
+        ) : null}
+      </form>
+    </Panel>
   )
 }
 
@@ -112,7 +185,7 @@ function PatternsPanel({
   const changes = patternChanges(entry.data, draft)
   const save = () =>
     put.mutate(
-      { id: entry.id, data: { forge: entry.data.forge, ...draft } },
+      { id: entry.id, data: { ...entry.data, ...draft } },
       {
         onSuccess: () => notify.success('Patterns saved', entry.id),
         onError: (error) => notify.error('Not saved', messageOf(error)),
@@ -384,11 +457,13 @@ type Show = 'all' | MembershipState
 
 function ResolvedPanel({
   group,
+  titleOf,
   membership,
   members,
   preview,
 }: {
   group: string
+  titleOf: GroupTitleOf
   membership: Membership
   members: readonly RepoSummary[]
   /** Unsaved patterns are previewed. */
@@ -487,7 +562,11 @@ function ResolvedPanel({
                     )}
                     {summary && summary.groups.some((other) => other !== group) ? (
                       <span className="ms-2 text-[11.5px] text-dim">
-                        also in {summary.groups.filter((other) => other !== group).join(', ')}
+                        also in{' '}
+                        {summary.groups
+                          .filter((other) => other !== group)
+                          .map(titleOf)
+                          .join(', ')}
                       </span>
                     ) : null}
                   </Td>

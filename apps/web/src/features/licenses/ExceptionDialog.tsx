@@ -2,11 +2,15 @@ import type { LicenseViolation, SettingView } from '@holtkeeper/api'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useResolvedRepos, useSettingMutations, useSettings } from '../../api/queries.ts'
+import {
+  useDescribeScope,
+  useResolvedRepos,
+  useSettingMutations,
+  useSettings,
+} from '../../api/queries.ts'
 import { isoDay, plural } from '../../lib/format.ts'
 import { exceptionTargets, violationLicense, withLicenseException } from '../../lib/licenses.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
-import { describeScope } from '../../lib/scope.ts'
 import { inDays, isFutureDay } from '../../lib/security.ts'
 import {
   Button,
@@ -34,6 +38,7 @@ export function ExceptionDialog({
   violation: LicenseViolation
   onClose: () => void
 }) {
+  const describeScope = useDescribeScope()
   const { principal } = useSession()
   const settings = useSettings()
   const { put } = useSettingMutations()

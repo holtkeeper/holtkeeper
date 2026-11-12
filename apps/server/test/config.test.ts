@@ -169,12 +169,21 @@ describe('config routes', () => {
     })
     expect(group.status).toBe(200)
     expect(await group.json()).toMatchObject({ id: 'games', version: 1 })
-    await call('PUT', '/config/groups/games', { forge: 'cloud', include: ['studio/*', 'web/*'] })
+    expect(
+      (await call('PUT', '/config/groups/games', { title: ' ', forge: 'cloud', include: ['a/*'] }))
+        .status,
+    ).toBe(400)
+    await call('PUT', '/config/groups/games', {
+      title: '  Game studio ',
+      forge: 'cloud',
+      include: ['studio/*', 'web/*'],
+    })
 
     const groups = (await (await call('GET', '/config/groups')).json()) as ConfigEntryList<'group'>
-    expect(groups.entries.map((e) => [e.id, e.version, e.data.include])).toEqual([
-      ['games', 2, ['studio/*', 'web/*']],
+    expect(groups.entries.map((e) => [e.id, e.version, e.data.include, e.data.title])).toEqual([
+      ['games', 2, ['studio/*', 'web/*'], 'Game studio'],
     ])
+    expect(source.current().groups.games?.title).toBe('Game studio')
     const forges = (await (await call('GET', '/config/forges')).json()) as ConfigEntryList<'forge'>
     expect(forges.entries.map((e) => [e.id, e.data.botUsername])).toEqual([['cloud', 'keeper']])
     const detail = (await (

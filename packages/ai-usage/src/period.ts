@@ -68,6 +68,26 @@ export function weekRange(now: Date, timeZone: string = instanceTimeZone()): Per
   }
 }
 
+/**
+ * The seven days of `week` (a `weekRange` in the same `timeZone`), each from local midnight to the
+ * next, keyed by its local date (`2026-11-12`); together they cover the week exactly.
+ */
+export function weekDays(week: PeriodRange, timeZone: string = instanceTimeZone()): PeriodRange[] {
+  const [year = 0, month = 1, day = 1] = week.key.split('-').map(Number)
+  const starts = Array.from({ length: 8 }, (_, index) =>
+    index === 0
+      ? Date.parse(week.from)
+      : index === 7
+        ? Date.parse(week.to)
+        : localMidnight(year, month - 1, day + index, timeZone),
+  )
+  return starts.slice(0, 7).map((start, index) => ({
+    from: new Date(start).toISOString(),
+    to: new Date(starts[index + 1] ?? start).toISOString(),
+    key: new Date(Date.UTC(year, month - 1, day + index)).toISOString().slice(0, 10),
+  }))
+}
+
 /** The week before `week` (a `weekRange`), in the same time zone. */
 export const previousWeek = (week: PeriodRange, timeZone: string = instanceTimeZone()) =>
   weekRange(new Date(Date.parse(week.from) - 1), timeZone)

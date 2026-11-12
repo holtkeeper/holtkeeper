@@ -174,12 +174,35 @@ describe('daily chart', () => {
       day: '2026-10-19',
       people: 2,
       automatic: 3,
+      forecast: 0,
       future: false,
       today: false,
     })
     expect(days[23]).toMatchObject({ day: '2026-11-11', automatic: 1, today: true })
     expect(days[24]).toMatchObject({ day: '2026-11-12', future: true })
     expect(days.at(-1)?.day).toBe('2026-11-15')
+  })
+
+  test('puts the forecast on today and the days ahead, never on past days', () => {
+    const days = originDays([], chartStart(now), now, 28, [
+      { day: '2026-11-11', usd: 1.5, automaticUsd: 1 },
+      { day: '2026-11-12', usd: 0, automaticUsd: 0 },
+      { day: '2026-11-13', usd: 4, automaticUsd: 2 },
+    ])
+    expect(days.map((day) => day.forecast).slice(22)).toEqual([0, 1.5, 0, 4, 0, 0])
+  })
+
+  const forecast = (first: string, second: string) =>
+    originDays([], chartStart(now), now, 28, [
+      { day: first, usd: 2, automaticUsd: 1 },
+      { day: second, usd: 3, automaticUsd: 1 },
+    ])
+      .map((day) => day.forecast)
+      .slice(22)
+
+  test('starts the forecast on the UTC today when the instance day differs', () => {
+    expect(forecast('2026-11-10', '2026-11-11')).toEqual([0, 2, 3, 0, 0, 0])
+    expect(forecast('2026-11-12', '2026-11-13')).toEqual([0, 2, 3, 0, 0, 0])
   })
 
   test('picks a round axis top', () => {

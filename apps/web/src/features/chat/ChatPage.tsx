@@ -21,7 +21,7 @@ export function ChatPage() {
   const [query, setQuery] = useState('')
   const q = useDeferredValue(query)
   const threads = useChatThreads(archived, q)
-  const { view, setView, homeGroups } = useScope()
+  const { view, setView, homeGroups, noTeams } = useScope()
   const scoped = threads.data ? scopeThreads(threads.data.threads, view, homeGroups) : undefined
   const shown = scoped?.shown ?? []
   const current = search.thread ?? shown[0]?.id
@@ -36,6 +36,7 @@ export function ChatPage() {
         counts={scoped?.counts}
         view={view}
         onView={setView}
+        noTeams={noTeams}
         query={query}
         onQuery={setQuery}
         archived={archived}

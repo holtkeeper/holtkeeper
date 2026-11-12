@@ -1,5 +1,6 @@
 import type {
   AiBudgetStatus,
+  AiForecastDay,
   AiUsageBucket,
   AiUsagePeriodKind,
   AiUsageRecord,
@@ -182,23 +183,39 @@ export interface OriginDay {
   day: string
   people: number
   automatic: number
+  /** Expected spend of what is left of the day (`AiSpendForecast.days`); 0 for past days. */
+  forecast: number
   /** The day has not started yet. */
   future: boolean
   today: boolean
 }
 
-/** One entry per chart day from buckets grouped by `day,origin`, zero where nothing ran. */
+/**
+ * One entry per chart day from buckets grouped by `day,origin`, zero where nothing ran, with the
+ * forecast on today and the days after it. `forecast` lists consecutive local days of the instance
+ * time zone starting with its today, so its first entry lands on the chart's (UTC) today whatever
+ * its date and each later one a day further; entries past the chart's last day are not drawn.
+ */
 export function originDays(
   buckets: readonly AiUsageBucket[],
   start: string,
   now: Date = new Date(),
   days = chartDays,
+  forecast: readonly AiForecastDay[] = [],
 ): OriginDay[] {
   const today = now.toISOString().slice(0, 10)
   const first = new Date(start).getTime()
+  const todayIndex = Math.round((Date.parse(today) - first) / dayMs)
   const list: OriginDay[] = Array.from({ length: days }, (_, index) => {
     const day = new Date(first + index * dayMs).toISOString().slice(0, 10)
-    return { day, people: 0, automatic: 0, future: day > today, today: day === today }
+    return {
+      day,
+      people: 0,
+      automatic: 0,
+      forecast: index >= todayIndex ? (forecast[index - todayIndex]?.usd ?? 0) : 0,
+      future: day > today,
+      today: day === today,
+    }
   })
   const byDay = new Map(list.map((entry) => [entry.day, entry]))
   for (const bucket of buckets) {

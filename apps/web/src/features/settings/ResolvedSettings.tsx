@@ -12,6 +12,7 @@ import { messageOf } from '../../api/client.ts'
 import {
   useCredentials,
   useGroups,
+  useGroupTitles,
   useRepos,
   useResolvedScope,
   useSettingMutations,
@@ -126,6 +127,7 @@ export function ResolvedSettings({
   section?: string | undefined
   onSection?: (section: string | undefined) => void
 }) {
+  const titleOf = useGroupTitles()
   const { can, principal } = useSession()
   const elsewhere = visibleSettingsSections(principal).filter(
     (id) => id === 'analyzers' || id === 'policies' || id === 'audit',
@@ -172,7 +174,7 @@ export function ResolvedSettings({
     here: resolved.data.rows.filter((row) => setHere(row, focus)).length,
     changed: resolved.data.rows.filter((row) => row.source.layer !== 'default').length,
   }
-  const groupNames = resolved.data.groups.join(', ')
+  const groupNames = resolved.data.groups.map(titleOf).join(', ')
   const showUpdates = focus.kind === 'repo' && (selected === undefined || selected === UPDATES)
 
   const display = (definition: SettingDefinitionView | undefined, value: unknown) =>
@@ -187,7 +189,7 @@ export function ResolvedSettings({
   ) => {
     const replaced = editing.entry ? row.replaces : { ...row.source, value: row.value }
     return replaced
-      ? `${display(definition, replaced.value)} · ${sourceLabel(replaced, focus)}`
+      ? `${display(definition, replaced.value)} · ${sourceLabel(replaced, focus, titleOf)}`
       : 'the default'
   }
 
@@ -271,13 +273,14 @@ export function ResolvedSettings({
           </Td>
           <Td>
             <SourceChip layer={row.source.layer} here={own}>
-              {sourceLabel(row.source, focus)}
+              {sourceLabel(row.source, focus, titleOf)}
             </SourceChip>
           </Td>
           <Td>
             {row.replaces ? (
               <span className="mono block max-w-64 truncate text-xs text-muted">
-                {display(definition, row.replaces.value)} · {sourceLabel(row.replaces, focus)}
+                {display(definition, row.replaces.value)} ·{' '}
+                {sourceLabel(row.replaces, focus, titleOf)}
               </span>
             ) : (
               <span className="text-xs text-dim">—</span>
@@ -835,6 +838,7 @@ const focusOf = (value: string): ScopeFocus => {
  * settings resolver for it. Opens by itself when the URL points at a key homed here.
  */
 export function AllKeys() {
+  const titleOf = useGroupTitles()
   const settings = useSettings()
   const groups = useGroups()
   const repos = useRepos()
@@ -896,7 +900,7 @@ export function AllKeys() {
               onChange={(value) => setFocus(value === 'org' ? '' : value)}
               options={[
                 { id: 'org', label: 'Organization' },
-                ...groupNames.map((group) => ({ id: group, label: `Group ${group}` })),
+                ...groupNames.map((group) => ({ id: group, label: `Group ${titleOf(group)}` })),
                 ...repoKeys.map((key) => ({ id: `repo:${key}`, label: key })),
               ]}
             />

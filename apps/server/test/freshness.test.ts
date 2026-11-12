@@ -219,6 +219,25 @@ describe('freshness sweeper', () => {
     )
   })
 
+  test('coverage is skipped on a repository with no tests by design, test ids still run', async () => {
+    const list = [
+      analyzer('coverage', { on: 'time', cadence: '1d' }),
+      analyzer('testids', { on: 'time', cadence: '1d' }),
+    ]
+    await putSetting(
+      'repo.tests',
+      { expected: false, reason: 'Config only' },
+      { groups: ['games'] },
+    )
+    await sweep(list)
+    expect(await queued()).toEqual(['coverage tools/b', 'testids games/a', 'testids tools/b'])
+    const status = await freshnessStatus(deps(list), { repo: { forge: 'work', path: 'games/a' } })
+    expect(status.find((entry) => entry.analyzer === 'coverage')?.decision).toEqual({
+      action: 'skip',
+      reason: 'the repository has no tests by design',
+    })
+  })
+
   test('repositories whose head cannot be read back off instead of taking every slot', async () => {
     delete heads['games/a']
     await sweep()

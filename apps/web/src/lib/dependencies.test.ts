@@ -172,6 +172,15 @@ describe('scopeLibraryRows', () => {
     expect(scoped[0]?.groups).toEqual(['games'])
   })
 
+  test('a group keeps the libraries its repositories use, narrowed to them', () => {
+    const scoped = scopeLibraryRows(list, repos, 'group:tools', ['games'])
+    expect(scoped.map((item) => [item.name, item.groups])).toEqual([
+      ['widget-kit', ['infra', 'tools']],
+      ['shape-lib', ['infra', 'tools']],
+    ])
+    expect(scoped[0]?.usedBy).toEqual([{ repo: 'work:tools/cli', versions: ['2.0.0'] }])
+  })
+
   test('without home groups rows stay whole', () => {
     expect(scopeLibraryRows(list, repos, 'mine', [])[0]?.usedBy).toHaveLength(2)
   })

@@ -4,7 +4,12 @@ import { KeyRound, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Fragment, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useCredentialMutations, useCredentials, useGitHubTokens } from '../../api/queries.ts'
+import {
+  useCredentialMutations,
+  useCredentials,
+  useDescribeScope,
+  useGitHubTokens,
+} from '../../api/queries.ts'
 import {
   type CredentialGroup,
   credentialGroup,
@@ -15,7 +20,6 @@ import {
 } from '../../lib/credential-status.ts'
 import { formatDate, formatDateTime } from '../../lib/format.ts'
 import { defaultGitHubRange } from '../../lib/github-usage.ts'
-import { describeScope } from '../../lib/scope.ts'
 import {
   Button,
   ConfirmDialog,
@@ -73,6 +77,7 @@ function UsedBy({ credential }: { credential: CredentialView }) {
  * what uses it, its scope, expiry, rotation, last use and status, sorted by status then expiry.
  */
 export function CredentialsTable() {
+  const describeScope = useDescribeScope()
   const { can, canGlobal } = useSession()
   const credentials = useCredentials()
   const { rotate, remove } = useCredentialMutations()

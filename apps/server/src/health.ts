@@ -1,4 +1,4 @@
-import type { SystemHealth, SystemHealthCheck } from '@holtkeeper/api'
+import type { ArtifactStoreView, SystemHealth, SystemHealthCheck } from '@holtkeeper/api'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { Store } from '@holtkeeper/store'
 
@@ -184,12 +184,48 @@ async function libraryCheck(
 }
 
 /**
+ * Where `artifacts` keeps its data (never credentials), how much it holds, the operator's
+ * declared `quotaBytes` and `server.retention`; `undefined` for a store without a location
+ * (memory). A failed or slow measurement leaves out the figures and sets `error`.
+ */
+async function artifactStoreView(
+  artifacts: ArtifactStore,
+  server: ServerDeps['config']['server'],
+  timeoutMs: number,
+): Promise<ArtifactStoreView | undefined> {
+  const { location } = artifacts
+  if (!location) return undefined
+  const quotaBytes = server?.artifacts?.quotaBytes
+  const retention = server?.retention
+  const base: ArtifactStoreView = {
+    ...location,
+    ...(quotaBytes ? { quotaBytes } : {}),
+    ...(retention && (retention.days || retention.maxBytes)
+      ? {
+          retention: {
+            ...(retention.days ? { days: retention.days } : {}),
+            ...(retention.maxBytes ? { maxBytes: retention.maxBytes } : {}),
+          },
+        }
+      : {}),
+  }
+  try {
+    const usage = await withTimeout(artifacts.usage(), timeoutMs)
+    const totals = usage.objects ?? usage
+    return { ...base, usedBytes: totals.bytes, objects: totals.count }
+  } catch (error) {
+    return { ...base, error: messageOf(error) }
+  }
+}
+
+/**
  * Settings › System at a glance: whether the store answers and its migrations are applied, the
  * artifact store answers, workers report and the library index runs, plus storage now against the
- * newest daily snapshot at least seven days old. Each check fails after `timeoutMs` (default 3 s).
+ * newest daily snapshot at least seven days old and the artifact store's view
+ * (`artifactStoreView`). Each check fails after `timeoutMs` (default 3 s).
  */
 export async function systemHealth(
-  deps: Pick<ServerDeps, 'store' | 'artifacts' | 'storage' | 'version' | 'now'>,
+  deps: Pick<ServerDeps, 'store' | 'artifacts' | 'storage' | 'version' | 'now' | 'config'>,
   options: { startedAt: string; timeoutMs?: number },
 ): Promise<SystemHealth> {
   const now = deps.now()
@@ -204,6 +240,7 @@ export async function systemHealth(
     overview,
     history,
     retired,
+    artifactStore,
   ] = await Promise.all([
     failureOf(() => store.jobs.list({ limit: 1 }), timeoutMs),
     typeof store.ready === 'function'
@@ -222,6 +259,9 @@ export async function systemHealth(
     storageOverview({ providers: deps.storage ?? [], kv: store.kv, now }),
     storageHistory(store.kv),
     retiredReadOnlyCheck(store).catch(() => undefined),
+    deps.artifacts
+      ? artifactStoreView(deps.artifacts, deps.config.server, timeoutMs)
+      : Promise.resolve(undefined),
   ])
   const checks: SystemHealthCheck[] = [
     answering('store', 'Store', storeError),
@@ -260,6 +300,7 @@ export async function systemHealth(
       totalBytes: overview.totalBytes,
       ...(past && { since: past.day, weekAgoBytes: past.bytes, weekAgo: past.areas }),
     },
+    ...(artifactStore && { artifactStore }),
     workers: reports.length,
     ...(deps.version?.trim() && { version: deps.version.trim() }),
     startedAt: options.startedAt,

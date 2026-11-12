@@ -95,7 +95,7 @@ export function withRepos(
 ): GroupDocumentData {
   if (!group) return { forge, include: [...new Set(paths)], exclude: [] }
   return {
-    forge: group.forge,
+    ...group,
     include: [...new Set([...group.include, ...paths])],
     exclude: group.exclude.filter((pattern) => !paths.includes(pattern)),
   }

@@ -54,6 +54,8 @@ catalog: { forge: 'work', include: ['admin/catalog-*', 'shop/catalog-*'] }
 [['frontend', 'storefront'], ['frontend', 'admin-panel', 'catalog']] // storefront frontends, plus admin panel frontends of the catalog
 ```
 
+A group may have a `title` (trimmed, 1–60 characters) that people see instead of its key. The key stays the identity: grants, settings scopes, home groups, guides, schedules and triggers name groups by key only. `groupTitle(groups, key)` returns the title, or the key when there is none; `groupLabel(groups, key)` returns `Title (key)` for text a reader may act on (chat, agent and MCP output), so the key is always at hand.
+
 Group-scope analyzers of a schedule or `onTag` run only for single-group entries: an intersection has no group of its own to report on.
 
 ### Secrets

@@ -3,7 +3,7 @@ import { Fingerprint, KeyRound, LifeBuoy, Mail, Pencil, Power, Trash2 } from 'lu
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useGroupNames, useHistory, useUserMutations } from '../../api/queries.ts'
+import { useGroupNames, useGroupTitles, useHistory, useUserMutations } from '../../api/queries.ts'
 import { useResendInvite } from '../../api/settings-people.ts'
 import { actionLabel, outcomeLabel, outcomeTone, targetLabel } from '../../lib/audit-log.ts'
 import { formatDate, formatDateTime, formatRelative, plural, shortId } from '../../lib/format.ts'
@@ -33,16 +33,17 @@ import {
   Dialog,
   EmptyState,
   ErrorState,
+  GroupName,
   KeyValue,
   LoadMore,
   Notice,
+  notify,
   Placeholder,
+  quietActionsOf,
   SideSheet,
   Tag,
   TextField,
   Tooltip,
-  notify,
-  quietActionsOf,
 } from '../../ui/index.ts'
 import { GrantsEditor } from '../access/GrantsEditor.tsx'
 import { ScopeBadge, ScopeEditor } from '../access/ScopeEditor.tsx'
@@ -308,6 +309,7 @@ function SignInTab({ user, canEdit }: { user: UserView; canEdit: boolean }) {
 }
 
 function TeamsTab({ user }: { user: UserView }) {
+  const titleOf = useGroupTitles()
   const teams = user.teams ?? []
   return (
     <div className="flex flex-col gap-3">
@@ -319,7 +321,7 @@ function TeamsTab({ user }: { user: UserView }) {
         <ul className="flex flex-wrap gap-1.5" aria-label={`Teams of ${user.name}`}>
           {teams.map((team) => (
             <li key={team}>
-              <Tag>{team}</Tag>
+              <Tag>{titleOf(team)}</Tag>
             </li>
           ))}
         </ul>
@@ -545,7 +547,9 @@ export function UserSheet({
           </Tag>
           <Tag>{roleNames[roleOf(user.grants).role]}</Tag>
           {(user.teams ?? []).map((team) => (
-            <Tag key={team}>Team {team}</Tag>
+            <Tag key={team}>
+              Team <GroupName group={team} />
+            </Tag>
           ))}
           <span className="text-xs text-muted">
             Added {formatDate(user.createdAt)}

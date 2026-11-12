@@ -66,7 +66,7 @@ const configWith = (jobs: Record<string, unknown>) =>
     jobs,
   })
 
-const deps = (config: ServerDeps['config']): ServerDeps => {
+const deps = (config: ServerDeps['config'], list: JobAnalyzerInfo[] = analyzers): ServerDeps => {
   const vault = aesVault('v'.repeat(32))
   return {
     config,
@@ -79,13 +79,13 @@ const deps = (config: ServerDeps['config']): ServerDeps => {
     }),
     settings: builtinSettings,
     analyses: [],
-    analyzers,
+    analyzers: list,
     now: () => new Date('2026-11-02T10:00:00.000Z'),
   }
 }
 
-const poller = (config: ServerDeps['config']) => {
-  const d = deps(config)
+const poller = (config: ServerDeps['config'], list?: JobAnalyzerInfo[]) => {
+  const d = deps(config, list)
   const result = serverPoller(d, createEventDispatcher(d))
   if (!result) throw new Error('no poller')
   return result
@@ -198,6 +198,42 @@ describe('jobs.onNewRepo', () => {
       'games/a quality poll',
       'games/b build poll',
       'games/b quality poll',
+    ])
+  })
+
+  test('coverage is never queued for a repository with no tests by design', async () => {
+    await store.settings.put({
+      id: 's1',
+      key: 'repo.tests',
+      value: { expected: false },
+      secret: false,
+      scope: { repos: ['work:games/b'] },
+      updatedAt: '2026-10-30T00:00:00.000Z',
+    })
+    const withCoverage = [...analyzers, analyzer('coverage')]
+    const p = poller(
+      configWith({ onNewRepo: { analyzers: ['quality', 'coverage'] } }),
+      withCoverage,
+    )
+    listed = ['games/a', 'games/b']
+    await p.listGroup('games')
+    const dispatch = createEventDispatcher(
+      deps(configWith({ onPush: { analyzers: ['coverage'] } }), withCoverage),
+    )
+    await dispatch(
+      {
+        kind: 'push',
+        repo: { forge: 'work', path: 'games/b' },
+        branch: 'x',
+        sha: 'abc',
+        actor: '',
+      },
+      { actor: 'poll', via: 'poll' },
+    )
+    expect(await queued()).toEqual([
+      'games/a coverage new-repo',
+      'games/a quality new-repo',
+      'games/b quality new-repo',
     ])
   })
 

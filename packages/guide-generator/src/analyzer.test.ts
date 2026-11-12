@@ -132,6 +132,37 @@ test('proposes general and testing in one main-tier call and stores model, cost 
   expect(general?.version).toBe(0)
 })
 
+test('a repository with no tests by design skips testing without asking the model about it', async () => {
+  const { agent, tasks } = fakeAgent()
+  const { data } = await createGuideAnalyzer({
+    store,
+    groupsOf: () => ['shapes'],
+    testsExpected: async () => false,
+  }).run({
+    repo,
+    dir,
+    runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
+    agent,
+    history: { analyses: store.analyses, auditRuns: store.auditRuns },
+    options: { force: false },
+  })
+  expect(tasks).toHaveLength(1)
+  expect(tasks[0]?.prompt).not.toContain('# Section testing')
+  expect(data.sections.map((section) => [section.section, section.outcome])).toEqual([
+    ['general', 'proposed'],
+    ['testing', 'skipped'],
+    ['testids', 'skipped'],
+    ['commits', 'skipped'],
+  ])
+  expect(data.sections[1]).toEqual({
+    section: 'testing',
+    outcome: 'skipped',
+    reason: 'no tests by design',
+    evidence: [],
+  })
+  expect(await store.guides.get(repoScope, 'testing')).toBeUndefined()
+})
+
 test('a second run over the same evidence makes no call', async () => {
   await run(fakeAgent().agent)
   const { agent, tasks } = fakeAgent()

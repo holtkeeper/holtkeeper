@@ -264,7 +264,6 @@ test('assets search drops unknown and default values', () => {
     problem: 'duplicate',
     sort: 'size',
     q: 'hero',
-    group: 'web',
   })
   expect(
     parseAssetsSearch({ status: 'policy', sort: 'severity', kind: 'texture', problem: 'x' }),

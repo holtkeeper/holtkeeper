@@ -13,6 +13,7 @@ import { sqliteStore } from '@holtkeeper/store-sqlite'
  *
  * - `HOLTKEEPER_DATABASE_URL` set: Postgres (required for more than one process), else SQLite in /data.
  * - `HOLTKEEPER_S3_BUCKET` set: artifacts in any S3-compatible storage (required for more than one process), else /data.
+ *   Optional `HOLTKEEPER_S3_QUOTA` (bytes) is the space the bucket offers, shown against usage in Settings › System.
  * - `HOLTKEEPER_AUTH=users`: accounts with passkeys; the first start logs the admin's setup link.
  *   Needs `HOLTKEEPER_PUBLIC_URL`. Otherwise one `root` password (`HOLTKEEPER_ROOT_PASSWORD`).
  * - Waibee Router is available as an AI provider; `WAIBEE_API_KEY` set lists its catalog with that
@@ -88,6 +89,9 @@ export default defineConfig({
             ? { endpoint: process.env.HOLTKEEPER_S3_ENDPOINT }
             : {}),
           ...(process.env.HOLTKEEPER_S3_REGION ? { region: process.env.HOLTKEEPER_S3_REGION } : {}),
+          ...(process.env.HOLTKEEPER_S3_QUOTA
+            ? { quotaBytes: Number(process.env.HOLTKEEPER_S3_QUOTA) }
+            : {}),
         }
       : { kind: 'fs', dir: '/data/artifacts' },
     retention: { days: 90 },

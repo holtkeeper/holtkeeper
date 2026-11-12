@@ -74,6 +74,7 @@ const policyKeys: ReadonlySet<string> = new Set([
   'assets.policy',
   'analyzers.stack',
   'analyzers.testids',
+  'repo.tests',
 ])
 
 /**
@@ -149,7 +150,7 @@ export const pageSettingKeys: Readonly<Record<SettingsPage, readonly string[]>> 
     'audit.allowlistPolicy',
   ],
   licenses: ['analyzers.licenses'],
-  coverage: ['analyzers.coverage'],
+  coverage: ['analyzers.coverage', 'repo.tests'],
   branches: ['analyzers.branches'],
   ci: ['analyzers.ci-jobs'],
   releases: ['releases'],

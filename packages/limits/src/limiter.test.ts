@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { createManualClock, settle } from './clock.ts'
 import { type Lease, LimitExceededError, createLimiter } from './limiter.ts'
 import type { LimitPolicy } from './policy.ts'
+import { memoryLimiterState } from './state.ts'
 import { failure } from './test-helpers.ts'
 
 const setup = (policy: LimitPolicy) => {
@@ -196,6 +197,42 @@ describe('createLimiter', () => {
     const over = await limiter.acquire('k', { tokens: 100 })
     await over.release({ tokens: 1500 })
     expect((await limiter.snapshot()).k?.tokensLeft).toBe(0)
+  })
+
+  test('counts requests and released tokens over a rolling hour', async () => {
+    const { clock, limiter } = setup({ maxConcurrent: 4 })
+    const first = await limiter.acquire('k', { requests: 2, tokens: 300 })
+    await (await limiter.acquire('k')).release()
+    await first.release({ tokens: 500 })
+    expect((await limiter.snapshot()).k).toMatchObject({ requestsLastHour: 3, tokensLastHour: 500 })
+
+    await clock.advance(30 * 60_000)
+    const later = await limiter.acquire('k')
+    expect((await limiter.snapshot()).k).toMatchObject({ requestsLastHour: 4, tokensLastHour: 500 })
+
+    await clock.advance(30 * 60_000)
+    expect((await limiter.snapshot()).k).toMatchObject({ requestsLastHour: 1, tokensLastHour: 0 })
+    await later.release({ tokens: 40 })
+    expect((await limiter.snapshot()).k).toMatchObject({ requestsLastHour: 1, tokensLastHour: 40 })
+
+    await clock.advance(61 * 60_000)
+    await (await limiter.acquire('k')).release({ tokens: 7 })
+    expect((await limiter.snapshot()).k).toMatchObject({ requestsLastHour: 1, tokensLastHour: 7 })
+  })
+
+  test('keeps at most one window entry per minute of the last hour', async () => {
+    const clock = createManualClock()
+    const state = memoryLimiterState(() => clock.now())
+    const limiter = createLimiter({ clock, state })
+    for (let minute = 0; minute < 90; minute++) {
+      await (await limiter.acquire('k')).release()
+      await (await limiter.acquire('k')).release()
+      await clock.advance(60_000)
+    }
+    const usage = (await state.read('k'))?.usage ?? []
+    expect(usage.length).toBeLessThanOrEqual(60)
+    expect(new Set(usage.map((entry) => entry.minute)).size).toBe(usage.length)
+    expect((await limiter.snapshot()).k?.requestsLastHour).toBe(118)
   })
 
   test('keys are independent and unconfigured keys are unlimited', async () => {

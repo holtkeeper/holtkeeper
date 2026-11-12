@@ -4,6 +4,7 @@ import type { AgentTaskGroupView, AgentTaskView, ForbiddenError } from '@holtkee
 import { type TaskCardMergeRequest, taskCard, taskSteps } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { FixProposer } from '@holtkeeper/propagate'
+import { repoTests, testsExpected } from '@holtkeeper/settings'
 import {
   type AgentTask,
   type AgentTaskCi,
@@ -31,7 +32,14 @@ import {
 } from '@holtkeeper/write-task'
 import { z } from 'zod'
 
-import { type ServerDeps, forgeFor, repoKey, repoTarget, ForbiddenToolError } from './context.ts'
+import {
+  type ServerDeps,
+  forgeFor,
+  groupLabeler,
+  repoKey,
+  repoTarget,
+  ForbiddenToolError,
+} from './context.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 import type { TaskToolsAccess } from './tools/tasks.ts'
 import { canSeeCatalog, crossTeamPolicy } from './visibility.ts'
@@ -304,7 +312,8 @@ async function groupBudget(deps: TaskDeps, repos: number) {
 /**
  * Proposes a change: a group with one `proposed` task per repository, all on the branch
  * `holtkeeper/<group id>-<slug>`. The principal must see every target (`repos:read`, or catalog
- * reach for other teams' repositories). With `run` it is approved right away (`approveTaskGroup`).
+ * reach for other teams' repositories). A `tests` task on a repository with no tests by design
+ * (`repo.tests`) is refused. With `run` it is approved right away (`approveTaskGroup`).
  * `trigger` decides the budget class: `manual` and `command` (a person asked) are interactive,
  * anything else automatic.
  */
@@ -333,6 +342,7 @@ export async function createTaskGroup(
         target: key,
       })
   }
+  await assertTestsExpected(deps, request.kind, keys)
 
   const at = deps.now().toISOString()
   const trigger = options.trigger ?? 'manual'
@@ -449,10 +459,21 @@ async function reservedWriteBudget(deps: TaskDeps, except: ReadonlySet<string>) 
 
 const usd = (value: number) => `$${value.toFixed(2)}`
 
+async function assertTestsExpected(
+  deps: TaskDeps,
+  kind: AgentTaskGroup['kind'],
+  repos: readonly string[],
+) {
+  if (kind !== 'tests' || !repos.length) return
+  const entries = await deps.store.settings.list(repoTests.key)
+  const untested = repos.find((key) => !testsExpected(entries, targetOf(deps, key)))
+  if (untested) throw new TaskError(409, `${untested} has no tests by design (repo.tests)`)
+}
+
 /**
  * Refuses running `pending` (tasks of `group`, whose tasks are `all`) for `principal` while
  * `tasks.write` is off, without `tasks:run` on a target (`canRunTask`), for read-only
- * repositories, once the group's tasks spent or hold `perGroupUsd`, and when this week's write
+ * repositories, for a `tests` group on a repository with no tests by design, once the group's tasks spent or hold `perGroupUsd`, and when this week's write
  * task spend plus the caps other tasks hold plus these caps would pass `weeklyUsd`. Returns each
  * pending task's spend cap: `perRepoUsd`, split within what is left of the group's cap.
  */
@@ -465,7 +486,15 @@ async function assertMayRun(
 ): Promise<number> {
   const settings = await tasksWriteSettings(deps.store)
   if (!settings.enabled)
-    throw new TaskError(409, 'write tasks are turned off (setting tasks.write)')
+    throw new TaskError(
+      409,
+      'write tasks are off: turn on "Agents may change code" in Ops › Tasks (needs settings:write)',
+    )
+  await assertTestsExpected(
+    deps,
+    group.kind,
+    pending.map((task) => task.repo),
+  )
   for (const task of pending) {
     const target = targetOf(deps, task.repo)
     // oxlint-disable-next-line no-await-in-loop -- few targets, settings are cached by the store
@@ -1142,7 +1171,7 @@ export async function relatedRepos(
       const shared = repoTarget(deps.config, target.repo).groups.find((name) =>
         groups.includes(name),
       )
-      if (shared) found.set(key, `same group ${shared}`)
+      if (shared) found.set(key, `same group ${groupLabeler(deps.config)(shared)}`)
     }
   return [...found].slice(0, 50).map(([key, relation]) => ({ repo: key, relation }))
 }

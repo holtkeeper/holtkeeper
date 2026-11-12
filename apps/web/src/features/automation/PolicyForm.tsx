@@ -3,7 +3,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useSettingMutations } from '../../api/queries.ts'
+import { useDescribeScope, useSettingMutations } from '../../api/queries.ts'
 import { POLICIES_KEY } from '../../lib/automation-flow.ts'
 import {
   ACTION_HINTS,
@@ -21,7 +21,6 @@ import {
   withoutPolicy,
 } from '../../lib/policies.ts'
 import { humanize } from '../../lib/schema-form.ts'
-import { describeScope } from '../../lib/scope.ts'
 import {
   Button,
   ConfirmDialog,
@@ -138,6 +137,7 @@ export function PolicyForm({
   writable: boolean
   onDone: () => void
 }) {
+  const describeScope = useDescribeScope()
   const stored = useMemo(() => normalizePolicies(entry?.value), [entry])
   const original = stored.find((policy) => policy.id === policyId)
   const [initial] = useState<PolicyValue>(

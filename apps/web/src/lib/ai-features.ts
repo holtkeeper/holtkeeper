@@ -1,30 +1,5 @@
+import { type AiFeature, featureLabel, featureOf } from '@holtkeeper/ai-usage/features'
 import type { AiFeatureSpend, AiUsageBucket } from '@holtkeeper/api'
-
-/** Product areas spend is reported by, derived from a run's task kind. */
-export type AiFeature = 'reviews' | 'tasks' | 'chat' | 'knowledge' | 'releases' | 'other'
-
-/** Display name of each feature. */
-export const featureLabel: Record<AiFeature, string> = {
-  reviews: 'Reviews',
-  tasks: 'Agent tasks',
-  chat: 'Chat',
-  knowledge: 'Guide and learnings',
-  releases: 'Release notes',
-  other: 'Other',
-}
-
-const featureKinds: readonly (readonly [AiFeature, readonly string[]])[] = [
-  ['reviews', ['review', 'triage']],
-  ['tasks', ['write-task', 'fix', 'port', 'propagate', 'upgrade', 'propagate-fix', 'tests']],
-  ['chat', ['chat', 'chat-summary']],
-  ['knowledge', ['guide', 'learning', 'library-digest']],
-  ['releases', ['release-notes']],
-]
-
-/** The feature a run of `taskKind` belongs to; unknown and empty kinds are `other`. */
-export function featureOf(taskKind: string): AiFeature {
-  return featureKinds.find(([, kinds]) => kinds.includes(taskKind))?.[0] ?? 'other'
-}
 
 /** One feature's share of a period's spend. */
 export interface FeatureShare {

@@ -40,13 +40,55 @@ test('assetKind', () => {
   expect(assetKind('LICENSE')).toBe('other')
 })
 
-test('normalizeAssetNames learns hashes that look like words from the rest of the build', () => {
-  const names = normalizeAssetNames([
-    'chunk-rkgagbvp.js',
-    'index-0mn929mj.js',
-    'admin-ye8pgm9b.js',
-    'polyfills.js',
-  ])
-  expect([...names.values()]).toEqual(['chunk.js', 'index.js', 'admin.js', 'polyfills.js'])
-  expect(normalizeAssetNames(['app-frontend.js']).get('app-frontend.js')).toBe('app-frontend.js')
+const normalized = (files: string[]) => [...normalizeAssetNames(files).values()]
+
+describe('normalizeAssetNames', () => {
+  test('learns hashes that look like words from the rest of the build', () => {
+    expect(
+      normalized(['chunk-rkgagbvp.js', 'index-0mn929mj.js', 'admin-ye8pgm9b.js', 'polyfills.js']),
+    ).toEqual(['chunk.js', 'index.js', 'admin.js', 'polyfills.js'])
+  })
+
+  test('learns from a single recognised hash', () => {
+    expect(
+      normalized(['index-kdfefdxf.js', 'admin-q8wz1kpa.js', 'chunk-rkgagbvp.js', 'styles.css']),
+    ).toEqual(['index.js', 'admin.js', 'chunk.js', 'styles.css'])
+  })
+
+  test('recognises a build whose hashes are all letters by a repeated stem', () => {
+    expect(
+      normalized([
+        'index-kdfefdxf.js',
+        'admin-qwzrkpan.js',
+        'chunk-rkgagbvp.js',
+        'chunk-mnbvcxzq.js',
+        'index.html',
+        'styles.css',
+      ]),
+    ).toEqual(['index.js', 'admin.js', 'chunk.js', 'chunk.js', 'index.html', 'styles.css'])
+  })
+
+  test('recognises uppercase base32 hashes', () => {
+    expect(
+      normalized(['out/main-QWERTYUI.js', 'out/chunk-ASDFGHJK.js', 'out/chunk-ZXCVBNMQ.js']),
+    ).toEqual(['out/main.js', 'out/chunk.js', 'out/chunk.js'])
+  })
+
+  test.each([
+    [['app-frontend.js']],
+    [['locale-english.js', 'locale-french.js', 'locale-german.js']],
+    [['icon-squirrel.svg', 'icon-pinecone.svg', 'index-0mn929mj.js']],
+    [['shape-circle.js', 'shape-square.js', 'shape-triangle.js']],
+    [['polyfills-legacy.js', 'vendor-react.js', 'index-0mn929mj.js']],
+    [['theme-midnight.css', 'index-0mn929mj.js']],
+    [['locale-german.js', 'locale-french.js']],
+    [['route-signup.js', 'route-search.js']],
+    [['icon-button.js', 'icon-header.js']],
+    [['js/vendor-lodash.js', 'js/vendor-moment.js', 'js/app-common.js', 'js/page-signup.js']],
+    [['shape-pentagon.js', 'shape-triangle.js', 'shape-trapezoid.js']],
+  ])('keeps word suffixes in %j', (files) => {
+    const names = normalizeAssetNames(files)
+    for (const file of files.filter((name) => !name.startsWith('index-')))
+      expect(names.get(file)).toBe(file)
+  })
 })

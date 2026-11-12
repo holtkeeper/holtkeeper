@@ -1,5 +1,6 @@
 import type { GroupMatch, RepoRef, Scope } from '@holtkeeper/api'
 
+import { type GroupTitleOf, groupMatchTitle, keyAsTitle } from './group-titles.ts'
 import { repoKey, validateGroupId } from './repo.ts'
 
 /** Whether the scope covers nothing: not `all` and no groups or repository patterns. */
@@ -23,11 +24,14 @@ export const validateGroupMatch = (text: string): string | undefined =>
     .map(validateGroupId)
     .find((error) => error !== undefined)
 
-/** `everything`, or a list like `group games, group frontend + storefront, work:games/**`. */
-export function describeScope(scope: Scope): string {
+/**
+ * `everything`, or a list like `group Games, group Frontend + storefront, work:games/**`: groups by
+ * `titleOf` (default their keys).
+ */
+export function describeScope(scope: Scope, titleOf: GroupTitleOf = keyAsTitle): string {
   if (scope.all) return 'everything'
   const parts = [
-    ...(scope.groups ?? []).map((entry) => `group ${formatGroupMatch(entry)}`),
+    ...(scope.groups ?? []).map((entry) => `group ${groupMatchTitle(entry, titleOf)}`),
     ...(scope.repos ?? []),
   ]
   return parts.length ? parts.join(', ') : 'nothing'

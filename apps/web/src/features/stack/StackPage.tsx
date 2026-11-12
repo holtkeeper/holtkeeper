@@ -6,6 +6,7 @@ import { type ReactNode, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import {
   useApplyChanges,
+  useGroupTitles,
   useStack,
   useTaskGroupMutations,
   useWriteTasks,
@@ -63,9 +64,12 @@ import {
   FilterButton,
   type FleetColumn,
   FleetTable,
+  GroupName,
   KeyValue,
+  notify,
   Page,
   Placeholder,
+  quietActionsOf,
   Segmented,
   SegmentedTabs,
   SideSheet,
@@ -74,8 +78,6 @@ import {
   Tag,
   Td,
   Th,
-  notify,
-  quietActionsOf,
 } from '../../ui/index.ts'
 import { RunJobButton, useRunJob } from '../jobs/RunJobDialog.tsx'
 import { FileDiffView } from '../reports/blocks/DiffView.tsx'
@@ -139,45 +141,28 @@ export function StackView({
       />
     )
 
-  const configGroups = [
-    ...new Set(picked.flatMap((entry) => entry.repos.flatMap((repo) => repo.groups))),
-  ].toSorted()
   const kinds = [...new Set(picked.flatMap((entry) => entry.tools.map((tool) => tool.kind)))]
-  const filtered = narrowStack(picked, {
-    ...(state.kind ? { kind: state.kind } : {}),
-    ...(state.group ? { group: state.group } : {}),
-  })
+  const filtered = narrowStack(picked, state.kind ? { kind: state.kind } : {})
   const scoped = scopeStack(filtered, group ? 'all' : view, homeGroups)
   const grid = conventionGrid(filtered)
   const failing = grid.counts.drifts + grid.counts.missing
 
-  const filters = (
-    <>
-      {kinds.length > 1 ? (
-        <FilterButton
-          label="Kind"
-          options={Object.entries(kindLabels)
-            .filter(([id]) => kinds.some((kind) => kind === id))
-            .map(([id, label]) => ({ id, label }))}
-          value={state.kind ?? []}
-          onChange={(kind) =>
-            setState({
-              ...state,
-              kind: kind.length ? kinds.filter((entry) => kind.includes(entry)) : undefined,
-            })
-          }
-        />
-      ) : null}
-      {!group && configGroups.length > 1 ? (
-        <FilterButton
-          label="Group"
-          options={configGroups.map((id) => ({ id, label: id }))}
-          value={state.group ?? []}
-          onChange={(next) => setState({ ...state, group: next.length ? next : undefined })}
-        />
-      ) : null}
-    </>
-  )
+  const filters =
+    kinds.length > 1 ? (
+      <FilterButton
+        label="Kind"
+        options={Object.entries(kindLabels)
+          .filter(([id]) => kinds.some((kind) => kind === id))
+          .map(([id, label]) => ({ id, label }))}
+        value={state.kind ?? []}
+        onChange={(kind) =>
+          setState({
+            ...state,
+            kind: kind.length ? kinds.filter((entry) => kind.includes(entry)) : undefined,
+          })
+        }
+      />
+    ) : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -431,11 +416,12 @@ function RepoLink({ forge, path }: { forge: string; path: string }) {
 }
 
 function RepoCell({ row }: { row: MatrixRow }) {
+  const titleOf = useGroupTitles()
   return (
     <div className="flex min-w-0 flex-col">
       <RepoLink forge={row.forge} path={row.repo} />
       <span className="truncate text-[11px] text-dim">
-        {row.error ? `Not read: ${row.error}` : row.groups.join(', ')}
+        {row.error ? `Not read: ${row.error}` : row.groups.map(titleOf).join(', ')}
       </span>
     </div>
   )
@@ -935,7 +921,9 @@ function SelectedCell({
                     {conventionLabel[convention.status]}
                   </Tag>
                   <span className="mono text-muted">{convention.file}</span>
-                  <span className="text-muted">{convention.group}</span>
+                  <span className="text-muted">
+                    <GroupName group={convention.group} />
+                  </span>
                 </>
               ) : undefined,
             },
@@ -1093,7 +1081,9 @@ function ConventionDetail({ result }: { result: PlacedConvention }) {
           {conventionLabel[result.status]}
         </Tag>
         <Tag mono>{result.mode}</Tag>
-        <span className="text-xs text-muted">group {result.group}</span>
+        <span className="text-xs text-muted">
+          group <GroupName group={result.group} />
+        </span>
       </div>
       {result.problems.length ? (
         <ul className="flex list-disc flex-col gap-1 pl-5">

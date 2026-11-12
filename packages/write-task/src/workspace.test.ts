@@ -73,4 +73,20 @@ describe('detectChecks', () => {
     ])
     expect(await detectChecks(await project({}))).toEqual([])
   })
+
+  test('a repository with no tests by design leaves out test checks unless configured', async () => {
+    const dir = await project({
+      'package.json': JSON.stringify({ scripts: { lint: 'oxlint', test: 'vitest' } }),
+      'bun.lock': '',
+      'go.mod': 'module example.test/widgets\n',
+    })
+    expect((await detectChecks(dir, undefined, { tests: false })).map((c) => c.command)).toEqual([
+      'bun install --frozen-lockfile',
+      'bun run lint',
+      'go vet ./...',
+    ])
+    expect(await detectChecks(dir, ['make test'], { tests: false })).toEqual([
+      { name: 'check 1', command: 'make test' },
+    ])
+  })
 })

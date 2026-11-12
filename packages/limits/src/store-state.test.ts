@@ -63,6 +63,35 @@ describe('storeLimiterState', () => {
     expect(await a.saturated('cred')).toBe(false)
   })
 
+  test('two limiters on one store count the same rolling hour', async () => {
+    const kv = fakeKv()
+    const clock = createManualClock()
+    const worker = createLimiter({
+      clock,
+      state: storeLimiterState({ kv, clock, processId: 'worker' }),
+    })
+    const web = createLimiter({ clock, state: storeLimiterState({ kv, clock, processId: 'web' }) })
+    worker.configure('cred', { requestsPerMinute: 100 })
+
+    await (await worker.acquire('cred', { tokens: 50 })).release({ tokens: 80 })
+    await clock.advance(20 * 60_000)
+    await (await web.acquire('cred', { requests: 3 })).release()
+    const held = await worker.acquire('cred')
+
+    expect((await web.snapshot()).cred).toMatchObject({
+      inFlight: 1,
+      requestsLastHour: 5,
+      tokensLastHour: 80,
+    })
+    expect((await worker.snapshot()).cred).toMatchObject({ requestsLastHour: 5 })
+
+    await clock.advance(41 * 60_000)
+    expect((await web.snapshot()).cred).toMatchObject({ requestsLastHour: 4, tokensLastHour: 0 })
+    await held.release()
+    await clock.advance(60 * 60_000)
+    expect((await web.snapshot()).cred).toMatchObject({ requestsLastHour: 0, tokensLastHour: 0 })
+  })
+
   test('retries on write conflicts and lists keys', async () => {
     const kv = fakeKv()
     const state = storeLimiterState({ kv, processId: 'p' })

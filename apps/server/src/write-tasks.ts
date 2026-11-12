@@ -12,6 +12,7 @@ import type { Store } from '@holtkeeper/store'
 import { WRITE_TASK_KIND, type WriteTaskPolicy } from '@holtkeeper/write-task'
 
 import type { ReadOnlyRepos } from './read-only.ts'
+import type { RepoTestsFor } from './repo-tests.ts'
 
 /** The `tasks.write` setting with defaults filled in; off when unset or invalid. */
 export async function tasksWriteSettings(store: Pick<Store, 'settings'>): Promise<TasksWrite> {
@@ -22,12 +23,14 @@ export async function tasksWriteSettings(store: Pick<Store, 'settings'>): Promis
 
 /**
  * What a write task may do when it starts on a worker: the `tasks.write` switch, the
- * repository's `repo.freeze` setting, the config's `dryRun`, whether commands run sandboxed and
- * whether this week's spend reached `weeklyUsd`, read anew for every task.
+ * repository's `repo.freeze` and `repo.tests` settings, the config's `dryRun`, whether commands
+ * run sandboxed and whether this week's spend reached `weeklyUsd`, read anew for every task.
  */
 export function writeTaskPolicy(deps: {
   store: Pick<Store, 'settings' | 'aiUsage'>
   readOnly: ReadOnlyRepos
+  /** `repo.tests` of a repository; without it every repository is taken to have tests. */
+  tests?: RepoTestsFor
   dryRun: () => boolean
   /** `jobs.execution.mode`; `host` (or unset) runs repository scripts unsandboxed. */
   executionMode: () => string | undefined
@@ -36,12 +39,16 @@ export function writeTaskPolicy(deps: {
   return async (repo) => {
     const settings = await tasksWriteSettings(deps.store)
     const mode = deps.executionMode()
+    const tests = (await deps.tests?.(repo)) ?? { expected: true }
     return {
       enabled: settings.enabled,
       readOnly: await deps.readOnly(repo),
       dryRun: deps.dryRun(),
       unsandboxed: mode === undefined || mode === 'host',
       weeklyCapReached: (await weeklyWriteSpend(deps)) >= settings.weeklyUsd,
+      ...(!tests.expected && {
+        noTests: tests.reason === undefined ? {} : { reason: tests.reason },
+      }),
     }
   }
 }

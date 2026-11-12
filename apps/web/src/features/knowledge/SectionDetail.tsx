@@ -12,6 +12,7 @@ import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
+  useGroupTitles,
   useGuideChain,
   useGuideMutations,
   useGuideRepoFiles,
@@ -348,6 +349,7 @@ function OwnRules({
   kind: 'repo' | 'family' | 'group' | 'all'
   aside?: ReactNode
 }) {
+  const titleOf = useGroupTitles()
   const { save } = useGuideMutations()
   const [rules, setRules] = useState<string | null>(null)
   const label =
@@ -356,7 +358,7 @@ function OwnRules({
       : space.kind === 'all'
         ? 'All repositories'
         : space.kind === 'group'
-          ? `Team ${space.group}`
+          ? `Team ${titleOf(space.group)}`
           : 'This family'
 
   const put = () =>

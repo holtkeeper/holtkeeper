@@ -328,6 +328,29 @@ describe('ops toolset', () => {
     )
     expect(await call(agent, 'analysis_status', { repo: 'work:shapes' })).not.toContain('Health')
   })
+  test('tool output names a titled group as Title (key)', async () => {
+    const titled = parseConfig({
+      forges: config.forges,
+      groups: { ...config.groups, shapes: { ...config.groups.shapes, title: 'Shape studio' } },
+    })
+    await store.kv?.set('poll-group:shapes', {
+      repos: [{ forge: 'work', path: 'shapes/circle' }],
+      listedAt: '2026-05-06T11:00:00.000Z',
+      attempts: [],
+    })
+    const reader: Principal = {
+      id: 'header:sam',
+      name: 'Sam',
+      provider: 'header',
+      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    }
+    const mcp = opsToolset(principalOpsAccess({ ...deps(), config: titled }, reader), now)
+    expect(await call(mcp, 'fleet_health', {})).toContain(
+      '- work:shapes/circle · groups Shape studio (shapes) · ',
+    )
+    expect(await call(mcp, 'fleet_health', { group: 'shapes' })).toContain('work:shapes/circle')
+  })
+
   test('fleet_health lists every readable member with the cells the caller may read', async () => {
     await store.kv?.set('poll-group:shapes', {
       repos: [

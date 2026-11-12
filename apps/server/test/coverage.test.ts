@@ -27,10 +27,17 @@ const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
     shapes: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    'shapes-admin': [
+      {
+        scope: { groups: ['shapes'] },
+        actions: ['analyses:read', 'settings:read', 'settings:write'],
+      },
+    ],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
 const asShapes = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'shapes' }
+const asShapesAdmin = { 'x-forwarded-user': 'ann', 'x-forwarded-groups': 'shapes-admin' }
 
 const coverage = (covered: number, extra: CoverageData['files'] = []): CoverageData => ({
   tools: ['vitest --coverage'],
@@ -107,6 +114,16 @@ const get = async (path: string, headers = asAdmin) => {
 beforeEach(() => {
   store = memoryStore()
 })
+
+const putTests = (
+  id: string,
+  scope: Record<string, unknown>,
+  value: unknown,
+  updatedAt = '2026-10-27T00:00:00.000Z',
+) => store.settings.put({ id, key: 'repo.tests', scope, value, secret: false, updatedAt })
+
+const testsOf = async (path: string, headers = asAdmin) =>
+  ((await get(`/api/coverage/repo?repo=work:${path}`, headers)).body as RepoCoverageView).tests
 
 describe('coverage overview', () => {
   test('one card per readable repository with trend, change and freshness', async () => {
@@ -284,8 +301,67 @@ describe('repository coverage', () => {
       groups: [],
       worst: [],
       changes: [],
+      tests: { expected: true, configurable: true },
     })
     expect((await get('/api/coverage/repo?repo=work:tools/lint', asShapes)).status).toBe(403)
     expect((await get('/api/coverage/repo', asShapes)).status).toBe(400)
+  })
+
+  test('says how repo.tests applies, and who may change it', async () => {
+    await putTests('group', { groups: ['shapes'] }, { expected: false, reason: 'Config only' })
+    await putTests('own', { repos: ['work:shapes/square'] }, { expected: false })
+    expect(await testsOf('shapes/circle')).toEqual({
+      expected: false,
+      reason: 'Config only',
+      scope: { groups: ['shapes'] },
+      configurable: true,
+    })
+    expect(await testsOf('shapes/square')).toEqual({
+      expected: false,
+      scope: { repos: ['work:shapes/square'] },
+      entryId: 'own',
+      inherited: false,
+      configurable: true,
+    })
+    expect(await testsOf('shapes/circle', asShapes)).toEqual({
+      expected: false,
+      reason: 'Config only',
+    })
+    expect(await testsOf('tools/lint')).toEqual({ expected: true, configurable: true })
+  })
+
+  test('names the own entry even when it turns tests on, and what applies without it', async () => {
+    await putTests('own', { repos: ['work:tools/lint'] }, { expected: false })
+    expect(await testsOf('tools/lint')).toMatchObject({ entryId: 'own', inherited: true })
+    await putTests('lifted', { repos: ['work:shapes/circle'] }, { expected: true })
+    await putTests('group', { groups: ['shapes'] }, { expected: false })
+    expect(await testsOf('shapes/circle')).toEqual({
+      expected: true,
+      scope: { repos: ['work:shapes/circle'] },
+      entryId: 'lifted',
+      inherited: false,
+      configurable: true,
+    })
+  })
+
+  test('a forge-less path entry is not the repository own entry', async () => {
+    await putTests('path', { repos: ['shapes/square'] }, { expected: false })
+    expect(await testsOf('shapes/square')).toEqual({
+      expected: false,
+      scope: { repos: ['shapes/square'] },
+      configurable: true,
+    })
+  })
+
+  test('a group admin cannot write a repository-scoped entry, so the toggle is not offered', async () => {
+    await putTests('group', { groups: ['shapes'] }, { expected: false })
+    expect(await testsOf('shapes/circle', asShapesAdmin)).toEqual({
+      expected: false,
+      scope: { groups: ['shapes'] },
+    })
+    expect(await testsOf('shapes/square', asShapesAdmin)).toEqual({
+      expected: false,
+      scope: { groups: ['shapes'] },
+    })
   })
 })

@@ -143,7 +143,7 @@ describe('scope and filters', () => {
   test('my teams keeps the home groups', () => {
     const scoped = scopeStack([colors, shapes], 'mine', ['shapes'])
     expect(scoped.groups.map((group) => group.group)).toEqual(['shapes'])
-    expect(scoped.counts).toEqual({ mine: 2, all: 3 })
+    expect(scoped.counts).toMatchObject({ mine: 2, all: 3 })
   })
 
   test('one group narrows everything to it whatever the switch says', () => {
@@ -152,13 +152,10 @@ describe('scope and filters', () => {
     expect(scoped.groups[0]?.tools[0]?.uses).toHaveLength(1)
   })
 
-  test('kind, group and repository filters narrow tools and repositories', () => {
+  test('kind and repository filters narrow tools and repositories', () => {
     const images = narrowStack([shapes, colors], { kind: ['image'] })
     expect(images.flatMap((group) => group.tools.map((tool) => tool.id))).toEqual([
       'image:registry.test/shapes/base',
-    ])
-    expect(narrowStack([shapes, colors], { group: ['colors'] }).map((g) => g.group)).toEqual([
-      'colors',
     ])
     const one = narrowStack([shapes, colors], { repo: 'work:shapes/square' })
     expect(one.map((group) => group.repos.map((repo) => repo.path))).toEqual([['shapes/square']])
@@ -370,7 +367,6 @@ test('parseStackSearch keeps known values and drops the rest', () => {
     tab: 'conventions',
     segment: 'eol',
     kind: ['runtime', 'image'],
-    group: ['Web', 'Payments'],
     line: 'node:20',
     repo: 'gitlab:acme/storefront',
     pane: 'cell',

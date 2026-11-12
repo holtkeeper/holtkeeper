@@ -237,6 +237,24 @@ export function chatStoreTests(store: () => Store) {
     expect((await chat.listThreads({ q: '   ' })).map((t) => t.id)).toEqual(['t2', 't1'])
   })
 
+  test('chat: a generated title applies once and never over a person-set one', async () => {
+    const chat = store().chat
+    await chat.createThread(thread('t1', { title: 'New thread', titlePending: true }))
+    await chat.createThread(thread('t2', { title: 'New thread', titlePending: true }))
+    expect((await chat.getThread('t1'))?.titlePending).toBe(true)
+
+    const named = await chat.updateThread('t1', { generatedTitle: 'Widget grid layout' })
+    expect(named?.title).toBe('Widget grid layout')
+    expect(named?.titlePending).toBeUndefined()
+    const again = await chat.updateThread('t1', { generatedTitle: 'Something else' })
+    expect(again?.title).toBe('Widget grid layout')
+
+    await chat.updateThread('t2', { title: 'Gadget plans' })
+    const kept = await chat.updateThread('t2', { generatedTitle: 'Widget grid layout' })
+    expect(kept?.title).toBe('Gadget plans')
+    expect((await chat.getThread('t2'))?.titlePending).toBeUndefined()
+  })
+
   test('chat: context repositories are stored without duplicates and patched', async () => {
     const chat = store().chat
     const created = await chat.createThread(

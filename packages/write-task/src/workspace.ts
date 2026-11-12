@@ -137,11 +137,13 @@ async function managerOf(dir: string): Promise<Manager> {
 /**
  * The repository's own checks: `install`, then the `typecheck`, `lint`, format check and `test`
  * scripts of the root `package.json` through its package manager (from the lockfile), and
- * `go vet ./...` plus `go test ./...` for a Go module. `configured` replaces the detection.
+ * `go vet ./...` plus `go test ./...` for a Go module. With `tests: false` (no tests by design)
+ * the `test` script and `go test` are left out. `configured` replaces the detection.
  */
 export async function detectChecks(
   dir: string,
   configured?: readonly string[],
+  { tests = true }: { tests?: boolean } = {},
 ): Promise<CheckSpec[]> {
   if (configured)
     return configured.map((command, index) => ({ name: `check ${index + 1}`, command }))
@@ -157,6 +159,7 @@ export async function detectChecks(
       typeof Reflect.get(scripts, name) === 'string'
     const manager = await managerOf(dir)
     for (const [name, candidates] of scriptCandidates) {
+      if (!tests && name === 'test') continue
       const script = candidates.find(has)
       if (script) checks.push({ name, command: `${manager} run ${script}` })
     }
@@ -165,7 +168,7 @@ export async function detectChecks(
   if (await exists(dir, 'go.mod'))
     checks.push(
       { name: 'go vet', command: 'go vet ./...' },
-      { name: 'go test', command: 'go test ./...' },
+      ...(tests ? [{ name: 'go test', command: 'go test ./...' }] : []),
     )
   return checks
 }

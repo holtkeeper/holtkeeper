@@ -21,6 +21,7 @@ import {
   useChatMutations,
   useChatPeople,
   useChatThread,
+  useGroupTitles,
   useRepos,
 } from '../../api/queries.ts'
 import {
@@ -28,6 +29,7 @@ import {
   firstUnreadId,
   formatCost,
   groupMessages,
+  isNaming,
   threadKind,
   threadRefs,
   threadScope,
@@ -39,14 +41,15 @@ import {
   Avatar,
   Button,
   ErrorState,
+  GroupName,
   MoreMenu,
   type MoreMenuItem,
+  notify,
   Placeholder,
   Select,
   Switch,
   Tag,
   Tooltip,
-  notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
 import { Composer } from './Composer.tsx'
@@ -63,7 +66,8 @@ function Title({ thread }: { thread: ChatThreadView }) {
         onSubmit={(event) => {
           event.preventDefault()
           const title = editing.trim()
-          if (title && title !== thread.title) update.mutate({ id: thread.id, title })
+          if (title && (thread.titlePending || title !== thread.title))
+            update.mutate({ id: thread.id, title })
           setEditing(undefined)
         }}
       >
@@ -84,14 +88,22 @@ function Title({ thread }: { thread: ChatThreadView }) {
     )
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
-      <h2 className="truncate text-[14px] font-semibold">{thread.title}</h2>
+      {isNaming(thread) ? (
+        <h2 className="truncate text-[14px] font-semibold text-muted italic">Naming…</h2>
+      ) : (
+        <h2
+          className={`truncate text-[14px] font-semibold ${thread.titlePending ? 'text-muted' : ''}`}
+        >
+          {thread.title}
+        </h2>
+      )}
       {thread.archived ? null : (
         <Button
           size="sm"
           variant="ghost"
           isIconOnly
           aria-label="Rename thread"
-          onPress={() => setEditing(thread.title)}
+          onPress={() => setEditing(thread.titlePending ? '' : thread.title)}
         >
           <Pencil className="size-3" aria-hidden />
         </Button>
@@ -196,6 +208,7 @@ function ContextRepos({ thread, hidden }: { thread: ChatThreadView; hidden: numb
 }
 
 function Context({ thread, refs }: { thread: ChatThreadView; refs: readonly ChatMessageRef[] }) {
+  const titleOf = useGroupTitles()
   const { update } = useChatMutations()
   const context = useChatContext(thread.id)
   const data = context.data
@@ -212,7 +225,7 @@ function Context({ thread, refs }: { thread: ChatThreadView; refs: readonly Chat
           ) : (
             <Users className="size-3.5 text-muted" aria-hidden />
           )}
-          <span className="mono truncate">{threadScope(thread)}</span>
+          <span className="mono truncate">{threadScope(thread, titleOf)}</span>
         </span>
         <p className="text-[12px] text-muted">
           {threadKind(thread)} · {plural(data?.messageCount ?? thread.messageCount, 'message')}
@@ -221,7 +234,9 @@ function Context({ thread, refs }: { thread: ChatThreadView; refs: readonly Chat
         {thread.groups.length ? (
           <div className="flex flex-wrap gap-1">
             {thread.groups.map((group) => (
-              <Tag key={group}>{group}</Tag>
+              <Tag key={group}>
+                <GroupName group={group} />
+              </Tag>
             ))}
           </div>
         ) : null}
@@ -329,6 +344,7 @@ export function ThreadPane({
   commands: readonly ChatCommandView[]
 }) {
   const { principal } = useSession()
+  const titleOf = useGroupTitles()
   const { messages, loadOlder } = useChatThread(threadId)
   const people = useChatPeople(threadId)
   const { post, update, read } = useChatMutations()
@@ -393,7 +409,7 @@ export function ThreadPane({
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
           <Title key={thread.id} thread={thread} />
-          <Tag mono>{threadScope(thread)}</Tag>
+          <Tag mono>{threadScope(thread, titleOf)}</Tag>
           {thread.autoReply ? <Tag tone="accent">Auto reply</Tag> : null}
           {thread.muted ? (
             <Tag>
@@ -477,7 +493,7 @@ export function ThreadPane({
                 people={people.data?.people ?? []}
                 commands={commands}
                 autoReply={thread.autoReply}
-                scope={thread.repo || thread.group ? threadScope(thread) : undefined}
+                scope={thread.repo || thread.group ? threadScope(thread, titleOf) : undefined}
                 busy={post.isPending}
                 onSend={send}
               />

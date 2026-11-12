@@ -33,6 +33,7 @@ import { type MouseEvent, type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
+  useGroupTitles,
   useHome,
   useInboxCount,
   useRepos,
@@ -41,6 +42,7 @@ import {
 } from '../../api/queries.ts'
 import { automaticLimit, budgetBar, budgetTone, formatUsd } from '../../lib/ai-usage.ts'
 import { formatRelative, plural } from '../../lib/format.ts'
+import { type ScopeView, scopeLabel } from '../../lib/home-scope.ts'
 import {
   type AttentionGrouping,
   type RankedRepo,
@@ -70,10 +72,10 @@ import {
   Dot,
   EmptyState,
   ErrorState,
-  FilterButton,
   HealthCell,
   Legend,
   LinkButton,
+  NoTeamsState,
   Page,
   Placeholder,
   SegmentedTabs,
@@ -401,14 +403,18 @@ function FleetHealth({ ranked }: { ranked: RankedRepo[] }) {
 
 const teamsLink = { to: '/account/$section', params: { section: 'teams' } } as const
 
-function WorstRepos({ ranked: all, now }: { ranked: RankedRepo[]; now: Date }) {
-  const [groups, setGroups] = useState<string[]>([])
-  const groupOptions = [...new Set(all.flatMap((entry) => entry.summary.groups))]
-    .toSorted()
-    .map((group) => ({ id: group, label: group }))
-  const ranked = groups.length
-    ? all.filter((entry) => entry.summary.groups.some((group) => groups.includes(group)))
-    : all
+function WorstRepos({
+  ranked,
+  now,
+  view,
+  noTeams,
+}: {
+  ranked: RankedRepo[]
+  now: Date
+  view: ScopeView
+  noTeams: boolean
+}) {
+  const titleOf = useGroupTitles()
   const worst = ranked.slice(0, 10)
   const columns = healthCells.filter((column) =>
     worst.some((entry) => entry.summary.cells[column.key] !== undefined),
@@ -420,29 +426,20 @@ function WorstRepos({ ranked: all, now }: { ranked: RankedRepo[]; now: Date }) {
       caption="Worst first"
       className="lg:col-span-2"
       actions={
-        <>
-          {groupOptions.length ? (
-            <FilterButton
-              label="Group"
-              all="All"
-              options={groupOptions}
-              value={groups}
-              onChange={setGroups}
-            />
-          ) : null}
-          <Legend
-            label="Cell legend"
-            items={[
-              { tone: 'success', label: 'OK' },
-              { tone: 'warning', label: 'Attention' },
-              { tone: 'danger', label: 'Failing' },
-              { tone: 'none', label: 'No data' },
-            ]}
-          />
-        </>
+        <Legend
+          label="Cell legend"
+          items={[
+            { tone: 'success', label: 'OK' },
+            { tone: 'warning', label: 'Attention' },
+            { tone: 'danger', label: 'Failing' },
+            { tone: 'none', label: 'No data' },
+          ]}
+        />
       }
     >
-      {worst.length ? (
+      {noTeams && !worst.length ? (
+        <NoTeamsState />
+      ) : worst.length ? (
         <Table label="Worst repositories">
           <thead>
             <tr>
@@ -469,7 +466,7 @@ function WorstRepos({ ranked: all, now }: { ranked: RankedRepo[]; now: Date }) {
                     {summary.repo.path}
                   </LinkButton>
                 </Td>
-                <Td className="text-muted">{summary.groups.join(', ') || '—'}</Td>
+                <Td className="text-muted">{summary.groups.map(titleOf).join(', ') || '—'}</Td>
                 <Td>
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                     <Dot tone={healthTones[summary.health]} />
@@ -523,13 +520,7 @@ function WorstRepos({ ranked: all, now }: { ranked: RankedRepo[]; now: Date }) {
             Showing the {worst.length} worst of {ranked.length}.
           </span>
         ) : null}
-        <span>
-          Scope follows{' '}
-          <Link {...teamsLink} className="text-foreground hover:underline">
-            My teams
-          </Link>{' '}
-          in your account.
-        </span>
+        <span>Scope: {scopeLabel(view, titleOf)}</span>
         {ranked.length > worst.length ? (
           <LinkButton to="/repos" size="sm" className="ms-auto">
             Show all {ranked.length}
@@ -687,8 +678,9 @@ export function HomePage() {
       </Page>
     )
 
-  const scoped = home.data ? scopeHome(home.data, scope.view, scope.homeGroups) : undefined
-  const scopedRepos = repos.data ? scope.scope(repos.data.repos) : undefined
+  const scoped =
+    home.data && scope.ready ? scopeHome(home.data, scope.view, scope.homeGroups) : undefined
+  const scopedRepos = repos.data && scope.ready ? scope.scope(repos.data.repos) : undefined
   const ranked = scopedRepos ? repoHealth(scopedRepos.shown) : undefined
   const fleet = ranked ? fleetCounts(ranked.map((entry) => entry.summary)) : undefined
   const open = scoped?.attention.filter((item) => !item.snoozed).length
@@ -776,6 +768,8 @@ export function HomePage() {
               snoozed={showSnoozed}
               now={now}
             />
+          ) : scope.noTeams ? (
+            <NoTeamsState />
           ) : (
             <EmptyState
               icon={<CircleCheck />}
@@ -819,6 +813,8 @@ export function HomePage() {
           >
             {!scoped || !home.data ? (
               <Placeholder className="m-3.5 h-32" />
+            ) : scope.noTeams && !scoped.changes.length ? (
+              <NoTeamsState />
             ) : scoped.changes.length ? (
               <ul className="py-1">
                 {scoped.changes.slice(0, 12).map((change) => (
@@ -833,7 +829,7 @@ export function HomePage() {
 
         {readsRepos ? (
           ranked ? (
-            <WorstRepos ranked={ranked} now={now} />
+            <WorstRepos ranked={ranked} now={now} view={scope.view} noTeams={scope.noTeams} />
           ) : (
             <Placeholder className="h-48 lg:col-span-2" />
           )

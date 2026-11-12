@@ -5,7 +5,7 @@ import { ChevronRight, ShieldCheck } from 'lucide-react'
 import { useFindings } from '../../api/queries.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative, plural } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
 import {
   type FindingGroupRow,
@@ -206,9 +206,9 @@ export function FindingsBody({
   const groups = sortFindings(filterFindings(all, search), sort)
   const rows = findingRows(groups)
   const ecosystems = findingEcosystems(all)
-  const keys = (
-    view === 'mine' && !repo ? foldOtherTeams(rows, homeGroups, (row) => row.groups).mine : rows
-  ).map((row) => row.key)
+  const keys = (repo ? rows : foldScope(rows, view, homeGroups, (row) => row.groups).shown).map(
+    (row) => row.key,
+  )
   const step = neighbours(keys, search.finding)
   const current = step.index >= 0 ? rows.find((row) => row.key === search.finding) : undefined
   const filtered = Boolean(

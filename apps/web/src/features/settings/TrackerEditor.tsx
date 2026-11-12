@@ -94,7 +94,9 @@ export function TrackerEditor({
   const problems = trackerProblems(trackers)
   const broken = mode === 'json' ? jsonError !== undefined : problems.size > 0 || invalid.size > 0
 
-  useEffect(() => onChange(broken ? undefined : trackers), [onChange, broken, trackers])
+  const changed = useRef(onChange)
+  changed.current = onChange
+  useEffect(() => changed.current(broken ? undefined : trackers), [broken, trackers])
 
   const reportInvalid = useCallback(
     (key: string, bad: boolean) =>

@@ -60,7 +60,7 @@ const dimensionValue = (
 export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilter = {}): boolean {
   const { from, to, repo, group, groups, actor, origin, model, provider, taskKind, analyzer } =
     filter
-  const { outcome, jobId, scopes } = filter
+  const { taskKinds, outcome, jobId, scopes } = filter
   return (
     (from === undefined || record.at >= from) &&
     (to === undefined || record.at < to) &&
@@ -72,6 +72,7 @@ export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilte
     (model === undefined || record.model === model) &&
     (provider === undefined || record.provider === provider) &&
     (taskKind === undefined || record.taskKind === taskKind) &&
+    (taskKinds === undefined || taskKinds.includes(record.taskKind)) &&
     (analyzer === undefined || record.analyzer === analyzer) &&
     (outcome === undefined || record.outcome === outcome) &&
     (jobId === undefined || record.jobId === jobId) &&

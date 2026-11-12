@@ -9,7 +9,7 @@ import { Plus, RotateCcw, X } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../../api/client.ts'
-import { useGroupNames, useRepos, useSettings } from '../../../api/queries.ts'
+import { useGroupNames, useGroupTitles, useRepos, useSettings } from '../../../api/queries.ts'
 import { useCheckCommitConventions, useSavePolicyDraft } from '../../../api/settings-analyzers.ts'
 import { canInGroup } from '../../../lib/access.ts'
 import { isoDay } from '../../../lib/format.ts'
@@ -53,6 +53,7 @@ import { PresetPicker } from '../PresetPicker.tsx'
 import { ValueEditor } from '../ValueEditor.tsx'
 
 const LICENSES = 'analyzers.licenses'
+const TESTS = 'repo.tests'
 const ALLOWLIST = 'audit.allowlist'
 const ALLOWLIST_RULES = 'audit.allowlistPolicy'
 
@@ -606,6 +607,39 @@ function SchemaPolicy({ bound, resetKey }: { bound: Bound; resetKey: string }) {
   )
 }
 
+function RepoTestsPolicy({ bound }: { bound: Bound }) {
+  const value = recordOf(bound.value)
+  const expected = value.expected !== false
+  const reason = typeof value.reason === 'string' ? value.reason : ''
+  const write = (next: { expected: boolean; reason: string }) =>
+    bound.onChange(
+      next.expected || !next.reason.trim()
+        ? { expected: next.expected }
+        : { expected: false, reason: next.reason },
+    )
+  return (
+    <div className="flex flex-col gap-3">
+      <Switch
+        label="Repositories have tests"
+        description="Off: coverage is skipped and agents neither write nor ask for tests. A repository can turn tests back on in the Resolver."
+        isSelected={expected}
+        isDisabled={!bound.writable}
+        onChange={(next) => write({ expected: next, reason })}
+      />
+      {expected ? null : (
+        <TextField
+          label="Reason"
+          value={reason}
+          onChange={(next) => write({ expected: false, reason: next })}
+          placeholder="Configuration only"
+          isDisabled={!bound.writable}
+          className="max-w-md"
+        />
+      )}
+    </div>
+  )
+}
+
 function TryTitle({ repos }: { repos: readonly string[] }) {
   const [repo, setRepo] = useState<string>()
   const [message, setMessage] = useState('')
@@ -687,6 +721,7 @@ const cards = [
   },
   { key: 'assets.policy', title: 'Asset policy', page: { label: 'Assets', to: '/quality/assets' } },
   { key: 'commits.conventions', title: 'Commit conventions' },
+  { key: TESTS, title: 'Tests', page: { label: 'Coverage', to: '/quality/coverage' } },
   {
     key: 'analyzers.testids',
     title: 'Test ids',
@@ -700,6 +735,7 @@ const cards = [
 ] as const
 
 function PoliciesBody({ data }: { data: SettingList }) {
+  const titleOf = useGroupTitles()
   const { can, canGlobal, principal } = useSession()
   const repos = useRepos(can('repos:read'))
   const save = useSavePolicyDraft()
@@ -714,7 +750,7 @@ function PoliciesBody({ data }: { data: SettingList }) {
   const today = isoDay(new Date())
   const groups = useGroupNames(can('repos:read'))
   const focusId = focus.kind === 'org' ? 'org' : `group:${focus.group}`
-  const focusLabel = focus.kind === 'org' ? 'Organization' : `Group ${focus.group}`
+  const focusLabel = focus.kind === 'org' ? 'Organization' : `Group ${titleOf(focus.group)}`
   const count = draftCount(draft)
 
   const bind = (definition: SettingDefinitionView): Bound => {
@@ -767,7 +803,10 @@ function PoliciesBody({ data }: { data: SettingList }) {
             aria-label="Editing for"
             options={[
               { id: 'org', label: 'Organization defaults' },
-              ...groups.map((group) => ({ id: `group:${group}`, label: `Group ${group}` })),
+              ...groups.map((group) => ({
+                id: `group:${group}`,
+                label: `Group ${titleOf(group)}`,
+              })),
             ]}
             value={focusId}
             onChange={(id) => {
@@ -856,6 +895,12 @@ function PoliciesBody({ data }: { data: SettingList }) {
             </PolicyCard>
           )
         }
+        if (card.key === TESTS)
+          return (
+            <PolicyCard key={card.key} {...common}>
+              <RepoTestsPolicy key={resetKey} bound={bound} />
+            </PolicyCard>
+          )
         if (card.key === 'audit.fix') {
           const upgrade = definitionOf('audit.upgrade')
           const upgradeBound = upgrade ? bind(upgrade) : undefined
@@ -904,8 +949,9 @@ function PoliciesBody({ data }: { data: SettingList }) {
 
 /**
  * Settings › Policies: the rules analyzers check against (license policy, security allowlist and
- * its rules, vulnerability fixes, stack conventions, asset policy, commit conventions, test ids)
- * and which agent knowledge needs no review (`knowledge.autoAccept`),
+ * its rules, vulnerability fixes, stack conventions, asset policy, commit conventions, whether
+ * repositories have tests (`repo.tests`), test ids) and which agent knowledge needs no review
+ * (`knowledge.autoAccept`),
  * for the organization or one group. Edits gather into one draft over several keys, saved at once
  * through `POST /api/settings/draft`; their pages keep editing the same entries.
  */

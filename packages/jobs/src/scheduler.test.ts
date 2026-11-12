@@ -222,6 +222,26 @@ describe('scheduler', () => {
     expect(lines.some((line) => line.includes('queued anyway: rate limited'))).toBe(true)
   })
 
+  test('skip leaves a repository out of one analyzer and logs it once', async () => {
+    const lines: string[] = []
+    const requests = await planSchedule(
+      { analyzers: ['depgraph', 'quality'], groups: ['games'] },
+      {
+        config,
+        analyzers,
+        resolveRepos,
+        skip: async (kind, repo) => kind === 'quality' && repo.path === 'games/b',
+        log: (line) => lines.push(line),
+      },
+    )
+    expect(requests.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
+      'depgraph games/a',
+      'depgraph games/b',
+      'quality games/a',
+    ])
+    expect(lines).toEqual(['quality: 1 repository left out by settings'])
+  })
+
   test('jobs carry their schedule, and the person who ran it by hand', async () => {
     const jobs = await scheduler().run('weekly', { actor: 'u1' })
     expect(jobs.map((j) => [j.schedule, j.actor, j.trigger])).toEqual([

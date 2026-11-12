@@ -974,6 +974,8 @@ export interface AiUsageFilter {
   model?: string
   provider?: string
   taskKind?: string
+  /** Records whose `taskKind` is one of these; an empty list matches nothing. */
+  taskKinds?: string[]
   analyzer?: string
   outcome?: AiRunOutcome
   jobId?: string
@@ -1147,6 +1149,8 @@ export interface ForgeDocumentData {
 
 /** A group of repositories, as `groups.<id>` of the effective config. */
 export interface GroupDocumentData {
+  /** Display name shown instead of the id; the id stays the identity in grants, scopes and guides. */
+  title?: string
   forge: string
   include: string[]
   exclude: string[]
@@ -1930,6 +1934,11 @@ export interface ChatThreadSummary {
 export interface ChatThread {
   id: string
   title: string
+  /**
+   * Set while `title` is a placeholder waiting to be named from the first message; cleared once a
+   * title is generated or a person sets one. Absent means the title is final.
+   */
+  titlePending?: boolean
   repo?: string
   group?: string
   createdBy: string
@@ -1984,7 +1993,13 @@ export interface ChatThreadFilter {
 
 /** Fields of a thread `ChatStore.updateThread` may change; `null` clears an optional one. */
 export interface ChatThreadPatch {
+  /** A title a person set; it clears `titlePending`. */
   title?: string
+  /**
+   * A title named from the first message: applied, clearing `titlePending`, only while the stored
+   * thread still has `titlePending`; otherwise ignored, so a person's title is never replaced.
+   */
+  generatedTitle?: string
   archived?: boolean
   autoReply?: boolean
   participants?: string[]

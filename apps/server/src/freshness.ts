@@ -15,7 +15,7 @@ import type { AnalysisHead, Job, KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { type JobAnalyzerInfo, type ServerDeps, repoKey } from './context.ts'
-import { automaticJobReady } from './jobs.ts'
+import { automaticJobBlocker } from './jobs.ts'
 import { forgeLimitKey } from './limits.ts'
 import { jobTarget } from './routes/jobs.ts'
 import { listedRepos } from './updates.ts'
@@ -346,7 +346,9 @@ async function notApplicable(
   options: { cachedOnly?: boolean } = {},
 ): Promise<string | undefined | typeof UNCHECKED> {
   const request = { analyzer: analyzer.kind, ...target }
-  if (!(await automaticJobReady(deps.config, deps.store, analyzer, request)))
+  const blocker = await automaticJobBlocker(deps.config, deps.store, analyzer, request)
+  if (blocker === 'no-tests') return 'the repository has no tests by design'
+  if (blocker === 'options')
     return `its options are not set up for this ${target.group === undefined ? 'repository' : 'group'}`
   if (!analyzer.appliesTo || target.group !== undefined || !forge) return undefined
   const cached = z

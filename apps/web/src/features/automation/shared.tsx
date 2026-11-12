@@ -2,7 +2,13 @@ import type { ConfigEntryView } from '@holtkeeper/api'
 import type { ReactNode } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useConfigMutations, useGroups, useJobAnalyzers } from '../../api/queries.ts'
+import {
+  useConfigMutations,
+  useGroups,
+  useGroupTitles,
+  useJobAnalyzers,
+} from '../../api/queries.ts'
+import { byGroupTitle } from '../../lib/group-titles.ts'
 import { ConfirmDialog, MultiToggle, TagInput, notify } from '../../ui/index.ts'
 
 /** A titled block of a form. */
@@ -80,14 +86,17 @@ export function GroupPicker({
   description?: string
 }) {
   const groups = useGroups()
-  const ids = [...new Set([...(groups.data?.entries ?? []).map((g) => g.id), ...value])].toSorted()
+  const titleOf = useGroupTitles()
+  const ids = [...new Set([...(groups.data?.entries ?? []).map((g) => g.id), ...value])].toSorted(
+    byGroupTitle(titleOf),
+  )
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-sm font-medium">Groups</span>
       {ids.length ? (
         <MultiToggle
           aria-label="Groups"
-          options={ids.map((id) => ({ id, label: id }))}
+          options={ids.map((id) => ({ id, label: titleOf(id) }))}
           value={value}
           onChange={onChange}
         />

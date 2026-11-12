@@ -5,7 +5,7 @@ import { useState } from 'react'
 
 import { useReleaseActions, useReleaseOverview, useRepos } from '../../api/queries.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import {
   type OverviewCounts,
   type OverviewSortKey,
@@ -304,8 +304,7 @@ export function ReleasesPage() {
     ...card,
     groups: groupsOf.get(repoKey(card.repo)) ?? [],
   }))
-  const folded = foldOtherTeams(cards, homeGroups, (card) => card.groups)
-  const inScope = view === 'mine' ? folded.mine : cards
+  const inScope = foldScope(cards, view, homeGroups, (card) => card.groups).shown
   const counts = queueCounts(inScope)
   const queueFilter = counts[chosenQueue] ? chosenQueue : 'action'
   const queue = queueRows(inScope, queueFilter)

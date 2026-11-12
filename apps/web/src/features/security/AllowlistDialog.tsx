@@ -3,10 +3,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useResolvedRepos, useSettingMutations, useSettings } from '../../api/queries.ts'
+import {
+  useDescribeScope,
+  useResolvedRepos,
+  useSettingMutations,
+  useSettings,
+} from '../../api/queries.ts'
 import { isoDay, plural } from '../../lib/format.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
-import { describeScope } from '../../lib/scope.ts'
 import { allowlistTargets, inDays, isFutureDay, withAllowlistEntry } from '../../lib/security.ts'
 import {
   Button,
@@ -29,6 +33,7 @@ import { useSession } from '../shell/session.ts'
  * narrower entry would replace that list.
  */
 export function AllowlistDialog({ group, onClose }: { group: FindingGroup; onClose: () => void }) {
+  const describeScope = useDescribeScope()
   const { principal } = useSession()
   const settings = useSettings()
   const { put } = useSettingMutations()

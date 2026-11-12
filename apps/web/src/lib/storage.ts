@@ -57,3 +57,35 @@ export function storageDelta(
     ? { text: `+${formatBytes(change)}`, trend: 'up' }
     : { text: `−${formatBytes(-change)}`, trend: 'down' }
 }
+
+/**
+ * How full a declared quota is: the bar's width (0..100), its label (`34%`, uncapped, so `112%`
+ * when over) and a tone that turns warning from 80% and danger from 95%. Absent without a quota
+ * or a measured figure.
+ */
+export function quotaUse(
+  usedBytes: number | undefined,
+  quotaBytes: number | undefined,
+): { width: number; label: string; tone: 'default' | 'warning' | 'danger' } | undefined {
+  if (usedBytes === undefined || !quotaBytes) return undefined
+  const percent = (usedBytes / quotaBytes) * 100
+  return {
+    width: shareOf(usedBytes, quotaBytes),
+    label: percent > 0 && percent < 1 ? '<1%' : `${Math.round(percent)}%`,
+    tone: percent >= 95 ? 'danger' : percent >= 80 ? 'warning' : 'default',
+  }
+}
+
+/**
+ * Holtkeeper's own retention in words: `unused for 90 days`, `least used beyond 50 GB`, both
+ * joined with ` · `, or `kept forever`.
+ */
+export function retentionLabel(
+  retention: { days?: number; maxBytes?: number } | undefined,
+): string {
+  const parts = [
+    retention?.days ? `unused for ${retention.days} ${retention.days === 1 ? 'day' : 'days'}` : '',
+    retention?.maxBytes ? `least used beyond ${formatBytes(retention.maxBytes)}` : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : 'kept forever'
+}

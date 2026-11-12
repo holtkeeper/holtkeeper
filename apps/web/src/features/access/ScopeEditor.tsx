@@ -1,8 +1,9 @@
 import type { Scope } from '@holtkeeper/api'
 import { Globe2, Layers } from 'lucide-react'
 
+import { useDescribeScope, useGroupTitles } from '../../api/queries.ts'
+import { groupMatchTitle } from '../../lib/group-titles.ts'
 import {
-  describeScope,
   formatGroupMatch,
   parseGroupMatch,
   validateGroupMatch,
@@ -24,6 +25,7 @@ export function ScopeEditor({
   label?: string
 }) {
   const mode = value.all ? 'all' : 'some'
+  const titleOf = useGroupTitles()
   return (
     <fieldset className="flex flex-col gap-3">
       <legend className="mb-2 text-sm font-medium">{label}</legend>
@@ -60,6 +62,7 @@ export function ScopeEditor({
             onChange={(next) => onChange({ ...value, groups: next.map(parseGroupMatch) })}
             placeholder="e.g. games"
             suggestions={groups}
+            labelOf={(text) => groupMatchTitle(parseGroupMatch(text), titleOf)}
             validate={validateGroupMatch}
             description="Join groups with + to require all of them: frontend + storefront"
           />
@@ -79,6 +82,7 @@ export function ScopeEditor({
 
 /** Read-only scope summary. */
 export function ScopeBadge({ scope }: { scope: Scope }) {
+  const describeScope = useDescribeScope()
   return (
     <Chip tone={scope.all ? 'accent' : 'default'} className="max-w-full">
       <span className="truncate font-mono text-[11px]">{describeScope(scope)}</span>

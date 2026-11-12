@@ -41,6 +41,11 @@ export interface WriteTaskPolicy {
   unsandboxed?: boolean
   /** This week's write task spend reached the weekly cap: the task stops as a budget stop. */
   weeklyCapReached?: boolean
+  /**
+   * The repository has no tests by design (`repo.tests`): detected checks leave out tests and the
+   * agent is told not to add any.
+   */
+  noTests?: { reason?: string }
 }
 
 type Checkout = NonNullable<AnalyzerContext<unknown>['checkout']>
@@ -93,10 +98,15 @@ function taskPrompt(input: {
   failing: readonly CheckResult[]
   patch?: 'applied' | 'conflict'
   conventions?: CommitConventions
+  noTests?: { reason?: string }
 }): string {
   const { options } = input
   const parts = [KIND_INSTRUCTIONS[options.kind], `Task: ${options.title}`]
   if (options.prompt?.trim()) parts.push(options.prompt.trim())
+  if (input.noTests)
+    parts.push(
+      `This repository has no tests by design${input.noTests.reason ? ` (${input.noTests.reason})` : ''}: do not add tests or test tooling.`,
+    )
   if (options.patch && input.patch === 'conflict')
     parts.push(
       '`git apply -3` could not apply this patch here. Make the same change by hand:',
@@ -160,7 +170,7 @@ export async function runWriteTask(input: RunWriteTaskInput): Promise<WriteTaskD
     const { dir, runner } = workspace
     if (!runner) throw new Error('the checkout has no command runner')
     await runChecked(runner, ['git', 'switch', '--quiet', '-C', branch], { cwd: dir, signal })
-    const specs = await detectChecks(dir, options.checks)
+    const specs = await detectChecks(dir, options.checks, { tests: !policy.noTests })
     const check = () =>
       step('checks', () =>
         runChecks(dir, runner, specs, { signal, log, ...(input.env && { env: input.env }) }),
@@ -196,6 +206,7 @@ export async function runWriteTask(input: RunWriteTaskInput): Promise<WriteTaskD
             failing: checks.filter((each) => !each.ok),
             ...(patch && { patch }),
             ...(input.conventions && { conventions: input.conventions }),
+            ...(policy.noTests && { noTests: policy.noTests }),
           }),
           capabilities: ['read', 'search', 'edit', 'run'],
           commands: agentCommands(specs),

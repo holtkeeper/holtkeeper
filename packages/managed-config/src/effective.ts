@@ -135,11 +135,12 @@ export function effectiveConfig(
         break
       }
       case 'group':
-        groups[doc.id] = {
+        groups[doc.id] = without({
+          title: doc.data.title,
           forge: doc.data.forge,
           include: doc.data.include,
           exclude: doc.data.exclude,
-        }
+        })
         break
       case 'repoTraits':
         repos[doc.data.pattern] = without({ forge: doc.data.forge, traits: doc.data.traits })

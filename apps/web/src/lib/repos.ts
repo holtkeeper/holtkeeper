@@ -11,6 +11,7 @@ import type {
 import type { DotTone } from '../ui/Legend.tsx'
 import type { StripCell } from '../ui/Strip.tsx'
 import { plural } from './format.ts'
+import { groupMatchesQuery, keyAsTitle, type GroupTitleOf } from './group-titles.ts'
 import { healthLabels, healthOrder, repoHealth } from './home.ts'
 import { type PageTab, hubSearch, pickTab, visibleTabs } from './repo-page.ts'
 import type { RepoHubSearch, RepoHubTab } from './repo.ts'
@@ -48,12 +49,11 @@ export const fleetCells: readonly { key: RepoHealthCellKey; label: string; mono?
 ]
 
 /**
- * The repository list's search parameters: a text filter, chosen groups, health states and
- * forges, and the sorted column. No sort means worst first.
+ * The repository list's search parameters: a text filter, chosen health states and forges, and
+ * the sorted column. No sort means worst first; groups come from the scope switch.
  */
 export interface ReposSearch {
   q?: string
-  group?: string[]
   health?: RepoHealthStatus[]
   forge?: string[]
   sort?: FleetSortKey
@@ -76,13 +76,11 @@ const isSortKey = (value: unknown): value is FleetSortKey =>
 /** `ReposSearch` from a URL; unknown states, sort keys and empty values are dropped. */
 export function parseReposSearch(search: Record<string, unknown>): ReposSearch {
   const q = typeof search.q === 'string' ? search.q : ''
-  const group = strings(search.group)
   const health = strings(search.health).filter(isHealth)
   const forge = strings(search.forge)
   const sort = isSortKey(search.sort) ? search.sort : undefined
   return {
     ...(q ? { q } : {}),
-    ...(group.length ? { group } : {}),
     ...(health.length ? { health } : {}),
     ...(forge.length ? { forge } : {}),
     ...(sort ? { sort, dir: search.dir === 'desc' ? ('desc' as const) : ('asc' as const) } : {}),
@@ -99,22 +97,29 @@ export function withReposSort(search: ReposSearch, sort: SortState<FleetSortKey>
   return sort ? { ...rest, sort: sort.key, dir: sort.direction } : rest
 }
 
-/** Whether `summary` matches the text filter: its `forge:path` or one of its groups. */
-const matchesRepoQuery = (summary: RepoSummary, query: string | undefined): boolean => {
+/** Whether `summary` matches the text filter: its `forge:path` or one of its groups (key or title). */
+const matchesRepoQuery = (
+  summary: RepoSummary,
+  query: string | undefined,
+  titleOf: GroupTitleOf,
+): boolean => {
   const needle = query?.trim().toLowerCase()
   return (
     !needle ||
     repoKey(summary.repo).toLowerCase().includes(needle) ||
-    summary.groups.some((group) => group.toLowerCase().includes(needle))
+    summary.groups.some((group) => groupMatchesQuery(group, titleOf, needle))
   )
 }
 
-/** The repositories `search` keeps: text, groups (any of), health states and forges. */
-export const filterRepos = (repos: readonly RepoSummary[], search: ReposSearch): RepoSummary[] =>
+/** The repositories `search` keeps: text (groups by key or `titleOf`), health states and forges. */
+export const filterRepos = (
+  repos: readonly RepoSummary[],
+  search: ReposSearch,
+  titleOf: GroupTitleOf = keyAsTitle,
+): RepoSummary[] =>
   repos.filter(
     (summary) =>
-      matchesRepoQuery(summary, search.q) &&
-      (!search.group?.length || summary.groups.some((group) => search.group?.includes(group))) &&
+      matchesRepoQuery(summary, search.q, titleOf) &&
       (!search.health?.length || search.health.includes(summary.health)) &&
       (!search.forge?.length || search.forge.includes(summary.repo.forge)),
   )

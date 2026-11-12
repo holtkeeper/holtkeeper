@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { useDescribeScope } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
 import {
   type FieldSource,
@@ -27,7 +28,6 @@ import {
   modes,
   withEnvironment,
 } from '../../lib/release-flow.ts'
-import { describeScope } from '../../lib/scope.ts'
 import {
   Button,
   KeyValue,
@@ -564,6 +564,7 @@ export function SignalTable({ rows }: { rows: readonly SignalRow[] }) {
  * only their scope and last change show; they are managed in Settings › Integrations.
  */
 export function NotifyWebhooks({ entries }: { entries: readonly SettingView[] }) {
+  const describeScope = useDescribeScope()
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">

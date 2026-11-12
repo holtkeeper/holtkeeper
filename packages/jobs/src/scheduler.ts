@@ -33,6 +33,11 @@ export interface SchedulerOptions {
   timezone?: string
   /** How often `start` checks for due schedules. Default 30 seconds. */
   intervalMs?: number
+  /**
+   * Whether to leave a repository out of a repo-scope analyzer's scheduled jobs, checked next to
+   * `appliesTo`, e.g. coverage on a repository with no tests by design.
+   */
+  skip?: (analyzer: string, repo: RepoRef) => Promise<boolean>
   log?: (line: string) => void
 }
 
@@ -118,7 +123,8 @@ function memoizedReader(forge: ApplicabilityContext['forge']): ApplicabilityCont
 /**
  * The jobs one schedule produces: repo-scope analyzers once per repository of the schedule's
  * groups (every group when it names none) that matches its `repos` globs and the analyzer's
- * `appliesTo` (a failing check counts as applying), group-scope analyzers once per group with
+ * `appliesTo` (a failing check counts as applying) and that `skip` does not leave out, group-scope
+ * analyzers once per group with
  * `repo` = `{ forge, path: <group> }`.
  */
 export async function planSchedule(
@@ -129,6 +135,7 @@ export async function planSchedule(
     analyzers,
     resolveRepos,
     forgeFor = configForgeReaders(config),
+    skip,
     log = () => {},
   }: {
     config: HoltkeeperConfig
@@ -136,6 +143,7 @@ export async function planSchedule(
     resolveRepos: ResolveRepos
     /** Default: the forge clients of `config`. */
     forgeFor?: ForgeReaderFor
+    skip?: SchedulerOptions['skip']
     log?: (line: string) => void
   },
 ): Promise<JobRequest[]> {
@@ -182,7 +190,13 @@ export async function planSchedule(
     }
     for (const analyzer of selected.filter((a) => a.scope === 'repo')) {
       let skipped = 0
+      let excluded = 0
       for (const repo of repos.values()) {
+        // oxlint-disable-next-line no-await-in-loop -- one repository after another keeps rate limits
+        if (skip && (await skip(analyzer.kind, repo))) {
+          excluded++
+          continue
+        }
         // oxlint-disable-next-line no-await-in-loop -- one repository after another keeps rate limits
         if (!(await applies(analyzer, repo))) {
           skipped++
@@ -199,6 +213,10 @@ export async function planSchedule(
       if (skipped)
         log(
           `${analyzer.kind}: ${skipped} repositor${skipped === 1 ? 'y does' : 'ies do'} not use it`,
+        )
+      if (excluded)
+        log(
+          `${analyzer.kind}: ${excluded} repositor${excluded === 1 ? 'y' : 'ies'} left out by settings`,
         )
     }
   }
@@ -268,6 +286,7 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
       analyzers,
       resolveRepos,
       ...(options.forgeFor && { forgeFor: options.forgeFor }),
+      ...(options.skip && { skip: options.skip }),
       log: (line) => log(`schedule ${schedule.name}: ${line}`),
     })
     if (actor) requests = requests.map((request) => ({ ...request, actor }))

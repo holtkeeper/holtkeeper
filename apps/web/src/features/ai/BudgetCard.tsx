@@ -1,5 +1,6 @@
-import type { AiBudgetStatus } from '@holtkeeper/api'
+import type { AiBudgetStatus, AiSpendCaps } from '@holtkeeper/api'
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
 
 import { useSettingMutations, useSettings } from '../../api/queries.ts'
@@ -247,18 +248,61 @@ function NarrowerBudget({ budget }: { budget: AiBudgetStatus }) {
   )
 }
 
+const capRow = 'grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-1.5 text-[12.5px]'
+
+function Caps({ caps }: { caps: AiSpendCaps }) {
+  return (
+    <>
+      <li className={capRow}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Tag>Cap</Tag>
+          <Link to="/ops/tasks" className="hover:underline">
+            Write tasks
+          </Link>
+        </div>
+        <span className="text-xs text-muted">
+          per task unless it sets its own, up to{' '}
+          <span className="font-mono">{formatUsd(caps.writeTaskMaxUsd)}</span>
+        </span>
+        <span className="font-mono">{formatUsd(caps.writeTaskUsd)}</span>
+      </li>
+      <li className={capRow}>
+        <div className="flex min-w-0 items-center gap-2">
+          <Tag>Cap</Tag>
+          <Link to="/chat" className="hover:underline">
+            Chat replies
+          </Link>
+        </div>
+        <span className="text-xs text-muted">
+          {caps.chatReplyAvgUsd === undefined ? (
+            'per reply'
+          ) : (
+            <>
+              average <span className="font-mono">{formatUsd(caps.chatReplyAvgUsd)}</span> per reply
+            </>
+          )}
+        </span>
+        <span className="font-mono">{formatUsd(caps.chatReplyUsd)}</span>
+      </li>
+    </>
+  )
+}
+
 /**
  * The weekly budget: this week's spend against the limit with the forecast and the point where
- * automatic work stops, an inline `llm.budget` editor for global `settings:write`, and the
- * narrower budgets the viewer may read.
+ * automatic work stops, an inline `llm.budget` editor for global `settings:write`, the narrower
+ * budgets the viewer may read and the read-only caps of one write task and one chat reply. The
+ * page's filters never narrow it.
  */
 export function BudgetCard({
   budget,
   narrower,
+  caps,
   writable,
 }: {
   budget: AiBudgetStatus
   narrower: readonly AiBudgetStatus[]
+  caps: AiSpendCaps
   writable: boolean
 }) {
   const state = budgetState(budget)
@@ -320,18 +364,17 @@ export function BudgetCard({
           budget={budget}
         />
       ) : null}
-      {narrower.length ? (
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-dim">
-            Narrower budgets
-          </span>
-          <ul className="flex flex-col divide-y divide-line">
-            {narrower.map((entry) => (
-              <NarrowerBudget key={entry.id} budget={entry} />
-            ))}
-          </ul>
-        </div>
-      ) : null}
+      <div className="flex flex-col gap-1">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-dim">
+          {narrower.length ? 'Narrower budgets and caps' : 'Caps'}
+        </span>
+        <ul className="flex flex-col divide-y divide-line">
+          {narrower.map((entry) => (
+            <NarrowerBudget key={entry.id} budget={entry} />
+          ))}
+          <Caps caps={caps} />
+        </ul>
+      </div>
     </Panel>
   )
 }

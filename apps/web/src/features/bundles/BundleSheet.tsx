@@ -418,6 +418,7 @@ export function BundleSheet({
   return (
     <>
       <SideSheet
+        size="wide"
         open
         onClose={onClose}
         id={row.analysisId.slice(0, 8)}

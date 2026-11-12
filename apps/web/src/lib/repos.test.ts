@@ -48,7 +48,6 @@ describe('search parameters', () => {
       }),
     ).toEqual({
       q: 'widget',
-      group: ['web', 'payments'],
       health: ['failing'],
       forge: ['github.com'],
       sort: 'coverage',
@@ -82,10 +81,10 @@ const audit = (critical: number, high: number, active: number) =>
 const only = (actions: string[]) => (action: string) => actions.includes(action)
 
 describe('filtering and sorting', () => {
-  test('filters by text over path and groups, groups, health and forge', () => {
+  test('filters by text over path and groups, health and forge', () => {
     expect(paths({ q: 'PAY' })).toEqual(['acme/ledger-api', 'acme/checkout-web'])
     expect(paths({ q: 'github.com:acme' })).toEqual(['acme/widget-kit'])
-    expect(paths({ group: ['payments'], health: ['warnings'] })).toEqual(['acme/checkout-web'])
+    expect(paths({ q: 'payments', health: ['warnings'] })).toEqual(['acme/checkout-web'])
     expect(paths({ forge: ['gitlab.acme.dev'] })).toEqual(['acme/ledger-api', 'acme/checkout-web'])
   })
 

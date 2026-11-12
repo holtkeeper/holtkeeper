@@ -68,7 +68,7 @@ export function SubNav({
   return (
     <nav
       aria-label={ariaLabel}
-      className="flex w-full shrink-0 flex-col gap-0.5 border-b border-line px-2.5 py-3 md:w-[196px] md:border-r md:border-b-0"
+      className="flex w-full shrink-0 flex-col gap-0.5 border-b border-line px-2.5 py-3 md:w-[224px] md:border-r md:border-b-0"
     >
       {search ? (
         <div className="relative mb-2">
@@ -124,9 +124,11 @@ export function SubNav({
                 className={itemClass(current)}
               >
                 {item.icon ? <item.icon className="size-[15px] shrink-0" /> : null}
-                <span className="truncate">{item.label}</span>
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
                 {item.meta ? (
-                  <span className="ml-auto text-[11px] text-dim">{item.meta}</span>
+                  <span className="shrink-0 whitespace-nowrap text-[11px] text-dim">
+                    {item.meta}
+                  </span>
                 ) : null}
               </Link>
             )

@@ -10,13 +10,14 @@ import {
   useMcpUsage,
   useRevokeMcpToken,
 } from '../../api/queries.ts'
-import { formatDate, formatRelative } from '../../lib/format.ts'
+import { formatCount, formatDate, formatRelative } from '../../lib/format.ts'
 import {
   type TokenStatus,
   tokenStatus,
   tokenStatusCounts,
   tokenStatusLabels,
 } from '../../lib/mcp-tokens.ts'
+import { callsByToken } from '../../lib/mcp-usage.ts'
 import {
   type McpClient,
   type McpTool,
@@ -49,6 +50,7 @@ import {
   Th,
   notify,
 } from '../../ui/index.ts'
+import { MyUsage } from './MyUsage.tsx'
 
 /** Where the endpoint lives as the server sees it, falling back to this origin. */
 const useEndpoint = () => useMcpUsage(7).data?.endpoint ?? `${window.location.origin}/mcp`
@@ -67,7 +69,7 @@ const steps = [
 
 /**
  * Account › Connect agents: one flow from the three steps to the viewer's MCP tokens with their
- * status, the client setup per client and the reference of the tools the endpoint offers them.
+ * status and calls, the client setup per client, the viewer's own usage and the reference of the tools the endpoint offers them.
  * `creating` opens the New token dialog, which the Account header's primary action drives.
  */
 export function McpServer({
@@ -102,7 +104,10 @@ export function McpServer({
         ))}
       </ol>
       <TokensPanel endpoint={endpoint} open={creating} onOpen={onCreating} />
-      <ConnectPanel endpoint={endpoint} />
+      <div className="grid items-start gap-5 xl:grid-cols-2">
+        <ConnectPanel endpoint={endpoint} />
+        <MyUsage />
+      </div>
       <ToolReference />
     </div>
   )
@@ -441,6 +446,7 @@ function TokenTable({
   onRevoke: (id: string) => void
 }) {
   const [query, setQuery] = useState('')
+  const calls = callsByToken(useMcpUsage(7).data?.tokens)
   const needle = query.trim().toLowerCase()
   const now = new Date()
   const counts = tokenStatusCounts(tokens, now)
@@ -482,6 +488,7 @@ function TokenTable({
             <Th>Token</Th>
             <Th>Expires</Th>
             <Th>Last used</Th>
+            <Th align="right">Calls, 7 days</Th>
             <Th>
               <span className="sr-only">Actions</span>
             </Th>
@@ -513,6 +520,9 @@ function TokenTable({
                 </Td>
                 <Td className="text-muted">
                   {token.lastUsedAt ? formatRelative(token.lastUsedAt) : 'never'}
+                </Td>
+                <Td align="right" className="mono">
+                  {formatCount(calls.get(token.id) ?? 0)}
                 </Td>
                 <Td align="right">
                   <Button

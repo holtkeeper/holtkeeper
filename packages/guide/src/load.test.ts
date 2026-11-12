@@ -66,3 +66,34 @@ test('createGuideResolver reads family, sections, policies and notes from the st
     '[kb:k1]',
   )
 })
+
+test('a repository with no tests by design reads no testing sections', async () => {
+  const store = memoryStore()
+  const at = '2026-11-01T10:00:00.000Z'
+  for (const section of ['general', 'testing'] as const)
+    await store.guides.put({
+      scope: 'group:games',
+      section,
+      rules: `${section} rule.`,
+      steering: '',
+      editedBy: 'jane',
+      editedAt: at,
+      learnings: [],
+    })
+  const resolve = createGuideResolver({ store })
+  const repo = { forge: 'work', path: 'games/a', groups: ['games'] }
+  expect((await resolve({ repo, task: 'review' })).text).toContain('testing rule.')
+
+  await store.settings.put({
+    id: 's1',
+    key: 'repo.tests',
+    scope: { groups: ['games'] },
+    value: { expected: false },
+    secret: false,
+    updatedAt: at,
+  })
+  const review = await resolve({ repo, task: 'review' })
+  expect(review.text).toContain('general rule.')
+  expect(review.text).not.toContain('testing rule.')
+  expect(review.text).toContain('This repository has no tests by design: do not add test files')
+})

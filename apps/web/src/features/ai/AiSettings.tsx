@@ -1,7 +1,7 @@
 import type { AiBudgetOverview, AiBudgetStatus, AiScopeCapView } from '@holtkeeper/api'
 import { ArrowUpRight } from 'lucide-react'
 
-import { useAiOverview, useCredentials } from '../../api/queries.ts'
+import { useAiOverview, useCredentials, useDescribeScope } from '../../api/queries.ts'
 import { useAgentTools, useAiBudget } from '../../api/settings-ai.ts'
 import {
   type FeatureShare,
@@ -13,7 +13,6 @@ import {
 } from '../../lib/ai-features.ts'
 import { automaticLimit, budgetState, formatRatio, formatUsd } from '../../lib/ai-usage.ts'
 import { formatDate } from '../../lib/format.ts'
-import { describeScope } from '../../lib/scope.ts'
 import { settingAnchor } from '../../lib/settings-sections.ts'
 import {
   ErrorState,
@@ -175,6 +174,7 @@ function UsedBar({ percent, color }: { percent: number; color: string }) {
  * features have no caps of their own and count toward the org budget.
  */
 function CapsTable({ overview, editable }: { overview: AiBudgetOverview; editable: boolean }) {
+  const describeScope = useDescribeScope()
   const features = featureBreakdown(overview.byFeature)
   const orgUsd = overview.budget?.weeklyUsd ?? 0
   return (
@@ -306,6 +306,7 @@ export function BudgetsPanel() {
 }
 
 function BudgetsBody({ overview, writable }: { overview: AiBudgetOverview; writable: boolean }) {
+  const describeScope = useDescribeScope()
   const { budget } = overview
   const features = featureBreakdown(overview.byFeature)
   const global = budget !== undefined && (budget.id === 'default' || budget.scope.all === true)

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -49,6 +49,45 @@ async function writeApp(useBig: boolean) {
   await write('src/lazy.ts', `export const go = () => console.log('lazy loaded')\n`)
 }
 
+const letters = (seed: string) => {
+  let value = Bun.hash(seed)
+  let token = ''
+  for (let index = 0; index < 8; index++) {
+    token += String.fromCharCode(97 + Number(value % 26n))
+    value /= 26n
+  }
+  return token
+}
+
+const hashOf = (path: string) => /-([0-9a-z]{8})\.js(?:\.map)?$/.exec(basename(path))?.[1] ?? ''
+
+/** Bun's hashes depend on the temp dir; all-letter content tokens are stable and the hardest case. */
+async function stableHashes(outputs: { path: string; kind: string }[]): Promise<string[]> {
+  const hashes = outputs.map((output) => hashOf(output.path)).filter(Boolean)
+  const contents = new Map(
+    await Promise.all(
+      outputs.map(async (output) => [output.path, await readFile(output.path, 'utf8')] as const),
+    ),
+  )
+  const unhashed = (text: string) =>
+    hashes.reduce((rest, hash) => rest.replaceAll(hash, ''), text.replace(/\/\/# debugId=\w+/, ''))
+  const renames = new Map(
+    outputs
+      .filter((output) => output.kind !== 'sourcemap')
+      .map((output) => [hashOf(output.path), letters(unhashed(contents.get(output.path) ?? ''))]),
+  )
+  const rename = (text: string) =>
+    [...renames].reduce((rest, [from, to]) => rest.replaceAll(from, to), text)
+  return Promise.all(
+    outputs.map(async (output) => {
+      const path = join(dirname(output.path), rename(basename(output.path)))
+      await rm(output.path)
+      await writeFile(path, rename(contents.get(output.path) ?? ''))
+      return path
+    }),
+  )
+}
+
 /** A fake build command that runs `Bun.build` and writes HTML pages pointing at its entries. */
 const { runner, calls } = createFakeRunner(async (_command, { cwd }) => {
   const outdir = join(cwd, 'dist')
@@ -63,11 +102,13 @@ const { runner, calls } = createFakeRunner(async (_command, { cwd }) => {
   })
   if (!result.success)
     return { exitCode: 1, stderr: result.logs.map((log) => log.message).join('\n') }
+  const paths = await stableHashes(result.outputs)
   const entry = (name: string) =>
     basename(
-      result.outputs.find(
-        (output) => output.kind === 'entry-point' && basename(output.path).startsWith(`${name}-`),
-      )?.path ?? '',
+      paths.find(
+        (path, index) =>
+          result.outputs[index]?.kind === 'entry-point' && basename(path).startsWith(`${name}-`),
+      ) ?? '',
     )
   await writeFile(join(outdir, 'styles.css'), 'body{margin:0;font-family:system-ui}')
   await writeFile(

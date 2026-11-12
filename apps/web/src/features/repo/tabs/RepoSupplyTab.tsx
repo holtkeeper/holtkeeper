@@ -2,7 +2,7 @@ import type { RepoRef } from '@holtkeeper/api'
 import { ArrowRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { useRepos } from '../../../api/queries.ts'
+import { useGroupTitles, useRepos } from '../../../api/queries.ts'
 import {
   type SupplySection,
   cardLabels,
@@ -16,13 +16,46 @@ import { RepoLibraries } from '../../libraries/LibrariesPage.tsx'
 import { RepoLicenses } from '../../licenses/LicensesPage.tsx'
 import { RepoPublicApi } from '../../public-api/PublicApiPage.tsx'
 import { RepoSecurity } from '../../security/SecurityPage.tsx'
+import { useScope } from '../../shell/scope.ts'
 import { useSession } from '../../shell/session.ts'
 import { RepoStack } from '../../stack/StackPage.tsx'
 
-function Workspace({ section, repo }: { section: SupplySection; repo: RepoRef }) {
+function StackLink({ repo }: { repo: RepoRef }) {
   const key = repoKey(repo)
-  const repos = useRepos(section === 'stack')
+  const repos = useRepos()
+  const { homeGroups } = useScope()
   const groups = repos.data?.repos.find((summary) => repoKey(summary.repo) === key)?.groups ?? []
+  const home = new Set(homeGroups.flat())
+  const group = groups.find((entry) => home.has(entry)) ?? groups[0]
+  const titleOf = useGroupTitles()
+  const label = (
+    <>
+      {group
+        ? `Open ${titleOf(group)} › ${cardLabels.stack}`
+        : `Open in Supply › ${cardLabels.stack}`}
+      <ArrowRight className="size-3.5" />
+    </>
+  )
+  return group ? (
+    <LinkButton
+      to="/repos/groups/$groupId"
+      params={{ groupId: group }}
+      search={{ tab: 'stack' }}
+      variant="ghost"
+      size="sm"
+    >
+      {label}
+    </LinkButton>
+  ) : (
+    <LinkButton to="/supply/stack" variant="ghost" size="sm">
+      {label}
+    </LinkButton>
+  )
+}
+
+function Workspace({ section, repo }: { section: SupplySection; repo: RepoRef }) {
+  if (section === 'stack') return <StackLink repo={repo} />
+  const key = repoKey(repo)
   const link =
     section === 'security'
       ? ({ to: '/supply/security', search: { repo: key } } as const)
@@ -30,9 +63,7 @@ function Workspace({ section, repo }: { section: SupplySection; repo: RepoRef })
         ? ({ to: '/supply/libraries', search: { repo: key } } as const)
         : section === 'licenses'
           ? ({ to: '/supply/licenses', search: { repo: key } } as const)
-          : section === 'stack'
-            ? { to: '/supply/stack' as const, search: groups.length ? { group: groups } : {} }
-            : ({ to: '/supply/public-api', search: { repo: key } } as const)
+          : ({ to: '/supply/public-api', search: { repo: key } } as const)
   return (
     <LinkButton {...link} variant="ghost" size="sm">
       Open in Supply › {cardLabels[section]}

@@ -42,14 +42,15 @@ import {
   Dot,
   EmptyState,
   ErrorState,
+  GroupName,
   KeyValue,
   type KeyValueRow,
+  notify,
   Placeholder,
   SegmentBar,
   SegmentedTabs,
   Tag,
   Tooltip,
-  notify,
 } from '../../ui/index.ts'
 import { MetricCard } from '../reports/MetricCard.tsx'
 import { useSession } from '../shell/session.ts'
@@ -96,7 +97,7 @@ function JobTarget({ job }: { job: Pick<Job, 'repo' | 'group'> }) {
       search={{}}
       className="hover:underline"
     >
-      Group {job.group}
+      Group <GroupName group={job.group} />
     </Link>
   ) : (
     <Link

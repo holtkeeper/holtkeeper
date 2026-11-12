@@ -12,7 +12,10 @@ export interface RepoSignals {
 
 /** Repositories that look alike enough to share rules; a person confirms before it is a family. */
 export interface FamilySuggestion {
-  /** A proposed name, from the members' common path. */
+  /**
+   * A proposed name: the deepest path segment the members share and the words their repository
+   * names share, plus the framework; unique among the suggestions of one run.
+   */
   name: string
   /** `forge:path`, sorted. */
   members: string[]
@@ -68,13 +71,40 @@ export function jaccard(a: ReadonlySet<string>, b: ReadonlySet<string>): number 
 
 const binary = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
+const wordsOf = (segment: string): string[] => segment.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+
 function proposedName(members: readonly string[], framework: string | undefined): string {
-  const paths = members.map((member) => member.slice(member.indexOf(':') + 1))
-  let prefix = paths[0] ?? ''
-  for (const path of paths) while (!path.startsWith(prefix)) prefix = prefix.slice(0, -1)
-  prefix = prefix.replace(/[^\p{L}\p{N}]+$/u, '')
-  const base = prefix || framework || 'similar'
-  return framework && prefix ? `${base} (${framework})` : base
+  const paths = members.map((member) => member.slice(member.indexOf(':') + 1).split('/'))
+  const first = paths[0] ?? []
+  let depth = 0
+  while (depth < first.length - 1 && paths.every((path) => path[depth] === first[depth])) depth++
+  const tail = depth > 0 ? first[depth - 1] : undefined
+  const last = paths.map((path) => new Set(wordsOf(path.at(-1) ?? '')))
+  const words = wordsOf(first.at(-1) ?? '').filter(
+    (word, index, all) => all.indexOf(word) === index && last.every((set) => set.has(word)),
+  )
+  const base = [tail, words.join('-')].filter(Boolean).join('/') || framework || 'similar'
+  return framework && base !== framework ? `${base} (${framework})` : base
+}
+
+/**
+ * Makes names that several suggestions share tell them apart: each gets the first of its shared
+ * dependencies the others with that name lack, or a number when none is left.
+ */
+function distinctNames(suggestions: FamilySuggestion[]): FamilySuggestion[] {
+  const byName = Map.groupBy(suggestions, (suggestion) => suggestion.name)
+  return suggestions.map((suggestion) => {
+    const twins = byName.get(suggestion.name) ?? []
+    if (twins.length < 2) return suggestion
+    const others = twins.filter((twin) => twin !== suggestion)
+    const mark = suggestion.shared.find((dep) =>
+      others.every((other) => !other.shared.includes(dep)),
+    )
+    return {
+      ...suggestion,
+      name: `${suggestion.name} · ${mark ?? twins.indexOf(suggestion) + 1}`,
+    }
+  })
 }
 
 /**
@@ -146,11 +176,13 @@ export function suggestFamilies(
       })
     }
   }
-  return suggestions.toSorted(
-    (a, b) =>
-      b.members.length - a.members.length ||
-      b.similarity - a.similarity ||
-      binary(a.members[0] ?? '', b.members[0] ?? ''),
+  return distinctNames(
+    suggestions.toSorted(
+      (a, b) =>
+        b.members.length - a.members.length ||
+        b.similarity - a.similarity ||
+        binary(a.members[0] ?? '', b.members[0] ?? ''),
+    ),
   )
 }
 

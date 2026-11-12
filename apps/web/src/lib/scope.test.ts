@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
+import { groupTitleOf } from './group-titles.ts'
 import {
   describeScope,
   formatGroupMatch,
@@ -23,6 +24,10 @@ describe('scopes', () => {
     expect(describeScope({})).toBe('nothing')
     expect(describeScope({ groups: [['frontend', 'storefront']] })).toBe(
       'group frontend + storefront',
+    )
+    const titleOf = groupTitleOf({ games: 'Game studio' })
+    expect(describeScope({ groups: ['games', ['games', 'web']] }, titleOf)).toBe(
+      'group Game studio, group Game studio + web',
     )
   })
 

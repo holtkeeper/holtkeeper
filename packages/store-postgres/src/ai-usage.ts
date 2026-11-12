@@ -116,6 +116,8 @@ const plainWhere = (sql: SQL, f: AiUsageFilter) => sql`
   AND (${f.model ?? null}::text IS NULL OR r.model = ${f.model ?? null}::text)
   AND (${f.provider ?? null}::text IS NULL OR r.provider = ${f.provider ?? null}::text)
   AND (${f.taskKind ?? null}::text IS NULL OR r.task_kind = ${f.taskKind ?? null}::text)
+  AND (${f.taskKinds === undefined ? null : sql.json(f.taskKinds)}::jsonb IS NULL
+    OR r.task_kind IN (SELECT jsonb_array_elements_text(${f.taskKinds === undefined ? null : sql.json(f.taskKinds)}::jsonb)))
   AND (${f.analyzer ?? null}::text IS NULL OR r.analyzer = ${f.analyzer ?? null}::text)
   AND (${f.outcome ?? null}::text IS NULL OR r.outcome = ${f.outcome ?? null}::text)
   AND (${f.jobId ?? null}::text IS NULL OR r.job_id = ${f.jobId ?? null}::text)`

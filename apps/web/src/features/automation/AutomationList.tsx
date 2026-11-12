@@ -3,7 +3,7 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { ChevronRight, ListChecks, Map as MapIcon, Play } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
-import { useAiOverview, useJobCount, useJobTargets } from '../../api/queries.ts'
+import { useAiOverview, useGroupTitles, useJobCount, useJobTargets } from '../../api/queries.ts'
 import { canReadSpend } from '../../lib/access.ts'
 import { formatUsd } from '../../lib/ai-usage.ts'
 import { ALL_LANE, type AutomationRule, ruleNodeId } from '../../lib/automation-flow.ts'
@@ -16,11 +16,14 @@ import {
   filterSchedules,
   inMyTeams,
   isProblem,
+  laneInView,
+  laneScopeCounts,
   scheduleStateLabel,
   scheduleStates,
 } from '../../lib/automation.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
+import { type ScopeView, scopeLabel, viewGroup } from '../../lib/home-scope.ts'
 import { jobScopeRepos } from '../../lib/jobs.ts'
 import {
   Button,
@@ -150,7 +153,7 @@ export function AutomationList({
   const tab: AutomationTab = search.tab ?? 'schedules'
   const needle = query.trim().toLowerCase()
   const mine = (lanes: readonly string[]) => inMyTeams(lanes, homeGroups)
-  const inScope = (lanes: readonly string[]) => scopeView === 'all' || mine(lanes)
+  const inScope = (lanes: readonly string[]) => laneInView(lanes, scopeView, homeGroups)
 
   const lanes = model.lanes.map((lane) => ({ id: lane.id, label: lane.label }))
   const visibleLanes = lanes.filter((lane) => inScope([lane.id]))
@@ -179,10 +182,8 @@ export function AutomationList({
   const policies = ofType('policy')
   const stale = staleCount(visibleLanes, model.freshness)
 
-  const scopeCounts = (lanesOf: readonly (readonly string[])[]) => ({
-    mine: lanesOf.filter((l) => mine(l)).length,
-    all: lanesOf.length,
-  })
+  const scopeCounts = (lanesOf: readonly (readonly string[])[]) =>
+    laneScopeCounts(lanesOf, homeGroups)
   const counts =
     tab === 'schedules'
       ? scopeCounts(allSchedules.map((row) => row.lanes))
@@ -419,13 +420,14 @@ function SchedulesTab({
   others: readonly ScheduleRow[]
   /** Every schedule in scope, before the text and status filters, for the strip. */
   all: readonly ScheduleRow[]
-  scopeView: 'mine' | 'all'
+  scopeView: ScopeView
   selected: string | undefined
   onOpen: (id: string) => void
   onRun: ((row: ScheduleRow) => void) | undefined
   onToggle: ((row: ScheduleRow, on: boolean) => void) | undefined
   showSpend: boolean
 }) {
+  const titleOf = useGroupTitles()
   const now = new Date()
   const { homeGroups } = useScope()
   const targets = useJobTargets()
@@ -581,7 +583,10 @@ function SchedulesTab({
       <header className="flex flex-wrap items-center gap-2">
         <h2 className="text-[13px] font-semibold">Schedules</h2>
         <span className="text-xs text-muted">
-          {scopeView === 'mine' ? 'my teams' : 'all I can see'} · worst first
+          {viewGroup(scopeView) !== undefined
+            ? scopeLabel(scopeView, titleOf)
+            : scopeLabel(scopeView).toLowerCase()}{' '}
+          · worst first
         </span>
         <Legend items={runLegend} label="Run legend" className="ml-auto" />
       </header>

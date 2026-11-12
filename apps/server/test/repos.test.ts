@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import { auditAnalysis } from '@holtkeeper/analyzers'
-import type { RepoList } from '@holtkeeper/api'
+import type { MeResponse, RepoList } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { coverageAnalysis } from '@holtkeeper/coverage'
@@ -19,8 +19,8 @@ const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000).
 const config = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
   groups: {
-    shapes: { forge: 'work', include: ['shapes/*'] },
-    colors: { forge: 'work', include: ['colors/*', 'colors/red'] },
+    shapes: { forge: 'work', include: ['shapes/*'], title: 'Shape Studio' },
+    colors: { forge: 'work', include: ['colors/*', 'colors/red'], title: 'Palette' },
   },
 })
 
@@ -73,6 +73,12 @@ const list = async (role: string) => {
   return ((await response.json()) as RepoList).repos
 }
 
+const titles = async (role: string) => {
+  const response = await app().request('/api/me', { headers: as(role) })
+  expect(response.status).toBe(200)
+  return ((await response.json()) as MeResponse).groupTitles
+}
+
 const coverage = (path: string, percent: number) =>
   store.analyses.add({
     repo: { forge: 'work', path },
@@ -109,6 +115,17 @@ beforeEach(async () => {
   })
 })
 
+describe('GET /api/me', () => {
+  test('lists every group title with global settings:read', async () => {
+    expect(await titles('admin')).toEqual({ shapes: 'Shape Studio', colors: 'Palette' })
+  })
+
+  test('limits titles to the groups a team viewer can reach', async () => {
+    expect(await titles('viewer')).toEqual({ shapes: 'Shape Studio' })
+    expect(await titles('nobody')).toEqual({})
+  })
+})
+
 describe('GET /api/repos', () => {
   test('lists every group member from stored listings and exact paths, not only audited ones', async () => {
     await coverage('shapes/circle', 81)
@@ -134,6 +151,23 @@ describe('GET /api/repos', () => {
     expect(circle?.freshness).toEqual({ current: 1, total: 1 })
     expect(circle?.lastAnalysedAt).toBe(hoursAgo(2))
     expect(circle?.updates).toEqual({ via: 'off' })
+  })
+
+  test('marks repositories with no tests by design', async () => {
+    await store.settings.put({
+      id: 'tests',
+      key: 'repo.tests',
+      scope: { groups: ['shapes'] },
+      value: { expected: false, reason: 'Config only' },
+      secret: false,
+      updatedAt: hoursAgo(3),
+    })
+    const repos = await list('admin')
+    expect(repos.map((r) => [r.repo.path, r.noTests])).toEqual([
+      ['colors/red', undefined],
+      ['shapes/circle', { reason: 'Config only' }],
+      ['shapes/square', { reason: 'Config only' }],
+    ])
   })
 
   test('omits cells, freshness and updates the caller may not read', async () => {

@@ -13,7 +13,7 @@ import {
   repoSplat,
   splitRepoPath,
 } from '../../lib/repo.ts'
-import { Dot, EmptyState, Page, SegmentedTabs, Tag, notify } from '../../ui/index.ts'
+import { Dot, EmptyState, GroupName, notify, Page, SegmentedTabs, Tag } from '../../ui/index.ts'
 import { useRunJob } from '../jobs/RunJobDialog.tsx'
 import { RepoActivityTab } from '../repo/tabs/RepoActivityTab.tsx'
 import { RepoKnowledgeTab } from '../repo/tabs/RepoKnowledgeTab.tsx'
@@ -86,7 +86,9 @@ function Heading({
                   params={{ groupId: group }}
                   className="no-underline"
                 >
-                  <Tag>{group}</Tag>
+                  <Tag>
+                    <GroupName group={group} />
+                  </Tag>
                 </Link>
               ))}
             </>

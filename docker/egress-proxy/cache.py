@@ -43,6 +43,7 @@ REDIRECT_TTL = 300.0
 SPOOL_MAX_AGE = 86400.0
 SYNC_MAX_AGE = 30.0
 SYNC_WORKERS = 16
+WRITE_LOCKS = 64
 
 # Archives whose content never changes once published. Indexes (packuments, `@v/list`, version
 # lists) are deliberately absent: they change, and a stale one is how caches break installs.
@@ -190,11 +191,10 @@ class DirStore:
     def exists(self, path: str) -> bool:
         return os.path.isfile(self.file(path, "=body"))
 
-    def commit(self, path: str, spooled: str, meta: dict) -> str | None:
+    def put_body(self, path: str, spooled: str) -> None:
         body = self.file(path, "=body")
         os.makedirs(os.path.dirname(body), exist_ok=True)
         os.replace(spooled, body)
-        return self.write_meta(path, meta)
 
     def delete(self, path: str) -> None:
         for name in ("=meta.json", "=body"):
@@ -330,7 +330,7 @@ class S3Store:
     def exists(self, path: str) -> bool:
         return self.call("HEAD", f"{self.prefix}{path}/=body") is not None
 
-    def commit(self, path: str, spooled: str, meta: dict) -> str | None:
+    def put_body(self, path: str, spooled: str) -> None:
         try:
             with open(spooled, "rb") as handle:
                 size = os.fstat(handle.fileno()).st_size
@@ -340,7 +340,6 @@ class S3Store:
                     data=handle,
                     headers={"Content-Length": str(size), "Content-Type": "application/octet-stream"},
                 )
-            return self.write_meta(path, meta)
         finally:
             os.remove(spooled)
 
@@ -451,6 +450,8 @@ class Cache:
         self.index: dict[str, dict] = {}
         self.tokens: dict[str, str] = {}
         self.dirty: set[str] = set()
+        self.writing: set[str] = set()
+        self.write_locks = [threading.Lock() for _ in range(WRITE_LOCKS)]
         self.redirects: dict[str, tuple[str, str, str, float]] = {}
         self.lock = threading.Lock()
         self.sync_lock = threading.Lock()
@@ -532,42 +533,70 @@ class Cache:
                 logging.warning(f"egress: cache sweep failed: {error}")
             await asyncio.sleep(self.sweep_interval)
 
+    def writer(self, path: str) -> threading.Lock:
+        """The lock that orders this replica's writes to the files of `path`; never taken while holding `lock`."""
+        return self.write_locks[hash(path) % WRITE_LOCKS]
+
+    def put_meta(self, path: str, meta: dict) -> str | None:
+        """Writes the meta file of `path` under its writer lock; the caller ends it with `wrote` under `lock`."""
+        with self.lock:
+            self.writing.add(path)
+        try:
+            return self.store.write_meta(path, meta)
+        except BaseException:
+            with self.lock:
+                self.writing.discard(path)
+            raise
+
+    def wrote(self, path: str, token: str | None) -> None:
+        """Notes the token of a meta file this replica wrote, so the next sync does not read it back."""
+        self.writing.discard(path)
+        if token:
+            self.tokens[path] = token
+
     def flush(self) -> None:
         with self.lock:
-            pending = [(path, dict(self.index[path])) for path in self.dirty if path in self.index]
-            self.dirty.clear()
-        for path, meta in pending:
-            try:
-                token = self.store.write_meta(path, meta)
-            except Exception as error:
-                self.stats.errors += 1
-                logging.warning(f"egress: recording use of {path} failed: {error}")
-                continue
-            self.remember(path, token)
-
-    def remember(self, path: str, token: str | None) -> None:
-        """Notes the token of a meta file this replica wrote, so the next sync does not read it back."""
-        if token:
-            with self.lock:
-                self.tokens[path] = token
+            pending = list(self.dirty)
+        for path in pending:
+            with self.writer(path):
+                with self.lock:
+                    meta = dict(self.index[path]) if path in self.dirty and path in self.index else None
+                    self.dirty.discard(path)
+                if meta is None:
+                    continue
+                try:
+                    token = self.put_meta(path, meta)
+                except Exception as error:
+                    self.stats.errors += 1
+                    logging.warning(f"egress: recording use of {path} failed: {error}")
+                    continue
+                with self.lock:
+                    self.wrote(path, token)
 
     def sync(self) -> None:
         """Brings the index up to the store, which other replicas may write too."""
         with self.sync_lock:
             with self.lock:
-                seen = dict(self.tokens)
+                before = dict(self.tokens)
             tokens = self.store.list_meta()
             with self.lock:
-                changed = [p for p, token in tokens.items() if seen.get(p) != token or p not in self.index]
+                changed = [
+                    p
+                    for p, token in tokens.items()
+                    if (self.tokens.get(p) != token or p not in self.index)
+                    and p not in self.writing
+                    and self.tokens.get(p) == before.get(p)
+                ]
             with ThreadPoolExecutor(SYNC_WORKERS) as pool:
                 fresh = {p: meta for p, meta in zip(changed, pool.map(self.store.read_meta, changed)) if meta}
             with self.lock:
-                written = {p: token for p, token in self.tokens.items() if seen.get(p) != token}
+                written = {p: token for p, token in self.tokens.items() if before.get(p) != token}
+                keep = self.dirty | self.writing | written.keys()
                 for path in list(self.index):
-                    if path not in tokens and path not in self.dirty and path not in written:
+                    if path not in tokens and path not in keep:
                         del self.index[path]
                 for path, meta in fresh.items():
-                    if path not in self.dirty and path not in written:
+                    if path not in keep:
                         self.index[path] = meta
                 self.tokens = {**tokens, **written}
                 self.synced_at = time.time()
@@ -602,16 +631,17 @@ class Cache:
         removed = 0
         size = 0
         for path in paths:
-            try:
-                self.store.delete(path)
-            except Exception as error:
-                self.stats.errors += 1
-                logging.warning(f"egress: removing {path} from the cache failed: {error}")
-                continue
-            with self.lock:
-                meta = self.index.pop(path, None)
-                self.tokens.pop(path, None)
-                self.dirty.discard(path)
+            with self.writer(path):
+                try:
+                    self.store.delete(path)
+                except Exception as error:
+                    self.stats.errors += 1
+                    logging.warning(f"egress: removing {path} from the cache failed: {error}")
+                    continue
+                with self.lock:
+                    meta = self.index.pop(path, None)
+                    self.tokens.pop(path, None)
+                    self.dirty.discard(path)
             removed += 1
             size += meta["size"] if meta else 0
         return {"removed": removed, "bytes": size}
@@ -771,7 +801,13 @@ class Cache:
             "hits": 0,
         }
         try:
-            token = self.store.commit(spool.entry, spool.path, meta)
+            with self.writer(spool.entry):
+                self.store.put_body(spool.entry, spool.path)
+                token = self.put_meta(spool.entry, meta)
+                with self.lock:
+                    self.index[spool.entry] = meta
+                    self.dirty.discard(spool.entry)
+                    self.wrote(spool.entry, token)
         except Exception as error:
             self.stats.errors += 1
             logging.warning(f"egress: storing {spool.url} in the cache failed: {error}")
@@ -780,9 +816,6 @@ class Cache:
             except OSError:
                 pass
             return
-        with self.lock:
-            self.index[spool.entry] = meta
-        self.remember(spool.entry, token)
         self.stats.stored += 1
 
     def error(self, flow: http.HTTPFlow) -> None:

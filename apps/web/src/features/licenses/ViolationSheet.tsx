@@ -10,7 +10,17 @@ import {
   violationLicense,
 } from '../../lib/licenses.ts'
 import { parseRepoKey, repoSplat } from '../../lib/repo.ts'
-import { KeyValue, SideSheet, Table, Tag, Td, Th, notify, quietActionsOf } from '../../ui/index.ts'
+import {
+  GroupName,
+  KeyValue,
+  notify,
+  quietActionsOf,
+  SideSheet,
+  Table,
+  Tag,
+  Td,
+  Th,
+} from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
 import { ExceptionDialog } from './ExceptionDialog.tsx'
 
@@ -50,7 +60,9 @@ function Repositories({ violation }: { violation: LicenseViolation }) {
               <Td>
                 <span className="flex flex-wrap gap-1">
                   {entry.groups.map((group) => (
-                    <Tag key={group}>{group}</Tag>
+                    <Tag key={group}>
+                      <GroupName group={group} />
+                    </Tag>
                   ))}
                 </span>
               </Td>

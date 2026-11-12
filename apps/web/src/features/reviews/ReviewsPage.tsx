@@ -7,7 +7,7 @@ import { useRepos, useReviews } from '../../api/queries.ts'
 import { formatUsd } from '../../lib/ai-usage.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
 import {
   type ReviewSortKey,
@@ -240,9 +240,8 @@ export function ReviewsBody({
     review,
     groups: groupsOf.get(repoKey(review.repo)) ?? [],
   }))
-  const mine = !repo && view === 'mine'
-  const folded = foldOtherTeams(rows, homeGroups, (row) => row.groups)
-  const keys = (mine ? [...folded.mine, ...folded.others] : rows).map(
+  const folded = foldScope(rows, view, homeGroups, (row) => row.groups)
+  const keys = (repo ? rows : [...folded.shown, ...folded.others]).map(
     (row) => row.review.analysisId,
   )
   const step = neighbours(keys, search.review)
@@ -250,7 +249,9 @@ export function ReviewsBody({
   const authors = reviewAuthors(loaded)
   const filtered = Boolean(search.q || search.verdict || search.mode || search.author)
   const window = reviews.data.pages[0]?.window
-  const narrowedHere = Boolean(search.q || search.mode || search.author || mine)
+  const narrowedHere = Boolean(
+    search.q || search.mode || search.author || (!repo && view !== 'all'),
+  )
   const strip = (shown: readonly Row[]) =>
     window && !narrowedHere
       ? stripCells(window, window.partial ? '· at least' : undefined)

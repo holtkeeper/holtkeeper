@@ -1,4 +1,5 @@
 import { defineAnalyzer } from '@holtkeeper/analyzer'
+import type { RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
 import { type PropagateSteps, runPropagation } from './pipeline.ts'
@@ -59,6 +60,8 @@ export interface PropagateAnalyzerDependencies {
   steps?: PropagateSteps
   /** Proposes write tasks for repositories whose checks fail; without it they get draft merge requests. */
   fixes?: FixProposer
+  /** Whether a repository is meant to have tests (`repo.tests`); one without runs no test checks. */
+  testsExpected?: (repo: RepoRef) => Promise<boolean>
 }
 
 /**
@@ -103,6 +106,7 @@ export function createPropagateAnalyzer(dependencies: PropagateAnalyzerDependenc
         packages: options.packages,
         ...(options.onlyRepos ? { onlyRepos: options.onlyRepos } : {}),
         ...(options.checks ? { checks: options.checks } : {}),
+        ...(dependencies.testsExpected ? { testsExpected: dependencies.testsExpected } : {}),
         allowInstallScripts: options.allowInstallScripts,
         ...(options.fixTasks && dependencies.fixes ? { fixes: dependencies.fixes } : {}),
         mergeRequest: options.mergeRequest,

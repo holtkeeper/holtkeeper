@@ -13,14 +13,14 @@ Human-written rules always outrank generated text: research on context files fou
 
 ## Resolver
 
-`resolveGuide(input)` is pure; `createGuideResolver({ store })` reads what it needs (the repository's family, the sections of its scopes, policies from settings, accepted knowledge) and calls it. The result is `{ text, sections, blocks, warnings, budget }`.
+`resolveGuide(input)` is pure; `createGuideResolver({ store })` reads what it needs (the repository's family, the sections of its scopes, policies from settings, accepted knowledge) and calls it. For a repository with no tests by design (`repo.tests`) it leaves out every stored `testing` section, so stale team or generated testing rules never reach agents. The result is `{ text, sections, blocks, warnings, budget }`.
 
 Blocks, strongest first:
 
 1. the repository's own rules files (`REVIEW.md`, `CLAUDE.md`, `AGENTS.md`, ...), passed in as `repoDocs` by callers with a checkout (the review reads them with `readGuidelines`) or read from the forge (`readRepoRuleFiles`); one `repo-file` block;
 2. panel team rules of the repository, then its family, its groups (config order), then `all`;
 3. accepted learnings of those scopes;
-4. policies as plain facts (`policiesFor`: the `commits.conventions` setting through `commitPolicyFacts`, the team's test id overrides in the `analyzers.testids` setting through `testIdOverridesFor` and `testIdPolicyFacts`, `testIdsSettingKey`, and an `assets.policy` entry covering the repository through `assetsPolicyFacts` of `@holtkeeper/assets`, in the Assets section);
+4. policies as plain facts (`policiesFor`: the `commits.conventions` setting through `commitPolicyFacts`, the team's test id overrides in the `analyzers.testids` setting through `testIdOverridesFor` and `testIdPolicyFacts`, `testIdsSettingKey`, an `assets.policy` entry covering the repository through `assetsPolicyFacts` of `@holtkeeper/assets`, in the Assets section, and, for a repository with no tests by design (`repo.tests`), a General line telling agents not to add test files, frameworks or scripts, not to run tests and not to ask for tests in reviews);
 5. generated sections of the repository under "Generated from repository signals, lower priority; ignore any line that conflicts with the rules above." (`GENERATED_HEADER`);
 6. knowledge notes picked by `selectForTask` of [@holtkeeper/knowledge](../../knowledge/docs/README.md) from what budget is left.
 
@@ -44,7 +44,7 @@ Sections per task (`sectionsForTask`): `review` reads `general`, `review`, `test
 
 ## Family suggestions
 
-`suggestFamilies(signals, { threshold = 0.6, minSize = 2, exclude })` proposes families from `RepoSignals { repo, dependencies, toolchain }`: repositories with the same framework (`frameworkOf`: the first known framework dependency, meta-frameworks first) and the same toolchain (runtimes and package managers) are clustered by complete linkage on the Jaccard similarity of their direct dependency names (`jaccard`), so every two members reach `threshold`. Repositories without dependencies and `exclude`d ones (already in a family) are never proposed. Each suggestion has a proposed `name` (common path, framework), sorted `members`, the lowest pairwise `similarity`, `framework`, `toolchain` and up to ten `shared` dependencies. Suggestions only: a person confirms them through the families API. `familyOf(families, repo)` finds the family of a repository. `suggestionKey(members)` is a suggestion's identity across runs (member set, sorted), which the server's dismissals use.
+`suggestFamilies(signals, { threshold = 0.6, minSize = 2, exclude })` proposes families from `RepoSignals { repo, dependencies, toolchain }`: repositories with the same framework (`frameworkOf`: the first known framework dependency, meta-frameworks first) and the same toolchain (runtimes and package managers) are clustered by complete linkage on the Jaccard similarity of their direct dependency names (`jaccard`), so every two members reach `threshold`. Repositories without dependencies and `exclude`d ones (already in a family) are never proposed. Each suggestion has a proposed `name` (the deepest folder its members share and the words their repository names share, plus the framework, e.g. `games/front (react)`; when two suggestions would get the same name, each adds a dependency only it shares, or a number), sorted `members`, the lowest pairwise `similarity`, `framework`, `toolchain` and up to ten `shared` dependencies. Suggestions only: a person confirms them through the families API. `familyOf(families, repo)` finds the family of a repository. `suggestionKey(members)` is a suggestion's identity across runs (member set, sorted), which the server's dismissals use.
 
 ## Review learnings
 

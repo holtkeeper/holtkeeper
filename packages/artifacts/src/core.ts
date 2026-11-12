@@ -9,6 +9,7 @@ import type {
   ArtifactUsage,
   PresignOptions,
   SweepResult,
+  UsageBucket,
 } from './types.ts'
 
 /** Lowercase hex SHA-256 of `data`: the id an artifact store gives this content. */
@@ -65,6 +66,11 @@ export interface ArtifactBackend {
   remove(id: string): Promise<void>
   /** Metadata of every stored artifact, in any order. */
   listMeta(): Promise<ArtifactInfo[]>
+  /**
+   * `listMeta` plus the totals of every object the listing saw under the root; `usage` prefers it
+   * and reports the totals as `objects`.
+   */
+  listObjects?(): Promise<{ items: ArtifactInfo[]; objects: UsageBucket }>
   /** Rejects when the store cannot be reached; costs the same however many artifacts it holds. */
   ping(): Promise<void>
   presign?(info: ArtifactInfo, options: PresignOptions): string
@@ -79,7 +85,10 @@ export interface StoreOptions {
   now?: () => Date
   /** Access times are rewritten at most this often per artifact. Default one hour. */
   touchIntervalMs?: number
-  /** `usage()` is computed at most this often; `0` always recomputes. Default 0. */
+  /**
+   * `usage()` is computed at most this often, and writes do not refresh it sooner, so it can lag
+   * by this much; `0` always recomputes. Concurrent calls share one measurement. Default 0.
+   */
   usageCacheMs?: number
 }
 
@@ -115,6 +124,17 @@ export function createArtifactStore(
   const touchInterval = options.touchIntervalMs ?? 3_600_000
   const usageCacheMs = options.usageCacheMs ?? 0
   let cachedUsage: { at: number; usage: ArtifactUsage } | undefined
+  let pendingUsage: Promise<ArtifactUsage> | undefined
+  const measure = async () => {
+    const started = Date.now()
+    const listed = backend.listObjects
+      ? await backend.listObjects()
+      : { items: await backend.listMeta() }
+    const usage = summarizeUsage(listed.items)
+    if ('objects' in listed) usage.objects = listed.objects
+    if (usageCacheMs > 0) cachedUsage = { at: started, usage }
+    return usage
+  }
 
   const stat = async (id: string) => (isArtifactId(id) ? backend.readMeta(id) : undefined)
   const touch = async (info: ArtifactInfo): Promise<ArtifactInfo> => {
@@ -126,7 +146,6 @@ export function createArtifactStore(
   }
   const remove = async (id: string) => {
     await backend.remove(id)
-    cachedUsage = undefined
   }
 
   return {
@@ -147,7 +166,6 @@ export function createArtifactStore(
         lastAccessedAt: at,
         ...(tags ? { tags } : {}),
       })
-      cachedUsage = undefined
       return { id, bytes: data.byteLength }
     },
 
@@ -192,11 +210,11 @@ export function createArtifactStore(
     },
 
     async usage() {
-      const at = Date.now()
-      if (cachedUsage && at - cachedUsage.at < usageCacheMs) return cachedUsage.usage
-      const usage = summarizeUsage(await backend.listMeta())
-      if (usageCacheMs > 0) cachedUsage = { at, usage }
-      return usage
+      if (cachedUsage && Date.now() - cachedUsage.at < usageCacheMs) return cachedUsage.usage
+      pendingUsage ??= measure().finally(() => {
+        pendingUsage = undefined
+      })
+      return pendingUsage
     },
 
     async sweep({ olderThan, maxBytes }): Promise<SweepResult> {

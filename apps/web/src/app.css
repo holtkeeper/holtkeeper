@@ -257,6 +257,13 @@ samp,
   height: calc(100vh - 16px);
 }
 
+@media (min-width: 761px) {
+  .shell-sheet:has(> [data-sheet-size='wide']) {
+    flex: 1 1 560px;
+    max-width: min(760px, 55vw);
+  }
+}
+
 .shell-sheet:empty {
   display: none;
 }

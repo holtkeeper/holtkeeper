@@ -1,4 +1,4 @@
-import type { McpCallView, McpUsageOverview } from '@holtkeeper/api'
+import type { McpCallView, McpPersonUsage, McpUsageOverview } from '@holtkeeper/api'
 import type { KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
@@ -6,12 +6,49 @@ const dayCountersSchema = z.object({
   calls: z.number(),
   errors: z.number(),
   tools: z.record(z.string(), z.object({ calls: z.number(), errors: z.number() })),
-  people: z.record(z.string(), z.object({ name: z.string(), calls: z.number() })),
+  people: z.record(
+    z.string(),
+    z.object({
+      name: z.string(),
+      calls: z.number(),
+      errors: z.number().default(0),
+      lastAt: z.string().optional(),
+      tools: z.record(z.string(), z.number()).default({}),
+      tokens: z.record(z.string(), z.number()).default({}),
+      packages: z.record(z.string(), z.number()).default({}),
+      clients: z.record(z.string(), z.number()).default({}),
+    }),
+  ),
   packages: z.record(z.string(), z.number()),
   clients: z.record(z.string(), z.number()),
 })
 
 type DayCounters = z.infer<typeof dayCountersSchema>
+type PersonCounters = DayCounters['people'][string]
+
+const shownPerPerson = 10
+const packagesKeptPerPerson = 200
+
+const emptyPerson = (name: string): PersonCounters => ({
+  name,
+  calls: 0,
+  errors: 0,
+  tools: {},
+  tokens: {},
+  packages: {},
+  clients: {},
+})
+
+const addCounts = (into: Record<string, number>, add: Record<string, number>) => {
+  for (const [key, n] of Object.entries(add)) into[key] = (into[key] ?? 0) + n
+}
+
+const topOf = (counts: Record<string, number>, size: number) =>
+  Object.fromEntries(
+    Object.entries(counts)
+      .toSorted((a, b) => b[1] - a[1])
+      .slice(0, size),
+  )
 
 const callsSchema = z.array(
   z.object({
@@ -48,7 +85,7 @@ const dayKey = (date: string) => `mcp:usage:${date}`
 const recentKey = 'mcp:recent'
 const recentSize = 200
 
-function addDay(into: DayCounters, add: DayCounters): DayCounters {
+function addDay(into: DayCounters, add: DayCounters, capped = false): DayCounters {
   const result = structuredClone(into)
   result.calls += add.calls
   result.errors += add.errors
@@ -58,14 +95,21 @@ function addDay(into: DayCounters, add: DayCounters): DayCounters {
     current.errors += counts.errors
   }
   for (const [id, person] of Object.entries(add.people)) {
-    const current = (result.people[id] ??= { name: person.name, calls: 0 })
+    const current = (result.people[id] ??= emptyPerson(person.name))
     current.name = person.name
     current.calls += person.calls
+    current.errors += person.errors
+    if (person.lastAt && (!current.lastAt || person.lastAt > current.lastAt))
+      current.lastAt = person.lastAt
+    addCounts(current.tools, person.tools)
+    addCounts(current.tokens, person.tokens)
+    addCounts(current.packages, person.packages)
+    addCounts(current.clients, person.clients)
+    if (capped && Object.keys(current.packages).length > packagesKeptPerPerson)
+      current.packages = topOf(current.packages, packagesKeptPerPerson)
   }
-  for (const [name, calls] of Object.entries(add.packages))
-    result.packages[name] = (result.packages[name] ?? 0) + calls
-  for (const [client, calls] of Object.entries(add.clients))
-    result.clients[client] = (result.clients[client] ?? 0) + calls
+  addCounts(result.packages, add.packages)
+  addCounts(result.clients, add.clients)
   return result
 }
 
@@ -78,6 +122,17 @@ const sorted = <T extends { calls: number }>(items: T[]) =>
 export interface McpCall extends McpCallView {
   /** Display name of `principal`. */
   name: string
+  /** Id of the MCP token the call authenticated with; absent for signed-in sessions. */
+  token?: string
+}
+
+/** An `McpPersonUsage` before the server adds what it knows about the person. */
+export type McpPersonCalls = Omit<McpPersonUsage, 'teams' | 'activeTokens'>
+
+/** `McpUsageOverview` with people as `McpPersonCalls`. */
+type McpCallsOverview = Omit<McpUsageOverview, 'people' | 'me'> & {
+  people: McpPersonCalls[]
+  me: McpPersonCalls
 }
 
 /** Options of `mcpUsage`. */
@@ -87,14 +142,17 @@ export interface McpUsageOptions {
   now: () => Date
   /** Calls are written in batches at most this often. Default 5 s. */
   flushMs?: number
-  /** Days the daily counters are kept. Default 120. */
+  /** Days the daily counters are kept. Default 90. */
   retentionDays?: number
 }
 
 /**
  * Counts MCP tool calls per day (by tool, person, package and client) and keeps the newest 200
- * calls. Calls are buffered and merged into `Store.kv` in batches, with `compareAndSet` where the
- * store has it; concurrent processes without it may lose a few counts, which is fine for usage
+ * calls. Per person and day it keeps calls, errors, the last call and full counts per tool, token
+ * and client, which the tool registry and each person's tokens keep small; packages per person
+ * keep the 200 most called, far above what one person asks about in a day. Overviews show each
+ * person's 10 most used tools, packages and clients. Calls are buffered and merged into
+ * `Store.kv` in batches, with `compareAndSet` where the store has it; concurrent processes without it may lose a few counts, which is fine for usage
  * statistics.
  */
 export function mcpUsage(options: McpUsageOptions) {
@@ -106,7 +164,7 @@ export function mcpUsage(options: McpUsageOptions) {
     },
   }
   const flushMs = options.flushMs ?? 5_000
-  const ttl = (options.retentionDays ?? 120) * 86_400
+  const ttl = (options.retentionDays ?? 90) * 86_400
   let days = new Map<string, DayCounters>()
   let recent: McpCallView[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -134,7 +192,7 @@ export function mcpUsage(options: McpUsageOptions) {
     flushing = (async () => {
       for (const [date, counters] of batch)
         // oxlint-disable-next-line no-await-in-loop -- a day or two per batch
-        await merge(dayKey(date), (current) => addDay(dayOf(current), counters), ttl)
+        await merge(dayKey(date), (current) => addDay(dayOf(current), counters, true), ttl)
       if (calls.length)
         await merge(recentKey, (current) => [...calls, ...callsOf(current)].slice(0, recentSize))
     })().finally(() => {
@@ -158,12 +216,18 @@ export function mcpUsage(options: McpUsageOptions) {
       const tool = (day.tools[call.tool] ??= { calls: 0, errors: 0 })
       tool.calls += 1
       if (!call.ok) tool.errors += 1
-      const person = (day.people[call.principal] ??= { name: call.name, calls: 0 })
+      const person = (day.people[call.principal] ??= emptyPerson(call.name))
       person.calls += 1
+      if (!call.ok) person.errors += 1
+      if (!person.lastAt || call.at > person.lastAt) person.lastAt = call.at
+      person.tools[call.tool] = (person.tools[call.tool] ?? 0) + 1
+      if (call.token) person.tokens[call.token] = (person.tokens[call.token] ?? 0) + 1
+      if (call.subject) person.packages[call.subject] = (person.packages[call.subject] ?? 0) + 1
+      if (call.client) person.clients[call.client] = (person.clients[call.client] ?? 0) + 1
       if (call.subject) day.packages[call.subject] = (day.packages[call.subject] ?? 0) + 1
       if (call.client) day.clients[call.client] = (day.clients[call.client] ?? 0) + 1
       days.set(date, day)
-      const { name: _, ...view } = call
+      const { name: _, token: __, ...view } = call
       recent.unshift(view)
       if (recent.length > recentSize) recent.length = recentSize
       schedule()
@@ -174,14 +238,14 @@ export function mcpUsage(options: McpUsageOptions) {
 
     /**
      * Usage of the last `days` days. Without `everyone` the people list and recent calls are
-     * limited to `self`.
+     * limited to `self`; `me` and `tokens` are always the caller's own.
      */
     async overview(input: {
       days: number
-      self: string
+      self: { id: string; name: string }
       everyone: boolean
       endpoint: string
-    }): Promise<McpUsageOverview> {
+    }): Promise<McpCallsOverview> {
       await flush()
       const today = options.now()
       const dates = Array.from({ length: input.days }, (_, index) =>
@@ -194,14 +258,38 @@ export function mcpUsage(options: McpUsageOptions) {
           return dayOf(await kv.get(dayKey(date)))
         }),
       )
-      const total = counters.reduce(addDay, emptyDay())
+      const total = counters.reduce((sum, day) => addDay(sum, day), emptyDay())
+      const personOf = (id: string, person: PersonCounters): McpPersonCalls => ({
+        id,
+        name: person.name,
+        calls: person.calls,
+        errors: person.errors,
+        ...(person.lastAt ? { lastAt: person.lastAt } : {}),
+        tools: sorted(
+          Object.entries(topOf(person.tools, shownPerPerson)).map(([tool, calls]) => ({
+            tool,
+            calls,
+          })),
+        ),
+        packages: sorted(
+          Object.entries(topOf(person.packages, shownPerPerson)).map(([name, calls]) => ({
+            name,
+            calls,
+          })),
+        ),
+        clients: sorted(
+          Object.entries(topOf(person.clients, shownPerPerson)).map(([client, calls]) => ({
+            client,
+            calls,
+          })),
+        ),
+        daily: counters.map((day) => day.people[id]?.calls ?? 0),
+        dailyErrors: counters.map((day) => day.people[id]?.errors ?? 0),
+      })
       const people = sorted(
-        Object.entries(total.people).map(([id, person]) => ({
-          id,
-          name: person.name,
-          calls: person.calls,
-        })),
+        Object.entries(total.people).map(([id, person]) => personOf(id, person)),
       )
+      const own = total.people[input.self.id] ?? emptyPerson(input.self.name)
       const calls = callsOf(await kv.get(recentKey))
       return {
         days: dates.map((date, index) => ({
@@ -215,10 +303,12 @@ export function mcpUsage(options: McpUsageOptions) {
           Object.entries(total.packages).map(([name, n]) => ({ name, calls: n })),
         ).slice(0, 20),
         clients: sorted(Object.entries(total.clients).map(([client, n]) => ({ client, calls: n }))),
-        people: input.everyone ? people : people.filter((person) => person.id === input.self),
+        people: input.everyone ? people : people.filter((person) => person.id === input.self.id),
+        me: personOf(input.self.id, own),
+        tokens: sorted(Object.entries(own.tokens).map(([id, n]) => ({ id, calls: n }))),
         recent: (input.everyone
           ? calls
-          : calls.filter((call) => call.principal === input.self)
+          : calls.filter((call) => call.principal === input.self.id)
         ).slice(0, 50),
         endpoint: input.endpoint,
       }

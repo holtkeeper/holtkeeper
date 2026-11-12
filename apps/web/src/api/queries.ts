@@ -47,6 +47,7 @@ import type {
   PutSettingInput,
   RepoRef,
   ReviewQuery,
+  Scope,
   UpdateCredentialInput,
   UpdateKnowledgeInput,
   UpdateUserInput,
@@ -61,12 +62,14 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
+import { useCallback, useMemo } from 'react'
 
 import { hasLiveCards, mergeMessages, withNewer, withOlder } from '../lib/chat.ts'
+import { type GroupTitleOf, groupTitleOf } from '../lib/group-titles.ts'
 import { runBulk } from '../lib/inbox.ts'
 import { browserStorage, clearRecent } from '../lib/palette.ts'
 import { repoKey } from '../lib/repo.ts'
-import type { ScopeFocus } from '../lib/scope.ts'
+import { type ScopeFocus, describeScope } from '../lib/scope.ts'
 import {
   type AiOverviewQuery,
   type AiUsageQuery,
@@ -149,6 +152,18 @@ export const keys = {
 /** The signed-in principal and the login methods. */
 export const useMe = () =>
   useQuery({ queryKey: keys.me, queryFn: ({ signal }) => api.me(signal), staleTime: 60_000 })
+
+/** What people see for each group key (its display title, else the key), from `useMe`. */
+export function useGroupTitles(): GroupTitleOf {
+  const titles = useMe().data?.groupTitles
+  return useMemo(() => groupTitleOf(titles), [titles])
+}
+
+/** `describeScope` with groups shown by their display titles. */
+export function useDescribeScope(): (scope: Scope) => string {
+  const titleOf = useGroupTitles()
+  return useCallback((scope: Scope) => describeScope(scope, titleOf), [titleOf])
+}
 
 /** The Home page in one read; refreshed every minute while it is open. */
 export const useHome = () =>
@@ -699,6 +714,8 @@ export function useSettingMutations() {
     Promise.all([
       client.invalidateQueries({ queryKey: keys.settings }),
       client.invalidateQueries({ queryKey: ['assets'] }),
+      client.invalidateQueries({ queryKey: ['coverage'] }),
+      client.invalidateQueries({ queryKey: keys.repos }),
     ])
   return {
     put: useMutation({ mutationFn: (input: PutSettingInput) => api.putSetting(input), onSuccess }),
@@ -1036,6 +1053,7 @@ export function usePutGroup() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: GroupDocumentData }) => api.putGroup(id, data),
     onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: keys.me })
       await client.invalidateQueries({ queryKey: keys.config })
       await client.invalidateQueries({ queryKey: keys.repos })
       await client.invalidateQueries({ queryKey: keys.settings })
@@ -1336,12 +1354,13 @@ export const useAiOverview = (enabled = true, query: AiOverviewQuery = {}) =>
     enabled,
   })
 
-/** AI usage sums grouped by `groupBy` (comma list of dimensions). */
-export const useAiUsage = (filter: AiUsageQuery & { groupBy?: string }) =>
+/** AI usage sums grouped by `groupBy` (comma list of dimensions); off while `enabled` is false. */
+export const useAiUsage = (filter: AiUsageQuery & { groupBy?: string }, enabled = true) =>
   useQuery({
     queryKey: [...keys.ai, 'usage', filter],
     queryFn: () => api.aiUsage(filter),
     placeholderData: keepPreviousData,
+    enabled,
   })
 
 /** Individual AI runs, newest first, paged by time. */

@@ -1,5 +1,5 @@
 import { GitPullRequest, Gauge, Package, SlidersHorizontal } from 'lucide-react'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState, useRef } from 'react'
 
 import {
   type RenovateField,
@@ -96,7 +96,9 @@ export function RenovateEditor({
         ? undefined
         : value
   const resultKey = result === undefined ? '' : JSON.stringify(result)
-  useEffect(() => onChange(resultKey ? JSON.parse(resultKey) : undefined), [onChange, resultKey])
+  const changed = useRef(onChange)
+  changed.current = onChange
+  useEffect(() => changed.current(resultKey ? JSON.parse(resultKey) : undefined), [resultKey])
 
   const set = (key: string, next: unknown) => setValue((previous) => ({ ...previous, [key]: next }))
   const reset = (key: string) =>

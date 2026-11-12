@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
+import { useGroupTitles } from '../api/queries.ts'
 import { otherTeamsText } from '../lib/other-teams.ts'
 
 /**
@@ -38,6 +39,7 @@ export function OtherTeams({
   summary?: ReactNode
 }) {
   const [own, setOwn] = useState(defaultOpen)
+  const titleOf = useGroupTitles()
   const open = controlled ?? own
   const setOpen = (next: boolean) => {
     setOwn(next)
@@ -68,7 +70,7 @@ export function OtherTeams({
               </span>
               <span className="tabular">{otherTeamsText(count, teams?.length ?? 0, noun)}</span>
               {teams?.length ? (
-                <span className="min-w-0 truncate text-dim">{teams.join(', ')}</span>
+                <span className="min-w-0 truncate text-dim">{teams.map(titleOf).join(', ')}</span>
               ) : null}
               {summary ? (
                 <>
@@ -97,7 +99,9 @@ export function OtherTeams({
         <span>
           Other teams <span className="tabular">({count})</span>
         </span>
-        {teams?.length ? <span className="text-muted">· {teams.join(', ')}</span> : null}
+        {teams?.length ? (
+          <span className="text-muted">· {teams.map(titleOf).join(', ')}</span>
+        ) : null}
       </button>
       {open ? children : null}
     </section>

@@ -20,11 +20,21 @@ Server side of Settings › AI and Settings › Integrations: forges, credential
 
 `routes/webhooks.ts` records a forge's last delivery (`recordForgeDelivery` in `webhook-sync.ts`, kv `webhooks:forge:<id>:last`, kept 30 days) for every authenticated delivery whose forge is known: `POST /webhooks/<forge>` and `/webhooks/r/<token>` right after the secret check, handled or ignored; `POST /webhooks/gitlab` once a delivery names a repository of a known forge. Deliveries with a wrong secret record nothing. `lastForgeDeliveries` reads them back.
 
+## Request limits usage
+
+`GET /api/limits/usage` (`routes/limits.ts`, `limitUsage`) needs a global `settings:read` and returns `LimitUsageList { rows, shared, readAt }`, cached 5 seconds per process unfiltered; each answer then keeps a credential row only when the caller has `credentials:read` on that credential's scope, while `forge:<id>` rows and configured keys that name nothing show to everyone allowed in. Before reading the limiter's `snapshot()` it resolves every credential's policy (kind defaults plus the everything-scope `limits.credentials` entry) and configures it, so a web process that ran none of the work still refills buckets with the right policy. Rows:
+
+- every credential whose policy has a limit, that a `limits.credentials` entry names (by id or name; `source: 'configured'`, else `default`) or that has recorded use (requests or tokens in the last hour, leases held, tokens today, a rate-limit answer);
+- `forge:<id>` keys of known forges as `Forge <id>`, with the forge's kind;
+- configured keys that name no credential or forge, with `missing: true`, sorted last.
+
+Each row carries the effective `policy` (rates, concurrency, daily caps; no backoff), `requestsLastHour` and `tokensLastHour` from the limiter's rolling window, `inFlight`, `coolDownUntil`, `last429At`, `dayTokens` and `dayCostUsd`. `shared` is `limits.distributed`: without it every process counts only its own calls. Not counted: queues of other processes, calls made with the same token outside Holtkeeper and egress-proxy downloads; the forge's own rate-limit headers are not read.
+
 ## AI budget and tools
 
 `routes/ai.ts`. Both routes need `ai:read` (or `ai:admin`) somewhere.
 
-- `GET /api/ai/budget`: the current budget week, this week's spend and runs over the usage the caller's grants cover, `budget` (the readable budget covering the most, as `broadestBudget` over `budgetStatuses`; the default budget is included only for a global `ai:read`), `budgetChanged` (who and when changed the global `llm.budget` entry), `byFeature` (spend per task kind, `other` for runs without one, largest first, zero-cost kinds left out) and `scopes` (readable `llm.budget` entries narrower than everything, fullest first). Features have no caps of their own; the web groups task kinds into features (`lib/ai-features.ts`).
+- `GET /api/ai/budget`: the current budget week, this week's spend and runs over the usage the caller's grants cover, `budget` (the readable budget covering the most, as `broadestBudget` over `budgetStatuses`; the default budget is included only for a global `ai:read`), `budgetChanged` (who and when changed the global `llm.budget` entry), `byFeature` (spend per task kind, `other` for runs without one, largest first, zero-cost kinds left out) and `scopes` (readable `llm.budget` entries narrower than everything, fullest first). Features have no caps of their own; task kinds group into features by `featureOf` of `@holtkeeper/ai-usage/features`.
 - `GET /api/ai/tools`: the tool registry, built once per process from the same toolset factories internal agents and the MCP endpoint use, with an inert context, so it lists definitions only. `usedBy` names the task kinds whose agents mount the tool's toolset (`review`, `chat`, `write-task`, from `taskToolsets`) and `mcp` for MCP clients; a tool served under one name by both counts once. Sorted by toolset, then name. Read-only: tools cannot be switched off.
 
 ## Budget warning in the Inbox

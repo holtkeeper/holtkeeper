@@ -22,6 +22,8 @@ const text = (value: string) => ({
 /** Who calls the MCP endpoint, for usage statistics. */
 export interface McpCaller {
   principal: Principal
+  /** Id of the MCP token the request authenticated with. */
+  token?: string
   /** First word of the client's User-Agent. */
   client?: string
   usage: Pick<McpUsage, 'record'>
@@ -95,6 +97,7 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
             principal: caller.principal.id,
             name: caller.principal.name,
             ...(caller.client ? { client: caller.client } : {}),
+            ...(caller.token ? { token: caller.token } : {}),
             ...(subject ? { subject } : {}),
             ok,
             durationMs: Math.round(performance.now() - started),

@@ -4,7 +4,7 @@ import type { FindingsResponse, LicensePolicySummary, LicensesOverview } from '@
 import { z } from 'zod'
 
 import type { RepoFilter } from '../api-surface/catalog.ts'
-import { type ServerDeps, repoTarget } from '../context.ts'
+import { type ServerDeps, groupLabeler, repoTarget } from '../context.ts'
 import { type FindingsFilter, readFindings } from '../findings.ts'
 import { createFleetCache } from '../fleet-cache.ts'
 import { licensesOverview } from '../licenses.ts'
@@ -28,6 +28,8 @@ export function readableRepo(canRead: RepoFilter, repo: string | undefined): str
 export interface SupplyToolsAccess {
   findings(filter?: FindingsFilter): Promise<FindingsResponse>
   licenses(): Promise<LicensesOverview>
+  /** How a group key is named in tool output; default the key itself. */
+  groupLabel?: (key: string) => string
 }
 
 /**
@@ -69,6 +71,7 @@ export function supplyToolsAccess(
         (target) => canSee(principal, 'analyses:read', target),
         can(principal, 'settings:read', { kind: 'scope', scope: { all: true } }),
       ),
+    groupLabel: groupLabeler(config),
   })
 }
 
@@ -79,9 +82,12 @@ const code = (values: readonly string[]) => values.map((value) => `\`${value}\``
 const findingStatuses = ['open', 'fixing', 'allowlisted'] as const
 const severities = ['critical', 'high', 'medium', 'low', 'unknown'] as const
 
+type GroupLabel = (key: string) => string
+
 function renderFindings(
   response: FindingsResponse,
   options: { severity?: string; status?: string; limit: number },
+  label: GroupLabel,
 ): string {
   const { severities: counts } = response
   const groups = response.groups.filter(
@@ -102,7 +108,7 @@ function renderFindings(
       `- **${group.advisory}**${group.aliases.length ? ` (${list(group.aliases)})` : ''} ${group.package} (${group.ecosystem}) — ${group.severity}, ${group.status}${group.taskId ? ` by task ${group.taskId}` : ''}${group.summary ? `: ${group.summary}` : ''}. ${group.fixedIn.length ? `Fixed in ${list(group.fixedIn)}` : 'No fix'}; first seen ${day(group.firstSeenAt)}${group.url ? `; ${group.url}` : ''}`,
       ...group.repos.map(
         (repo) =>
-          `  - \`${repo.repo}\`${repo.groups.length ? ` (${list(repo.groups)})` : ''}: ${list(repo.versions)} in ${code(repo.sources)}, ${repo.status}${repo.taskId ? ` by task ${repo.taskId}` : ''}`,
+          `  - \`${repo.repo}\`${repo.groups.length ? ` (${list(repo.groups.map(label))})` : ''}: ${list(repo.versions)} in ${code(repo.sources)}, ${repo.status}${repo.taskId ? ` by task ${repo.taskId}` : ''}`,
       ),
     ]),
     ...(groups.length > shown.length
@@ -119,7 +125,11 @@ function renderPolicy(policy: LicensePolicySummary): string {
   return `Policy${policy.preset ? ` (${policy.preset})` : ''}: allow ${list(policy.allow) || 'nothing'}; deny ${list(policy.deny) || 'nothing'}${policy.review.length ? `; needs review ${list(policy.review)}` : ''}${policy.ignore.length ? `; ignore ${list(policy.ignore)}` : ''}; unknown licenses ${policy.unknown === 'violation' ? 'are violations' : 'warn'}${policy.devDependencies === 'ignore' ? '; dev-only dependencies are not judged' : ''}${policy.requireProjectLicense ? '; a project license file is required' : ''}${policy.overrides ? `; ${policy.overrides} narrower override${policy.overrides === 1 ? '' : 's'}` : ''}.${exceptions.length ? `\nExceptions: ${exceptions.map((exception) => `${exception.package}${exception.version ? `@${exception.version}` : ''}${exception.license ? ` (${exception.license})` : ''}: ${exception.reason}${exception.expires ? `, until ${exception.expires}` : ''}`).join('; ')}.` : ''}`
 }
 
-function renderLicenses(overview: LicensesOverview, repo: string | undefined): string {
+function renderLicenses(
+  overview: LicensesOverview,
+  repo: string | undefined,
+  label: GroupLabel,
+): string {
   const rows = repo ? overview.repos.filter((row) => row.repo === repo) : overview.repos
   const violations = repo
     ? overview.violations.filter((violation) =>
@@ -154,7 +164,7 @@ function renderLicenses(overview: LicensesOverview, repo: string | undefined): s
     '## Repositories',
     ...rows.map(
       (row) =>
-        `- \`${row.repo}\`${row.groups.length ? ` (${list(row.groups)})` : ''}: ${row.packages} packages — ${row.verdicts.denied} denied, ${row.verdicts.unlisted} need review, ${row.verdicts.unknown} unknown, ${row.verdicts.allowed} allowed, ${row.verdicts.ignored} ignored, ${row.verdicts.internal} internal${row.verdicts.excepted ? `, ${row.verdicts.excepted} excepted` : ''}${row.licenseFile === 'missing' ? '; license file missing' : ''}; scanned ${day(row.createdAt)}`,
+        `- \`${row.repo}\`${row.groups.length ? ` (${list(row.groups.map(label))})` : ''}: ${row.packages} packages — ${row.verdicts.denied} denied, ${row.verdicts.unlisted} need review, ${row.verdicts.unknown} unknown, ${row.verdicts.allowed} allowed, ${row.verdicts.ignored} ignored, ${row.verdicts.internal} internal${row.verdicts.excepted ? `, ${row.verdicts.excepted} excepted` : ''}${row.licenseFile === 'missing' ? '; license file missing' : ''}; scanned ${day(row.createdAt)}`,
     ),
     ...(repo
       ? []
@@ -171,6 +181,7 @@ function renderLicenses(overview: LicensesOverview, repo: string | undefined): s
  * as `GET /api/audits/findings` and `GET /api/licenses`, as text.
  */
 export function supplyTools(access: SupplyToolsAccess): RegistryTool[] {
+  const label = access.groupLabel ?? ((key: string) => key)
   return [
     defineTool({
       name: 'security_findings',
@@ -183,11 +194,15 @@ export function supplyTools(access: SupplyToolsAccess): RegistryTool[] {
         limit: z.number().int().min(1).max(200).optional().describe('Default 50'),
       }),
       run: async ({ repo, severity, status, limit }) =>
-        renderFindings(await access.findings(repo ? { repos: [repo] } : {}), {
-          ...(severity ? { severity } : {}),
-          ...(status ? { status } : {}),
-          limit: limit ?? 50,
-        }),
+        renderFindings(
+          await access.findings(repo ? { repos: [repo] } : {}),
+          {
+            ...(severity ? { severity } : {}),
+            ...(status ? { status } : {}),
+            limit: limit ?? 50,
+          },
+          label,
+        ),
       subject: ({ repo }) => repo,
     }),
     defineTool({
@@ -197,7 +212,7 @@ export function supplyTools(access: SupplyToolsAccess): RegistryTool[] {
       input: z.object({
         repo: z.string().optional().describe('Only this repository, as forge:path'),
       }),
-      run: async ({ repo }) => renderLicenses(await access.licenses(), repo),
+      run: async ({ repo }) => renderLicenses(await access.licenses(), repo, label),
       subject: ({ repo }) => repo,
     }),
   ]

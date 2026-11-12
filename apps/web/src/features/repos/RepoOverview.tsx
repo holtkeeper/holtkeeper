@@ -22,7 +22,17 @@ import {
 } from '../../lib/repo-page.ts'
 import { repoKey } from '../../lib/repo.ts'
 import { formatValue } from '../../lib/units.ts'
-import { CopyButton, Dot, KeyValue, Placeholder, Table, Tag, Td, Th } from '../../ui/index.ts'
+import {
+  CopyButton,
+  Dot,
+  GroupName,
+  KeyValue,
+  Placeholder,
+  Table,
+  Tag,
+  Td,
+  Th,
+} from '../../ui/index.ts'
 import { HubCard, HubLink, hubLinkClass } from '../repo/HubCard.tsx'
 import { useSession } from '../shell/session.ts'
 
@@ -225,7 +235,9 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
                     params={{ groupId: group }}
                     className="no-underline"
                   >
-                    <Tag>{group}</Tag>
+                    <Tag>
+                      <GroupName group={group} />
+                    </Tag>
                   </Link>
                 ))}
               </span>

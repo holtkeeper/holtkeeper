@@ -14,6 +14,7 @@ import { useState } from 'react'
 
 import {
   useFamilies,
+  useGroupTitles,
   useGuideSection,
   useKnowledgeEntry,
   useLearnings,
@@ -39,6 +40,7 @@ import { BudgetWarningBody } from '../ai/BudgetWarning.tsx'
 import { EffectivePrompt } from '../knowledge/EffectivePrompt.tsx'
 import { NextCard } from '../releases/NextCard.tsx'
 import { TaskDetail, TaskGroupView } from '../tasks/TaskGroupView.tsx'
+import { WritesOffNotice, useWritesOff } from '../tasks/WritesOff.tsx'
 import type { Decide } from './decide.ts'
 
 /** Tabs each kind's sheet offers, first one shown by default. */
@@ -68,6 +70,7 @@ function TaskBody({ item, tab }: { item: InboxTaskItem; tab: string }) {
   const group = useTaskGroup(item.groupId)
   const [now] = useState(() => new Date())
   const [openTask, setOpenTask] = useState<string>()
+  const writesOff = useWritesOff()
   if (!group.data) return <Loading error={group.error} />
   const detail = group.data
   if (tab === 'repos')
@@ -86,13 +89,16 @@ function TaskBody({ item, tab }: { item: InboxTaskItem; tab: string }) {
       </ul>
     )
   return (
-    <TaskGroupView
-      group={detail}
-      people={detail.people}
-      section={tab === 'plan' || tab === 'request' ? tab : 'diff'}
-      openTask={openTask}
-      onOpenTask={setOpenTask}
-    />
+    <div className="flex flex-col gap-3">
+      {writesOff ? <WritesOffNotice /> : null}
+      <TaskGroupView
+        group={detail}
+        people={detail.people}
+        section={tab === 'plan' || tab === 'request' ? tab : 'diff'}
+        openTask={openTask}
+        onOpenTask={setOpenTask}
+      />
+    </div>
   )
 }
 
@@ -151,6 +157,7 @@ function NoteBody({ item, tab }: { item: InboxNoteItem; tab: string }) {
 }
 
 function LearningBody({ item, decide }: { item: InboxLearningItem; decide: Decide }) {
+  const titleOf = useGroupTitles()
   const repo = parseRepoKey(item.repos[0]?.repo)
   const learnings = useLearnings({ ...(repo && { repo }), status: ['proposed'] })
   const families = useFamilies()
@@ -180,7 +187,7 @@ function LearningBody({ item, decide }: { item: InboxLearningItem; decide: Decid
             className="min-w-0 flex-1"
             options={candidate.scopes.map((key) => ({
               id: key,
-              label: scopeLabel(key, families.data?.families ?? []),
+              label: scopeLabel(key, families.data?.families ?? [], titleOf),
             }))}
             value={scope}
             onChange={(key) => setChosen(candidate.scopes.find((k) => k === key))}

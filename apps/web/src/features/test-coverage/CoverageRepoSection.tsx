@@ -5,39 +5,47 @@ import { useState } from 'react'
 import { useRepoCoverage, useSettings } from '../../api/queries.ts'
 import { orgCoverageTarget, trendValues } from '../../lib/coverage.ts'
 import { repoKey } from '../../lib/repo.ts'
-import { EmptyState, ErrorState, LinkButton, Placeholder, UnderlineTabs } from '../../ui/index.ts'
+import { Button, ErrorState, LinkButton, Placeholder, UnderlineTabs } from '../../ui/index.ts'
 import { MiniSparkline } from '../../ui/MiniSparkline.tsx'
 import { RunJobButton } from '../jobs/RunJobDialog.tsx'
 import {
   type CoverageTab,
   CoverageHeadline,
   CoverageTabBody,
+  NotMeasured,
   coverageTabItems,
   coverageTabOf,
   useCoverageOptions,
 } from './CoverageSheet.tsx'
+import { NoTestsNotice, useTestsToggle } from './TestsToggle.tsx'
 
 /**
  * The hub's Quality › Coverage area for one repository: freshness, shares and change against its
  * target over the coverage bar and trend, then the Breakdown, Files, Changes and Exclusions tabs
- * the Coverage sheet has. Offers Run coverage until a record exists.
+ * the Coverage sheet has. Offers Run coverage until a record exists; a repository with no tests by
+ * design (`repo.tests`) shows that notice instead, with the toggle for callers who may change it.
  */
 export function CoverageRepoSection({ repo }: { repo: RepoRef }) {
   const coverage = useRepoCoverage(repo)
   const settings = useSettings()
   const options = useCoverageOptions(repo, orgCoverageTarget(settings.data))
   const [tab, setTab] = useState<CoverageTab>('breakdown')
+  const tests = useTestsToggle(repo, coverage.data?.tests)
   if (coverage.isPending) return <Placeholder className="h-48" />
   if (coverage.isError) return <ErrorState error={coverage.error} />
   const data = coverage.data
   const card = data.card
+  const noTests = data.tests?.expected === false ? data.tests : undefined
   if (!card)
     return (
-      <EmptyState
-        title="Not measured yet"
-        description="The coverage analyzer has not stored a record for this repository."
-        action={<RunJobButton repo={repo} analyzer="coverage" label="Run coverage" />}
-      />
+      <>
+        {noTests ? (
+          <NoTestsNotice tests={noTests} control={tests} />
+        ) : (
+          <NotMeasured repo={repo} tests={tests} />
+        )}
+        {tests.dialog}
+      </>
     )
   return (
     <section className="flex flex-col overflow-hidden rounded-xl border border-line bg-panel">
@@ -61,16 +69,24 @@ export function CoverageRepoSection({ repo }: { repo: RepoRef }) {
             >
               Full record
             </Link>
-            <RunJobButton
-              repo={repo}
-              analyzer="coverage"
-              label="Run coverage"
-              variant="secondary"
-              size="sm"
-            />
+            {noTests ? null : (
+              <RunJobButton
+                repo={repo}
+                analyzer="coverage"
+                label="Run coverage"
+                variant="secondary"
+                size="sm"
+              />
+            )}
+            {tests.toggle?.kind === 'mark' ? (
+              <Button variant="ghost" size="sm" onPress={tests.openMark}>
+                Mark as no tests by design…
+              </Button>
+            ) : null}
           </div>
         </div>
-        <CoverageHeadline card={card} target={options.target} />
+        {noTests ? <NoTestsNotice tests={noTests} control={tests} /> : null}
+        <CoverageHeadline card={card} target={options.target} noTests={noTests !== undefined} />
         {card.trend.length > 1 ? (
           <MiniSparkline
             values={trendValues(card)}
@@ -90,6 +106,7 @@ export function CoverageRepoSection({ repo }: { repo: RepoRef }) {
       <div className="px-4 py-3.5">
         <CoverageTabBody repo={repo} data={data} tab={tab} options={options} />
       </div>
+      {tests.dialog}
     </section>
   )
 }

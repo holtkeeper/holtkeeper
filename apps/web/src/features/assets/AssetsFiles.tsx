@@ -24,7 +24,7 @@ import {
   trendText,
 } from '../../lib/assets.ts'
 import { plural } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
 import {
   Button,
@@ -196,7 +196,7 @@ const rowDetail = (row: AssetTableRow) => {
 /**
  * Asset files to act on over `GET /api/assets`, or one repository's with `repo`: the summary strip
  * and bytes per kind of the repositories in scope, a paged table of files with problems and
- * potential savings, filters by status, kind, format and group, and the media optimizer sheet for
+ * potential savings, filters by status, kind and format (groups come from the scope switch), and the media optimizer sheet for
  * one file, a selection, or (`media`) a file it opens on.
  */
 export function AssetsFiles({
@@ -239,10 +239,10 @@ export function AssetsFiles({
   const total = pages.at(-1)?.total ?? 0
   const narrowed = Boolean(key)
   const keyRepo = repo ?? parseRepoKey(key)
-  const mine = !narrowed && view === 'mine'
-  const kpi = assetsKpis(mine ? foldOtherTeams(repos, homeGroups, (r) => r.groups).mine : repos)
+  const scoped = !narrowed
+  const kpi = assetsKpis(scoped ? foldScope(repos, view, homeGroups, (r) => r.groups).shown : repos)
   const rows = searchAssetRows(assetTableRows(pages), search.q)
-  const shownRows = mine ? foldOtherTeams(rows, homeGroups, (r) => r.groups).mine : rows
+  const shownRows = scoped ? foldScope(rows, view, homeGroups, (r) => r.groups).shown : rows
   const optimizable = shownRows.filter(canOptimize)
   const chosen = optimizable.filter((row) => selected.has(row.key))
   const kinds = assetKinds.filter((kind) => repos.some((r) => (r.kinds[kind] ?? 0) > 0))
@@ -252,10 +252,7 @@ export function AssetsFiles({
       ...(search.format ? [search.format] : []),
     ]),
   ].toSorted()
-  const groups = [...new Set(repos.flatMap((r) => r.groups))].toSorted()
-  const filtered = Boolean(
-    search.q || search.kind || search.format || search.group || search.problem,
-  )
+  const filtered = Boolean(search.q || search.kind || search.format || search.problem)
   const target =
     queue.targets[queue.index] ?? (optimizeNew ? (keyRepo ? { repo: keyRepo } : {}) : undefined)
   const currentRow = queue.rows?.[queue.index]
@@ -496,14 +493,6 @@ export function AssetsFiles({
                   options={formats.map((id) => ({ id, label: id.toUpperCase() }))}
                   value={search.format ? [search.format] : []}
                   onChange={(next) => update({ format: singleChoice(next, search.format) })}
-                />
-              ) : null}
-              {!narrowed && groups.length > 1 ? (
-                <FilterButton
-                  label="Group"
-                  options={groups.map((id) => ({ id, label: id }))}
-                  value={search.group ? [search.group] : []}
-                  onChange={(next) => update({ group: singleChoice(next, search.group) })}
                 />
               ) : null}
               <Select

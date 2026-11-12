@@ -1,7 +1,7 @@
 import type { RepoRef } from '@holtkeeper/api'
 import { useState } from 'react'
 
-import { useRepoAssets } from '../../api/queries.ts'
+import { useGroupTitles, useRepoAssets } from '../../api/queries.ts'
 import { type AssetsSearch, policyLines, policySource } from '../../lib/assets.ts'
 import { formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
@@ -27,6 +27,7 @@ export function AssetsRepoSection({
   file?: string
   ref?: string
 }) {
+  const titleOf = useGroupTitles()
   const view = useRepoAssets(repo)
   const [search, setSearch] = useState<AssetsSearch>({})
   const update = (patch: Partial<AssetsSearch>) => setSearch((prev) => patchSearch(prev, patch))
@@ -65,7 +66,7 @@ export function AssetsRepoSection({
       {data ? (
         <AssetsPolicyCard
           lines={policyLines(data.policy)}
-          source={policySource(data.policySource)}
+          source={policySource(data.policySource, titleOf)}
           space={`repo:${repoKey(repo)}`}
           actions={
             <SettingsButton

@@ -83,7 +83,14 @@ export function chatThreadContext(
 /** `thread` with `patch` applied; `null` fields are removed (see `ChatThreadPatch`). */
 export function patchChatThread(thread: ChatThread, patch: ChatThreadPatch): ChatThread {
   const next: ChatThread = { ...thread }
-  if (patch.title !== undefined) next.title = patch.title
+  if (patch.generatedTitle !== undefined && next.titlePending) {
+    next.title = patch.generatedTitle
+    delete next.titlePending
+  }
+  if (patch.title !== undefined) {
+    next.title = patch.title
+    delete next.titlePending
+  }
   if (patch.archived !== undefined) next.archived = patch.archived
   if (patch.autoReply !== undefined) next.autoReply = patch.autoReply
   if (patch.participants !== undefined) next.participants = patch.participants

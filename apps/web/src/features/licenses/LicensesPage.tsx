@@ -3,10 +3,10 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, Scale, X } from 'lucide-react'
 import { useState } from 'react'
 
-import { useLicenses } from '../../api/queries.ts'
+import { useGroupTitles, useLicenses } from '../../api/queries.ts'
 import { neighbours } from '../../lib/flow.ts'
 import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope, scopeSuffix } from '../../lib/home-scope.ts'
 import {
   type LicenseKpis,
   type LicensesSearch,
@@ -33,9 +33,10 @@ import {
   Button,
   EmptyState,
   ErrorState,
-  type FleetColumn,
   FilterButton,
+  type FleetColumn,
   FleetTable,
+  GroupName,
   KeyValue,
   Page,
   Placeholder,
@@ -65,6 +66,7 @@ function kpiCells(
   kpi: LicenseKpis,
   overview: LicensesOverview,
   mode: 'fleet' | 'mine' | 'repo',
+  suffix = '',
 ): StripCell[] {
   const narrowed = mode === 'repo'
   const deltas = mode === 'fleet' ? overview.deltas : undefined
@@ -77,7 +79,7 @@ function kpiCells(
       ...(narrowed
         ? {}
         : {
-            caption: `in ${plural(kpi.repos, 'repository', 'repositories')}${mode === 'mine' ? ' of my teams' : ''}`,
+            caption: `in ${plural(kpi.repos, 'repository', 'repositories')}${suffix}`,
           }),
     },
     {
@@ -283,7 +285,9 @@ const repoColumns: readonly FleetColumn<LicensesRepoRow>[] = [
     cell: (row) => (
       <span className="flex flex-wrap gap-1">
         {row.groups.map((group) => (
-          <Tag key={group}>{group}</Tag>
+          <Tag key={group}>
+            <GroupName group={group} />
+          </Tag>
         ))}
       </span>
     ),
@@ -444,6 +448,7 @@ function LicensesBody({
   update: (patch: Partial<LicensesSearch>) => void
   onEditPolicy?: () => void
 }) {
+  const titleOf = useGroupTitles()
   const licenses = useLicenses()
   const navigate = useNavigate()
   const { view, setView, homeGroups } = useScope()
@@ -458,9 +463,9 @@ function LicensesBody({
   const rows = violationRows(sortViolations(filterViolations(overview.violations, filters), sort))
   const repoRows = filterLicenseRepos(overview.repos, filters)
   const ecosystems = [...new Set(overview.violations.map((v) => v.ecosystem))].toSorted()
-  const groups = [...new Set(overview.repos.flatMap((r) => r.groups))].toSorted()
-  const mine = !narrowed && view === 'mine'
-  const keys = (mine ? foldOtherTeams(rows, homeGroups, (row) => row.groups).mine : rows).map(
+  const scoped = !narrowed
+  const mine = scoped && view !== 'all'
+  const keys = (scoped ? foldScope(rows, view, homeGroups, (row) => row.groups).shown : rows).map(
     (row) => row.key,
   )
   const step = neighbours(keys, search.package)
@@ -470,14 +475,12 @@ function LicensesBody({
     : mine
       ? licenseKpis(
           overview,
-          foldOtherTeams(overview.repos, homeGroups, (row) => row.groups).mine.map(
+          foldScope(overview.repos, view, homeGroups, (row) => row.groups).shown.map(
             (row) => row.repo,
           ),
         )
       : licenseKpis(overview)
-  const filtered = Boolean(
-    search.q || search.verdict?.length || search.ecosystem?.length || search.group?.length,
-  )
+  const filtered = Boolean(search.q || search.verdict?.length || search.ecosystem?.length)
   const scope = narrowed ? {} : { scope: { value: view, onChange: setView, homeGroups } }
 
   if (!overview.repos.length)
@@ -502,7 +505,12 @@ function LicensesBody({
       <div className="overflow-hidden rounded-xl border border-line bg-panel">
         <Strip
           label="License totals"
-          cells={kpiCells(kpi, overview, key ? 'repo' : mine ? 'mine' : 'fleet')}
+          cells={kpiCells(
+            kpi,
+            overview,
+            key ? 'repo' : mine ? 'mine' : 'fleet',
+            scopeSuffix(view, titleOf),
+          )}
           className="border-b-0"
         />
       </div>
@@ -540,14 +548,6 @@ function LicensesBody({
                   onChange={(ecosystem) =>
                     update({ ecosystem: ecosystem.length ? ecosystem : undefined })
                   }
-                />
-              ) : null}
-              {!narrowed && groups.length > 1 ? (
-                <FilterButton
-                  label="Group"
-                  options={groups.map((id) => ({ id, label: id }))}
-                  value={search.group ?? []}
-                  onChange={(group) => update({ group: group.length ? group : undefined })}
                 />
               ) : null}
               <Select

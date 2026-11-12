@@ -1,4 +1,5 @@
 import type { RepoOverview } from '@holtkeeper/api'
+import { groupTitle } from '@holtkeeper/core'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
@@ -38,6 +39,7 @@ export function repoPageRoutes(deps: ServerDeps) {
         access: principalHealthAccess(principal, target),
         releases: () => releaseServiceFor(deps).snapshot(principal),
         groupsOf: (repo) => repoTarget(config, repo).groups,
+        groupTitle: (group) => groupTitle(config.groups, group),
       }),
     )
   })

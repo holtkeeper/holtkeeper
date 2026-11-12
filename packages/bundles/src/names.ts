@@ -79,21 +79,73 @@ export function normalizeAssetName(file: string): string {
   return strip(file, strict)
 }
 
+const codeKinds = new Set<AssetKind>(['js', 'css'])
+
+const extension = (file: string) => file.slice(file.lastIndexOf('.') + 1).toLowerCase()
+
+const wordShaped = (token: string) =>
+  /[aeiouy]/i.test(token) && !/[b-df-hj-np-tv-xz]{4}/i.test(token)
+
+function repeatedStemHashes(files: readonly string[]): { tokens: string[]; files: string[] }[] {
+  const groups = new Map<string, { tokens: Set<string>; files: string[] }>()
+  for (const file of files) {
+    if (!codeKinds.has(assetKind(file))) continue
+    const slash = file.lastIndexOf('/')
+    const base = file.slice(slash + 1)
+    const extStart = base.indexOf('.', 1)
+    if (extStart === -1) continue
+    const match = /[-.~]([A-Za-z0-9_]{8,})$/.exec(base.slice(0, extStart))
+    if (!match?.[1]) continue
+    const key = `${file.slice(0, slash + 1)}${base.slice(0, match.index + 1)}${base.slice(extStart)}`
+    const group = groups.get(key) ?? { tokens: new Set<string>(), files: [] }
+    group.tokens.add(match[1])
+    group.files.push(file)
+    groups.set(key, group)
+  }
+  return [...groups.values()]
+    .map((group) => ({ tokens: [...group.tokens], files: group.files }))
+    .filter(({ tokens }) => {
+      const length = tokens[0]?.length
+      return (
+        tokens.length >= 2 &&
+        tokens.every((token) => token.length === length) &&
+        (tokens.every((token) => /^[0-9a-z]+$/.test(token)) ||
+          tokens.every((token) => /^[0-9A-Z]+$/.test(token))) &&
+        tokens.some((token) => /\d/.test(token) || !wordShaped(token))
+      )
+    })
+}
+
 /**
- * `normalizeAssetName` for a whole build. Hashes without digits or capitals (`chunk-rkgagbvp.js`)
- * look like words to a single-file check, so the length and alphabet of the hashes found in the
- * build are learned and applied to the remaining files.
+ * `normalizeAssetName` for a whole build. Hashes without digits or mixed case (`chunk-rkgagbvp.js`)
+ * look like words to a single-file check, so the build supplies more evidence: one stem in one
+ * directory repeated with two or more different single-case JS or CSS tokens of the same length, 8 or
+ * more characters each, at least one of which has a digit or does not read like a word (no vowel, or
+ * four consonants in a row), marks those tokens as hashes: `chunk-rkgagbvp.js` and
+ * `chunk-mnbvcxzq.js` do, `locale-german.js` and `locale-french.js` do not. The length and alphabet
+ * of every hash found (one is enough) are then learned and applied to the remaining files with an
+ * extension that carried a hash, so a word is stripped only when it has exactly the length and
+ * alphabet of a hash on the same file type in the same build.
  */
 export function normalizeAssetNames(files: readonly string[]): Map<string, string> {
   const removed: string[] = []
-  for (const file of files) strip(file, strict, removed)
+  const hashed = new Set<string>()
+  for (const file of files) {
+    const before = removed.length
+    strip(file, strict, removed)
+    if (removed.length > before) hashed.add(extension(file))
+  }
+  for (const group of repeatedStemHashes(files)) {
+    removed.push(...group.tokens)
+    for (const file of group.files) hashed.add(extension(file))
+  }
   const lengths = new Set(removed.map((token) => token.length))
-  const alphabet = [/^[0-9a-f]+$/, /^[0-9a-z]+$/, /^[0-9A-Za-z_-]+$/].find((pattern) =>
-    removed.every((token) => pattern.test(token)),
+  const alphabet = [/^[0-9a-f]+$/, /^[0-9a-z]+$/, /^[0-9A-Z]+$/, /^[0-9A-Za-z_-]+$/].find(
+    (pattern) => removed.every((token) => pattern.test(token)),
   )
   const learned = (token: string) =>
     strict(token) || (alphabet !== undefined && lengths.has(token.length) && alphabet.test(token))
   return new Map(
-    files.map((file) => [file, removed.length >= 2 ? strip(file, learned) : strip(file, strict)]),
+    files.map((file) => [file, strip(file, hashed.has(extension(file)) ? learned : strict)]),
   )
 }

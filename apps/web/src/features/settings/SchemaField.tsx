@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState, useRef } from 'react'
 
 import {
   type FieldNode,
@@ -88,7 +88,9 @@ export function StructuredEditor({
   )
 
   const broken = mode === 'json' ? jsonError !== undefined : invalid.size > 0
-  useEffect(() => onChange(broken ? undefined : value), [onChange, broken, value])
+  const changed = useRef(onChange)
+  changed.current = onChange
+  useEffect(() => changed.current(broken ? undefined : value), [broken, value])
 
   const switchTo = (next: 'form' | 'json') => {
     if (next === mode || (next === 'form' && jsonError !== undefined)) return

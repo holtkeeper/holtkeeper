@@ -1,3 +1,4 @@
+import { type AiFeature, featureLabel, featureOf } from '@holtkeeper/ai-usage/features'
 import type {
   GroupMatch,
   HealthTone,
@@ -15,8 +16,7 @@ import type {
 import type { StatusTone } from '../ui/colors.ts'
 import type { DotTone } from '../ui/Legend.tsx'
 import type { Tick } from '../ui/TickStrip.tsx'
-import { type AiFeature, featureLabel, featureOf } from './ai-features.ts'
-import { type ScopeView, inHomeGroups } from './home-scope.ts'
+import { type ScopeView, inView } from './home-scope.ts'
 import { repoKey } from './repo.ts'
 
 /**
@@ -29,7 +29,7 @@ export function inScope(
   homeGroups: readonly GroupMatch[],
 ): boolean {
   if (view === 'all' || !refs.length) return true
-  return refs.some((ref) => inHomeGroups(homeGroups, ref.groups))
+  return refs.some((ref) => inView(view, homeGroups, ref.groups))
 }
 
 /** Needs attention and What changed narrowed to a scope position. */

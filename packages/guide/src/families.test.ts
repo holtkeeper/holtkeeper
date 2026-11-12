@@ -30,6 +30,32 @@ describe('suggestFamilies', () => {
     ])
   })
 
+  test('names come from the deepest shared folder and the shared words of repository names', () => {
+    const names = suggestFamilies([
+      { repo: 'work:acme/games/board-front', dependencies: shop },
+      { repo: 'work:acme/games/cards-front', dependencies: shop },
+      { repo: 'work:acme/media/player', dependencies: ['fooUtil', 'bar-lib', 'baz-kit'] },
+      { repo: 'work:acme/media/editor', dependencies: ['fooUtil', 'bar-lib', 'baz-kit'] },
+    ]).map((suggestion) => suggestion.name)
+    expect(names.toSorted()).toEqual(['games/front (react)', 'media'])
+  })
+
+  test('suggestions that would share a name are told apart by a dependency only they share', () => {
+    const left = ['react', 'widget-kit', 'left-lib', 'left-ui', 'left-state']
+    const right = ['react', 'widget-kit', 'right-lib', 'right-ui', 'right-state']
+    const names = suggestFamilies([
+      { repo: 'work:acme/one/app', dependencies: left },
+      { repo: 'work:acme/two/app', dependencies: left },
+      { repo: 'work:acme/three/app', dependencies: right },
+      { repo: 'work:acme/four/app', dependencies: right },
+    ]).map((suggestion) => suggestion.name)
+    expect(new Set(names).size).toBe(names.length)
+    expect(names.toSorted()).toEqual([
+      'acme/app (react) · left-lib',
+      'acme/app (react) · right-lib',
+    ])
+  })
+
   test('complete linkage keeps chains of loosely related repos apart', () => {
     const a = ['l1', 'l2', 'l3', 'l4', 'l5']
     const b = ['l2', 'l3', 'l4', 'l5', 'l6']

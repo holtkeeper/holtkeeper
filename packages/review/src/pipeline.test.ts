@@ -587,6 +587,56 @@ describe('reviewMergeRequest', () => {
     ])
   })
 
+  test('without tests by design the prompt skips tests and agent test findings are dropped', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        review([
+          { ...finding(2, 'agent'), severity: 'major', title: 'Add a test', body: 'x' },
+          { ...finding(1, 'agent'), severity: 'major', category: 'bug', body: 'y' },
+        ]),
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({ forge: requireReviewForge(forge), agent, tests: false }),
+    )
+    expect(tasks[0]?.system).not.toContain('missing tests')
+    expect(tasks[0]?.system).toContain(
+      'Categories: bug, security, performance, maintainability, style, docs.',
+    )
+    expect(tasks[0]?.system).toContain('surrounding code and callers instead')
+    expect(data.comments.map((c) => [c.line, c.category])).toEqual([[1, 'bug']])
+  })
+
+  test('without tests by design the flagged test-id lines still get their comments', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({
+      review: [
+        review([
+          {
+            ...finding(1, 'agent'),
+            suggestion: { replacement: 'export function price(a, b) { // data-test' },
+          },
+          { ...finding(2, 'agent'), title: 'Add a test' },
+        ]),
+      ],
+    })
+    const data = await reviewMergeRequest(
+      runOf({
+        forge: requireReviewForge(forge),
+        agent,
+        tests: false,
+        steps: {
+          deterministic: async () => ({ candidates: [finding(1, 'testids')], checks: [] }),
+        },
+      }),
+    )
+    expect(tasks[0]?.system).not.toContain('missing tests')
+    expect(tasks[0]?.system).toContain('Use `tests` only for the lines the checks flagged with it.')
+    expect(tasks[0]?.system).toMatch(/Categories: [^\n]*\btests\b/)
+    expect(data.comments.map((c) => [c.line, c.category])).toEqual([[1, 'tests']])
+  })
+
   test('requireReviewForge names missing methods', () => {
     expect(() => requireReviewForge({ kind: 'x' } as never)).toThrow('getMergeRequest')
   })

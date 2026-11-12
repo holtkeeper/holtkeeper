@@ -244,6 +244,25 @@ describe('runWriteTask', () => {
     expect(task?.commands).not.toContain('bun install --frozen-lockfile; curl')
   })
 
+  test('a repository with no tests by design runs no test checks and tells the agent', async () => {
+    const { forge } = fakeForge()
+    const space = await workspace()
+    const { agent, tasks } = fakeAgent()
+    await runWriteTask({
+      repo,
+      forge,
+      checkout: space.checkout,
+      agent,
+      policy: { ...enabled, noTests: { reason: 'Config only' } },
+      options: options({ prompt: 'Make it 4.' }),
+    })
+    expect(tasks[0]?.prompt).toContain(
+      'This repository has no tests by design (Config only): do not add tests or test tooling.',
+    )
+    expect(tasks[0]?.commands).toContain('bun run lint')
+    expect(tasks[0]?.commands).not.toContain('bun run test')
+  })
+
   test('a budget stop publishes nothing', async () => {
     const { forge, commits, opened } = fakeForge()
     const space = await workspace()

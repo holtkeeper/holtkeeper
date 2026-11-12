@@ -24,7 +24,7 @@ import {
   signed,
 } from '../../lib/branches.ts'
 import { formatDate, plural } from '../../lib/format.ts'
-import { foldOtherTeams } from '../../lib/home-scope.ts'
+import { foldScope } from '../../lib/home-scope.ts'
 import { parseRepoKey, repoKey, repoSplat } from '../../lib/repo.ts'
 import { selectAll, selectAllState, selectOne } from '../../lib/table-selection.ts'
 import { sortRows } from '../../lib/table-sort.ts'
@@ -238,12 +238,11 @@ export function BranchesBody({
   const filters = { ...search, ...(key ? { repo: key } : {}) }
   const repos = filterBranchRepos(overview.data.repos, filters)
   const scoped = !key
-  const mine = scoped && view === 'mine'
-  const scopeRepos = mine ? foldOtherTeams(repos, homeGroups, (row) => row.groups).mine : repos
+  const scopeRepos = scoped ? foldScope(repos, view, homeGroups, (row) => row.groups).shown : repos
   const all = branchListRows(overview.data)
   const candidates = filterBranchesExceptReason(all, filters)
   const counts = reasonCounts(
-    mine ? foldOtherTeams(candidates, homeGroups, (row) => row.groups).mine : candidates,
+    scoped ? foldScope(candidates, view, homeGroups, (row) => row.groups).shown : candidates,
   )
   const rows = sortRows(
     oldestFirst(
@@ -252,7 +251,7 @@ export function BranchesBody({
     branchesSort(search),
     branchSortValue,
   )
-  const visible = mine ? foldOtherTeams(rows, homeGroups, (row) => row.groups).mine : rows
+  const visible = scoped ? foldScope(rows, view, homeGroups, (row) => row.groups).shown : rows
   const visibleKeys = visible.map((row) => row.key)
   const selectedRows = all.filter((row) => selected.has(row.key))
   const selectedRepos = new Set(selectedRows.map((row) => row.repoKey)).size

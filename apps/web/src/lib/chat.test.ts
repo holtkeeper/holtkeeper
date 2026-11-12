@@ -12,10 +12,12 @@ import {
   hasLiveCards,
   initialValues,
   insertMention,
+  isNaming,
   matchingCommands,
   mentionAt,
   mentionOptions,
   mergeMessages,
+  newThreadTitle,
   withNewer,
   withOlder,
   missingFields,
@@ -32,6 +34,7 @@ import {
   unreadBadge,
   withoutPrefix,
 } from './chat.ts'
+import type { ScopeView } from './home-scope.ts'
 
 const form: ChatForm = {
   command: 'release deploy',
@@ -229,17 +232,26 @@ test('threads scope by home groups, team-wide threads count as mine', () => {
     { id: 'b', groups: ['games'] },
     { id: 'c', groups: ['puzzles'] },
   ]
-  const ids = (view: 'mine' | 'all') =>
+  const ids = (view: ScopeView) =>
     scopeThreads(threads, view, ['games']).shown.map((thread) => thread.id)
   expect(ids('mine')).toEqual(['a', 'b'])
   expect(ids('all')).toEqual(['a', 'b', 'c'])
-  expect(scopeThreads(threads, 'mine', ['games']).counts).toEqual({ mine: 2, all: 3 })
+  expect(ids('group:puzzles')).toEqual(['c'])
+  expect(scopeThreads(threads, 'mine', ['games']).counts).toEqual({
+    mine: 2,
+    all: 3,
+    groups: [
+      { group: 'games', count: 1 },
+      { group: 'puzzles', count: 1 },
+    ],
+  })
   expect(scopeThreads(threads, 'mine', ['games'])).toMatchObject({
     others: [{ id: 'c' }],
     teams: ['puzzles'],
   })
   expect(scopeThreads(threads, 'all', ['games'])).toMatchObject({ others: [], teams: [] })
-  expect(scopeThreads(threads, 'mine', []).shown).toHaveLength(3)
+  expect(scopeThreads(threads, 'group:puzzles', ['games'])).toMatchObject({ others: [] })
+  expect(scopeThreads(threads, 'mine', [])).toMatchObject({ shown: [{ id: 'a' }], others: [] })
   expect(threadScope({ repo: 'work:g/app' })).toBe('g/app')
   expect(threadScope({ group: 'games' })).toBe('games')
   expect(threadScope({})).toBe('Team')
@@ -373,4 +385,12 @@ test('polls fold newer messages in, older pages go in front', () => {
   const older = withOlder(polled, page([1, 2], false, 't3'))
   expect(older.messages.map((m) => m.seq)).toEqual([1, 2, 3, 4, 5])
   expect(older).toMatchObject({ hasMore: false, cursor: 5, serverTime: 't2' })
+})
+
+test('new threads send a trimmed title or none, and pending titles read as naming', () => {
+  expect(newThreadTitle('  Widget grid  ')).toEqual({ title: 'Widget grid' })
+  expect(newThreadTitle('   ')).toEqual({})
+  expect(isNaming({ titlePending: true, messageCount: 1 })).toBe(true)
+  expect(isNaming({ titlePending: true, messageCount: 0 })).toBe(false)
+  expect(isNaming({ messageCount: 3 })).toBe(false)
 })

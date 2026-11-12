@@ -17,7 +17,7 @@ plan (forge API) ─► checkout ─► bump ─► verify ─┬─ pass ─►
 
 ## Analyzer
 
-`propagateAnalyzer` (kind `propagate`, analysis `propagation`, scope `group`, `exclusive`, needs `forge`, no agent) and `createPropagateAnalyzer({ fixes?, registry?, steps? })`: `fixes` is the `FixProposer` the server injects; without it failing repositories get drafts. It needs `context.checkout` and `context.repos` from the runner.
+`propagateAnalyzer` (kind `propagate`, analysis `propagation`, scope `group`, `exclusive`, needs `forge`, no agent) and `createPropagateAnalyzer({ fixes?, registry?, steps?, testsExpected? })`: `fixes` is the `FixProposer` the server injects; without it failing repositories get drafts. `testsExpected(repo)` (the server reads `repo.tests`) marks repositories with no tests by design: `runPropagation` verifies them with `withoutTests(checks)` (`{ test: false, go: 'go build ./...', ...checks }`), and their fix tasks get the write task policy's `noTests`. It needs `context.checkout` and `context.repos` from the runner.
 
 | Option                        | Default                         | Meaning                                                                               |
 | ----------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- |

@@ -48,36 +48,46 @@ export interface ReviewPromptInput {
   threads: readonly OpenThread[]
   maxComments: number
   language?: string
+  /**
+   * `false` for a repository with no tests by design: the prompt does not ask about tests, and the
+   * `tests` category stays only for `requests` of that category.
+   */
+  tests?: false
 }
 
-const severityGuide = [
-  '- critical: security holes, data loss, crashes in common paths.',
-  '- major: wrong behavior, broken edge cases, race conditions, missing error handling that will bite.',
-  '- minor: maintainability problems, missing tests for new logic, misleading names, small inefficiencies.',
-  '- info: optional remarks; use sparingly.',
-].join('\n')
+const severityGuide = (tests: boolean) =>
+  [
+    '- critical: security holes, data loss, crashes in common paths.',
+    '- major: wrong behavior, broken edge cases, race conditions, missing error handling that will bite.',
+    `- minor: maintainability problems, ${tests ? 'missing tests for new logic, ' : ''}misleading names, small inefficiencies.`,
+    '- info: optional remarks; use sparingly.',
+  ].join('\n')
 
 /** The system prompt: role, rules for lines and suggestions, severities, language. */
 export function reviewSystemPrompt(input: ReviewPromptInput): string {
   const language = input.language
     ? `Write titles, bodies and the summary in ${input.language}.`
     : 'Write titles, bodies and the summary in the language of the merge request description (English when it has none).'
+  const tests = input.tests !== false
+  const requestedTests = !tests && (input.requests ?? []).some((r) => r.category === 'tests')
+  const listed =
+    tests || requestedTests ? categories : categories.filter((name) => name !== 'tests')
   const parts = [
-    `You review merge request !${input.mergeRequest.id} of ${input.repo}. The checkout is at the merge request head; use the read and search tools to look at surrounding code, callers and tests instead of guessing.`,
+    `You review merge request !${input.mergeRequest.id} of ${input.repo}. The checkout is at the merge request head; use the read and search tools to look at surrounding code${tests ? ', callers and tests' : ' and callers'} instead of guessing.`,
     [
       'Rules:',
       '- Report only real problems the change introduces or exposes. No praise, no restating the diff, no nitpicks a formatter or linter would catch.',
       '- `line` (and `startLine` for a range) are new-side line numbers exactly as listed in the diff. Comment only on lines marked `+`; lines marked `~` were reviewed before.',
       '- A `suggestion.replacement` replaces exactly the full lines `startLine..line` (or just `line`): include their complete new text with indentation, and nothing from the lines around them. Suggest only when you are sure the replacement is correct.',
       `- At most ${input.maxComments} comments; when there are more, keep the most severe.`,
-      `- Categories: ${categories.join(', ')}.`,
+      `- Categories: ${listed.join(', ')}.${requestedTests ? ' Use `tests` only for the lines the checks flagged with it.' : ''}`,
       '- Do not repeat open threads listed in the prompt.',
       '- verdict is `needs-changes` when any major or critical problem remains, `looks-good` otherwise.',
       '- `walkthrough`: the changes in scope grouped by logical change, most important first; each entry lists its files and says in one or two sentences what changed and why. Group related files instead of listing each one.',
       '- `effort`: how hard this change is for a human to review, 1 (trivial) to 5 (large or subtle, needs a careful look).',
       language,
     ].join('\n'),
-    `Severity:\n${severityGuide}`,
+    `Severity:\n${severityGuide(tests)}`,
   ]
   return parts.join('\n\n')
 }

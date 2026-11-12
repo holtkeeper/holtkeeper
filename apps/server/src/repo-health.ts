@@ -19,11 +19,12 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { licensesAnalysis } from '@holtkeeper/licenses'
 import { renovateAnalysis } from '@holtkeeper/renovate'
 import { formatBytes } from '@holtkeeper/report'
-import { settingCascades } from '@holtkeeper/settings'
+import { repoTests, resolveRepoTests, settingCascades } from '@holtkeeper/settings'
 import type { AnalysisHead, Job, SettingEntry } from '@holtkeeper/store'
 
 import { latestHeadsWithMetrics } from './analyses.ts'
 import { type ServerDeps, repoKey } from './context.ts'
+import { TEST_ANALYZERS } from './repo-tests.ts'
 import { canSee } from './visibility.ts'
 
 const HOUR_MS = 3_600_000
@@ -187,7 +188,12 @@ function dependenciesCell(head: AnalysisHead | undefined): RepoHealthCell {
   )
 }
 
-function coverageCell(head: AnalysisHead | undefined, target: number): RepoHealthCell {
+function coverageCell(
+  head: AnalysisHead | undefined,
+  target: number,
+  tests: { expected: boolean; reason?: string },
+): RepoHealthCell {
+  if (!tests.expected) return cell('No tests', tests.reason ?? 'by design', 'none')
   if (!head) return noRecord()
   const metrics = metricsOf(coverageAnalysis, head)
   if (metrics?.percent === undefined) return cell('—', 'nothing to cover', 'none')
@@ -364,8 +370,10 @@ function judgedBy(settings: readonly SettingEntry[], repo: RepoTarget) {
   const cascades = settingCascades(settings, repo)
   const coverage = cascades.get('analyzers.coverage')?.[0]
   const budgets = budgetsOf(cascades.get(BUNDLE_SETTING)?.[0])
+  const { expected, reason } = resolveRepoTests(cascades.get(repoTests.key) ?? [], repo)
   return {
     target: coverageTargetOf(coverage?.secret ? undefined : coverage?.value),
+    tests: reason === undefined ? { expected } : { expected, reason },
     ...(budgets && { budgets }),
   }
 }
@@ -396,7 +404,8 @@ type IndexedSources = ReturnType<typeof indexSources>
  * Health of `repo`: the cells `access` allows (others are left out), the overall state over those
  * cells, and freshness and the last analysis time when `access` allows `analyses:read`. Thresholds
  * are this module's; the coverage target and bundle budgets come from the repository's
- * `analyzers.coverage` and `analyzers.bundle` settings.
+ * `analyzers.coverage` and `analyzers.bundle` settings, and a repository with no tests by design
+ * (`repo.tests`) gets a neutral coverage cell and its test analyses are left out of freshness.
  */
 export function repoHealth(
   indexed: IndexedSources,
@@ -411,7 +420,7 @@ export function repoHealth(
   const build: Record<RepoHealthCellKey, () => RepoHealthCell> = {
     security: () => securityCell(heads.get('audit'), indexed.audits.get(key)),
     dependencies: () => dependenciesCell(heads.get('renovate')),
-    coverage: () => coverageCell(heads.get('coverage'), options().target),
+    coverage: () => coverageCell(heads.get('coverage'), options().target, options().tests),
     bundles: () => bundlesCell(heads.get('bundle'), options().budgets),
     jobs: () => jobsCell(indexed.jobs.get(key) ?? [], sources.now),
     ci: () => ciCell(heads.get('ci-jobs')),
@@ -432,12 +441,13 @@ export function repoHealth(
     .map((head) => head.createdAt)
     .toSorted()
     .at(-1)
+  const tracked = list.filter((head) => !TEST_ANALYZERS.has(head.kind) || options().tests.expected)
   return {
     health,
     cells,
     freshness: {
-      current: list.filter((head) => !isStale(head, sources.now)).length,
-      total: list.length,
+      current: tracked.filter((head) => !isStale(head, sources.now)).length,
+      total: tracked.length,
     },
     ...(lastAnalysedAt && { lastAnalysedAt }),
   }

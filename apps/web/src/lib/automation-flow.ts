@@ -10,8 +10,8 @@ import type {
 
 import { describeCadence, describeWindows, mergeRequestActions } from './automation.ts'
 import type { FlowEdgeSpec, FlowNodeSpec } from './flow.ts'
+import { type GroupTitleOf, byGroupTitle, groupMatchTitle, keyAsTitle } from './group-titles.ts'
 import { type ConditionValue, describeCondition, normalizePolicies } from './policies.ts'
-import { formatGroupMatch } from './scope.ts'
 
 /** Settings key of merge request policies, edited on the Automation page. */
 export const POLICIES_KEY = 'mergeRequests.policies'
@@ -168,10 +168,13 @@ const scopeLanes = (scope: Scope): string[] =>
 
 const joined = (items: readonly string[]) => items.join(', ')
 
-const intersectionChips = (matches: readonly GroupMatch[] | undefined): string[] =>
+const intersectionChips = (
+  matches: readonly GroupMatch[] | undefined,
+  titleOf: GroupTitleOf,
+): string[] =>
   (matches ?? [])
     .filter((match) => typeof match !== 'string')
-    .map((m) => `only ${formatGroupMatch(m)}`)
+    .map((m) => `only ${groupMatchTitle(m, titleOf)}`)
 
 /** The title a trigger has on the canvas. */
 function triggerTitle(trigger: TriggerDocumentData): string {
@@ -257,6 +260,8 @@ export interface AutomationInput {
   /** Settings entries; only `mergeRequests.policies` and `freshness` ones are read. */
   settings: readonly SettingView[]
   analyzers: readonly JobAnalyzerView[]
+  /** Names group lanes; default the group ids. */
+  titleOf?: GroupTitleOf
 }
 
 /** Node id of a rule. */
@@ -284,6 +289,7 @@ const sizes = {
  * lane; one without groups, or limited to repositories only, in the every-repository lane.
  */
 export function automationRules(input: AutomationInput): AutomationRule[] {
+  const titleOf = input.titleOf ?? keyAsTitle
   const byKind = new Map(input.analyzers.map((analyzer) => [analyzer.kind, analyzer]))
   const usesAgent = (kind: string) => byKind.get(kind)?.needs.agent !== undefined
   const analyzerAction = (kind: string): ActionSpec => ({
@@ -304,7 +310,7 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
     const base = {
       ref: { type: 'trigger' as const, id: entry.id },
       title: triggerTitle(data),
-      chips: [...triggerChips(data), ...intersectionChips(groups)],
+      chips: [...triggerChips(data), ...intersectionChips(groups, titleOf)],
       enabled: true,
       events: [data.on],
       lanes: anyRepo ? [ALL_LANE] : memberGroups(groups),
@@ -396,7 +402,7 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
         describeCadence(data),
         ...describeWindows(data.windows),
         ...(data.repos?.length ? [`only ${joined(data.repos)}`] : []),
-        ...intersectionChips(data.groups),
+        ...intersectionChips(data.groups, titleOf),
       ],
       enabled: data.enabled,
       events: ['schedule'],
@@ -421,7 +427,9 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
   const fresh = input.analyzers.filter((analyzer) => analyzer.refresh !== undefined)
   const lanes: { id: string; group?: string; label: string }[] = [
     { id: ALL_LANE, label: 'All repositories' },
-    ...[...new Set(input.groups)].toSorted().map((group) => ({ id: group, group, label: group })),
+    ...[...new Set(input.groups)]
+      .toSorted(byGroupTitle(input.titleOf ?? keyAsTitle))
+      .map((group) => ({ id: group, group, label: (input.titleOf ?? keyAsTitle)(group) })),
   ]
 
   return lanes.map((lane) => {

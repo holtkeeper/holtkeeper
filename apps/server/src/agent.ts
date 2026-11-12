@@ -53,7 +53,7 @@ import { z } from 'zod'
 
 import { createApiCatalog } from './api-surface/catalog.ts'
 import { createUsageIndex } from './api-surface/usages.ts'
-import { repoTarget } from './context.ts'
+import { groupLabeler, repoTarget } from './context.ts'
 import {
   agentSummarize,
   githubClientFor,
@@ -618,6 +618,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
               other.groups.some((group) => target.groups.includes(group)),
         canReadScope: (scope) =>
           requester ? can(requester, 'settings:read', { kind: 'scope', scope }) : false,
+        groupLabel: groupLabeler(config),
       }),
       rules: agentRulesAccess({
         repo: target,
@@ -633,6 +634,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         store,
         repo: target,
         targetOf: (other) => repoTarget(config, other),
+        groupLabel: groupLabeler(config),
         policy: crossTeamOf(entries),
         ...(requester && { requester }),
         ...(options.artifacts && { artifacts: options.artifacts }),

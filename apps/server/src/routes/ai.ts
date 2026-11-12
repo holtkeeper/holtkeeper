@@ -7,6 +7,9 @@ import {
   budgetKey,
   byCost,
   budgetStatuses,
+  featureTaskKinds,
+  filterableFeatures,
+  isFilterableFeature,
   periodKinds,
   periodSpans,
   spendForecast,
@@ -19,6 +22,7 @@ import type {
   AgentToolView,
   AiBudgetOverview,
   AiRunList,
+  AiSpendCaps,
   AiUsageBuckets,
   AiUsageOverview,
   AiUsagePeriod,
@@ -31,10 +35,15 @@ import {
   type AiUsageFilter,
   aiUsageDimensions,
 } from '@holtkeeper/store'
-import { WRITE_TASK_KIND } from '@holtkeeper/write-task'
+import {
+  DEFAULT_TASK_BUDGET_USD,
+  MAX_TASK_BUDGET_USD,
+  WRITE_TASK_KIND,
+} from '@holtkeeper/write-task'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
+import { CHAT_REPLY_LIMITS } from '../chat-threads.ts'
 import {
   type AppContext,
   type Env,
@@ -148,6 +157,44 @@ function accessOf(c: AppContext): AiUsageFilter {
   return { ...(scopes && { scopes }), ...(groups && { groups }) }
 }
 
+/** The page filters every AI usage endpoint takes: `feature`, `origin`, `model` and `taskKind`. */
+function narrowOf(c: AppContext): AiUsageFilter {
+  const text = (name: string) => c.req.query(name) || undefined
+  const origin = text('origin')
+  if (origin !== undefined && !origins.some((o) => o === origin))
+    throw new HTTPException(400, { message: `origin must be one of ${origins.join(', ')}` })
+  const feature = text('feature')
+  let taskKinds: string[] | undefined
+  if (feature !== undefined) {
+    if (!isFilterableFeature(feature))
+      throw new HTTPException(400, {
+        message: `feature must be one of ${filterableFeatures.join(', ')}`,
+      })
+    taskKinds = [...featureTaskKinds[feature]]
+  }
+  const model = text('model')
+  const taskKind = text('taskKind')
+  const started = origins.find((o) => o === origin)
+  return {
+    ...(started && { origin: started }),
+    ...(taskKinds && { taskKinds }),
+    ...(model !== undefined && { model }),
+    ...(taskKind !== undefined && { taskKind }),
+  }
+}
+
+/** Mean cost of a chat reply that ran between `from` and `to` within `access`. */
+async function chatReplyAverage(
+  usage: ServerDeps['store']['aiUsage'],
+  access: AiUsageFilter,
+  from: string,
+  to: string,
+): Promise<number | undefined> {
+  const totals = await usageTotals(usage, { ...access, from, to, taskKind: 'chat' })
+  const replies = totals.runs - totals.denied
+  return replies > 0 ? totals.costUsd / replies : undefined
+}
+
 /** Task kinds whose mounted toolsets the registry names, in the order `usedBy` lists them. */
 const registryTaskKinds = ['review', 'chat', WRITE_TASK_KIND]
 
@@ -228,9 +275,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
     const outcome = text('outcome')
     if (outcome !== undefined && !outcomes.some((o) => o === outcome))
       throw new HTTPException(400, { message: `unknown outcome ${outcome}` })
-    const origin = text('origin')
-    if (origin !== undefined && !origins.some((o) => o === origin))
-      throw new HTTPException(400, { message: `origin must be one of ${origins.join(', ')}` })
+    const narrow = narrowOf(c)
     const groups = groupsParam(c.req.query('groups'))
     const from = timeParam(c, 'from')
     const to = timeParam(c, 'to')
@@ -238,16 +283,14 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
       from,
       to,
       group: text('group'),
-      model: text('model'),
       provider: text('provider'),
-      taskKind: text('taskKind'),
       analyzer: text('analyzer'),
       actor: text('actor'),
       outcome: outcomes.find((o) => o === outcome),
-      origin: origins.find((o) => o === origin),
     }
     return {
       ...Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)),
+      ...narrow,
       ...(groups && { groups }),
       ...(repo ? { repo } : scopes && { scopes }),
     }
@@ -298,16 +341,19 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
   app.get('/ai/overview', async (c) => {
     const principal = principalOf(c)
     const access = accessOf(c)
+    const narrowed = { ...access, ...narrowOf(c) }
     const kind = periodParam(c.req.query('period'))
     const at = now()
     const spans = periodSpans(kind, at)
     const period = async (range: PeriodRange): Promise<AiUsagePeriod> => {
       const span = { from: range.from, to: range.to }
       const [totals, automatic] = await Promise.all([
-        usageTotals(store.aiUsage, { ...access, ...span }),
-        usageTotals(store.aiUsage, { ...access, ...span, origin: 'automatic' }),
+        usageTotals(store.aiUsage, { ...narrowed, ...span }),
+        narrowed.origin === 'interactive'
+          ? undefined
+          : usageTotals(store.aiUsage, { ...narrowed, ...span, origin: 'automatic' }),
       ])
-      return { ...range, totals, automaticUsd: automatic.costUsd }
+      return { ...range, totals, automaticUsd: automatic?.costUsd ?? 0 }
     }
     const topBy = async (dimension: AiUsageDimension) =>
       byCost(
@@ -315,7 +361,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
           from: spans.current.from,
           to: spans.current.to,
           groupBy: [dimension],
-          filter: access,
+          filter: narrowed,
         }),
       ).slice(0, top)
     const entries = (await store.settings.list(budgetKey)).filter((entry) =>
@@ -330,6 +376,7 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
       topAnalyzers,
       budgets,
       forecast,
+      chatReplyAvgUsd,
     ] = await Promise.all([
       period(spans.current),
       period(spans.comparison),
@@ -340,7 +387,8 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
       budgetStatuses(entries, store.aiUsage, at, {
         includeDefault: canReadAiScope(principal, { all: true }),
       }),
-      spendForecast(store.aiUsage, at, { filter: access }),
+      spendForecast(store.aiUsage, at, { filter: narrowed, perDay: true }),
+      chatReplyAverage(store.aiUsage, access, spans.current.from, spans.current.to),
     ])
     const { totals } = current
     const input = totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
@@ -359,6 +407,12 @@ export function aiRoutes({ store, config, now }: ServerDeps) {
       errorRate: ran ? totals.errors / ran : 0,
       ...(stopsAt !== undefined && { automaticStopsAt: stopsAt }),
       forecast,
+      caps: {
+        writeTaskUsd: DEFAULT_TASK_BUDGET_USD,
+        writeTaskMaxUsd: MAX_TASK_BUDGET_USD,
+        chatReplyUsd: CHAT_REPLY_LIMITS.maxCostUsd,
+        ...(chatReplyAvgUsd !== undefined && { chatReplyAvgUsd }),
+      } satisfies AiSpendCaps,
     })
   })
 

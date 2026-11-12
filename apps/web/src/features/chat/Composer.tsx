@@ -1,6 +1,6 @@
 import type { ChatCommandView, ChatPersonView } from '@holtkeeper/api'
 import { ArrowUp, SquareSlash } from 'lucide-react'
-import { type KeyboardEvent, useRef, useState } from 'react'
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react'
 
 import {
   type MentionOption,
@@ -10,6 +10,7 @@ import {
   mentionAt,
   mentionOptions,
 } from '../../lib/chat.ts'
+import { isEditableTarget } from '../../lib/slash-focus.ts'
 import { Avatar, BrandIcon, Button, Kbd } from '../../ui/index.ts'
 
 type Suggestion =
@@ -76,6 +77,12 @@ export function Composer({
   const [active, setActive] = useState(0)
   const [dismissed, setDismissed] = useState<string>()
   const input = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    const touch = globalThis.matchMedia?.('(pointer: coarse)').matches ?? false
+    if (!touch && !isEditableTarget(document.activeElement))
+      input.current?.focus({ preventScroll: true })
+  }, [])
 
   const commandMode = text.startsWith('/')
   const mention = commandMode ? undefined : mentionAt(text, caret)

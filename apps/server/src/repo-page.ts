@@ -32,7 +32,13 @@ import { licensesAnalysis } from '@holtkeeper/licenses'
 import { renovateAnalysis } from '@holtkeeper/renovate'
 import { formatBytes } from '@holtkeeper/report'
 import { type ReviewData, reviewDataSchema } from '@holtkeeper/review'
-import { repoFreeze, resolveRepoFreeze, settingCascades } from '@holtkeeper/settings'
+import {
+  repoFreeze,
+  repoTests,
+  resolveRepoFreeze,
+  resolveRepoTests,
+  settingCascades,
+} from '@holtkeeper/settings'
 import type {
   AnalysisHead,
   AnalysisRecord,
@@ -271,11 +277,15 @@ const hasContent = (section: {
   section.proposal !== undefined ||
   section.learnings.length > 0
 
-async function knowledgeSummary(store: Store, repo: RepoTarget): Promise<RepoKnowledgeSummary> {
+async function knowledgeSummary(
+  store: Store,
+  repo: RepoTarget,
+  titleOf: (group: string) => string,
+): Promise<RepoKnowledgeSummary> {
   const key = repoKey(repo)
   const family = familyOf(await store.families.list(), key)
   const groupScopes = repo.groups.map((group) => ({
-    label: `group ${group}`,
+    label: `group ${titleOf(group)}`,
     scope: guideScopeKey({ kind: 'group', group }),
   }))
   const familyScope = family
@@ -354,6 +364,7 @@ function judgedBy(settings: readonly SettingEntry[], repo: RepoTarget) {
   return {
     target: coverageTargetOf(coverage?.secret ? undefined : coverage?.value),
     budgets: budgets.success ? budgets.data : undefined,
+    tests: resolveRepoTests(cascades.get(repoTests.key) ?? [], repo),
   }
 }
 
@@ -554,6 +565,14 @@ const percentText = (value: number) => `${value.toFixed(1)}%`
 function coverageCard({ heads, judged }: CardInputs): RepoOverviewCard {
   const head = heads.get('coverage')
   const metrics = head ? metricsOf(coverageAnalysis, head) : undefined
+  if (!judged.tests.expected)
+    return card('coverage', 'quality', {
+      tone: 'none',
+      status: 'No tests by design',
+      value: '—',
+      unit: 'lines',
+      lines: [judged.tests.reason],
+    })
   if (!head || !metrics) return notAnalysed('coverage', 'quality', 'lines')
   if (metrics.percent === undefined)
     return card('coverage', 'quality', {
@@ -742,6 +761,8 @@ export async function repoOverview(
     access: HealthAccess
     releases?: () => Promise<ReleaseCard[]>
     groupsOf: (repo: RepoRef) => string[]
+    /** What people see for a group key; default the key. */
+    groupTitle?: (group: string) => string
   },
 ): Promise<RepoOverview> {
   const { store } = deps
@@ -772,7 +793,9 @@ export async function repoOverview(
         tasks: may('repos:read'),
         spend: may('ai:read') || may('ai:admin'),
       }),
-      may('knowledge:read') ? knowledgeSummary(store, repo) : undefined,
+      may('knowledge:read')
+        ? knowledgeSummary(store, repo, options.groupTitle ?? ((group) => group))
+        : undefined,
       accessSummary(store, repo, now),
     ])
   const indexed = indexSources(sources)

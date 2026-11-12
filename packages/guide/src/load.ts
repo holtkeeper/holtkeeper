@@ -1,4 +1,5 @@
 import type { RepoTarget } from '@holtkeeper/access'
+import { resolveRepoTests } from '@holtkeeper/settings'
 import type { GuideSectionName, Store } from '@holtkeeper/store'
 
 import { familyOf } from './families.ts'
@@ -30,7 +31,8 @@ export type GuideResolver = (request: GuideRequest) => Promise<ResolvedGuide>
 /**
  * The single Guide resolver review, thread replies, agent tasks, release notes and MCP use: reads
  * the repository's family, the sections of its scopes, its policies from settings and accepted
- * knowledge, then runs `resolveGuide`.
+ * knowledge, then runs `resolveGuide`. For a repository with no tests by design (`repo.tests`) the
+ * `testing` sections are left out.
  */
 export function createGuideResolver(deps: {
   store: Pick<Store, 'guides' | 'families' | 'knowledge' | 'settings'>
@@ -39,7 +41,7 @@ export function createGuideResolver(deps: {
   return async (request) => {
     const family = familyOf(await store.families.list(), repoKey(request.repo))
     const notesChars = request.notesChars
-    const [sections, settings, entries] = await Promise.all([
+    const [stored, settings, entries] = await Promise.all([
       store.guides.list({
         scopes: scopesFor(request.repo, family?.id),
         sections: request.focus
@@ -49,6 +51,8 @@ export function createGuideResolver(deps: {
       store.settings.list(),
       notesChars === 0 ? [] : store.knowledge.list({ status: 'accepted' }),
     ])
+    const tests = resolveRepoTests(settings, request.repo).expected
+    const sections = tests ? stored : stored.filter((row) => row.section !== 'testing')
     return resolveGuide({
       repo: request.repo,
       task: request.task,

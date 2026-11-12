@@ -62,6 +62,7 @@ const sharedKeys = (section: 'analyzers' | 'policies') =>
         'analyzers.review',
         'analyzers.guide',
         'knowledge.autoAccept',
+        'repo.tests',
       ].map(definition),
     ],
     section,
@@ -79,8 +80,10 @@ test('Analyzers and Policies show keys their pages keep as home', () => {
     'commits.conventions',
     'analyzers.licenses',
     'audit.allowlist',
+    'repo.tests',
   ])
   expect(settingHome('analyzers.coverage')).toEqual({ page: 'coverage' })
+  expect(settingHome('repo.tests')).toEqual({ page: 'coverage' })
   expect(settingHome('audit.allowlistPolicy')).toEqual({ page: 'audits' })
   expect(settingHome('analyzers.licenses')).toEqual({ page: 'licenses' })
 })

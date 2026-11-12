@@ -140,6 +140,8 @@ export interface GuideAnalyzerDeps {
   store?: Pick<Store, 'guides' | 'families' | 'kv'>
   /** Config groups of a repository, for the team scopes whose steering and rules apply. */
   groupsOf?: (repo: RepoRef) => string[]
+  /** Whether the repository is meant to have tests (`repo.tests`); without it, always. */
+  testsExpected?: (repo: RepoRef) => Promise<boolean>
 }
 
 async function latestData<T>(
@@ -176,8 +178,9 @@ const emptyRow = (scope: GuideScopeKey, section: GuideSectionName): GuideSection
  * New text is stored as a proposal a person accepts; accepted text stays what agents see until
  * then. Text from inputs a person rejected (`rememberGuideRejection`) is not proposed again.
  * Steering and team rules come from every scope of the repository. Runs after `coverage` and
- * `testids` so their newest records are read. Without `deps.store` (outside the server) it cannot
- * run.
+ * `testids` so their newest records are read. The `testing` section of a repository with no tests
+ * by design (`deps.testsExpected`) is recorded as skipped without an agent call. Without
+ * `deps.store` (outside the server) it cannot run.
  */
 export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
   return defineAnalyzer({
@@ -201,7 +204,10 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
       const family = familyOf(await store.families.list(), repoKey(repo))
       const scopes = scopesFor(target, family?.id)
       const repoScope = scopes[0] ?? `repo:${repoKey(repo)}`
-      const wanted = options.sections ?? [...generatedSections]
+      const requested = options.sections ?? [...generatedSections]
+      const noTests =
+        requested.includes('testing') && deps.testsExpected && !(await deps.testsExpected(repo))
+      const wanted = noTests ? requested.filter((section) => section !== 'testing') : requested
       const rows = await store.guides.list({ scopes, sections: wanted })
       const rowsOf = (section: GuideSectionName) =>
         scopes.map((scope) => rows.find((row) => row.scope === scope && row.section === section))
@@ -286,14 +292,29 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
         context.log?.(`${section.section}: ${placed.outcome}`)
       }
 
-      const data: GuideRunData = {
-        sections: result.sections.map((section) => ({
+      const sections: GuideRunData['sections'] = [
+        ...result.sections.map((section) => ({
           section: section.section,
           outcome: section.outcome,
           ...(section.inputHash && { inputHash: section.inputHash }),
           ...(section.reason && { reason: section.reason }),
           evidence: section.evidence,
         })),
+        ...(noTests
+          ? [
+              {
+                section: 'testing' as const,
+                outcome: 'skipped' as const,
+                reason: 'no tests by design',
+                evidence: [],
+              },
+            ]
+          : []),
+      ]
+      const data: GuideRunData = {
+        sections: sections.toSorted(
+          (a, b) => requested.indexOf(a.section) - requested.indexOf(b.section),
+        ),
         ...(result.call && { call: result.call }),
         ...(options.prompt && { prompt: options.prompt }),
       }

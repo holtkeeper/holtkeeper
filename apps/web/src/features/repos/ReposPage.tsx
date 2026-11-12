@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, FolderGit2, History, Plus } from 'lucide-react'
 import { useState } from 'react'
 
-import { useRepos } from '../../api/queries.ts'
+import { useGroupTitles, useRepos } from '../../api/queries.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import { cellTones, dotToTagTone, healthLabels, healthOrder, healthTones } from '../../lib/home.ts'
 import { repoKey, repoSplat, splitRepoPath } from '../../lib/repo.ts'
@@ -30,9 +30,10 @@ import {
   Button,
   EmptyState,
   ErrorState,
-  type FleetColumn,
   FilterButton,
+  type FleetColumn,
   FleetTable,
+  GroupName,
   HealthCell,
   Page,
   Placeholder,
@@ -54,13 +55,13 @@ export function ReposPage() {
     void navigate({ to: '/repos', search: next, replace: true })
   const [adding, setAdding] = useState(false)
   const { view, setView, homeGroups } = useScope()
+  const titleOf = useGroupTitles()
   const all = repos.data?.repos ?? []
   const sort = reposSort(search)
-  const rows = sortRows(worstFirst(filterRepos(all, search)), sort, fleetSortValue)
-  const groups = [...new Set(all.flatMap((r) => r.groups))].toSorted()
+  const rows = sortRows(worstFirst(filterRepos(all, search, titleOf)), sort, fleetSortValue)
   const forges = [...new Set(all.map((r) => r.repo.forge))].toSorted()
   const canAdd = canGlobal('settings:write')
-  const filtered = Boolean(search.q || search.group || search.health || search.forge)
+  const filtered = Boolean(search.q || search.health || search.forge)
 
   const open = (summary: RepoSummary) =>
     void navigate({ to: '/repos/$', params: { _splat: repoSplat(summary.repo) } })
@@ -103,14 +104,6 @@ export function ReposPage() {
           legend={healthLegend}
           toolbar={
             <>
-              <FilterButton
-                label="Group"
-                options={groups.map((id) => ({ id, label: id }))}
-                value={search.group ?? []}
-                onChange={(group) =>
-                  setSearch({ ...search, group: group.length ? group : undefined })
-                }
-              />
               <FilterButton
                 label="Health"
                 options={healthOrder.map((id) => ({ id, label: healthLabels[id] }))}
@@ -288,7 +281,9 @@ function RepoName({ summary }: { summary: RepoSummary }) {
               params={{ groupId: group }}
               className="no-underline"
             >
-              <Tag className="hover:underline">{group}</Tag>
+              <Tag className="hover:underline">
+                <GroupName group={group} />
+              </Tag>
             </Link>
           ))}
         </div>

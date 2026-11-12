@@ -14,6 +14,7 @@ import {
   useDependency,
   useDependencyApi,
   useDependencyDocs,
+  useGroupTitles,
   usePublicApiPackage,
   useWriteTasks,
 } from '../../api/queries.ts'
@@ -343,6 +344,7 @@ function SheetFacts({ detail }: { detail: DependencyDetail }) {
 }
 
 function DecisionList({ decisions }: { decisions: readonly DependencyDecision[] }) {
+  const titleOf = useGroupTitles()
   if (!decisions.length) return null
   return (
     <ul className="flex flex-col gap-1.5">
@@ -357,7 +359,7 @@ function DecisionList({ decisions }: { decisions: readonly DependencyDecision[] 
             {decision.title}
           </Link>
           {decision.shared && decision.owner.length ? (
-            <Tag mono>{decision.owner.join(', ')}</Tag>
+            <Tag>{decision.owner.map(titleOf).join(', ')}</Tag>
           ) : null}
           <span className="text-xs text-muted">
             {decision.source === 'agent' ? 'agent, approved' : decision.author} ·{' '}

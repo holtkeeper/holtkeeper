@@ -20,6 +20,7 @@ import {
   withCiSort,
   worstCiFirst,
 } from './ci.ts'
+import { groupTitleOf } from './group-titles.ts'
 
 const job = (name: string, stage: string, extra: Partial<CiJobStats> = {}): CiJobStats => ({
   name,
@@ -170,6 +171,11 @@ test('filters and sort values', () => {
     'acme/checkout-web',
   ])
   expect(filterCiCards(cards, { problems: true })).toHaveLength(1)
+  expect(
+    filterCiCards(cards, { q: 'money' }, groupTitleOf({ Payments: 'Money Desk' })).map(
+      (c) => c.repo.path,
+    ),
+  ).toEqual(['acme/ledger-api'])
   const [first, second] = cards
   if (!first || !second) throw new Error('cards missing')
   expect(ciSortValue(first, 'status')).toBe(1)

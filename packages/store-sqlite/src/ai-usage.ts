@@ -110,6 +110,8 @@ function plainWhere(filter: AiUsageFilter): Where {
   if (filter.model !== undefined) add('r.model = ?', filter.model)
   if (filter.provider !== undefined) add('r.provider = ?', filter.provider)
   if (filter.taskKind !== undefined) add('r.task_kind = ?', filter.taskKind)
+  if (filter.taskKinds !== undefined)
+    add('r.task_kind IN (SELECT value FROM json_each(?))', JSON.stringify(filter.taskKinds))
   if (filter.analyzer !== undefined) add('r.analyzer = ?', filter.analyzer)
   if (filter.outcome !== undefined) add('r.outcome = ?', filter.outcome)
   if (filter.jobId !== undefined) add('r.job_id = ?', filter.jobId)

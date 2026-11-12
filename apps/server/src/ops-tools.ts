@@ -11,7 +11,7 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { readJobLog } from '@holtkeeper/jobs'
 import type { AiUsageFilter, Job } from '@holtkeeper/store'
 
-import { type ServerDeps, parseRepo, repoKey, repoTarget } from './context.ts'
+import { type ServerDeps, groupLabeler, parseRepo, repoKey, repoTarget } from './context.ts'
 import { freshnessStatus } from './freshness.ts'
 import { type CostReader, jobStats } from './job-stats.ts'
 import { explainJob } from './job-why.ts'
@@ -154,6 +154,7 @@ function opsToolsAccess(deps: OpsDeps, options: OpsToolsAccessOptions): OpsTools
         return weekBreakdown(store.aiUsage, weekRange(at), options.usage ?? { scopes: [] })
       },
     }),
+    groupLabel: groupLabeler(config),
   }
 }
 

@@ -6,7 +6,7 @@ import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 
 import { defaultBumpers } from './bump.ts'
-import { type CheckOptions, defaultVerifier, detectChecks } from './checks.ts'
+import { type CheckOptions, defaultVerifier, detectChecks, withoutTests } from './checks.ts'
 import { chainNotes, forgeNotes, nodeModulesNotes, trimText } from './notes.ts'
 import { type Planner, defaultPlanner, diskFiles, forgeFiles } from './plan.ts'
 import {
@@ -296,6 +296,8 @@ export interface PropagationInput {
   packages: PackageRequest[]
   onlyRepos?: string[]
   checks?: CheckOptions
+  /** Whether a repository is meant to have tests; one without gets `withoutTests(checks)`. */
+  testsExpected?: (repo: RepoRef) => Promise<boolean>
   allowInstallScripts?: boolean
   /**
    * Proposes one write task per repository whose checks fail after the bump, all in one task
@@ -400,6 +402,8 @@ export async function runPropagation(input: PropagationInput) {
           releaseNotes: [],
         }
       }
+      const tests = input.testsExpected ? await input.testsExpected(ref) : true
+      const checks = tests ? input.checks : withoutTests(input.checks)
       const checkout = await input.checkout(ref, { ref: repository.defaultBranch, writable: true })
       try {
         const result = await updateCheckout({
@@ -410,7 +414,7 @@ export async function runPropagation(input: PropagationInput) {
           bumpers: steps.bumpers,
           verifier: steps.verifier,
           notes: steps.notes,
-          ...(input.checks ? { checks: input.checks } : {}),
+          ...(checks ? { checks } : {}),
           allowInstallScripts: input.allowInstallScripts ?? false,
           ...(input.signal ? { signal: input.signal } : {}),
           ...(log ? { log } : {}),

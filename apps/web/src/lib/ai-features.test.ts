@@ -8,7 +8,6 @@ import {
   featureBreakdown,
   featureColor,
   featureItems,
-  featureOf,
   toolUsers,
 } from './ai-features.ts'
 
@@ -25,19 +24,6 @@ const bucket = (taskKind: string, costUsd: number, runs = 1, unknownCost = 0): A
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
   }) as AiUsageBucket
-
-describe('featureOf', () => {
-  test('maps task kinds to features, unknown and empty ones to Other', () => {
-    expect(featureOf('review')).toBe('reviews')
-    expect(featureOf('triage')).toBe('reviews')
-    expect(featureOf('write-task')).toBe('tasks')
-    expect(featureOf('chat-summary')).toBe('chat')
-    expect(featureOf('learning')).toBe('knowledge')
-    expect(featureOf('release-notes')).toBe('releases')
-    expect(featureOf('widget-digest')).toBe('other')
-    expect(featureOf('')).toBe('other')
-  })
-})
 
 describe('featureBreakdown', () => {
   test('sums task kinds per feature with shares, Other last', () => {

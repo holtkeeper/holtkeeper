@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { StorageOverview, SystemHealth } from '@holtkeeper/api'
-import type { StorageProvider } from '@holtkeeper/artifacts'
+import {
+  type ArtifactStore,
+  type StorageProvider,
+  memoryArtifactStore,
+} from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -41,11 +45,28 @@ const kvOf = (store: Store) => {
 
 const setup = (
   store: Store,
-  options: { auth?: AuthProvider; storage?: StorageProvider[]; version?: string } = {},
+  options: {
+    auth?: AuthProvider
+    storage?: StorageProvider[]
+    version?: string
+    artifacts?: ArtifactStore
+    server?: Record<string, unknown>
+  } = {},
 ) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
-    config,
+    config: options.server
+      ? parseConfig({
+          forges: {},
+          server: {
+            auth: noAuth(),
+            store,
+            vaultKey: 'v'.repeat(32),
+            ...options.server,
+          },
+        })
+      : config,
+    ...(options.artifacts && { artifacts: options.artifacts }),
     auth: options.auth ?? noAuth(),
     store,
     vault,
@@ -204,6 +225,72 @@ describe('GET /api/system/health', () => {
       detail: expect.stringContaining('1 retired repo.readOnly entry'),
     })
     expect(health.version).toBeUndefined()
+  })
+
+  test('describes the artifact store with its declared quota and retention, never its keys', async () => {
+    const artifacts: ArtifactStore = {
+      ...memoryArtifactStore(),
+      location: {
+        kind: 's3',
+        bucket: 'widgets',
+        endpoint: 's3.example.test',
+        region: 'eu-north-1',
+      },
+      usage: async () => ({
+        count: 3,
+        bytes: 300,
+        byContentType: {},
+        byTag: {},
+        objects: { count: 7, bytes: 420 },
+      }),
+    }
+    const health = (await (
+      await setup(memoryStore(), {
+        artifacts,
+        server: {
+          artifacts: {
+            kind: 's3',
+            bucket: 'widgets',
+            accessKeyId: 'key-id',
+            secretAccessKey: 'secret-key',
+            quotaBytes: 1000,
+          },
+          retention: { days: 30 },
+        },
+      }).request('/api/system/health')
+    ).json()) as SystemHealth
+    expect(health.artifactStore).toEqual({
+      kind: 's3',
+      bucket: 'widgets',
+      endpoint: 's3.example.test',
+      region: 'eu-north-1',
+      usedBytes: 420,
+      objects: 7,
+      quotaBytes: 1000,
+      retention: { days: 30 },
+    })
+    expect(JSON.stringify(health)).not.toContain('secret-key')
+    expect(health.checks.find((check) => check.id === 'artifacts')?.status).toBe('ok')
+  })
+
+  test('reports a failed artifact measurement and leaves out the store without a location', async () => {
+    const broken: ArtifactStore = {
+      ...memoryArtifactStore(),
+      location: { kind: 'fs', dir: '/srv/widgets' },
+      usage: () => Promise.reject(new Error('disk gone')),
+    }
+    const failed = (await (
+      await setup(memoryStore(), { artifacts: broken }).request('/api/system/health')
+    ).json()) as SystemHealth
+    expect(failed.artifactStore).toEqual({
+      kind: 'fs',
+      dir: '/srv/widgets',
+      error: 'disk gone',
+    })
+    const memory = (await (
+      await setup(memoryStore(), { artifacts: memoryArtifactStore() }).request('/api/system/health')
+    ).json()) as SystemHealth
+    expect(memory.artifactStore).toBeUndefined()
   })
 
   test('needs a global settings:read', async () => {

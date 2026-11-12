@@ -313,6 +313,28 @@ describe('repository hub overview', () => {
     expect(coverage).toMatchObject({ tone: 'ok', status: 'On target', lines: ['target 50%'] })
   })
 
+  test('the coverage card reads no tests by design when tests are off', async () => {
+    await metricsRecord('coverage', { percent: 20, target: 60, files: 3, untested: 2 })
+    await store.settings.put({
+      id: 'tests',
+      key: 'repo.tests',
+      scope: { groups: ['shapes'] },
+      value: { expected: false, reason: 'Config only' },
+      secret: false,
+      updatedAt: at,
+    })
+    const coverage = (await overviewOf()).cards.find((card) => card.key === 'coverage')
+    expect(coverage).toEqual({
+      key: 'coverage',
+      section: 'quality',
+      tone: 'none',
+      status: 'No tests by design',
+      value: '—',
+      unit: 'lines',
+      lines: ['Config only'],
+    })
+  })
+
   test('reviews of 30 days, this week’s work, knowledge, default branch and access', async () => {
     await store.analyses.add({
       repo: circle,

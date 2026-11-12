@@ -2,7 +2,15 @@ import { describe, expect, test } from 'bun:test'
 
 import type { ForgeDefinition } from '@holtkeeper/forge'
 
-import { ConfigError, loadConfig, looksLikeCron, parseConfig, parseConfigFile } from './config.ts'
+import {
+  ConfigError,
+  groupLabel,
+  groupTitle,
+  loadConfig,
+  looksLikeCron,
+  parseConfig,
+  parseConfigFile,
+} from './config.ts'
 import { resolveRepo } from './resolve.ts'
 
 const forge: ForgeDefinition = {
@@ -37,6 +45,21 @@ describe('parseConfig', () => {
     expect(config).toMatchObject({ dryRun: false, groups: {}, repos: {} })
     expect(config.jobs.schedules).toEqual([])
     expect(parseConfig({}).forges).toEqual({})
+  })
+
+  test('trims group titles and rejects empty or long ones', () => {
+    const group = { forge: 'work', include: ['games/*'] }
+    const config = parseConfig({
+      forges: { work: forge },
+      groups: { games: { ...group, title: '  Game studio ' } },
+    })
+    expect(config.groups.games?.title).toBe('Game studio')
+    expect(
+      errorOf({ forges: { work: forge }, groups: { games: { ...group, title: ' ' } } }),
+    ).toContain('groups.games.title')
+    expect(
+      errorOf({ forges: { work: forge }, groups: { games: { ...group, title: 'x'.repeat(61) } } }),
+    ).toContain('groups.games.title')
   })
 
   test('rejects unknown forge in a group', () => {
@@ -246,5 +269,22 @@ describe('jobs config', () => {
     expect(looksLikeCron('@daily')).toBeTrue()
     expect(looksLikeCron('* * *')).toBeFalse()
     expect(looksLikeCron('rm -rf * * * *')).toBeFalse()
+  })
+})
+
+describe('group titles', () => {
+  const groups = { games: { title: 'Game studio' }, tools: {}, same: { title: 'same' } }
+
+  test('groupTitle shows the title, else the key', () => {
+    expect(groupTitle(groups, 'games')).toBe('Game studio')
+    expect(groupTitle(groups, 'tools')).toBe('tools')
+    expect(groupTitle(groups, 'gone')).toBe('gone')
+  })
+
+  test('groupLabel keeps the key next to the title', () => {
+    expect(groupLabel(groups, 'games')).toBe('Game studio (games)')
+    expect(groupLabel(groups, 'tools')).toBe('tools')
+    expect(groupLabel(groups, 'same')).toBe('same')
+    expect(groupLabel(groups, 'gone')).toBe('gone')
   })
 })

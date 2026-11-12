@@ -33,6 +33,8 @@ export interface KnowledgeToolsContext {
   ownerOf?: (scope: Scope) => string[]
   /** `forge:path` with its groups when the caller may read that repository's knowledge. */
   repoOf: (repo: string) => RepoTarget | undefined
+  /** How a group key is named in tool output; default the key itself. */
+  groupLabel?: (key: string) => string
   /** Who proposals are attributed to. */
   actor: string
   now: () => Date
@@ -43,11 +45,11 @@ const pool = 500
 
 const bodyPreview = 600
 
-const scopeText = (scope: Scope) =>
+const scopeText = (scope: Scope, label: (key: string) => string) =>
   [
     ...(scope.all ? ['everything'] : []),
     ...(scope.groups ?? []).map(
-      (group) => `group ${Array.isArray(group) ? group.join(' & ') : group}`,
+      (group) => `group ${Array.isArray(group) ? group.map(label).join(' & ') : label(group)}`,
     ),
     ...(scope.repos ?? []).map((repo) => `\`${repo}\``),
   ].join(', ') || 'nothing'
@@ -129,12 +131,12 @@ export async function searchKnowledge(
   ].join('\n\n')
 }
 
-const renderDetail = (entry: KnowledgeEntry) =>
+const renderDetail = (entry: KnowledgeEntry, label: (key: string) => string) =>
   [
     `# ${citation(entry.id)} ${entry.title}`,
     [
       `- kind: ${entry.kind}, status: ${entry.status}${entry.status === 'proposed' ? ' (not reviewed yet; do not rely on it)' : ''}`,
-      `- applies to: ${scopeText(entry.scope)}; tasks ${entry.appliesTo.join(', ')}`,
+      `- applies to: ${scopeText(entry.scope, label)}; tasks ${entry.appliesTo.join(', ')}`,
       ...(entry.packages?.length
         ? [`- packages: ${entry.packages.map(describePackage).join(', ')}`]
         : []),
@@ -155,7 +157,7 @@ async function readKnowledge(context: KnowledgeToolsContext, id: string): Promis
   const entry = await context.store.knowledge.get(id.replace(/^\[?kb:|\]$/g, ''))
   if (!entry || !canReadEntry(context, entry))
     throw new ToolError(`No knowledge entry ${id}; search_knowledge lists the ones you can read.`)
-  return renderDetail(entry)
+  return renderDetail(entry, context.groupLabel ?? ((key) => key))
 }
 
 /**
