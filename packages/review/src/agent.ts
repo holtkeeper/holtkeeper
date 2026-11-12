@@ -2,7 +2,7 @@ import type { Agent, AgentResult, AgentTask, Toolset } from '@holtkeeper/agent'
 import { z } from 'zod'
 
 import type { OpenThread } from './dedupe.ts'
-import { renderNumberedDiff } from './diff.ts'
+import { changedLineCount, renderNumberedDiff } from './diff.ts'
 import type { Guideline } from './guidelines.ts'
 import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } from './schema.ts'
 import type { FileScope } from './scope.ts'
@@ -47,6 +47,11 @@ export interface ReviewPromptInput {
   requests?: readonly { path: string; line: number; text: string; category: string }[]
   threads: readonly OpenThread[]
   maxComments: number
+  /**
+   * Set when this pass reviews one part of a split diff: its 1-based `index`, the `count` of
+   * parts, and every file in scope of the merge request.
+   */
+  part?: { index: number; count: number; files: readonly string[] }
   language?: string
   /**
    * `false` for a repository with no tests by design: the prompt does not ask about tests, and the
@@ -87,6 +92,12 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       '- `walkthrough`: the changes in scope grouped by logical change, most important first; each entry lists its files and says in one or two sentences what changed and why. Group related files instead of listing each one.',
       '- `effort`: how hard this change is for a human to review, 1 (trivial) to 5 (large or subtle, needs a careful look).',
       language,
+    ].join('\n'),
+    [
+      'How to review:',
+      `- Go through every changed file in the diff. Before judging a change, open the code around it, its callers and the code paths it touches with the tools; the larger the diff, the more you read.`,
+      '- Check error paths, retries and idempotency, edge cases (empty, missing, boundary values), concurrency and ordering, and the contract with callers (types, return values, side effects).',
+      '- Report every distinct problem you find, up to the comment limit; do not stop after the first one. A single comment on a large change is right only when the rest really is clean.',
     ].join('\n'),
     `Severity:\n${severityGuide(tests)}`,
   ]
@@ -139,6 +150,9 @@ export function reviewPrompt(input: ReviewPromptInput): string {
     requests.length
       ? `Checks flagged these lines. Comment on each one that is right, with that category, severity \`minor\` and a \`suggestion\` that fixes it in the style the note describes (for a missing test attribute: add the project's attribute with a short value unique within the component, named like the examples). Skip the ones that are wrong; they count toward the comment limit:\n${requests.join('\n')}`
       : '',
+    input.part
+      ? `The diff is split for review; this is part ${input.part.index} of ${input.part.count}. Comment only on lines of the diff below, and read the other files of the merge request when the change depends on them. Every file in scope:\n${input.part.files.map((path) => `- ${path}`).join('\n')}`
+      : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
     `Diff:\n\n${diff}`,
   ]
@@ -154,26 +168,123 @@ export interface AgentReviewOptions {
   /** Run on the `deep` model tier instead of `main`. */
   deep?: boolean
   toolsets?: readonly Toolset[]
+  /** Turn limit of each agent pass. Default 40. */
   maxTurns?: number
   signal?: AbortSignal
 }
 
+/** Changed lines above which an answer given without reading any code is followed up once. */
+export const INVESTIGATE_MIN_LINES = 80
+/** Files above which an answer given without reading any code is followed up once. */
+export const INVESTIGATE_MIN_FILES = 3
+/** Changed lines above which the diff is split into parts reviewed by separate passes. */
+export const SPLIT_MAX_LINES = 600
+/** Files above which the diff is split into parts reviewed by separate passes. */
+export const SPLIT_MAX_FILES = 12
+/** Parts of a split diff reviewed at once. */
+export const SPLIT_CONCURRENCY = 3
+
+const INVESTIGATE_FOLLOW_UP =
+  'You answered without opening any code, but this diff is too large to judge from the diff alone. Inspect the changed files, their callers and the code paths they touch with the tools, then answer again with the complete JSON: every problem you find, including those from your previous answer, not only new ones.'
+
+/** Lines a file contributes to the size of a review: in-scope added lines when incremental. */
+const weightOf = (file: FileScope, mode: ReviewPromptInput['mode']) =>
+  mode === 'incremental' ? file.lines.size : changedLineCount(file.hunks)
+
+const sizeOf = (files: readonly FileScope[], mode: ReviewPromptInput['mode']) =>
+  files.reduce((sum, file) => sum + weightOf(file, mode), 0)
+
 /**
- * Asks the agent for a structured review on the `main` tier (`deep` with `options.deep`); comments
- * come back as unvalidated candidates.
+ * Splits the files in scope into parts of at most `SPLIT_MAX_FILES` files that keep files of one
+ * directory together and balance changed lines; one part when the diff is within
+ * `SPLIT_MAX_LINES` and `SPLIT_MAX_FILES`. A directory that alone exceeds a limit is cut in path
+ * order, and a single file larger than `SPLIT_MAX_LINES` forms its own part. Files keep their
+ * diff order inside a part.
  */
-export async function runAgentReview(
-  options: AgentReviewOptions,
-): Promise<
-  Pick<AgentReview, 'summary' | 'verdict' | 'walkthrough' | 'effort'> & { candidates: Candidate[] }
-> {
-  const context = reviewContext(options.input)
+export function splitReviewFiles(
+  files: readonly FileScope[],
+  mode: ReviewPromptInput['mode'],
+): FileScope[][] {
+  const total = sizeOf(files, mode)
+  if (total <= SPLIT_MAX_LINES && files.length <= SPLIT_MAX_FILES) return [[...files]]
+  const directories = new Map<string, FileScope[]>()
+  for (const file of files) {
+    const directory = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''
+    directories.set(directory, [...(directories.get(directory) ?? []), file])
+  }
+  const pieces: FileScope[][] = []
+  for (const group of directories.values()) {
+    let piece: FileScope[] = []
+    for (const file of group.toSorted((a, b) => a.path.localeCompare(b.path))) {
+      if (
+        piece.length &&
+        (piece.length >= SPLIT_MAX_FILES ||
+          sizeOf(piece, mode) + weightOf(file, mode) > SPLIT_MAX_LINES)
+      ) {
+        pieces.push(piece)
+        piece = []
+      }
+      piece.push(file)
+    }
+    if (piece.length) pieces.push(piece)
+  }
+  const count = Math.max(
+    Math.ceil(total / SPLIT_MAX_LINES),
+    Math.ceil(files.length / SPLIT_MAX_FILES),
+  )
+  const parts: FileScope[][] = Array.from({ length: count }, () => [])
+  for (const piece of pieces.toSorted((a, b) => sizeOf(b, mode) - sizeOf(a, mode))) {
+    const open = parts
+      .filter((part) => part.length + piece.length <= SPLIT_MAX_FILES)
+      .toSorted((a, b) => sizeOf(a, mode) - sizeOf(b, mode))[0]
+    if (open) open.push(...piece)
+    else parts.push([...piece])
+  }
+  const order = new Map(files.map((file, index) => [file.path, index]))
+  return parts
+    .filter((part) => part.length)
+    .map((part) => part.toSorted((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0)))
+}
+
+/** The prompt input of one part: its files, and the requests, threads and path rules on them. */
+function partInput(
+  input: ReviewPromptInput,
+  files: readonly FileScope[],
+  index: number,
+  count: number,
+): ReviewPromptInput {
+  const paths = new Set(files.map((file) => file.path))
+  const pathInstructions = (input.pathInstructions ?? []).flatMap((rule) => {
+    const matching = rule.files.filter((path) => paths.has(path))
+    return matching.length ? [{ ...rule, files: matching }] : []
+  })
+  const requests = (input.requests ?? []).filter((request) => paths.has(request.path))
+  const { pathInstructions: _rules, requests: _requests, ...rest } = input
+  return {
+    ...rest,
+    files,
+    threads: input.threads.filter((thread) => paths.has(thread.path)),
+    ...(pathInstructions.length ? { pathInstructions } : {}),
+    ...(requests.length ? { requests } : {}),
+    part: { index, count, files: input.files.map((file) => file.path) },
+  }
+}
+
+type ReviewPass = Pick<AgentReview, 'summary' | 'verdict' | 'walkthrough' | 'effort'> & {
+  candidates: Candidate[]
+}
+
+async function reviewPass(options: AgentReviewOptions, input: ReviewPromptInput) {
+  const context = reviewContext(input)
+  const investigate =
+    input.files.length > INVESTIGATE_MIN_FILES ||
+    sizeOf(input.files, input.mode) > INVESTIGATE_MIN_LINES
   const result = await runTracked(
     options.agent,
     {
       dir: options.dir,
-      system: reviewSystemPrompt(options.input),
-      prompt: reviewPrompt(options.input),
+      system: reviewSystemPrompt(input),
+      prompt: reviewPrompt(input),
       ...(context ? { context } : {}),
       capabilities: ['read', 'search'],
       output: agentReviewSchema,
@@ -181,6 +292,7 @@ export async function runAgentReview(
       tier: options.deep ? 'deep' : 'main',
       ...(options.toolsets ? { toolsets: options.toolsets } : {}),
       maxTurns: options.maxTurns ?? 40,
+      ...(investigate ? { followUpWithoutTools: INVESTIGATE_FOLLOW_UP } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
     },
     options.usage,
@@ -196,6 +308,82 @@ export async function runAgentReview(
     verdict: review.verdict,
     ...(review.walkthrough?.length ? { walkthrough: review.walkthrough } : {}),
     ...(review.effort ? { effort: review.effort } : {}),
+  } satisfies ReviewPass
+}
+
+const isBudgetStop = (error: unknown): boolean =>
+  error instanceof Error && (error.name === 'BudgetExceededError' || isBudgetStop(error.cause))
+
+async function settledInParallel<Item, Result>(
+  items: readonly Item[],
+  limit: number,
+  signal: AbortSignal | undefined,
+  work: (item: Item, index: number) => Promise<Result>,
+): Promise<PromiseSettledResult<Result>[]> {
+  const results: PromiseSettledResult<Result>[] = []
+  const queue = [...items.entries()]
+  const worker = async () => {
+    for (let entry = queue.shift(); entry; entry = queue.shift()) {
+      if (signal?.aborted) return
+      const [index, item] = entry
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a worker takes one item at a time
+        results[index] = { status: 'fulfilled', value: await work(item, index) }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  signal?.throwIfAborted()
+  return results
+}
+
+/**
+ * Asks the agent for a structured review on the `main` tier (`deep` with `options.deep`); comments
+ * come back as unvalidated candidates. A diff over `SPLIT_MAX_LINES` or `SPLIT_MAX_FILES` is
+ * split with `splitReviewFiles` and each part reviewed by its own pass (`SPLIT_CONCURRENCY` at
+ * once, each with `maxTurns`); their candidates are concatenated, summaries joined, walkthroughs
+ * concatenated, `effort` is the highest and the verdict the worst. A failed part does not lose
+ * the others: its files are listed as not reviewed in the summary and the verdict becomes
+ * `needs-changes`. The review fails when every part fails, a spend limit stops a part, or the run
+ * is aborted. A pass over more than `INVESTIGATE_MIN_FILES` files or `INVESTIGATE_MIN_LINES`
+ * changed lines that answers without reading any code is followed up once
+ * (`followUpWithoutTools`). Every pass adds to `usage`.
+ */
+export async function runAgentReview(options: AgentReviewOptions): Promise<ReviewPass> {
+  const parts = splitReviewFiles(options.input.files, options.input.mode)
+  if (parts.length <= 1) return reviewPass(options, options.input)
+  const settled = await settledInParallel(
+    parts,
+    SPLIT_CONCURRENCY,
+    options.signal,
+    (files, index) => reviewPass(options, partInput(options.input, files, index + 1, parts.length)),
+  )
+  const errors = settled.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
+  const passes = settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
+  const stop = errors.find(isBudgetStop)
+  if (stop || !passes.length) throw stop ?? errors[0]
+  const failed = parts.filter((_, index) => settled[index]?.status !== 'fulfilled')
+  const walkthrough = passes.flatMap((pass) => pass.walkthrough ?? [])
+  const effort = Math.max(0, ...passes.map((pass) => pass.effort ?? 0))
+  const notReviewed = failed.flat().map((file) => `\`${file.path}\``)
+  return {
+    candidates: passes.flatMap((pass) => pass.candidates),
+    summary: [
+      ...passes.map((pass) => pass.summary.trim()),
+      notReviewed.length
+        ? `Not reviewed, a review pass failed on these files: ${notReviewed.join(', ')}.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    verdict:
+      failed.length || passes.some((pass) => pass.verdict === 'needs-changes')
+        ? 'needs-changes'
+        : 'looks-good',
+    ...(walkthrough.length ? { walkthrough } : {}),
+    ...(effort ? { effort } : {}),
   }
 }
 

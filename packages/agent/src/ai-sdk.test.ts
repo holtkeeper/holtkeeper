@@ -149,6 +149,87 @@ describe('createAiSdkAgent', () => {
     expect(result.turns).toBe(2)
   })
 
+  test('an answer without tool calls is followed up once and the second answer is used', async () => {
+    const { model, languageModel } = scripted(
+      say('{"score": 1}'),
+      call('read_file', { path: 'src/a.ts' }),
+      say('{"score": 2}'),
+    )
+    const agent = createAiSdkAgent({ languageModel, tierModels: on('m') })
+    const result = await agent.run({
+      dir: await checkout(),
+      prompt: 'rate',
+      output: z.object({ score: z.number() }),
+      followUpWithoutTools: 'Look at the code first.',
+    })
+    expect(result).toMatchObject({ output: { score: 2 }, turns: 3 })
+    expect(result.usage?.outputTokens).toBe(300)
+    expect(model.doGenerateCalls).toHaveLength(3)
+    expect(JSON.stringify(model.doGenerateCalls[1]?.prompt.at(-1))).toContain(
+      'Look at the code first.',
+    )
+  })
+
+  test('the follow-up happens only once, and never after tool calls', async () => {
+    const shallow = scripted(say('{"score": 1}'), say('{"score": 2}'))
+    const once = await createAiSdkAgent({
+      languageModel: shallow.languageModel,
+      tierModels: on('m'),
+    }).run({
+      dir: await checkout(),
+      prompt: 'rate',
+      output: z.object({ score: z.number() }),
+      followUpWithoutTools: 'Look again.',
+    })
+    expect(once).toMatchObject({ output: { score: 2 }, turns: 2 })
+
+    const deep = scripted(call('read_file', { path: 'src/a.ts' }), say('{"score": 4}'))
+    const investigated = await createAiSdkAgent({
+      languageModel: deep.languageModel,
+      tierModels: on('m'),
+    }).run({
+      dir,
+      prompt: 'rate',
+      output: z.object({ score: z.number() }),
+      followUpWithoutTools: 'Look again.',
+    })
+    expect(investigated).toMatchObject({ output: { score: 4 }, turns: 2 })
+    expect(deep.model.doGenerateCalls).toHaveLength(2)
+  })
+
+  test('the first answer stays when the follow-up gives no valid one', async () => {
+    const { languageModel } = scripted(say('{"score": 1}'), say('not json'))
+    const result = await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'rate',
+      output: z.object({ score: z.number() }),
+      followUpWithoutTools: 'Look again.',
+    })
+    expect(result).toMatchObject({ output: { score: 1 }, turns: 2 })
+  })
+
+  test('the first answer stays when the follow-up runs into the cost cap', async () => {
+    const { model, languageModel } = scripted(
+      say('{"score": 1}'),
+      call('glob', { pattern: '*' }),
+      call('glob', { pattern: '*' }),
+      say('{"score": 2}'),
+    )
+    const result = await createAiSdkAgent({
+      languageModel,
+      tierModels: on('m'),
+      pricing: { m: { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.1 } },
+    }).run({
+      dir: await checkout(),
+      prompt: 'rate',
+      output: z.object({ score: z.number() }),
+      maxCostUsd: 0.003,
+      followUpWithoutTools: 'Look again.',
+    })
+    expect(result).toMatchObject({ output: { score: 1 }, turns: 2 })
+    expect(model.doGenerateCalls).toHaveLength(2)
+  })
+
   test('marks the system prompt and only the newest message as Anthropic cache breakpoints', async () => {
     const { model, languageModel } = scripted(
       call('glob', { pattern: '*' }),

@@ -34,6 +34,13 @@ export interface AgentTask<Output = unknown> {
   maxCostUsd?: number
   signal?: AbortSignal
   /**
+   * A follow-up for a shallow answer: when the agent gives its final answer without having called
+   * any tool, the run continues once with this text as the next user message and returns the
+   * answer to it (the first answer stays the result when the second gives none). Skipped at the
+   * turn limit or cost cap. Adapters that cannot continue a run ignore it.
+   */
+  followUpWithoutTools?: string
+  /**
    * Model tier the task runs on (`fast`, `main`, `deep`), with the tier's reasoning effort.
    * Default `DEFAULT_TIER` (`main`). Callers never name a model.
    */

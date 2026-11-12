@@ -463,7 +463,9 @@ const UNPRICED_FALLBACK = {
  * early. When the loop ends on tool calls (turn limit or repeats) under the cost cap, one more
  * request with tools disabled asks for the answer; it counts as a turn, so `turns` can reach
  * `maxTurns + 1`. Only when that request gives no answer does the run fail, with `MaxTurnsError`
- * carrying what it used. Steps reach `task.transcript` as they finish.
+ * carrying what it used. With `task.followUpWithoutTools`, a final answer given before any tool
+ * call is followed up once in the same conversation; the answer to it wins, and the first one is
+ * returned when the follow-up yields no valid answer. Steps reach `task.transcript` as they finish.
  */
 export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
   const maxChars = options.limits?.maxOutputChars ?? DEFAULT_LOCAL_TOOL_LIMITS.maxOutputChars
@@ -581,11 +583,42 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
           return result
         }
 
-        for (let attempt = 0; attempt < 2; attempt++) {
-          // oxlint-disable-next-line no-await-in-loop -- a retry continues the same conversation
+        const finish = (answerText: string, output?: Output): AgentResult<Output> => {
+          const cost = spent()
+          return {
+            text: answerText,
+            ...(output !== undefined && { output }),
+            turns,
+            usage,
+            model: modelId,
+            runtime: 'ai-sdk',
+            ...(cost !== undefined && { costUsd: cost }),
+          }
+        }
+        const parsed = (answerText: string): { text: string; output?: Output } | undefined => {
+          if (!task.output) return answerText.trim() ? { text: answerText } : undefined
+          try {
+            return { text: answerText, output: parseAgentOutput(answerText, task.output) }
+          } catch {
+            return undefined
+          }
+        }
+        const followUp = task.followUpWithoutTools?.trim()
+        let toolCalls = 0
+        let retried = false
+        let followedUp = false
+        let fallback: { text: string; output?: Output } | undefined
+        const useFallback = (error: Error) => {
+          if (!fallback) throw error
+          return finish(fallback.text, fallback.output)
+        }
+
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- each request continues the same conversation
           let result = await step(messages)
+          toolCalls += result.steps.reduce((sum, s) => sum + s.toolCalls.length, 0)
           if (result.finishReason === 'tool-calls') {
-            if (capped()) throw overBudget()
+            if (capped()) return useFallback(overBudget())
             const reason = repeating(result)
               ? 'you keep repeating the same calls'
               : 'the turn limit is reached'
@@ -598,31 +631,44 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
                 content: `Stop calling tools: ${reason}. Give your final answer now from what you found${task.output ? ', as only the JSON value' : ''}.`,
               },
             ]
-            // oxlint-disable-next-line no-await-in-loop -- the final request follows the loop
-            result = await step(messages).catch((error: unknown) => {
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- the final request follows the loop
+              result = await step(messages)
+            } catch (error) {
               signal.throwIfAborted()
-              throw error instanceof BudgetExceededError ? error : noAnswer(error)
-            })
-            if (result.finishReason === 'tool-calls' || !result.text.trim()) throw noAnswer()
+              if (error instanceof BudgetExceededError) throw error
+              return useFallback(noAnswer(error))
+            }
+            if (result.finishReason === 'tool-calls' || !result.text.trim())
+              return useFallback(noAnswer())
           }
-          const cost = spent()
-          const answer: AgentResult<Output> = {
-            text: result.text,
-            turns,
-            usage,
-            model: modelId,
-            runtime: 'ai-sdk',
+          if (
+            followUp &&
+            !followedUp &&
+            toolCalls === 0 &&
+            tools.size > 0 &&
+            turns < maxTurns &&
+            !capped()
+          ) {
+            followedUp = true
+            fallback = parsed(result.text)
+            messages = [
+              ...messages,
+              ...result.responseMessages,
+              { role: 'user', content: followUp },
+            ]
+            continue
           }
-          if (cost !== undefined) answer.costUsd = cost
-          if (!task.output) return answer
+          if (!task.output) return finish(result.text)
           try {
-            answer.output = parseAgentOutput(result.text, task.output)
-            return answer
+            return finish(result.text, parseAgentOutput(result.text, task.output))
           } catch (error) {
-            if (finishing && error instanceof AgentOutputError) throw noAnswer(error)
-            if (attempt > 0 || turns >= maxTurns || !(error instanceof AgentOutputError))
-              throw error
+            if (!(error instanceof AgentOutputError)) throw error
+            if (fallback) return useFallback(error)
+            if (finishing) throw noAnswer(error)
+            if (retried || turns >= maxTurns) throw error
             if (capped()) throw overBudget()
+            retried = true
             messages = [
               ...messages,
               ...result.responseMessages,
@@ -630,7 +676,6 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             ]
           }
         }
-        throw new Error('ai-sdk agent failed: no valid answer')
       }
     },
   }
