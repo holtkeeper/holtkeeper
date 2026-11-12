@@ -469,7 +469,7 @@ describe('withServerDefaults', () => {
     })
     await agent.run({ dir: '/r', prompt: 'p' })
     const toolset = seen[0]?.toolsets?.find((item) => item.name === 'libraries')
-    expect(toolset).toBeDefined()
+    expect(toolset?.instructions).toContain('catalog tools')
     const versions = toolset?.tools.find((tool) => tool.name === 'libraries.versions')
     await versions?.run({ package: 'zod' }, { dir: '/r', signal: new AbortController().signal })
     expect(asked).toEqual([`${repo.forge}:${repo.path}`])
@@ -617,6 +617,9 @@ describe('withServerDefaults', () => {
       'gadgets',
     ])
     expect(triage?.map((toolset) => toolset.name)).toEqual(['code', 'docs', 'knowledge'])
+    expect(review?.find((toolset) => toolset.name === 'catalog')?.instructions).toContain(
+      'search_symbols',
+    )
 
     const signal = new AbortController().signal
     const listPackages = review

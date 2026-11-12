@@ -14,10 +14,9 @@ export interface RegistryTool<Input extends z.ZodObject = z.ZodObject> extends A
   defaultLimit?: number
 }
 
-/** A toolset of the registry. `instructions` is a sentence or two on when to use its tools. */
+/** A toolset of the registry; MCP clients get its `instructions` as server instructions. */
 export interface RegistryToolset extends Toolset {
   tools: RegistryTool[]
-  instructions?: string
 }
 
 /** A tool failure whose message is meant for the agent as it is. */

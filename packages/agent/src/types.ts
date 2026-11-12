@@ -103,10 +103,14 @@ export interface AgentTool<Input extends z.ZodObject = z.ZodObject> {
   run(input: z.infer<Input>, ctx: ToolContext): Promise<string> | string
 }
 
-/** A named group of tools that is mounted together, e.g. `code` or `docs`. */
+/**
+ * A named group of tools that is mounted together, e.g. `code` or `docs`. `instructions`, a
+ * sentence or two on when to use its tools, reaches the model in the system prompt.
+ */
 export interface Toolset {
   name: string
   tools: AgentTool[]
+  instructions?: string
 }
 
 /**

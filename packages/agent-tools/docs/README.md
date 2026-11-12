@@ -31,7 +31,7 @@ One set of tool definitions serves the internal agents and the server's MCP endp
 - `subject(input)`: what a call is about (a package, a repository), for usage statistics.
 - `defaultLimit`: hits returned when `limit` is not passed.
 
-A `RegistryToolset` adds `instructions`, a sentence or two on when to use its tools; the MCP adapter joins them into the server instructions.
+A toolset's `instructions` (on `Toolset` of `@holtkeeper/agent`) is a sentence or two on when to use its tools: internal agents get it in their system prompt, and the MCP adapter joins those of `RegistryToolset`s into the server instructions.
 
 - `mountToolsets(available, names)` → the toolsets named in `names`, in that order; unknown names are skipped. Each task mounts only what it needs, because tool schemas cost prompt tokens.
 - `RESULT_CAPS = { maxChars: 16000, maxSnippets: 20 }`: about 4k tokens and 20 hits per internal agent call.
@@ -92,7 +92,7 @@ The server uses the defaults; there is no setting for them.
 
 ### `libraries` — `libraryTools({ access, repo?, budget? })`
 
-`LibraryDocsAccess` is injected (implemented by `libraryDocs(...)` in `@holtkeeper/libraries`, which this package does not depend on). Every method returns compact Markdown that names the versions it comes from and marks third-party text; `repo` (`forge:path` of the task repository) is passed as the caller `{ repo }`, so `version` defaults to what that repository resolves, else the newest indexed one. Results are cut to the toolset budget (lines clipped to `maxLineLength`, at most `maxResultLines` with `… N more lines`).
+Its `instructions` limit it to third-party libraries and send the organization's own packages to the catalog tools (`search_symbols`, `get_symbol`, `get_package_api`). `LibraryDocsAccess` is injected (implemented by `libraryDocs(...)` in `@holtkeeper/libraries`, which this package does not depend on). Every method returns compact Markdown that names the versions it comes from and marks third-party text; `repo` (`forge:path` of the task repository) is passed as the caller `{ repo }`, so `version` defaults to what that repository resolves, else the newest indexed one. Results are cut to the toolset budget (lines clipped to `maxLineLength`, at most `maxResultLines` with `… N more lines`).
 
 | Tool                 | Input                                                          | Output                                                                                     |
 | -------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |

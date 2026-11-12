@@ -428,6 +428,22 @@ describe('system prompt', () => {
   })
 })
 
+describe('toolset guidance', () => {
+  test('instructions of mounted toolsets reach the system prompt', async () => {
+    const { query, calls } = fakeQuery([success('ok')])
+    await createClaudeAgent({ apiKey: 'k' }, { query }).run({
+      dir: '/repo',
+      prompt: 'p',
+      toolsets: [
+        { name: 'code', instructions: 'Look up names first.', tools: [lookup] },
+        { name: 'plain', tools: [{ ...lookup, name: 'plain.lookup' }] },
+      ],
+    })
+    expect(appendOf(calls[0]?.options ?? {})).toContain('- code: Look up names first.')
+    expect(appendOf(calls[0]?.options ?? {})).not.toContain('- plain:')
+  })
+})
+
 const modelUsage = (input: number) => ({
   inputTokens: input,
   outputTokens: 2,

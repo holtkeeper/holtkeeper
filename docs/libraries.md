@@ -135,6 +135,8 @@ Text coming from libraries, repositories and issues is marked in the answers as 
 
 Review, port, propagate and other agent tasks get the same tools as `libraries.versions`, `libraries.search`, `libraries.read`, `libraries.changes`, `libraries.issues` and `libraries.source`, with the task's repository as the default version. Nothing to configure.
 
+The library index covers third-party packages only. Asked about one of your organization's own packages (or a deep import path into one), the library tools answer that it is an internal package and point to the API catalog tools (`search_symbols`, `get_symbol`, `get_package_api`) instead of saying it is not indexed. Reviews also run on a checkout without `node_modules`, so their prompt sends dependency questions to these tools.
+
 ## Issue digests
 
 With `"digests": true`, the first time an issue thread comes up in a search it is summarized by the configured LLM into problem, symptoms, affected versions, fixed-in version and workaround, and the summary is stored, so later searches show it directly. At most three threads are summarized per search. Runs are charged to `llm.budget` under task kind `library-digest` and show up under **Ops › AI spend**. Over MCP they only happen when the call passes a `repo` you can read, since the repository decides which provider credential and budget apply.

@@ -49,7 +49,7 @@ import type {
 import { intervalMs } from '@holtkeeper/updates'
 import { z } from 'zod'
 
-import { type ApiCatalog, createApiCatalog } from './api-surface/catalog.ts'
+import { type ApiCatalog, type RepoFilter, createApiCatalog } from './api-surface/catalog.ts'
 import { type UsageIndex, createUsageIndex } from './api-surface/usages.ts'
 import { libraryKeyOf } from './dependencies.ts'
 import { githubReferences, githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
@@ -637,6 +637,24 @@ export interface ServerLibraryDocsOptions {
   github: () => Promise<GitHubClient>
   /** The model for issue digests of a caller repository; `undefined` leaves digests off. */
   summarize?: (repo: string | undefined) => Promise<Summarize | undefined>
+  /** The organization package a name belongs to (`ownPackageOf`); such names get a pointer to the catalog. */
+  ownPackage?: (name: string) => Promise<string | undefined>
+}
+
+/**
+ * The package of `catalog`, among repositories `filter` lets through, that `name` names or deep
+ * imports from (`@scope/pkg/lib/x` belongs to `@scope/pkg`), longest name first.
+ */
+export function ownPackageOf(
+  catalog: Pick<ApiCatalog, 'packages'>,
+  filter: RepoFilter,
+): (name: string) => Promise<string | undefined> {
+  return async (name) => {
+    const names = (await catalog.packages(filter)).map((item) => item.name)
+    return names
+      .filter((own) => name === own || name.startsWith(`${own}/`))
+      .toSorted((a, b) => b.length - a.length)[0]
+  }
 }
 
 /**
@@ -651,6 +669,7 @@ export function serverLibraryDocs(options: ServerLibraryDocsOptions): LibraryDoc
   return libraryDocs({
     store,
     artifacts,
+    ...(options.ownPackage ? { ownPackage: options.ownPackage } : {}),
     async issues(input, caller) {
       const summarize = await options.summarize?.(caller?.repo)
       return libraryIssues({

@@ -25,6 +25,12 @@ export interface LibraryDocsOptions {
   source?: SourceSnapshot
   /** Characters per answer. Default 20 000. */
   maxChars?: number
+  /**
+   * The organization package that `name` (a package or a deep import path into one) belongs to,
+   * when the API catalog has it; a library missing from the index is then answered with a pointer
+   * to the catalog tools instead of "not indexed".
+   */
+  ownPackage?: (name: string) => Promise<string | undefined>
 }
 
 const sourceOrder: LibraryChunk['source'][] = ['archive', 'repository', 'releases', 'site']
@@ -155,6 +161,9 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
     const ref = { ecosystem: ecosystemOf(query), name: query.package.trim() }
     const library = await store.getLibrary(ref)
     if (!library) {
+      const own = await options.ownPackage?.(ref.name)
+      if (own)
+        return `${ref.name}${own === ref.name ? '' : ` belongs to ${own}, which`} is a package of this organization, not a third-party library, so the library tools do not cover it. Its API is in the catalog: search_symbols by export name, then get_symbol or get_package_api ${own} with \`version\` set to the version this repository depends on (default is the newest release).`
       const similar = (await store.listLibraries({ ecosystem: ref.ecosystem, query: ref.name }))
         .slice(0, 10)
         .map((item) => item.name)

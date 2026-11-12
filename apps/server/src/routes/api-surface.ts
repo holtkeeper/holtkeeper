@@ -44,6 +44,7 @@ import {
   githubClientFor,
   librariesConfigOf,
   libraryReader,
+  ownPackageOf,
   serverLibraryDocs,
   visibleLibraries,
 } from '../libraries.ts'
@@ -212,6 +213,7 @@ export function createApiSurface(
         const agent = await deps.agentFor(target)
         return agent ? agentSummarize(agent) : undefined
       },
+      ownPackage: ownPackageOf(catalog, canRead),
     })
     return { docs, api: libraryApi({ store: libraries, artifacts }), store: libraries }
   }

@@ -176,6 +176,31 @@ describe('createAiSdkAgent', () => {
     expect(model.doGenerateCalls.at(-1)?.prompt.length).toBe(6)
   })
 
+  test('the system prompt carries the instructions of mounted toolsets', async () => {
+    const { model, languageModel } = scripted(say('done'))
+    await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'p',
+      toolsets: [
+        {
+          name: 'widgets',
+          instructions: 'Look widgets up with find_widget before guessing.',
+          tools: [
+            { name: 'find_widget', description: 'Find', input: z.object({}), run: () => 'w' },
+          ],
+        },
+        {
+          name: 'gadgets',
+          tools: [{ name: 'gadget', description: 'G', input: z.object({}), run: () => 'g' }],
+        },
+      ],
+    })
+    const [system] = model.doGenerateCalls[0]?.prompt ?? []
+    const text = typeof system?.content === 'string' ? system.content : ''
+    expect(text).toContain('- widgets: Look widgets up with find_widget before guessing.')
+    expect(text).not.toContain('- gadgets:')
+  })
+
   test('structured output never forces a tool or a response format', async () => {
     const { model, languageModel } = scripted(say('{"score": 3}'))
     await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({

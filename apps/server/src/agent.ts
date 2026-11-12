@@ -58,6 +58,7 @@ import {
   agentSummarize,
   githubClientFor,
   librariesConfigFrom,
+  ownPackageOf,
   serverLibraryDocs,
 } from './libraries.ts'
 import { type AssetToolsAccess, assetsToolset, storedAssetTools } from './tools/assets.ts'
@@ -560,6 +561,20 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
     const provider = credential.name
     const limited = { key: credential.id, credential }
     const librariesConfig = librariesConfigFrom(entries)
+    const requester = job?.requester
+    const catalogContext = agentCatalogContext({
+      catalog: apiCatalog,
+      usages: usageIndex,
+      store,
+      repo: target,
+      targetOf: (other) => repoTarget(config, other),
+      groupLabel: groupLabeler(config),
+      policy: crossTeamOf(entries),
+      ...(requester && { requester }),
+      ...(options.artifacts && { artifacts: options.artifacts }),
+      ...(options.supply && { supply: options.supply }),
+      now,
+    })
     let self: Agent | undefined
     const libraries =
       store.libraries && options.artifacts
@@ -583,10 +598,10 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
               ),
             summarize: async () =>
               librariesConfig?.digests && self ? agentSummarize(self) : undefined,
+            ownPackage: ownPackageOf(apiCatalog, catalogContext.canRead),
           })
         : undefined
 
-    const requester = job?.requester
     const releases = options.releases?.(target, requester)
     const ops = options.ops?.(target, requester)
     const tools = resolveSetting(entries, 'agent.tools', target)?.value
@@ -634,19 +649,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         testIds,
         families: () => store.families.list(),
       }),
-      catalog: agentCatalogContext({
-        catalog: apiCatalog,
-        usages: usageIndex,
-        store,
-        repo: target,
-        targetOf: (other) => repoTarget(config, other),
-        groupLabel: groupLabeler(config),
-        policy: crossTeamOf(entries),
-        ...(requester && { requester }),
-        ...(options.artifacts && { artifacts: options.artifacts }),
-        ...(options.supply && { supply: options.supply }),
-        now,
-      }),
+      catalog: catalogContext,
       onRunError: (error) =>
         log(
           `agent: recording a run failed: ${error instanceof Error ? error.message : String(error)}`,

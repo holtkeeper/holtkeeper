@@ -14,6 +14,14 @@ export function mcpToolName(name: string): string {
   return name.replaceAll(/[^A-Za-z0-9_-]/g, '_')
 }
 
+/** The `instructions` of `toolsets` as one system prompt section; empty when none has any. */
+export function toolsetGuidance(toolsets: readonly Toolset[] = []): string {
+  const lines = toolsets.flatMap((toolset) =>
+    toolset.instructions?.trim() ? [`- ${toolset.name}: ${toolset.instructions.trim()}`] : [],
+  )
+  return lines.length ? ['When to use the tool groups:', ...lines].join('\n') : ''
+}
+
 /** The name Claude Code gives a tool of an MCP server: `mcp__<server>__<tool>`. */
 export function qualifiedToolName(server: string, tool: string): string {
   return `mcp__${mcpToolName(server)}__${mcpToolName(tool)}`

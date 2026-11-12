@@ -74,6 +74,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
     tests || requestedTests ? categories : categories.filter((name) => name !== 'tests')
   const parts = [
     `You review merge request !${input.mergeRequest.id} of ${input.repo}. The checkout is at the merge request head; use the read and search tools to look at surrounding code${tests ? ', callers and tests' : ' and callers'} instead of guessing.`,
+    'Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages are in the API catalog (search_symbols by export name, then get_symbol or get_package_api, passing `version` = the version this repository depends on, from package.json, the lockfile or repo_packages), third-party libraries in the library tools. Packages defined in this checkout: read their source here; the catalog shows indexed versions, not this merge request.',
     [
       'Rules:',
       '- Report only real problems the change introduces or exposes. No praise, no restating the diff, no nitpicks a formatter or linter would catch.',

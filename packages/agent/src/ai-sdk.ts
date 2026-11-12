@@ -42,7 +42,7 @@ import {
   clipOutput,
   localTools,
 } from './local-tools.ts'
-import { mcpToolName } from './mcp.ts'
+import { mcpToolName, toolsetGuidance } from './mcp.ts'
 import { AgentOutputError, parseAgentOutput } from './output.ts'
 import type { AiProviderPlugin } from './plugin.ts'
 import { type AiSdkPackage, costFromPricing, mapModel, type ModelPricing } from './provider.ts'
@@ -220,7 +220,7 @@ function outputSchemaText(schema: z.ZodType): string {
   }
 }
 
-/** System prompt of the tool loop: instructions, context, confinement, tools and answer format. */
+/** System prompt of the tool loop: instructions, context, confinement, tools, toolset guidance and answer format. */
 function toolLoopSystemPrompt(task: AgentTask, tools: readonly string[]): string {
   const parts: string[] = []
   if (task.system?.trim()) parts.push(task.system.trim())
@@ -234,6 +234,8 @@ function toolLoopSystemPrompt(task: AgentTask, tools: readonly string[]): string
       .filter(Boolean)
       .join('\n'),
   )
+  const guidance = toolsetGuidance(task.toolsets)
+  if (guidance) parts.push(guidance)
   if (task.output) {
     const schema = outputSchemaText(task.output)
     parts.push(

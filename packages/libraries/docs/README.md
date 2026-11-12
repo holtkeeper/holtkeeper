@@ -53,7 +53,7 @@ Each per-version source returns a `SourceOutcome { status: LibrarySourceStatus, 
 
 ### Answers
 
-- `libraryDocs({ store, artifacts, issues?, source?, maxChars? }): LibraryDocs` — the interface of `access.ts`, used by the MCP server and agent tools. `issues` is `libraryIssues(...)` from `src/issues`; `source` is a `sourceSnapshots(...)`.
+- `libraryDocs({ store, artifacts, issues?, source?, maxChars?, ownPackage? }): LibraryDocs` — the interface of `access.ts`, used by the MCP server and agent tools. `issues` is `libraryIssues(...)` from `src/issues`; `source` is a `sourceSnapshots(...)`. `ownPackage(name)` names the organization package a name (or a deep import path into it) belongs to; a library missing from the index that has one is answered with a pointer to the catalog tools (`search_symbols`, `get_symbol`, `get_package_api <package>`) instead of "not indexed".
 - `libraryApi({ store, artifacts }): LibraryApi` — `get(ref, version): Promise<ApiPackage[] | undefined>` and `versions(ref): Promise<string[]>` (versions with an API, highest first), so `get_package_api`, `diff_versions` and `upgrade_impact` can fall back to external packages.
 - `thirdParty(origin, text)`, `fenceFor(text)` — the marker every answer wraps library text in.
 

@@ -123,6 +123,13 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       return new ToolError(
         `${name} has no version ${version}; call list_versions for the recorded ones.`,
       )
+    const owner = known
+      .filter((pkg) => name.startsWith(`${pkg.name}/`))
+      .toSorted((a, b) => b.name.length - a.name.length)[0]
+    if (owner)
+      return new ToolError(
+        `${name} is a deep import into ${owner.name}; entry points: ${owner.subpaths.map((s) => importPath(owner.name, s)).join(', ')}. Call get_package_api ${owner.name} (narrow with subpath) or search_symbols by export name.`,
+      )
     const close = known
       .filter(
         (pkg) => pkg.name.includes(name) || name.includes(pkg.name.split('/').pop() ?? '\u0000'),

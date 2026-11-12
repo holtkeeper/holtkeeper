@@ -5,6 +5,8 @@ import type {
   GitHubTokenUsage,
   LibraryIndexStatus,
   LibraryReindexResult,
+  PublicApiPackageSummary,
+  RepoRef,
 } from '@holtkeeper/api'
 import type { ApiPackage } from '@holtkeeper/api-surface'
 import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
@@ -30,6 +32,7 @@ import {
   librariesSetting,
   lastLibraryRun,
   noteLibraryUses,
+  ownPackageOf,
   requestLibraryIndex,
   runLibraryIndex,
   startLibraryIndex,
@@ -597,6 +600,24 @@ describe('library MCP tools', () => {
     ).toBe(404)
   })
 
+  test('a package of the organization points to the catalog tools', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'libs/ui' },
+      kind: 'api-surface',
+      createdAt: at,
+      data: { packages: [{ ...zodApi('2.0.0', ['RoundWidget']), name: '@acme/widgets' }] },
+    })
+    const deep = await callTool('library_versions', {
+      package: '@acme/widgets/lib/round/RoundWidget',
+    })
+    expect(deep.text).toContain('belongs to @acme/widgets, which is a package of this organization')
+    expect(deep.text).toContain('get_package_api @acme/widgets')
+    const api = await callTool('get_package_api', { package: '@acme/widgets/lib/round' })
+    expect(api.text).toContain('@acme/widgets/lib/round is a deep import into @acme/widgets')
+    const stranger = await callTool('library_versions', { package: '@acme/gadgets' })
+    expect(stranger.text).toContain('is not indexed')
+  })
+
   test('API tools fall back to the library index', async () => {
     const api = await callTool('get_package_api', { package: 'zod', repo: 'work:libs/ui' })
     expect(api.isError).toBeUndefined()
@@ -912,5 +933,35 @@ describe('library index duty', () => {
     await Bun.sleep(30)
     await stop()
     expect(calls).toBe(2)
+  })
+})
+
+const ownSummary = (name: string, path: string) =>
+  ({ name, repo: { forge: 'work', path } }) as unknown as PublicApiPackageSummary
+const visibleRepo = (repo: RepoRef) => !repo.path.startsWith('secret/')
+
+describe('ownPackageOf', () => {
+  const catalog = {
+    packages: async (filter: (repo: RepoRef) => boolean) =>
+      [
+        ownSummary('@acme/widgets', 'libs/widgets'),
+        ownSummary('@acme/widgets-extra', 'libs/extra'),
+        ownSummary('@acme/widgets/sub', 'libs/sub'),
+        ownSummary('@other/hidden', 'secret/hidden'),
+      ].filter((item) => filter(item.repo)),
+  }
+
+  test('picks the longest package name that the path names or deep imports from', async () => {
+    const own = ownPackageOf(catalog, visibleRepo)
+    expect(await own('@acme/widgets')).toBe('@acme/widgets')
+    expect(await own('@acme/widgets/lib/round')).toBe('@acme/widgets')
+    expect(await own('@acme/widgets-extra/lib/x')).toBe('@acme/widgets-extra')
+    expect(await own('@acme/widgets/sub/deep')).toBe('@acme/widgets/sub')
+    expect(await own('@acme/widgetsfoo')).toBeUndefined()
+  })
+
+  test('does not reveal packages of repositories the filter rejects', async () => {
+    expect(await ownPackageOf(catalog, visibleRepo)('@other/hidden/lib/x')).toBeUndefined()
+    expect(await ownPackageOf(catalog, () => true)('@other/hidden/lib/x')).toBe('@other/hidden')
   })
 })

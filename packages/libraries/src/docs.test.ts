@@ -112,6 +112,24 @@ describe('libraryDocs', () => {
     expect(await docs.versions({ package: 'nope' })).toContain('nope (npm) is not indexed')
   })
 
+  test('an organization package missing from the index points to the catalog tools', async () => {
+    const docs = libraryDocs({
+      store: await seed(),
+      artifacts: memoryArtifactStore(),
+      ownPackage: async (name) =>
+        name === '@acme/widgets' || name.startsWith('@acme/widgets/') ? '@acme/widgets' : undefined,
+    })
+    const direct = await docs.search({ package: '@acme/widgets', query: 'Button' })
+    expect(direct).toContain('@acme/widgets is a package of this organization')
+    expect(direct).toContain('get_package_api @acme/widgets')
+    expect(direct).not.toContain('not indexed')
+    expect(await docs.versions({ package: '@acme/widgets/lib/button/Round' })).toContain(
+      '@acme/widgets/lib/button/Round belongs to @acme/widgets, which is a package of this organization',
+    )
+    expect(await docs.versions({ package: 'nope' })).toContain('nope (npm) is not indexed')
+    expect(await docs.versions({ package: 'lib' })).toContain('# lib (npm)')
+  })
+
   test('search defaults to the caller repository version and marks third-party text', async () => {
     const docs = libraryDocs({ store: await seed(), artifacts: memoryArtifactStore() })
     const text = await docs.search({ package: 'lib', query: 'add numbers' }, { repo: 'gl:b' })

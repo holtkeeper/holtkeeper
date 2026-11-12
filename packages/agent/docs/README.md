@@ -9,7 +9,7 @@ The `Agent` contract for LLM work on a repository checkout (code review, refacto
   - `tier` — `fast`, `main` (default) or `deep`, see [Model tiers](#model-tiers); the adapter runs the tier's model at its reasoning effort.
   - `taskKind` — `review`, `refactor`, `triage`, ...; for knowledge, instructions and reporting, never for the model.
   - `context` — a pre-selected knowledge/conventions block, placed early in the system prompt.
-  - `toolsets` — in-process tools (`Toolset { name; tools: AgentTool[] }`), e.g. from `@holtkeeper/agent-tools`.
+  - `toolsets` — in-process tools (`Toolset { name; tools: AgentTool[]; instructions? }`), e.g. from `@holtkeeper/agent-tools`. Both adapters add every toolset's `instructions` (when to use its tools) to the system prompt as a "When to use the tool groups" list.
   - `mcpServers` — external MCP servers by name (SDK `McpServerConfig`).
   - `transcript` — a `TranscriptSink` that receives the run's events, see [Transcripts](#transcripts).
   - `commands` — with `run`: the only commands the agent may run (`commandAllowed(command, commands)`: the command's words start with the words of one entry, so `bun run test` also allows `bun run test src/widget.test.ts`; shell operators, substitutions, redirections, line breaks and quotes are refused). The Claude adapter denies other `Bash` calls in its permission gate, the AI SDK adapter's `run_command` refuses them. Absent: any command.

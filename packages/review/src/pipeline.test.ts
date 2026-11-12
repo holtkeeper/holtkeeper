@@ -203,6 +203,15 @@ describe('reviewMergeRequest', () => {
     }
   })
 
+  test('the prompt sends dependency questions to the package tools, not node_modules', async () => {
+    const { forge } = fakeForge({ files, discussions: [] })
+    const { agent, tasks } = fakeAgent({ review: [review([])] })
+    await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent }))
+    expect(tasks[0]?.system).toContain('node_modules or the module cache may be missing')
+    expect(tasks[0]?.system).toContain('Packages defined in this checkout: read their source here')
+    expect(tasks[0]?.system).toContain('search_symbols by export name')
+  })
+
   test('a deep review runs on the deep model tier', async () => {
     const { forge } = fakeForge({ files, discussions: [] })
     const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })

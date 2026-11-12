@@ -10,7 +10,7 @@ import { resolveSecret, type Secret } from '@holtkeeper/forge'
 
 import { commandAllowed } from './commands.ts'
 import { BudgetExceededError, budgetExceededFrom } from './errors.ts'
-import { toMcpServer, mcpToolName } from './mcp.ts'
+import { toMcpServer, mcpToolName, toolsetGuidance } from './mcp.ts'
 import { parseAgentOutput, validateAgentOutput } from './output.ts'
 import { isInside } from './paths.ts'
 import { costFromPricing, mapModel, type ModelPricing } from './provider.ts'
@@ -141,8 +141,8 @@ function permissionGate(
 }
 
 /**
- * System prompt additions: task instructions, the context block, confinement, tool limits and the
- * answer format. Nothing in it depends on the run (the checkout path reaches the model through
+ * System prompt additions: task instructions, the context block, confinement, tool limits, the
+ * mounted toolsets' `instructions` and the answer format. Nothing in it depends on the run (the checkout path reaches the model through
  * Claude Code's dynamic section), so runs of the same kind share a cacheable system prompt.
  * `extraTools` are the mounted MCP tools the model should prefer over reading whole files.
  */
@@ -168,6 +168,8 @@ export function systemPromptFor(
       .filter(Boolean)
       .join('\n'),
   )
+  const guidance = toolsetGuidance(task.toolsets)
+  if (guidance) parts.push(guidance)
   if (task.output) {
     parts.push(
       'Your final message must be a single JSON value matching the format the task describes, with no prose around it. A ```json fence is acceptable.',
