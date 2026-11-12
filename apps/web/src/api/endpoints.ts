@@ -137,6 +137,7 @@ import type {
   ConfigEntryList,
   ConfigEntryView,
   CreateKnowledgeInput,
+  ForgeAccountView,
   ForgeRepositoryList,
   ForgeSshKeyInput,
   ForgeSshKeyResult,
@@ -592,6 +593,12 @@ export const api = {
     request<ForgeSshKeyResult>('POST', `/api/forges/${id(forgeId)}/ssh-key`, { body: input }),
   removeForgeSshKey: (forgeId: string) =>
     request<void>('DELETE', `/api/forges/${id(forgeId)}/ssh-key`),
+  forgeAccount: (forgeId: string) =>
+    request<ForgeAccountView>('GET', `/api/forges/${id(forgeId)}/account`),
+  setForgeAvatar: (forgeId: string, file: File) =>
+    uploadFile<ForgeAccountView>('PUT', `/api/forges/${id(forgeId)}/account/avatar`, file, {
+      filename: file.name,
+    }),
   forgeRepositories: (forgeId: string, search: string) =>
     request<ForgeRepositoryList>('GET', `/api/forges/${id(forgeId)}/repositories`, {
       query: { search: search || undefined, limit: 30 },

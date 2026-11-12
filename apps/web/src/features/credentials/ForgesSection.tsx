@@ -41,6 +41,7 @@ import {
 } from '../../ui/index.ts'
 import { useSectionHeader } from '../settings/section-header.ts'
 import { useSession } from '../shell/session.ts'
+import { BotAccount } from './BotAccount.tsx'
 import { type ForgeDraft, toForgeDraft, toForgeInput, validateForgeDraft } from './forge-form.ts'
 
 type ForgeEntry = ConfigEntryView<'forge'>
@@ -197,6 +198,7 @@ export function ForgesSection() {
                     </div>
                   ) : null}
                 </div>
+                <BotAccount forgeId={forge.id} writable={writable} />
                 {sshKey ? (
                   <SshKeySummary
                     sshKey={sshKey}

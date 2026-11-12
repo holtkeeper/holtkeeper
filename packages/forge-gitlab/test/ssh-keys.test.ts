@@ -21,6 +21,9 @@ describe('current user', () => {
       username: 'holtkeeper-bot',
       name: 'Holtkeeper Bot',
       email: 'bot-commits@example.com',
+      avatarUrl: 'https://gitlab.test/uploads/-/system/user/avatar/7/avatar.png',
+      webUrl: 'https://gitlab.test/holtkeeper-bot',
+      settingsUrl: 'https://gitlab.test/-/user_settings/profile',
     })
   })
 })

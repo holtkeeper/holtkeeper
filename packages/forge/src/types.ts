@@ -569,6 +569,13 @@ export interface GitForge {
   /** The account behind the token, e.g. the identity for commits signed with its SSH key. */
   getCurrentUser?(): Promise<ForgeUser>
   /**
+   * Replaces the avatar of the account behind the token. Callers pass only files
+   * `checkAccountAvatar` accepts; the forge may still reject one, e.g. a file it cannot decode.
+   * Forges whose API cannot change avatars leave it out. Not a repository write, so the read-only
+   * and comments-off wrappers let it through.
+   */
+  setCurrentUserAvatar?(file: AccountAvatarFile): Promise<void>
+  /**
    * The repository's avatar image, else the nearest parent group's; `undefined` when none of them
    * has one. `contentType` is a raster or SVG image type.
    */
@@ -792,6 +799,22 @@ export interface ForgeUser {
   username: string
   name: string
   email?: string
+  /** URL of the account's current avatar image, when the forge reports one. */
+  avatarUrl?: string
+  /** The account's profile page on the forge, when the forge reports it. */
+  webUrl?: string
+  /**
+   * Page on the forge where the account's owner changes its name and username, which the token
+   * itself may not change. Absent when the forge has no such page.
+   */
+  settingsUrl?: string
+}
+
+/** An image for `setCurrentUserAvatar`. `filename` carries the extension forges check. */
+export interface AccountAvatarFile {
+  bytes: Uint8Array
+  filename: string
+  contentType: string
 }
 
 /** What an SSH key may be used for: git over SSH, commit signing, or both. */

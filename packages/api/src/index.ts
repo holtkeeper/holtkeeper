@@ -22,6 +22,11 @@ export type * from '@holtkeeper/changes'
 export type * from '@holtkeeper/report'
 export { formatBytes, percentChange } from '@holtkeeper/report'
 export type { RepoRef } from '@holtkeeper/forge'
+export {
+  ACCOUNT_AVATAR_EXTENSIONS,
+  ACCOUNT_AVATAR_MAX_BYTES,
+  checkAccountAvatar,
+} from '@holtkeeper/forge/avatar'
 export type { FamilySuggestion, GuideBlock, GuideLayer, GuideTask } from '@holtkeeper/guide'
 export type { Issue, IssueCategory } from '@holtkeeper/issues'
 export type {

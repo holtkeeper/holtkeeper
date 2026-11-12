@@ -59,8 +59,9 @@ const writes: Record<string, (args: readonly unknown[]) => string | undefined> =
 /**
  * `forge` with every change to a read-only repository rejected with `ReadOnlyRepositoryError`
  * before it reaches the forge: branches, commits, tags, releases, merge requests, comments, reviews, threads,
- * pipeline jobs, deploy keys and project webhooks. Reads, user keys, group webhooks and removals of
- * keys and hooks pass through. Optional methods stay absent when `forge` lacks them.
+ * pipeline jobs, deploy keys and project webhooks. Reads, user keys, group webhooks, removals of
+ * keys and hooks and the token account's avatar (an admin change to the bot account, not to a
+ * repository) pass through. Optional methods stay absent when `forge` lacks them.
  */
 export function readOnlyForge(forge: GitForge, isReadOnly: ReadOnlyCheck): GitForge {
   return new Proxy(forge, {

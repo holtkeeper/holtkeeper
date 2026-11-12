@@ -272,6 +272,8 @@ const currentUserSchema = z.object({
   name: z.string(),
   commit_email: z.string().nullable().optional(),
   email: z.string().nullable().optional(),
+  avatar_url: z.string().nullable().optional(),
+  web_url: z.string().nullable().optional(),
 })
 const anySchema = z.unknown()
 const awardSchema = z.object({
@@ -708,7 +710,24 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     async getCurrentUser() {
       const user = await client.json('GET', 'user', currentUserSchema)
       const email = user.commit_email || user.email
-      return { username: user.username, name: user.name, ...(email ? { email } : {}) }
+      return {
+        username: user.username,
+        name: user.name,
+        ...(email ? { email } : {}),
+        ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
+        ...(user.web_url ? { webUrl: user.web_url } : {}),
+        settingsUrl: `${options.url.replace(/\/+$/, '')}/-/user_settings/profile`,
+      }
+    },
+
+    async setCurrentUserAvatar(file) {
+      const form = new FormData()
+      form.append(
+        'avatar',
+        new Blob([new Uint8Array(file.bytes)], { type: file.contentType }),
+        file.filename,
+      )
+      await client.json('PUT', 'user/avatar', anySchema, { body: form })
     },
 
     async getRepository(repo) {

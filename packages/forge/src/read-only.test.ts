@@ -25,6 +25,7 @@ function fakeForge() {
       return { id: '1', hooks: [] }
     },
     removeWebhook: record('removeWebhook'),
+    setCurrentUserAvatar: record('setCurrentUserAvatar'),
   } as unknown as GitForge
   return { forge, calls }
 }
@@ -80,6 +81,17 @@ describe('readOnlyForge', () => {
     await guarded.ensureWebhook?.({ group: 'libs' }, hook)
     await guarded.removeWebhook?.([{ id: '1', scope: 'project', target: 'libs/ui' }])
     expect(calls).toEqual(['registerSshKey', 'ensureWebhook', 'removeWebhook'])
+  })
+
+  test('lets the account avatar change through even when every repository is read-only', async () => {
+    const { forge, calls } = fakeForge()
+    const guarded = readOnlyForge(forge, () => true)
+    await guarded.setCurrentUserAvatar?.({
+      bytes: new Uint8Array([1]),
+      filename: 'a.png',
+      contentType: 'image/png',
+    })
+    expect(calls).toEqual(['setCurrentUserAvatar'])
   })
 
   test('keeps optional methods absent', () => {

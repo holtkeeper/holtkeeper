@@ -42,6 +42,7 @@ type Query = Record<string, string | number | boolean | undefined>
 
 interface RequestOptions {
   query?: Query
+  /** Sent as JSON, except `FormData`, which goes out as `multipart/form-data`. */
   body?: unknown
 }
 
@@ -107,12 +108,13 @@ export function createGitLabClient(options: GitLabClientOptions): GitLabClient {
 
   const send = async (method: Method, url: string, body: unknown, label: string) => {
     const headers: Record<string, string> = { 'PRIVATE-TOKEN': token, Accept: 'application/json' }
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    const multipart = body instanceof FormData
+    if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json'
     for (let attempt = 0; ; attempt++) {
       const response = await fetchImpl(url, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: multipart ? body : body === undefined ? undefined : JSON.stringify(body),
         // fetch keeps custom headers such as PRIVATE-TOKEN across cross-origin redirects.
         redirect: 'error',
       })

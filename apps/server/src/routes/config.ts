@@ -4,6 +4,7 @@ import type {
   ConfigEntryList,
   ConfigEntryView,
   ConfigViewData,
+  ForgeAccountView,
   ForgeRepositoryList,
   ForgeSshKeyInput,
   ForgeSshKeyResult,
@@ -21,6 +22,8 @@ import { localRunner } from '@holtkeeper/exec'
 import {
   type GitForge,
   type WebhookTarget,
+  ACCOUNT_AVATAR_MAX_BYTES,
+  checkAccountAvatar,
   forgeErrorStatus,
   webhookEvents,
 } from '@holtkeeper/forge'
@@ -171,6 +174,26 @@ const accountOf = (forge: GitForge) =>
     () => undefined,
   )
 
+/** The token's account as `GET /forges/:id/account` answers it. */
+const accountView = async (id: string, forge: GitForge): Promise<ForgeAccountView> => {
+  if (!forge.getCurrentUser)
+    throw new HTTPException(409, { message: `forge ${id} cannot tell its account` })
+  let user: Awaited<ReturnType<typeof forge.getCurrentUser>>
+  try {
+    user = await forge.getCurrentUser()
+  } catch (error) {
+    throw new HTTPException(502, { message: `account not read: ${messageOf(error)}` })
+  }
+  return {
+    username: user.username,
+    name: user.name,
+    ...(user.avatarUrl !== undefined && { avatarUrl: user.avatarUrl }),
+    ...(user.webUrl !== undefined && { webUrl: user.webUrl }),
+    ...(user.settingsUrl !== undefined && { settingsUrl: user.settingsUrl }),
+    canSetAvatar: typeof forge.setCurrentUserAvatar === 'function',
+  }
+}
+
 async function mapLimited<T, R>(
   items: readonly T[],
   limit: number,
@@ -209,7 +232,9 @@ const audit = (
  * (`/config/<collection>[/:id]`), forge webhooks and schedule previews. Reading needs global
  * `settings:read`, changing global `settings:write`; every change is audited with the document as
  * target. Checking repository access before adding (a batch of up to 50 paths) also needs global
- * `settings:write` and changes nothing.
+ * `settings:write` and changes nothing. `GET /forges/:id/account` reads the token's account;
+ * `PUT /forges/:id/account/avatar?filename=` replaces its avatar with the raw body (400 for files
+ * `checkAccountAvatar` rejects, 409 when the forge cannot), audited as `forge.avatar_set`.
  */
 export function configRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
@@ -638,6 +663,47 @@ export function configRoutes(deps: ServerDeps) {
       ...(errors.length && { errors }),
     })
     return c.body(null, 204)
+  })
+
+  app.get('/forges/:id/account', async (c) => {
+    authorize(c, 'settings:read', GLOBAL)
+    const id = c.req.param('id')
+    return c.json<ForgeAccountView>(await accountView(id, forgeFor(deps.config, id)))
+  })
+
+  app.put('/forges/:id/account/avatar', async (c) => {
+    authorize(c, 'settings:write', GLOBAL)
+    const id = c.req.param('id')
+    const forge = forgeFor(deps.config, id)
+    if (!forge.setCurrentUserAvatar)
+      throw new HTTPException(409, { message: `forge ${id} cannot change its account's avatar` })
+    const filename = c.req.query('filename')?.trim()
+    if (!filename) throw new HTTPException(400, { message: 'filename is required' })
+    if (Number(c.req.header('Content-Length')) > ACCOUNT_AVATAR_MAX_BYTES)
+      throw new HTTPException(400, {
+        message: `The image is larger than ${ACCOUNT_AVATAR_MAX_BYTES / 1024} KB.`,
+      })
+    const bytes = new Uint8Array(await c.req.arrayBuffer())
+    const checked = checkAccountAvatar({ filename, size: bytes.byteLength, head: bytes })
+    if ('problem' in checked) throw new HTTPException(400, { message: checked.problem })
+    const extension = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+    try {
+      await forge.setCurrentUserAvatar({
+        bytes,
+        filename: `avatar${extension}`,
+        contentType: checked.contentType,
+      })
+    } catch (error) {
+      const status = forgeErrorStatus(error)
+      throw new HTTPException(status === 400 || status === 422 ? 400 : 502, {
+        message: `avatar not changed: ${messageOf(error)}`,
+      })
+    }
+    audit(c, 'forge.avatar_set', 'forge', id, {
+      contentType: checked.contentType,
+      bytes: bytes.byteLength,
+    })
+    return c.json<ForgeAccountView>(await accountView(id, forge))
   })
 
   app.get('/schedules/:id/preview', (c) => {

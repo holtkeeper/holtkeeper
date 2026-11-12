@@ -63,6 +63,8 @@ export class FakeGitLabKeys {
         name: 'Holtkeeper Bot',
         email: 'bot@example.com',
         commit_email: 'bot-commits@example.com',
+        avatar_url: 'https://gitlab.test/uploads/-/system/user/avatar/7/avatar.png',
+        web_url: 'https://gitlab.test/holtkeeper-bot',
       })
     if (s[0] === 'user' && s[1] === 'keys') {
       if (method === 'GET' && s.length === 2) return json(200, [...this.userKeys.values()])

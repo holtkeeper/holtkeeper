@@ -20,6 +20,7 @@ function fakeForge() {
     replyToDiscussion: record('replyToDiscussion'),
     resolveDiscussion: record('resolveDiscussion'),
     listDiscussions: async () => [],
+    setCurrentUserAvatar: record('setCurrentUserAvatar'),
     updateMergeRequest: async () => {
       calls.push('updateMergeRequest')
       return { id: 1 }
@@ -31,6 +32,17 @@ function fakeForge() {
 const quiet = (repo: string) => repo.startsWith('quiet/')
 
 describe('commentsOffForge', () => {
+  test('lets the account avatar change through', async () => {
+    const { forge, calls } = fakeForge()
+    const guarded = commentsOffForge(forge, () => true)
+    await guarded.setCurrentUserAvatar?.({
+      bytes: new Uint8Array([1]),
+      filename: 'a.png',
+      contentType: 'image/png',
+    })
+    expect(calls).toEqual(['setCurrentUserAvatar'])
+  })
+
   test('rejects notes on merge requests of repositories whose comments are off', async () => {
     const { forge, calls } = fakeForge()
     const guarded = commentsOffForge(forge, async (repo) => quiet(repo))

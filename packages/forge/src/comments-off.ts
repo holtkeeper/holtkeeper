@@ -40,8 +40,8 @@ const posts: Record<string, (args: readonly unknown[]) => boolean> = {
 /**
  * `forge` with every note on a merge request of a repository whose comments are off rejected with
  * `MergeRequestCommentsOffError` before it reaches the forge: comments, reviews, thread replies,
- * note edits and resolved threads. A bare approval (a review with no comments and no summary), merge requests themselves (create, update, merge, labels) and
- * everything else pass through. Optional methods stay absent when `forge` lacks them.
+ * note edits and resolved threads. A bare approval (a review with no comments and no summary), merge requests themselves (create, update, merge, labels),
+ * account changes such as the avatar and everything else pass through. Optional methods stay absent when `forge` lacks them.
  */
 export function commentsOffForge(forge: GitForge, isOff: CommentsOffCheck): GitForge {
   return new Proxy(forge, {

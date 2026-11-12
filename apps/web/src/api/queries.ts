@@ -1029,6 +1029,27 @@ export function useForgeMutations() {
   }
 }
 
+/** The account behind a forge's token; needs global `settings:read`. */
+export const useForgeAccount = (forgeId: string, enabled = true) =>
+  useQuery({
+    queryKey: [...keys.config, 'forge-account', forgeId],
+    queryFn: () => api.forgeAccount(forgeId),
+    enabled,
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+
+/** Replaces the avatar of a forge's token account and caches the account the server answers. */
+export function useSetForgeAvatar() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ forgeId, file }: { forgeId: string; file: File }) =>
+      api.setForgeAvatar(forgeId, file),
+    onSuccess: (account, { forgeId }) =>
+      client.setQueryData([...keys.config, 'forge-account', forgeId], account),
+  })
+}
+
 /** Repositories the forge's token is a member of, matching `search`; off without a forge. */
 export const useForgeRepositories = (forgeId: string | undefined, search: string) =>
   useQuery({
