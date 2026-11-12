@@ -8,6 +8,7 @@ import {
   SPLIT_CONCURRENCY,
   SPLIT_MAX_FILES,
   SPLIT_MAX_LINES,
+  localizeFindings,
   reviewPrompt,
   reviewSystemPrompt,
   runAgentReview,
@@ -266,5 +267,80 @@ describe('runAgentReview', () => {
 
   test('the prompt of a single pass names no parts', () => {
     expect(reviewPrompt(inputOf([fileOf('src/a.ts', 3)]))).not.toContain('part 1')
+  })
+})
+
+describe('localizeFindings', () => {
+  const finding = {
+    path: 'src/widget.tsx',
+    line: 4,
+    severity: 'minor' as const,
+    category: 'performance' as const,
+    title: 'Shorten the path data',
+    body: 'Saves 12 bytes: `d` only.',
+    source: 'media',
+  }
+
+  test('translates titles and bodies in one fast call and keeps everything else', async () => {
+    const { agent, tasks } = fakeAgent({
+      triage: [
+        { items: [{ id: 0, title: 'Сократите путь', body: 'Экономит 12 байт: только `d`.' }] },
+      ],
+    })
+    const spent: ReviewUsage = { turns: 0 }
+    const [out] = await localizeFindings({
+      agent,
+      dir: '/tmp',
+      language: 'Russian',
+      candidates: [finding],
+      usage: spent,
+    })
+    expect(out).toEqual({
+      ...finding,
+      title: 'Сократите путь',
+      body: 'Экономит 12 байт: только `d`.',
+    })
+    expect(tasks[0]).toMatchObject({ tier: 'fast', maxTurns: 1, capabilities: [] })
+    expect(spent.turns).toBe(2)
+  })
+
+  test('leaves English, empty answers and failures alone', async () => {
+    const spent: ReviewUsage = { turns: 0 }
+    const english = fakeAgent({})
+    expect(
+      await localizeFindings({
+        agent: english.agent,
+        dir: '/tmp',
+        language: 'English',
+        candidates: [finding],
+        usage: spent,
+      }),
+    ).toEqual([finding])
+    expect(english.tasks).toHaveLength(0)
+    const empty = fakeAgent({ triage: [{ items: [] }] })
+    expect(
+      await localizeFindings({
+        agent: empty.agent,
+        dir: '/tmp',
+        language: 'Russian',
+        candidates: [finding],
+        usage: spent,
+      }),
+    ).toEqual([finding])
+    const failing: Agent = {
+      name: 'failing',
+      run: async () => {
+        throw new Error('budget')
+      },
+    }
+    expect(
+      await localizeFindings({
+        agent: failing,
+        dir: '/tmp',
+        language: 'Russian',
+        candidates: [finding],
+        usage: spent,
+      }),
+    ).toEqual([finding])
   })
 })

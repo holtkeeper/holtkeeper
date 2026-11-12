@@ -268,6 +268,34 @@ async function reviewRaster(
 }
 
 /**
+ * The smallest block of whole lines where `replacement` differs from `original` (which starts at
+ * line `first`): unchanged leading and trailing lines are dropped, so a suggestion touches only
+ * what changes and does not clash with other suggestions on the same markup.
+ */
+export function changedLines(
+  original: string,
+  replacement: string,
+  first: number,
+): { line: number; endLine: number; replacement: string } {
+  const before = original.split('\n')
+  const after = replacement.split('\n')
+  let head = 0
+  while (head < before.length - 1 && head < after.length - 1 && before[head] === after[head]) head++
+  let tail = 0
+  while (
+    tail < before.length - 1 - head &&
+    tail < after.length - 1 - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  )
+    tail++
+  return {
+    line: first + head,
+    endLine: first + before.length - 1 - tail,
+    replacement: after.slice(head, after.length - tail).join('\n'),
+  }
+}
+
+/**
  * Comments on inline SVGs whose lines the diff adds entirely, with a suggestion replacing exactly
  * those lines; fragments touching untouched lines are only summarized.
  */
@@ -298,12 +326,13 @@ function reviewCode(
     const original = lines.slice(fragment.line - 1, fragment.endLine).join('\n')
     const replacement = original.replace(fragment.oldText, fragment.newText)
     if (replacement === original) continue
+    const narrowed = changedLines(original, replacement, fragment.line)
     const saving = fragment.bytes.before - fragment.bytes.after
     const percent = Math.round((saving / fragment.bytes.before) * 1000) / 10
     comments.push({
       path: file.path,
-      line: fragment.endLine,
-      ...(fragment.endLine > fragment.line ? { startLine: fragment.line } : {}),
+      line: narrowed.endLine,
+      ...(narrowed.endLine > narrowed.line ? { startLine: narrowed.line } : {}),
       body: [
         fragment.kind === 'svg'
           ? 'Optimize this inline SVG with svgo (safe preset)'
@@ -313,7 +342,7 @@ function reviewCode(
           ? `Saves ${saving} bytes (${percent}%): editor metadata, comments and excess decimals go; ids, classes and styles stay.`
           : `Saves ${saving} bytes (${percent}%): path digits ${fragment.digits.before} → ${fragment.digits.after} at 3 decimals; nothing but the \`d\` values changes.`,
       ].join('\n'),
-      suggestion: { replacement },
+      suggestion: { replacement: narrowed.replacement },
     })
   }
   const before = touched.reduce((sum, fragment) => sum + fragment.bytes.before, 0)

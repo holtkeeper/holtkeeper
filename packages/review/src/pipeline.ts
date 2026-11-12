@@ -14,7 +14,7 @@ import type {
 import type { QualityCheck } from '@holtkeeper/quality'
 import type { AnalysisStore } from '@holtkeeper/store'
 
-import { type RecheckVerdict, recheckThreads, runAgentReview } from './agent.ts'
+import { type RecheckVerdict, localizeFindings, recheckThreads, runAgentReview } from './agent.ts'
 import {
   type ReviewCheckName,
   agentCompletedChecks,
@@ -187,9 +187,11 @@ export interface ReviewSteps {
     /** Deterministic findings the agent should turn into comments with suggestions. */
     requests?: readonly Candidate[],
   ): Promise<AgentOutcome | undefined>
+  /** Image and inline SVG findings, translated into `options.language` when one is set. */
   media(
     run: ReviewRun,
     loaded: LoadedReview,
+    usage?: ReviewUsage,
   ): Promise<{ candidates: Candidate[]; summary?: string } | undefined>
   recheck(
     run: ReviewRun,
@@ -363,9 +365,9 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
   return guide?.text && guide.scopes.length ? { ...outcome, guideScopes: guide.scopes } : outcome
 }
 
-const media: ReviewSteps['media'] = async (run, loaded) => {
+const media: ReviewSteps['media'] = async (run, loaded, usage) => {
   if (!run.options.media) return undefined
-  return reviewMedia({
+  const outcome = await reviewMedia({
     reviewer: run.mediaReviewer ?? noopMediaReviewer,
     forge: run.forge,
     repo: run.repo,
@@ -373,6 +375,16 @@ const media: ReviewSteps['media'] = async (run, loaded) => {
     refs: loaded.diff.refs,
     files: loaded.diff.files,
   })
+  if (!outcome || !run.agent || !run.dir || !run.options.language || !usage) return outcome
+  const candidates = await localizeFindings({
+    agent: run.agent,
+    dir: run.dir,
+    language: run.options.language,
+    candidates: outcome.candidates,
+    usage,
+    ...(run.signal ? { signal: run.signal } : {}),
+  })
+  return { ...outcome, candidates }
 }
 
 /** Most threads re-checked per run, to bound the triage cost. */
@@ -610,7 +622,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       ? found.candidates.filter((c) => agentCompletedChecks.has(c.source) && !c.suggestion)
       : []
   const agentOutcome = await steps.agentReview(run, loaded, planned, usage, requests)
-  const mediaOutcome = await steps.media(run, loaded)
+  const mediaOutcome = await steps.media(run, loaded, usage)
 
   const validate = (candidates: readonly Candidate[]) =>
     candidates.flatMap((candidate) => {

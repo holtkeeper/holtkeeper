@@ -5,7 +5,7 @@ import { requireSharp } from '@holtkeeper/media'
 import type { VariantCache } from '@holtkeeper/media'
 import type { MediaReviewInput } from '@holtkeeper/review'
 
-import { createMediaReviewer, panelLink, policyNotes } from '../src/media/reviewer.ts'
+import { changedLines, createMediaReviewer, panelLink, policyNotes } from '../src/media/reviewer.ts'
 
 const policy = (value: unknown) => async () => assetsPolicySchema.parse(value)
 
@@ -136,7 +136,7 @@ test('unreadable images are mentioned, not reviewed', async () => {
 const heavy =
   'M12.000000 2.000000C6.4771525 2.000000 2.000000 6.4771525 2.000000 12.000000C2.000000 17.5228475 6.4771525 22.000000 12.000000 22.000000C17.5228475 22.000000 22.000000 17.5228475 22.000000 12.000000C22.000000 6.4771525 17.5228475 2.000000 12.000000 2.000000Z'
 
-test('inline SVGs on added lines get a suggestion covering exactly those lines', async () => {
+test('inline SVGs on added lines get a suggestion on just the lines that change', async () => {
   const text = [
     'export const Ring = () => (',
     '  <svg viewBox="0 0 24 24">',
@@ -151,10 +151,12 @@ test('inline SVGs on added lines get a suggestion covering exactly those lines',
     usages: [],
     code: [{ path: 'src/Ring.tsx', text, addedLines: [1, 2, 3, 4, 5] }],
   })
-  expect(result.comments.map((comment) => [comment.startLine, comment.line])).toEqual([[2, 4]])
+  expect(result.comments.map((comment) => [comment.startLine, comment.line])).toEqual([
+    [undefined, 3],
+  ])
   const replacement = result.comments[0]?.suggestion?.replacement ?? ''
-  expect(replacement.split('\n')).toHaveLength(3)
-  expect(replacement.startsWith('  <svg viewBox="0 0 24 24">')).toBe(true)
+  expect(replacement.split('\n')).toHaveLength(1)
+  expect(replacement.startsWith('    <path d="')).toBe(true)
   expect(replacement).not.toContain('.000000')
   expect(result.comments[0]?.body.split('\n')[0]).toBe('Shorten the path data of this inline SVG')
   expect(result.summary).toContain('`src/Ring.tsx`: 1 inline SVG')
@@ -242,4 +244,30 @@ test('policy notes name format, size and dimension limits', () => {
   expect(policyNotes({ path: 'a/b.webp', bytes: 1500 }, strict)).toEqual([
     "2 kB is above the policy's warning limit of 1 kB",
   ])
+})
+
+test('changedLines keeps only the lines a suggestion really changes', () => {
+  const original = [
+    '<svg>',
+    '  <path',
+    '    d="M 1.000,2.000 L 3.000,4.000"',
+    '    stroke="red"',
+    '  />',
+    '</svg>',
+  ].join('\n')
+  const replacement = [
+    '<svg>',
+    '  <path',
+    '    d="M1 2l2 2"',
+    '    stroke="red"',
+    '  />',
+    '</svg>',
+  ].join('\n')
+  expect(changedLines(original, replacement, 10)).toEqual({
+    line: 12,
+    endLine: 12,
+    replacement: '    d="M1 2l2 2"',
+  })
+  expect(changedLines('a\nb', 'a\nb\nc', 1)).toEqual({ line: 2, endLine: 2, replacement: 'b\nc' })
+  expect(changedLines('x', 'y', 5)).toEqual({ line: 5, endLine: 5, replacement: 'y' })
 })

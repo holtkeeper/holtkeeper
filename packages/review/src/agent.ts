@@ -445,3 +445,56 @@ export async function recheckThreads(options: {
   )
   return new Map((result.output?.threads ?? []).map((verdict) => [verdict.id, verdict]))
 }
+
+const localizedSchema = z.object({
+  items: z.array(z.object({ id: z.number().int(), title: z.string(), body: z.string() })),
+})
+
+/**
+ * `candidates` with titles and bodies translated into `language` by one `fast` call without
+ * tools; code, numbers and technical terms stay as they are. Returns the input unchanged for
+ * English, for an empty list, and when the call fails or answers something unusable.
+ */
+export async function localizeFindings(options: {
+  agent: Agent
+  dir: string
+  language: string
+  candidates: readonly Candidate[]
+  usage: ReviewUsage
+  signal?: AbortSignal
+}): Promise<Candidate[]> {
+  const { candidates, language } = options
+  if (candidates.length === 0 || /^en(glish)?\b/i.test(language.trim())) return [...candidates]
+  try {
+    const result = await runTracked(
+      options.agent,
+      {
+        dir: options.dir,
+        system: [
+          `Translate code review findings into ${language}. Translate only the prose of each title and body; keep Markdown, code spans, file paths, numbers, units and arrows exactly as they are.`,
+          KEEP_ENGLISH,
+          'Answer with every item, keeping its id.',
+        ].join('\n'),
+        prompt: JSON.stringify({
+          items: candidates.map((c, id) => ({ id, title: c.title, body: c.body })),
+        }),
+        capabilities: [],
+        output: localizedSchema,
+        taskKind: 'triage',
+        tier: 'fast',
+        maxTurns: 1,
+        ...(options.signal ? { signal: options.signal } : {}),
+      },
+      options.usage,
+    )
+    const byId = new Map((result.output?.items ?? []).map((item) => [item.id, item]))
+    return candidates.map((candidate, id) => {
+      const item = byId.get(id)
+      return item?.title.trim() && item.body.trim()
+        ? { ...candidate, title: item.title.trim(), body: item.body.trim() }
+        : candidate
+    })
+  } catch {
+    return [...candidates]
+  }
+}
