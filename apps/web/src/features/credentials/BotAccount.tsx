@@ -1,9 +1,9 @@
-import { ExternalLink, ImageUp } from 'lucide-react'
+import { ImageUp } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useForgeAccount, useSetForgeAvatar } from '../../api/queries.ts'
-import { Avatar, Button, Placeholder, buttonClass, notify } from '../../ui/index.ts'
+import { Avatar, Button, Placeholder, notify } from '../../ui/index.ts'
 import { AVATAR_ACCEPT, avatarFileProblem, versionedAvatarUrl } from './bot-account.ts'
 
 /** The account behind a forge's token, with an avatar upload for `settings:write`. */
@@ -20,7 +20,7 @@ export function BotAccount({ forgeId, writable }: { forgeId: string; writable: b
         Bot account not read: {messageOf(account.error)}
       </div>
     )
-  const { name, username, webUrl, settingsUrl, canSetAvatar } = account.data
+  const { name, username, webUrl, canSetAvatar } = account.data
   const src = versionedAvatarUrl(account.data.avatarUrl, version)
 
   const choose = async (file: File | undefined) => {
@@ -72,25 +72,12 @@ export function BotAccount({ forgeId, writable }: { forgeId: string; writable: b
               Upload avatar
             </Button>
           ) : null}
-          {settingsUrl ? (
-            <a
-              href={settingsUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonClass('ghost', 'sm')}
-            >
-              <ExternalLink className="size-3.5" />
-              Profile settings
-            </a>
-          ) : null}
         </div>
       </div>
-      {settingsUrl ? (
-        <span className="text-xs text-muted">
-          The token cannot change the name or username; change them in the profile settings on the
-          forge.
-        </span>
-      ) : null}
+      <span className="text-xs text-muted">
+        The token cannot change the name or username: sign in to the forge as @{username} to change
+        them.
+      </span>
       {writable && canSetAvatar ? (
         <input
           ref={input}

@@ -803,11 +803,6 @@ export interface ForgeUser {
   avatarUrl?: string
   /** The account's profile page on the forge, when the forge reports it. */
   webUrl?: string
-  /**
-   * Page on the forge where the account's owner changes its name and username, which the token
-   * itself may not change. Absent when the forge has no such page.
-   */
-  settingsUrl?: string
 }
 
 /** An image for `setCurrentUserAvatar`. `filename` carries the extension forges check. */

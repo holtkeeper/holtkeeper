@@ -28,7 +28,6 @@ const user = (): ForgeUser => ({
   name: 'Widget Bot',
   avatarUrl,
   webUrl: 'https://forge.test/widget-bot',
-  settingsUrl: 'https://forge.test/-/user_settings/profile',
 })
 
 const avatarForge = {

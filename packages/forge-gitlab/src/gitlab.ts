@@ -716,7 +716,6 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         ...(email ? { email } : {}),
         ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
         ...(user.web_url ? { webUrl: user.web_url } : {}),
-        settingsUrl: `${options.url.replace(/\/+$/, '')}/-/user_settings/profile`,
       }
     },
 
