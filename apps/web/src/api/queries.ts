@@ -664,6 +664,10 @@ export function useRepoUpdateMutations(repo: RepoRef) {
       mutationFn: () => api.removeRepoWebhook(repoKey(repo)),
       onSuccess,
     }),
+    reenableWebhooks: useMutation({
+      mutationFn: () => api.reenableRepoWebhooks(repoKey(repo)),
+      onSuccess: (view) => client.setQueryData(keys.repoUpdates(repo), view),
+    }),
   }
 }
 

@@ -1,7 +1,7 @@
 import type { Scope } from '@holtkeeper/access'
 import type { Timestamp } from '@holtkeeper/store'
 
-import type { AiBudgetStatus, AiBudgetWeek } from './types.ts'
+import type { AiBudgetStatus, AiBudgetWeek, WebhookHealthSummary } from './types.ts'
 
 /** One task kind's share of this week's AI spend, e.g. `review`, `chat`, `guide`. */
 export interface AiFeatureSpend {
@@ -75,6 +75,8 @@ export interface IntegrationForgeView {
   lastWebhookAt?: Timestamp
   /** Whether a webhook secret is set up for the forge. */
   webhook: boolean
+  /** Holtkeeper's hooks on the forge (forge-wide and per repository); absent before a check. */
+  webhookHealth?: WebhookHealthSummary
 }
 
 /** `GET /api/integrations/forges`; needs a global `settings:read`. */

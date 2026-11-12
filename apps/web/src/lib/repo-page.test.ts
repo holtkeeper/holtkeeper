@@ -196,6 +196,26 @@ describe('header and facts', () => {
       tone: 'none',
       text: 'Off',
     })
+    const disabled = [
+      {
+        owner: 'repo' as const,
+        scope: 'project' as const,
+        target: 'shapes/widget',
+        hookId: '7',
+        state: 'disabled' as const,
+        checkedAt: '2026-11-11T11:56:00.000Z',
+      },
+    ]
+    expect(updatesBadge({ viaWebhook: false, polling, webhookHealth: disabled }, now)).toEqual({
+      tone: 'warn',
+      text: 'Webhook disabled · polling',
+    })
+    expect(
+      updatesBadge(
+        { viaWebhook: false, polling: { ...polling, enabled: false }, webhookHealth: disabled },
+        now,
+      ),
+    ).toEqual({ tone: 'bad', text: 'Webhook disabled' })
   })
 
   test('access in words', () => {

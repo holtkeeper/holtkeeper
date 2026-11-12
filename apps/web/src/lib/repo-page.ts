@@ -13,6 +13,7 @@ import { formatUsd } from './ai-usage.ts'
 import { formatRelative, plural } from './format.ts'
 import { type Freshness, compareFreshness, freshnessOf } from './freshness.ts'
 import type { RepoHubSearch, RepoHubTab } from './repo.ts'
+import { disabledHooks } from './webhook-health.ts'
 
 /** A tab and the permissions that show it. */
 export interface PageTab<Id extends string> {
@@ -256,11 +257,15 @@ export function deliveryCards(
 
 /** The header's Updates tag: how the repository learns about forge changes, in a few words. */
 export function updatesBadge(
-  view: Pick<RepoUpdatesView, 'viaWebhook' | 'webhookSeenAt' | 'polling'>,
+  view: Pick<RepoUpdatesView, 'viaWebhook' | 'webhookSeenAt' | 'polling' | 'webhookHealth'>,
   now: Date = new Date(),
 ): { tone: HealthTone; text: string } {
   const { polling } = view
   if (polling.lastError) return { tone: 'bad', text: 'Poll failed' }
+  if (disabledHooks(view.webhookHealth).length)
+    return polling.enabled
+      ? { tone: 'warn', text: 'Webhook disabled · polling' }
+      : { tone: 'bad', text: 'Webhook disabled' }
   if (view.viaWebhook)
     return {
       tone: 'ok',

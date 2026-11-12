@@ -15,6 +15,7 @@ import type { AppContext, Env, ServerDeps } from '../context.ts'
 import { type EventDispatcher, type EventOutcome, createEventDispatcher } from '../events.ts'
 import type { RepoHooks } from '../repo-hooks.ts'
 import { markWebhookSeen } from '../updates.ts'
+import { reenableTestRunning } from '../webhook-health.ts'
 import { recordForgeDelivery } from '../webhook-sync.ts'
 
 const projectSchema = z.object({
@@ -310,6 +311,8 @@ export interface WebhookRoutesOptions {
  *   rejected ones with their error.
  *
  * Every delivery about a repository marks it as reached by webhooks, which slows its polling down.
+ * A push to a repository while a hook re-enable sends its test delivery (`reenableTestRunning`) is
+ * answered 200 and ignored: it is the forge's synthetic test push, not a real one.
  * Every authenticated delivery whose forge is known records the forge's last delivery time
  * (`lastForgeDeliveries`), handled or ignored.
  */
@@ -346,6 +349,10 @@ export function webhookRoutes(deps: ServerDeps, options: WebhookRoutesOptions = 
     const { repo } = parsed.event
     check?.(repo)
     if (store.kv) await markWebhookSeen(store.kv, repo, deps.now())
+    if (parsed.event.kind === 'push' && store.kv && (await reenableTestRunning(store.kv, repo))) {
+      const outcome = { enqueued: [], ignored: 'test push sent to re-enable the hook' }
+      return { response: c.json<EventOutcome>(outcome), outcome, summary: parsed.summary }
+    }
     const outcome = await dispatch(parsed.event, { actor: 'webhook:gitlab', via: 'webhook' })
     return {
       response: outcome.ignored ? c.json(outcome) : c.json(outcome, 202),

@@ -7,6 +7,7 @@ import { useRepoUpdateMutations, useRepoUpdates } from '../../api/queries.ts'
 import { formatDate, formatRelative } from '../../lib/format.ts'
 import { healthTagTone } from '../../lib/home.ts'
 import { updatesBadge } from '../../lib/repo-page.ts'
+import { disabledHooks, hookStateLabel, webhookDisabledNotice } from '../../lib/webhook-health.ts'
 import {
   Button,
   Chip,
@@ -36,7 +37,8 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * The Updates area of a repository's settings: how it learns about forge changes. A Webhook panel
  * (its own URL, who issued it, the last delivery and the last 24 hours), a Polling panel (cadence,
  * what it looks for, last and next poll) and the recent webhook deliveries and polls in one table.
- * "Poll now" needs `settings:write`. Hidden while loading; says so when the server has no
+ * While GitLab keeps one of Holtkeeper's hooks from delivering, a notice lists them with "Re-enable
+ * now". "Poll now" and "Re-enable now" need `settings:write`. Hidden while loading; says so when the server has no
  * key-value store.
  */
 export function RepoUpdatesSection({ repo }: { repo: RepoRef }) {
@@ -84,6 +86,7 @@ export function RepoUpdatesSection({ repo }: { repo: RepoRef }) {
           </Button>
         ) : null}
       </header>
+      <WebhookHealth repo={repo} view={view} />
       <div className="grid gap-3 lg:grid-cols-2">
         <WebhookPanel repo={repo} view={view} />
         <PollingPanel view={view} />
@@ -92,6 +95,62 @@ export function RepoUpdatesSection({ repo }: { repo: RepoRef }) {
         <UpdateEvents events={updateEvents(view)} />
       </Panel>
     </section>
+  )
+}
+
+function WebhookHealth({ repo, view }: { repo: RepoRef; view: RepoUpdatesView }) {
+  const { can } = useSession()
+  const { reenableWebhooks } = useRepoUpdateMutations(repo)
+  const hooks = view.webhookHealth ?? []
+  const now = new Date()
+  const notice = webhookDisabledNotice(hooks, view.polling.enabled, now)
+  if (!notice) return null
+  const reenable = () =>
+    reenableWebhooks.mutate(undefined, {
+      onSuccess: (next) =>
+        disabledHooks(next.webhookHealth).length
+          ? notify.error('Still disabled', 'GitLab did not accept the test delivery.')
+          : notify.success('Webhook re-enabled'),
+      onError: (error) => notify.error('Not re-enabled', messageOf(error)),
+    })
+
+  return (
+    <Notice tone={notice.tone} title={notice.title}>
+      <div className="flex flex-col gap-2">
+        <span>{notice.detail}</span>
+        <ul className="flex flex-col gap-1">
+          {hooks.map((hook) => {
+            const label = hookStateLabel(hook, now)
+            return (
+              <li
+                key={`${hook.owner}:${hook.hookId}`}
+                className="flex flex-wrap items-center gap-2 text-xs"
+              >
+                <span className="font-mono">{hook.target}</span>
+                <span className="text-muted">
+                  {hook.owner === 'repo' ? 'own hook' : `forge ${hook.scope} hook`}
+                </span>
+                <Chip tone={label.tone} size="sm">
+                  {label.text}
+                </Chip>
+              </li>
+            )
+          })}
+        </ul>
+        {can('settings:write') ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="self-start"
+            isPending={reenableWebhooks.isPending}
+            onPress={reenable}
+          >
+            <PlugZap className="size-3.5" />
+            Re-enable now
+          </Button>
+        ) : null}
+      </div>
+    </Notice>
   )
 }
 
@@ -170,6 +229,7 @@ function WebhookPanel({ repo, view }: { repo: RepoRef; view: RepoUpdatesView }) 
   const registered = hook?.registered ?? []
   const last = hook?.deliveries[0]
   const now = new Date()
+  const ownHealth = view.webhookHealth?.find((entry) => entry.owner === 'repo')
 
   const issue = (register?: boolean) =>
     issueWebhook.mutate(register, {
@@ -230,7 +290,11 @@ function WebhookPanel({ repo, view }: { repo: RepoRef; view: RepoUpdatesView }) 
               ) : null}
             </Fact>
             <Fact label="On the forge">
-              {registered.length ? (
+              {ownHealth ? (
+                <Chip tone={hookStateLabel(ownHealth, now).tone} size="sm">
+                  {hookStateLabel(ownHealth, now).text}
+                </Chip>
+              ) : registered.length ? (
                 <Chip tone="success" size="sm">
                   Registered
                 </Chip>

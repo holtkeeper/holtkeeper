@@ -64,6 +64,11 @@ export async function markWebhookSeen(kv: KvStore, repo: RepoRef, now: Date) {
   await kv.set(seenKey(repo), now.toISOString(), 7 * 86_400)
 }
 
+/** Forgets the last webhook delivery about `repo`, so polling takes over again at once. */
+export async function forgetWebhookSeen(kv: KvStore, repo: RepoRef) {
+  await kv.delete(seenKey(repo))
+}
+
 /**
  * How each of `repos` learns about forge changes, keyed `forge:path`, from stored state only, all
  * keys read at once: `webhook` after a delivery in the last day, `polling` when the `polling` entry

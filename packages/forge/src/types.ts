@@ -622,6 +622,18 @@ export interface GitForge {
   ensureWebhook?(target: WebhookTarget, hook: WebhookSpec): Promise<WebhookRegistration>
   /** Removes the hooks `ensureWebhook` reported; hooks that are already gone are ignored. */
   removeWebhook?(hooks: RegisteredHook[]): Promise<void>
+  /**
+   * Whether the forge still delivers to `hook`. The hook is found by its id, else by `url` on the
+   * same target; a hook whose URL is not `url` is never reported, so callers only ever see their
+   * own hooks. `missing` when neither exists.
+   */
+  webhookStatus?(hook: RegisteredHook, url: string): Promise<WebhookStatus>
+  /**
+   * Makes the forge deliver again to a hook it disabled after failed deliveries. Callers pass a
+   * hook `webhookStatus` matched. Rejects when the forge still cannot deliver to it. Prefers a test
+   * delivery Holtkeeper's receiver ignores, so re-enabling does not look like real activity.
+   */
+  enableWebhook?(hook: RegisteredHook): Promise<void>
 }
 
 /**
@@ -724,6 +736,20 @@ export interface RegisteredHook {
   scope: 'group' | 'project'
   /** Group or project path. */
   target: string
+}
+
+/**
+ * Delivery state of a hook: `temporarily_disabled` hooks come back on their own at
+ * `disabledUntil`, `disabled` ones stay off until re-enabled.
+ */
+export type WebhookState = 'enabled' | 'temporarily_disabled' | 'disabled' | 'missing'
+
+/** What `webhookStatus` found. `id` is the matched hook's id; absent when `missing`. */
+export interface WebhookStatus {
+  state: WebhookState
+  id?: string
+  /** When a temporarily disabled hook delivers again on its own, ISO 8601. */
+  disabledUntil?: string
 }
 
 /**

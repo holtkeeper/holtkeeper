@@ -355,6 +355,8 @@ export const api = {
     request<RepoUpdatesView>('POST', '/api/repos/updates/webhook', { body: input }),
   removeRepoWebhook: (repo: string) =>
     request<void>('DELETE', '/api/repos/updates/webhook', { query: { repo } }),
+  reenableRepoWebhooks: (repo: string) =>
+    request<RepoUpdatesView>('POST', '/api/repos/updates/webhook/reenable', { body: { repo } }),
   groupListing: (group: string) =>
     request<GroupListingView>('GET', `/api/repos/updates/groups/${id(group)}`),
   listGroup: (group: string) =>

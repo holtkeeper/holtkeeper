@@ -15,6 +15,7 @@ import type {
   CredentialUseView,
   CredentialView,
   IntegrationForgeList,
+  WebhookReenableResult,
   ProviderModelList,
 } from '@holtkeeper/api'
 import { parseCredentialInput } from '@holtkeeper/credentials'
@@ -38,6 +39,7 @@ import {
 import { EGRESS_SECRET_KIND } from '../egress-secrets.ts'
 import { credentialTestSchema } from '../schemas.ts'
 import { listedRepos } from '../updates.ts'
+import { checkWebhookHealth, webhookHealthSummary } from '../webhook-health.ts'
 import { lastForgeDeliveries } from '../webhook-sync.ts'
 
 const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
@@ -144,8 +146,10 @@ async function credentialUses(
  * decides whether agent tool loops run on the Claude Agent SDK.
  *
  * `GET /credentials` adds `usedBy` to each visible credential. `GET /integrations/forges` lists
- * panel forges with their repository counts and last webhook delivery; it needs a global
- * `settings:read`, since the counts cover every repository.
+ * panel forges with their repository counts, last webhook delivery and the counts of the last
+ * webhook health check; it needs a global `settings:read`, since the counts cover every
+ * repository. `POST /integrations/forges/:id/webhooks/reenable` (global `settings:write`, audited)
+ * checks the forge's hooks now and re-enables disabled ones at once.
  */
 export function credentialRoutes(deps: ServerDeps) {
   const { credentials, store } = deps
@@ -176,16 +180,23 @@ export function credentialRoutes(deps: ServerDeps) {
   app.get('/integrations/forges', async (c) => {
     authorize(c, 'settings:read', GLOBAL)
     const docs = (await store.config?.list('forge')) ?? []
-    const [repos, deliveries] = await Promise.all([
-      listedRepos(store.kv, deps.config),
+    const { kv } = store
+    const [repos, deliveries, health] = await Promise.all([
+      listedRepos(kv, deps.config),
       lastForgeDeliveries(
-        store.kv,
+        kv,
         docs.map((doc) => doc.id),
+      ),
+      Promise.all(
+        docs.map((doc) =>
+          kv ? webhookHealthSummary(kv, doc.id, deps.now()) : Promise.resolve(undefined),
+        ),
       ),
     ])
     return c.json<IntegrationForgeList>({
-      forges: docs.map((doc) => {
+      forges: docs.map((doc, index) => {
         const lastWebhookAt = deliveries.get(doc.id)
+        const webhookHealth = health[index]
         return {
           id: doc.id,
           kind: doc.data.kind,
@@ -196,9 +207,30 @@ export function credentialRoutes(deps: ServerDeps) {
           webhook:
             doc.data.webhook !== undefined ||
             deps.config.jobs?.webhooks?.[doc.id]?.secret !== undefined,
+          ...(webhookHealth && { webhookHealth }),
         }
       }),
     })
+  })
+
+  app.post('/integrations/forges/:id/webhooks/reenable', async (c) => {
+    const principal = authorize(c, 'settings:write', GLOBAL)
+    const forge = c.req.param('id')
+    if (!(forge in deps.config.forges))
+      throw new HTTPException(404, { message: `forge ${forge} is not configured` })
+    if (!store.kv)
+      throw new HTTPException(503, { message: 'webhook health needs a key-value store' })
+    const result = await checkWebhookHealth(deps, {
+      forge,
+      force: true,
+      actor: { id: principal.id, name: principal.name, provider: principal.provider },
+    })
+    c.set('audit', {
+      action: 'forge.webhooks_reenable',
+      target: { type: 'forge', id: forge },
+      details: { checked: result.checked, reenabled: result.reenabled, failed: result.failed },
+    })
+    return c.json<WebhookReenableResult>(result)
   })
 
   app.post('/credentials', async (c) => {

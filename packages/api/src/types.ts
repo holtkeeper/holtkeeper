@@ -3927,6 +3927,61 @@ export interface RepoUpdatesView {
   }
   /** Whether the forge can register the webhook itself. */
   canRegister: boolean
+  /**
+   * Holtkeeper's own hooks that reach the repository (its own and the forge-wide group or project
+   * hook), as the last health check found them; absent before the first check.
+   */
+  webhookHealth?: WebhookHealthView[]
+}
+
+/**
+ * What the last health check found out about one of Holtkeeper's own hooks on the forge. Hooks
+ * the forge disabled after failed deliveries are re-enabled every 15 minutes; a failed attempt
+ * waits until `retryAt`, doubling from 15 minutes up to a day; a rate-limited one retries a minute
+ * later. A disabled hook without `retryAt` is one the forge cannot re-enable. `unknown`: the forge
+ * could not be asked (`lastError` says why).
+ */
+export interface WebhookHealthView {
+  /** `forge` for the forge-wide hook, `repo` for a repository's own. */
+  owner: 'forge' | 'repo'
+  scope: 'group' | 'project'
+  /** Group or project path the hook sits on. */
+  target: string
+  hookId: string
+  state: 'enabled' | 'temporarily_disabled' | 'disabled' | 'missing' | 'unknown'
+  /** When the forge would deliver to a temporarily disabled hook again on its own. */
+  disabledUntil?: Timestamp
+  checkedAt: Timestamp
+  /** Last time Holtkeeper turned the hook back on. */
+  reenabledAt?: Timestamp
+  lastError?: string
+  /** Failed re-enable attempts in a row. */
+  failures?: number
+  retryAt?: Timestamp
+}
+
+/** Counts of a forge's hooks from the last health check. */
+export interface WebhookHealthSummary {
+  checkedAt: Timestamp
+  total: number
+  /** Still disabled after the check, temporarily or for good. */
+  disabled: number
+  missing: number
+  /** The forge could not be asked about them. */
+  unknown: number
+  /** Re-enabled within the last 24 hours. */
+  reenabled24h: number
+}
+
+/**
+ * `POST /api/integrations/forges/:id/webhooks/reenable`: checks the forge's hooks now and
+ * re-enables disabled ones at once, ignoring the retry wait.
+ */
+export interface WebhookReenableResult {
+  checked: number
+  reenabled: number
+  failed: number
+  hooks: WebhookHealthView[]
 }
 
 /**

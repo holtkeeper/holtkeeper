@@ -23,6 +23,7 @@ import {
 } from '../context.ts'
 import { type RepoHook, type RepoHooks, repoHookPath } from '../repo-hooks.ts'
 import type { Poller } from '../updates.ts'
+import { checkWebhookHealth, webhookHealthOf } from '../webhook-health.ts'
 import { peopleOf } from './avatars.ts'
 
 const webhookInputSchema = z.object({ repo: z.string().min(1), register: z.boolean().optional() })
@@ -50,6 +51,9 @@ const audit = (c: AppContext, action: string, repo: RepoRef, details: Record<str
  * rotates its webhook URL (optionally registering it on the forge) and `DELETE
  * /repos/updates/webhook?repo=` turns the URL off and removes hooks Holtkeeper registered.
  * The view keeps the webhook's last 50 deliveries and counts those of the last 24 hours.
+ * `POST /repos/updates/webhook/reenable` checks Holtkeeper's hooks that reach the repository now and
+ * re-enables those the forge disabled, without waiting for the next check (audited); forge-wide
+ * hooks that cover it are included only for callers with global `settings:write`.
  * `GET /repos/updates/groups/:group` shows the repositories polling knows for a group, what its
  * include patterns matched before excludes, when it lists next and its recent listings; `POST /repos/updates/groups/:group/list` lists them on the forge now.
  * Reading needs `settings:read` on the repository (or group), the rest `settings:write`; the webhook URL is
@@ -87,6 +91,7 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
     const recent = deliveries.filter((delivery) => Date.parse(delivery.at) > since)
     const creator = hook?.createdBy
     const people = creator ? await peopleOf(deps, [creator]) : {}
+    const health = deps.store.kv ? await webhookHealthOf(deps.store.kv, repo) : undefined
     return {
       repo,
       polling: {
@@ -122,6 +127,7 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
         },
       }),
       canRegister: forge?.kind === 'gitlab',
+      ...(health && { webhookHealth: health }),
     }
   }
 
@@ -249,6 +255,25 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
         message: `the new URL is active but registering it on the forge failed: ${details.error}`,
       })
     return c.json<RepoUpdatesView>(await view(c, repo, true), 201)
+  })
+
+  app.post('/repos/updates/webhook/reenable', async (c) => {
+    const input = await readBody(c, pollInputSchema)
+    const repo = repoOf(input.repo)
+    const principal = authorize(c, 'settings:write', target(repo))
+    parts()
+    const result = await checkWebhookHealth(deps, {
+      repo,
+      force: true,
+      ...(!can(principal, 'settings:write', { kind: 'global' }) && { owners: ['repo'] as const }),
+      actor: { id: principal.id, name: principal.name, provider: principal.provider },
+    })
+    audit(c, 'repo.webhook_reenable', repo, {
+      checked: result.checked,
+      reenabled: result.reenabled,
+      failed: result.failed,
+    })
+    return c.json<RepoUpdatesView>(await view(c, repo, true))
   })
 
   app.delete('/repos/updates/webhook', async (c) => {

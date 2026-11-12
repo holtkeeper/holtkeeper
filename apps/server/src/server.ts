@@ -108,6 +108,7 @@ import { type SupplyToolsAccess, supplyToolsAccess } from './tools/repos.ts'
 import { commitConventionsReader } from './tools/rules.ts'
 import { serverPoller } from './updates.ts'
 import { serveWeb } from './web.ts'
+import { checkWebhookHealth } from './webhook-health.ts'
 import { startWebhookSync } from './webhook-sync.ts'
 import { writeTaskPolicy } from './write-tasks.ts'
 
@@ -536,6 +537,10 @@ export async function startServer(
       () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
       () => startFreshness(deps, log) ?? (() => {}),
       () => startWebhookSync(deps, log),
+      periodicDuty('webhook health', () => checkWebhookHealth(deps, {}, log), {
+        intervalMs: 15 * 60_000,
+        log,
+      }),
       () => startLibraryIndex(deps, log),
       () => startDatabaseSnapshots(server.store, { log }),
       periodicDuty(

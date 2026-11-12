@@ -4,6 +4,7 @@ import type {
   ForgeSshKeyInput,
   ForgeSshKeyView,
   ForgeWebhookResult,
+  IntegrationForgeView,
 } from '@holtkeeper/api'
 import {
   Fingerprint,
@@ -19,8 +20,9 @@ import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useCredentials, useForgeMutations, useForges } from '../../api/queries.ts'
-import { useIntegrationForges } from '../../api/settings-ai.ts'
+import { useIntegrationForges, useReenableForgeWebhooks } from '../../api/settings-ai.ts'
 import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
+import { webhookHealthLine } from '../../lib/webhook-health.ts'
 import {
   Button,
   Chip,
@@ -64,6 +66,22 @@ export function ForgesSection() {
   const factsOf = (id: string) => integration.data?.forges.find((forge) => forge.id === id)
   const credentials = useCredentials(can('credentials:read'))
   const { remove, removeSshKey } = useForgeMutations()
+  const reenable = useReenableForgeWebhooks()
+  const reenableNow = (forge: string) =>
+    reenable.mutate(forge, {
+      onSuccess: (result) =>
+        result.failed
+          ? notify.error(
+              `${result.failed} still disabled`,
+              `${result.reenabled} re-enabled; GitLab did not accept the test delivery for the rest.`,
+            )
+          : notify.success(
+              result.reenabled
+                ? `${plural(result.reenabled, 'webhook')} re-enabled`
+                : 'All webhooks deliver',
+            ),
+      onError: (error) => notify.error('Not re-enabled', messageOf(error)),
+    })
   const [editing, setEditing] = useState<ForgeEntry | 'new' | null>(null)
   const [issuing, setIssuing] = useState<ForgeEntry | null>(null)
   const [deleting, setDeleting] = useState<ForgeEntry | null>(null)
@@ -145,6 +163,15 @@ export function ForgesSection() {
                           )}
                         </div>
                       ) : null}
+                      <WebhookHealthLine
+                        summary={factsOf(forge.id)?.webhookHealth}
+                        {...(writable
+                          ? {
+                              onReenable: () => reenableNow(forge.id),
+                              pending: reenable.isPending && reenable.variables === forge.id,
+                            }
+                          : {})}
+                      />
                     </div>
                   </div>
                   {writable ? (
@@ -706,5 +733,31 @@ function SshKeyDialog({ forge, onClose }: { forge: ForgeEntry; onClose: () => vo
         )}
       </div>
     </Dialog>
+  )
+}
+
+function WebhookHealthLine({
+  summary,
+  onReenable,
+  pending = false,
+}: {
+  summary: IntegrationForgeView['webhookHealth']
+  onReenable?: () => void
+  pending?: boolean
+}) {
+  const line = webhookHealthLine(summary)
+  if (!line || !summary) return null
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-2 text-xs ${line.tone === 'warning' ? 'text-warning' : 'text-muted'}`}
+    >
+      <span title={formatDateTime(summary.checkedAt)}>{line.text}</span>
+      {onReenable && summary.disabled ? (
+        <Button variant="ghost" size="sm" isPending={pending} onPress={onReenable}>
+          <Webhook className="size-3.5" />
+          Re-enable now
+        </Button>
+      ) : null}
+    </div>
   )
 }
