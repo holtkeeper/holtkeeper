@@ -46,7 +46,6 @@ import {
   settingsSectionIds,
   settingsSections,
 } from '../../lib/settings-sections.ts'
-import type { BrandIconName } from '../../ui/BrandIcon.tsx'
 
 /** A group of pages that share one set of segmented tabs in the page header. */
 export interface Workspace {
@@ -117,8 +116,6 @@ export interface NavItem {
   workspace: Workspace['id']
   label: string
   icon: LucideIcon
-  /** Brand icon used as the favicon while the entry is active. */
-  brand?: BrandIconName
   /** Hidden unless some grant allows this action, or one of these actions. */
   requires?: Action | readonly Action[]
   /** `requires` must come from a grant over everything, because the server checks it globally. */
@@ -138,16 +135,14 @@ export const navBadgeWord: Record<NavBadge, string> = {
   tasks: 'need approval',
 }
 
-const settingsEntries: Readonly<
-  Record<SettingsSectionId, { icon: LucideIcon; brand: BrandIconName }>
-> = {
-  people: { icon: Users, brand: 'users' },
-  ai: { icon: Sparkles, brand: 'ai' },
-  integrations: { icon: Plug, brand: 'credentials' },
-  analyzers: { icon: Radar, brand: 'jobs' },
-  policies: { icon: ShieldCheck, brand: 'audit' },
-  system: { icon: HardDrive, brand: 'storage' },
-  audit: { icon: History, brand: 'auditlog' },
+const settingsEntries: Readonly<Record<SettingsSectionId, { icon: LucideIcon }>> = {
+  people: { icon: Users },
+  ai: { icon: Sparkles },
+  integrations: { icon: Plug },
+  analyzers: { icon: Radar },
+  policies: { icon: ShieldCheck },
+  system: { icon: HardDrive },
+  audit: { icon: History },
 }
 
 const navItems: readonly NavItem[] = [
@@ -156,7 +151,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'repos',
     to: '/repos',
-    brand: 'repos',
     label: 'Repositories',
     icon: FolderGit2,
     requires: 'repos:read',
@@ -164,7 +158,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'repos',
     to: '/repos/groups',
-    brand: 'repos',
     label: 'Groups',
     icon: Users,
     requires: 'repos:read',
@@ -172,7 +165,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'chat',
     to: '/chat',
-    brand: 'chat',
     label: 'Chat',
     icon: MessagesSquare,
     requires: 'repos:read',
@@ -180,7 +172,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'supply',
     to: '/supply/libraries',
-    brand: 'updates',
     label: 'Libraries',
     icon: Library,
     catalog: true,
@@ -188,7 +179,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'supply',
     to: '/supply/security',
-    brand: 'audit',
     label: 'Security',
     icon: FileSearch,
     requires: 'audits:read',
@@ -196,7 +186,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'supply',
     to: '/supply/licenses',
-    brand: 'licenses',
     label: 'Licenses',
     icon: Scale,
     requires: 'analyses:read',
@@ -204,7 +193,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'supply',
     to: '/supply/stack',
-    brand: 'stack',
     label: 'Stack',
     icon: Layers,
     catalog: true,
@@ -212,7 +200,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'supply',
     to: '/supply/public-api',
-    brand: 'api',
     label: 'Public API',
     icon: CodeXml,
     catalog: true,
@@ -220,7 +207,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'quality',
     to: '/quality/coverage',
-    brand: 'coverage',
     label: 'Coverage',
     icon: FlaskConical,
     requires: 'analyses:read',
@@ -228,7 +214,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'quality',
     to: '/quality/bundles',
-    brand: 'bundles',
     label: 'Bundles',
     icon: Boxes,
     requires: 'analyses:read',
@@ -236,7 +221,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'quality',
     to: '/quality/assets',
-    brand: 'assets',
     label: 'Assets',
     icon: Images,
     requires: 'analyses:read',
@@ -244,7 +228,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'quality',
     to: '/quality/ci',
-    brand: 'ci',
     label: 'CI',
     icon: Timer,
     requires: 'analyses:read',
@@ -252,7 +235,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'quality',
     to: '/quality/branches',
-    brand: 'branches',
     label: 'Branches',
     icon: GitBranch,
     requires: 'analyses:read',
@@ -260,7 +242,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'quality',
     to: '/quality/reviews',
-    brand: 'review',
     label: 'Reviews',
     icon: MessageSquareCode,
     requires: 'analyses:read',
@@ -268,7 +249,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'releases',
     to: '/releases',
-    brand: 'releaseboard',
     label: 'Overview',
     icon: Rocket,
     requires: 'releases:read',
@@ -276,7 +256,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'releases',
     to: '/releases/timeline',
-    brand: 'releaseboard',
     label: 'Timeline',
     icon: ListTree,
     requires: 'releases:read',
@@ -284,7 +263,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'releases',
     to: '/releases/setup',
-    brand: 'releaseboard',
     label: 'Flow setup',
     icon: Waypoints,
     requires: 'releases:read',
@@ -292,7 +270,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'knowledge',
     to: '/knowledge/guide',
-    brand: 'knowledge',
     label: 'Guide',
     icon: BookOpen,
     requires: 'knowledge:read',
@@ -300,7 +277,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'knowledge',
     to: '/knowledge/notes',
-    brand: 'knowledge',
     label: 'Notes',
     icon: NotebookPen,
     requires: 'knowledge:read',
@@ -308,7 +284,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'knowledge',
     to: '/knowledge/learnings',
-    brand: 'knowledge',
     label: 'Learnings',
     icon: Lightbulb,
     requires: 'knowledge:read',
@@ -316,7 +291,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'ops',
     to: '/ops/runs',
-    brand: 'jobs',
     label: 'Runs',
     icon: ListChecks,
     requires: 'analyses:read',
@@ -324,7 +298,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'ops',
     to: '/ops/tasks',
-    brand: 'jobs',
     label: 'Tasks',
     icon: Bot,
     requires: 'repos:read',
@@ -334,7 +307,6 @@ const navItems: readonly NavItem[] = [
     workspace: 'ops',
     to: '/ops/automation',
     global: true,
-    brand: 'automation',
     label: 'Automation',
     icon: Workflow,
     requires: 'settings:read',
@@ -342,7 +314,6 @@ const navItems: readonly NavItem[] = [
   {
     workspace: 'ops',
     to: '/ops/spend',
-    brand: 'ai',
     label: 'AI spend',
     icon: CircleDollarSign,
     requires: ['ai:read', 'ai:admin'],
@@ -352,7 +323,6 @@ const navItems: readonly NavItem[] = [
     to: '/settings/$section',
     section,
     icon: settingsEntries[section].icon,
-    brand: settingsEntries[section].brand,
     label: settingsSections[section].label,
   })),
 ]

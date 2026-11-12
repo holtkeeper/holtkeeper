@@ -1,50 +1,18 @@
 # @holtkeeper/brand
 
-The Holtkeeper mascot and capability icons as SVG, shared by the web UI and the docs site. The
-originals live in [holtkeeper/.github](https://github.com/holtkeeper/.github) (`profile/assets/`);
-copy them from there instead of editing them here.
+The Holtkeeper mascot as SVG, shared by the web UI and the docs site. The originals are rendered in
+[holtkeeper/.github](https://github.com/holtkeeper/.github) (`scripts/render.py`, output in
+`profile/assets/`); copy them from there instead of editing them here.
 
-| Import                               | What                                 |
-| ------------------------------------ | ------------------------------------ |
-| `@holtkeeper/brand/holtkeeper.svg`   | The mascot: app icon, favicon, logo  |
-| `@holtkeeper/brand/avatar.svg`       | The mascot on its tile (org avatar)  |
-| `@holtkeeper/brand/review.svg`       | AI review                            |
-| `@holtkeeper/brand/updates.svg`      | Dependency updates across the fleet  |
-| `@holtkeeper/brand/audit.svg`        | Vulnerability audit                  |
-| `@holtkeeper/brand/browserslist.svg` | Browserslist updates                 |
-| `@holtkeeper/brand/release.svg`      | Releases and changelogs              |
-| `@holtkeeper/brand/bundles.svg`      | Bundle size                          |
-| `@holtkeeper/brand/assets.svg`       | Images, fonts and media              |
-| `@holtkeeper/brand/knowledge.svg`    | Knowledge agents read before tasks   |
-| `@holtkeeper/brand/repos.svg`        | Repositories                         |
-| `@holtkeeper/brand/credentials.svg`  | Credentials                          |
-| `@holtkeeper/brand/coverage.svg`     | Test coverage                        |
-| `@holtkeeper/brand/testids.svg`      | Test ids in frontend templates       |
-| `@holtkeeper/brand/branches.svg`     | Branches to clean up                 |
-| `@holtkeeper/brand/ci.svg`           | CI job durations and failures        |
-| `@holtkeeper/brand/licenses.svg`     | Dependency licenses                  |
-| `@holtkeeper/brand/api.svg`          | Public API of packages               |
-| `@holtkeeper/brand/stack.svg`        | Tech stack and end of life           |
-| `@holtkeeper/brand/activity.svg`     | Activity feed                        |
-| `@holtkeeper/brand/ai.svg`           | AI usage                             |
-| `@holtkeeper/brand/storage.svg`      | Storage                              |
-| `@holtkeeper/brand/database.svg`     | Database                             |
-| `@holtkeeper/brand/caches.svg`       | Download caches                      |
-| `@holtkeeper/brand/libraries.svg`    | Third-party library docs             |
-| `@holtkeeper/brand/dependencies.svg` | Dependency graph                     |
-| `@holtkeeper/brand/chat.svg`         | Chat with Holtkeeper                 |
-| `@holtkeeper/brand/releaseboard.svg` | Releases                             |
-| `@holtkeeper/brand/mcp.svg`          | MCP server for agents                |
-| `@holtkeeper/brand/slack.svg`        | Slack                                |
-| `@holtkeeper/brand/auditlog.svg`     | Audit log                            |
-| `@holtkeeper/brand/users.svg`        | Users                                |
-| `@holtkeeper/brand/automation.svg`   | Automation: events, rules, freshness |
-| `@holtkeeper/brand/jobs.svg`         | Background jobs                      |
-| `@holtkeeper/brand/settings.svg`     | Settings                             |
+| Import                             | What                                                   |
+| ---------------------------------- | ------------------------------------------------------ |
+| `@holtkeeper/brand/holtkeeper.svg` | The mascot on a transparent background: logo, app icon |
+| `@holtkeeper/brand/avatar.svg`     | The mascot on its Graphite tile (org and bot avatar)   |
 
 ```ts
-import auditIcon from '@holtkeeper/brand/audit.svg'
+import logo from '@holtkeeper/brand/holtkeeper.svg'
 ```
 
-`apps/web/public/favicon.svg` and `docs/public/favicon.svg` are copies of `holtkeeper.svg`: favicons are
-served as plain files, not bundled.
+The mascot is an otter in driftwood brown (`#9c7a5e`) with a dark eye mask; the amber accent (`--brand`, `#f0a63a`) stays for the interface. `apps/web/public/favicon.svg`
+and `docs/public/favicon.svg` are copies of `holtkeeper.svg`: the one favicon of both sites, served as
+a plain file, not bundled.

@@ -11,7 +11,7 @@ import {
 import { unreadBadge } from '../../lib/chat.ts'
 import { isPaletteShortcut } from '../../lib/palette.ts'
 import { taskApprovalBadge } from '../../lib/tasks.ts'
-import { Avatar, BrandIcon, Count, brandIconUrl } from '../../ui/index.ts'
+import { Avatar, BrandIcon, Count } from '../../ui/index.ts'
 import { ShellContext, type ShellSlots } from '../../ui/shell.ts'
 import { CommandPalette } from './CommandPalette.tsx'
 import {
@@ -29,7 +29,6 @@ import { openPalette, setPaletteOpen, usePaletteOpen } from './palette.ts'
 import { useSession } from './session.ts'
 
 const appName = 'Holtkeeper'
-const defaultFavicon = '/favicon.svg'
 
 function useActiveNav(items: readonly NavItem[]): NavItem | undefined {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
@@ -42,19 +41,12 @@ function useActiveNav(items: readonly NavItem[]): NavItem | undefined {
   return activeNav(pathname, record ? analysis.data?.analysis.kind : undefined, items)
 }
 
-function setDocumentMeta(title: string, favicon: string) {
-  document.title = title
-  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-  if (icon) icon.href = favicon
-}
-
-function useDocumentMeta(item: NavItem | undefined) {
+function useDocumentTitle(item: NavItem | undefined) {
   useEffect(() => {
-    setDocumentMeta(
-      item ? `${item.label} · ${appName}` : appName,
-      item?.brand ? brandIconUrl(item.brand) : defaultFavicon,
-    )
-    return () => setDocumentMeta(appName, defaultFavicon)
+    document.title = item ? `${item.label} · ${appName}` : appName
+    return () => {
+      document.title = appName
+    }
   }, [item])
 }
 
@@ -119,7 +111,7 @@ export function AppShell() {
     select: (state) => /^\/account(\/|$)/.test(state.location.pathname),
   })
   const [sheet, setSheet] = useState<HTMLElement | null>(null)
-  useDocumentMeta(active)
+  useDocumentTitle(active)
   usePaletteShortcut()
 
   const slots = useMemo<ShellSlots>(() => {
@@ -172,7 +164,7 @@ export function AppShell() {
             aria-label={`${appName} home`}
             className="grid size-8 shrink-0 place-items-center rounded-[9px] focus-visible:outline-2 focus-visible:outline-focus"
           >
-            <BrandIcon name="holtkeeper" className="size-7" />
+            <BrandIcon className="size-7" />
           </Link>
           <nav aria-label="Workspaces" className="shell-rail-group">
             {groups

@@ -133,7 +133,7 @@ function Author({
     )
   return (
     <span className="grid size-8 shrink-0 place-items-center rounded-full border border-line bg-raise">
-      <BrandIcon name="holtkeeper" className="size-5" />
+      <BrandIcon className="size-5" />
     </span>
   )
 }

@@ -25,7 +25,7 @@ export function AuthCard({
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="flex h-12 items-center gap-2.5 border-b border-line px-4">
-        <BrandIcon name="holtkeeper" className="size-5" />
+        <BrandIcon className="size-5" />
         <span className="text-[13px] font-semibold">Holtkeeper</span>
         <span className="mono truncate text-xs text-dim">{window.location.host}</span>
         <span className="flex-1" />
@@ -44,7 +44,7 @@ export function AuthCard({
             className="w-full rounded-[12px] border border-line bg-panel p-7"
           >
             <div className="mb-6 flex flex-col items-center gap-3 text-center">
-              <BrandIcon name="holtkeeper" className="size-12" />
+              <BrandIcon className="size-12" />
               <div>
                 <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
                 {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}

@@ -160,9 +160,9 @@ test('Analyzers and Policies open for settings:read on any scope, each with its 
   const entries = scoped?.items.filter(
     (item) => item.section === 'analyzers' || item.section === 'policies',
   )
-  expect(entries?.map((item) => [navKey(item), item.label, item.brand])).toEqual([
-    ['/settings/analyzers', 'Analyzers', 'jobs'],
-    ['/settings/policies', 'Policies', 'audit'],
+  expect(entries?.map((item) => [navKey(item), item.label])).toEqual([
+    ['/settings/analyzers', 'Analyzers'],
+    ['/settings/policies', 'Policies'],
   ])
   const items = scoped?.items ?? []
   expect(new Set(items.map((item) => item.icon)).size).toBe(items.length)

@@ -36,7 +36,7 @@ function SuggestionRow({ item }: { item: Suggestion }) {
     <>
       {option.agent ? (
         <span className="grid size-5 shrink-0 place-items-center rounded-full border border-line bg-raise">
-          <BrandIcon name="holtkeeper" className="size-3.5" />
+          <BrandIcon className="size-3.5" />
         </span>
       ) : (
         <Avatar src={option.avatarUrl ?? ''} name={option.name} size="xs" />
@@ -217,7 +217,7 @@ export function Composer({
             </span>
           ) : agentWillReply ? (
             <span className="inline-flex items-center gap-1 text-accent">
-              <BrandIcon name="holtkeeper" className="size-3.5" /> Holtkeeper will reply
+              <BrandIcon className="size-3.5" /> Holtkeeper will reply
             </span>
           ) : (
             <span>Only people read this; mention @holtkeeper to ask the agent.</span>
