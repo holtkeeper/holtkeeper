@@ -29,6 +29,7 @@ const tagPushSchema = z.object({
   object_kind: z.literal('tag_push'),
   ref: z.string().startsWith('refs/tags/'),
   after: z.string(),
+  checkout_sha: z.string().nullish(),
   project: projectSchema,
 })
 
@@ -181,7 +182,8 @@ async function parseGitlab(
     const repo = repoOf(hook.project)
     if (!repo) return noForge
     const tag = hook.ref.slice('refs/tags/'.length)
-    return { event: { kind: 'tag', repo, tag, sha: hook.after }, summary: `tag ${tag}` }
+    const sha = hook.checkout_sha || hook.after
+    return { event: { kind: 'tag', repo, tag, sha }, summary: `tag ${tag}` }
   }
 
   if (header === 'Push Hook') {

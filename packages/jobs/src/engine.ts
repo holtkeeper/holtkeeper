@@ -51,6 +51,8 @@ export interface JobEngineOptions {
   worker?: Pick<WorkerOptions, 'concurrency' | 'claimDelayMs' | 'maxJobs' | 'workerId' | 'pools'>
   now?: () => Date
   onFinished?: (job: Job, record?: AnalysisRecord) => void | Promise<void>
+  /** See `WorkerOptions.onCanceled`. */
+  onCanceled?: (job: Job) => void | Promise<void>
   log?: (line: string) => void
 }
 
@@ -100,6 +102,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
     concurrency: jobs.concurrency,
     timeoutMs: jobs.timeoutMinutes * 60_000,
     ...(options.onFinished && { onFinished: options.onFinished }),
+    ...(options.onCanceled && { onCanceled: options.onCanceled }),
     ...(options.settingOptions && { settingOptions: options.settingOptions }),
     ...(options.admission && { admission: options.admission }),
     ...(options.cancelReason && { cancelReason: options.cancelReason }),

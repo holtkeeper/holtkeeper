@@ -72,6 +72,11 @@ export interface WorkerOptions {
    */
   onFinished?: (job: Job, record?: AnalysisRecord) => void | Promise<void>
   /**
+   * Called once per job the worker stopped as canceled: by `cancelReason` before it ran, or by a
+   * cancel while it ran. Errors are logged, never thrown.
+   */
+  onCanceled?: (job: Job) => void | Promise<void>
+  /**
    * Whether a claimed job may start now, e.g. `false` while the credentials it needs are
    * saturated. A refused job stays claimed (heartbeat running, attempt not repeated) without
    * taking a concurrency slot, and is asked again every `admissionPollMs` while the worker claims
@@ -257,6 +262,15 @@ export function createWorker(options: WorkerOptions): Worker {
     }
   }
 
+  const canceled = async (job: Job | undefined) => {
+    if (!job) return
+    try {
+      await options.onCanceled?.(job)
+    } catch (error) {
+      say(`onCanceled failed for job ${job.id}: ${messageOf(error)}`)
+    }
+  }
+
   const admit = async (job: Job) => {
     if (!admission) return true
     try {
@@ -362,7 +376,9 @@ export function createWorker(options: WorkerOptions): Worker {
         await jobLog.close()
         await store.jobs.cancel(job.id, at())
         say(`job ${job.id} (${label}) canceled: ${cancelReason}`)
-        return store.jobs.get(job.id)
+        const canceledJob = await store.jobs.get(job.id)
+        await canceled(canceledJob)
+        return canceledJob
       }
       const analyzer = analyzers.get(job.analyzer)
       if (!analyzer) throw new PermanentJobError(`unknown analyzer "${job.analyzer}"`)
@@ -459,7 +475,9 @@ export function createWorker(options: WorkerOptions): Worker {
         log('canceled')
         await jobLog.close()
         say(`job ${job.id} (${label}) canceled`)
-        return store.jobs.get(job.id)
+        const canceledJob = await store.jobs.get(job.id)
+        await canceled(canceledJob)
+        return canceledJob
       }
       const message = messageOf(error)
       if (isBudgetStop(error)) {

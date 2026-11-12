@@ -42,6 +42,19 @@ beforeEach(() => {
   })
 })
 
+const common = {
+  emoji: {},
+  defaultEmoji: {
+    reviewing: 'eyes',
+    clean: 'large_green_circle',
+    minor: 'large_orange_circle',
+    changes: 'red_circle',
+    skipped: 'white_circle',
+  },
+  eventsPath: '/api/slack/events',
+}
+const unset = { configured: false, ...common }
+
 const call = async (method: string, path: string, body?: unknown, headers = asAdmin) => {
   const response = await app.request(`/api${path}`, {
     method,
@@ -54,7 +67,7 @@ const call = async (method: string, path: string, body?: unknown, headers = asAd
 
 describe('slack tokens', () => {
   test('stores the tokens sealed, reports them and forgets them', async () => {
-    expect((await call('GET', '/slack')).body).toEqual({ configured: false })
+    expect((await call('GET', '/slack')).body).toEqual(unset)
 
     const saved = await call('PUT', '/slack/connection', {
       botToken: 'xoxb-widget-1',
@@ -62,13 +75,18 @@ describe('slack tokens', () => {
     })
     expect(saved).toEqual({
       status: 200,
-      body: { configured: true, connectedAt: NOW.toISOString(), connectedBy: 'header:jane' },
+      body: {
+        configured: true,
+        connectedAt: NOW.toISOString(),
+        connectedBy: 'header:jane',
+        ...common,
+      },
     })
     const stored = JSON.stringify(await store.kv?.get('chat:slack:connection'))
     expect(stored).not.toContain('xoxb-widget-1')
     expect(stored).not.toContain('shape-secret')
 
-    expect((await call('DELETE', '/slack/connection')).body).toEqual({ configured: false })
+    expect((await call('DELETE', '/slack/connection')).body).toEqual(unset)
     expect(await store.kv?.get('chat:slack:connection')).toBeUndefined()
   })
 
@@ -78,12 +96,48 @@ describe('slack tokens', () => {
       signingSecret: 'shape-secret',
     })
     expect(response.status).toBe(400)
-    expect((await call('GET', '/slack')).body).toEqual({ configured: false })
+    expect((await call('GET', '/slack')).body).toEqual(unset)
   })
 
   test('only settings writers change the tokens', async () => {
     const body = { botToken: 'xoxb-widget-1', signingSecret: 'shape-secret' }
     expect((await call('PUT', '/slack/connection', body, asViewer)).status).toBe(403)
     expect((await call('GET', '/slack', undefined, asViewer)).status).toBe(200)
+  })
+
+  test('keeps emoji overrides on the credential, also when the tokens are replaced', async () => {
+    const tokens = { botToken: 'xoxb-widget-1', signingSecret: 'shape-secret' }
+    expect((await call('PUT', '/slack/emoji', { emoji: { clean: 'ok' } })).status).toBe(409)
+    await call('PUT', '/slack/connection', tokens)
+
+    const set = await call('PUT', '/slack/emoji', {
+      emoji: { clean: ':white_check_mark:', reviewing: 'hourglass' },
+    })
+    expect(set.status).toBe(200)
+    expect(set.body).toMatchObject({ emoji: { clean: 'white_check_mark', reviewing: 'hourglass' } })
+    await call('PUT', '/slack/connection', { ...tokens, botToken: 'xoxb-widget-2' })
+    expect((await call('GET', '/slack')).body).toMatchObject({
+      emoji: { clean: 'white_check_mark', reviewing: 'hourglass' },
+    })
+
+    expect((await call('PUT', '/slack/emoji', { emoji: { clean: 'not an emoji' } })).status).toBe(
+      400,
+    )
+    expect((await call('PUT', '/slack/emoji', { emoji: { clean: 'ok' } }, asViewer)).status).toBe(
+      403,
+    )
+    expect((await call('PUT', '/slack/emoji', { emoji: {} })).body).toMatchObject({ emoji: {} })
+  })
+
+  test('refuses unknown statuses and drops the emoji with the credential', async () => {
+    const tokens = { botToken: 'xoxb-widget-1', signingSecret: 'shape-secret' }
+    await call('PUT', '/slack/connection', tokens)
+    expect((await call('PUT', '/slack/emoji', { emoji: { wow: 'eyes' } })).status).toBe(400)
+    const set = await call('PUT', '/slack/emoji', { emoji: { clean: 'thumbsup::skin-tone-2' } })
+    expect(set.body).toMatchObject({ emoji: { clean: 'thumbsup::skin-tone-2' } })
+
+    await call('DELETE', '/slack/connection')
+    await call('PUT', '/slack/connection', tokens)
+    expect((await call('GET', '/slack')).body).toMatchObject({ emoji: {} })
   })
 })

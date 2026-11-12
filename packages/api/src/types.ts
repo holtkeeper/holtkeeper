@@ -778,17 +778,34 @@ export interface ChatUnreadView {
   total: number
 }
 
-/** `GET /api/slack`: whether Slack app tokens are stored for a future integration. */
+/** A review status a Slack message can show, from in progress to done. */
+export type SlackReviewStatusName = 'reviewing' | 'clean' | 'minor' | 'changes' | 'skipped'
+
+/**
+ * `GET /api/slack`: whether the Slack app credential (bot token and signing secret) is stored,
+ * and the status emoji: the credential's overrides and the defaults they replace.
+ */
 export interface SlackSettingsView {
   configured: boolean
   connectedAt?: string
   connectedBy?: string
+  /** Emoji names (no colons) the credential overrides; absent statuses use `defaultEmoji`. */
+  emoji: Partial<Record<SlackReviewStatusName, string>>
+  defaultEmoji: Record<SlackReviewStatusName, string>
+  /** Path of the Events API request URL, e.g. `/api/slack/events`. */
+  eventsPath: string
 }
 
-/** `PUT /api/slack/connection` */
+/** `PUT /api/slack/connection`; `emoji` replaces the overrides, omitted keeps them. */
 export interface SlackConnectInput {
   botToken: string
   signingSecret: string
+  emoji?: Partial<Record<SlackReviewStatusName, string>>
+}
+
+/** `PUT /api/slack/emoji`: replaces the emoji overrides of the stored credential. */
+export interface SlackEmojiInput {
+  emoji: Partial<Record<SlackReviewStatusName, string>>
 }
 
 /** A credential without its secret. */

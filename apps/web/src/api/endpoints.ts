@@ -56,6 +56,7 @@ import type {
   ChatThreadView,
   ChatUnreadView,
   SlackConnectInput,
+  SlackEmojiInput,
   SlackSettingsView,
   AccountChallenge,
   AiRunList,
@@ -742,6 +743,8 @@ export const api = {
   connectSlack: (input: SlackConnectInput) =>
     request<SlackSettingsView>('PUT', '/api/slack/connection', { body: input }),
   disconnectSlack: () => request<SlackSettingsView>('DELETE', '/api/slack/connection'),
+  setSlackEmoji: (input: SlackEmojiInput) =>
+    request<SlackSettingsView>('PUT', '/api/slack/emoji', { body: input }),
 
   createTaskGroup: (input: AgentTaskGroupInput) =>
     request<AgentTaskGroupView>('POST', '/api/task-groups', { body: input }),

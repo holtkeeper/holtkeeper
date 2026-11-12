@@ -1,6 +1,6 @@
 # @holtkeeper/chat-slack
 
-Block Kit rendering for [@holtkeeper/chat](../../chat/docs/README.md) cards and forms. It only builds payloads: nothing here talks to Slack, receives its requests or posts messages. The Slack integration was removed for now; the server keeps only the app's tokens (see the server docs), and this library stays for when an integration comes back.
+Block Kit rendering for [@holtkeeper/chat](../../chat/docs/README.md) cards and forms. It only builds payloads: nothing here talks to Slack, receives its requests or posts messages. The chat integration was removed for now. The server's Slack app only marks messages that link merge requests with a review status emoji, keeps a plain-text status reply under messages linking several, and posts release announcements ([Slack review status](../../../apps/server/docs/slack.md)), so it does not use this library; it stays for when a chat integration comes back.
 
 Buttons carry their command line in `value` with `action_id` `COMMAND_ACTION:<index>`; form buttons use `FORM_ACTION` and carry the form as JSON; link buttons use `LINK_ACTION`.
 

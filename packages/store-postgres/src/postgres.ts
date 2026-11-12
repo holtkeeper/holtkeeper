@@ -32,6 +32,7 @@ import {
   toSetting,
   toUser,
 } from './rows.ts'
+import { postgresSlackMessages } from './slack.ts'
 import { type Db, tables } from './tables.ts'
 import { postgresTasks } from './tasks.ts'
 
@@ -126,6 +127,7 @@ export function postgresStore(options: PostgresStoreOptions): PostgresStore {
     audit: postgresAudit(db),
     externalAccounts: postgresExternalAccounts(db),
     libraries: postgresLibraries(db),
+    slackMessages: postgresSlackMessages(db),
     database: postgresDatabase(db, schema),
     async ready() {
       await db()

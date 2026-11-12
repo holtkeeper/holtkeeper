@@ -703,6 +703,35 @@ export const migrations: readonly Migration[] = [
       ALTER TABLE credentials ADD COLUMN last_used_at timestamptz;
     `,
   },
+  {
+    version: 27,
+    sql: `
+      CREATE TABLE slack_messages (
+        channel text NOT NULL,
+        ts text NOT NULL,
+        repo text NOT NULL,
+        merge_request integer NOT NULL,
+        created_at text NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (channel, ts, repo, merge_request)
+      );
+      CREATE INDEX slack_messages_merge_request ON slack_messages (repo, merge_request);
+      CREATE INDEX slack_messages_created ON slack_messages (created_at);
+    `,
+  },
+  {
+    version: 28,
+    sql: `
+      CREATE TABLE slack_replies (
+        channel text NOT NULL,
+        ts text NOT NULL,
+        created_at text NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (channel, ts)
+      );
+      CREATE INDEX slack_replies_created ON slack_replies (created_at);
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

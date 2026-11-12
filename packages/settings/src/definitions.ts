@@ -443,6 +443,38 @@ Unlike **Read-only** (\`repo.freeze\`), which refuses every change through the f
   schema: mergeRequestCommentsSchema,
 })
 
+/** A Slack channel id as Slack shows it under the channel's details, e.g. `C0123ABCD`. */
+export const slackChannelIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[CG][A-Z0-9]{6,20}$/, 'a Slack channel id such as C0123ABCD (channel details › About)')
+
+/** Value of `slack.reviews`: the Slack channels whose merge request links get review status. */
+export const slackReviewsSchema = z.object({
+  channels: z.array(slackChannelIdSchema).max(100).default([]),
+})
+
+/** A parsed `slack.reviews` value. */
+export type SlackReviews = z.infer<typeof slackReviewsSchema>
+
+/** Per-repository `slack.reviews` setting: the most specific entry wins; no channels by default. */
+export const slackReviews = defineSetting({
+  key: 'slack.reviews',
+  label: 'Slack review status',
+  description:
+    'Slack channels where messages linking merge requests of the covered repositories get a review status emoji.',
+  section: 'Merge requests',
+  help: `Holtkeeper's Slack app watches the channels it was invited to. A message there that links a merge request of a covered repository gets one emoji with the review status, kept current as reviews run: reviewing, looks good, minor findings, needs changes or not reviewed. The app never posts anything. Its tokens and the emoji live in **Settings › Integrations › Slack**. A link to a merge request with no review yet gets its emoji once a review is queued.
+
+- **channels**: Slack channel ids, e.g. \`C0123ABCD\`. Copy one from the channel's details (click the channel name, the id is at the bottom of **About**). Invite the app to the channel too (\`/invite @<app name>\`).
+
+Set it for everything, a group or a repository pattern. The most specific entry wins as a whole, so different groups can watch different channels, and an entry with no channels keeps a group quiet. A message about a repository is handled only in channels bound to that repository.
+
+Nothing is shown where **Merge request reviews** (\`mergeRequests.comments\`) is off; turning it off, or unbinding a channel, removes the emoji at the merge request's next review change.`,
+  default: { channels: [] },
+  schema: slackReviewsSchema,
+})
+
 /** Value of `tasks.write`; every field has a default, so `{ enabled: true }` is enough. */
 export const tasksWriteSchema = z.object({
   enabled: z.boolean().default(false),
@@ -524,6 +556,7 @@ export const builtinSettings: SettingDefinition[] = [
   repoFreeze,
   repoTests,
   mergeRequestComments,
+  slackReviews,
   accessCrossTeam,
   tasksWrite,
 ]

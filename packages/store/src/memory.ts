@@ -16,6 +16,7 @@ import {
 import { memoryKnowledge } from './knowledge.ts'
 import { memoryLearnings } from './learnings.ts'
 import { memoryLibraries } from './libraries.ts'
+import { memorySlackMessages } from './slack.ts'
 import { memoryTasks } from './tasks.ts'
 import type {
   AnalysisQuery,
@@ -209,6 +210,7 @@ export function memoryStore(): Store {
     audit: memoryAudit(),
     externalAccounts,
     libraries: memoryLibraries(),
+    slackMessages: memorySlackMessages(),
     close: async () => {},
   }
 }

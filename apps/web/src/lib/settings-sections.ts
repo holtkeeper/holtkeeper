@@ -38,9 +38,15 @@ export const settingsSections: Readonly<
   },
   integrations: {
     label: 'Integrations',
-    description:
-      'Forges, credentials, trackers, outgoing webhooks, request limits and Slack tokens',
-    keys: ['trackers', 'analyzers.tracker', 'releases.notify', 'limits.credentials'],
+    description: 'Forges, credentials, trackers, outgoing webhooks, request limits and Slack',
+    keys: [
+      'trackers',
+      'analyzers.tracker',
+      'releases.notify',
+      'limits.credentials',
+      'slack.reviews',
+      'releases.announce',
+    ],
   },
   analyzers: {
     label: 'Analyzers',

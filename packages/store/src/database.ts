@@ -37,6 +37,8 @@ const domainOf: Record<string, DatabaseDomain> = {
   chat_messages: 'chat',
   chat_thread_reads: 'chat',
   chat_thread_mutes: 'chat',
+  slack_messages: 'chat',
+  slack_replies: 'chat',
   agent_tasks: 'tasks',
   agent_task_groups: 'tasks',
   config_documents: 'config',

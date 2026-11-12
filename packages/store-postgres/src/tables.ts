@@ -40,6 +40,8 @@ export interface Tables {
   libraryChunks: SQL.Query<unknown>
   libraryChunkVersions: SQL.Query<unknown>
   libraryIssues: SQL.Query<unknown>
+  slackMessages: SQL.Query<unknown>
+  slackReplies: SQL.Query<unknown>
 }
 
 /** Table names of `schema`, qualified so queries never depend on `search_path`. */
@@ -84,6 +86,8 @@ export function tables(sql: SQL, schema: string): Tables {
     libraryChunks: name('library_chunks'),
     libraryChunkVersions: name('library_chunk_versions'),
     libraryIssues: name('library_issues'),
+    slackMessages: name('slack_messages'),
+    slackReplies: name('slack_replies'),
   }
 }
 

@@ -36,6 +36,7 @@ import {
 import { type CostReader, analyzerHealth, jobCosts, jobStats, waitHints } from '../job-stats.ts'
 import { explainJob } from '../job-why.ts'
 import { commentsOffFor, isReviewAnalyzer } from '../mr-comments.ts'
+import { noteReviewJob } from '../mr-status.ts'
 import { readTranscript } from '../transcripts.ts'
 import { canSee } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
@@ -420,6 +421,7 @@ export function jobRoutes(deps: ServerDeps) {
       createdAt: now,
       actor: principal.id,
     })
+    noteReviewJob(deps, job)
     c.set('audit', {
       action: 'job.create',
       target: { type: 'job', id: job.id, repo: `${job.repo.forge}:${job.repo.path}` },
@@ -440,6 +442,7 @@ export function jobRoutes(deps: ServerDeps) {
     const now = deps.now().toISOString()
     const job = await store.jobs.cancel(existing.id, now)
     if (!job) throw new HTTPException(404, { message: 'job not found' })
+    noteReviewJob(deps, job)
     c.set('audit', {
       action: 'job.cancel',
       target: { type: 'job', id: job.id, repo: `${job.repo.forge}:${job.repo.path}` },

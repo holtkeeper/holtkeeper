@@ -58,6 +58,8 @@ Everything else is fixed:
 
 `releases.notify` (`releaseNotifyDefinition`, secret) lists webhook `targets` (`url`, which gets each event as a JSON `Notification`), each with the `events` it wants (`proposed`, `merged`, `accepted`, `versioned`, `deploy-started`, `deploy-succeeded`, `deploy-failed`; all when empty). Events carry the `actor` id and, for people, `actorName` and `channel`; `actorLabel(event)` renders them as `Jane Doe (API)` for the `By` field. `announce(settings, event)` sends through `@holtkeeper/notify` and returns failures instead of throwing.
 
+`releases.announce` (`releaseAnnounceDefinition`, schema `releaseAnnounceSchema`, `releaseAnnounceSettings(value)` parses and falls back to the defaults) says where new versions are announced in Slack; see [Announcements](#announcements).
+
 ## Reading
 
 - `collectFacts({ forge, repo, settings, recorded? })` → `ReleaseFacts`: branch heads, version tags (`versionTags`, only tags that follow `tagFormat` and the scheme, newest first; the newest 100 tags, doubling up to 3200 while none of them is a version), commits on the source not on the target (`ahead`) and on the target since the latest version (`unreleased`), each capped at `commitCap` (300), the open and the last merged candidate, latest pipelines, blocking merge requests and the acceptance (`recorded`, else the label or merge signal). Needs `GitForge.listCommits`; throws `UnsupportedForgeError` without it.
@@ -86,7 +88,7 @@ Past versions are read from the forge alone, no checkout:
 3. **Text** — `renderChangelog(entries, links?)` (markdown with a `###` heading per section), the notes (`edits.summary`, else `digestSummary` of the entries) and the fixed title and body. The candidate's body ends with `releaseMarker`, so Holtkeeper recognizes and updates its own merge requests.
 4. **Gates** — `checkGates(step, settings, facts)`: the pipeline of the branch the step works on, blocking merge requests, acceptance for `version`; plus `empty` (nothing to release), `changelog` (some included entries are not conventional commits) and `tag-exists` (no, invalid or taken version). Each `GateResult` has a `severity`: `block` (a failing one refuses the step), `warn` (`changelog`: shown, never refuses) or `info` (a branch without a pipeline). `blockingGates(gates, force)` keeps failing `block` gates, and with `force` only `hardGates` (`empty`, `tag-exists`); `gatesPass(gates)` tells whether none is left.
 
-`writeSummary(agent, entries, { version?, previous? })` has the agent write the notes in one cheap call (task kind `release-notes`, model tier `fast`, no repository access). Audience, language and style come from the team: the server's agent adds the repository's Guide (sections `releases` and `commits`) as context to tasks of this kind. Notes are written only on demand or when a person proposes with notes, never per tag. It rejects on failure so callers keep the digest.
+`writeSummary(agent, entries, { version?, previous? })` has the agent write the notes in one cheap call (task kind `release-notes`, model tier `fast`, no repository access). Audience, language and style come from the team: the server's agent adds the repository's Guide (sections `releases` and `commits`) as context to tasks of this kind. Notes are written only on demand or when a person proposes with notes; announcements of new tags use `writeAnnouncementNotes` (see [Announcements](#announcements)). It rejects on failure so callers keep the digest.
 
 ## Commits
 
@@ -119,6 +121,17 @@ All take a `StepContext { forge, repo, settings, now, dryRun? }`, refuse with `G
 ## Stored values
 
 `acceptanceSchema`, `releaseEditsSchema` and `releaseEventSchema` validate what callers keep (the server keeps them in `Store.kv`); `readStored(schema, value)` reads a stored value or `undefined`. Besides kind, actor, version, tag, environment, url and detail, a `ReleaseEvent` records what the version sheet shows: `accepted` the accepted `sha`, `via` and `note`; `versioned` the target `sha`, `force`, `notes` (`source`, `edited`) and `changelogSha`; `deploy-started` the `jobId` and `reason`. All are optional, so older events still read.
+
+## Announcements
+
+The pure parts of the server's Slack release announcements ([apps/server/docs/slack.md](../../../apps/server/docs/slack.md#release-announcements)):
+
+- `releaseAnnounceSchema` — `{ channels: string[] (Slack channel ids), tags?: string[] (globs over tag names), groupWindowMinutes (10), notes (true), tasks (true), impact (true), language? }`. No channels, no announcements.
+- `announcedTag(settings, announce, tag)` → `AnnouncedTag { name, sha, package?, version }` or `undefined` when the setting does not cover the tag. With `tags` a tag must match one of the globs (a tag that names no version keeps its name as the version); without them tags that follow `version.tagFormat` with a valid version under the scheme count, and package tags (`parsePackageTag`) with their package.
+- `previousTag(settings, tag, tags)` → the highest lower version of the same package among `tags` (of the repository for plain tags, compared by the scheme), release candidates only when `tag` is one or `version.prerelease` is on; `undefined` for a first release.
+- `breakingEntries(entries)` — included entries the commit conventions mark breaking.
+- `packageEntries(entries, packageName)` — the entries of a monorepo range that belong to one package, by conventional-commit scope (the short name `widgets` or `@acme/widgets`; comma-separated scopes count each): when some entry is scoped to the package, entries scoped only to something else are left out; unscoped entries stay. Without any entry naming the package every entry is kept.
+- `writeAnnouncementNotes(agent, { packages, language? })` → per package `{ name, overview, highlights, breaking: { change, migration? }[] }`, one call for all packages of an announcement (task kind `release-notes`, tier `fast`, no repository access). Each package brings its entries and `apiBreaking` (removed exports and declarations that lost members, from the API diff), so breaking changes and migration hints come from both. Prose is in `language` (English by default), code and technical terms in English; the Guide's `releases` rules reach the agent as for `writeSummary`. Rejects on failure, so callers announce without notes.
 
 ## Testing
 

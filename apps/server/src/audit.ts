@@ -236,17 +236,22 @@ const userFields = (user: User | undefined) =>
     avatarSeed: user.avatarSeed,
   }
 
-/** Whether a request is audited: mutating methods under `/api` and `/auth/<provider>/admin`. */
+/**
+ * Whether a request is audited: mutating methods under `/api` and `/auth/<provider>/admin`,
+ * except Slack event deliveries, which arrive for every message in the app's channels.
+ */
 function isAudited(method: string, path: string, provider: string) {
   return (
     mutating.has(method) &&
+    path !== '/api/slack/events' &&
     (path.startsWith('/api/') || path.startsWith(`/auth/${provider}/admin/`))
   )
 }
 
 /**
- * Audits every mutating request under `/api` and `/auth/<provider>/admin` once the response is
- * ready: actor, route template and params, status, duration and outcome (401/403 are `denied`).
+ * Audits every mutating request under `/api` (but Slack event deliveries) and
+ * `/auth/<provider>/admin` once the response is ready: actor, route template and params,
+ * status, duration and outcome (401/403 are `denied`).
  * Routes enrich the event with `c.set('audit', …)`; user changes made through the `users`
  * provider get field-level `changes` from the stored user before and after. The event names a
  * repository (`target.repo`) only when the route sets it or a permission check of the request

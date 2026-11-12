@@ -1496,17 +1496,18 @@ export function useReindexLibraries() {
   })
 }
 
-/** Whether Slack app tokens are stored. */
+/** Whether Slack app tokens are stored, and the review status emoji. */
 export const useSlackSettings = (enabled: boolean) =>
   useQuery({ queryKey: keys.slack, queryFn: api.slackSettings, enabled })
 
-/** Store or forget the Slack app tokens; each answers with the new settings. */
+/** Store or forget the Slack app tokens, or set its status emoji; each answers with the new settings. */
 export function useSlackMutations() {
   const client = useQueryClient()
   const onSuccess = (view: SlackSettingsView) => client.setQueryData(keys.slack, view)
   return {
     connect: useMutation({ mutationFn: api.connectSlack, onSuccess }),
     disconnect: useMutation({ mutationFn: api.disconnectSlack, onSuccess }),
+    setEmoji: useMutation({ mutationFn: api.setSlackEmoji, onSuccess }),
   }
 }
 

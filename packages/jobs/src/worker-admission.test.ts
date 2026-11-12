@@ -96,6 +96,7 @@ describe('worker admission', () => {
     const store = memoryStore()
     const logs = memoryArtifactStore()
     const ran: string[] = []
+    const canceledJobs: string[] = []
     const worker = createWorker({
       store,
       analyzers: [
@@ -109,6 +110,9 @@ describe('worker admission', () => {
       logFlush: { flushLines: 1 },
       pollMs: 5,
       cancelReason: (job) => (job.repo.path === 'quiet' ? 'turned off' : undefined),
+      onCanceled: (job) => {
+        canceledJobs.push(`${job.repo.path}:${job.status}`)
+      },
     })
     const enqueue = (path: string) =>
       store.jobs.enqueue({
@@ -124,6 +128,8 @@ describe('worker admission', () => {
     await until(async () => (await store.jobs.get(loud.id))?.status === 'succeeded')
     await until(async () => (await store.jobs.get(quiet.id))?.status === 'canceled')
     expect(ran).toEqual(['loud'])
+    await until(async () => canceledJobs.length > 0)
+    expect(canceledJobs).toEqual(['quiet:canceled'])
     expect(
       (await readJobLog(logs, quiet.id, 1, { tail: 100 })).lines.map((line) => line.text),
     ).toContain('canceled: turned off')

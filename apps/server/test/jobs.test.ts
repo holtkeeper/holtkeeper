@@ -718,6 +718,17 @@ describe('gitlab webhook', () => {
     expect(jobs.map((job) => job.ref)).toEqual([sha])
   })
 
+  test('annotated package tags resolve to the tagged commit', async () => {
+    const app = setup(games)
+    const commit = 'c'.repeat(40)
+    await hook(app, {
+      ...tagPush('games/a', '@games/card@0.8.0', 'd'.repeat(40)),
+      checkout_sha: commit,
+    })
+    const jobs = await store.jobs.list({ analyzer: 'changelog' })
+    expect(jobs.map((job) => job.ref)).toEqual([commit])
+  })
+
   test('verifies the token', async () => {
     const app = setup()
     expect((await hook(app, tagPush('games/a', 'v1'), 'wrong')).status).toBe(401)

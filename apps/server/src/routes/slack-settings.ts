@@ -4,30 +4,37 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
 import { type Env, type ServerDeps, authorize, readBody } from '../context.ts'
+import {
+  SLACK_CONNECTION_KEY,
+  type StoredSlackConnection,
+  defaultSlackEmoji,
+  slackEmojiOverridesSchema,
+  storedSlackConnection,
+} from '../slack/connection.ts'
 
-const CONNECTION_KEY = 'chat:slack:connection'
 const GLOBAL = { kind: 'global' } as const
+
+/** Path of the Slack Events API request URL. */
+const SLACK_EVENTS_PATH = '/api/slack/events'
 
 const connectSchema = z.object({
   botToken: z.string().trim().min(1),
   signingSecret: z.string().trim().min(1),
+  emoji: slackEmojiOverridesSchema.optional(),
 })
 
-const storedSchema = z.object({
-  botToken: z.string(),
-  signingSecret: z.string(),
-  connectedAt: z.string(),
-  connectedBy: z.string(),
-})
+const emojiSchema = z.object({ emoji: slackEmojiOverridesSchema })
 
 /**
- * Slack app tokens kept for a future integration (global `settings:read` to read,
- * `settings:write` to change). Nothing talks to Slack; the tokens are only stored, sealed with
- * the vault in `store.kv` under `chat:slack:connection`.
+ * The Slack app credential, one per instance (global `settings:read` to read, `settings:write`
+ * to change): bot token and signing secret sealed with the vault in `store.kv` under
+ * `chat:slack:connection`, and the review status emoji overrides.
  *
- * - `GET /slack` — whether tokens are stored, when and by whom.
- * - `PUT /slack/connection` `{ botToken, signingSecret }` — stores both sealed.
- * - `DELETE /slack/connection` — forgets them.
+ * - `GET /slack` — whether the credential is stored, when and by whom, and the emoji.
+ * - `PUT /slack/connection` `{ botToken, signingSecret, emoji? }` — stores both sealed; without
+ *   `emoji` the stored overrides stay.
+ * - `PUT /slack/emoji` `{ emoji }` — replaces the emoji overrides; 409 without a credential.
+ * - `DELETE /slack/connection` — forgets the credential with its emoji.
  */
 export function slackSettingsRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
@@ -38,15 +45,24 @@ export function slackSettingsRoutes(deps: ServerDeps) {
   }
 
   const view = async (): Promise<SlackSettingsView> => {
-    const parsed = storedSchema.safeParse(await deps.store.kv?.get(CONNECTION_KEY))
-    return parsed.success
+    const stored = await storedSlackConnection(deps.store)
+    const common = { defaultEmoji: { ...defaultSlackEmoji }, eventsPath: SLACK_EVENTS_PATH }
+    return stored
       ? {
           configured: true,
-          connectedAt: parsed.data.connectedAt,
-          connectedBy: parsed.data.connectedBy,
+          connectedAt: stored.connectedAt,
+          connectedBy: stored.connectedBy,
+          emoji: stored.emoji ?? {},
+          ...common,
         }
-      : { configured: false }
+      : { configured: false, emoji: {}, ...common }
   }
+
+  const save = ({ emoji, ...rest }: StoredSlackConnection) =>
+    kvOf().set(
+      SLACK_CONNECTION_KEY,
+      emoji && Object.keys(emoji).length > 0 ? { ...rest, emoji } : rest,
+    )
 
   app.get('/slack', async (c) => {
     authorize(c, 'settings:read', GLOBAL)
@@ -60,19 +76,38 @@ export function slackSettingsRoutes(deps: ServerDeps) {
       throw new HTTPException(400, {
         message: 'The bot token starts with xoxb- (Bot User OAuth Token)',
       })
-    await kvOf().set(CONNECTION_KEY, {
+    const emoji = input.emoji ?? (await storedSlackConnection(deps.store))?.emoji
+    await save({
       botToken: await deps.vault.seal(input.botToken),
       signingSecret: await deps.vault.seal(input.signingSecret),
       connectedAt: deps.now().toISOString(),
       connectedBy: principal.id,
+      ...(emoji && { emoji }),
     })
     c.set('audit', { action: 'slack.connect', target: { type: 'slack', id: 'connection' } })
     return c.json(await view())
   })
 
+  app.put('/slack/emoji', async (c) => {
+    authorize(c, 'settings:write', GLOBAL)
+    const input = await readBody(c, emojiSchema)
+    const stored = await storedSlackConnection(deps.store)
+    if (!stored)
+      throw new HTTPException(409, {
+        message: 'Store the Slack bot token and signing secret first',
+      })
+    await save({ ...stored, emoji: input.emoji })
+    c.set('audit', {
+      action: 'slack.emoji',
+      target: { type: 'slack', id: 'connection' },
+      details: { emoji: input.emoji },
+    })
+    return c.json(await view())
+  })
+
   app.delete('/slack/connection', async (c) => {
     authorize(c, 'settings:write', GLOBAL)
-    await kvOf().delete(CONNECTION_KEY)
+    await kvOf().delete(SLACK_CONNECTION_KEY)
     c.set('audit', { action: 'slack.disconnect', target: { type: 'slack', id: 'connection' } })
     return c.json(await view())
   })

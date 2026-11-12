@@ -25,7 +25,10 @@ import type { z } from 'zod'
 import type { AuditEnrichment } from './audit.ts'
 import type { ChatAgentFor } from './chat-threads.ts'
 import type { MediaEngine } from './media/engine.ts'
+import type { MergeRequestStatusSink } from './mr-status.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
+import type { SlackApi, SlackPoster } from './slack/client.ts'
+import type { SlackReviews } from './slack/service.ts'
 import type { SupplyToolsAccess } from './tools/repos.ts'
 
 /** Everything route handlers use. Built once by `createServer`; tests build it with fakes. */
@@ -77,9 +80,10 @@ export interface ServerDeps {
   agentFor?: (repo: RepoRef) => Promise<Agent | undefined>
   /**
    * The agent of a repository for automatic work the server does outside jobs (learning capture
-   * from review replies); its runs are not interactive, so they leave the budget reserve alone.
+   * from review replies, release announcements); its runs are not interactive, so they leave the
+   * budget reserve alone. `actor` names the work in usage records; default `agent:learning`.
    */
-  automaticAgentFor?: (repo: RepoRef) => Promise<Agent | undefined>
+  automaticAgentFor?: (repo: RepoRef, actor?: string) => Promise<Agent | undefined>
   /**
    * The agent of team chat replies and summaries (`ChatAgentFor`); its runs are interactive work
    * of the person who asked. Without it the chat answers that no AI provider is configured.
@@ -102,6 +106,20 @@ export interface ServerDeps {
   releasePollMs?: number
   /** How long forge events wait before the release snapshot of a repository is reread, in milliseconds. Default 30 s. */
   releaseRefreshDelayMs?: number
+  /**
+   * Told when the review state of a merge request may have changed (`noteReviewJob`); the server
+   * wires the Slack review status (`slackReviews`). Without it nothing listens.
+   */
+  mergeRequestStatus?: MergeRequestStatusSink
+  /**
+   * The Slack review status the events route hands messages to; the server passes the same
+   * instance as `mergeRequestStatus`. Default: one built from these deps.
+   */
+  slackReviews?: SlackReviews
+  /** The Slack Web API client for a bot token. Default: `slackWebApi` over `fetch`; tests pass a fake. */
+  slackApi?: (botToken: string) => SlackApi
+  /** The Slack client release announcements post with. Default: `slackWebPoster`; tests pass a fake. */
+  slackPoster?: (botToken: string) => SlackPoster
   /** Receives work routes leave running after responding, e.g. an analysis backfill; for tests. */
   onBackground?: (work: Promise<unknown>) => void
   now: () => Date

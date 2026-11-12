@@ -33,7 +33,7 @@ export {
   weekStart,
 } from './ai-usage.ts'
 export { compareConfigDocuments, isKvLease } from './config.ts'
-export { updateKv } from './kv.ts'
+export { keepKv, updateKv } from './kv.ts'
 export { AUTO_ACCEPT_ACTOR } from './actors.ts'
 export { ExternalAccountConflictError } from './accounts.ts'
 export {
@@ -59,6 +59,7 @@ export {
   newestVersionsFirst,
   plainChunk,
 } from './libraries.ts'
+export { byLinkMessage, byLinkTarget } from './slack.ts'
 export { databaseDomains, tableDomain } from './database.ts'
 export type { DatabaseDomain } from './database.ts'
 export { newestRecords } from './analyses.ts'

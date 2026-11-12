@@ -889,6 +889,77 @@ export interface ReactionTotals {
   down: number
 }
 
+/** Review status of a merge request as a Slack message shows it, from in progress to done. */
+export type SlackReviewStatus = 'reviewing' | 'clean' | 'minor' | 'changes' | 'skipped'
+
+/**
+ * A Slack message that links a merge request Holtkeeper follows: one per message and merge
+ * request, so a message linking two merge requests has two.
+ */
+export interface SlackMessageLink {
+  /** Slack channel id, e.g. `C0123ABCD`. */
+  channel: string
+  /** The message's `ts`. */
+  ts: string
+  /** `forge:path` of the merge request's repository, lowercased. */
+  repo: string
+  /** The repository's path in its own case, for display; absent on rows stored before it. */
+  path?: string
+  mergeRequest: number
+  /** The status last known for this merge request; absent until one is known. */
+  status?: SlackReviewStatus
+  /** Head commit `status` describes, when known. */
+  head?: string
+  /** Emoji name currently on the message, shared by every link of the message. */
+  reaction?: string
+  /** The merge request's title, once something needed it. */
+  title?: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+/** The reply in a Slack message's thread that lists the status of each merge request it links. */
+export interface SlackStatusReply {
+  /** Channel of the message and the reply. */
+  channel: string
+  /** `ts` of the message the reply answers. */
+  ts: string
+  /** `ts` of the reply. */
+  replyTs: string
+  /** The text the reply was last set to. */
+  text: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+
+/** Slack messages that link merge requests, kept until `prune`. */
+export interface SlackMessageStore {
+  /** Adds the link or replaces the one with the same channel, `ts`, repository and merge request. */
+  put(link: SlackMessageLink): Promise<void>
+  /** Links of one message, by repository and merge request. */
+  ofMessage(channel: string, ts: string): Promise<SlackMessageLink[]>
+  /** Links to one merge request, oldest message first. */
+  ofMergeRequest(repo: string, mergeRequest: number): Promise<SlackMessageLink[]>
+  /**
+   * Deletes the message's link to one merge request, or every link and the status reply of the
+   * message without `target`; returns how many links it deleted.
+   */
+  delete(
+    channel: string,
+    ts: string,
+    target?: { repo: string; mergeRequest: number },
+  ): Promise<number>
+  /** The status reply of a message, if one was stored. */
+  replyOf(channel: string, ts: string): Promise<SlackStatusReply | undefined>
+  /** Adds the status reply of a message or replaces the one with the same channel and `ts`. */
+  putReply(reply: SlackStatusReply): Promise<void>
+  /**
+   * Deletes links created before `before`, and status replies created before it whose message
+   * has no links left; returns how many links it deleted.
+   */
+  prune(before: Timestamp): Promise<number>
+}
+
 /** Learning candidates, the reply notes already looked at, and reaction counts of review comments. */
 export interface LearningStore {
   get(id: string): Promise<LearningCandidate | undefined>
@@ -2352,6 +2423,8 @@ export interface Store {
   externalAccounts?: ExternalAccountStore
   /** Third-party library docs; servers without it index no libraries. */
   libraries?: LibraryStore
+  /** Slack messages that link merge requests; servers without it show no review status in Slack. */
+  slackMessages?: SlackMessageStore
   /** Introspection of the underlying database; stores without one (memory) leave it out. */
   database?: DatabaseInspector
   close(): Promise<void>

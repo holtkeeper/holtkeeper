@@ -48,6 +48,7 @@ import { reachableGroups, repoRoutes } from './routes/repos.ts'
 import { reviewRoutes } from './routes/reviews.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
+import { slackEventRoutes } from './routes/slack-events.ts'
 import { slackSettingsRoutes } from './routes/slack-settings.ts'
 import { snoozeRoutes } from './routes/snoozes.ts'
 import { stackRoutes } from './routes/stack.ts'
@@ -95,6 +96,7 @@ export function createApp(deps: ServerDeps) {
   app.use('/api/*', async (c, next) => {
     await next()
     if (c.req.method === 'GET' || c.req.method === 'HEAD' || c.res.status >= 400) return
+    if (c.req.path === '/api/slack/events') return
     inbox.invalidate()
     invalidateHome(deps)
   })
@@ -173,6 +175,7 @@ export function createApp(deps: ServerDeps) {
     updateRoutes(deps, { ...(poller && { poller }), ...(hooks && { repoHooks: hooks }) }),
   )
   api.route('/', slackSettingsRoutes(deps))
+  api.route('/', slackEventRoutes(deps))
   api.route('/', chatRoutes(deps))
   api.route('/', configRoutes(deps))
   api.route('/', egressRoutes(deps))

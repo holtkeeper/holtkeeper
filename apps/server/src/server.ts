@@ -43,7 +43,11 @@ import {
 } from '@holtkeeper/managed-config'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
 import { createPropagateAnalyzer } from '@holtkeeper/propagate'
-import { releaseNotifyDefinition, releaseSettingsDefinition } from '@holtkeeper/release'
+import {
+  releaseAnnounceDefinition,
+  releaseNotifyDefinition,
+  releaseSettingsDefinition,
+} from '@holtkeeper/release'
 import type { AnalysisKind } from '@holtkeeper/report'
 import { createReviewAnalyzer } from '@holtkeeper/review'
 import {
@@ -91,13 +95,16 @@ import { serverLimits } from './limits.ts'
 import { startManagedConfig } from './managed.ts'
 import type { MediaEngine } from './media/engine.ts'
 import { createMediaReviewer } from './media/reviewer.ts'
+import { noteReviewJob } from './mr-status.ts'
 import { startOperations } from './operations.ts'
 import { agentOpsAccess } from './ops-tools.ts'
+import { releaseAnnouncerFor } from './release-announce.ts'
 import { agentReleaseAccess } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
 import { repoTestsFor, testsExpectedFor } from './repo-tests.ts'
 import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
+import { createSlackReviews } from './slack/service.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { startStorageReports } from './storage-reports.ts'
 import { databaseStorage, recordStorageSnapshot, storageOverview } from './storage.ts'
@@ -451,6 +458,7 @@ export async function startServer(
       trackersSetting,
       releaseSettingsDefinition,
       releaseNotifyDefinition,
+      releaseAnnounceDefinition,
       commitConventionsSetting,
       assetsPolicySetting,
       librariesSetting,
@@ -471,10 +479,8 @@ export async function startServer(
       settingsAgent ? settingsAgent(repo, { interactive: true }) : agentFor(repo),
     chatAgentFor: async (target, run) =>
       settingsAgent ? settingsAgent(target, run) : agentFor(target),
-    automaticAgentFor: async (repo) =>
-      settingsAgent
-        ? settingsAgent(repo, { interactive: false, actor: 'agent:learning' })
-        : agentFor(repo),
+    automaticAgentFor: async (repo, actor = 'agent:learning') =>
+      settingsAgent ? settingsAgent(repo, { interactive: false, actor }) : agentFor(repo),
     ...(options.media ? { media: options.media } : {}),
     storage: [
       artifactStorage(artifacts),
@@ -495,6 +501,10 @@ export async function startServer(
     if (seeded.length > 0) log(`settings: seeded defaults for ${seeded.join(', ')}`)
   }
 
+  const slack = createSlackReviews(deps, { log })
+  deps.slackReviews = slack
+  deps.mergeRequestStatus = slack
+  const announcer = releaseAnnouncerFor(deps, { log })
   const app = createApp(deps)
   if (duties.http === 'api') {
     const webRoot = server.webRoot ?? defaultWebRoot
@@ -526,7 +536,10 @@ export async function startServer(
       metrics?.observeJob(job)
       if (record) await noteLibraryUses(server.store.kv, record.kind, deps.now())
       await taskJobFinished(taskDeps, job, record)
+      noteReviewJob(deps, job)
+      void announcer.indexFinished(job)
     },
+    onCanceled: (job) => noteReviewJob(deps, job),
     log,
   })
 
@@ -554,7 +567,7 @@ export async function startServer(
         return () => jobs.scheduler.stop()
       },
       () => serverPoller(deps, createEventDispatcher(deps), log)?.start() ?? (() => {}),
-      () => startFreshness(deps, log) ?? (() => {}),
+      () => startFreshness(deps, log, () => announcer.sweep()) ?? (() => {}),
       () => startWebhookSync(deps, log),
       periodicDuty('webhook health', () => checkWebhookHealth(deps, {}, log), {
         intervalMs: 15 * 60_000,

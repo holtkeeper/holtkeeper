@@ -9,9 +9,16 @@ export const slackLimits = {
   url: 3000,
 } as const
 
-/** Escapes the characters Slack's mrkdwn treats as control characters. */
-const escapeMrkdwn = (text: string) =>
+/** Text with the characters Slack's mrkdwn treats as control characters (`&`, `<`, `>`) escaped. */
+export const escapeMrkdwn = (text: string) =>
   text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+/**
+ * A mrkdwn link `<url|label>` whose label shows as plain text: control characters escaped in
+ * both parts, `|` percent-encoded in the URL and replaced with `¦` in the label.
+ */
+export const mrkdwnLink = (url: string, label: string) =>
+  `<${escapeMrkdwn(url).replaceAll('|', '%7C')}|${escapeMrkdwn(label).replaceAll('|', '¦')}>`
 
 const link = /\[([^\]\n]+)\]\(([^)\s]+)\)/gu
 

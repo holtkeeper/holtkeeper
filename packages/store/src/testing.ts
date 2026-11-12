@@ -7,6 +7,7 @@ import { AUDIT_GENESIS_HASH, auditHash } from './audit.ts'
 import { chatStoreTests } from './chat-contract.ts'
 import { guideStoreTests } from './guides-contract.ts'
 import { learningStoreTests } from './learnings-contract.ts'
+import { slackMessageStoreTests } from './slack-contract.ts'
 import { taskStoreTests } from './tasks-contract.ts'
 import type {
   AuditEventInput,
@@ -243,6 +244,7 @@ export function describeStoreContract(name: string, create: () => Store | Promis
     learningStoreTests(() => store)
     chatStoreTests(() => store)
     taskStoreTests(() => store)
+    slackMessageStoreTests(() => store)
 
     test('audit runs: add, get, list newest first with filters and limit', async () => {
       const a = await store.auditRuns.add(run('games/a', '2026-10-01T00:00:00.000Z'))

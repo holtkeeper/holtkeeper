@@ -48,6 +48,8 @@ export interface JobsOptions {
   admission?: (job: Job) => boolean | Promise<boolean>
   /** Called once a job finished, e.g. for notifications. */
   onFinished?: (job: Job, record?: AnalysisRecord) => void | Promise<void>
+  /** Called once a job was canceled by the worker, before or while it ran. */
+  onCanceled?: (job: Job) => void | Promise<void>
   /** What to start: the worker and/or the scheduler. Default both. */
   run?: { worker: boolean; scheduler: boolean }
   /** Worker overrides for this process (concurrency, max jobs). */
@@ -398,6 +400,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
       if (record) await recordAuditRun(store, job, record)
       await options.onFinished?.(job, record)
     },
+    ...(options.onCanceled && { onCanceled: options.onCanceled }),
   })
   const run = options.run ?? { worker: true, scheduler: true }
   if (run.worker) await engine.worker.start()

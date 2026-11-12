@@ -36,6 +36,7 @@ import { sqliteKnowledge } from './knowledge.ts'
 import { sqliteLearnings } from './learnings.ts'
 import { sqliteLibraries } from './libraries.ts'
 import { migrate } from './migrations.ts'
+import { sqliteSlackMessages } from './slack.ts'
 import { sqliteTasks } from './tasks.ts'
 
 /** Options for `sqliteStore`. */
@@ -621,6 +622,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
     audit: sqliteAudit(db),
     externalAccounts: sqliteExternalAccounts(db),
     libraries: sqliteLibraries(db),
+    slackMessages: sqliteSlackMessages(db),
     database: sqliteDatabase(db),
     async close() {
       db.close()

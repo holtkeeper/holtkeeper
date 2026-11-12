@@ -76,6 +76,7 @@
         "@holtkeeper/managed-config": "workspace:*",
         "@holtkeeper/media": "workspace:*",
         "@holtkeeper/mr-policies": "workspace:*",
+        "@holtkeeper/notify": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",
         "@holtkeeper/release": "workspace:*",
         "@holtkeeper/renovate": "workspace:*",

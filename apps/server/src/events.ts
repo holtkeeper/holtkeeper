@@ -41,6 +41,8 @@ import { noteDefaultBranchPush } from './freshness.ts'
 import { automaticJobReady } from './jobs.ts'
 import { captureReplyLearning, harvestReactions } from './learnings.ts'
 import { commentsOffFor, isReviewAnalyzer } from './mr-comments.ts'
+import { noteReviewJob } from './mr-status.ts'
+import { releaseAnnouncerFor } from './release-announce.ts'
 import { releaseServiceFor } from './releases.ts'
 import { analyzerOffFor } from './repo-analyzers.ts'
 
@@ -159,7 +161,8 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * branch (`defaultBranchOnly`, e.g. `guide`). Write tasks are never
  * queued from events, policies or note commands; only an approved task group queues them.
  *
- * Tags, pushes, merge request changes and pipelines also go to the release assistant, in the background.
+ * Tags, pushes, merge request changes and pipelines also go to the release assistant, in the background;
+ * tags also to the release announcements (`releaseAnnouncerFor`).
  * Where `mergeRequests.comments` is off, `review` is never queued, policies run with `commentsOff`
  * (their comment and label actions are skipped), and notes queue only policy intents: commands
  * and thread replies get no answer (replies to Holtkeeper's threads are still learned from).
@@ -199,6 +202,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       )
       if (duplicate) continue
       const job = await store.jobs.enqueue({ ...request, trigger, createdAt: now })
+      noteReviewJob(deps, job)
       enqueued.push(job.id)
     }
     return enqueued
@@ -675,7 +679,15 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
     if (event.kind !== 'tag' && event.kind !== 'push' && (await deps.readOnly?.(event.repo)))
       return ignore('the repository is read-only')
     const handle = handlers(source)
-    if (event.kind === 'tag') return handle.handleTag(event)
+    if (event.kind === 'tag') {
+      const outcome = await handle.handleTag(event)
+      const announced = releaseAnnouncerFor(deps).onTag(event.repo, {
+        name: event.tag,
+        sha: event.sha,
+      })
+      deps.onBackground?.(announced)
+      return outcome
+    }
     if (event.kind === 'push') return handle.handlePush(event)
     if (event.kind === 'mergeRequest') return handle.handleMergeRequest(event)
     if (event.kind === 'note') return handle.handleNote(event)

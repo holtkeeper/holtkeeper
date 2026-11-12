@@ -710,21 +710,25 @@ export async function freshnessSummary(
 
 /**
  * The freshness sweeper as a leader duty: a sweep a minute after taking the lead, then every five
- * minutes; a failing sweep is logged and the next one runs as usual. `undefined` without a
- * key-value store.
+ * minutes; a failing sweep is logged and the next one runs as usual. `alongside` runs after each
+ * sweep, its failures logged the same way (the server polls release tags there). `undefined`
+ * without a key-value store.
  */
 export function startFreshness(
   deps: FreshnessDeps,
   log: (line: string) => void = () => {},
+  alongside?: () => Promise<unknown>,
 ): (() => Promise<void>) | undefined {
   if (!deps.store.kv) return undefined
   const budget = guardFor(deps)
   let running: Promise<unknown> | undefined
+  const failed = (error: unknown) =>
+    log(`freshness: ${error instanceof Error ? error.message : String(error)}`)
   const run = () => {
     running ??= sweepFreshness(deps, { budget, log })
-      .catch((error: unknown) =>
-        log(`freshness: ${error instanceof Error ? error.message : String(error)}`),
-      )
+      .catch(failed)
+      .then(() => alongside?.())
+      .catch(failed)
       .finally(() => {
         running = undefined
       })

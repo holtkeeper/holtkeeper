@@ -128,7 +128,7 @@ Credentials of kind `egress-secret` ("Proxy secret") hold a secret the egress pr
 
 Settings → Integrations also lists forges (global `settings:read`, `ForgesSection`). With global `settings:write` you add a GitLab forge (id, URL, a GitLab token credential and the optional bot username Holtkeeper posts as, `PUT /api/config/forges/:id`), edit or delete forges, and issue, rotate or remove a forge's SSH key (`POST`/`DELETE /api/forges/:id/ssh-key`): what it is used for (clone and push, signing, or both), its lifetime and an optional commit identity. `forge-form.ts` holds the form's validation.
 
-Below the forges, **Slack** (`SlackTokensSection.tsx`, global `settings:read`) shows whether a Slack app's bot token and signing secret are stored (`GET /api/slack`) and, with global `settings:write`, saves or replaces them (`PUT /api/slack/connection`) or forgets them. Nothing uses them until a Slack integration comes back.
+Below the forges, **Slack** (`SlackTokensSection.tsx`, global `settings:read`) shows whether the Slack app's bot token and signing secret are stored (`GET /api/slack`) and the Event Subscriptions request URL to copy. With global `settings:write` it saves or replaces them (`PUT /api/slack/connection`) or forgets them with the emoji, and once they are stored edits the review status emoji (`PUT /api/slack/emoji`; blank fields use the defaults shown as placeholders, invalid names are flagged before saving); readers see the emoji in effect. The app marks merge request links in the channels `slack.reviews` binds with a review status emoji (see [Slack review status](../../server/docs/slack.md)).
 
 ## Repositories and groups
 

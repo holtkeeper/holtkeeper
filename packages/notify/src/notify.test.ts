@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { redact } from './http.ts'
-import { fit, toMrkdwn } from './slack.ts'
+import { escapeMrkdwn, fit, mrkdwnLink, toMrkdwn } from './slack.ts'
 import { type Fetch, type Notification, notificationSchema } from './types.ts'
 import { genericWebhook } from './webhook.ts'
 
@@ -39,6 +39,13 @@ describe('mrkdwn', () => {
       '• <https://x.example/a?b=1&amp;c=2|Breaking>: drop &lt;api&gt;\n• *bold* &amp; done',
     )
     expect(toMrkdwn('## Title\n<!channel> [a|b](u)')).toBe('*Title*\n&lt;!channel&gt; <u|a/b>')
+  })
+
+  test('escapeMrkdwn and mrkdwnLink keep labels plain text', () => {
+    expect(escapeMrkdwn('a <b> & **c**')).toBe('a &lt;b&gt; &amp; **c**')
+    expect(mrkdwnLink('https://x.example/a|b?c=1&d=2', 'Fix <!here> | more')).toBe(
+      '<https://x.example/a%7Cb?c=1&amp;d=2|Fix &lt;!here&gt; ¦ more>',
+    )
   })
 
   test('fit cuts at a line break and marks the cut', () => {

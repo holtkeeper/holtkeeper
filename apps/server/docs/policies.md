@@ -54,6 +54,8 @@ Server side of Settings › Policies: policy drafts saved as one change, the lic
 - **Own merge requests.** Merge requests Holtkeeper opens itself (write tasks, propagation, renovate, release candidates) are created and updated with their own title, description and labels; only notes on them are refused.
 - No badge, label or warning shows anywhere: the repository simply gets no reviews. Default-branch analyses, schedules and freshness are not affected.
 
+The [Slack review status](slack.md) shows nothing for the repository either: new links get no emoji, and an emoji already on a message is removed at the merge request's next review change.
+
 Unlike `repo.freeze`, which refuses every change through the forge and ignores merge request events, this only keeps reviews and comments off merge requests; a repository entry that is on lifts a group entry that is off.
 
 ## Tests
