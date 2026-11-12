@@ -1,0 +1,28 @@
+---
+interface Item {
+  value: string | number
+  label: string
+  tone?: 'ok' | 'warn' | 'bad'
+}
+
+interface Props {
+  /** Counts in the order the panel shows them. */
+  items: Item[]
+  /** Text at the right end, such as the last sync time. */
+  end?: string
+}
+
+const { items, end } = Astro.props
+---
+
+<div class="hk-strip">
+  {
+    items.map((item) => (
+      <span class={item.tone ? `hk-tone-${item.tone}` : undefined}>
+        <b>{item.value}</b> {item.label}
+      </span>
+    ))
+  }
+  {end && <span class="hk-sp" />}
+  {end && <span>{end}</span>}
+</div>

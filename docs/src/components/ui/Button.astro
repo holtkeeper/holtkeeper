@@ -1,0 +1,10 @@
+---
+interface Props {
+  primary?: boolean
+  ghost?: boolean
+}
+
+const { primary = false, ghost = false } = Astro.props
+---
+
+<span class:list={['hk-btn', { primary, ghost }]}><slot /></span>

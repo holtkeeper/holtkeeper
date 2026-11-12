@@ -1,0 +1,24 @@
+---
+interface Props {
+  /** Main text of the row. */
+  title?: string
+  /** Second line under the title. */
+  sub?: string
+  selected?: boolean
+}
+
+const { title, sub, selected = false } = Astro.props
+---
+
+<div class:list={['hk-row', { selected }]}>
+  <slot name="start" />
+  {
+    title && (
+      <span class="hk-row-main">
+        <span>{title}</span>
+        {sub && <small>{sub}</small>}
+      </span>
+    )
+  }
+  <slot />
+</div>

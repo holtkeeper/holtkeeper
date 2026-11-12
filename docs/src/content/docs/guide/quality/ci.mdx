@@ -1,0 +1,186 @@
+---
+title: CI
+description: See how long every repository's pipelines take, how often they pass, and which jobs fail, flake or got slower, across the fleet and per repository.
+panel: Quality › CI
+route: /quality/ci
+permission: analyses:read
+sidebar:
+  order: 4
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See how long every repository's pipelines take, how often they pass, and which jobs fail, flake or got slower, across the fleet and per repository.
+
+<Screen title="Quality › CI" caption="Worst state first, then lowest success rate. Branch and window are set by the analyzer, so those two labels do not filter.">
+  <Toolbar title="CI">
+    <Tag>My teams</Tag>
+    <Tag>Branch: default</Tag>
+    <Tag>Last 30 days</Tag>
+    <Tag>Status: any</Tag>
+    <Tag>Problems only</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 31, label: 'repositories' },
+      { value: '7m 40s', label: 'median pipeline · p90 12m 05s' },
+      { value: '91.4%', label: 'success rate' },
+      { value: 9, label: 'flaky jobs', tone: 'warn' },
+      { value: '18s', label: 'median queue' },
+      { value: 2, label: 'failing', tone: 'bad' },
+      { value: 4, label: 'flaky', tone: 'warn' },
+      { value: 3, label: 'slower', tone: 'warn' },
+      { value: 22, label: 'healthy', tone: 'ok' },
+    ]}
+  />
+  <Scroll>
+
+| Repository          | Status                        | Median  | Change                             | p90     | Success | Flaky | Queue | Pipelines | Last       |
+| ------------------- | ----------------------------- | ------- | ---------------------------------- | ------- | ------- | ----- | ----- | --------- | ---------- |
+| `acme/admin-ui`     | <Tag tone="bad">Failing</Tag> | 14m 20s | <Tag tone="bad">↑ 12% slower</Tag> | 21m 02s | 72.5%   | 3     | 41s   | 188       | 2 h ago    |
+| `acme/checkout-web` | <Tag tone="warn">Flaky</Tag>  | 9m 05s  | 3% faster                          | 11m 40s | 88.0%   | 2     | 12s   | 402       | 25 min ago |
+| `acme/billing-api`  | <Tag tone="warn">Slower</Tag> | 6m 48s  | <Tag tone="bad">↑ 31% slower</Tag> | 8m 10s  | 97.1%   | 0     | 9s    | 96        | 1 d ago    |
+| `acme/widget-kit`   | <Tag tone="ok">Healthy</Tag>  | 3m 12s  | —                                  | 4m 01s  | 99.2%   | 0     | 6s    | 131       | 3 h ago    |
+
+  </Scroll>
+</Screen>
+
+## What the table shows
+
+One row per repository with pipelines in the last 30 days, from its newest CI record. The analyzer reads finished jobs from the forge once a day and keeps their history, so later runs only fetch what is new.
+
+| Column     | Meaning                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| Repository | Opens the repository hub at Quality › CI; its groups and branch sit under the name.      |
+| Status     | **Failing**, **Flaky**, **Slower**, **Healthy** or **Idle** (no pipeline in the window). |
+| Median     | Median pipeline time of passing pipelines on the default branch.                         |
+| Change     | How the median moved. `↑ 12% slower` reads as bad; changes under 5% stay neutral.        |
+| Trend      | A sparkline of the last 8 weekly medians.                                                |
+| p90        | The pipeline time 9 in 10 passing pipelines stay under.                                  |
+| Success    | Share of pipelines that passed.                                                          |
+| Flaky      | Jobs that passed only on retry.                                                          |
+| Queue      | Median time jobs waited for a runner.                                                    |
+| Pipelines  | Pipelines in the window, and the age of the last one.                                    |
+
+**Status** filters by state and **Problems only** hides healthy and idle repositories. The scope switch (_My teams_ folds other teams' rows into one row with their failing, flaky and healthy counts) and the header search narrow by team, path or group. Headers re-sort, and filters live in the URL.
+
+:::note
+Pipeline time is how long any job of the pipeline was running, retries included. Idle gaps, such as a manual job started days later, do not count, so it can differ from the forge's own pipeline duration.
+:::
+
+## How jobs are judged
+
+| Problem | When                                                                                                                                        |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Failing | The job fails in 10% or more of its runs, with at least two failures. Jobs allowed to fail never count.                                     |
+| Slower  | The median of the last two weeks is at least 20% and 15 seconds above the rest of the window, with at least five passing runs on each side. |
+| Flaky   | The job passed only on retry in two or more pipelines.                                                                                      |
+
+A repository is **Failing** when a job keeps failing, else **Flaky**, else **Slower**, else **Healthy**. For slower jobs Holtkeeper finds the day the slowdown started and links the first run of that day, so you can see which commit did it.
+
+## Find the worst jobs in the fleet
+
+Under the repositories a second table lists the worst jobs across every repository in scope. Switch it between **Slowest**, **Least reliable** and **Got slower**.
+
+<Screen title="Quality › CI › Jobs across the fleet">
+  <Toolbar title="Jobs">
+    <Segmented slot="start" items={['Slowest', 'Least reliable', 'Got slower']} active={1} />
+  </Toolbar>
+  <Scroll>
+
+| Job                                                                         | Repository          | Stage | Median | p90     | Failure rate | Passes on retry | Runs |
+| --------------------------------------------------------------------------- | ------------------- | ----- | ------ | ------- | ------------ | --------------- | ---- |
+| **e2e:chromium** <Tag tone="bad">failing</Tag> <Tag tone="warn">flaky</Tag> | `acme/admin-ui`     | test  | 8m 30s | 12m 10s | 23%          | 14%             | 188  |
+| **integration** <Tag tone="warn">flaky</Tag>                                | `acme/checkout-web` | test  | 4m 02s | 5m 50s  | 6%           | 9%              | 402  |
+| **build:docker** <Tag tone="warn">slower</Tag>                              | `acme/billing-api`  | build | 3m 41s | 4m 20s  | 1%           | 0%              | 96   |
+
+  </Scroll>
+  <div style="padding: 0.5rem 0.75rem" class="hk-dim">Showing 3 of 1,204 jobs · read nightly</div>
+</Screen>
+
+Each job links to its repository's CI area and to its last run on the forge.
+
+## Inspect a repository
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. The side sheet shows the pipeline outcomes (passed, failed, canceled) as its progress bar, the state, groups, branch, pipeline count and the newest run.
+
+<Screen title="Quality › CI › acme/admin-ui">
+  <Sheet title="acme/admin-ui" position="1 of 31">
+    <Tag tone="bad" slot="tags">
+      Failing
+    </Tag>
+    <Tag slot="tags">GitLab</Tag>
+    <Button slot="actions">Release gates</Button>
+    <Button slot="actions" primary>
+      Re-read pipelines
+    </Button>
+    <Meter value={72} tone="warn" label="136 passed · 47 failed · 5 canceled" />
+    <Facts
+      items={[
+        ['Branch', 'main'],
+        ['Pipelines', '188 in 30 days'],
+        ['Pipeline time', '14m 20s · ↑ 12% slower · p90 21m 02s'],
+        ['Queue', '41s median'],
+        ['Newest run', '#48213 · 2 h ago'],
+        ['Read', 'today, 03:12'],
+      ]}
+    />
+    <Tabs items={['Overview', 'Jobs', 'Problems:3', 'Reliability']} />
+  </Sheet>
+</Screen>
+
+| Tab         | What it shows                                                                                                                                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview    | Job duration by stage (one bar per job in run order, median solid over p90, with problem tags), up to five problem jobs with a reason and a link to the run, the pipeline numbers, and pipeline time per week as a chart. |
+| Jobs        | Every job with median, p90, change, failure rate, passes on retry, runs, problem tags and a link to the last run.                                                                                                         |
+| Problems    | The problem list, then jobs flagged with other problems.                                                                                                                                                                  |
+| Reliability | Jobs that failed or passed only on retry, worst failure rate first.                                                                                                                                                       |
+
+Problem reasons read like "fails in 23% of runs", "+40% since 12 Oct (1m 40s → 2m 20s)" or "passed only on retry in 3 pipelines".
+
+<Ui>Re-read pipelines</Ui> runs the CI analyzer for the repository at once (it needs
+`analyses:run`). <Ui>Release gates</Ui> appears when the repository's releases wait on CI and opens
+[Releases › Flow setup](/guide/releases/flow-setup/); the release-gate fact in Overview needs
+`releases:read`. <Ui>⋯</Ui> › <Ui>Open repository</Ui> goes to the hub, and <Ui>Open as page</Ui> to
+the [analysis record](/guide/quality/analysis-record/).
+
+:::tip
+A sheet that says the record is in an older format offers <Ui>Run now</Ui>. One run brings it up to date.
+:::
+
+## Change what the analyzer reads
+
+The analyzer's options are the `analyzers.ci-jobs` setting in **Settings › Analyzers**, per scope like every analyzer. They set the window length, a single branch or tag to read instead of every ref, how many recent days are compared with the rest, and the change in percent and seconds that marks a job slower.
+
+```json title="analyzers.ci-jobs · one group"
+{
+  "branch": "main",
+  "changePercent": 25,
+  "minChangeSeconds": 30
+}
+```
+
+## In one repository
+
+The repository hub's **Quality › CI** shows the same body for one repository, with the outcome bar, <Ui>Full record</Ui> and <Ui>Re-read pipelines</Ui>. Its header links **Open in Quality** back to the fleet view.
+
+## Related
+
+- [Releases › Flow setup](/guide/releases/flow-setup/) — release gates that wait on CI.
+- [Ops › Runs](/guide/ops/runs/) — Holtkeeper's own jobs, not your pipelines.
+- [Settings › Analyzers](/guide/settings/analyzers/) — switch analyzers per scope and set their options.
+- [CI jobs analyzer](/modules/ci-jobs/) — how jobs are read, stored and judged.

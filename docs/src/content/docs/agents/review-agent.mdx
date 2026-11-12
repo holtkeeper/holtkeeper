@@ -1,0 +1,136 @@
+---
+title: The review agent
+description: How Holtkeeper's own agent reviews merge requests, which language it writes in, how its suggestions and threads work, and how replies teach it rules.
+panel: Quality › Reviews
+route: /quality/reviews
+permission: analyses:read
+sidebar:
+  order: 6
+---
+
+import { Button, Comment, Diff, Facts, Screen, Sheet, Tabs, Tag, Ui } from '@ui'
+
+Besides answering your agents, Holtkeeper runs an agent of its own: the review agent. It reads a merge request with the repository's Guide and rules files, posts inline comments with one-click suggestions and a summary, comes back when new commits land, resolves its threads once the problem is fixed and answers when someone replies. Every review is listed in **Quality › Reviews**.
+
+## When a review runs
+
+- **On merge request events**, when a merge request trigger in **Ops › Automation** lists the review analyzer: on open, reopen, new commits or leaving draft.
+- **On demand**: <Ui>Review a merge request</Ui> on **Quality › Reviews** (a repository and `!N` or the merge request URL), or <Ui>Review again</Ui> on a past review. Both need `analyses:run`.
+- **From an agent**: `request_review` on a merge request one of its tasks opened; see [Changing code through tasks](/agents/tasks/).
+- **On a reply** in one of its threads: the agent answers that thread only.
+
+Some merge requests are skipped by default, with the reason stored and nothing posted: merge requests between release branches (`develop → main`, `release/* → main`, back-merges like `main → develop`), whose code was reviewed on its way in, and merge requests Holtkeeper's own bot opened. <Ui>Review again</Ui> overrides both. A repository with **Merge request reviews** off (`mergeRequests.comments`) or a read-only repository gets no review at all.
+
+## How it reviews
+
+1. **Scope.** Only lines the merge request adds in reviewable files. Lockfiles, generated code, snapshots, `dist` and similar are ignored, as are globs listed in the repository's `REVIEW.md`. After the first review, only lines added since the last reviewed head are in scope.
+2. **Context.** The agent gets the repository's `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`, then the team's Guide for reviews: team rules, learned rules, policies and the most relevant knowledge notes. It reads more code with its tools instead of getting whole files, and asks the package catalog and library index about dependencies, since the checkout is never installed.
+3. **Checks.** Deterministic checks run first. By default that is the test id check: new interactive elements without a test id, with an id suggested in the repository's style. The agent comments on the ones it agrees with.
+4. **A deliberate pass.** Every changed file, the code around each change, its callers and the paths it touches; error paths, edge cases, concurrency and contracts. A shallow answer on a larger diff is sent back once to inspect the code. Diffs over 600 changed lines or 12 files are split into parts of related files that are reviewed in parallel.
+5. **Images.** Added or changed images and inline SVG are checked for size and format against the asset policy.
+6. **Validate and post.** Every comment must point at a changed line; findings that repeat an open thread are dropped; the rest is sorted by severity and capped (15 comments by default, `minor` and above). One review is posted with the inline comments and a summary.
+
+<Screen title="Merge request !412 · acme/checkout-web" kind="example" caption="An inline comment with a one-click suggestion.">
+  <Diff
+    file="src/cart/total.ts"
+    stat="+6 −2"
+    lines={[
+      [41, ' ', 'export function cartTotal(items: CartItem[]): number {'],
+      [42, '-', '  return items.reduce((sum, item) => sum + item.price * item.qty, 0)'],
+      [42, '+', '  const total = items.reduce((sum, item) => sum + item.price * item.qty, 0)'],
+      [43, '+', '  return Math.round(total * 100) / 100'],
+    ]}
+  />
+  <Comment severity="major" where="line 43">
+
+**Money is integer cents here.** `price` is already in cents, so rounding to two decimals changes nothing for whole numbers and only hides a fractional `qty` from the quantity input. Keep the sum integer and drop the fraction where it comes from.
+
+```text
+  return items.reduce((sum, item) => sum + item.price * Math.trunc(item.qty), 0)
+```
+
+  </Comment>
+</Screen>
+
+The summary note carries the verdict, a short summary, how hard the change is to review (effort 1–5), a walkthrough of the logical changes, findings per severity, what happened to earlier threads, and what was not reviewed.
+
+## Language
+
+The review writes in the language of the merge request's description: a description in German gets German comments, summary, walkthrough and replies. Code, suggestions, code comments and technical terms stay in English. Teams can fix the language with the `language` option of `analyzers.review`.
+
+## Suggestions
+
+When the fix is local, a comment carries a suggestion block that the author applies with one click in GitLab. Suggestions replace exactly the commented lines; no-op suggestions and ones that would copy neighbouring lines are dropped before posting. Suggestions are applied in the forge, never by Holtkeeper.
+
+## Threads after the first review
+
+When new commits land, the agent reviews only what is new and re-checks its open threads whose file changed (at most 10 per run, on a fast model):
+
+| Outcome                         | What the agent does                                     |
+| ------------------------------- | ------------------------------------------------------- |
+| Fixed                           | Resolves the thread with a short note.                  |
+| The file left the merge request | Resolves the thread.                                    |
+| Still applies and raised again  | Replies "still applies" instead of posting a duplicate. |
+
+Its own **summary threads** are resolved when a later review comes back clean (verdict _looks good_), so a merge request does not stay blocked on an old summary. Set `resolveSummary` to `always` or `never` to change that. Only notes by Holtkeeper's own account are touched; a person's copy of a summary never is.
+
+## Replies and learnings
+
+Reply in one of the agent's threads and it answers that thread: it explains, concedes and resolves, or updates the suggestion. A reply that teaches a lasting rule ("we always keep shape sizes in `ShapeSize`") becomes a rule candidate in **Knowledge › Learnings**. Once a person accepts it, it is part of the Guide for every later review and agent. 👍 and 👎 reactions on comments are counted per finding category when the merge request closes; **Quality › Reviews** shows them under the table.
+
+## In the panel
+
+<Screen title="Quality › Reviews › !412">
+  <Sheet id="!412" title="feat(cart): [ABC-512] keep coupons after login" position="2 of 38">
+    <Tag tone="warn" slot="tags">
+      Needs changes
+    </Tag>
+    <Button slot="actions">Open merge request</Button>
+    <Button slot="actions">Review again</Button>
+    <Facts
+      items={[
+        ['Repository', 'acme/checkout-web'],
+        ['Branches', 'feat/ABC-512-coupons → main'],
+        ['Mode', 'incremental'],
+        ['Guide scopes', 'all, group:storefront, repo:gitlab:acme/checkout-web'],
+        ['Cost', '$0.38 · 1m 52s'],
+      ]}
+    />
+    <Tabs items={['Findings:3', 'Summary', 'Learnings:1']} />
+  </Sheet>
+</Screen>
+
+## Configure it
+
+Options are the `analyzers.review` setting, per repository, group or everywhere; <Ui>Configure</Ui> on **Quality › Reviews** opens it.
+
+| Option           | Default                 | Meaning                                                                   |
+| ---------------- | ----------------------- | ------------------------------------------------------------------------- |
+| `maxComments`    | 15                      | Inline comments per run.                                                  |
+| `minSeverity`    | `minor`                 | `info`, `minor`, `major` or `critical`.                                   |
+| `includeChecks`  | `testids`               | Deterministic checks: `secrets`, `testids`, both, or none.                |
+| `approve`        | `never`                 | `when-clean` approves clean reviews.                                      |
+| `resolveSummary` | `when-clean`            | When its summary threads are resolved: `when-clean`, `always` or `never`. |
+| `depth`          | `standard`              | `deep` reviews on the deeper model tier.                                  |
+| `language`       | the description's       | Language of comments, summary and replies.                                |
+| `maxDiffLines`   | 3000                    | Larger diffs are skipped with a note.                                     |
+| `ignore`         | lockfiles, generated, … | Path globs never reviewed.                                                |
+
+`REVIEW.md` at the repository root goes first into the agent's context. A `## Ignore` section lists globs to skip, and a `## Paths` section gives rules for files matching a glob:
+
+```md title="REVIEW.md"
+## Ignore
+
+- `src/generated/**`
+
+## Paths
+
+- `migrations/**`: every migration must be reversible.
+```
+
+## Related
+
+- [Quality › Reviews](/guide/quality/reviews/) — every review with its findings and cost.
+- [Learnings](/guide/knowledge/learnings/) — rules taught in review replies.
+- [Settings › Analyzers](/guide/settings/analyzers/) — `analyzers.review` per scope.
+- [Review analyzer](/modules/review/) — the module behind it.

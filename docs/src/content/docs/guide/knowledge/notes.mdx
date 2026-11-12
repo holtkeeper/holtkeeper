@@ -1,0 +1,190 @@
+---
+title: Notes
+description: Keep the team's decisions, conventions, migration notes, quirks and how-tos in one knowledge base that agents search and cite, and review the notes agents propose.
+panel: Knowledge › Notes
+route: /knowledge/notes
+permission: knowledge:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Keep the team's decisions, conventions, migration notes, quirks and how-tos in one knowledge base that agents search and cite, and review the notes agents propose.
+
+Notes are for knowledge that does not fit a one-line rule: why the team chose something, how to migrate between versions of a library, a trap in a build tool. Agents get the notes that apply to their task within the [Guide](/guide/knowledge/guide/)'s budget, search them over MCP and cite them as `[kb:<id>]`. When they learn something reusable, they propose a note, and a person accepts it before agents rely on it.
+
+<Screen title="Knowledge › Notes" caption="Proposals first under Waiting for review, newest first; then the rest grouped by status.">
+  <Toolbar crumbs={['Knowledge', 'All']} title="storefront">
+    <Segmented slot="start" items={['Guide', 'Notes:12', 'Learnings:3']} active={1} />
+    <Button ghost>Configure</Button>
+    <Button primary>New note</Button>
+  </Toolbar>
+  <Toolbar>
+    <Segmented slot="start" items={['Live:12', 'Rejected:2', 'Archived:5']} />
+    <Tag>Kind: any</Tag>
+    <Tag>Topic: any</Tag>
+    <Tag>Task: any</Tag>
+    <Tag>Group: status</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 'storefront', label: 'space' },
+      { value: 9, label: 'accepted', tone: 'ok' },
+      { value: 3, label: 'proposed · also in Inbox', tone: 'warn' },
+      { value: 4, label: 'inherited' },
+      { value: 2, label: 'shared with other teams' },
+    ]}
+  />
+  <Scroll>
+
+| Permalink              | Note                                                                                    | Status                          | Author                |
+| ---------------------- | --------------------------------------------------------------------------------------- | ------------------------------- | --------------------- |
+| **Waiting for review** |                                                                                         |                                 |                       |
+| `kb:3e7a91c0`          | some-lib 4 needs `await init()` before the first call <Tag>quirk</Tag> <Tag>build</Tag> | <Tag tone="warn">Proposed</Tag> | agent · 2 h ago       |
+| `kb:b20f6d14`          | Migrate @acme/widget-kit 4 → 5 <Tag>migration</Tag> <Tag>dependencies</Tag>             | <Tag tone="warn">Proposed</Tag> | agent · 1 day ago     |
+| **Accepted**           |                                                                                         |                                 |                       |
+| `kb:91cc2a7e`          | Prices are integers in minor units <Tag>decision</Tag> <Tag>Shared</Tag>                | <Tag tone="ok">Accepted</Tag>   | Mira K. · 3 weeks ago |
+| `kb:0d54e8b3`          | Feature flags live in `config/flags.ts` <Tag>convention</Tag> <Tag>Inherited</Tag>      | <Tag tone="ok">Accepted</Tag>   | Ivo P. · 2 months ago |
+
+  </Scroll>
+</Screen>
+
+## What a note holds
+
+| Field      | Meaning                                                                                                    |
+| ---------- | ---------------------------------------------------------------------------------------------------------- |
+| Title      | A short statement.                                                                                         |
+| Text       | The explanation, in Markdown.                                                                              |
+| Kind       | **decision**, **convention**, **migration**, **quirk** or **howto**.                                       |
+| Scope      | Which repositories it applies to: everything, groups, or repository paths and globs.                       |
+| Task kinds | Which tasks read it: review, port, propagate, or every task.                                               |
+| Topics     | Free lowercase tags such as `testing` or `i18n`.                                                           |
+| Packages   | Packages with version ranges. A migration must name them and only reaches tasks that touch those versions. |
+| Visibility | **team** (default) or **shared**: other teams read shared notes too.                                       |
+| Subject    | What it is about, such as `npm:some-lib`. A decision or convention about one package is shared by default. |
+| Evidence   | Links that back it up: merge requests, threads, docs.                                                      |
+
+## Find a note
+
+The notes follow the space picked in the sidebar. A team lists notes naming it; a family lists notes naming one of its members; a repository lists everything that covers it, and marks notes that reach it through a broader scope as **Inherited**.
+
+- The status tabs switch between **Live** (proposed and accepted), **Rejected** and **Archived**.
+- The text filter matches title, text, topics and the `kb:` id.
+- **Kind**, **Topic** and **Task** narrow the list; **Group** groups rows by status (the default), topic or kind.
+
+In _All_, other teams' notes fold into one **Other teams** row under the table. The strip counts accepted and proposed notes (the proposed count links to the same notes in the [Inbox](/guide/home/inbox/)), notes inherited from broader scopes and accepted notes shared with other teams.
+
+## Read and decide a note
+
+Click a row. The note opens in a side sheet beside the table, and its link goes into the URL, so you can share it. <Kbd>J</Kbd> / <Kbd>K</Kbd> step through the rows; <Kbd>Esc</Kbd> closes.
+
+<Screen title="Knowledge › Notes › kb:3e7a91c0">
+  <Sheet id="kb:3e7a91c0" title="some-lib 4 needs await init() before the first call" position="1 of 12">
+    <Tag tone="warn" slot="tags">Proposed</Tag>
+    <Tag slot="tags">quirk</Tag>
+    <Tag slot="tags">npm:some-lib</Tag>
+    <Button slot="actions" ghost>Reject</Button>
+    <Button slot="actions" primary>Accept</Button>
+    <Tabs items={['Note', 'History:1', 'Evidence:2']} />
+    <Stack>
+
+Since version 4, `some-lib` loads its locale data lazily. Calling `format()` before `await init()` returns the raw key instead of throwing. Call `init()` once in the app's bootstrap.
+
+    </Stack>
+    <Facts
+      items={[
+        ['Where agents use it', 'quirk · every task'],
+        ['Scope', 'Group storefront'],
+        ['Topics', 'build, dependencies'],
+        ['Packages', 'some-lib >=4 <5'],
+        ['Visible to', 'Team'],
+        ['Proposed by', 'agent on acme/checkout-web · 2 h ago'],
+      ]}
+    />
+
+  </Sheet>
+</Screen>
+
+| Tab      | What it shows                                                                                                                                              |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Note     | The text and _Where agents use it_: kind, scope, task kinds, topics, packages, who may read it, the permalink and <Ui>Copy link</Ui>.                      |
+| History  | The current version and every earlier one, each with who made it, when and which fields changed. <Ui>Restore</Ui> puts an older version back as a new one. |
+| Evidence | The note's links, opened in a new tab.                                                                                                                     |
+
+With `knowledge:write` the sheet's actions are:
+
+- <Ui>Accept</Ui> and <Ui>Reject</Ui> for a proposal;
+- <Ui>Archive</Ui> for an accepted note that is no longer true;
+- <Ui>Restore</Ui> to accept a rejected or archived note again;
+- <Ui>Edit</Ui> and <Ui>Delete</Ui> behind <Ui>⋯</Ui>. Delete asks first and removes the history
+  too.
+
+:::tip
+A proposal is often almost right. Click <Ui>Edit</Ui>, fix the kind or topics, then <Ui>Save and accept</Ui>. Agents classify by keywords, so correcting kind and topics when accepting is expected.
+:::
+
+## Write a note
+
+1. Pick the space the note is for. The scope starts from it.
+2. Click <Ui>New note</Ui>.
+3. Enter the title and the text in Markdown; the preview shows how it reads.
+4. Under **Details**, set kind, scope, task kinds, topics, packages, visibility, subject and evidence links.
+5. Save. The new note opens.
+
+<Screen title="Knowledge › Notes › New note">
+  <Stack>
+    <Fields>
+      <Field label="Title" value="Migrate @acme/widget-kit 4 → 5" wide />
+      <Field
+        label="Text"
+        value={'Replace size="sm" with size="small"; Badge no longer accepts color…'}
+        wide
+      />
+      <Field label="Kind" value="migration" />
+      <Field label="Scope" value="Group storefront" />
+      <Field label="Task kinds" value="review, port, propagate" />
+      <Field label="Topics" value="dependencies" />
+      <Field label="Packages" value={'npm @acme/widget-kit · from >=4 <5 · to >=5 <6'} mono wide />
+      <Field label="Visibility" value="Shared" />
+      <Field label="Evidence" placeholder="https://…" />
+    </Fields>
+    <div>
+      <Button ghost>Cancel</Button> <Button primary>Save</Button>
+    </div>
+  </Stack>
+</Screen>
+
+:::caution
+Saving checks the version you started editing. If someone saved the note in the meantime, your save is refused; reload and apply your change again.
+:::
+
+## Notes agents propose
+
+Agents propose notes through the MCP tool `propose_knowledge` and while working on tasks. A proposal that repeats an existing note (same title or text, or mostly the same words) creates nothing new: its evidence links are added to the existing note.
+
+Proposals wait under **Waiting for review** and in the Inbox. The `knowledge.autoAccept` policy can accept chosen kinds at once; <Ui>Configure</Ui> on this tab opens it in **Settings › Policies** at **Agent knowledge**. Proposals from coding agents over MCP always wait for a person.
+
+## Related
+
+- [Team guide](/guide/knowledge/guide/) — rules agents follow, and how notes fit in the prompt budget.
+- [Learnings](/guide/knowledge/learnings/) — rules taught by replying to review comments.
+- [Inbox](/guide/home/inbox/) — decide proposals with everything else waiting for you.
+- [MCP tools](/reference/mcp-tools/) — `search_knowledge`, `get_knowledge` and `propose_knowledge`.
+- [Knowledge](/modules/knowledge/) — how notes are validated, ranked and deduplicated.

@@ -1,0 +1,230 @@
+---
+title: Assets and media
+description: Find images, fonts, audio and video that break your asset policy or could be smaller, set the policy per team, and turn heavy images into optimized variants with a merge request.
+panel: Quality › Assets
+route: /quality/assets
+permission: analyses:read
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Find images, fonts, audio and video that break your asset policy or could be smaller, set the policy per team, and turn heavy images into optimized variants with a merge request.
+
+<Screen title="Quality › Assets" caption="Files that break the policy, worst first. Optimize opens the media optimizer; other files link to their record.">
+  <Toolbar title="Assets">
+    <Segmented slot="start" items={['Breaks the policy', 'Any saving', 'Everything']} />
+    <Tag>Kind: all</Tag>
+    <Tag>Format: all</Tag>
+    <Tag>Sort: severity</Tag>
+    <Button>Configure</Button>
+    <Button primary>Optimize an image</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '184 MB', label: 'asset weight · 23 repositories' },
+      { value: '41 MB', label: 'potential saving · 22%' },
+      { value: '9,412', label: 'files checked' },
+      { value: 18, label: 'errors', tone: 'bad' },
+      { value: 126, label: 'warnings', tone: 'warn' },
+      { value: '3.2 MB', label: 'duplicates' },
+      { value: 2, label: 'budgets exceeded', tone: 'bad' },
+    ]}
+    end="+4.6 MB since previous records"
+  />
+  <Scroll>
+
+| File                                | Repository          | Format | Size   | Problems                                                       | Saving                                                 |                                |
+| ----------------------------------- | ------------------- | ------ | ------ | -------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------ |
+| `public/images/hero-banner.png`     | `acme/checkout-web` | PNG    | 1.8 MB | <Tag tone="bad">Over 1 MB</Tag> <Tag tone="warn">No WebP</Tag> | <Meter value={86} tone="ok" label="−1.5 MB · WebP" />  | <Button>Optimize</Button>      |
+| `src/assets/fonts/Display-Bold.ttf` | `acme/admin-ui`     | TTF    | 412 kB | <Tag tone="bad">Format not allowed</Tag>                       | <Meter value={58} tone="ok" label="−239 kB · WOFF2" /> | <Button ghost>Details</Button> |
+| `static/video/intro.mp4`            | `acme/landing`      | MP4    | 640 kB | <Tag tone="warn">Over 500 kB</Tag>                             | —                                                      | <Button ghost>Details</Button> |
+| `public/icons/logo.svg`             | `acme/widget-kit`   | SVG    | 38 kB  | <Tag tone="info">Saving</Tag>                                  | <Meter value={41} tone="ok" label="−15.6 kB · svgo" /> | <Button>Optimize</Button>      |
+
+  </Scroll>
+  <div style="padding: 0.6rem 0.75rem"><Button ghost>Load more files</Button></div>
+</Screen>
+
+## What the page shows
+
+The strip sums the newest assets record of every repository in scope: total asset weight, the potential saving and its share, files checked, policy errors and warnings, bytes in duplicate copies, exceeded budgets and the weight change against the previous records. These figures follow the scope, not the status, kind and format filters. Under the strip, **By kind** shows a bar of bytes per kind (images, fonts, audio, video, atlases, models, data) and the repositories over a budget.
+
+The table lists one row per file:
+
+| Column     | Meaning                                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| File       | The path in the repository.                                                                                          |
+| Repository | Opens the repository hub at Quality › Assets.                                                                        |
+| Format     | The file format.                                                                                                     |
+| Size       | Bytes on disk.                                                                                                       |
+| Problems   | The first two problems as tags, with their messages.                                                                 |
+| Saving     | The potential saving with a bar and the best conversion, such as PNG to WebP or TTF to WOFF2.                        |
+| Action     | <Ui>Optimize</Ui> for images the optimizer can work on, otherwise <Ui>Details</Ui>, which opens the analysis record. |
+
+The toolbar's status switch picks **Breaks the policy** (the default), **Any saving** or **Everything**. **Kind** and **Format** narrow to one choice each, and the sort orders by severity, saving or size. The search in the header matches every word against repository, path and format, but only among the rows already loaded: <Ui>Load more files</Ui> fetches the next page. Filters other than the search live in the URL.
+
+:::note
+The table shows up to 50 files per repository, errors first, then by size. A repository's own hub section lists every file.
+:::
+
+## What counts as a problem
+
+Each file is checked against the asset policy that covers its repository:
+
+| Problem       | Severity         | When                                                                             |
+| ------------- | ---------------- | -------------------------------------------------------------------------------- |
+| Format        | error            | The extension is not in the allowed formats.                                     |
+| Size          | warning or error | The file is over the warning or error limit for its kind.                        |
+| Dimensions    | warning          | A raster image or video is wider or taller than the limit. SVGs are not checked. |
+| Modern format | warning          | A PNG, JPEG or GIF from 8 kB ships without the required WebP or AVIF next to it. |
+| Budget        | error            | The repository's total, or one kind's total, is over its budget.                 |
+| Duplicate     | info             | The same bytes exist at another path.                                            |
+| Saving        | info             | No rule is broken, but a conversion would save enough to be worth it.            |
+
+Files are scanned in `public/`, `assets/`, `static/`, `src/**/assets/` and `res/` by default. The analyzer runs when the default branch changes, at most once a day; <Ui>⋯</Ui> on the page runs it at once.
+
+## Set the asset policy
+
+The policy says which formats, sizes and dimensions are acceptable. It is a setting, `assets.policy`, scoped like every setting: an entry for every repository, overridden by group or repository entries, the most specific entry winning as a whole.
+
+The **Asset policy** card under the table shows the fleet's policy and how many group or repository entries override it. Narrowed to one repository, it shows that repository's effective policy and where it comes from.
+
+<Screen title="Quality › Assets › Asset policy">
+  <Toolbar title="Asset policy">
+    <Tag slot="start">All repositories · 3 overrides</Tag>
+    <Button>Edit</Button>
+  </Toolbar>
+  <Facts
+    items={[
+      ['Raster images', 'PNG, JPEG and GIF from 8 kB need WebP next to them'],
+      ['SVG', 'Optimize with svgo'],
+      ['Max file size', 'warn at 500 kB, error at 1 MB'],
+      ['Max dimension', '2560 px'],
+      ['Smallest saving', '5% and 1 kB'],
+      ['Ignored', 'vendor/**, **/*.min.*, fixtures/**'],
+      ['Mode', 'Comment'],
+    ]}
+  />
+</Screen>
+
+1. Click <Ui>Edit</Ui> on the policy card. The settings sheet opens at `assets.policy`.
+2. Pick the scope, then fill the fields below.
+3. Save. The next assets run, every review and the agents' `asset_policy` tool use the new policy.
+
+<Screen title="Settings › assets.policy">
+  <Stack>
+    <Fields>
+      <Field label="Scope" value="Group · storefront" />
+      <Field label="Raster format" value="avif+webp" hint="webp, avif, avif+webp or keep" />
+      <Field label="SVG" value="optimize" hint="optimize or keep" />
+      <Field label="Allowed formats" value="png, jpg, webp, avif, svg, woff2" mono />
+      <Field label="Max bytes · warn" value="300000" mono />
+      <Field label="Max bytes · error" value="800000" mono />
+      <Field label="Max dimension" value="2560" mono />
+      <Field label="Mode" value="suggest-mr" hint="comment or suggest-mr" />
+      <Field label="Budgets" value="total 20 MB · image 15 MB" wide />
+      <Field label="Ignore" value="vendor/**, **/*.min.*, fixtures/**" mono wide />
+    </Fields>
+  </Stack>
+</Screen>
+
+| Field           | Default                                  | Meaning                                                                                                  |
+| --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Raster format   | `webp`                                   | Modern format every PNG, JPEG and GIF from 8 kB needs next to it: `webp`, `avif`, `avif+webp` or `keep`. |
+| SVG             | `optimize`                               | `optimize` suggests svgo rewrites; `keep` leaves SVGs alone.                                             |
+| Allowed formats | any                                      | Extensions allowed at all; files of other formats are errors.                                            |
+| Max bytes       | warn 500 kB, error 1 MB                  | Per file, optionally per kind.                                                                           |
+| Max dimension   | 2560                                     | Largest width or height of raster images and videos.                                                     |
+| Smallest saving | 5% and 1 kB                              | Conversions saving less than both are not suggested.                                                     |
+| Ignore          | `vendor/**`, `**/*.min.*`, `fixtures/**` | Globs left out of everything.                                                                            |
+| Budgets         | none                                     | Total bytes of every asset, and bytes per kind.                                                          |
+| Mode            | `comment`                                | With `suggest-mr`, reviews also offer a merge request with the variants from the panel.                  |
+
+:::tip
+The policy holds numbers and formats only. Write prose rules, such as which component renders images or where files go, in the Guide's **Assets** section. Agents read both: the Guide adds the policy to that section as plain facts.
+:::
+
+<Ui>Configure</Ui> on the page edits the analyzer's own options (`analyzers.assets`): which folders
+to scan, a build output folder to scan as well, how many of the largest images to optimize and the
+svgo preset.
+
+## Optimize an image
+
+The media optimizer turns one heavy image into WebP, AVIF and resized variants, writes the markup that uses them and delivers the files as a merge request or a ZIP. It opens from <Ui>Optimize</Ui> on a row, from <Ui>Optimize an image</Ui> in the header (on a blank file, with a repository picker), or from a link in a review comment about an image.
+
+It works in four steps:
+
+1. **Configure** — repository, image path, ref, formats, widths, densities, effort and quality. Click <Ui>Generate variants</Ui>. Once generated, the step folds to a summary with <Ui>Edit</Ui>.
+2. **Choose variants** — the original size, the best saving and a table of offered variants with a thumbnail, size, saving and the path each will be written to. Variants whose path already exists at the ref start unchosen; choosing one anyway is a conflict until you change its path. An optimized SVG, or a variant at the original's own path, replaces the original.
+3. **Markup** — ready snippets per framework, such as HTML `<picture>`, React, Vue or CSS `image-set()`, each with a copy button.
+4. **Deliver** — an optional merge request title, then <Ui>Open merge request</Ui> or <Ui>Download ZIP</Ui>. The result shows the merge request link and any files the forge refused to write.
+
+<Screen title="Quality › Assets › Optimize">
+  <Sheet title="public/images/hero-banner.png" position="1 of 16">
+    <Tag slot="tags">acme/checkout-web</Tag>
+    <Segmented items={['Configure', 'Choose variants', 'Markup', 'Deliver']} active={1} />
+    <Facts
+      items={[
+        ['Original', 'PNG · 2400 × 1200 · 1.8 MB'],
+        ['Best saving', '−1.5 MB (86%) · WebP 1920w'],
+        ['Chosen', '6 variants · 412 kB in all'],
+      ]}
+    />
+    <Scroll>
+
+|     | Variant      | Size   | Saving                      | Path                                   |
+| --- | ------------ | ------ | --------------------------- | -------------------------------------- |
+| ☑   | WebP · 640w  | 38 kB  | <Tag tone="ok">−98%</Tag>   | `public/images/hero-banner-640w.webp`  |
+| ☑   | WebP · 1280w | 104 kB | <Tag tone="ok">−94%</Tag>   | `public/images/hero-banner-1280w.webp` |
+| ☑   | AVIF · 1280w | 71 kB  | <Tag tone="ok">−96%</Tag>   | `public/images/hero-banner-1280w.avif` |
+| ☐   | PNG · 2400w  | 1.4 MB | <Tag tone="warn">−22%</Tag> | `public/images/hero-banner.png`        |
+
+    </Scroll>
+    <div style="padding: 0.6rem 0.75rem"><Button ghost>Back</Button> <Button primary>Next</Button></div>
+
+  </Sheet>
+</Screen>
+
+<Ui>Back</Ui> and <Ui>Edit</Ui> return to earlier steps without losing the chosen variants.
+
+### Optimize several files
+
+Tick the rows you want and click <Ui>Optimize N selected</Ui>, or click <Ui>Optimize</Ui> to queue every optimizable row shown. Step through the queue with <Kbd>J</Kbd> / <Kbd>K</Kbd>; the sheet shows your place, such as "3 of 16", and each file starts fresh.
+
+:::caution
+
+<Ui>Generate variants</Ui> needs `analyses:read`; **Deliver** needs `analyses:run`. When the server
+has no image encoder set up, the optimizer says it is not set up. :::
+
+## Ignore a file or folder
+
+On the analysis record, file rows have an exclude button on hover. Pick whether to skip optimization or ignore the file entirely, choose a glob (the file, its extension in the folder, a parent folder, the name anywhere) or type one, and it is added to the repository's `assets.policy` entry.
+
+## In one repository
+
+The repository hub's **Quality › Assets** shows the same table for one repository, with the record's age and commit, a sparkline of total bytes over recent records, **Open in Quality**, and the repository's policy card with <Ui>Analyzer options</Ui> and its `assets.policy` entries. Its empty state offers <Ui>Run assets</Ui>.
+
+## Related
+
+- [Bundles](/guide/quality/bundles/) — JavaScript and CSS size per app and package.
+- [Reviews](/guide/quality/reviews/) — reviews comment on images a merge request adds or changes.
+- [Team guide](/guide/knowledge/guide/) — the Assets section with your prose rules.
+- [Settings › Policies](/guide/settings/policies/) — scoped settings such as the asset policy.
+- [Assets analyzer](/modules/assets/) and [media engine](/modules/media/) — how files are found, checked and encoded.

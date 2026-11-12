@@ -18,28 +18,22 @@ export interface DocSource {
   label: string
   /** Title that replaces the first heading, when the heading reads badly as a page title. */
   title?: string
-  /** Module group for the sidebar; absent for guide pages and the modules index. */
+  /** Module group for the sidebar; absent for project docs and the modules index. */
   group?: string
   /** Position among siblings. */
   order: number
 }
 
-const guideOrder = [
-  'PLAN.md',
-  'development.md',
-  'deployment.md',
-  'agent-access.md',
-  'libraries.md',
-  'library-docs.md',
-]
-const guideLabels: Record<string, string> = {
-  'PLAN.md': 'Plan',
-  'development.md': 'Development',
-  'deployment.md': 'Deployment',
-  'agent-access.md': 'Agent access',
-  'libraries.md': 'Library docs',
-  'library-docs.md': 'Library docs (design)',
+/** Where each project doc under `docs/` is rendered; files not listed land in Develop. */
+const projectDocs: Record<string, { id: string; label: string }> = {
+  'development.md': { id: 'develop/setup', label: 'Development setup' },
+  'PLAN.md': { id: 'develop/plan', label: 'Plan and decisions' },
+  'agent-access.md': { id: 'develop/agent-access', label: 'Agent access to the panel' },
+  'library-docs.md': { id: 'develop/library-docs-design', label: 'Library docs design' },
+  'deployment.md': { id: 'self-host/reference/deployment', label: 'Deployment reference' },
+  'libraries.md': { id: 'agents/library-docs', label: 'Library docs for agents' },
 }
+const projectOrder = Object.keys(projectDocs)
 
 const nonEmpty = (file: string) => existsSync(file) && statSync(file).size > 0
 
@@ -75,14 +69,14 @@ export function discoverDocs(root: string): DocSource[] {
       })
       continue
     }
-    const known = guideOrder.indexOf(name)
+    const known = projectDocs[name]
     const slug = name.replace(/\.md$/, '').toLowerCase()
     sources.push({
       file,
       path: `docs/${name}`,
-      id: `guide/${slug}`,
-      label: guideLabels[name] ?? slug.replace(/^\w/, (c) => c.toUpperCase()),
-      order: known >= 0 ? known : guideOrder.length,
+      id: known?.id ?? `develop/${slug}`,
+      label: known?.label ?? slug.replace(/^\w/, (c) => c.toUpperCase()),
+      order: known ? projectOrder.indexOf(name) + 10 : projectOrder.length + 10,
     })
   }
 
@@ -107,23 +101,20 @@ export function discoverDocs(root: string): DocSource[] {
   return sources
 }
 
-/** Sidebar items for the two documentation topics. */
-export function sidebarTopics(sources: DocSource[]) {
+/** Sidebar items of the Develop topic that come from the repository: project docs and modules. */
+export function developSidebar(sources: DocSource[]) {
   const byOrder = (a: DocSource, b: DocSource) =>
     a.order - b.order || a.label.localeCompare(b.label)
-  const guide = sources.filter((s) => s.id.startsWith('guide/')).toSorted(byOrder)
+  const project = sources.filter((s) => s.id.startsWith('develop/')).toSorted(byOrder)
   const modules = sources.filter((s) => s.group).toSorted(byOrder)
   const groups = moduleGroups
     .map((group) => ({
       label: group.label,
-      collapsed: !('open' in group && group.open),
+      collapsed: true,
       items: modules.filter((s) => s.group === group.label).map((s) => s.id),
     }))
     .filter((g) => g.items.length > 0)
-  return {
-    guide: ['guide/getting-started', ...guide.map((s) => s.id)],
-    modules: ['modules', ...groups],
-  }
+  return { project: project.map((s) => s.id), modules: ['modules', ...groups] }
 }
 
 /** Resolves a link written in a repository markdown file to a site route or a GitHub URL. */

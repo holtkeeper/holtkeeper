@@ -1,143 +1,37 @@
 ---
-import { getEntry } from 'astro:content'
-
 import Logo from '@holtkeeper/brand/holtkeeper.svg'
 
-const repo = 'https://github.com/holtkeeper/holtkeeper'
-const deployment = await getEntry('docs', 'guide/deployment')
 const columns = [
-  {
-    title: 'Product',
-    links: [
-      ['How it works', '/#how'],
-      ['Features', '/#features'],
-      ['Contracts', '/#contracts'],
-      ['Deploy', '/#deploy'],
-    ],
-  },
-  {
-    title: 'Docs',
-    links: [
-      ['Getting started', '/guide/getting-started/'],
-      ['Plan', '/guide/plan/'],
-      ['Development', '/guide/development/'],
-      ...(deployment ? [['Deployment', '/guide/deployment/']] : []),
-      ['Modules', '/modules/'],
-    ],
-  },
-  {
-    title: 'Community',
-    links: [
-      ['GitHub', repo],
-      ['Issues', `${repo}/issues`],
-    ],
-  },
-  {
-    title: 'Project',
-    links: [
-      ['License', `${repo}/blob/main/LICENSE`],
-      ['Agent guide', `${repo}/blob/main/AGENTS.md`],
-      ['Source', repo],
-    ],
-  },
-]
+  ['Start', [['Overview', '/start/'], ['Quickstart', '/start/quickstart/'], ['Concepts', '/start/concepts/fleet/'], ['First steps', '/start/first-steps/connect-forge/']]],
+  ['Guide', [['Home & Inbox', '/guide/home/overview/'], ['Repos', '/guide/repos/repositories/'], ['Supply chain', '/guide/supply-chain/libraries/'], ['Quality', '/guide/quality/coverage/'], ['Releases', '/guide/releases/overview/']]],
+  ['Agents', [['Connect an agent', '/agents/connect/'], ['MCP tools', '/reference/mcp-tools/'], ['Tasks', '/agents/tasks/'], ['Review agent', '/agents/review-agent/']]],
+  ['Self-host', [['Single container', '/self-host/run/single-container/'], ['Kubernetes', '/self-host/run/kubernetes/'], ['Configuration', '/self-host/configure/configuration/'], ['Upgrades', '/self-host/operate/upgrades/']]],
+  ['Develop', [['Architecture', '/develop/architecture/'], ['Setup', '/develop/setup/'], ['Modules', '/modules/'], ['Plan', '/develop/plan/']]],
+] as const
 ---
 
-<footer class="footer">
-  <div class="l-wrap grid">
-    <div class="about">
-      <a class="brand" href="/">
-        <Logo width={26} height={26} aria-hidden="true" />
-        Holtkeeper
-      </a>
-      <p>Keeps a fleet of repositories in shape. Self-hosted, open source, MIT.</p>
-    </div>
-    {
-      columns.map((c) => (
-        <div>
-          <h3>{c.title}</h3>
-          <ul>
-            {c.links.map(([label, href]) => (
-              <li>
-                <a href={href}>{label}</a>
-              </li>
+<footer class="l-foot">
+  <div class="l-wrap">
+    <div class="l-fgrid">
+      <div class="l-fcol l-fbrand">
+        <a class="l-brand" href="/"><Logo width={26} height={26} aria-hidden="true" /><span>Holtkeeper</span></a>
+        <span class="hk-mut">A cozy holt for every repository, from a homelab to a production zoo.</span>
+      </div>
+      {
+        columns.map(([title, links]) => (
+          <nav class="l-fcol" aria-label={title}>
+            <b>{title}</b>
+            {links.map(([label, href]) => (
+              <a href={href}>{label}</a>
             ))}
-          </ul>
-        </div>
-      ))
-    }
-  </div>
-  <div class="l-wrap legal">
-    <span>MIT License · © {new Date().getFullYear()} Holtkeeper contributors</span>
-    <span class="mono">bun · typescript 7 · no build step</span>
+          </nav>
+        ))
+      }
+    </div>
+    <div class="l-fbot">
+      <span>MIT licensed</span>
+      <span class="l-sp"></span>
+      <a href="https://github.com/holtkeeper/holtkeeper">GitHub</a>
+    </div>
   </div>
 </footer>
-
-<style>
-  .footer {
-    padding-block: 4rem 2.5rem;
-    border-top: 1px solid var(--l-line);
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: 2fr repeat(4, 1fr);
-    gap: 2rem;
-  }
-  .brand {
-    display: flex;
-    gap: 0.6rem;
-    align-items: center;
-    font-weight: 640;
-    letter-spacing: -0.02em;
-    text-decoration: none;
-  }
-  .about p {
-    max-width: 18rem;
-    margin-top: 1rem;
-    color: var(--l-dim);
-    font-size: 0.9rem;
-  }
-  h3 {
-    margin-bottom: 0.9rem;
-    font-size: 0.82rem;
-    font-weight: 600;
-  }
-  ul {
-    display: grid;
-    gap: 0.55rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-  ul a {
-    color: var(--l-muted);
-    font-size: 0.9rem;
-    text-decoration: none;
-    transition: color 0.15s;
-  }
-  ul a:hover {
-    color: var(--l-text);
-  }
-  .legal {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-    justify-content: space-between;
-    margin-top: 3rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--l-line);
-    color: var(--l-dim);
-    font-size: 0.8rem;
-  }
-  .mono {
-    font-family: var(--l-mono);
-  }
-  @media (max-width: 52rem) {
-    .grid {
-      grid-template-columns: 1fr 1fr;
-    }
-    .about {
-      grid-column: 1 / -1;
-    }
-  }
-</style>

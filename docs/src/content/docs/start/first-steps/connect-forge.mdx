@@ -1,0 +1,115 @@
+---
+title: Connect a forge
+description: Add a GitLab instance with a token credential, then optionally a webhook, an SSH key and private package access for jobs.
+panel: Settings › Integrations
+route: /settings/integrations
+permission: settings:write
+sidebar:
+  order: 1
+---
+
+import { Button, Field, Fields, Screen, Scroll, Stack, Strip, Tag, Toolbar, Ui } from '@ui'
+
+A forge is a GitLab instance plus the token Holtkeeper uses there. Forges are added in the panel, never in the config file, and the token is stored as a sealed credential that the forge refers to. Connecting one takes two forms: the credential, then the forge. Webhooks, SSH keys and package access are optional and can wait.
+
+:::note
+Only GitLab is supported today, gitlab.com or self-managed (a path prefix such as `https://example.com/gitlab` works). GitHub support is coming.
+:::
+
+## Before you start
+
+- You need `settings:write` and `credentials:write` on everything, which the `root` admin and the Admin role have.
+- Create a GitLab account for Holtkeeper, such as `holtkeeper-bot`, and add it to the groups or projects it should look after. Developer is enough for reviews and merge requests; registering webhooks needs Maintainer or Owner.
+- Create a personal access token for it with the `api` scope. `read_api` only lets Holtkeeper read; reviews, comments and merge requests need `api`.
+
+:::tip[Use a dedicated account]
+Review drafts are published in one batch for the token's account, so leftovers from another tool on a person's account would go out with the review. A bot account also lets Holtkeeper ignore its own pushes and notes, and skip reviewing its own merge requests.
+:::
+
+## Add the token
+
+1. Open **Settings › Integrations** and, under **Credentials**, choose <Ui>Add credential</Ui>.
+2. Pick the GitLab kind and fill in:
+
+   - **Name**: `gitlab-bot`.
+   - **URL**: `https://gitlab.example.com`.
+   - **Secret**: the token. It is sealed with the vault key and never shown again.
+   - **Expires**: the token's expiry date, if it has one.
+
+3. Optionally turn on **Rotate automatically**: before the token expires, Holtkeeper asks GitLab for a replacement with the **New token lifetime** you set, and stores it. Nothing else needs to change.
+4. Save.
+
+## Add the forge
+
+1. Choose <Ui>Add forge</Ui> in the section header.
+2. Fill in the form and save.
+
+<Screen title="Settings › Integrations › Add forge">
+  <Stack>
+    <Toolbar title="Add forge" crumbs={['Settings', 'Integrations']} />
+    <Fields>
+      <Field
+        label="Id"
+        value="work"
+        mono
+        hint="Repositories are addressed as <forge>:<path>, so the id cannot change later."
+      />
+      <Field label="URL" value="https://gitlab.example.com" mono />
+      <Field label="Token" value="gitlab-bot" hint="A GitLab credential." />
+      <Field
+        label="Bot username"
+        value="holtkeeper-bot"
+        mono
+        hint="Leave empty when the token belongs to a person."
+      />
+      <Field
+        label="Packages for jobs"
+        toggle
+        wide
+        hint="Jobs download private packages from this forge through the egress proxy, without seeing the token."
+      />
+    </Fields>
+    <Button primary>Add forge</Button>
+  </Stack>
+</Screen>
+
+| Field             | What to enter                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Id                | A short, permanent name. Repositories become `work:acme/checkout-web`.                                                                |
+| URL               | The GitLab base URL.                                                                                                                  |
+| Token             | The credential you just added. Without one the form says so and links to creating it.                                                 |
+| Bot username      | The account behind the token when it is a bot: its pushes, merge requests and notes are ignored, and review skips its merge requests. |
+| Packages for jobs | On by default where the egress proxy runs: jobs install private npm, Maven or PyPI packages from this forge.                          |
+
+The forge appears in the **Forges** list with its token, repository count and how changes arrive.
+
+## Get changes quickly (optional)
+
+Out of the box Holtkeeper **polls** every repository every five minutes, which is enough to start. For changes within seconds, give the forge a webhook:
+
+1. Make sure Holtkeeper is reachable from GitLab and its public URL is set (`HOLTKEEPER_PUBLIC_URL`), so the hook points at the right host.
+2. On the forge, generate the webhook secret with **Register on GitLab** on. Holtkeeper adds or updates a hook on every group the forge's repositories live in, sending tag push, merge request, comment and pipeline events. On GitLab Free, which has no group hooks, it adds one project hook per project instead.
+3. Copy the secret now if you also add hooks by hand: it is shown only once.
+
+While webhooks deliver, polling slows to once an hour as a safety net. If GitLab disables a hook after failed deliveries, the forge shows it and **Re-enable now** brings it back. Single repositories can also have their own webhook URL, under their **Settings › Updates**.
+
+<Screen title="Settings › Integrations › Forges">
+  <Strip items={[{ value: 1, label: 'forge' }, { value: 23, label: 'repositories' }, { value: '2 min ago', label: 'last webhook' }]} end="All webhooks deliver" />
+  <Scroll>
+
+| Forge  | URL                          | Token        | Repositories | Updates                      |
+| ------ | ---------------------------- | ------------ | ------------ | ---------------------------- |
+| `work` | `https://gitlab.example.com` | `gitlab-bot` | 23           | <Tag tone="ok">Webhook</Tag> |
+
+  </Scroll>
+</Screen>
+
+## SSH key (optional)
+
+Holtkeeper clones and pushes over HTTPS with the token by default. A forge can instead issue an Ed25519 SSH key on the token's account, used for **Clone and push**, **Sign commits** or both, with a lifetime in days and an optional commit name and email. Signed commits show as verified in GitLab when the email is a verified email of that account. Rotate the key before its lifetime ends.
+
+## Related
+
+- [Add repositories](/start/first-steps/add-repositories/) — the next step.
+- [Integrations](/guide/settings/integrations/) — forges, credentials and request limits in detail.
+- [The fleet](/start/concepts/fleet/) — forges, groups and scopes.

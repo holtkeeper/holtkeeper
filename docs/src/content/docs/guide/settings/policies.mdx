@@ -1,0 +1,195 @@
+---
+title: Policies
+description: Set the organization's rules in one place — licenses, the security allowlist, fixes, conventions, tests, analyzers off, merge request reviews and agent knowledge — for everyone or for one group, saved as one change.
+panel: Settings › Policies
+route: /settings/policies
+permission: settings:read
+sidebar:
+  order: 6
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Split,
+  Stack,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Set the organization's rules in one place — licenses, the security allowlist, fixes, conventions, tests, analyzers off, merge request reviews and agent knowledge — for everyone or for one group, saved as one change.
+
+<Screen
+  title="Settings › Policies"
+  caption="Edits gather into one draft over every card; nothing is stored until you save."
+>
+  <Toolbar title="Policies" crumbs={['Settings']}>
+    <Segmented slot="start" items={['Organization defaults', 'Payments', 'Widgets']} active={1} />
+    <Button ghost>Discard</Button>
+    <Button primary>Save 2 changes</Button>
+  </Toolbar>
+  <Stack>
+    <Toolbar title="License policy">
+      <Tag slot="start">Inherited by Group Payments</Tag>
+      <Button ghost>Reset</Button>
+    </Toolbar>
+    <Split>
+      <Rows>
+        <Row title="Allowed" sub="MIT, Apache-2.0, BSD-3-Clause, ISC" />
+        <Row title="Needs review" sub="MPL-2.0, LGPL-3.0" />
+        <Row title="Denied" sub="GPL-3.0, AGPL-3.0" />
+      </Rows>
+      <Fields columns={1}>
+        <Field label="Unknown licenses" value="Needs review" />
+        <Field label="Dev-only dependencies" value="Ignored" />
+        <Field label="Check the repository's license file" toggle={true} />
+      </Fields>
+    </Split>
+    <Toolbar title="Merge request reviews">
+      <Tag slot="start" tone="warn">
+        Changed
+      </Tag>
+    </Toolbar>
+    <Fields>
+      <Field label="Review and comment on merge requests" toggle={false} />
+      <Field label="Reason" value="Payments reviews in its own tool until Q1" />
+    </Fields>
+  </Stack>
+</Screen>
+
+## Edit for everyone or for one group
+
+1. Pick **Organization defaults**, or one group, in the switch at the top.
+2. Change any cards. Each card shows the value at that scope: the group's own entry, else the organization's, else the built-in default, tagged _Inherited by Group …_ until you change it.
+3. Click <Ui>Save N changes</Ui>. All changes are stored together, or none if one is refused, and the Audit log records them as one event.
+
+<Ui>Discard</Ui> throws the draft away; <Ui>Reset</Ui> on a card removes the scope's own entry so it
+inherits again. Setting a value back to the stored one drops it from the draft. You cannot switch
+scope while the draft has edits.
+
+:::note
+Policies set the organization and its groups. Overrides for one repository live in its [repository settings](/guide/repos/repository-settings/). Merge request policies and freshness live in [Automation](/guide/ops/automation/). Without `settings:write` every card is read only.
+:::
+
+The cards edit the same settings as the pages they belong to (Licenses, Security, Stack, Assets, Reviews, Coverage), so a change here shows there and the other way round.
+
+## License policy
+
+Three columns, **Allowed**, **Needs review** and **Denied**, with a preset picker to start from. Below them:
+
+- **Unknown licenses**: _Needs review_ or _Denied_.
+- **Dev-only dependencies**: _Checked too_ or _Ignored_.
+- Whether the repository's own license file is checked, and packages to ignore.
+- **Exceptions**: package, version, license, reason, approved by and until. Add one with the inline form; you are recorded as the approver.
+
+See [Licenses](/guide/supply-chain/licenses/) for what the policy flags.
+
+## Security allowlist
+
+The allowlist accepts a known advisory for a package instead of fixing it.
+
+<Screen title="Settings › Policies · Security allowlist">
+  <Stack>
+    <Fields>
+      <Field label="Longest an entry may last, days" value="90" mono hint="Empty for no limit" />
+      <Field label="Require a reason" toggle={true} />
+    </Fields>
+    <Scroll>
+
+| Advisory              | Package            | Reason                                     | Expires    |                                                       |
+| --------------------- | ------------------ | ------------------------------------------ | ---------- | ----------------------------------------------------- |
+| `GHSA-xxxx-1234-abcd` | `some-lib`         | Only used in build scripts                 | in 12 days | <Button>Extend</Button> <Button ghost>Remove</Button> |
+| `GHSA-yyyy-5678-efgh` | `@acme/widget-kit` | <Tag tone="bad">A reason is required</Tag> | in 30 days | <Button ghost>Remove</Button>                         |
+
+    </Scroll>
+
+  </Stack>
+</Screen>
+
+1. Set the longest an entry may last and whether a reason is required.
+2. Add entries with the form under the table. A row added or changed in the draft shows the problem that would stop it saving.
+3. <Ui>Extend</Ui> moves an entry's expiry to 30 days from today, or to the longest allowed when
+   that is shorter.
+
+:::caution
+A group can tighten the organization's allowlist rules but never loosen them: the strictest rule of every scope that contains an entry applies. Tightening never blocks unrelated edits; only new or changed entries are checked.
+:::
+
+## Fixes and conventions
+
+- **Vulnerability fixes**: whether Holtkeeper opens fixes, and the largest upgrade it may make (major, minor or patch).
+- **Stack conventions**, **Asset policy**, **Commit conventions** and **Test ids**: each setting's own editor.
+
+**Commit conventions** add <Ui>Try a title</Ui>: pick a repository of the scope and type a title, and it lists each broken rule as _Fails_ (an error) or _Unusual_ (differs from history only).
+
+<Screen title="Settings › Policies · Try a title" kind="example">
+  <Stack>
+    <Fields>
+      <Field label="Repository" value="acme/checkout-web" mono />
+      <Field label="Title" value="Fixed the date parser" />
+    </Fields>
+    <Rows>
+      <Row title="Type prefix missing" sub="Titles start with feat, fix, chore…">
+        <Tag tone="bad">Fails</Tag>
+      </Row>
+      <Row title="Ticket key missing" sub="Most titles in history carry ABC-123">
+        <Tag tone="warn">Unusual</Tag>
+      </Row>
+    </Rows>
+  </Stack>
+</Screen>
+
+## Repositories without tests
+
+**Tests** has a **Repositories have tests** switch and, while it is off, a reason. With tests off, coverage is never queued automatically, the repository is never counted as failing coverage (it reads _No tests by design_), reviews and agent tasks skip test checks, and test tasks are refused. Test ids stay as they are. A repository turns tests back on in its settings or from the Coverage sheet.
+
+## Turn analyzers off
+
+**Analyzers off** lists the analyzers that run automatically as toggles, with a reason while any is off. An analyzer that is off:
+
+- is never queued by events, policies, schedules or freshness for those repositories;
+- reads **Off** with the reason in repository health and on the hub's overview, never as failing;
+- still runs when someone starts it by hand, and stored records stay readable.
+
+A repository turns them back on in its own settings.
+
+## Merge request reviews
+
+**Review and comment on merge requests**, with a reason while off. When off for a repository:
+
+- no AI review is queued, whatever asks for it, and manual reviews are refused;
+- Holtkeeper posts nothing on its merge requests: no comments, reviews or replies; policy comments and labels are skipped;
+- merge requests Holtkeeper opens itself (agent tasks, upgrades, release candidates) are still created.
+
+Nothing else changes, and no badge shows: the repository simply gets no reviews. Unlike a freeze, analyses of the default branch go on. A repository entry that is on lifts a group entry that is off.
+
+## Agent knowledge
+
+What agents add to [Knowledge](/guide/knowledge/notes/) without someone reviewing it first:
+
+| Row             | Toggles                                                                                                                     |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Notes           | The kinds of notes agents add at once.                                                                                      |
+| Learnings       | The sources accepted (_Proposed over MCP_, _Review replies_) and where they go: the _Suggested scope_ or _Repository only_. |
+| Generated Guide | The Guide sections whose generated text is accepted when the guide job writes it.                                           |
+
+<Ui>Reset</Ui> clears all three at the scope. Everything not accepted waits in Knowledge for review.
+
+:::tip
+A card whose stored entries carry keys the setting no longer reads shows a warning under its header, naming each key and where a moved one lives now. Nothing is migrated for you.
+:::
+
+## Related
+
+- [Policies concept](/start/concepts/policies/) — scopes, inheritance and the most specific entry winning.
+- [Licenses](/guide/supply-chain/licenses/) and [Security](/guide/supply-chain/security/) — what the license policy and the allowlist act on.
+- [Repository settings](/guide/repos/repository-settings/) — overrides for one repository.
+- [Automation](/guide/ops/automation/) — merge request policies and freshness.
+- [Setting keys](/reference/setting-keys/) — every key these cards write.

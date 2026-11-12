@@ -1,0 +1,175 @@
+---
+title: Repository hub
+description: One repository in depth — its health per area, how fresh every analysis is, and tabs for supply chain, quality, releases, activity, knowledge and settings.
+panel: Repos › Repositories › a repository
+route: /repos/<forge>/<path>
+permission: analyses:read
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Facts,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Split,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+One repository in depth — its health per area, how fresh every analysis is, and tabs for supply chain, quality, releases, activity, knowledge and settings. Open it from any repository link: the [Repositories](/guide/repos/repositories/) table, a health cell, the [command palette](/guide/home/command-palette/) or a chat chip. The page reads stored records only; opening it never asks the forge or a model.
+
+<Screen title="Repos › acme/checkout-web" caption="The strip has one entry per health area you may read, then the head commit Holtkeeper last saw.">
+  <Toolbar title="acme/checkout-web" crumbs={['Repos']}>
+    <Tag mono slot="start">work</Tag>
+    <Tag mono slot="start">main</Tag>
+    <Tag slot="start">web</Tag>
+    <Tag slot="start">web › payments</Tag>
+    <Tag tone="ok">Updates · webhook</Tag>
+    <Button primary>Run analyzer</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 'ok', label: 'Security', tone: 'ok' },
+      { value: 'ok', label: 'Deps', tone: 'ok' },
+      { value: '71%', label: 'Coverage', tone: 'warn' },
+      { value: '93%', label: 'Bundles', tone: 'warn' },
+      { value: 'ok', label: 'CI', tone: 'ok' },
+      { value: 'ok', label: 'Licenses', tone: 'ok' },
+      { value: 'waits', label: 'Release', tone: 'warn' },
+    ]}
+    end="Head 4e1c9a2 · seen 40 min ago"
+  />
+  <Stack>
+    <Segmented items={['Overview', 'Supply chain', 'Quality', 'Releases', 'Activity', 'Knowledge', 'Settings']} />
+  </Stack>
+  <Split>
+    <Stack>
+
+**Supply chain**
+
+<Facts
+  items={[
+    ['Security', 'No critical or high findings'],
+    ['Libraries', '84 direct · 3 majors behind'],
+    ['Licenses', 'All allowed'],
+  ]}
+/>
+
+**Quality**
+
+<Facts
+  items={[
+    ['Coverage', '71.4% lines · −0.8 pts'],
+    ['Bundles', '168.0 kB gzip'],
+    ['CI', 'p50 6m 12s · 2% failed'],
+  ]}
+/>
+
+<Meter value={93} label="Bundle budget" />
+
+    </Stack>
+    <Stack>
+
+**Delivery**
+
+<Facts
+  items={[
+    ['Reviews, 30 days', '42 merge requests · 118 comments'],
+    ['This week', '31 jobs · 1 failed · 1 task awaiting approval'],
+    ['Knowledge', '6 Guide sections · 4 notes · 1 proposed learning'],
+    ['Release', 'v8.2.1 on production · v8.3.0 waits for acceptance'],
+  ]}
+/>
+
+**Facts**
+
+<Facts
+  items={[
+    ['Toolchain', 'Node 22 · pnpm 9'],
+    ['Access', 'Writable here'],
+    ['Default branch', 'main'],
+  ]}
+/>
+
+    </Stack>
+
+  </Split>
+</Screen>
+
+## The header
+
+The header shows the avatar, path, forge, default branch and groups, then:
+
+- the **Updates** tag, saying whether changes arrive by webhook or polling. It turns into a warning when GitLab disabled the webhook. Click it to open the [Updates](/guide/repos/repository-settings/#how-the-repository-gets-updates) settings.
+- <Ui>Run analyzer</Ui>, which queues an analyzer for this repository now.
+
+The health strip under it has one named entry per health area you may read and ends with the head commit Holtkeeper last saw.
+
+### Change the avatar
+
+The avatar comes from an upload, the forge's project or group avatar, or generated initials. With `settings:write` on the repository, click the large avatar to upload a PNG, JPEG, WebP or GIF of up to 512 kB, or reset it to the forge's or the generated one. Every image of the repository reloads after a change.
+
+## Tabs
+
+The tab and its area live in the URL, so a link opens the same view. A tab you may not see is hidden; a link to it opens the first one you can.
+
+| Tab          | What it shows                                                                                                 | Needs                                        |
+| ------------ | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Overview     | Supply chain, Quality and Delivery cards, the freshness of every analysis, facts and the latest audit events. | `analyses:read`                              |
+| Supply chain | One area at a time: Security, Libraries, Licenses, Stack, Public API.                                         | `analyses:read`, Security also `audits:read` |
+| Quality      | One area at a time: Coverage, Bundles, Assets, CI, Branches, Reviews.                                         | `analyses:read`                              |
+| Releases     | The repository's [release timeline](/guide/releases/timeline/).                                               | `releases:read`                              |
+| Activity     | Its audit events, as the [audit log](/guide/settings/audit-log/) shows them to you.                           |                                              |
+| Knowledge    | Its [Guide](/guide/knowledge/guide/): the effective prompt and the sections with the layers each comes from.  | `knowledge:read`                             |
+| Settings     | Every setting as it applies here. See [Repository settings](/guide/repos/repository-settings/).               | `settings:read`                              |
+
+### Supply chain and Quality areas
+
+Each area is the fleet page's table narrowed to this repository, with **Open in Supply ›** or **Open in Quality** linking to the fleet page filtered to it. Stack links to its group's **Stack & conventions** tab instead.
+
+<Screen title="Repos › acme/checkout-web › Quality › Bundles">
+  <Toolbar title="Quality">
+    <Segmented slot="start" items={['Coverage', 'Bundles', 'Assets', 'CI', 'Branches', 'Reviews']} active={1} />
+    <Button ghost>Open in Quality</Button>
+  </Toolbar>
+  <Scroll>
+
+| Target                 | Release  | JS gzip  | Change  | Budget used          |
+| ---------------------- | -------- | -------- | ------- | -------------------- |
+| **checkout-web** · app | `v8.2.1` | 168.0 kB | +1.1 kB | <Meter value={93} /> |
+
+  </Scroll>
+</Screen>
+
+## Check how fresh the analyses are
+
+The Overview lists the newest record of every analyzer with its state:
+
+| State   | Meaning                                              |
+| ------- | ---------------------------------------------------- |
+| Current | The record describes the head commit.                |
+| Behind  | Newer commits landed on the default branch since.    |
+| Aging   | Older than usual for its analyzer.                   |
+| Stale   | Due for a refresh; Holtkeeper queues one on its own. |
+| Failed  | The last run failed.                                 |
+| Never   | The analyzer never ran on this repository.           |
+
+<Ui>Run analyzer</Ui> refreshes one at once; follow the job in [Ops › Runs](/guide/ops/runs/).
+
+:::note
+**Access** in the facts says whether Holtkeeper may write to the repository: _Read-only_ with the reason when a freeze applies, or _Writable here_ with the reason when a narrower setting lifts a broader freeze. Read-only repositories get no merge requests from agent tasks.
+:::
+
+## Related
+
+- [Repositories](/guide/repos/repositories/) — the fleet table the hub opens from.
+- [Repository settings](/guide/repos/repository-settings/) — the hub's Settings tab.
+- [Analysis record](/guide/quality/analysis-record/) — one report in full, with its version history.
+- [Analyzers and runs](/start/concepts/analyzers-and-runs/) — what freshness means.

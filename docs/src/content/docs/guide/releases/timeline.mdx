@@ -1,0 +1,299 @@
+---
+title: Release timeline
+description: Prepare one repository's next version, check its gates, accept and create it, deploy it environment by environment, and look back at every past version.
+panel: Releases › Timeline
+route: /releases/timeline
+permission: releases:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Meter,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Sheet,
+  SlackContext,
+  SlackHeader,
+  SlackMessage,
+  SlackWindow,
+  Split,
+  Stack,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Prepare one repository's next version, check its gates, accept and create it, deploy it environment by environment, and look back at every past version.
+
+<Screen title="Releases › Timeline" caption="The next release on top, environments below it, past versions at the bottom.">
+  <Toolbar title="acme/checkout-web ▾">
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+  </Toolbar>
+  <Stack>
+    <Toolbar>
+      <Tag tone="warn" slot="start">Waiting for acceptance</Tag>
+      <Tag mono slot="start">merge request · development → main · v8.3.0</Tag>
+      <Tag>!231 merged</Tag>
+      <Tag>Compare</Tag>
+      <Tag tone="ok">pipeline passed</Tag>
+    </Toolbar>
+    <Toolbar title="v8.2.1 → v8.3.0">
+      <Tag slot="start">minor</Tag>
+      <Button ghost>Change version</Button>
+      <Tag>14 commits · waiting 2 days</Tag>
+    </Toolbar>
+
+minor ← 3 feat · patch ← 6 fix
+
+    <Tabs items={['Changes:12', 'Tasks:4', 'What changed']} />
+    <Rows>
+      <Row title="✓ Target pipeline passed" sub="blocks" />
+      <Row title="✓ No blocking merge requests" sub="blocks" />
+      <Row title="✗ Not accepted yet" sub="blocks · accept here or label the release MR release-accepted" />
+      <Row title="✓ Changelog ready" sub="12 entries · 2 left out · prepended to CHANGELOG.md" />
+    </Rows>
+    <Toolbar>
+      <span slot="start">Accept first, then the version can be created.</span>
+      <Button>Accept v8.3.0</Button>
+      <Button primary>Create v8.3.0</Button>
+    </Toolbar>
+
+  </Stack>
+</Screen>
+
+## Pick a repository
+
+The title holds a repository switch over the repositories on the [overview](/guide/releases/overview/). Opened without one, the page shows the first repository that needs action. Search with <Kbd>/</Kbd> to narrow the versions table by tag, version, commit or task key.
+
+- <Ui>Configure</Ui> opens the repository's [flow setup](/guide/releases/flow-setup/); you need
+  `settings:write` there.
+- <Ui>⋯</Ui> has <Ui>Read the forge again</Ui> and <Ui>Open repository</Ui>.
+
+Above the next release you may see a notice: a dry run (steps change nothing), a read-only repository, or releases turned off with <Ui>Set up its flow</Ui>. Then come the stage tag, in the same words as the overview, the flow in one line (mode, target branch, an example tag) and links to the current release merge request, compare view, tag and pipeline.
+
+## Prepare the next version
+
+The next release card shows the pending step: the version when the target branch has unreleased changes, the release merge request when the source branch is ahead, with a switch when both wait.
+
+### Version
+
+The bump row shows current → next version, the bump, the number of commits and how long the version has waited, then the reasons from the commit messages. Bumps follow Conventional Commits: a breaking change bumps the major (the minor while the major is 0), `feat` the minor, anything else the patch.
+
+<Ui>Change version</Ui> picks a patch, minor or major bump, or a custom version.
+
+### Changes, tasks and notes
+
+<Screen title="Releases › Timeline › Edit entries">
+  <Stack>
+    <Toolbar title="Changes">
+      <Button>Edit entries</Button>
+    </Toolbar>
+    <Rows>
+      <Row title="Features" />
+      <Row title="dialog: trap focus inside open dialogs" sub="!412 · ABC-123" />
+      <Row title="cart: keep coupons across sessions" sub="!415 · ABC-129" />
+      <Row title="Fixes" />
+      <Row title="grid: keep the sort when rows change" sub="a1b2c3d" />
+      <Row title="ci: cache the pnpm store" sub="left out · type ci" />
+    </Rows>
+  </Stack>
+</Screen>
+
+- **Changes** are grouped by type; left-out ones are counted. <Ui>Edit entries</Ui> includes, leaves out or renames entries, and shows the result at once.
+- **Tasks** lists the tracker keys named by the commits (`ABC-123`) with their status when a tracker is connected.
+- **What changed** holds the notes: a digest of the changelog by default. <Ui>Write with AI</Ui> drafts them, you can edit them, or go back to the digest.
+
+:::tip
+The audience, language and tone of AI notes come from the **Releases** section of the repository's [Guide](/guide/knowledge/guide/), not from a setting here.
+:::
+
+### Gates
+
+The checklist lists every gate with a pass or fail mark and how much it matters:
+
+| Severity | Effect                                                                                                                                          |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| blocks   | A failing one refuses the step unless someone overrides it in the confirmation. Nothing to release and a taken version can never be overridden. |
+| warns    | Shown, never refuses. The changelog gate warns when some entries are not Conventional Commits.                                                  |
+| info     | For your information, such as a branch without a pipeline.                                                                                      |
+
+A failing acceptance gate says how to accept in this flow.
+
+## Accept and create the version
+
+When the flow asks for an acceptance, the version waits until someone accepts the current head of the target branch. An acceptance holds for that head only; new changes need a new one.
+
+1. Review the changes, tasks, notes and gates.
+2. Choose <Ui>Accept v8.3.0</Ui>. It appears only while the version waits for acceptance and you have `releases:run`. **Accepted by** now shows your name, where and when; <Ui>Withdraw</Ui> takes it back.
+3. Choose the step's button: <Ui>Create v8.3.0</Ui>, <Ui>Open release MR</Ui> or <Ui>Update !231</Ui>.
+4. Read the confirmation. It lists what will happen, previews the text, offers AI notes for a release merge request and asks you to override any failing gate that blocks.
+
+<Screen title="Releases › Timeline › Create v8.3.0">
+  <Stack>
+    <Toolbar title="Create v8.3.0 in acme/checkout-web" />
+    <Rows>
+      <Row title="Commit the notes to CHANGELOG.md on main" sub="chore(release): 8.3.0" />
+      <Row title="Tag the head of main as v8.3.0" sub="Release 8.3.0" />
+      <Row title="Create the forge release with the notes" />
+    </Rows>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Create v8.3.0</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+The step's button stays off while a gate nobody may override fails or the version waits for acceptance; the reason is written beside the buttons. Other ways to accept, set in the flow: a `release-accepted` label on the merged release merge request, the merge itself, or a CI job calling the API.
+
+## Deploy
+
+When the repository deploys somewhere, the environments panel has one card per environment, in order.
+
+<Screen title="Releases › Timeline › Environments">
+  <Split>
+    <Stack>
+      <Toolbar title="staging">
+        <Tag tone="ok" slot="start">
+          Deployed
+        </Tag>
+      </Toolbar>
+      <Facts
+        items={[
+          ['Runs', 'v8.3.0'],
+          ['Job', 'deploy:staging'],
+          ['Order', 'right after the tag'],
+          ['Last attempt', '4 min · 2 min ago'],
+        ]}
+      />
+      <Button>Deploy again</Button>
+    </Stack>
+    <Stack>
+      <Toolbar title="production">
+        <Tag tone="warn" slot="start">
+          Ready
+        </Tag>
+      </Toolbar>
+      <Facts
+        items={[
+          ['Runs', 'v8.2.1'],
+          ['Job', 'deploy:production'],
+          ['Order', 'after staging · asks first'],
+          ['Last attempt', '—'],
+        ]}
+      />
+      <Button primary>Deploy</Button>
+    </Stack>
+  </Split>
+</Screen>
+
+A card shows the latest version's deploy status there, the version that runs now, the job, its order (right after the tag or after another environment, and whether it asks first) and the newest attempt with its link and duration. With `releases:run` it offers <Ui>Deploy</Ui>, <Ui>Retry</Ui> or <Ui>Deploy again</Ui>.
+
+Environments that ask first, environments still waiting for an earlier one, retries and repeats go through a confirmation that takes a reason. The reason is kept on the attempt and in the history. Deploying before an earlier environment succeeded needs an explicit override.
+
+:::note
+Deploys run the manual jobs of the tag pipeline, and only when a person starts them. Holtkeeper follows a deploy for up to 12 hours.
+:::
+
+## Past versions
+
+<Screen title="Releases › Timeline › Versions">
+  <Toolbar title="Versions">
+    <Tag>Bump: any</Tag>
+    <Tag>Deployed to: any</Tag>
+  </Toolbar>
+  <Scroll>
+
+| Version  | Bump  | Changes        | staging                       | production                    | Released    | Commit    |
+| -------- | ----- | -------------- | ----------------------------- | ----------------------------- | ----------- | --------- |
+| `v8.3.0` | minor | 2 feat · 6 fix | <Tag tone="ok">Deployed</Tag> | <Tag>Not deployed</Tag>       | today       | `9f2e1c4` |
+| `v8.2.1` | patch | 3 fix          | <Tag tone="ok">Deployed</Tag> | <Tag tone="ok">Deployed</Tag> | 6 days ago  | `4b7a0d2` |
+| `v8.2.0` | minor | 4 feat · 2 fix | <Tag tone="ok">Deployed</Tag> | <Tag tone="bad">Failed</Tag>  | 3 weeks ago | `e81c3a9` |
+
+  </Scroll>
+</Screen>
+
+Newest first, with the bump, a count of changes, where each version stands per environment (**Deployed**, **Deploying**, **Failed**, **Not deployed**), the release date and the commit. **Bump** and **Deployed to** filter the loaded versions; the footer loads older ones. Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd>.
+
+### Version sheet
+
+<Screen title="Releases › Timeline › v8.2.0">
+  <Sheet title="v8.2.0" position="3 of 41">
+    <Tag slot="tags">acme/checkout-web</Tag>
+    <Button slot="actions">Compare</Button>
+    <Meter value={50} tone="warn" label="Runs on staging" />
+    <Tabs items={['Deploys', 'Changelog', 'Tasks:5', 'Notes']} />
+    <Facts
+      items={[
+        ['production', 'Failed · retried by Jane Doe: “flaky migration lock” · 6 min'],
+        ['staging', 'Deployed · 3 min'],
+        ['Accepted', 'Jane Doe in the panel · 3 weeks ago'],
+        ['Tagged', 'Sam Lee · notes written with AI and edited'],
+        ['Changelog', 'committed to CHANGELOG.md'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+The header has the tag, the repository, a progress bar with one segment per environment and <Ui>Compare</Ui> with the previous version.
+
+| Tab       | What it shows                                                                                                                                                                                                                                                                                                                                                             |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deploys   | Per environment every attempt, newest first: status, start, who started it through Holtkeeper and why, duration, and the deploy action. Then the version facts and **How it was cut**: who accepted it and how, who tagged it, whether checks were overridden, where the notes came from and whether the plan was edited, the `CHANGELOG.md` commit and the release page. |
+| Changelog | The version's changelog.                                                                                                                                                                                                                                                                                                                                                  |
+| Tasks     | Its tracker keys with titles and status.                                                                                                                                                                                                                                                                                                                                  |
+| Notes     | The notes the version was created with.                                                                                                                                                                                                                                                                                                                                   |
+
+A version Holtkeeper did not create says so on **How it was cut** and **Notes**.
+
+## Announcements
+
+When several package tags land together, as in a monorepo release, the [Slack announcement](/guide/releases/overview/#announce-new-versions-in-slack) puts them in one message with a section per package.
+
+<Screen title="Slack · #releases" kind="example">
+  <SlackWindow channel="releases">
+    <SlackMessage author="holtkeeper" time="16:21">
+      <SlackHeader>New versions in acme/shared-libs</SlackHeader>
+
+**@acme/url-kit 2.1.0** since 2.0.3 · [Compare](#)
+
+- Parses relative URLs against a base.
+
+**Changes**
+
+_Features_
+
+- url-kit: resolve relative URLs ([!88](#))
+
+**@acme/form-utils 1.4.2** since 1.4.1 · [Compare](#)
+
+**Changes**
+
+_Fixes_
+
+- form-utils: keep empty strings in `toFormData` ([3c9d0e1](#))
+
+          <SlackContext>Compatibility analysis is still running</SlackContext>
+        </SlackMessage>
+
+      </SlackWindow>
+
+  </Screen>
+
+## In one repository
+
+The repository hub's **Releases** tab shows this page's body, with links to the timeline and the flow setup.
+
+## Related
+
+- [Releases overview](/guide/releases/overview/) — every repository's stage at once.
+- [Flow setup](/guide/releases/flow-setup/) — acceptance, gates and environments.
+- [CI](/guide/quality/ci/) — the target branch pipeline behind the pipeline gate.
+- [Agents › Tools](/agents/tools/) — `release_status`, `release_changes` and release steps for agents.

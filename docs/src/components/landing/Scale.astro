@@ -1,0 +1,89 @@
+---
+const tiers = [
+  {
+    n: '01 · Homelab',
+    title: 'A few repositories, one box',
+    text: 'Your side projects on a self-managed GitLab, reviewed and kept up to date while you sleep.',
+    facts: [
+      ['Runs as', '1 container'],
+      ['Store', 'SQLite in a volume'],
+      ['Sign-in', 'password'],
+    ],
+  },
+  {
+    n: '02 · Team',
+    title: 'Dozens of repositories',
+    text: 'Shared libraries, a few apps, one CI. Dependency waves and release notes replace the Monday chores.',
+    facts: [
+      ['Runs as', 'Compose, web + workers'],
+      ['Store', 'Postgres + S3'],
+      ['Sign-in', 'passkeys'],
+    ],
+  },
+  {
+    n: '03 · Production',
+    title: 'Hundreds, across many teams',
+    text: 'Groups per team, policies per scope, approvals in the Inbox, AI spend under a weekly cap.',
+    facts: [
+      ['Runs as', 'Helm, scaled workers'],
+      ['Store', 'Postgres cluster'],
+      ['Sign-in', 'passkeys, SSO header'],
+    ],
+  },
+]
+
+const zoo = [
+  ['Repository shapes', ['Monorepos', 'Polyrepos', 'Single apps', 'Shared libraries', 'Internal registries']],
+  ['Stacks side by side', ['npm', 'pnpm', 'Bun', 'Go modules', 'Docker', 'Helm charts']],
+  ['Release habits', ['changesets', 'release-please', 'CI tags', 'Holtkeeper flows', 'Package tags']],
+  ['Per-repository tools', ['mise pins versions', 'Container sandbox', 'Team rules', 'Commit conventions']],
+] as const
+---
+
+<section class="l-sec" id="scale">
+  <div class="l-wrap">
+    <div class="l-head">
+      <span class="l-eyebrow">Any size, any shape</span>
+      <h2>Starts on one box. Grows without a rewrite.</h2>
+      <p>Start with one container next to your side projects. Grow into hundreds of repositories across teams, each with its own layout, package manager and release habits. Holtkeeper adapts to the repositories, not the other way round.</p>
+    </div>
+    <div class="l-scale">
+      {
+        tiers.map((t, i) => (
+          <div class="l-tier">
+            <span class="l-step-n">{t.n.toUpperCase()}</span>
+            <h3>{t.title}</h3>
+            <p>{t.text}</p>
+            <dl>
+              {t.facts.map(([k, v]) => (
+                <>
+                  <dt>{k}</dt>
+                  <dd>{v}</dd>
+                </>
+              ))}
+            </dl>
+            <span class="l-seg" aria-hidden="true">
+              {tiers.map((_, j) => (
+                <i class={j <= i ? 'acc' : undefined} />
+              ))}
+            </span>
+          </div>
+        ))
+      }
+    </div>
+    <div class="l-zoo">
+      {
+        zoo.map(([title, chips]) => (
+          <div class="l-card static">
+            <h3>{title}</h3>
+            <span class="l-chips">
+              {chips.map((c) => (
+                <span class="hk-tag">{c}</span>
+              ))}
+            </span>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>

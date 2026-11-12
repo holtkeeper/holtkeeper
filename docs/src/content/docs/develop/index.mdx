@@ -1,0 +1,38 @@
+---
+title: Develop
+description: How Holtkeeper is built and how to extend it — contracts, modules and the conventions of the repository.
+sidebar:
+  label: Overview
+  order: 0
+---
+
+import { Card, Cards } from '@ui'
+
+How Holtkeeper is built and how to extend it. The engine is a Bun monorepo with no build step: packages export TypeScript source, contracts sit in their own packages, and every implementation is replaceable.
+
+<Cards>
+  <Card title="Development setup" href="/develop/setup/" icon="start">
+    Install the tools, run the server and the panel from source, run the checks.
+  </Card>
+  <Card title="Architecture" href="/develop/architecture/" icon="server">
+    Processes, contracts and how a webhook becomes a merge request.
+  </Card>
+  <Card title="Plan and decisions" href="/develop/plan/" icon="book">
+    Principles, stack choices, milestones and the decision log.
+  </Card>
+  <Card title="Modules" href="/modules/" icon="agents">
+    Every package with its contract, options and public API.
+  </Card>
+</Cards>
+
+## Rules of the repository
+
+- **No build step.** Packages export `./src/index.ts` and Bun runs it directly.
+- **Erasable TypeScript only**: no `enum`, `namespace` or parameter properties; `.ts` extensions in imports.
+- **Depend on interfaces.** Analyzers talk to `GitForge`, never to a GitLab client; anything that shells out takes a `CommandRunner`, so tests use a fake runner.
+- **Tests sit next to the code** as `*.test.ts`; integration tests and fixtures live in the module's `test/` folder.
+- **Docs move with code**: a change to a module's behaviour updates its `docs/` in the same change.
+- **Made-up examples only** in tests, fixtures and docs.
+- `bun run check` runs everything CI runs: format, lint, typecheck, tests and knip.
+
+The full contributor guide is [AGENTS.md](https://github.com/holtkeeper/holtkeeper/blob/main/AGENTS.md) in the repository.

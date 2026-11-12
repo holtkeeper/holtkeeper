@@ -1,0 +1,250 @@
+---
+title: Security
+description: Review the vulnerability findings of every repository's latest audit, hand fixes to an agent across repositories at once, and allowlist what does not apply with a reason and an end date.
+panel: Supply chain › Security
+route: /supply/security
+permission: audits:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Review the vulnerability findings of every repository's latest audit, hand fixes to an agent across repositories at once, and allowlist what does not apply with a reason and an end date.
+
+<Screen title="Supply chain › Security" caption="One row per advisory and package, worst severity first.">
+  <Toolbar title="Security">
+    <Segmented slot="start" items={['My teams:6', 'All I can see:21']} />
+    <Button ghost>Configure</Button>
+    <Button primary>Run audit</Button>
+  </Toolbar>
+  <Tabs items={['Findings:9', 'Runs', 'Allowlist:3']} />
+  <Strip
+    items={[
+      { value: 1, label: 'critical', tone: 'bad' },
+      { value: 3, label: 'high', tone: 'bad' },
+      { value: 4, label: 'medium', tone: 'warn' },
+      { value: 2, label: 'fixing' },
+      { value: 1, label: 'allowlisted' },
+    ]}
+  />
+  <Stack>
+    <Tag>Repository: any</Tag> <Tag>Severity: any</Tag> <Tag>Status: open</Tag> <Tag>Ecosystem: any</Tag>
+  </Stack>
+  <Scroll>
+
+| Advisory                                            | Package                   | Severity                       | Repositories | Fixed in | Status                        |
+| --------------------------------------------------- | ------------------------- | ------------------------------ | ------------ | -------- | ----------------------------- |
+| `GHSA-made-up0-0001` · prototype pollution in merge | `some-lib@4.2.0`          | <Tag tone="bad">critical</Tag> | 9            | `4.2.3`  | <Tag tone="bad">open</Tag>    |
+| `GHSA-made-up0-0002` · ReDoS in path parser         | `url-kit@2.0.1`           | <Tag tone="bad">high</Tag>     | 4            | `2.0.3`  | <Tag tone="info">fixing</Tag> |
+| `GO-0000-made-up` · header smuggling                | `example.org/proxy@0.9.0` | <Tag tone="warn">medium</Tag>  | 2            | `0.9.4`  | <Tag tone="bad">open</Tag>    |
+| `GHSA-made-up0-0003` · SSR-only XSS                 | `view-lib@3.1.0`          | <Tag tone="warn">medium</Tag>  | 3            | `3.1.2`  | <Tag>allowlisted</Tag>        |
+
+  </Scroll>
+</Screen>
+
+## What the page shows
+
+Findings come from the newest audit of every repository you may read audits of. A finding is one advisory affecting one package version in one lockfile or manifest; the page groups them by advisory and package, so one row can cover many repositories.
+
+Each repository in a row has a status, and the row takes the most urgent one:
+
+| Status      | Meaning                                                                                                   |
+| ----------- | --------------------------------------------------------------------------------------------------------- |
+| open        | The finding is there and nothing is fixing it.                                                            |
+| fixing      | An approved, queued, running or open-merge-request upgrade task is moving the package in that repository. |
+| allowlisted | Every finding there is hidden by an allowlist entry that has not expired.                                 |
+
+The page has three views as tabs: **Findings**, **Runs** and **Allowlist**. The tab counts include allowlisted findings, as the strip does.
+
+## Filter findings
+
+The toolbar has a **Repository** filter (it narrows every view), **Severity**, **Status** (open, fixing, allowlisted), **Ecosystem**, a text search and a sort. Filters, sort and the open finding live in the URL.
+
+:::caution
+When allowlist entries have expired, a warning sits above the table. Expired entries hide nothing: their findings are back in the list until someone renews or removes the entry.
+:::
+
+## Inspect a finding
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>.
+
+<Screen title="Supply chain › Security › GHSA-made-up0-0001">
+  <Sheet id="GHSA-made-up0-0001" title="Prototype pollution in merge" position="1 of 9">
+    <Tag tone="bad" slot="tags">
+      critical
+    </Tag>
+    <Tag slot="tags">npm</Tag>
+    <Button slot="actions">Fix with agent</Button>
+    <Button slot="actions">Allowlist…</Button>
+    <Facts
+      items={[
+        ['Package', 'some-lib'],
+        ['Aliases', 'CVE-0000-00001'],
+        ['Installed', '4.2.0, 4.1.7'],
+        ['Fixed in', '4.2.3'],
+        ['First seen', '12 days ago'],
+        ['Repositories', '7 open · 1 fixing · 1 allowlisted'],
+      ]}
+    />
+    <Tabs items={['Repositories:9', 'Run history', 'Fix attempts']} />
+  </Sheet>
+</Screen>
+
+| Part         | What it shows                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| Repositories | Every affected repository with its version, lockfile and status.                                   |
+| Run history  | The audit runs of those repositories, each linking to its run record.                              |
+| Fix attempts | What the newest audit of each repository tried for this advisory, per fixer, plus the fixing task. |
+
+## Fix with an agent
+
+<Ui>Fix with agent</Ui> upgrades the package to its first fixed version in every repository where
+the finding is open, as one fix task group: one merge request per repository.
+
+<Screen title="Supply chain › Security › Fix with agent">
+  <Stack>
+    <Toolbar title="Fix GHSA-made-up0-0001 in 7 repositories" />
+    <Facts items={[['Upgrade', 'some-lib → 4.2.3']]} />
+    <Rows>
+      <Row title="acme/checkout-web" sub="4.2.0 · package-lock.json" />
+      <Row title="acme/admin-ui" sub="4.2.0 · pnpm-lock.yaml" />
+      <Row title="acme/storefront" sub="4.1.7 · yarn.lock" />
+    </Rows>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Fix with agent</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+1. Open the finding and choose <Ui>Fix with agent</Ui>.
+2. Check the repositories and the target version.
+3. Confirm. Depending on your permissions the group is started or proposed for approval in the [Inbox](/guide/home/inbox/).
+
+Once a task is under way the finding turns **fixing** in those repositories. The dialog cannot be confirmed, and says why, while write tasks are off, when no repository has the finding open, when no fixed version is published, or when more repositories are affected than one group allows.
+
+## Allowlist a finding
+
+Some advisories do not apply: a server-side issue in a package only used in the browser, a dev-only tool. <Ui>Allowlist…</Ui> hides the finding with a reason people can check later. It needs `settings:write`.
+
+<Screen title="Supply chain › Security › Allowlist">
+  <Stack>
+    <Toolbar title="Allowlist GHSA-made-up0-0003" />
+    <Fields>
+      <Field label="Reason" value="Only rendered on the client; the SSR path is not used" wide />
+      <Field
+        label="Last day"
+        value="2027-03-31"
+        hint="The entry stops hiding the finding after this day"
+      />
+    </Fields>
+    <Facts items={[['Added to', 'audit.allowlist · group web']]} />
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Allowlist</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+1. Open the finding and choose <Ui>Allowlist…</Ui>.
+2. Write the reason and pick the last day the entry applies.
+3. Save. The entry is added to the `audit.allowlist` setting that already applies to the affected repositories, or to a new entry scoped to the repositories no entry covers.
+
+:::note
+A narrower allowlist entry replaces the whole list for its repositories. So repositories whose applying entry you cannot read are left out and named in the dialog; ask someone with access to add them.
+:::
+
+## Manage the allowlist
+
+The **Allowlist** view lists every `audit.allowlist` entry: what it applies to, the reason, the last day, its state and the repositories where it hides a finding now.
+
+<Screen title="Supply chain › Security › Allowlist">
+  <Tabs items={['Findings:9', 'Runs', 'Allowlist:3']} active={2} />
+  <Scroll>
+
+| Advisory             | Applies to               | Reason                      | Last day     | State                           | Hides in |
+| -------------------- | ------------------------ | --------------------------- | ------------ | ------------------------------- | -------- |
+| `GHSA-made-up0-0003` | `view-lib` · group `web` | Only rendered on the client | `2027-03-31` | <Tag tone="ok">active</Tag>     | 3        |
+| `GHSA-made-up0-0004` | `apps/web/**`            | Dev server only             | `2026-11-20` | <Tag tone="warn">expiring</Tag> | 1        |
+| `CVE-0000-00009`     | all repositories         | Not reachable from our code | `2026-10-31` | <Tag tone="bad">expired</Tag>   | 0        |
+
+  </Scroll>
+</Screen>
+
+States: **expired**, **expiring** (within 14 days), **active** and **permanent** (no last day). <Ui>Renew</Ui> sets a new last day and needs `settings:write`. Narrowed to one repository, the view keeps the entries that hide something there or whose scope reaches it, expired ones included. Without `settings:read` the view lists the allowlisted findings instead of the entries.
+
+An entry can also be written by hand through <Ui>Configure</Ui>:
+
+```json title="audit.allowlist"
+[
+  {
+    "id": "GHSA-made-up0-0004",
+    "reason": "Dev server only",
+    "expires": "2026-11-20",
+    "package": "dev-server-lib",
+    "paths": ["apps/web/**"]
+  }
+]
+```
+
+`id` is the advisory id or any alias, `reason` is required, `package` and `paths` (globs over lockfile paths) narrow it further.
+
+## Audit runs
+
+The **Runs** view lists the latest audit run per repository; with a repository picked, every run. Filter by trigger and by whether findings stayed. A row opens the run record.
+
+<Screen title="Supply chain › Security › Runs › acme/checkout-web">
+  <Toolbar crumbs={['Security', 'Runs']} title="acme/checkout-web · 3 h ago">
+    <Button>Run again</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 2, label: 'active', tone: 'bad' },
+      { value: 3, label: 'fixed', tone: 'ok' },
+      { value: 1, label: 'allowlisted' },
+      { value: 2, label: 'changed files' },
+    ]}
+  />
+  <Tabs items={['Findings:2', 'Fix attempts', 'Resolved:3', 'Allowlisted:1', 'Changed files:2']} />
+</Screen>
+
+An audit run scans the checkout, applies the allowlist, lets the fixers try each lockfile in turn, then scans again and trusts only that second scan. **Fix attempts** shows each fixer's try per file; **Resolved** what the rescan no longer found.
+
+## Run and configure audits
+
+- <Ui>Run audit</Ui>, the page's primary action, queues an audit now. It needs `audits:run`.
+- <Ui>Configure</Ui> opens the audit settings: `analyzers.audit`, `audit.fix`, `audit.upgrade` and
+  `audit.allowlist`. See [Settings › Analyzers](/guide/settings/analyzers/) and [Setting
+  keys](/reference/setting-keys/).
+
+Audits made elsewhere, such as in CI, can be uploaded to `POST /api/audit-runs` with `audits:run` on the repository.
+
+## In one repository
+
+The repository hub's **Supply chain** tab shows the same findings narrowed to that repository.
+
+## Related
+
+- [Libraries](/guide/supply-chain/libraries/) — advisories next to versions and update merge requests.
+- [Tasks](/guide/ops/tasks/) — follow a fix group.
+- [Policies](/start/concepts/policies/) — how scoped settings like the allowlist cascade.
+- [Agents › Tools](/agents/tools/) — `security_findings` for coding agents.

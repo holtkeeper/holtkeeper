@@ -1,0 +1,9 @@
+---
+interface Props {
+  columns?: number
+}
+
+const { columns = 2 } = Astro.props
+---
+
+<div class="hk-fields" style={`--cols: ${columns}`}><slot /></div>

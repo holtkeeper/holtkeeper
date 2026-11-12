@@ -1,0 +1,156 @@
+---
+title: Configuration
+description: A walk-through of holtkeeper.config.ts — the server section, the store, artifacts and retention, jobs, limits and AI providers — and what belongs in the panel instead.
+sidebar:
+  order: 1
+---
+
+import { Facts, Screen, Toolbar } from '@ui'
+
+`holtkeeper.config.ts` is a TypeScript module that describes the infrastructure of one instance: how people sign in, where data and artifacts live, and how workers run jobs. It is read once at start. Everything about your repositories — forges, groups, schedules, analyzer options, budgets — lives in the panel and the database instead.
+
+## Where the file lives
+
+The container mounts it read-only at `/app/config/holtkeeper.config.ts` and starts with `-c /app/config/holtkeeper.config.ts`. It must stay inside `/app` so its `@holtkeeper/*` imports resolve. Two starting points come with the repository:
+
+| File                                                | Used by         | Sign-in                                                   |
+| --------------------------------------------------- | --------------- | --------------------------------------------------------- |
+| `deploy/holtkeeper.config.ts`                       | Docker, Compose | `root` password                                           |
+| `deploy/helm/holtkeeper/files/holtkeeper.config.ts` | Helm chart      | `root` password, or passkeys with `HOLTKEEPER_AUTH=users` |
+
+Both read every secret from the environment, so you change behavior with [environment variables](/reference/environment/) rather than by editing the file. In Kubernetes, replace the file with `config.content` or `config.existingConfigMap`.
+
+## A walk-through
+
+This is the shape of the chart's config, shortened:
+
+```ts title="holtkeeper.config.ts"
+import { passwordAuth } from '@holtkeeper/auth-password'
+import { defineConfig } from '@holtkeeper/core'
+import { env } from '@holtkeeper/forge'
+import { postgresStore } from '@holtkeeper/store-postgres'
+import { sqliteStore } from '@holtkeeper/store-sqlite'
+
+const multiProcess = Boolean(process.env.HOLTKEEPER_DATABASE_URL)
+
+export default defineConfig({
+  server: {
+    auth: passwordAuth({
+      password: env('HOLTKEEPER_ROOT_PASSWORD'),
+      sessionSecret: env('HOLTKEEPER_SESSION_SECRET'),
+    }),
+    store: multiProcess
+      ? postgresStore({ url: env('HOLTKEEPER_DATABASE_URL') })
+      : sqliteStore({ path: '/data/holtkeeper.db' }),
+    vaultKey: env('HOLTKEEPER_VAULT_KEY'),
+    hostname: '0.0.0.0',
+    port: 7420,
+    publicUrl: 'https://holtkeeper.example.com',
+    artifacts: { kind: 'fs', dir: '/data/artifacts' },
+    retention: { days: 90 },
+  },
+  jobs: {
+    execution: { mode: 'mise' },
+    cacheDir: '/workspace/cache',
+    concurrency: 2,
+    webhookSecret: env('HOLTKEEPER_WEBHOOK_SECRET'),
+  },
+  limits: { distributed: multiProcess },
+})
+```
+
+`env('NAME')` stores a reference to a variable that is read when the value is used, so a config validates without its secrets. A config with mistakes stops the start with every problem listed by path.
+
+## `server`
+
+| Field                     | Default                         | Meaning                                                                                                      |
+| ------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `auth`                    | required                        | `usersAuth()`, `passwordAuth()`, `headerAuth()` or `noAuth()`; see [Sign-in](/self-host/configure/sign-in/). |
+| `store`                   | required                        | Where everything but artifacts lives; see below.                                                             |
+| `vaultKey`                | required                        | At least 32 characters. Seals credentials and secret settings.                                               |
+| `hostname`, `port`        | `127.0.0.1`, `7420`             | Listen on `0.0.0.0` in containers.                                                                           |
+| `publicUrl`               | none                            | The address people and GitLab use: webhook URLs, sign-in links, the Settings footer.                         |
+| `artifacts`               | `.holtkeeper/artifacts` on disk | `fs` or `s3`; see below.                                                                                     |
+| `retention`               | none (keep forever)             | `{ days?, maxBytes? }` sweeps artifacts hourly.                                                              |
+| `databasePath`            | none                            | The SQLite file, so Settings › System can report its size.                                                   |
+| `rotationIntervalMinutes` | `60`                            | Background credential rotation; `0` turns it off.                                                            |
+| `egress`                  | none                            | `{ secret, proxy? }` for the egress proxy; see [Egress](/self-host/configure/egress/).                       |
+
+:::caution
+Never change `vaultKey` once credentials are stored, and use the same key in every process. Without it, stored tokens and every database backup become unreadable.
+:::
+
+### Choose a store
+
+| Store                                         | Use it for                                                                                               |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `sqliteStore({ path })`                       | One process, or several in one container sharing the file.                                               |
+| `postgresStore({ url, schema?, max?, ssl? })` | Anything with more than one process. Schema `holtkeeper` by default, pool of 10 connections per process. |
+| `memoryStore()`                               | Tests only; nothing survives a restart.                                                                  |
+
+Postgres migrates itself on first use, one process at a time. The role needs `CREATE` on the database, or own a `holtkeeper` schema you created beforehand. For the **Slow queries** and **Sessions** tabs under Settings › System → Database, load `pg_stat_statements` and grant the role `pg_read_all_stats`. Behind PgBouncer in transaction mode, use 1.21 or later with `max_prepared_statements` set.
+
+### Artifacts
+
+Artifacts are files jobs produce: reports, encoded image variants, cached results.
+
+```ts title="holtkeeper.config.ts"
+artifacts: {
+  kind: 's3',
+  bucket: 'holtkeeper',
+  endpoint: 'https://s3.example.com',
+  region: 'eu-north-1',
+  accessKeyId: env('HOLTKEEPER_S3_ACCESS_KEY_ID'),
+  secretAccessKey: env('HOLTKEEPER_S3_SECRET_ACCESS_KEY'),
+  quotaBytes: 107374182400,
+},
+```
+
+`kind: 'fs'` takes a `dir`. `kind: 's3'` works with any S3-compatible storage and also accepts `sessionToken`, `prefix` and `virtualHostedStyle`. `quotaBytes` is a figure you declare — Holtkeeper never enforces it and cannot read a provider quota — shown against usage in **Settings › System**. S3 downloads are redirected to short-lived signed URLs.
+
+### Retention
+
+`retention: { days: 90 }` removes artifacts older than 90 days; with `maxBytes` it then removes the least recently used until the total fits. The sweep runs hourly on the process that holds the scheduler lease. Artifacts can be regenerated by running the analysis again, so retention costs history, not correctness.
+
+<Screen
+  title="Settings › System › Storage and caches"
+  caption="The artifact store card shows the bucket, usage against the declared quota and the retention in force."
+>
+  <Toolbar title="Artifacts" />
+  <Facts
+    items={[
+      ['Bucket', 's3.example.com · holtkeeper · eu-north-1'],
+      ['Used', '41.2 GB of 100 GB · 18,402 objects'],
+      ['Retention', '90 days'],
+    ]}
+  />
+</Screen>
+
+## `jobs`
+
+| Field            | Default             | Meaning                                                                                                            |
+| ---------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `execution`      | `{ mode: 'host' }`  | Where job commands run; see [Job execution](/self-host/configure/job-execution/). The starting configs use `mise`. |
+| `concurrency`    | `2`                 | Jobs one worker process runs at once. `--concurrency` overrides it per process.                                    |
+| `cacheDir`       | `.holtkeeper/cache` | Bare git mirrors of analyzed repositories, reused between jobs.                                                    |
+| `timeoutMinutes` | `30`                | A job running longer is stopped; that counts as a failed attempt.                                                  |
+| `webhookSecret`  | none                | The secret GitLab webhooks must send; webhooks are refused without it.                                             |
+
+The job engine always runs, with these defaults when the file has no `jobs` section.
+
+## `limits`, `ai`, `dryRun`
+
+- `limits: { distributed: true }` keeps credential rate and concurrency limits in the store, so several workers share one token's budget. Turn it on whenever more than one process runs.
+- `ai: { providers: [...] }` adds AI provider plugins that credentials in [Settings › AI](/guide/settings/ai/) can name. The chart's config adds Waibee Router; `WAIBEE_API_KEY` makes it list that account's catalog and prices.
+- `dryRun: true` makes jobs report what they would do without changing anything.
+
+## What does not belong here
+
+`forges`, `groups`, `repos`, `plugins`, `jobs.schedules`, `jobs.on*`, `jobs.commands`, `jobs.botUsername` and `jobs.webhooks` were moved to the panel. A file that still has them starts, logs one warning per key and ignores it. Add forges and groups in [Settings › Integrations](/guide/settings/integrations/); tool versions, polling intervals and the other runtime settings are under **Settings › System › Background work**.
+
+## Related
+
+- [Environment variables](/reference/environment/) — what the starting configs read.
+- [Sign-in](/self-host/configure/sign-in/) — the `auth` providers.
+- [Job execution](/self-host/configure/job-execution/) — `jobs.execution`.
+- [Server module](/modules/server/) and [core module](/modules/core/) — every field in depth.

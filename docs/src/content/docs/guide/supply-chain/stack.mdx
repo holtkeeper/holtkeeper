@@ -1,0 +1,215 @@
+---
+title: Stack
+description: See which runtimes, package managers, services and base images every repository uses, which release lines reach end of life, and whether each repository still matches its group's convention files.
+panel: Supply chain › Stack
+route: /supply/stack
+permission: catalog:read
+sidebar:
+  order: 4
+---
+
+import {
+  Button,
+  Diff,
+  Facts,
+  Field,
+  Fields,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See which runtimes, package managers, services and base images every repository uses, which release lines reach end of life, and whether each repository still matches its group's convention files.
+
+<Screen title="Supply chain › Stack" caption="Each cell is the version a repository uses, toned by its support.">
+  <Toolbar title="Stack">
+    <Segmented slot="start" items={['My teams:6', 'All I can see:21']} />
+    <Tag>Group: Any ▾</Tag>
+    <Button primary>Run stack scan</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 21, label: 'repositories' },
+      { value: 3, label: 'on end of life', tone: 'bad' },
+      { value: 4, label: 'end of life soon', tone: 'warn' },
+      { value: 6, label: 'behind a major', tone: 'warn' },
+      { value: '2 drift', label: 'conventions · Open' },
+    ]}
+  />
+  <Tabs items={['Runtimes', 'Conventions:2']} />
+  <Stack>
+    <Segmented items={['All', 'Ends soon:4', 'End of life:3']} />
+    <Tag>Kind: runtime ▾</Tag>
+  </Stack>
+  <Scroll>
+
+| Repository          | node                       | go                          | pnpm                        | postgres                  |
+| ------------------- | -------------------------- | --------------------------- | --------------------------- | ------------------------- |
+| `acme/checkout-web` | <Tag tone="ok">22.11</Tag> | —                           | <Tag tone="ok">10.4</Tag>   | —                         |
+| `acme/admin-ui`     | <Tag tone="bad">18</Tag>   | —                           | <Tag tone="warn">8.15</Tag> | —                         |
+| `acme/billing-api`  | —                          | <Tag tone="warn">1.23</Tag> | —                           | <Tag tone="warn">13</Tag> |
+| `acme/widget-kit`   | <Tag tone="ok">24</Tag>    | —                           | <Tag tone="ok">10.4</Tag>   | —                         |
+
+  </Scroll>
+</Screen>
+
+## What the page shows
+
+The stack is analyzed per group: once a day, every repository of the group is read through the forge, without a clone, and the versions found are compared with the latest releases and their end-of-life dates. The page shows the current state.
+
+| Kind            | Examples                  | Read from                                                                              |
+| --------------- | ------------------------- | -------------------------------------------------------------------------------------- |
+| runtime         | node, go, python, java    | version files (`.nvmrc`, `.tool-versions`, mise, `go.mod`), images, CI setup steps     |
+| package-manager | pnpm, npm, yarn, bun      | `packageManager`, version files                                                        |
+| service         | postgres, redis, rabbitmq | compose files, CI `services`, deployment YAML                                          |
+| os              | alpine, debian, ubuntu    | image tags                                                                             |
+| image           | your base images          | Dockerfiles, compose, CI and deployment YAML (Helm `values*.yaml`, `k8s`, `charts`, …) |
+| tool            | any other mise tool       | version files                                                                          |
+
+Support reads the same everywhere: **end of life**, **ends soon** (within 180 days by default), **LTS**, **active** or unknown. A floating version such as `22` counts as current while the latest is any `22.x`.
+
+A line under the tabs sums each group's changes over the past week.
+
+## Runtimes
+
+**Runtimes** is a repository × tool matrix. Narrow it with the support segment (all, ends soon, end of life) and the **Kind** filter; the scope switch narrows groups. Below the matrix, **Version lines** lists each tool with its latest version and the lines in use as chips with their repository count.
+
+<Screen title="Supply chain › Stack › Version lines">
+  <Scroll>
+
+| Tool     | Latest    | Lines in use                                                                          |
+| -------- | --------- | ------------------------------------------------------------------------------------- |
+| node     | `24.11.0` | <Tag tone="ok">24 × 3</Tag> <Tag tone="ok">22 × 11</Tag> <Tag tone="bad">18 × 2</Tag> |
+| go       | `1.25.4`  | <Tag tone="ok">1.25 × 4</Tag> <Tag tone="warn">1.23 × 1</Tag>                         |
+| postgres | `18.1`    | <Tag tone="ok">17 × 2</Tag> <Tag tone="warn">13 × 1</Tag>                             |
+
+  </Scroll>
+</Screen>
+
+## Upgrade a release line
+
+A line chip or a matrix cell opens the line sheet.
+
+<Screen title="Supply chain › Stack › node 18">
+  <Sheet title="node 18" position="1 of 9">
+    <Tag tone="bad" slot="tags">End of life</Tag>
+    <Button slot="actions">Plan upgrade with agent</Button>
+    <Facts
+      items={[
+        ['Latest', '24.11.0 · LTS 22'],
+        ['Suggested', '18 → 22'],
+      ]}
+    />
+    <Scroll>
+
+| Where declared      | Writes           | File             |
+| ------------------- | ---------------- | ---------------- |
+| `acme/admin-ui`     | `18`             | `.nvmrc`         |
+| `acme/admin-ui`     | `node:18-alpine` | `Dockerfile`     |
+| `acme/legacy-tools` | `18.20.4`        | `.tool-versions` |
+
+    </Scroll>
+
+  </Sheet>
+</Screen>
+
+- **Where declared** lists the repositories on the line, what each writes and where. Each repository links to its hub.
+- With a cell picked, **Selected cell** adds that repository's versions, the suggested upgrade steps and the convention its file is checked against.
+- <Ui>Plan upgrade with agent</Ui> appears when a newer line is suggested and you have `tasks:run`.
+  It starts one upgrade task group that moves every repository on the line to the first suggested
+  step, with the spend cap and the write-task checks of any rollout.
+
+## Conventions
+
+Conventions are golden files every repository of a group should match: an `.nvmrc`, a shared lint config, a CI include. **Conventions** is a repository × file grid.
+
+<Screen title="Supply chain › Stack › Conventions">
+  <Tabs items={['Runtimes', 'Conventions:2']} active={1} />
+  <Scroll>
+
+| Repository          | `.nvmrc`                      | `package.json`                | `.gitlab-ci.yml`             |
+| ------------------- | ----------------------------- | ----------------------------- | ---------------------------- |
+| `acme/checkout-web` | <Tag tone="ok">matches</Tag>  | <Tag tone="ok">matches</Tag>  | <Tag tone="ok">matches</Tag> |
+| `acme/admin-ui`     | <Tag tone="warn">drifts</Tag> | <Tag tone="warn">drifts</Tag> | <Tag tone="ok">matches</Tag> |
+| `acme/docs-site`    | <Tag tone="bad">missing</Tag> | <Tag tone="ok">matches</Tag>  | <Tag>error</Tag>             |
+
+  </Scroll>
+</Screen>
+
+A cell opens its problems and the suggested fix as a diff:
+
+<Screen title="Supply chain › Stack › Conventions › acme/admin-ui · package.json">
+  <Stack>
+    <Facts items={[['Problem', 'engines.node: expected ">=22", found ">=18"']]} />
+    <Diff
+      file="package.json"
+      stat="+1 −1"
+      lines={[
+        [4, ' ', '  "engines": {'],
+        [5, '-', '    "node": ">=18"'],
+        [5, '+', '    "node": ">=22"'],
+        [6, ' ', '  },'],
+      ]}
+    />
+    <Toolbar>
+      <Button primary>Open merge request</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+<Ui>Open merge request</Ui> (needs `analyses:run`) opens the fix in that repository. Problems and
+diffs show only for repositories you may read analyses of; elsewhere you see how many differences
+there are.
+
+### Define a convention
+
+Conventions are set per group in the `analyzers.stack` setting, which the panel edits as a form under [Settings › Analyzers](/guide/settings/analyzers/).
+
+<Screen title="Settings › Analyzers › stack › Conventions">
+  <Fields>
+    <Field label="Path" value=".nvmrc" mono />
+    <Field label="Mode" value="exact" />
+    <Field label="Content" value="22" mono wide />
+    <Field label="Create where missing" toggle={true} value="Suggest creating the file" />
+  </Fields>
+</Screen>
+
+| Mode            | Matches when                                                     | Suggested fix                 |
+| --------------- | ---------------------------------------------------------------- | ----------------------------- |
+| `exact`         | the file equals the golden content                               | replace the file              |
+| `json-subset`   | every key and array item of the golden JSON is present and equal | in-place edits, comments kept |
+| `yaml-subset`   | the same for YAML                                                | in-place edits                |
+| `lines-present` | every non-blank golden line appears, in any order                | append the missing lines      |
+
+:::note
+Conventions are exact files on purpose: no model writes or judges them.
+:::
+
+## Run a scan
+
+<Ui>Run stack scan</Ui> queues a new analysis instead of waiting for the daily one. Other
+`analyzers.stack` options: `ignore` (tools or images to leave out, such as
+`image:registry.example.com/*`), `soonDays` (default 180) and `lookups` (off only collects what
+repositories use, without latest versions).
+
+:::caution
+Helm templates and Kustomize overlays are not rendered, image tags that are code names (`bookworm`) count as unpinned, and unquoted YAML versions like `3.10` read as `3.1`. Quote them.
+:::
+
+## In a group
+
+A group page's **Stack & conventions** tab shows the same view for one group. The repository hub's stack link opens that tab for the repository's group, or this page when the repository is in no group.
+
+## Related
+
+- [Groups](/guide/repos/groups/) — where a group's stack and conventions live.
+- [Libraries](/guide/supply-chain/libraries/) — package dependencies rather than tools.
+- [Stack analyzer](/modules/stack/) — what is read and how versions are judged.
+- [Agents › Tools](/agents/tools/) — `stack_usage` and `repo_stack` for agents writing Dockerfiles and CI.

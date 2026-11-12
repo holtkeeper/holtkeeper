@@ -1,0 +1,211 @@
+---
+title: Connect agents
+description: Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP client, watch your own usage and browse the tools your agents get.
+panel: Account › Connect agents
+route: /account/agents
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Split,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Issue personal MCP tokens, add Holtkeeper to Claude Code, Cursor or any MCP client, watch your own usage and browse the tools your agents get. Every signed-in person can connect agents; a token reads by default and acts as you.
+
+<Screen title="Account › Connect agents" caption="Create a token, add the server to your client, ask about your code.">
+  <Toolbar title="Connect agents" crumbs={['Account']}>
+    <Button primary>New token</Button>
+  </Toolbar>
+  <Stack>
+
+**1** Create a token · **2** Add the server to your client · **3** Ask about your code
+
+**Your tokens**
+
+  </Stack>
+  <Strip
+    items={[
+      { value: 2, label: 'active', tone: 'ok' },
+      { value: 1, label: 'expires soon', tone: 'warn' },
+      { value: 0, label: 'expired' },
+      { value: 1, label: 'never used' },
+    ]}
+  />
+  <Scroll>
+
+| Name            | Status                              | Allows               | Token          | Expires    | Last used | Calls, 7 days |                               |
+| --------------- | ----------------------------------- | -------------------- | -------------- | ---------- | --------- | ------------- | ----------------------------- |
+| **laptop**      | <Tag tone="ok">Active</Tag>         | Read                 | `hk_mcp_3f9a…` | in 71 days | 2 h       | 412           | <Button ghost>Revoke</Button> |
+| **release-bot** | <Tag tone="warn">Expires soon</Tag> | Read · Release steps | `hk_mcp_c21d…` | in 9 days  | 1 d       | 38            | <Button ghost>Revoke</Button> |
+| **ci-agent**    | <Tag>Never used</Tag>               | Read · Run tasks     | `hk_mcp_77e0…` | in 1 year  | —         | 0             | <Button ghost>Revoke</Button> |
+
+  </Scroll>
+</Screen>
+
+## Create a token
+
+Use one token per machine or agent, so you can revoke one without breaking the others.
+
+1. Click <Ui>New token</Ui> in the header.
+2. Name it after the machine or agent, for example `laptop`.
+3. Pick when it expires: 30 days, 90 days, 1 year or never.
+4. Leave both switches off for a read-only token, or turn on what the agent needs:
+   - **Release steps** lets it propose, accept, version and deploy releases.
+   - **Run tasks** lets it start code-changing tasks and request reviews without waiting for a person to approve.
+5. Create it and copy the secret now; it is not shown again. The dialog also shows the ready Claude Code command.
+
+<Screen title="Account › Connect agents › New MCP token">
+  <Sheet title="New MCP token">
+    <Button primary slot="actions">
+      Create a token
+    </Button>
+    <Fields>
+      <Field label="Name" value="laptop" hint="One per machine or agent." />
+      <Field label="Expires after" value="90 days" />
+      <Field label="Release steps" toggle hint="Propose, accept, version and deploy releases." />
+      <Field label="Run tasks" toggle hint="Start tasks and request reviews without approval." />
+    </Fields>
+  </Sheet>
+</Screen>
+
+A token acts as you with read access to repositories, analyses, audits, knowledge and releases, plus releasing or running tasks when you turned those on. It never gets more than your own grants. With Holtkeeper's own accounts it follows your current grants, and disabling your account or signing out everywhere revokes it.
+
+:::caution
+A token authenticates only the MCP endpoint and the read-only catalog API. It cannot issue or revoke tokens. Revoke a token you no longer use from its row.
+:::
+
+### Token status
+
+| Status       | Meaning                            |
+| ------------ | ---------------------------------- |
+| Active       | Valid and used.                    |
+| Expires soon | Expires within 14 days.            |
+| Expired      | Past its expiry; create a new one. |
+| Never used   | No call has used it yet.           |
+
+The name filter above the table narrows long lists. **Calls, 7 days** counts each token's calls.
+
+## Add the server to your client
+
+**Client setup** shows the endpoint and a tab per client, each with <Ui>Copy</Ui>.
+
+<Screen title="Account › Connect agents › Client setup">
+  <Stack>
+    <Segmented items={['Claude Code', 'Cursor', '.mcp.json', 'curl check']} />
+  </Stack>
+</Screen>
+
+For Claude Code, run:
+
+```sh title="Claude Code"
+claude mcp add --transport http holtkeeper https://holtkeeper.example.com/mcp \
+  --header "Authorization: Bearer hk_mcp_…"
+```
+
+The **.mcp.json** tab gives the same server as a project file:
+
+```json title=".mcp.json"
+{
+  "mcpServers": {
+    "holtkeeper": {
+      "type": "http",
+      "url": "https://holtkeeper.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer hk_mcp_…"
+      }
+    }
+  }
+}
+```
+
+The **curl check** tab is a `curl` command that asks the endpoint for its tool list, so you can confirm the token works before configuring a client. **Cursor** has the JSON for its MCP settings. The endpoint speaks Streamable HTTP, so any client that supports it works. More setups are in [Agents › Connect](/agents/connect/).
+
+## See your usage
+
+**My usage** shows your own calls over 7, 30 or 90 days.
+
+<Screen title="Account › Connect agents › My usage">
+  <Toolbar title="My usage">
+    <Segmented items={['7 days', '30 days', '90 days']} active={1} />
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 1284, label: 'tool calls' },
+      { value: 9, label: 'failed', tone: 'bad' },
+      { value: '2 h', label: 'last call' },
+    ]}
+  />
+  <Split>
+    <Stack>
+
+**Tools you called most**
+
+<Meter value={100} label="search_symbols · 402" tone="ok" />
+<Meter value={61} label="get_package_api · 246" tone="ok" />
+<Meter value={33} label="repo_rules · 131" tone="ok" />
+
+    </Stack>
+    <Stack>
+
+**Packages your calls asked about most**
+
+<Meter value={100} label="@acme/widget-kit · 188" tone="ok" />
+<Meter value={42} label="some-lib · 79" tone="ok" />
+
+**Clients you called from most**
+
+<Meter value={100} label="claude-code · 1102" tone="ok" />
+<Meter value={16} label="cursor · 182" tone="ok" />
+
+    </Stack>
+
+  </Split>
+</Screen>
+
+A daily chart shows answered over failed calls. Tool calls do not call a model, so they cost nothing from the AI budget. With `ai:read`, a link leads to everyone's usage on [Ops › AI spend](/guide/ops/ai-spend/).
+
+## Browse the tool reference
+
+**Tool reference** is read live from the endpoint, so it lists exactly the tools you get. Tools are split into **Your packages** (exports, versions, usages and upgrade impact of what your repositories publish), **Third-party libraries** (whether to add or upgrade a dependency, and the docs, changes, issues and source of libraries at the version each repository uses) and **Team knowledge**. Each tool shows its description and arguments, and the list can be filtered.
+
+<Screen title="Account › Connect agents › Tool reference">
+  <Stack>
+    <Facts
+      items={[
+        ['search_symbols', 'Find exported names across your packages · q, package, repo, kind'],
+        [
+          'evaluate_dependency',
+          'What the organization knows about a dependency before adding or upgrading it',
+        ],
+        ['search_knowledge', 'Decisions, conventions and migration notes of the knowledge base'],
+      ]}
+    />
+  </Stack>
+</Screen>
+
+:::note
+Agents can propose knowledge and rule changes, but people review them in Knowledge. No MCP tool approves tasks or makes other [Inbox](/guide/home/inbox/) decisions.
+:::
+
+## Related
+
+- [Agents › Connect](/agents/connect/) — client setup in more depth.
+- [MCP tools](/reference/mcp-tools/) — every tool and its arguments.
+- [Agent tasks](/agents/tasks/) — what **Run tasks** lets an agent do.
+- [Profile and access](/guide/account/profile/) — your grants, which tokens never exceed.
+- [AI spend](/guide/ops/ai-spend/) — everyone's MCP usage.

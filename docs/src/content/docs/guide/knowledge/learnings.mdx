@@ -1,0 +1,150 @@
+---
+title: Learnings
+description: Turn what people teach Holtkeeper in replies to review comments, and rules agents propose, into Guide rules — pick the scope, accept in batches and take back what auto-accept let through.
+panel: Knowledge › Learnings
+route: /knowledge/learnings
+permission: knowledge:read
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Comment,
+  Kbd,
+  Screen,
+  Scroll,
+  Segmented,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Turn what people teach Holtkeeper in replies to review comments, and rules agents propose, into Guide rules — pick the scope, accept in batches and take back what auto-accept let through.
+
+<Screen title="Knowledge › Learnings" caption="Proposed candidates only; accepted rules live in the Guide.">
+  <Toolbar crumbs={['Knowledge', 'All']} title="storefront">
+    <Segmented slot="start" items={['Guide', 'Notes:12', 'Learnings:3']} active={2} />
+    <Button ghost>Configure</Button>
+  </Toolbar>
+  <Toolbar>
+    <Segmented slot="start" items={['All:3', 'Review reply:2', 'Merged:0', 'Over MCP:1']} />
+    <Tag>Section: any</Tag>
+    <Tag>Confidence: any</Tag>
+    <Tag>Sort: evidence</Tag>
+    <Button primary>Accept 2 selected</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 3, label: 'waiting for a person · also in Inbox', tone: 'warn' },
+      { value: 2, label: 'from review replies' },
+      { value: 1, label: 'over MCP' },
+      { value: 2, label: 'selected' },
+    ]}
+  />
+  <Scroll>
+
+|     | Rule                                                                                             | Section | Evidence | Source                  | Confidence   | Promote to                        |                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------ | ------- | -------- | ----------------------- | ------------ | --------------------------------- | --------------------------------------------------------------------------------- |
+| ☑   | Do not flag `any` in files under `src/legacy/`; they are typed in ABC-210. · `acme/admin-ui`     | Review  | 3        | Review reply · !1204 +2 | ▮▮▮▮▯ High   | <Tag>Team storefront</Tag>        | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+| ☑   | Use `formatMoney` from @acme/widget-kit for prices in UI. · `acme/checkout-web`                  | General | 1        | Review reply · !318     | ▮▮▮▯▯ Medium | <Tag>This repository</Tag>        | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+| ☐   | Snapshot tests need a stable seed. · `acme/widget-kit` · proposed by agent: flaky snapshot in CI | Testing | 1        | Over MCP                | ▮▮▯▯▯ Low    | <Tag>Family Storefront apps</Tag> | <Button>Accept</Button> <Button ghost>Edit</Button> <Button ghost>Reject</Button> |
+
+  </Scroll>
+  <div style="padding: 0.5rem 0.75rem" class="hk-dim">J / K move · X select · P accept · D reject</div>
+</Screen>
+
+## Where candidates come from
+
+- **Review reply** — someone replies to a Holtkeeper review comment with a lasting rule: "we don't do X here", "this is intentional because…", "don't flag this". Holtkeeper filters replies cheaply first (thanks, "fixed" and questions never pass), then a small AI call turns a passing reply into one imperative sentence of at most 200 characters, without personal names.
+- **Merged** — candidates drawn from merged work.
+- **Over MCP** — a coding agent proposed a rule with `propose_rule_change`, with a reason and sometimes a target scope. No AI call is made.
+
+Nothing reaches agents until a person accepts it.
+
+<Screen title="Merge request !1204 · acme/admin-ui" kind="example" caption="A reply that becomes a candidate.">
+  <Stack>
+    <Comment severity="minor" where="src/legacy/session.ts · line 12">
+
+**Avoid `any`.** The return type is `any`; give it a concrete type.
+
+    </Comment>
+    <Comment author="Ivo P.">
+
+Files under `src/legacy/` are typed in ABC-210, please don't flag `any` there until then.
+
+    </Comment>
+
+  </Stack>
+</Screen>
+
+## Read the table
+
+| Column     | Meaning                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| Rule       | The candidate rule and its repository; for a direct proposal, who proposed it and why.           |
+| Section    | The [Guide](/guide/knowledge/guide/) section it goes into.                                       |
+| Evidence   | Replies backing it, plus one for a direct proposal.                                              |
+| Source     | Review reply, Merged or Over MCP, with the first merge request linked and `+N` more.             |
+| Confidence | Five bars and a level: Low (1–2), Medium (3), High (4–5). It is computed from the sources alone. |
+| Promote to | The scope the rule is accepted into.                                                             |
+
+The source tabs count proposed candidates per source. **Section** and **Confidence** filter; **Sort** orders by evidence, confidence or newest. In _All_, candidates of other teams' repositories fold into an **Other teams** row. The strip counts candidates waiting for a person (also listed in the [Inbox](/guide/home/inbox/)) and where they came from.
+
+## Choose the scope
+
+**Promote to** offers every scope you may edit for the candidate's repository: the repository, its family, its subgroup and team, never _All repositories_. It starts at the scope the proposer named, else at the suggested one, where a group means the repository's nearest group (a subgroup before its parent). While you pick another scope, `target:` under the picker shows your choice.
+
+Without the right to decide, the cell only reads `suggested:` or `target:`.
+
+:::tip
+A rule taught on one repository often holds for the whole team. Promote it to the team so every repository's reviews follow it.
+:::
+
+## Accept, edit or reject
+
+1. Tick candidates, or focus one with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>X</Kbd> to toggle it.
+2. Check **Promote to** for each.
+3. Click <Ui>Accept N selected</Ui>, or press <Kbd>P</Kbd>. Without a selection, <Kbd>P</Kbd> accepts the focused row.
+
+Rights are checked per candidate and per target scope. Candidates that could not be accepted stay selected with the reason under their rule; a toast counts what was accepted.
+
+- <Ui>Edit</Ui> changes the rule text and section in place.
+- <Ui>Reject</Ui>, or <Kbd>D</Kbd>, rejects the selected or focused candidates.
+
+Keys work outside text fields; the footer lists them.
+
+:::note
+Checkboxes show only on candidates you may decide. Accepting writes the rule into the scope's section of the Guide, with links back to its sources.
+:::
+
+## After deciding
+
+Under the table, **Accepted rules live in the Guide** counts accepted rules per section, each linking to that section of the space's Guide. Accepted rules sit after team rules and before policies and generated text in what agents read.
+
+**Rejected** shows rejected candidates on request. They can still be accepted or edited; rejecting an accepted rule takes it out of the Guide.
+
+### Rules auto-accept let through
+
+The `learnings.autoAccept` policy can accept candidates without a person, by source (_Proposed over MCP_, _Review replies_), into the suggested scope or the repository only. Those rules are behind <Ui>Show N auto-accepted</Ui> in the accepted card, each reading _accepted by Auto-accept_.
+
+- Accept it again to confirm it: your name is recorded, and you may move it to another scope.
+- Reject it to take it out of the Guide.
+
+<Ui>Configure</Ui> on this tab opens the review analyzer in **Settings › Analyzers**, since review
+threads are where learnings come from. The auto-accept policy lives in **Settings › Policies** at
+**Agent knowledge**.
+
+## Reactions are elsewhere
+
+👍 and 👎 on review comments are counted per finding category in [Quality › Reviews](/guide/quality/reviews/), not here. The **Learnings** tab of a review there lists the candidates drawn from that merge request.
+
+## Related
+
+- [Team guide](/guide/knowledge/guide/) — where accepted rules land, and how much room they get.
+- [Reviews](/guide/quality/reviews/) — review comments, replies and reactions.
+- [Notes](/guide/knowledge/notes/) — longer decisions and migration notes.
+- [Settings › Policies](/guide/settings/policies/) — auto-accept for learnings, notes and generated text.
+- [Guide](/modules/guide/) — how review learnings are captured and decided.

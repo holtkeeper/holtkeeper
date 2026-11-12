@@ -1,0 +1,33 @@
+---
+interface Props {
+  file?: string
+  /** Header text at the right, such as `+14 −3`. */
+  stat?: string
+  /** `[line, '+' | '-' | ' ', text]` per line. */
+  lines: [number | string, '+' | '-' | ' ', string][]
+}
+
+const { file, stat, lines } = Astro.props
+const kind = { '+': 'add', '-': 'del', ' ': undefined } as const
+---
+
+<div class="hk-diff">
+  {
+    file && (
+      <div class="hk-diff-file">
+        <span>{file}</span>
+        <span class="hk-sp" />
+        {stat && <span>{stat}</span>}
+      </div>
+    )
+  }
+  {
+    lines.map(([n, sign, text]) => (
+      <div class:list={['hk-diff-line', kind[sign]]}>
+        <span class="n">{n}</span>
+        <span>{sign === '-' ? '−' : sign}</span>
+        <span>{text}</span>
+      </div>
+    ))
+  }
+</div>

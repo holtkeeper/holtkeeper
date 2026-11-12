@@ -1,0 +1,63 @@
+---
+title: Agents
+description: What coding agents get from Holtkeeper over MCP, and how changes they ask for reach your repositories.
+sidebar:
+  label: Overview
+  order: 0
+---
+
+import { Card, Cards } from '@ui'
+
+Holtkeeper gives coding agents (Claude Code, Cursor or any MCP client) the same picture of the fleet people see in the panel: which packages exist and how they are used, which libraries and versions each repository runs, the team's rules and knowledge, release state and job health. Agents read all of it over one MCP endpoint before they change code. When an agent wants Holtkeeper itself to change code, it asks for a task, and a person approves it unless the token was allowed to run tasks.
+
+## What an agent gets
+
+| Area                     | What the agent can answer                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Your packages            | Every export of every internal package with its doc comment, per released version, and what changed between them. |
+| Usage across the fleet   | Who uses a package, which exports, props and members, the code of those uses and what an upgrade would break.     |
+| Third-party libraries    | Version-exact docs, changelogs, migration notes, known issues and source of the npm and Go libraries in use.      |
+| Supply chain             | Advisories, license verdicts and the runtimes, images and charts each repository runs.                            |
+| Team rules and knowledge | The repository's Guide, commit conventions, test ids, asset limits and the knowledge base.                        |
+| Releases and jobs        | Where a repository is in its release flow, what changed since the last version, why a job failed.                 |
+| Tasks                    | Ask Holtkeeper to change code in one or many repositories through draft merge requests.                           |
+
+## How it fits together
+
+1. **A person creates a token** in **Account › Connect agents**. The token acts as that person, cut down to reading: it never sees more than its owner may.
+2. **The agent reads over MCP.** Before it edits a repository it calls `repo_rules`; before it adds a dependency, `evaluate_dependency`; before it commits, `commit_conventions`. The server tells clients when to use which tool, so most agents pick the right one without prompting.
+3. **Changes go through tasks.** `start_task` proposes a task group: one draft merge request per repository on a shared branch. A person approves it in the Inbox or in **Ops › Tasks**; a token issued with **Run tasks** may start it right away where its owner may run tasks.
+4. **Lessons come back as proposals.** Agents propose knowledge entries and Guide rules; people review them in **Knowledge** before any agent relies on them.
+
+:::note
+Nothing an agent does over MCP is a decision on behalf of a person. No tool approves another task group, accepts a note or a learning, or renews an allowlist entry; those stay in the panel.
+:::
+
+## Pages
+
+<Cards>
+  <Card title="Connect an agent" href="/agents/connect/" icon="agents">
+    Create a token and add Holtkeeper to Claude Code, Cursor or any MCP client.
+  </Card>
+  <Card title="Tokens and scopes" href="/agents/tokens/" icon="account">
+    What a token can see, the Release steps and Run tasks scopes, revocation and usage.
+  </Card>
+  <Card title="What agents can ask" href="/agents/tools/" icon="book">
+    A walkthrough of the tools with example questions and answers.
+  </Card>
+  <Card title="Changing code through tasks" href="/agents/tasks/" icon="ops">
+    `start_task`, approvals, `task_status` and the merge requests tasks open.
+  </Card>
+  <Card title="Rules and knowledge" href="/agents/rules-and-knowledge/" icon="knowledge">
+    The Guide, commit conventions, test ids, asset policy and the knowledge base.
+  </Card>
+  <Card title="The review agent" href="/agents/review-agent/" icon="quality">
+    How Holtkeeper reviews merge requests and answers in its threads.
+  </Card>
+</Cards>
+
+## Related
+
+- [MCP tools](/reference/mcp-tools/) — every tool with its arguments.
+- [Account › Connect agents](/guide/account/connect-agents/) — the panel screen.
+- [Tasks and the Inbox](/start/concepts/tasks-and-inbox/) — how proposals wait for people.

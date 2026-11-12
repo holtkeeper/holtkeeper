@@ -1,0 +1,23 @@
+---
+interface Props {
+  /** Where the piece of the panel lives, as its breadcrumb: `Quality › Bundles`. */
+  title: string
+  /** `panel` (default) frames a piece of the panel; `example` frames anything else. */
+  kind?: 'panel' | 'example'
+  /** One sentence under the frame. */
+  caption?: string
+}
+
+const { title, kind = 'panel', caption } = Astro.props
+---
+
+<figure class="hk-ui-root hk-screen" aria-label={`${kind === 'panel' ? 'In the panel' : 'Example'}: ${title}`}>
+  <figcaption class="hk-screen-cap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18"></path>
+    </svg>
+    {kind === 'panel' ? 'In the panel' : 'Example'} · {title}
+  </figcaption>
+  <div class="hk-screen-body"><slot /></div>
+</figure>
+{caption && <p class="hk-caption">{caption}</p>}

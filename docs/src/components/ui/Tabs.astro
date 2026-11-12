@@ -1,0 +1,25 @@
+---
+interface Props {
+  /** Tab names; `Name:3` adds a count. */
+  items: string[]
+  /** The selected tab's index. */
+  active?: number
+}
+
+const { items, active = 0 } = Astro.props
+const tabs = items.map((item) => {
+  const [name, count] = item.split(':')
+  return { name, count }
+})
+---
+
+<div class="hk-tabs-ui">
+  {
+    tabs.map((t, i) => (
+      <span class={i === active ? 'on' : undefined}>
+        {t.name}
+        {t.count && <span class="hk-count-ui">{t.count}</span>}
+      </span>
+    ))
+  }
+</div>

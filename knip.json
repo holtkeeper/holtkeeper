@@ -8,7 +8,11 @@
       "entry": ["deploy/holtkeeper.config.ts", "deploy/helm/*/files/*.ts"]
     },
     "docs": {
-      "ignoreDependencies": ["@astrojs/check"]
+      "ignoreDependencies": [
+        "@astrojs/check",
+        "@fontsource-variable/geist",
+        "@fontsource-variable/geist-mono"
+      ]
     },
     "examples": {
       "entry": ["dev/*.ts"]

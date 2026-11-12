@@ -1,0 +1,138 @@
+---
+title: Bundles
+description: Track how much JavaScript and CSS every app and published package ships, set a gzip budget per target, and see which release made it grow.
+panel: Quality › Bundles
+route: /quality/bundles
+permission: analyses:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Sheet,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Track how much JavaScript and CSS every app and published package ships, set a gzip budget per target, and see which release made it grow.
+
+<Screen title="Quality › Bundles" caption="Rows go worst first: over budget, failed builds, near budget, then by budget used.">
+  <Toolbar title="Bundles">
+    <Tag>Kind: all</Tag>
+    <Tag>Budget: any</Tag>
+    <Button primary>Measure now</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 41, label: 'targets' },
+      { value: 2, label: 'over budget', tone: 'bad' },
+      { value: 3, label: 'near budget', tone: 'warn' },
+      { value: 6, label: 'grew since last release · +18.4 kB' },
+    ]}
+  />
+  <Scroll>
+
+| Target                               | Release   | JS gzip  | Change  | Budget used           |
+| ------------------------------------ | --------- | -------- | ------- | --------------------- |
+| **admin-ui** · app · `acme/admin-ui` | `v3.14.0` | 212.6 kB | +6.2 kB | <Meter value={103} /> |
+| **checkout-web** · app               | `v8.2.1`  | 168.0 kB | +1.1 kB | <Meter value={93} />  |
+| **@acme/widget-kit** · package       | `5.0.0`   | 31.4 kB  | −2.0 kB | <Meter value={78} />  |
+| **docs-site** · app                  | `main`    | 96.2 kB  | +0.3 kB | <Tag>No budget</Tag>  |
+
+  </Scroll>
+</Screen>
+
+## What the table shows
+
+One row per app build or published package, from the newest bundle record of every repository you can read. The page reads stored measurements only; opening it never starts a build.
+
+| Column      | Meaning                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| Target      | The app or package, its kind and repository. Opens the repository hub at Quality › Bundles. |
+| Release     | The package version, or the ref the build was measured on.                                  |
+| JS / CSS    | Total shipped size after gzip.                                                              |
+| Change      | Bytes and percent against the previous measurement.                                         |
+| Budget used | Share of the target's budget, the state in words and `N% of budget`.                        |
+| Largest     | Initial gzip size of the largest entrypoint.                                                |
+
+The toolbar narrows the table: the scope switch (_My teams_ folds other teams' targets into one row with their over-budget count), **Kind** (apps or packages) and **Budget** (over, build failed, near, within, no budget). The search in the header filters by target or repository. Every column sorts, and filters live in the URL, so a link shows the same view.
+
+## Set a budget
+
+1. Open <Ui>⋯</Ui> › <Ui>Configure</Ui> on the page, or **Settings › Analyzers › bundle**.
+2. Under **Budgets**, map a target name or a glob to the maximum gzip size in bytes.
+3. Save. The next measurement applies it; <Ui>Measure now</Ui> runs one at once.
+
+```json title="analyzers.bundle · budgets"
+{
+  "checkout-web": 180000,
+  "admin-*": 205000,
+  "@acme/*": 40000
+}
+```
+
+:::note
+A target is **near** its budget from 90% and **over** above 100%. Targets without a budget still show their size and change; find them with **Budget: no budget**.
+:::
+
+## Inspect a target
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. A side sheet opens with the budget as a progress bar, the facts and four tabs.
+
+<Screen title="Quality › Bundles › checkout-web">
+  <Sheet id="BND-418" title="checkout-web" position="3 of 41">
+    <Tag tone="warn" slot="tags">
+      Near budget
+    </Tag>
+    <Button slot="actions">Open as page</Button>
+    <Facts
+      items={[
+        ['Repository', 'acme/checkout-web'],
+        ['Release', 'v8.2.1 · 2 days ago'],
+        ['Total', '168.0 kB gzip · +1.1 kB'],
+        ['Budget', '180 kB · 93% used'],
+        ['Largest entry', 'main · 121.4 kB'],
+      ]}
+    />
+    <Tabs items={['Composition', 'Entrypoints', 'Packages', 'History']} />
+  </Sheet>
+</Screen>
+
+| Tab         | What it shows                                                                                                                 |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Composition | Initial load per entrypoint, notable changes, and a treemap of what the bundle is made of.                                    |
+| Entrypoints | Every entrypoint with its initial and total size.                                                                             |
+| Packages    | Which dependencies take the space. A package target shows its archive here.                                                   |
+| History     | Size over every measurement in gzip, brotli or raw; failed builds are gaps. Pick a point to see its report in the other tabs. |
+
+<Ui>Open as page</Ui> turns the sheet into the full analysis record with a link you can share.
+
+## Measure past releases
+
+<Ui>⋯</Ui> › <Ui>Analyze past releases</Ui> queues the bundle analyzer for older tags, so History
+has something to compare against. It runs as an ordinary job; follow it in [Ops ›
+Runs](/guide/ops/runs/).
+
+:::caution
+
+<Ui>Measure now</Ui> and <Ui>Analyze past releases</Ui> need the `analyses:run` permission. Without
+it the buttons are hidden. :::
+
+## In one repository
+
+The repository hub's **Quality › Bundles** shows the same table narrowed to that repository. Its header links **Open in Quality** back to the fleet view.
+
+## Related
+
+- [Assets](/guide/quality/assets/) — images, fonts and media that break the asset policy.
+- [Settings › Analyzers](/guide/settings/analyzers/) — switch analyzers per scope and set their options.
+- [Bundle analyzer](/modules/bundles/) — how targets are found and measured.

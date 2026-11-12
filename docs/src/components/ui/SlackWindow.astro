@@ -1,0 +1,41 @@
+---
+import { botAvatar } from './slack.ts'
+
+interface Props {
+  channel: string
+  /** Channel topic next to its name. */
+  topic?: string
+  /** Show the workspace sidebar with these channels. */
+  channels?: string[]
+  workspace?: string
+}
+
+const { channel, topic, channels, workspace = 'Acme' } = Astro.props
+---
+
+<figure class="hk-ui-root hk-slack" aria-label={`Slack: #${channel}`}>
+  <div class="hk-slack-top" aria-hidden="true"><span>Search {workspace}</span></div>
+  <div class:list={['hk-slack-main', { 'no-side': !channels }]}>
+    {
+      channels && (
+        <div class="hk-slack-side" aria-hidden="true">
+          <span class="ws">{workspace}</span>
+          <span class="lab">Channels</span>
+          {channels.map((c) => (
+            <span class:list={['ch', { on: c === channel }]}># {c}</span>
+          ))}
+          <span class="lab">Apps</span>
+          <span class="ch">
+            <img src={botAvatar} alt="" width="16" height="16" />
+            holtkeeper
+          </span>
+        </div>
+      )
+    }
+    <div class="hk-slack-chan">
+      <div class="hk-slack-head"># {channel} {topic && <span>{topic}</span>}</div>
+      <div class="hk-slack-msgs"><slot /></div>
+      <div class="hk-slack-composer" aria-hidden="true">Message #{channel}</div>
+    </div>
+  </div>
+</figure>

@@ -1,0 +1,107 @@
+---
+title: Command palette
+description: Press ⌘K anywhere to jump to a repository, page, setting, library, symbol or person, or to run a quick action.
+panel: Anywhere · ⌘K
+sidebar:
+  order: 3
+---
+
+import { Kbd, Row, Rows, Screen, Segmented, Split, Stack, Tag, Ui, Facts } from '@ui'
+
+Press <Kbd>⌘K</Kbd> anywhere to jump to a repository, page, setting, library, symbol or person, or to run a quick action. The palette searches only what you can open.
+
+<Screen title="⌘K" caption="With All, each group keeps its best five matches; a selected repository shows a preview on the right.">
+  <Stack>
+    <Segmented items={['All:14', 'Repositories:3', 'Libraries:2', 'Pages:4', 'Settings:3', 'Actions:1', 'People:1']} />
+  </Stack>
+  <Split>
+    <Rows>
+      <Row title="› checkout" sub="Type to search · ↑ ↓ to move · ↵ to open" />
+      <Row title="acme/checkout-web" sub="Warnings · Coverage, Bundles" selected>
+        <Tag tone="warn">Warnings</Tag>
+      </Row>
+      <Row title="acme/checkout-api" sub="Healthy">
+        <Tag tone="ok">Healthy</Tag>
+      </Row>
+      <Row title="Quality › Bundles" sub="Page" />
+      <Row title="Analyzers › bundle › Budgets" sub="Setting" />
+      <Row title="@acme/checkout-utils" sub="Library · 2.4.0" />
+      <Row title="New chat thread" sub="Action" />
+    </Rows>
+    <Stack>
+
+**acme/checkout-web**
+
+<Facts
+  items={[
+    ['Groups', 'web, payments'],
+    ['Forge', 'work'],
+    ['Security', 'Healthy'],
+    ['Coverage', '71% · below target'],
+    ['Bundles', '93% of budget'],
+  ]}
+/>
+
+<Ui>Overview</Ui> <Ui>Supply chain</Ui> <Ui>Quality</Ui> <Ui>Releases</Ui>
+
+    </Stack>
+
+  </Split>
+</Screen>
+
+## Open it
+
+- Press <Kbd>⌘K</Kbd> on macOS or <Kbd>Ctrl</Kbd> <Kbd>K</Kbd> elsewhere. It works on every page, even while you type in a field. Press it again to close.
+- Click <Ui>⌘K</Ui> on the rail, or <Ui>Search</Ui> on a not-found page.
+- <Kbd>Esc</Kbd>, a click outside or opening a result closes it. The query starts empty each time.
+
+## What it finds
+
+| Group                 | What you get                                                                                                                                          | Shown when                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Repositories          | Each repository with its overall health and the areas that need attention. Selected, it previews its groups, forge, health and links to its hub tabs. | you have `repos:read`                                       |
+| Libraries and symbols | Packages and libraries, and exported symbols from two characters on.                                                                                  | you can read the catalog and typed a query                  |
+| Pages                 | Every page you can open, titled `Workspace › Page`.                                                                                                   | always                                                      |
+| Settings              | The same index as the search field on Settings.                                                                                                       | for the Settings sections you can open                      |
+| Actions               | Switch theme, open the documentation, start a new chat thread, sign out.                                                                              | always (new thread when Chat is visible)                    |
+| People                | People, opening them on Settings › People.                                                                                                            | you have `users:read` and Holtkeeper keeps its own accounts |
+| Recent                | Pages you opened from the palette.                                                                                                                    | while you can still reach them                              |
+
+Without a query, the palette shows Recent first, then Pages and Actions.
+
+## Narrow the search
+
+Click a chip to search one kind; it then lists up to 50 matches. Or start the query with a prefix:
+
+| Prefix | Searches     | Example  |
+| ------ | ------------ | -------- |
+| `>`    | Actions      | `>theme` |
+| `#`    | Repositories | `#admin` |
+| `@`    | People       | `@mira`  |
+
+Matches rank a title that starts with the query first, then a word of the title that starts with it, then any part of the title, then every word found in the title, subtitle or keywords. Words split on spaces and on `/ . : › @ _ -`, so `kit` finds `@acme/widget-kit`.
+
+## Move with the keyboard
+
+| Key                       | Does                                 |
+| ------------------------- | ------------------------------------ |
+| <Kbd>↑</Kbd> <Kbd>↓</Kbd> | Move the selection; it wraps around. |
+| <Kbd>↵</Kbd>              | Open the selected result.            |
+| <Kbd>Esc</Kbd>            | Close the palette.                   |
+
+Results that are pages are real links: <Kbd>⌘</Kbd>-click or a middle click opens them in a new tab.
+
+## Recent items
+
+The palette remembers the last eight pages you opened from it, newest first; actions are never remembered. The list is kept in this browser per person, so people sharing a browser never see each other's items, and signing out clears it. Items you can no longer reach drop out on their own.
+
+:::tip
+If a repository link leads to a not-found page, it suggests up to three repositories a few typos away, only from those you can see.
+:::
+
+## Related
+
+- [Overview](/guide/home/overview/) — the page the palette usually starts from.
+- [Repository hub](/guide/repos/repository-hub/) — where a repository result opens.
+- [Threads](/guide/chat/threads/) — what **New chat thread** starts.
+- [Keyboard shortcuts](/reference/shortcuts/)

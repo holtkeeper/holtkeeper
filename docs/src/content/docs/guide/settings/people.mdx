@@ -1,0 +1,236 @@
+---
+title: People & access
+description: Invite people, give them a role on the groups and repositories they work on, see who can do what, and set how far everyone reads other teams' catalog.
+panel: Settings › People & access
+route: /settings/people
+permission: users:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Invite people, give them a role on the groups and repositories they work on, see who can do what, and set how far everyone reads other teams' catalog.
+
+<Screen title="Settings › People & access" caption="Status starts at Active and Invited; disabled people fold into a button under the table.">
+  <Toolbar title="People & access" crumbs={['Settings']}>
+    <Tag>Users</Tag>
+    <Tag>Roles</Tag>
+    <Tag>Reach</Tag>
+    <Button primary>Invite people</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 18, label: 'people' },
+      { value: 15, label: 'active' },
+      { value: 2, label: 'invited' },
+      { value: 1, label: 'disabled' },
+      { value: 2, label: 'admins' },
+      { value: 1, label: 'without a passkey or SSO', tone: 'warn' },
+    ]}
+    end="Passkeys · SSO"
+  />
+  <Toolbar>
+    <Tag slot="start">Search people</Tag>
+    <Tag>Role</Tag>
+    <Tag>Team</Tag>
+    <Tag>Sign-in</Tag>
+    <Tag>Status: Active, Invited</Tag>
+    <Segmented items={['Table', 'Access map']} />
+  </Toolbar>
+  <Scroll>
+
+| Person                              | Teams                                  | Role                        | Applies to | Last seen  | Sign-in | Status                                                |
+| ----------------------------------- | -------------------------------------- | --------------------------- | ---------- | ---------- | ------- | ----------------------------------------------------- |
+| **Mira K.** · mira@acme.dev · `you` | <Tag>Payments</Tag>                    | <Tag tone="acc">Admin</Tag> | Everything | now        | Passkey | <Tag tone="ok">Active</Tag>                           |
+| **Jon D.** · jon@acme.dev           | <Tag>Widgets</Tag>                     | Maintainer                  | Widgets    | 2 h ago    | SSO     | <Tag tone="ok">Active</Tag>                           |
+| **Ana P.** · ana@acme.dev           | <Tag>Payments</Tag> <Tag>Widgets</Tag> | Developer                   | Payments   | yesterday  | Passkey | <Tag tone="ok">Active</Tag>                           |
+| **Leo S.** · leo@acme.dev           | <Tag>Payments</Tag>                    | Viewer                      | Payments   | —          | —       | <Tag tone="warn">Invited</Tag> Link expires in 2 days |
+| **Rae T.** · rae@acme.dev           | —                                      | Custom                      | 3 grants   | 5 days ago | Passkey | <Tag tone="ok">Active</Tag>                           |
+
+  </Scroll>
+</Screen>
+
+## Find a person
+
+The table lists everyone who can sign in with the panel's own accounts. Search matches name, email and team; **Role**, **Team**, **Sign-in** and **Status** narrow it, and the toolbar says how many of how many are shown.
+
+| Column     | Meaning                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| Person     | Avatar, name, email, and `you` on your own row.                                               |
+| Teams      | The person's home groups, else the groups their access names.                                 |
+| Role       | Viewer, Developer, Maintainer, Admin, Custom or No access.                                    |
+| Applies to | Where the role applies, or how many grants a custom set has.                                  |
+| Last seen  | Their last signed-in request.                                                                 |
+| Sign-in    | Passkey, single sign-on or nothing yet.                                                       |
+| Status     | Active, Invited (with _Link expires in 2 days_ or _Link expired · send a new one_), Disabled. |
+
+**Access map** draws the filtered people against what they can reach; click a person to open their sheet.
+
+:::note
+**Teams** only decide what _My teams_ shows a person across the panel. They never grant access; roles do.
+:::
+
+## Roles
+
+Every person has one role on one scope, or an exact set of grants. The **Roles** block shows the four presets with how many enabled people hold each.
+
+| Role       | Can                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------- |
+| Viewer     | Read health, libraries, releases, knowledge and settings in its scope.                      |
+| Developer  | Viewer, plus run analyzers and audits, start agent tasks and write knowledge notes.         |
+| Maintainer | Developer, plus run release steps and edit settings in its scope.                           |
+| Admin      | Everything, everywhere, including people and credentials. Always covers the whole instance. |
+
+A scope is everything, some groups, or some repositories. A group entry can ask for repositories in two groups at once (`frontend + storefront`). Grants that match no preset show as **Custom**. See [Permissions](/reference/permissions/) for every action a grant can hold.
+
+## Invite people
+
+1. Click <Ui>Invite people</Ui> (needs `users:invite`).
+2. Enter the name and email.
+3. Pick a role and where it applies, or switch to exact grants.
+4. Send. A one-time sign-in link appears **once**: copy it and hand it over yourself.
+
+<Screen
+  title="Settings › People & access · Invite"
+  kind="example"
+  caption="You can hand out only access you hold yourself, over scopes you may invite to."
+>
+  <Stack>
+    <Toolbar title="Invite people" />
+    <Fields>
+      <Field label="Name" value="Leo S." />
+      <Field label="Email" value="leo@acme.dev" />
+      <Field
+        label="Role"
+        value="Viewer"
+        hint="Reads health, libraries, releases, knowledge and settings in its scope."
+      />
+      <Field label="Applies to" value="Payments" />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Exact grants</Button>
+      <Button primary>Create invite link</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+:::caution
+You can only give access you have: `users:invite` over each scope, and grants within your own. A group admin can invite people to their group, never to everything.
+:::
+
+While the person has not signed in, their sheet offers <Ui>Send a new invite</Ui>, which makes a fresh link.
+
+## Change someone's access
+
+Click a row, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows status, role, teams, who added them and when, and the invite note.
+
+<Screen title="Settings › People & access › Ana P.">
+  <Sheet title="Ana P." position="3 of 18">
+    <Tag tone="ok" slot="tags">
+      Active
+    </Tag>
+    <Tag slot="tags">Developer</Tag>
+    <Button slot="actions">Create recovery link</Button>
+    <Button slot="actions">Disable</Button>
+    <Button slot="actions">⋯</Button>
+    <Tabs items={['Role and access', 'Sign-in', 'Teams', 'Activity']} />
+    <Stack>
+      <Segmented items={['Viewer', 'Developer', 'Maintainer', 'Admin']} active={2} />
+      <Field label="Applies to" value="Payments" />
+      <Facts
+        items={[
+          ['Allowed', 'read repositories, run analyzers, start agent tasks, write notes'],
+          ['Gains', 'run release steps, edit settings'],
+          ['Loses', '—'],
+          ['Not allowed', 'manage people, read credentials'],
+        ]}
+      />
+      <Toolbar>
+        <Button ghost>Edit exact grants</Button>
+        <Button primary>Save</Button>
+      </Toolbar>
+    </Stack>
+  </Sheet>
+</Screen>
+
+1. On **Role and access**, pick the new role. The current one stays marked.
+2. Set **Applies to**.
+3. Check **What … can do**: what stays allowed, what they gain, what they lose and what stays out of reach.
+4. Click <Ui>Save</Ui>. Nothing is written before that.
+
+<Ui>Edit exact grants</Ui> edits the raw grants instead. A custom set stays untouched unless you
+pick a preset or edit it. Your own access is read only here.
+
+The other tabs:
+
+| Tab      | What it shows                                                                                         |
+| -------- | ----------------------------------------------------------------------------------------------------- |
+| Sign-in  | Passkeys (remove one with `users:write`) and linked single sign-on identities.                        |
+| Teams    | The person's home groups.                                                                             |
+| Activity | Last seen, then what they did, as far as the [Audit log](/guide/settings/audit-log/) lets you see it. |
+
+The header's <Ui>Create recovery link</Ui> (needs `users:write`) lets someone who lost their passkey back in. <Ui>Disable</Ui> and <Ui>Enable</Ui> never apply to yourself. The ⋯ menu edits name and email.
+
+## Set the reach across teams
+
+**Reach** is one level for every person, team and agent, without exceptions per team. It decides what people see of repositories outside their own access:
+
+<Screen title="Settings › People & access · Reach">
+  <Rows>
+    <Row title="Own teams only" sub="Nothing of other teams' repositories." />
+    <Row
+      title="Catalog of every team"
+      sub="Packages, public API, stack, usage counts and shared notes. No code."
+    />
+    <Row
+      title="Catalog and usage code of every team"
+      sub="The catalog plus the code of usages in other teams' repositories."
+      selected
+    >
+      <Tag tone="acc">Current</Tag>
+    </Row>
+  </Rows>
+</Screen>
+
+Changing it needs `settings:write` over everything. Findings, audits, jobs, releases, review output and source code never cross teams at any level.
+
+## Make repositories read-only
+
+**Read-only repositories** lists freezes: while a repository is frozen, Holtkeeper only analyzes it and never changes it.
+
+1. Add an entry, pick the groups or repositories and give a reason. A new entry starts frozen.
+2. Optionally set an end date; without one the freeze lasts until removed.
+3. To keep one repository of a frozen group writable, add an entry for it with **frozen** switched off. The most specific entry wins.
+
+Anyone with `settings:write` on a group or repository can lift a broader freeze there.
+
+## Who sees this section
+
+The people list needs `users:read`. With only `settings:read` you see Reach and read-only repositories. Inviting needs `users:invite`; disabling, recovery links and removing passkeys need `users:write`.
+
+## Related
+
+- [Permissions](/start/concepts/permissions/) — grants, scopes and roles explained.
+- [Permissions reference](/reference/permissions/) — every action and what it allows.
+- [Audit log](/guide/settings/audit-log/) — who changed whose access, and when.
+- [Profile](/guide/account/profile/) — your own passkeys, teams and access.
+- [Access](/modules/access/) — how grants are checked.

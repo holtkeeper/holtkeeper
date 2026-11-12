@@ -1,0 +1,129 @@
+---
+title: Add repositories
+description: Put repositories under Holtkeeper's care by adding them to groups, by exact path or by pattern, and split teams into subgroups.
+panel: Repos › Repositories
+route: /repos
+permission: settings:write
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Holtkeeper looks after the repositories its groups include. A group is a set of path patterns on one forge, usually one team, and every repository it matches is listed, analysed and kept fresh. You can add repositories one by one with **Add repository**, or give a group a pattern such as `acme/web-*` and let new projects join on their own.
+
+## Add repositories by path
+
+**Add repository** is the primary action on **Repos** and **Repos › Groups**. It opens a side sheet in three steps.
+
+1. **Forge**: pick the forge the repositories live on.
+2. **Paths**: either <Ui>Pick from forge</Ui>, browsing the projects the token can see, or <Ui>Paste paths</Ui>, one path or GitLab URL per line. URLs are trimmed to paths and duplicates dropped. Up to 50 paths are checked at once against the token.
+3. **Group**: add the paths to an <Ui>Existing group</Ui> or a <Ui>New group</Ui> with an id such as `web`. The exact paths go into the group's include list.
+
+<Screen
+  title="Repos › Add repository"
+  caption="Step 2 of 3. A path the token cannot read names the account to invite."
+>
+  <Toolbar title="Add repository">
+    <Segmented items={['Pick from forge', 'Paste paths']} active={1} />
+  </Toolbar>
+  <Fields columns={1}>
+    <Field
+      label="Paths or forge URLs, one per line"
+      value="acme/checkout-web, https://gitlab.example.com/acme/admin-ui, acme/widget-kit"
+      mono
+    />
+  </Fields>
+  <Rows>
+    <Row title="acme/checkout-web">
+      <Tag tone="ok">Readable</Tag>
+    </Row>
+    <Row title="acme/admin-ui">
+      <Tag tone="ok">Readable</Tag>
+    </Row>
+    <Row title="acme/widget-kit" sub="Not found for holtkeeper-bot: invite it to the project">
+      <Tag tone="bad">Not added</Tag>
+    </Row>
+  </Rows>
+</Screen>
+
+:::note
+A path the token cannot read is not added. Invite the forge's account to the project in GitLab and add it again.
+:::
+
+## Add repositories by pattern
+
+For a team that keeps creating projects, a pattern saves the clicking.
+
+1. Open **Repos › Groups**, then the group.
+2. Go to the **Membership** tab.
+3. Add include patterns (`acme/web-*`, `acme/storefront/**`) and, if needed, exclude patterns (`acme/web-sandbox-*`).
+4. Before saving, the tab previews who joins and who leaves against the last listing. Save.
+
+Holtkeeper lists the forge for the group's members every 30 minutes; **List now** runs it at once. A project that matches for the first time joins without anyone adding it.
+
+## What happens next
+
+A repository a group finds for the first time gets every read-only analyzer once, on its default branch. Follow them in **Ops › Runs**. Until they finish, the repository shows as not analysed.
+
+<Screen
+  title="Repos › Groups › Web"
+  caption="A group page: its members, subgroups, stack, knowledge, settings and membership."
+>
+  <Toolbar title="Web" crumbs={['Repos', 'Groups']}>
+    <Button>Run job for group</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 2, label: 'patterns' },
+      { value: 14, label: 'members · 1 excluded' },
+      { value: 9, label: 'healthy', tone: 'ok' },
+      { value: 3, label: 'with warnings', tone: 'warn' },
+      { value: 2, label: 'not analysed' },
+    ]}
+    end="Listed 4 min ago · next in 26 min"
+  />
+  <Segmented
+    items={[
+      'Repositories:14',
+      'Subgroups:2',
+      'Stack & conventions',
+      'Knowledge',
+      'Settings',
+      'Membership',
+    ]}
+  />
+</Screen>
+
+## Split a team into subgroups
+
+A subgroup narrows its parent: it only ever holds the parent's members, everything scoped to the parent keeps covering it, and its own settings, grants and knowledge win over the parent's.
+
+1. Open the root group and its **Subgroups** tab.
+2. Choose **New subgroup**: a display name, a key under the parent (`web.payments`), and the parent's members as exact paths or one glob.
+3. Save. To move a single repository later, use **Move to subgroup** on its row.
+
+Subgroups go one level deep. A repository in two sibling subgroups gets a warning, because their settings would tie.
+
+## Remove a repository
+
+Remove its exact path from the group's include list, or add an exclude pattern on the **Membership** tab.
+
+## Related
+
+- [The fleet](/start/concepts/fleet/) — forges, groups and scopes.
+- [Repositories](/guide/repos/repositories/), [Groups](/guide/repos/groups/) and [Repository hub](/guide/repos/repository-hub/) — the screens in detail.
+- [Invite your team](/start/first-steps/invite-team/) — the next step.

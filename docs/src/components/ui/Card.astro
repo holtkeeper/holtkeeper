@@ -1,0 +1,17 @@
+---
+import RailIcon from '../RailIcon.astro'
+import type { RailIconName } from '../rail-icons.ts'
+
+interface Props {
+  title: string
+  href: string
+  icon?: RailIconName
+}
+
+const { title, href, icon } = Astro.props
+---
+
+<a class="hk-card" href={href}>
+  <span class="hk-card-title">{icon && <RailIcon name={icon} />}{title}</span>
+  <span class="hk-card-text"><slot /></span>
+</a>

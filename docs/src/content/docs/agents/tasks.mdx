@@ -1,0 +1,156 @@
+---
+title: Changing code through tasks
+description: How an agent asks Holtkeeper to change code with start_task, how people approve it, and how task_status and request_review follow the merge requests.
+panel: Ops › Tasks
+route: /ops/tasks
+permission: tasks:run
+sidebar:
+  order: 4
+---
+
+import { Button, Facts, Screen, Scroll, Sheet, Strip, Tabs, Tag, Toolbar, Ui } from '@ui'
+
+An agent on your laptop edits the repository in front of it. When a change has to land in other repositories too, or should run on Holtkeeper's workers with the repository's own checks, the agent asks for a **task**: `start_task` proposes a task group, a person approves it, and Holtkeeper opens one draft merge request per repository on a shared branch. Holtkeeper never merges.
+
+## The flow
+
+1. The agent calls `start_task` with the repositories, a one-line title and a plan.
+2. Holtkeeper stores a **task group** with one task per repository, proposed by you through your MCP client.
+3. A person with `tasks:run` approves it in the [Inbox](/guide/home/inbox/) or **Ops › Tasks**. With a **Run tasks** token, the agent's own call approves it where you may run tasks.
+4. A write worker checks out each repository, makes a branch `holtkeeper/<task id>-<slug>`, lets an agent work with the repository's checks (install, type check, lint, format, tests) and commits.
+5. A draft merge request opens per repository. Failing checks keep it a draft and list the failing output in the description.
+6. The agent polls `task_status` for merge requests, CI and spend, and can ask for a review with `request_review`.
+
+## Start a task
+
+```text
+> Rename the `variant` prop of Badge to `tone` in every app that uses it.
+
+● holtkeeper - package_usage (package: "@acme/widget-kit")
+  ⎿ Badge with prop `variant`: gitlab:acme/checkout-web (9), gitlab:acme/admin-ui (14)
+
+● holtkeeper - start_task
+    repos:  ["gitlab:acme/checkout-web", "gitlab:acme/admin-ui"]
+    title:  "refactor: rename Badge variant to tone"
+    prompt: "In every use of Badge from @acme/widget-kit, replace the `variant`
+             prop with `tone` (same values). Do not touch other components."
+    kind:   "upgrade"
+  ⎿ Proposed task group g5k2qd with 2 repositories. Your token cannot run tasks,
+    so a person approves it in the panel: https://holtkeeper.example.com/ops/tasks?group=g5k2qd
+```
+
+| Argument | Meaning                                                                                          |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| `repos`  | 1–20 repositories as `forge:path`. The instance allows at most 10 per group by default.          |
+| `title`  | One line, used for the branch and the merge request. Follow the repository's commit conventions. |
+| `prompt` | What to change, as a plan the worker agent can follow without your conversation.                 |
+| `kind`   | `fix` (default), `port`, `upgrade`, `propagate-fix`, `chat` or `tests`.                          |
+| `run`    | `true` (default) starts right away when allowed; `false` always only proposes.                   |
+
+You must be able to see every target repository. Write the prompt as a complete plan: the worker agent sees the repository, its Guide and the checks, not your chat.
+
+:::tip
+Call `commit_conventions` for each repository first and use a title that passes `check_commit_message`. The commit message is chosen from the title and the agent's suggestions, and the first candidate the repository's conventions accept wins.
+:::
+
+## Who approves
+
+| Your token                    | Your grants on every target | What `start_task` does         |
+| ----------------------------- | --------------------------- | ------------------------------ |
+| Read-only                     | any                         | Proposes; a person approves.   |
+| **Run tasks** (`tasks` scope) | `tasks:run`                 | Approves and queues at once.   |
+| **Run tasks**                 | missing on some target      | Proposes; the answer says why. |
+| any, with `run: false`        | any                         | Proposes.                      |
+
+For another team's repository, `tasks:run` must come from a grant that names that repository or its group explicitly; your own team's grant never covers it.
+
+Approving checks more than permissions. A group is refused while:
+
+- write tasks are switched off (**Agents may change code** in **Ops › Tasks**, the `tasks.write` setting, off until an admin turns it on);
+- a target repository is read-only (`repo.freeze`);
+- this week's write task spend would pass the weekly cap (default $40), or the group's own cap (default $5).
+
+Each repository's task gets at most $1.50 by default, lowered so the group stays within its cap.
+
+## In the panel
+
+The group lands in **Needs approval** on **Ops › Tasks** and in the Inbox. Approvers see the plan, the repositories and the spend cap before they click.
+
+<Screen title="Ops › Tasks" caption="Needs approval: nothing runs until someone approves.">
+  <Toolbar title="Tasks">
+    <Tag>Open · 3</Tag>
+    <Button primary>New task in Chat</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 1, label: 'needs approval', tone: 'warn' },
+      { value: 1, label: 'running' },
+      { value: 1, label: 'opened MR', tone: 'ok' },
+    ]}
+  />
+  <Scroll>
+
+| Status                                | Task                                                       | Repositories           | Progress  | Spend   |                          |
+| ------------------------------------- | ---------------------------------------------------------- | ---------------------- | --------- | ------- | ------------------------ |
+| <Tag tone="warn">Needs approval</Tag> | **refactor: rename Badge variant to tone** · upgrade · mcp | `acme/checkout-web` +1 | 0 of 2    | ≤ $3.00 | <Button>Approve</Button> |
+| <Tag tone="info">Running</Tag>        | **fix: escape search query** · fix · mcp                   | `acme/admin-ui`        | 1 running | $0.42   |                          |
+
+  </Scroll>
+</Screen>
+
+<Screen title="Ops › Tasks › task g5k2qd">
+  <Sheet id="task g5k2qd" title="refactor: rename Badge variant to tone" position="1 of 3">
+    <Tag tone="warn" slot="tags">
+      Needs approval
+    </Tag>
+    <Button slot="actions">Approve and run</Button>
+    <Button slot="actions">Reject</Button>
+    <Facts
+      items={[
+        ['Proposed by', 'Dana Novak via claude-code'],
+        ['Kind', 'upgrade'],
+        ['Repositories', 'acme/checkout-web, acme/admin-ui'],
+        ['Spend cap', '$3.00'],
+        ['Branch', 'holtkeeper/g5k2qd-refactor-rename-badge-variant-to-tone'],
+      ]}
+    />
+    <Tabs items={['Plan', 'Repositories:2', 'Diff', 'Agent runs', 'Request', 'Flow']} />
+  </Sheet>
+</Screen>
+
+See [Ops › Tasks](/guide/ops/tasks/) for the whole screen.
+
+## Follow it with task_status
+
+```text
+● holtkeeper - task_status (id: "g5k2qd")
+  ⎿ refactor: rename Badge variant to tone — mr-open · $1.84
+    branch holtkeeper/g5k2qd-refactor-rename-badge-variant-to-tone
+    - gitlab:acme/checkout-web: mr-open · !412 (draft) · CI passed · $0.71
+    - gitlab:acme/admin-ui: mr-open · !1088 (draft) · CI failed · $1.13
+```
+
+`id` is a task group id (`g…`) or a task id (`t…`). Open merge requests are refreshed from the forge before the answer, so a merged one shows as done and a closed one as cancelled.
+
+## Ask for a review
+
+`request_review` queues Holtkeeper's [review agent](/agents/review-agent/) on a merge request one of the group's tasks opened. Pass a task id, or the group id and `repo`. It needs a **Run tasks** token and `tasks:run` on the repository.
+
+```text
+● holtkeeper - request_review (id: "g5k2qd", repo: "gitlab:acme/admin-ui")
+  ⎿ Queued a review of !1088 in gitlab:acme/admin-ui.
+```
+
+## What a task never does
+
+- Merge. Merge requests stay drafts until a person decides.
+- Approve other proposals. `start_task` with `run` approves only the group it just proposed.
+- Read secrets. The worker agent gets the repository and the network through the egress proxy, never credentials; it may run only the detected checks and `git status`, `git diff` and `git log`.
+
+## Related
+
+- [Ops › Tasks](/guide/ops/tasks/) — approve, cancel and retry task groups.
+- [Tasks and the Inbox](/start/concepts/tasks-and-inbox/) — how proposals wait for people.
+- [Tokens and scopes](/agents/tokens/) — the Run tasks scope.
+- [Settings › AI](/guide/settings/ai/) — the weekly budget write tasks spend from.
+- [Write tasks](/modules/write-task/) — how a task runs on the worker.

@@ -1,0 +1,281 @@
+---
+import {
+  Button,
+  Comment,
+  Diff,
+  Meter,
+  SlackContext,
+  SlackHeader,
+  SlackMessage,
+  SlackWindow,
+  Strip,
+  Tag,
+  Ticks,
+  Toolbar,
+} from '../ui/index.ts'
+import RailIcon from '../RailIcon.astro'
+import type { RailIconName } from '../rail-icons.ts'
+
+const slides = [
+  { label: 'Panel', caption: 'Home: what needs you across the whole fleet, at a glance.' },
+  { label: 'Review', caption: 'AI review: findings on the line, with a suggestion you apply in one click.' },
+  { label: 'Slack', caption: 'Slack: every new version announced with what it breaks and where.' },
+  { label: 'Inbox', caption: 'Inbox: approve a dependency wave across nine repositories at once.' },
+  { label: 'Security', caption: 'Security: advisories across the fleet, fixed by the agent in waves.' },
+  { label: 'Libraries', caption: 'Libraries: who uses what at which version, and what an upgrade breaks.' },
+  { label: 'Releases', caption: 'Releases: the next version with its changelog and gates, ready to ship.' },
+  { label: 'Agents', caption: 'Agents: your coding agent reads the fleet over MCP before it edits.' },
+]
+const rail: RailIconName[] = ['home', 'repos', 'chat', 'supply', 'quality', 'releases', 'knowledge', 'ops']
+---
+
+<section class="l-tour hk-ui-root" aria-roledescription="carousel" aria-label="Product tour" data-tour>
+  <div class="l-tour-bar">
+    <div class="l-tour-tabs" role="tablist" aria-label="Choose a view">
+      {
+        slides.map((s, i) => (
+          <button
+            type="button"
+            role="tab"
+            id={`tour-tab-${i}`}
+            aria-controls={`tour-slide-${i}`}
+            aria-selected={i === 0 ? 'true' : 'false'}
+            tabindex={i === 0 ? 0 : -1}
+            data-tour-tab={i}
+          >
+            {s.label}
+          </button>
+        ))
+      }
+    </div>
+    <button class="l-btn ghost icon" type="button" aria-label="Previous view" data-tour-step="-1">‹</button>
+    <button class="l-btn ghost icon" type="button" aria-label="Next view" data-tour-step="1">›</button>
+  </div>
+
+  <div class="l-stage" aria-live="polite">
+    <div class="l-slide l-frame l-panel" id="tour-slide-0" role="tabpanel" aria-labelledby="tour-tab-0">
+      <div class="l-rail" aria-hidden="true">
+        {rail.map((name, i) => <span class={i === 0 ? 'on' : undefined}><RailIcon name={name} /></span>)}
+      </div>
+      <div class="l-panel-main">
+        <Toolbar title="Overview" crumbs={['Home']}>
+          <Tag>All I can see · 64</Tag>
+          <Button primary>Review inbox 7</Button>
+        </Toolbar>
+        <Strip
+          items={[
+            { value: 64, label: 'repositories' },
+            { value: 52, label: 'healthy', tone: 'ok' },
+            { value: 8, label: 'warnings', tone: 'warn' },
+            { value: 3, label: 'failing', tone: 'bad' },
+          ]}
+          end="next sweep 18:00"
+        />
+        <div class="l-pad">
+          <div class="l-row-sm"><b>Fleet health</b><span class="hk-sp"></span><span class="hk-mut">64 repositories</span></div>
+          <Ticks healthy={52} warnings={8} failing={3} none={1} />
+        </div>
+        <div class="l-list">
+          <div><Tag tone="bad">Critical</Tag><span class="l-grow">Advisory in <code>some-lib 2.4.1</code> — fix wave ready</span><span class="hk-mono hk-mut">acme/checkout-web</span></div>
+          <div><Tag tone="warn">Approve</Tag><span class="l-grow">Upgrade <code>widget-kit</code> 4 → 5 across 9 repos</span><span class="hk-mono hk-mut">wave #212</span></div>
+          <div><Tag tone="info">Agent</Tag><span class="l-grow">Review answered 3 threads, 1 suggestion left</span><span class="hk-mono hk-mut">!1824</span></div>
+          <div><Tag>Budget</Tag><span class="l-grow">Bundle over budget by 6.2 kB gzip</span><span class="hk-mono hk-mut">acme/admin-ui</span></div>
+          <div><Tag tone="ok">Released</Tag><span class="l-grow"><code>@acme/widget-kit</code> 5.0.0 announced in #releases</span><span class="hk-mono hk-mut">14:20</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="l-slide l-frame" id="tour-slide-1" role="tabpanel" aria-labelledby="tour-tab-1" hidden>
+      <Toolbar title="!1824 Keyboard paging in Pager" crumbs={['acme/widget-kit']}>
+        <Tag tone="warn">1 major</Tag>
+        <Tag>2 minor</Tag>
+      </Toolbar>
+      <div class="l-stack">
+        <Diff
+          file="src/pager/usePager.ts"
+          stat="+14 −3"
+          lines={[
+            [41, ' ', '  const onKey = (event: KeyboardEvent) => {'],
+            [42, '-', "    if (event.key === 'ArrowRight') setPage(page + 1)"],
+            [42, '+', "    if (event.key === 'ArrowRight') go(page + 1)"],
+            [43, '+', "    if (event.key === 'ArrowLeft') go(page - 1)"],
+            [44, ' ', '  }'],
+          ]}
+        />
+        <Comment severity="major" where="line 43">
+          <p><code>go(page - 1)</code> runs on the first page too and asks for page 0, which the API rejects. Clamp it like <code>ArrowRight</code> does at the end.</p>
+          <Diff lines={[[43, '+', "    if (event.key === 'ArrowLeft' && page > 1) go(page - 1)"]]} />
+          <div class="l-row-sm"><Button primary>Apply suggestion</Button><Button>Reply</Button><span class="hk-sp"></span><span class="hk-dim">reviewed a41c9e2</span></div>
+        </Comment>
+      </div>
+    </div>
+
+    <div class="l-slide" id="tour-slide-2" role="tabpanel" aria-labelledby="tour-tab-2" hidden>
+      <SlackWindow channel="releases" topic="Versions of everything we publish" channels={['general', 'widgets-reviews', 'releases', 'platform']}>
+        <SlackMessage author="holtkeeper" time="14:20">
+          <SlackHeader>@acme/widget-kit 5.0.0</SlackHeader>
+          <SlackContext>since 4.8.2 · <a href="#tour">Compare</a></SlackContext>
+          <p>Pager and DatePicker now share one focus model, and theming moves to CSS variables.</p>
+          <ul><li>Pager pages with the keyboard</li><li>DatePicker opens on the selected month</li></ul>
+          <p><b>Breaking changes</b></p>
+          <ul><li><code>WidgetTheme</code> is removed<br /><em>Set the <code>--widget-*</code> CSS variables instead.</em></li></ul>
+          <p><b>Changes</b><br /><em>Features</em></p>
+          <ul><li><a href="#tour">Keyboard paging in Pager (!1824)</a></li></ul>
+          <p><b>Will break on upgrade</b></p>
+          <ul><li><a href="#tour">acme/checkout-web</a> (on 4.6.0): 3 broken uses of <code>WidgetTheme</code> — <a href="#tour">src/theme.ts</a></li></ul>
+        </SlackMessage>
+      </SlackWindow>
+    </div>
+
+    <div class="l-slide l-frame" id="tour-slide-3" role="tabpanel" aria-labelledby="tour-tab-3" hidden>
+      <Toolbar title="Inbox" crumbs={['Home']}><span class="hk-mono hk-mut">WAVE-212 · 2 of 7</span></Toolbar>
+      <div class="l-stack">
+        <div class="l-row-sm"><Tag tone="warn">Needs approval</Tag><Tag>Dependency wave</Tag><span class="hk-sp"></span><span class="hk-mut">opened by the agent · 12 min ago</span></div>
+        <b class="l-h">Upgrade <code>@acme/widget-kit</code> 4.8 → 5.0 in 9 repositories</b>
+        <p class="hk-mut">The agent replaced <code>WidgetTheme</code> with CSS variables where it was used. CI passed in 8 of 9; one needs a person.</p>
+        <div class="l-list l-boxed">
+          <div><span class="l-grow hk-mono">acme/checkout-web</span><span class="hk-mono hk-mut">!2210</span><Tag tone="ok">CI passed</Tag></div>
+          <div><span class="l-grow hk-mono">acme/admin-ui</span><span class="hk-mono hk-mut">!981</span><Tag tone="ok">CI passed</Tag></div>
+          <div><span class="l-grow hk-mono">acme/storefront</span><span class="hk-mono hk-mut">!3302</span><Tag tone="ok">CI passed</Tag></div>
+          <div><span class="l-grow hk-mono">acme/partner-portal</span><span class="hk-mono hk-mut">!417</span><Tag tone="bad">CI failed</Tag></div>
+          <div><span class="l-grow hk-mono hk-mut">+ 5 more</span><Tag tone="ok">CI passed</Tag></div>
+        </div>
+        <div class="l-row-sm"><Button primary>Approve 8 merge requests</Button><Button>Open failing one</Button><span class="hk-sp"></span><kbd class="hk-kbd">A</kbd><span class="hk-mut">approve</span></div>
+      </div>
+    </div>
+
+    <div class="l-slide l-frame" id="tour-slide-4" role="tabpanel" aria-labelledby="tour-tab-4" hidden>
+      <Toolbar title="Security" crumbs={['Supply chain']}><Button primary>Fix all critical</Button></Toolbar>
+      <Strip
+        items={[
+          { value: 2, label: 'critical', tone: 'bad' },
+          { value: 5, label: 'high', tone: 'warn' },
+          { value: 11, label: 'fixing' },
+          { value: 3, label: 'allowlisted' },
+        ]}
+        end="OSV · synced 06:00"
+      />
+      <div class="hk-table-wrap">
+        <table>
+          <thead><tr><th>Severity</th><th>Package</th><th>Repos</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><Tag tone="bad">Critical</Tag></td><td><code>some-lib</code> <span class="hk-mut hk-mono">2.4.1 → 2.4.3</span></td><td class="hk-mono">7</td><td><Tag tone="info">Agent fixing · 5/7</Tag></td></tr>
+            <tr><td><Tag tone="bad">Critical</Tag></td><td><code>yaml-parse</code> <span class="hk-mut hk-mono">1.9.0 → 1.9.2</span></td><td class="hk-mono">3</td><td><Tag tone="warn">Needs approval</Tag></td></tr>
+            <tr><td><Tag tone="warn">High</Tag></td><td><code>url-kit</code> <span class="hk-mut hk-mono">0.8.4 → 0.9.0</span></td><td class="hk-mono">12</td><td><Tag>Breaking · planned</Tag></td></tr>
+            <tr><td><Tag tone="warn">High</Tag></td><td><code>golang.org/x/net</code></td><td class="hk-mono">4</td><td><Tag tone="ok">Fixed in 4</Tag></td></tr>
+            <tr><td><Tag>Medium</Tag></td><td><code>fast-glob-lite</code> <span class="hk-mut hk-mono">3.1.0</span></td><td class="hk-mono">2</td><td><Tag>Allowlisted · 21 d</Tag></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="l-slide l-frame" id="tour-slide-5" role="tabpanel" aria-labelledby="tour-tab-5" hidden>
+      <Toolbar title="@acme/widget-kit" crumbs={['Libraries']}><Tag tone="ok">5.0.0 latest</Tag><Button>Plan upgrade</Button></Toolbar>
+      <div class="l-stack">
+        <div class="l-row-sm"><b>Used by 16 repositories</b><span class="hk-sp"></span><span class="hk-mut">4 teams · 212 imports</span></div>
+        <div class="l-vbar" role="img" aria-label="Versions in use: 5.0 in 2, 4.8 in 9, 4.6 in 4, 3.x in 1">
+          <span style="flex: 2" class="ok">5.0 · 2</span><span style="flex: 9" class="mid">4.8 · 9</span><span style="flex: 4" class="warn">4.6 · 4</span><span style="flex: 1.4" class="bad">3.x</span>
+        </div>
+        <div class="l-boxed hk-table-wrap">
+          <table>
+            <thead><tr><th>Repository</th><th>Version</th><th>Exports used</th><th>Upgrade</th></tr></thead>
+            <tbody>
+              <tr><td class="hk-mono">acme/checkout-web</td><td class="hk-mono">4.6.0</td><td class="hk-mono hk-mut">Pager, WidgetTheme +4</td><td><Tag tone="bad">3 break</Tag></td></tr>
+              <tr><td class="hk-mono">acme/admin-ui</td><td class="hk-mono">4.8.2</td><td class="hk-mono hk-mut">Pager, DatePicker</td><td><Tag tone="ok">clean</Tag></td></tr>
+              <tr><td class="hk-mono">acme/storefront</td><td class="hk-mono">4.8.2</td><td class="hk-mono hk-mut">Button, Pager +7</td><td><Tag tone="ok">clean</Tag></td></tr>
+              <tr><td class="hk-mono">acme/legacy-cms</td><td class="hk-mono">3.9.1</td><td class="hk-mono hk-mut">WidgetTheme +12</td><td><Tag tone="bad">17 break</Tag></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="l-slide l-frame" id="tour-slide-6" role="tabpanel" aria-labelledby="tour-tab-6" hidden>
+      <Toolbar title="acme/widget-kit" crumbs={['Releases']}><span class="hk-mono hk-mut">5.0.0 → 5.1.0</span></Toolbar>
+      <div class="l-stack">
+        <div class="l-row-sm"><Tag tone="ok">Ready to release</Tag><Tag>minor</Tag><span class="hk-sp"></span><span class="hk-mut">6 merge requests since 5.0.0</span></div>
+        <div class="l-notes">
+          <b>Features</b>
+          <span class="hk-mut">• Pager pages with the keyboard <code>!1824</code> · ABC-123</span>
+          <span class="hk-mut">• DatePicker shows week numbers <code>!1830</code> · ABC-140</span>
+          <b>Bug fixes</b>
+          <span class="hk-mut">• Keep focus when DatePicker closes <code>!1819</code></span>
+        </div>
+        <div class="l-list l-boxed">
+          <div><span class="l-ok">✓</span><span class="l-grow">CI passed on <code>main</code></span></div>
+          <div><span class="l-ok">✓</span><span class="l-grow">No breaking API changes against 5.0.0</span></div>
+          <div><span class="l-wait">○</span><span class="l-grow">Approvals 1 of 2</span><span class="hk-mut">QA lead pending</span></div>
+        </div>
+        <div class="l-row-sm"><Button primary>Release 5.1.0</Button><Button>Edit changelog</Button><span class="hk-sp"></span><span class="hk-mut">announces in #releases</span></div>
+      </div>
+    </div>
+
+    <div class="l-slide l-frame l-term" id="tour-slide-7" role="tabpanel" aria-labelledby="tour-tab-7" hidden>
+      <div class="l-term-bar"><i></i><i></i><i></i><span>coding agent · ~/acme/checkout-web</span></div>
+      <div class="l-term-body">
+        <p class="u">Move us to widget-kit 5</p>
+        <p>● <b>holtkeeper</b> · upgrade_impact(package: "@acme/widget-kit", to: "5.0.0")</p>
+        <p class="r">3 uses break: WidgetTheme in src/theme.ts:12, src/App.tsx:4, src/App.tsx:31</p>
+        <p>● <b>holtkeeper</b> · library_changes(from: "4.6.0", to: "5.0.0")</p>
+        <p class="r">Migration: set --widget-* variables instead of WidgetTheme</p>
+        <p>● <b>holtkeeper</b> · repo_rules(repo: "gitlab:acme/checkout-web")</p>
+        <p class="r">Commits: feat(scope): … · tests next to code</p>
+        <p>● Edited 2 files, ran the tests</p>
+        <p class="r ok">✓ 148 passed</p>
+        <p>● <b>holtkeeper</b> · check_commit_message("feat(theme): move to widget-kit 5")</p>
+        <p class="r ok">✓ follows the repository's conventions</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="l-tour-foot">
+    <p class="l-tour-caption" data-tour-caption>{slides[0]!.caption}</p>
+    <span class="l-dots" aria-hidden="true">{slides.map((_, i) => <i class={i === 0 ? 'on' : undefined} />)}</span>
+  </div>
+  <script type="application/json" data-tour-captions set:html={JSON.stringify(slides.map((s) => s.caption))} />
+</section>
+
+<script>
+  for (const tour of document.querySelectorAll<HTMLElement>('[data-tour]')) {
+    const tabs = [...tour.querySelectorAll<HTMLButtonElement>('[data-tour-tab]')]
+    const slides = [...tour.querySelectorAll<HTMLElement>('.l-slide')]
+    const dots = [...tour.querySelectorAll<HTMLElement>('.l-dots i')]
+    const caption = tour.querySelector<HTMLElement>('[data-tour-caption]')
+    const captions = JSON.parse(tour.querySelector('[data-tour-captions]')?.textContent ?? '[]') as string[]
+    let current = 0
+    let paused = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    const show = (next: number, focus = false) => {
+      current = (next + slides.length) % slides.length
+      slides.forEach((slide, i) => (slide.hidden = i !== current))
+      tabs.forEach((tab, i) => {
+        tab.setAttribute('aria-selected', String(i === current))
+        tab.tabIndex = i === current ? 0 : -1
+      })
+      dots.forEach((dot, i) => dot.classList.toggle('on', i === current))
+      if (caption) caption.textContent = captions[current] ?? ''
+      tabs[current]?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      if (focus) tabs[current]?.focus()
+    }
+
+    const pick = (next: number, focus = false) => {
+      paused = true
+      show(next, focus)
+    }
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => pick(i))
+      tab.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowRight') pick(current + 1, true)
+        if (event.key === 'ArrowLeft') pick(current - 1, true)
+      })
+    })
+    for (const button of tour.querySelectorAll<HTMLButtonElement>('[data-tour-step]')) {
+      button.addEventListener('click', () => pick(current + Number(button.dataset.tourStep)))
+    }
+    tour.addEventListener('focusin', () => (paused = true))
+    setInterval(() => {
+      if (!paused && !document.hidden) show(current + 1)
+    }, 7000)
+  }
+</script>

@@ -2,16 +2,22 @@
 import { Badge, Icon } from '@astrojs/starlight/components'
 import SidebarRestorePoint from '@astrojs/starlight/components/SidebarRestorePoint.astro'
 
+import { moduleGroups } from '../../docs/groups.ts'
+import RailIcon from '../RailIcon.astro'
+import { groupRailIcon } from '../rail-icons.ts'
+
 type Entry = (typeof Astro.locals.starlightRoute.sidebar)[number]
 type IconName = Parameters<typeof Icon>[0]['name']
 
 interface Props {
   entries: Entry[]
-  icons?: Record<string, IconName>
   nested?: boolean
 }
 
-const { entries, icons = {}, nested = false } = Astro.props
+const { entries, nested = false } = Astro.props
+const moduleIcons: Record<string, IconName> = Object.fromEntries(
+  moduleGroups.map((g) => [g.label, g.icon as IconName]),
+)
 const hasCurrent = (e: Entry): boolean => (e.type === 'link' ? e.isCurrent : e.entries.some(hasCurrent))
 ---
 
@@ -27,9 +33,13 @@ const hasCurrent = (e: Entry): boolean => (e.type === 'link' ? e.isCurrent : e.e
         ) : (
           <details open={hasCurrent(e) || !e.collapsed}>
             <summary class:list={{ 'hk-has-current': hasCurrent(e) }}>
-              {icons[e.label] && <Icon name={icons[e.label]!} class="hk-nav-icon" />}
+              {groupRailIcon[e.label] ? (
+                <RailIcon name={groupRailIcon[e.label]!} class="hk-nav-icon" />
+              ) : (
+                moduleIcons[e.label] && <Icon name={moduleIcons[e.label]!} class="hk-nav-icon" />
+              )}
               <span>{e.label}</span>
-              <span class="hk-count">{e.entries.length}</span>
+              {!nested && <span class="hk-count">{e.entries.length}</span>}
               <Icon name="right-caret" class="hk-caret" />
             </summary>
             <SidebarRestorePoint />

@@ -1,0 +1,182 @@
+---
+title: Groups
+description: See the groups that organize your repositories, open one to read its members, stack, Guide and settings, and edit which repositories it includes.
+panel: Repos › Groups
+route: /repos/groups
+permission: repos:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See the groups that organize your repositories, open one to read its members, stack, Guide and settings, and edit which repositories it includes. A group is a set of repositories on one forge chosen by include and exclude patterns; teams, settings, grants and Guides all attach to groups.
+
+<Screen title="Repos › Groups" caption="Subgroups fold under their parent; a filter keeps a parent when it or one of its subgroups matches.">
+  <Toolbar title="Groups">
+    <Button primary>Add repository</Button>
+  </Toolbar>
+  <Scroll>
+
+| Group                                            | Patterns                              | Members | Health                                  |
+| ------------------------------------------------ | ------------------------------------- | ------- | --------------------------------------- |
+| ▾ **Web** · `web`                                | `acme/*-web`, `acme/admin-ui`         | 14      | 9 healthy · 4 with warnings · 1 failing |
+| &nbsp;&nbsp; **Web › Payments** · `web.payments` | `acme/checkout-*`, `acme/billing-web` | 4       | 2 healthy · 2 with warnings             |
+| ▸ **Widgets** · `widgets`                        | `acme/widget-*`                       | 6       | 6 healthy                               |
+| **Docs** · `docs`                                | `acme/docs-site`                      | 1       | 1 not analysed                          |
+
+  </Scroll>
+</Screen>
+
+## What the list shows
+
+Every group you can see: the configured groups when you may read settings for everything, plus the groups your repositories belong to. Each row shows the group's display name and key, its patterns and the health of its members. A parent group expands to show its subgroups.
+
+A group may have a **display name**, such as _Web › Payments_, that the panel shows instead of its key everywhere: lists, the scope switch, tags in tables, Knowledge and chat. The key stays the identity: grants, settings, home groups, schedules and links always use the key.
+
+## Open a group
+
+Click a group to open its page. A strip sums its membership and health, and segmented tabs split the rest.
+
+<Screen title="Repos › Groups › Web">
+  <Toolbar title="Web" crumbs={['Repos', 'Groups']}>
+    <Tag mono slot="start">
+      web
+    </Tag>
+    <Button>Run job for group</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '3 include · 1 exclude', label: 'patterns' },
+      { value: 15, label: 'resolves to on the forge' },
+      { value: 14, label: 'members · 1 excluded' },
+      { value: 9, label: 'healthy', tone: 'ok' },
+      { value: 4, label: 'warnings', tone: 'warn' },
+      { value: 1, label: 'failing', tone: 'bad' },
+    ]}
+    end="Listed 12 min ago · next in 18 min"
+  />
+  <Stack>
+    <Segmented
+      items={[
+        'Repositories:14',
+        'Subgroups:1',
+        'Stack & conventions',
+        'Knowledge',
+        'Settings',
+        'Membership',
+      ]}
+    />
+  </Stack>
+</Screen>
+
+| Tab                 | What it shows                                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repositories        | The members as the [Repositories](/guide/repos/repositories/) table, with every health cell.                                                       |
+| Subgroups           | The group's subgroups and **New subgroup**. Only on a root group.                                                                                  |
+| Stack & conventions | Runtimes, package managers and images of the members. See [Stack](/guide/supply-chain/stack/).                                                     |
+| Knowledge           | The group's [Guide](/guide/knowledge/guide/): the rules agents read for its repositories.                                                          |
+| Settings            | Every setting as it applies to the group, where it comes from, and overrides. Works like [repository settings](/guide/repos/repository-settings/). |
+| Membership          | Include and exclude patterns, the display name and the forge listing. Needs `settings:read` over everything.                                       |
+
+<Ui>Run job for group</Ui> starts an analyzer job for the group's repositories.
+
+## Change membership
+
+Holtkeeper lists each group's repositories from the forge every 30 minutes and matches them against the patterns.
+
+1. Open the group's **Membership** tab.
+2. Edit the **include** and **exclude** patterns: exact paths like `acme/admin-ui` or globs like `acme/*-web`.
+3. Before saving, the preview applies the unsaved patterns to the last listing, labelled _from the last listing_, and names who joins and who leaves.
+4. Save. To pick up a project created a minute ago, press <Ui>List now</Ui> to list the forge at once.
+
+<Screen title="Repos › Groups › Web › Membership">
+  <Stack>
+    <Fields>
+      <Field label="Display name" value="Web" hint="1–60 characters. The key web stays the same." />
+      <Field label="Key" value="web" mono />
+      <Field label="Include" value="acme/*-web, acme/admin-ui, acme/billing-web" mono wide />
+      <Field label="Exclude" value="acme/legacy-web" mono wide />
+    </Fields>
+
+**From the last listing:** joins `acme/billing-web` · leaves `acme/legacy-web`
+
+<Facts
+  items={[
+    ['Listing', 'Listed 12 min ago · next in 18 min'],
+    ['Recent attempts', '3 ok · 0 failed'],
+  ]}
+/>
+
+<Button>List now</Button> <Button primary>Save</Button>
+
+  </Stack>
+</Screen>
+
+:::caution
+Editing patterns and the display name needs `settings:write` over everything. Group edits are recorded in the [audit log](/guide/settings/audit-log/).
+:::
+
+## Work with subgroups
+
+A subgroup splits a group one level deeper, for example a team inside a department. Its key is `<parent>.<name>`, such as `web.payments`; the parent comes from the key and never changes. A subgroup sits on its parent's forge and holds only the parent's members that its own patterns match, so anything scoped to the parent also covers it.
+
+### Create a subgroup
+
+1. Open the root group and its **Subgroups** tab.
+2. Click <Ui>New subgroup</Ui>.
+3. Enter a display name and the key under the parent.
+4. Pick members from the parent's repositories as exact paths, a glob, or both.
+5. Save.
+
+<Screen title="Repos › Groups › Web › New subgroup">
+  <Sheet title="New subgroup">
+    <Button primary slot="actions">
+      Save
+    </Button>
+    <Fields>
+      <Field label="Display name" value="Payments" />
+      <Field label="Key" value="web.payments" mono />
+      <Field
+        label="Members"
+        value="acme/checkout-web, acme/billing-web"
+        mono
+        wide
+        hint="Picked from the members of Web."
+      />
+      <Field label="Glob" value="acme/checkout-*" mono wide />
+    </Fields>
+  </Sheet>
+</Screen>
+
+On a subgroup's Membership tab the patterns pick from the parent's members: the listing panel reads **Listed from parent** and has no **List now**.
+
+### Move a repository between subgroups
+
+With subgroups configured, each member row on the parent has <Ui>Move to subgroup</Ui>. The target subgroup includes the path; each subgroup it leaves drops or excludes it. The Repositories tab warns about members in two sibling subgroups, because their subgroup settings would tie.
+
+:::tip
+A subgroup can be one of your home groups on its own: pick it on [Account › My teams](/guide/account/profile/#choose-your-teams).
+:::
+
+## Related
+
+- [Repositories](/guide/repos/repositories/) — every repository and **Add repository**.
+- [Repository settings](/guide/repos/repository-settings/) — the same settings view for one repository.
+- [Guide](/guide/knowledge/guide/) — the rules a group's repositories inherit.
+- [Fleet concepts](/start/concepts/fleet/) — groups, subgroups and teams.
+- [Permissions](/start/concepts/permissions/) — how grants attach to groups.

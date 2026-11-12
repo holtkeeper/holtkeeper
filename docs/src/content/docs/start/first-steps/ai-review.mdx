@@ -1,0 +1,158 @@
+---
+title: Turn on AI review
+description: Add an AI provider, add a merge request trigger for the review analyzer, and tune or switch off reviews per team.
+panel: Ops › Automation
+route: /ops/automation
+permission: settings:write
+sidebar:
+  order: 4
+---
+
+import { Button, Comment, Diff, Field, Fields, Screen, Stack, Strip, Tag, Toolbar, Ui } from '@ui'
+
+Holtkeeper's reviewer reads every merge request with the repository's rules, opens the surrounding code itself, and posts findings on the changed lines, with suggestions GitLab applies in one click, plus a summary. On the next push it reviews only what is new, resolves its own threads once they are fixed, and answers replies in its threads. Turning it on takes an AI provider and one event trigger.
+
+## Before you start
+
+- A forge with a token that has the `api` scope and repositories added ([Connect a forge](/start/first-steps/connect-forge/)).
+- A **Bot username** set on the forge, so Holtkeeper recognises its own threads and skips its own merge requests.
+- An API key for Anthropic, or for a gateway that speaks the Anthropic Messages API, or for another provider through the AI SDK.
+- Global `settings:write` and `credentials:write` (the Admin role).
+
+## 1. Add an AI provider
+
+1. Open **Settings › AI** and choose <Ui>Add provider</Ui>.
+2. Pick the kind: **anthropic** for an Anthropic API key, **anthropic-compatible** for a gateway (with its base URL and header style), or **ai-sdk** for other providers.
+3. Paste the API key, name the provider (`anthropic-main`) and save.
+4. Use **Test** on its card to check it answers and can use tools.
+5. In the section's settings, set **AI provider** to this credential. Its card now carries the tag _Agents use it_.
+
+Models are picked per job by tier: reviews run on the main tier, re-checks of old threads on the fast one, and `deep` reviews on the largest. There is no model setting to choose.
+
+:::note[Spend]
+A fresh install has a weekly AI budget of $150, keeping the last $25 for people's own work, and blocks automatic work above it. Reviews show their cost in Quality › Reviews; the budget is in Settings › AI and Ops › AI spend.
+:::
+
+## 2. Review merge requests as they change
+
+A fresh install reviews nothing on its own: add a trigger.
+
+1. Open **Ops › Automation** and choose <Ui>New rule</Ui>.
+2. On the **Event trigger** tab, set **Event** to merge request.
+3. Under **Merge request events**, keep **Opened**, **New commits** and **Reopened**.
+4. Leave **Include drafts** off unless the team wants reviews on drafts.
+5. Set **Analyzers** to `review`, and limit it to some groups if you want to start with one team.
+6. Save.
+
+<Screen
+  title="Ops › Automation › New rule"
+  caption="An event trigger that queues the review on every merge request change of the web team."
+>
+  <Stack>
+    <Toolbar title="New rule" crumbs={['Ops', 'Automation']}>
+      <Tag>Event trigger</Tag>
+    </Toolbar>
+    <Fields>
+      <Field label="Event" value="Merge request" />
+      <Field label="Merge request events" value="Opened, New commits, Reopened" />
+      <Field label="Include drafts" toggle />
+      <Field label="Analyzers" value="review" mono />
+      <Field label="Groups" value="web" wide />
+    </Fields>
+    <Button primary>Save</Button>
+  </Stack>
+</Screen>
+
+Open a merge request in one of those repositories, or push to one. Within a minute, or as soon as polling sees it, the review runs and the comments appear in GitLab.
+
+<Screen
+  title="Merge request !42 in acme/checkout-web"
+  kind="example"
+  caption="An inline finding with a one-click suggestion."
+>
+  <Diff
+    file="src/cart/total.ts"
+    stat="+3 −1"
+    lines={[
+      [41, ' ', 'export function cartTotal(items: Item[]) {'],
+      [42, '-', '  return items.reduce((sum, item) => sum + item.price, 0)'],
+      [42, '+', '  return items.reduce((sum, item) => sum + item.price * item.qty, 0)'],
+      [43, ' ', '}'],
+    ]}
+  />
+  <Comment severity="major" where="line 42">
+    Prices are stored in cents as integers, but `qty` comes from the form as a string here, so
+    `price * qty` turns into `NaN` for an empty field. Parse it where the item is built.
+  </Comment>
+</Screen>
+
+## 3. Let people ask for a review (optional)
+
+Add a second event trigger with **Event** set to command, **Command** `review` and **Analyzer** `review`. Anyone can then write `/holtkeeper review` in a merge request comment, and `/holtkeeper review force=true` reviews what is normally skipped.
+
+In the panel, **Quality › Reviews** has <Ui>Review a merge request</Ui> (a repository and `!42` or a merge request URL) and **Review again** on any past review; both need `analyses:run`.
+
+## What is not reviewed
+
+- Merge requests between release branches, such as `develop → main` or `main → develop`: their code was reviewed on the way in.
+- Merge requests opened by the bot account.
+- Diffs larger than 3,000 changed lines (a short note says so); lockfiles, generated files, snapshots and build output are always left out.
+- Repositories where **Merge request reviews** is off.
+
+## Tune it per team
+
+Choose <Button ghost>Configure</Button> on **Quality › Reviews** to edit the `analyzers.review` options, for everything or for one group or repository:
+
+| Option           | Default                         | Use it to                                                           |
+| ---------------- | ------------------------------- | ------------------------------------------------------------------- |
+| Comments per run | 15                              | Cap the inline comments.                                            |
+| Minimum severity | `minor`                         | Post only `major` and `critical` findings, or include `info`.       |
+| Approve          | `never`                         | `when-clean` approves merge requests with a clean review.           |
+| Depth            | `standard`                      | `deep` reviews on the largest model, for critical repositories.     |
+| Ignore           | generated files, lockfiles, ... | Add paths the reviewer should skip.                                 |
+| Language         | the merge request description's | Comments in another language; code and suggestions stay in English. |
+
+Rules for what to look for belong in the repository, not in options. A `REVIEW.md` at the root goes first into the reviewer's context; its `## Ignore` section lists globs to skip and its `## Paths` section gives rules for matching files. `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are read too, along with the team's Guide in Holtkeeper.
+
+```md title="REVIEW.md"
+## Paths
+
+- `migrations/**`: every migration must be reversible.
+- `src/api/**`: keep the public contract; bump the version on breaking changes.
+
+## Ignore
+
+- `src/generated/**`
+```
+
+When authors reply to a finding with a lasting rule ("we always do X here"), Holtkeeper proposes it as a learning in the Inbox, so the next review knows it.
+
+## Switch reviews off
+
+Set **Merge request reviews** to off for a group or repository, with a reason. Holtkeeper then queues no review and posts nothing on those merge requests, while analyses and the merge requests it opens itself go on as usual. A repository entry that is on lifts a group entry that is off. To keep Holtkeeper from changing a repository at all, [freeze](/start/concepts/policies/#freezes) it instead.
+
+<Screen
+  title="Quality › Reviews"
+  caption="Every review with its verdict, findings, resolved threads and cost."
+>
+  <Toolbar title="Reviews">
+    <Button ghost>Configure</Button>
+    <Button primary>Review a merge request</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 38, label: 'reviews' },
+      { value: 21, label: 'looks good', tone: 'ok' },
+      { value: 17, label: 'needs changes', tone: 'warn' },
+      { value: 64, label: 'findings · 9 major' },
+      { value: '$6.40', label: 'AI cost' },
+    ]}
+  />
+</Screen>
+
+## Related
+
+- [Reviews](/guide/quality/reviews/) — the review list, sheet and reactions per category.
+- [Automation](/guide/ops/automation/) — triggers, schedules and merge request policies.
+- [Settings › AI](/guide/settings/ai/) — providers, budgets and caps.
+- [Analyzers and runs](/start/concepts/analyzers-and-runs/) — what queues a review.

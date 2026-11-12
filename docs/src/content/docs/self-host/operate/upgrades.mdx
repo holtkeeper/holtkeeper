@@ -1,0 +1,74 @@
+---
+title: Upgrades
+description: Pick an image tag, let migrations run on start, and check the deployment reference for steps a release needs before you deploy it.
+sidebar:
+  order: 4
+---
+
+An upgrade is a new image tag. The database migrates itself when the first process starts, retired settings and config keys are ignored with a warning, and the panel shows the release that now runs. A few releases need a step before the deploy; those are listed in the deployment reference.
+
+## Image tags
+
+Every image is published to `ghcr.io/holtkeeper/holtkeeper` with three kinds of tags:
+
+| Tag             | Example                 | Moves        | Use it for                             |
+| --------------- | ----------------------- | ------------ | -------------------------------------- |
+| Release version | `1.4.0`                 | never        | Production: pin and upgrade on purpose |
+| Full commit SHA | the 40-character commit | never        | Running a specific commit from `main`  |
+| `main`          | `main`                  | every commit | Trying the latest; not for production  |
+
+The sandbox base (`holtkeeper-worker`) and the egress proxy (`holtkeeper-egress-proxy`) get the same tags. The chart's egress proxy follows `image.tag` unless `egressProxy.image.tag` is set, so both move together.
+
+The release is baked into the image as `HOLTKEEPER_VERSION`. The panel shows it in the Settings footer and in the health strip of **Settings › System**; the chart sets it from `version`, else `image.tag`, else the chart's `appVersion`.
+
+## Upgrade
+
+1. Read the notes in the [deployment reference](/self-host/reference/deployment/) for anything between your version and the new one.
+2. [Back up](/self-host/operate/backups/) the database.
+3. Change the tag:
+
+   ```yaml title="values.yaml"
+   image:
+     tag: '<new version>'
+   ```
+
+   ```sh title="Terminal"
+   helm upgrade holtkeeper deploy/helm/holtkeeper -f values.yaml
+   ```
+
+   Under Compose, set `HOLTKEEPER_IMAGE` and run `docker compose up -d`; for a single container, recreate it with the new tag.
+
+4. Check that `/readyz` answers 200 with migrations `ok`, and that **Settings › System** shows the new release and workers reporting.
+
+Workers drain on `SIGTERM`: running jobs get the drain timeout and are then requeued on a new worker, so a rolling upgrade loses no jobs.
+
+## Migrations
+
+Migrations run automatically; there is no separate command.
+
+- **Postgres**: the first process to start takes an advisory lock and migrates in one transaction; processes that start together wait for it. A failing step rolls the whole run back, so the schema is never half-migrated. Until migrations are applied, `/readyz` fails and the **Migrations** check in Settings › System is `failing`.
+- **SQLite**: missing steps run in one transaction when the file is opened.
+
+Migrations only go forward. To roll back a release, restore the backup you took before the upgrade rather than starting an older image on a newer schema.
+
+## Retired keys and settings
+
+Releases retire things gracefully:
+
+- Config keys that moved to the panel (`forges`, `groups`, `jobs.schedules` and the like) log one warning each and are ignored.
+- Retired setting keys are dropped everywhere; old rows never fail validation.
+- Settings with option keys an analyzer no longer takes are flagged in the panel.
+
+:::caution
+`repo.readOnly` is retired: stored entries no longer stop Holtkeeper from commenting, reviewing, opening merge requests or pushing. Before deploying a release past the retirement, list them and set each one again as `repo.freeze` on the same scope. Until you do, Settings › System shows a **Read-only entries** warning. See the [deployment reference](/self-host/reference/deployment/#before-upgrading-past-the-reporeadonly-retirement).
+:::
+
+## Config changes
+
+In Kubernetes the config file is a ConfigMap, and the pods carry its checksum: changing `config.content` restarts them. Under Compose and Docker, restart the containers after editing the mounted file.
+
+## Related
+
+- [Backups](/self-host/operate/backups/) — before every upgrade.
+- [Health and metrics](/self-host/operate/health/) — verify the rollout.
+- [Deployment reference](/self-host/reference/deployment/) — release notes for operators.

@@ -1,0 +1,242 @@
+---
+title: Libraries
+description: See every library your repositories depend on, who uses which version, how far behind they are, and what an upgrade would break before you roll it out.
+panel: Supply chain › Libraries
+route: /supply/libraries
+permission: catalog:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See every library your repositories depend on, who uses which version, how far behind they are, and what an upgrade would break before you roll it out.
+
+<Screen title="Supply chain › Libraries" caption="One row per library; the versions column reads left to right from the newest version in use.">
+  <Toolbar title="Libraries">
+    <Segmented slot="start" items={['My teams:14', 'All I can see:38']} />
+    <Tag>Group: Any ▾</Tag>
+    <Button ghost>⋯</Button>
+    <Button primary>Analyse now</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 312, label: 'libraries' },
+      { value: 27, label: 'behind a major', tone: 'warn' },
+      { value: 4, label: 'with advisories', tone: 'bad' },
+      { value: 9, label: 'update MRs open' },
+      { value: 18, label: 'internal' },
+    ]}
+    end="analysed 2 h ago"
+  />
+  <Stack>
+    <Segmented items={['Third-party:294', 'Behind a major:27', 'Advisories:4', 'Update MRs:9', 'Internal:18']} />
+    <Segmented items={['All', 'npm:281', 'Go:31']} />
+  </Stack>
+  <Scroll>
+
+| Library                                                   | Versions in use           | Repos | Latest  | Behind  | Advisories                 | Update MRs |
+| --------------------------------------------------------- | ------------------------- | ----- | ------- | ------- | -------------------------- | ---------- |
+| **some-lib** · npm                                        | `4.2.0 × 9` · `3.8.1 × 3` | 12    | `5.1.0` | 1 major | <Tag tone="bad">high</Tag> | 2          |
+| **url-kit** · npm                                         | `2.0.3 × 7`               | 7     | `2.0.3` | —       | —                          | —          |
+| **@acme/widget-kit** · npm <Tag tone="acc">internal</Tag> | `5.0.0 × 6` · `4.3.2 × 4` | 10    | `5.0.0` | 1 major | —                          | —          |
+| **example.org/retry** · Go                                | `1.4.0 × 3`               | 3     | `1.6.2` | —       | —                          | 1          |
+
+  </Scroll>
+</Screen>
+
+## What the table shows
+
+One row per library that a repository you can read depends on, from the newest dependency and usage records. Opening the page reads stored records only: no registry, forge or model is called.
+
+| Column          | Meaning                                                                                                                       |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Library         | Name, ecosystem (npm or Go) and an `internal` tag for packages one of your own repositories publishes.                        |
+| Versions in use | The exact versions repositories resolve, drawn as a bar tinted by how many majors each is behind.                             |
+| Repos           | How many repositories use it.                                                                                                 |
+| Latest          | The registry's newest release; for an internal package, the version in its own repository.                                    |
+| Behind          | Breaking releases behind latest: majors, and minors while the version is below 1.0.                                           |
+| Advisories      | Open vulnerability advisories from the latest audits, with the worst severity. See [Security](/guide/supply-chain/security/). |
+| Update MRs      | Open update merge requests for the library.                                                                                   |
+
+The segments above the table narrow it: **Third-party**, **Behind a major**, **Advisories**, **Update MRs** and **Internal**, plus an ecosystem switch; each carries its count. Every column sorts, and the filters, sort and open row live in the URL, so a link shows the same view.
+
+Under _My teams_ the versions and the behind figures are recomputed for your teams' repositories; other teams fold into one row at the end. <Ui>⋯</Ui> › <Ui>Export CSV</Ui> downloads the rows on screen.
+
+:::note
+Advisories show only for repositories you may read audits of (`audits:read`), and team decisions only with `knowledge:read`. Everything else follows your catalog reach.
+:::
+
+## Inspect a library
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. The side sheet shows the version mix in its header and four tabs.
+
+<Screen title="Supply chain › Libraries › some-lib">
+  <Sheet id="npm" title="some-lib" position="1 of 294">
+    <Tag slot="tags">4.2.0 × 9 · 3.8.1 × 3</Tag>
+    <Button slot="actions">Plan upgrade</Button>
+    <Button slot="actions">Copy as prompt</Button>
+    <Button slot="actions">Open as page</Button>
+    <Facts
+      items={[
+        ['Latest', '5.1.0 · npm · MIT'],
+        ['Public API', '214 exports · 71% documented'],
+        ['Upgrade readiness', '4.2.0 → 5.1.0 · 0 of 12 on target · 3 breaking, 5 to check'],
+        ['Write tasks', 'On · up to $2.00 per repository'],
+      ]}
+    />
+    <Tabs items={['Overview', 'Upgrade:12', 'Used by:12', 'Docs']} />
+  </Sheet>
+</Screen>
+
+| Tab      | What it shows                                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview | Latest, ecosystem, license, links and description; team decisions; versions in use; advisories; licenses with their verdicts; bundle shares; indexed versions; update merge requests. |
+| Upgrade  | The badge counts repositories not on the target yet. Pick from and to versions and see the affected uses or API changes, and the changelog.                                           |
+| Used by  | The badge counts repositories using it. Who uses it, on which version, and which exports, props and members.                                                                          |
+| Docs     | A search over the library's indexed documentation.                                                                                                                                    |
+
+The header's quiet actions: <Ui>Plan upgrade</Ui> opens the Upgrade tab (needs `tasks:run`), <Ui>Copy as prompt</Ui> copies an upgrade prompt naming the target version and the repositories behind it, ready to paste into a coding agent. Internal packages also have <Ui>⋯</Ui> › <Ui>Public API</Ui>. <Ui>Open as page</Ui> opens the full library page.
+
+## The library page
+
+The full page has a facts strip and six tabs. The sheet shows the same content with fewer tabs.
+
+<Screen title="Supply chain › Libraries › @acme/widget-kit">
+  <Toolbar crumbs={['Libraries', 'npm']} title="@acme/widget-kit">
+    <Tag tone="acc" slot="start">internal</Tag>
+    <Button primary>Roll out 5.0.0</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '5.0.0', label: 'latest' },
+      { value: 10, label: 'repositories' },
+      { value: 4, label: 'behind a major', tone: 'warn' },
+      { value: '82%', label: 'documented' },
+    ]}
+    end="defined in acme/widget-kit"
+  />
+  <Tabs items={['Overview', 'API', 'Changes', 'Used by:10', 'Upgrade:4', 'Docs']} active={3} />
+  <Scroll>
+
+| Repository          | Version | Exports used                      | Uses |
+| ------------------- | ------- | --------------------------------- | ---- |
+| `acme/checkout-web` | `4.3.2` | `Button`, `Dialog`, `useToast`    | 48   |
+| `acme/admin-ui`     | `5.0.0` | `Button`, `DataGrid`, `ShapeBase` | 112  |
+| `acme/docs-site`    | `4.3.2` | `Button`                          | 6    |
+
+  </Scroll>
+</Screen>
+
+| Tab      | What it shows                                                                                                                                                                                                                           |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview | As in the sheet, with the facts in the page header.                                                                                                                                                                                     |
+| API      | Internal packages: the shown version's exports per entry point, grouped by kind, with declarations and doc comments. Third-party libraries: the totals the index knows.                                                                 |
+| Changes  | Internal packages: the diff with an earlier release (removed, changed, deprecated, added) and a warning when the version number does not match it. Third-party: release notes and API changes from the oldest version in use to latest. |
+| Used by  | Repositories using it with their versions tinted by how far behind they are, the exports, props and members they use, unused exports and the code of a picked use.                                                                      |
+| Upgrade  | From and to pickers, the affected uses or the API changes, the changelog and <Ui>Copy as prompt</Ui>.                                                                                                                                   |
+| Docs     | A search over the indexed docs and the documents of the newest indexed version.                                                                                                                                                         |
+
+On **Used by**, pick a repository to narrow everything to it. The toolbar filters by **Export** (only uses of one export) and **Version** (only consumers on one version); <Ui>All repositories</Ui> clears a picked repository, and <Ui>Copy as prompt</Ui> builds an upgrade prompt over the consumers shown.
+
+## Check what an upgrade breaks
+
+1. Open the library and go to **Upgrade**.
+2. Pick **From** (default: the oldest version in use) and **To** (default: latest).
+3. Read the affected uses. Each is one of three levels:
+
+<Screen title="Supply chain › Libraries › some-lib › Upgrade">
+  <Toolbar title="Upgrade">
+    <Tag mono>From 4.2.0</Tag>
+    <Tag mono>To 5.1.0</Tag>
+    <Button>Copy as prompt</Button>
+  </Toolbar>
+  <Scroll>
+
+| Level                             | Export        | Change                     | Repositories                         | Uses |
+| --------------------------------- | ------------- | -------------------------- | ------------------------------------ | ---- |
+| <Tag tone="bad">Breaking</Tag>    | `createStore` | removed                    | `acme/checkout-web`, `acme/admin-ui` | 14   |
+| <Tag tone="bad">Breaking</Tag>    | `Widget`      | changed · lost prop `size` | `acme/admin-ui`                      | 3    |
+| <Tag tone="warn">Check</Tag>      | `Widget`      | changed                    | `acme/checkout-web`                  | 21   |
+| <Tag tone="info">Deprecated</Tag> | `fooUtil`     | deprecated                 | `acme/docs-site`                     | 2    |
+
+  </Scroll>
+</Screen>
+
+| Level      | When                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| Breaking   | The export was removed, or a use touches a member or prop the new declaration no longer has. |
+| Check      | The declaration changed, but the use does not touch anything that disappeared.               |
+| Deprecated | The export is newly marked deprecated.                                                       |
+
+Repositories already on the target version are left out. Use-level impact covers npm packages whose code a `usages` analysis has read; for other libraries the tab shows the API changes and the changelog instead, and says why a part is missing.
+
+:::caution
+Impact reads uses Holtkeeper found in code. Uses through local wrappers, re-exporting barrels or values typed as `any` can stay invisible, so treat an empty list as "nothing found", not as a guarantee.
+:::
+
+## Roll out a version
+
+With `tasks:run`, the library page's primary <Ui>Roll out 5.0.0</Ui> upgrades every repository in scope that is below the target.
+
+<Screen title="Supply chain › Libraries › @acme/widget-kit › Roll out">
+  <Stack>
+    <Toolbar title="Roll out @acme/widget-kit 5.0.0" />
+    <Rows>
+      <Row title="acme/checkout-web" sub="4.3.2 → 5.0.0" />
+      <Row title="acme/docs-site" sub="4.3.2 → 5.0.0" />
+      <Row title="acme/storefront" sub="4.1.0 → 5.0.0" />
+      <Row title="acme/partner-portal" sub="4.3.2 → 5.0.0" />
+    </Rows>
+    <Fields columns={1}>
+      <Field label="Spend cap" value={'$2.00 per repository'} hint="From the write task settings" />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Roll out</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+1. Open the library page and choose <Ui>Roll out</Ui> with the version.
+2. Check the list of repositories and the spend cap.
+3. Confirm. Holtkeeper starts one upgrade task group: one draft merge request per repository, written by an agent.
+
+The dialog says so when write tasks are off or when more repositories are in scope than one rollout allows. Follow the tasks in [Ops › Tasks](/guide/ops/tasks/) or your [Inbox](/guide/home/inbox/).
+
+:::tip
+Narrow the scope first (the scope switch or **Group**) to roll a version out team by team.
+:::
+
+## Third-party documentation
+
+The **Docs** tab and the API of third-party libraries come from the library index, which keeps a few versions of every npm package and Go module your repositories use: the ones in use and the ones an upgrade would land on. Agents read the same index over MCP. Setup and coverage are in [Library docs for agents](/agents/library-docs/); the index's state is in [Settings › System](/guide/settings/system/).
+
+## In one repository
+
+The repository hub's **Supply chain** tab shows the same table narrowed to that repository's versions.
+
+## Related
+
+- [Security](/guide/supply-chain/security/) — the advisories behind the Advisories column.
+- [Public API](/guide/supply-chain/public-api/) — exports of your own packages.
+- [Agents › Tools](/agents/tools/) — `package_usage`, `upgrade_impact` and `evaluate_dependency` for coding agents.
+- [Tasks](/guide/ops/tasks/) — follow a rollout.

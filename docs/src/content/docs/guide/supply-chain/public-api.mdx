@@ -1,0 +1,163 @@
+---
+title: Public API
+description: Browse the public API of your organization's own packages, find any export by name or doc words, and see how it changed between released versions.
+panel: Supply chain › Public API
+route: /supply/public-api
+permission: catalog:read
+sidebar:
+  order: 5
+---
+
+import {
+  Button,
+  Facts,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Browse the public API of your organization's own packages, find any export by name or doc words, and see how it changed between released versions.
+
+<Screen title="Supply chain › Public API" caption="Packages your repositories publish, newest version first.">
+  <Toolbar title="Public API">
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+    <Button primary>Analyse now</Button>
+  </Toolbar>
+  <Tabs items={['Packages', 'Symbol search']} />
+  <Strip
+    items={[
+      { value: 18, label: 'packages' },
+      { value: '2,940', label: 'exports' },
+      { value: '74%', label: 'documented' },
+      { value: 1, label: 'removed', tone: 'warn' },
+    ]}
+  />
+  <Scroll>
+
+| Package                                            | Version | Repository         | Exports | Documented | Versions |
+| -------------------------------------------------- | ------- | ------------------ | ------- | ---------- | -------- |
+| `@acme/widget-kit`                                 | `5.0.0` | `acme/widget-kit`  | 412     | 82%        | 14       |
+| `@acme/url-kit`                                    | `2.0.3` | `acme/shared-libs` | 37      | 95%        | 6        |
+| `@acme/form-utils`                                 | `1.4.1` | `acme/shared-libs` | 88      | 61%        | 9        |
+| `@acme/legacy-grid` <Tag tone="warn">removed</Tag> | `0.9.2` | `acme/shared-libs` | 54      | 40%        | 3        |
+
+  </Scroll>
+</Screen>
+
+## What the page shows
+
+Holtkeeper reads the public API of every package in your repositories: each entry point, every exported name with its declaration and doc comment. It reads the source as text; nothing is installed or built. A record is kept per release tag, and the default branch is read weekly, so you can look up any released version and what is coming next.
+
+**Packages** is the catalog: every package with its newest version, repository, number of exports, documented share and how many versions are on record. A package opens its [library page](/guide/supply-chain/libraries/#the-library-page), whose **API**, **Changes** and **Used by** tabs show the rest.
+
+:::caution
+A package marked **removed** was dropped from its repository: two default-branch reads in a row no longer found it. It stays listed so old versions resolve, but do not add new uses. Agents are warned the same way.
+:::
+
+## Find an export
+
+**Symbol search** finds exports by name or by words in their doc comments.
+
+<Screen title="Supply chain › Public API › Symbol search">
+  <Tabs items={['Packages', 'Symbol search']} active={1} />
+  <Toolbar>
+    <Tag slot="start" mono>useToast</Tag>
+    <Tag>Include deprecated</Tag>
+    <Tag>Sort: relevance</Tag>
+  </Toolbar>
+  <Stack>
+    <Segmented items={['Newest release', 'Default branch']} />
+    <Tag>Package: any</Tag> <Tag>Entry point: any</Tag> <Tag>Kind: function:3 · type:2</Tag> <Tag>Match: name:4 · docs:1</Tag>
+  </Stack>
+  <Scroll>
+
+| Symbol          | Kind     | Package            | Entry point      | Doc                                        |
+| --------------- | -------- | ------------------ | ---------------- | ------------------------------------------ |
+| `useToast`      | function | `@acme/widget-kit` | `.`              | Shows a toast and returns its handle.      |
+| `ToastOptions`  | type     | `@acme/widget-kit` | `.`              | Options for `useToast`.                    |
+| `useToastQueue` | function | `@acme/widget-kit` | `./experimental` | Queues toasts so only one shows at a time. |
+
+  </Scroll>
+</Screen>
+
+1. Open **Symbol search** and type a name or a few words.
+2. Narrow with the facets: package, entry point, kind, match (name or doc words) and newest release or default branch. Each facet shows its count.
+3. Turn on <Ui>Include deprecated</Ui> to see exports marked deprecated, and pick a sort.
+
+The search, facets and the open symbol live in the URL, so a link shows the same results.
+
+## Inspect a symbol
+
+A result opens the symbol sheet.
+
+<Screen title="Supply chain › Public API › useToast">
+  <Sheet title="useToast" position="1 of 3">
+    <Tag slot="tags">function</Tag>
+    <Button slot="actions">Find usages</Button>
+    <Button slot="actions">Compare versions</Button>
+    <Tabs items={['Declaration', 'History']} />
+    <Stack>
+
+```ts
+/**
+ * Shows a toast and returns its handle.
+ * @param message Text of the toast.
+ * @returns A handle with `dismiss()`.
+ * @since 4.1.0
+ */
+export function useToast(message: string, options?: ToastOptions): ToastHandle
+```
+
+    </Stack>
+    <Facts
+      items={[
+        ['Entry point', '@acme/widget-kit'],
+        ['Repository', 'acme/widget-kit'],
+        ['Version', '5.0.0'],
+      ]}
+    />
+
+  </Sheet>
+</Screen>
+
+| Tab         | What it shows                                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------------- |
+| Declaration | The declaration and its doc tags (params, returns, throws, since, see, deprecated), entry point, repository, version. |
+| History     | How the symbol changed between versions.                                                                              |
+
+<Ui>Find usages</Ui> shows the code in other repositories that uses the export.
+<Ui>Compare versions</Ui> diffs the package between two versions: removed, changed, deprecated and
+added exports, with a warning when the version number does not match the change.
+
+## Fill the record
+
+- <Ui>Analyse now</Ui> queues the `api-surface` analyzer now instead of waiting for the weekly run.
+- <Ui>⋯</Ui> › <Ui>Analyze past releases</Ui> reads older release tags, so History and comparisons
+  reach further back.
+- <Ui>⋯</Ui> › <Ui>Reread records</Ui> reads the stored records again.
+- <Ui>Configure</Ui> opens the `api-surface` analyzer's options: which packages to keep (`packages`,
+  such as `@acme/*`), which folders to skip (`exclude`) and whether private workspace packages count
+  (`includePrivate`, on by default).
+
+:::tip
+Coding agents read the same catalog over MCP with `search_symbols`, `get_package_api`, `list_versions` and `diff_versions`, so they look up your APIs instead of reading `node_modules`. See [Agents › Tools](/agents/tools/).
+:::
+
+## In one repository
+
+The repository hub's **Supply chain** tab lists the packages that repository publishes.
+
+## Related
+
+- [Libraries](/guide/supply-chain/libraries/) — who uses each package and what an upgrade breaks.
+- [Releases](/guide/releases/overview/) — announcements say which repositories a new version breaks.
+- [API surface analyzer](/modules/api-surface/) — how entry points and exports are read.
+- [MCP tools](/reference/mcp-tools/) — every tool agents get.

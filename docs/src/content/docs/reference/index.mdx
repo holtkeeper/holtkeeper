@@ -1,0 +1,41 @@
+---
+title: Reference
+description: Look-up tables for Holtkeeper — environment variables, MCP tools, CLI, setting keys, permissions, webhooks and keyboard shortcuts.
+sidebar:
+  label: Overview
+  order: 0
+---
+
+import { Card, Cards } from '@ui'
+
+The pages here are for looking things up, not for reading start to end: every name is copied from the code, so you can search a page for the exact key, tool or flag you saw in a log, a config file or an agent transcript.
+
+<Cards>
+  <Card title="Environment variables" href="/reference/environment/" icon="server">
+    Every `HOLTKEEPER_*` variable the server and workers read.
+  </Card>
+  <Card title="MCP tools" href="/reference/mcp-tools/" icon="agents">
+    Every tool agents can call, with its main arguments, grouped by area.
+  </Card>
+  <Card title="CLI" href="/reference/cli/" icon="ops">
+    The `holtkeeper` command: `serve` and `users`, with their options.
+  </Card>
+  <Card title="Setting keys" href="/reference/setting-keys/" icon="settings">
+    Every setting key with its section, shape, default and where the panel edits it.
+  </Card>
+  <Card title="Permissions" href="/reference/permissions/" icon="account">
+    Actions such as `analyses:read` and `settings:write`, and the four roles.
+  </Card>
+  <Card title="Webhooks" href="/reference/webhooks/" icon="repos">
+    Forge webhooks Holtkeeper receives, their secrets and the events it acts on.
+  </Card>
+  <Card title="Keyboard shortcuts" href="/reference/shortcuts/" icon="book">
+    ⌘K, J/K, ↵ and the other keys of the panel.
+  </Card>
+</Cards>
+
+## Related
+
+- [Concepts](/start/concepts/permissions/) — how permissions, scopes and policies fit together.
+- [Configuration](/self-host/configure/configuration/) — the config file the server reads.
+- [Agents](/agents/) — connecting coding agents over MCP.

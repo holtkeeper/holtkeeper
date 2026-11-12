@@ -1,0 +1,197 @@
+---
+title: Inbox
+description: Every decision waiting for you in one list — task proposals, notes, learnings, Guide text, release acceptances, allowlist renewals and budget warnings — with approve, reject and snooze.
+panel: Home › Inbox
+route: /inbox
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Every decision waiting for you in one list — task proposals, notes, learnings, Guide text, release acceptances, allowlist renewals and budget warnings — with approve, reject and snooze. The Inbox is the second tab of Home and open to every role; it lists only what you may decide.
+
+<Screen title="Home › Inbox" caption="Two sections, each oldest first: what you decide in your teams, then what your teams can also decide.">
+  <Toolbar title="Inbox">
+    <Tabs slot="start" items={['Open:7', 'Snoozed:1']} />
+    <Segmented items={['For me', 'My teams']} active={1} />
+    <Tag>Sort: oldest first</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 5, label: 'waiting for you' },
+      { value: 2, label: 'more for your teams' },
+      { value: 1, label: 'expired', tone: 'bad' },
+      { value: 2, label: 'expiring within 7 days', tone: 'warn' },
+      { value: '6d', label: 'oldest wait' },
+      { value: 1, label: 'snoozed' },
+    ]}
+  />
+  <Stack>
+    <Segmented items={['All:7', 'Task proposals:2', 'Notes:1', 'Learnings:2', 'Guide:0', 'Releases:1', 'Allowlist:1', 'Budget:0']} />
+
+**Waiting for you**
+
+  </Stack>
+  <Scroll>
+
+| Item                                                   | Kind                             | Scope                   | Waiting | Decision                                                       |
+| ------------------------------------------------------ | -------------------------------- | ----------------------- | ------- | -------------------------------------------------------------- |
+| **Bump `some-lib` to 4.1.3** · proposed by Mira K.     | <Tag>Task proposal</Tag>         | `acme/checkout-web`, +3 | 6d      | <Button primary>Approve</Button> <Button ghost>Reject</Button> |
+| **Prefer `Intl.NumberFormat` over manual formatting**  | <Tag>Learning</Tag>              | `acme/admin-ui`         | 3d      | <Button primary>Accept</Button> <Button ghost>Reject</Button>  |
+| **`GHSA-xxxx-1234` in `some-lib`** · expires in 2 days | <Tag tone="warn">Allowlist</Tag> | `acme/widget-kit`       | 2d      | <Button primary>Renew</Button>                                 |
+| **Release `v8.3.0`** · 14 unreleased commits           | <Tag>Release</Tag>               | `acme/checkout-web`     | 1d      | <Button primary>Accept</Button> <Button ghost>Reject</Button>  |
+
+  </Scroll>
+  <Stack>
+
+**Your teams can also decide**
+
+  </Stack>
+  <Scroll>
+
+| Item                                                | Kind            | Scope           | Waiting | Decision                                                      |
+| --------------------------------------------------- | --------------- | --------------- | ------- | ------------------------------------------------------------- |
+| **Widgets are rendered through `ShapeBase`** · note | <Tag>Note</Tag> | group `widgets` | 4d      | <Button primary>Accept</Button> <Button ghost>Reject</Button> |
+
+  </Scroll>
+</Screen>
+
+## What lands here
+
+| Kind           | The decision                                                                                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task proposals | **Approve** lets the agent change code; nothing runs before. **Reject** drops the proposal.                                                    |
+| Notes          | **Accept** or **Reject** a proposed knowledge note.                                                                                            |
+| Learnings      | **Accept** a learned rule into the scope it names (or the suggested one), or **Reject** it.                                                    |
+| Guide          | **Accept** or **Reject** text Holtkeeper generated for a Guide section.                                                                        |
+| Releases       | **Accept** a release that waits for an acceptance, or **Reject** it: the item hides until new commits arrive and nothing changes on the forge. |
+| Allowlist      | **Renew** an allowlist entry by 30 days past its last day or today. It has no Reject.                                                          |
+| Budget         | **Acknowledge** a weekly AI budget warning, shown to people who may change that budget. It snoozes the warning until the week ends.            |
+
+Proposing, tagging and deploying a release are not Inbox decisions; they stay on the [Releases](/guide/releases/overview/) page.
+
+## Find the right items
+
+- **Waiting for you** holds what you may decide in your home groups; **Your teams can also decide** holds the rest. Without home groups everything is in the first section.
+- **For me** drops the teams section; **My teams** shows both.
+- The kind segments narrow the list to one kind, each with its count.
+- **Sort** picks oldest first (the default), newest first or soonest to lapse.
+- The search in the header matches the title, scope, detail, repositories and who proposed it.
+
+The view lives in the URL, so a link opens the same filter and, with an item selected, the same sheet.
+
+:::note
+The count on the rail's Home icon and on the Inbox tab is the number of open items, snoozed ones left out. It is the same number the rows add up to.
+:::
+
+## Decide one item
+
+1. Click a row, or press <Kbd>J</Kbd> to open the first one. A side sheet opens.
+2. Read the details: what was asked and where it writes, the diff, the rule or the text that would change.
+3. Press <Kbd>A</Kbd> to approve or accept, <Kbd>R</Kbd> to reject, or <Kbd>S</Kbd> to snooze.
+4. Move on with <Kbd>J</Kbd> and <Kbd>K</Kbd>.
+
+<Screen title="Home › Inbox › Bump some-lib to 4.1.3">
+  <Sheet id="task:7f3a2c" title="Bump some-lib to 4.1.3" position="1 of 7">
+    <Tag slot="tags">Task proposal</Tag>
+    <Tag tone="warn" slot="tags">
+      Proposed
+    </Tag>
+    <Tag mono slot="tags">
+      group widgets
+    </Tag>
+    <Button primary slot="actions">
+      Approve
+    </Button>
+    <Button slot="actions">Reject</Button>
+    <Button ghost slot="actions">
+      ⋯
+    </Button>
+    <Tabs items={['Diff', 'Plan', 'Context', 'Repositories:4']} active={2} />
+    <Facts
+      items={[
+        ['Asked', 'Upgrade some-lib to the release that fixes GHSA-xxxx-1234'],
+        ['Proposed by', 'Mira K. · from chat · 6 days ago'],
+        ['Writes to', 'acme/checkout-web, acme/admin-ui, acme/widget-kit, acme/docs-site'],
+        ['Spend cap', '$4.00'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+What the sheet shows depends on the kind:
+
+| Kind          | In the sheet                                                                                        |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| Task proposal | **Diff**, **Plan**, **Context** (what was asked, by whom and where it writes) and **Repositories**. |
+| Note          | The note and an **Effective prompt** tab: what agents will read once it is accepted.                |
+| Learning      | The rule, its **Target** or **Suggested** scope, and a scope picker to accept it somewhere else.    |
+| Guide         | A line diff of the generated text against the accepted text.                                        |
+| Release       | The release card with the next version and what it contains.                                        |
+| Allowlist     | A renewal form with the new last day and its reason.                                                |
+| Budget        | The week's spend against the budget.                                                                |
+
+The <Ui>⋯</Ui> menu snoozes the item or opens it where it lives. The short id in the header copies on click.
+
+### Renew an allowlist entry
+
+<Screen title="Home › Inbox › GHSA-xxxx-1234">
+  <Sheet id="allow:GHSA-xxxx-1234" title="some-lib · GHSA-xxxx-1234" position="3 of 7">
+    <Tag tone="warn" slot="tags">
+      Expires in 2 days
+    </Tag>
+    <Button primary slot="actions">
+      Renew
+    </Button>
+    <Facts
+      items={[
+        ['Repository', 'acme/widget-kit'],
+        ['Last day', '2026-11-14'],
+        ['New last day', '2026-12-14'],
+        ['Reason', 'Only reachable from the build script; fix lands with ABC-123'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+The new last day starts 30 days out. The server refuses a date further away than the allowlist policy allows, or a blank reason when the policy asks for one, and the notice says which rule it broke.
+
+## Decide several at once
+
+Select rows with their checkboxes, then use <Ui>Approve selected</Ui>, <Ui>Reject selected</Ui> or <Ui>Snooze 1 day</Ui>. Items are sent one after another; rows that fail stay selected with their error under the title.
+
+## Snooze
+
+Snooze an item for a day or a week from the sheet, the <Ui>⋯</Ui> menu or with <Kbd>S</Kbd>. It moves to the **Snoozed** tab and comes back on its own. Snoozing is private and decides nothing.
+
+:::caution
+While **Agents may change code** is off on [Ops › Tasks](/guide/ops/tasks/), task approvals are disabled and a warning says so in the list and in the task sheet.
+:::
+
+:::note
+Decisions are made by people only. No MCP tool approves a task group, accepts a note, learning or Guide text, dismisses a release or renews an allowlist entry.
+:::
+
+## Related
+
+- [Overview](/guide/home/overview/) — Needs attention links its Review and Renew items here.
+- [Tasks](/guide/ops/tasks/) — follow approved task groups to their merge requests.
+- [Learnings](/guide/knowledge/learnings/) and [Notes](/guide/knowledge/notes/) — where accepted knowledge lives.
+- [Tasks and the Inbox](/start/concepts/tasks-and-inbox/) — why agents propose and people decide.
+- [Keyboard shortcuts](/reference/shortcuts/)

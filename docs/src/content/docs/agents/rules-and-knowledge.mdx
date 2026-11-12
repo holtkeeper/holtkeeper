@@ -1,0 +1,186 @@
+---
+title: Rules and knowledge
+description: The team rules, commit conventions, test ids, asset limits and knowledge base agents read before they change code, and how they propose new ones.
+panel: Knowledge › Guide
+route: /knowledge/guide
+permission: knowledge:read
+sidebar:
+  order: 5
+---
+
+import { Button, Rows, Row, Screen, Tabs, Tag, Toolbar } from '@ui'
+
+A repository's conventions live in several places: rules people wrote in the panel, forge push rules, a commitlint config, what recent history does, the team's knowledge base. Holtkeeper puts them together per repository and hands them to agents through a few tools. An agent that calls them before it writes code produces changes that look like the team wrote them, and when it learns something lasting it proposes it back for people to review.
+
+## Call order
+
+| Before the agent…                             | It calls                                                 |
+| --------------------------------------------- | -------------------------------------------------------- |
+| changes code in a repository                  | `repo_rules`                                             |
+| solves a problem the team may have solved     | `search_knowledge`, then `get_knowledge`                 |
+| writes a commit message, branch or MR title   | `commit_conventions`, then `check_commit_message`        |
+| writes end-to-end tests or new UI             | `test_ids`, `suggest_test_ids`                           |
+| adds or changes images, fonts, audio or video | `asset_policy`; `repo_assets` for what already breaks it |
+
+The server tells MCP clients this order in its instructions, so agents usually follow it unprompted. A line in your own `CLAUDE.md` or `AGENTS.md` such as "call `repo_rules` before editing" makes it certain.
+
+## The Guide: repo_rules
+
+`repo_rules` returns the repository's **Guide**: the rules an agent must follow there, layered from broad to narrow.
+
+1. Team rules written in **Knowledge › Guide** for the whole organization, the repository's groups, its family and the repository itself.
+2. Learned rules: candidates people accepted from review replies and agent proposals.
+3. Policies turned into sentences, such as commit conventions, test ids and the asset policy.
+4. Generated text from the Guide generator, marked lower priority. Human rules always win over it.
+5. Relevant knowledge notes.
+
+The repository's own rules files (`AGENTS.md`, `CLAUDE.md`, …) are not included; the agent reads them from its checkout.
+
+| Argument  | Meaning                                                                                                      |
+| --------- | ------------------------------------------------------------------------------------------------------------ |
+| `repo`    | The repository as `forge:path`.                                                                              |
+| `task`    | What the agent is doing: `agent` (writing code, the default), `review`, `chat` or `release-notes`.           |
+| `section` | The topic besides general rules: `general`, `review`, `testing`, `testids`, `assets`, `commits`, `releases`. |
+| `only`    | Read just this section with its layers, as **Knowledge › Guide** shows it; overrides `task` and `section`.   |
+
+```text
+● holtkeeper - repo_rules (repo: "gitlab:acme/checkout-web", section: "testing")
+  ⎿ # Guide for gitlab:acme/checkout-web (agent, testing)
+    ## General
+    - Money is integer cents; never use floats for prices. (team rule, group storefront)
+    - Run `pnpm check` before committing. (team rule, repository)
+    ## Testing
+    - Use the test renderer from `src/test/render.tsx`, never render without providers. (learned)
+    - Generated, lower priority: tests live next to the code as `*.test.tsx`.
+    ## Notes
+    - [kb:k3d9] Checkout e2e tests need the mock payment provider (quirk)
+```
+
+<Screen
+  title="Knowledge › Guide"
+  caption="Each section shows its layers; the effective prompt preview shows what an agent receives."
+>
+  <Toolbar title="Guide" crumbs={['Knowledge']}>
+    <Tag mono>gitlab:acme/checkout-web</Tag>
+    <Button>Effective prompt</Button>
+  </Toolbar>
+  <Tabs
+    items={['General', 'Review', 'Testing', 'Test ids', 'Assets', 'Commits', 'Releases']}
+    active={2}
+  />
+  <Rows>
+    <Row
+      title="Use the test renderer from src/test/render.tsx"
+      sub="Learned · repository · from a review reply on !412"
+    >
+      <Tag tone="ok">Accepted</Tag>
+    </Row>
+    <Row title="Tests live next to the code as *.test.tsx" sub="Generated · lower priority">
+      <Tag>Generated</Tag>
+    </Row>
+  </Rows>
+</Screen>
+
+### Proposing a rule: propose_rule_change
+
+When an agent notices a lasting convention that is missing or wrong, `propose_rule_change` suggests one imperative sentence for a Guide section, with the reason and the evidence it saw. It never edits team rules. The proposal waits in **Knowledge › Learnings** for a person, unless the team auto-accepts proposals from agents (`learnings.autoAccept` with source `mcp`, honored only for proposers with `knowledge:write` on the repository).
+
+```text
+● holtkeeper - propose_rule_change
+    repo:    "gitlab:acme/checkout-web"
+    section: "testing"
+    rule:    "Mock the payment provider with createPaymentMock in every checkout e2e test."
+    reason:  "Three e2e tests in src/checkout/ do this; the one that did not failed in CI (!398)."
+    scope:   "repo"
+  ⎿ Proposed for review in Knowledge › Learnings.
+```
+
+`scope` says where it should apply once accepted: `repo` (default), `family`, `group` (the nearest one), or an exact scope such as `group:<key>`. Use `propose_knowledge` for one-off facts, not rules.
+
+## Commit conventions
+
+`commit_conventions` explains how commit messages and branch names should look, combining four sources, strongest first: the team's `commits.conventions` setting, the forge's push rules, a commitlint config on the default branch, and the last commits and branches. It returns a template, every rule with where it comes from, and real examples that follow them.
+
+```text
+● holtkeeper - commit_conventions (repo: "gitlab:acme/checkout-web")
+  ⎿ Commit template: <type>(<scope>): [<TICKET>] <subject>
+    - types: feat, fix, chore, refactor, test, docs (commitlint)
+    - ticket: required, bracket after the type, ABC-123 (team setting)
+    - maxLength: 72 (history)
+    Branch template: <prefix>/<TICKET>-<description> (history)
+    Examples: feat(cart): [ABC-512] keep coupons after login …
+
+● holtkeeper - check_commit_message (repo: "gitlab:acme/checkout-web",
+                                      message: "fix(cart): keep coupons after login",
+                                      branch: "fix/keep-coupons")
+  ⎿ message: error ticket — needs a key such as [ABC-123] after the type
+    branch: warning ticket — recent branches carry a key
+```
+
+Errors break configured or enforced rules; warnings only differ from what recent history does. Teams set conventions in **Settings › Policies** or the Guide's **Commits** section.
+
+## Test ids
+
+For end-to-end tests and new UI, `test_ids` returns the repository's test id convention (attribute, naming, which elements get ids; learned from its code, with team settings on top) and the existing ids per component. Narrow with `path`: a file, a folder (`src/cart`) or a component name (`CartRow`).
+
+`suggest_test_ids` takes one component file's current text, saved or not, and lists the interactive elements without a test id, each with an id in the repository's style. It is deterministic: the same file always gives the same ids.
+
+```text
+● holtkeeper - suggest_test_ids (repo: "gitlab:acme/checkout-web",
+                                  file: "src/cart/CartRow.tsx", content: "…")
+  ⎿ Convention: data-qa, kebab-case, component prefix
+    - line 18 <button onClick={remove}> → data-qa="cart-row-remove-button"
+    - line 24 <input name="quantity"> → data-qa="cart-row-quantity-input"
+```
+
+Teams set the attribute and which elements need ids in the `analyzers.testids` setting, edited in the Guide's **Test ids** section.
+
+## Asset policy
+
+`asset_policy` returns what a repository allows for images, fonts and media: required modern formats, allowed formats, size limits per kind, the dimension limit, ignored globs and budgets. With `path`, what applies to that one file. `repo_assets` lists files that already break the policy or could be smaller, from the newest assets analysis, with the best conversion and the expected saving (`severity`: `error`, `warning` (default) or `all`).
+
+```text
+● holtkeeper - asset_policy (repo: "gitlab:acme/checkout-web", path: "public/hero.png")
+  ⎿ # Asset policy of `gitlab:acme/checkout-web`, from group storefront
+    - raster images: WebP required; warn above 500 kB, error above 1 MB; at most 2560 px
+    ## This file
+    - not allowed as PNG: ship public/hero.webp
+```
+
+The policy is the `assets.policy` setting; prose rules such as which image component to use are in the Guide's **Assets** section.
+
+## The knowledge base
+
+The knowledge base holds what the team decided and learned: decisions, conventions, migration notes, quirks and how-tos, each scoped to repositories or groups. Agents read only accepted entries, plus other teams' entries marked shared.
+
+`search_knowledge` searches them best match first. With `repo`, only entries that apply there; filter with `kind`, `package`, `subject` (`npm:react`, `tool:node`) or `topic`. `get_knowledge` reads one entry in full. Agents cite entries as `[kb:<id>]`, and the panel shows the same ids, so a reader can follow the citation.
+
+```text
+● holtkeeper - search_knowledge (query: "date library", repo: "gitlab:acme/checkout-web")
+  ⎿ 1. [kb:k7f2] Use date-fns, not moment, in web apps — decision, shared by team platform
+       moment is in maintenance mode and costs 70 kB gzip in checkout-web…
+```
+
+### Proposing knowledge: propose_knowledge
+
+`propose_knowledge` proposes an entry for one repository: a short, reusable lesson with a Markdown body and an example, optional topics, packages (with version ranges for migrations) and evidence links. It is attributed to you and waits in **Knowledge › Notes** for review; a proposal that repeats an existing entry is not added, and its evidence is merged into that entry instead.
+
+```text
+● holtkeeper - propose_knowledge
+    title:    "Upgrading @acme/forms 3 → 4 needs the resolver moved to useForm options"
+    body:     "In 4.0 `resolver` moved from <Form> to `useForm({ resolver })`. …"
+    repo:     "gitlab:acme/checkout-web"
+    kind:     "migration"
+    packages: [{ ecosystem: "npm", name: "@acme/forms", from: ">=3 <4", to: ">=4 <5" }]
+  ⎿ Proposed kb:k9a1, waiting for review.
+```
+
+Some kinds can be accepted without review: the `knowledge.autoAccept` setting lists them (`quirk` and `howto` on a fresh install). Search first; a duplicate never becomes a new entry.
+
+## Related
+
+- [Guide](/guide/knowledge/guide/) — write and review team rules.
+- [Notes](/guide/knowledge/notes/) — accept or reject proposed knowledge.
+- [Learnings](/guide/knowledge/learnings/) — rule candidates from review replies and agents.
+- [Settings › Policies](/guide/settings/policies/) — commit conventions, asset policy and auto-accept.
+- [Setting keys](/reference/setting-keys/) — `commits.conventions`, `assets.policy`, `analyzers.testids`.

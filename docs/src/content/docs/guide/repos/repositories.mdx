@@ -1,0 +1,161 @@
+---
+title: Repositories
+description: The whole fleet in one table — every repository of your groups with its health per area, freshness and how it gets updates — and the place to add new ones.
+panel: Repos › Repositories
+route: /repos
+permission: repos:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Kbd,
+  Row,
+  Rows,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Split,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+The whole fleet in one table — every repository of your groups with its health per area, freshness and how it gets updates — and the place to add new ones. Every member of the configured groups is listed, also repositories that were never analysed.
+
+<Screen title="Repos › Repositories" caption="No sort means worst first. A cell opens the area of the repository hub that explains it.">
+  <Toolbar title="Repositories">
+    <Segmented slot="start" items={['My teams:24', 'All I can see:61']} />
+    <Tag>Group: Any ▾</Tag>
+    <Tag>Health: any</Tag>
+    <Tag>Forge: any</Tag>
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+    <Button primary>Add repository</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 24, label: 'repositories' },
+      { value: 15, label: 'healthy', tone: 'ok' },
+      { value: 6, label: 'warnings', tone: 'warn' },
+      { value: 2, label: 'failing', tone: 'bad' },
+      { value: 1, label: 'not analysed' },
+    ]}
+    end="Updates 19 webhook · 5 polling"
+  />
+  <Scroll>
+
+| Repository                                       | Health                          | Security                 | Deps                     | Coverage                   | Bundles                    | Jobs                    | CI                      | Licenses                | Release                      | Fresh | Updates |
+| ------------------------------------------------ | ------------------------------- | ------------------------ | ------------------------ | -------------------------- | -------------------------- | ----------------------- | ----------------------- | ----------------------- | ---------------------------- | ----- | ------- |
+| **acme/admin-ui**                                | <Tag tone="bad">Failing</Tag>   | <Tag tone="ok">ok</Tag>  | <Tag tone="warn">3</Tag> | <Tag tone="ok">82%</Tag>   | <Tag tone="bad">103%</Tag> | <Tag tone="bad">2</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag>      | 2h    | webhook |
+| **acme/checkout-web**                            | <Tag tone="warn">Warnings</Tag> | <Tag tone="warn">1</Tag> | <Tag tone="ok">ok</Tag>  | <Tag tone="warn">71%</Tag> | <Tag tone="warn">93%</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="warn">waits</Tag> | 40m   | webhook |
+| **acme/widget-kit**                              | <Tag tone="ok">Healthy</Tag>    | <Tag tone="ok">ok</Tag>  | <Tag tone="ok">ok</Tag>  | <Tag tone="ok">91%</Tag>   | <Tag tone="ok">78%</Tag>   | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag> | <Tag tone="ok">ok</Tag>      | 1d    | polling |
+| **acme/docs-site**                               | <Tag>Not analysed</Tag>         |                          |                          |                            |                            |                         |                         |                         |                              | —     | polling |
+| Other teams · 37 repositories of 4 other teams ▸ |                                 |                          |                          |                            |                            |                         |                         |                         |                              |       |         |
+
+  </Scroll>
+</Screen>
+
+## Read the table
+
+| Column     | Meaning                                                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Repository | The path and avatar. Opens the [repository hub](/guide/repos/repository-hub/).                                            |
+| Health     | The overall state: failing, warnings, healthy or not analysed.                                                            |
+| Areas      | One cell each for Security, Deps, Coverage, Bundles, Jobs, CI, Licenses and Release. A cell you may not read stays empty. |
+| Fresh      | How current the newest analyses are.                                                                                      |
+| Updates    | How Holtkeeper learns about changes: by webhook or by polling.                                                            |
+
+A cell opens the hub area that explains it; **Jobs** opens the repository's runs in [Ops › Runs](/guide/ops/runs/). The strip counts repositories per state and ends with how many get updates by webhook and by polling.
+
+## Filter and sort
+
+- The **scope switch** picks _My teams_, _All I can see_ or one group. In _My teams_, repositories your teams do not own fold into one **Other teams · N** row; click it to expand.
+- **Health** and **Forge** narrow the rows; the legend next to them names the colors.
+- The search in the header filters by path.
+- Click a column header to sort. With no sort the worst repositories come first.
+
+Filters and the sorted column live in the URL, so a link shows the same view.
+
+| Key                       | Does                                |
+| ------------------------- | ----------------------------------- |
+| <Kbd>J</Kbd> <Kbd>K</Kbd> | Move through the rows.              |
+| <Kbd>↵</Kbd>              | Open the selected repository's hub. |
+
+The header also has <Ui>Configure</Ui>, which opens Settings › Analyzers, and a <Ui>⋯</Ui> menu with <Ui>Copy link</Ui> and <Ui>Show runs</Ui>.
+
+## Add a repository
+
+<Ui>Add repository</Ui> opens a side sheet in three steps beside the list. The same button is on
+[Groups](/guide/repos/groups/).
+
+1. **Pick a forge.** Choose the GitLab forge the repository lives on. On the next steps <Ui>Change</Ui> goes back to it.
+2. **Pick the paths.** Browse the projects the forge's token can reach, or paste paths or URLs. Pasted URLs are trimmed to paths and duplicates dropped. Holtkeeper checks access for up to 50 at a time.
+3. **Pick a group.** Add the paths to an existing group or to a new one. The group's include list gets the exact paths. <Ui>Back</Ui> and <Ui>Continue</Ui> sit in the sheet's footer.
+
+<Screen title="Repos › Repositories › Add repository">
+  <Split>
+    <Rows>
+      <Row title="acme/admin-ui" sub="Warnings" />
+      <Row title="acme/checkout-web" sub="Warnings" />
+      <Row title="acme/widget-kit" sub="Healthy" />
+    </Rows>
+    <Sheet title="Add repository" position="Step 2 of 3">
+      <Tag slot="tags" mono>
+        forge work
+      </Tag>
+      <Button ghost slot="actions">
+        Change
+      </Button>
+      <Stack>
+        <Fields columns={1}>
+          <Field
+            label="Paths"
+            value="acme/billing-web, https://gitlab.example.com/acme/billing-api"
+            hint="Paste paths or URLs, or pick projects the token can reach."
+            mono
+            wide
+          />
+        </Fields>
+        <Rows>
+          <Row title="acme/billing-web" sub="Reachable">
+            <Tag tone="ok">OK</Tag>
+          </Row>
+          <Row
+            title="acme/billing-api"
+            sub="Not found — invite the token's account holtkeeper-bot to the project"
+          >
+            <Tag tone="bad">404</Tag>
+          </Row>
+        </Rows>
+        <Button ghost>Back</Button>
+        <Button primary>Continue</Button>
+      </Stack>
+    </Sheet>
+  </Split>
+</Screen>
+
+:::tip
+If a path answers _not found_, the token cannot see the project. The sheet names the account behind the token so you can invite it on GitLab, then check again.
+:::
+
+### Add to a subgroup
+
+A subgroup can be the target too; it is listed indented under its parent. A subgroup only holds its parent's members, so paths the parent does not match yet go into the parent's include list as well.
+
+:::caution
+Adding repositories changes a group's membership and needs `settings:write` over everything. Without it the button is hidden.
+:::
+
+## Related
+
+- [Groups](/guide/repos/groups/) — how repositories are grouped, and subgroups.
+- [Repository hub](/guide/repos/repository-hub/) — one repository in depth.
+- [Integrations](/guide/settings/integrations/) — connect the GitLab forge the paths come from.
+- [Fleet concepts](/start/concepts/fleet/) — health, groups and teams.

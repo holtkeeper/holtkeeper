@@ -1,0 +1,204 @@
+---
+title: Release flow setup
+description: Describe how a repository releases — branches, acceptance, gates, version scheme, changelog and deploy environments — starting from what Holtkeeper reads in the repository.
+panel: Releases › Flow setup
+route: /releases/setup
+permission: settings:write
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Describe how a repository releases — branches, acceptance, gates, version scheme, changelog and deploy environments — starting from what Holtkeeper reads in the repository.
+
+<Screen
+  title="Releases › Flow setup"
+  caption="The flow strip draws the draft from left to right; a click on a step opens the step that edits it."
+>
+  <Toolbar crumbs={['Flow setup']} title="acme/checkout-web">
+    <Segmented slot="start" items={['1 Flow', '2 Versions', '3 Environments']} />
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 'development', label: 'source' },
+      { value: 'Release MR', label: 'label release · acceptance: label' },
+      { value: 'main', label: 'target · 2 gates' },
+      { value: 'v8.3.0', label: 'tag' },
+      { value: 'staging → production', label: 'production asks first' },
+    ]}
+  />
+  <Stack>
+    <Tag tone="info">
+      Detected: merge request flow — 11 of the last 12 release MRs merged development into main
+    </Tag>
+    <Toolbar>
+      <Button>Review the suggestions first</Button>
+      <Button primary>Use it and turn releases on</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+## Open the setup
+
+Open **Releases › Flow setup**, or <Ui>Configure</Ui> on a repository's timeline, or <Ui>Set up releases</Ui> on the overview. Without a repository the page shows a picker of the repositories you may configure. The CI page's **Release gates** and the repository hub's **Releases** tab link here too.
+
+Nothing is tagged or deployed from this page; it only edits the repository's `releases` setting.
+
+| You see          | When                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| A wizard         | The repository has no `releases` setting yet: three steps, **Flow**, **Versions**, **Environments**. |
+| One editing page | It is configured: **Releases on**, Flow, Versions and changelog, and Environments on one page.       |
+| Read-only lines  | You do not have `settings:write` on the repository: the effective flow, nothing to edit.             |
+
+## Start from the suggestion
+
+The wizard reads the repository from the forge as soon as it opens: merge requests, tags, labels, `CHANGELOG.md`, commit messages, pipelines and protected branches. A notice names the suggested mode and why.
+
+1. Read the suggestion and, below it, **What we read**.
+2. Choose <Ui>Use it and turn releases on</Ui> to apply the suggestions, turn releases on and save in one go, or <Ui>Review the suggestions first</Ui> to only fill the draft and walk through the steps.
+3. A field the checks refuse opens its step instead of saving.
+
+On a configured repository, detection runs only when you ask with <Ui>Read the forge</Ui> (or <Ui>⋯</Ui> › <Ui>Read the forge again</Ui>); the button is then <Ui>Use the suggestions</Ui>.
+
+<Screen title="Releases › Flow setup › What we read">
+  <Scroll>
+
+| Kind                 | Value                                 | Where                       | Suggests              |
+| -------------------- | ------------------------------------- | --------------------------- | --------------------- |
+| Release labels       | `release` on 11 of 12 release MRs     | merge requests · 2 days ago | `mergeRequest.labels` |
+| Acceptance           | `release-accepted` used               | !231                        | `acceptance: label`   |
+| Changelog file       | `CHANGELOG.md`                        | repository root             | `changelogFile`       |
+| Conventional Commits | 94% of commits                        | main · last 300 commits     | —                     |
+| Tracker keys         | `ABC` in 71% of commits               | main                        | —                     |
+| Deploy jobs          | `deploy:staging`, `deploy:production` | pipeline of v8.2.1          | `deploy.environments` |
+| Protected target     | `main`                                | branch settings             | `gates.pipeline`      |
+
+  </Scroll>
+</Screen>
+
+Every field and every step of the flow strip carries a source tag:
+
+| Tag        | Meaning                                           |
+| ---------- | ------------------------------------------------- |
+| `detected` | The value equals a suggestion backed by evidence. |
+| `edited`   | You changed it from what the page started with.   |
+| `saved`    | It comes from the saved setting.                  |
+| `default`  | It is Holtkeeper's default.                       |
+
+## Flow
+
+<Screen title="Releases › Flow setup › Flow">
+  <Fields>
+    <Field label="Mode" value="Merge request" />
+    <Field label="Acceptance" value="Label on the release MR" />
+    <Field label="Source branch" value="development" mono />
+    <Field label="Target branch" value="main" mono hint="Empty: the default branch" />
+    <Field label="Release MR labels" value="release" mono />
+    <Field
+      label="Pipeline gate"
+      toggle={true}
+      value="A failed or canceled pipeline blocks the step"
+    />
+    <Field
+      label="Blocking labels"
+      value="do-not-release"
+      mono
+      wide
+      hint="Open merge requests with these labels block the step"
+    />
+  </Fields>
+</Screen>
+
+| Mode          | How the repository releases                                                                                                                |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Merge request | A release merge request brings the source branch (default `development`) into the target. The version is created on the target afterwards. |
+| Trunk         | Work lands on the target directly; versions are tagged on it.                                                                              |
+| External      | Another tool, such as changesets or release-please, releases the repository. Versions and deploys are shown; steps are off.                |
+
+Acceptance says what the version waits for, so you can tie it to your own QA or sign-off:
+
+| Acceptance | The version waits for                                             |
+| ---------- | ----------------------------------------------------------------- |
+| None       | Nothing; the version can be created at once. The default.         |
+| Manual     | A person in the panel, or a CI job calling the API.               |
+| Label      | The `release-accepted` label on the merged release merge request. |
+| Merge      | The release merge request being merged.                           |
+
+A person can accept in every mode.
+
+## Versions and changelog
+
+<Screen title="Releases › Flow setup › Versions">
+  <Fields>
+    <Field label="Scheme" value="Semantic (1.4.2)" />
+    <Field label="Tag format" value="v{version}" mono />
+    <Field label="Release candidates first" toggle={false} value="1.3.0-rc.1, rc.2, …" />
+    <Field label="Prepend to CHANGELOG.md" toggle={true} value="On the target branch" />
+    <Field label="Leave out commit types" value="ci, chore" mono />
+    <Field label="Tracker URL" value="https://tracker.example.com/browse/{id}" mono />
+  </Fields>
+</Screen>
+
+- **Scheme**: semantic versions, or calendar versions as `YYYY.MM.MICRO`.
+- **Tag format** wraps the version and must contain `{version}`; the default is `v{version}`.
+- **Release candidates** tag `1.3.0-rc.1`, `rc.2` and so on before the version.
+- **CHANGELOG.md**: each version's notes are committed on top of the file.
+- **Leave out commit types**: entries of these types are left out of the changelog.
+- **Tracker URL** turns keys like `ABC-123` into links; `{id}` stands for the key.
+
+The bump, the changelog grouping and the texts of merge requests, tags and releases are fixed. The style of AI notes is a rule in the **Releases** section of the [Guide](/guide/knowledge/guide/).
+
+## Environments
+
+<Screen title="Releases › Flow setup › Environments">
+  <Stack>
+    <Rows>
+      <Row title="staging" sub="job deploy:staging · right after the tag" />
+      <Row title="production" sub="job deploy:prod* · after staging · asks first" />
+    </Rows>
+    <Toolbar>
+      <Button>+ Environment</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+Each environment has a name, a job (a glob over the tag pipeline's manual jobs), the environment it deploys after, and whether it asks for confirmation first.
+
+1. Choose <Ui>+ Environment</Ui>. New environments are named `staging`, then `production`, then `environment-N`, and deploy after the last one.
+2. Set the job and, if needed, change **After** and **Asks first**.
+3. Rename freely: environments deployed after it follow the new name. Removing one clears the **After** of the ones that followed it.
+
+The step also shows the release webhooks read-only: their scope and last change, never their URLs. <Ui>Manage in Settings</Ui> opens [Settings › Integrations](/guide/settings/integrations/).
+
+## Save
+
+- In the wizard, <Ui>Back</Ui> and <Ui>Continue</Ui> move between steps; the last step has <Ui>Save the flow</Ui> and **Turn releases on when I finish** (on by default). After saving, the repository's [timeline](/guide/releases/timeline/) opens.
+- On a configured repository, <Ui>Save</Ui> in the header is enabled once the draft differs; <Ui>⋯</Ui> › <Ui>Start over</Ui> discards the draft.
+
+The draft stays in the page until you save. Saving writes the repository's own `releases` entry, or creates one scoped to just this repository.
+
+:::caution
+Save refuses a missing source branch, a target equal to the source, a tag format without `{version}`, and empty or duplicate environment names. The page jumps to the first step with an error, marked **fix**.
+:::
+
+## Related
+
+- [Releases overview](/guide/releases/overview/) — every repository's stage.
+- [Release timeline](/guide/releases/timeline/) — run the steps this flow describes.
+- [Policies](/start/concepts/policies/) — how scoped settings like `releases` cascade.
+- [Release assistant](/modules/release/) — flow, gates and steps in detail.

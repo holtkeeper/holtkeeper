@@ -1,0 +1,325 @@
+---
+title: Automation
+description: See and change what runs when — schedules, event triggers, merge request policies and freshness — as a list or as a map of every rule per team.
+panel: Ops › Automation
+route: /ops/automation
+permission: settings:read
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Split,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Ticks,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See and change what runs when — schedules, event triggers, merge request policies and freshness — as a list or as a map of every rule per team.
+
+Four kinds of rules queue analyzer runs:
+
+| Rule                 | Fires when                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| Schedule             | Its cron expression or interval comes due, inside the time windows you allow.               |
+| Event trigger        | A push, a tag, a merge request, a label or a newly found repository arrives from the forge. |
+| Merge request policy | A merge request event matches its conditions; it can also approve, merge, label or comment. |
+| Freshness            | A stored analysis is older than the code or its cadence. Built in, tuned per team.          |
+
+<Screen title="Ops › Automation" caption="Schedules go worst first: failing, blocked and partly failed before healthy ones.">
+  <Toolbar title="Automation" crumbs={['Ops']}>
+    <Segmented slot="start" items={['List', 'Map']} />
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+    <Button primary>New rule</Button>
+  </Toolbar>
+  <Toolbar>
+    <Segmented slot="start" items={['Triggers:5', 'Schedules:6', 'MR policies:4', 'Freshness:3']} active={1} />
+    <Tag>My teams</Tag>
+    <Tag>Team</Tag>
+    <Tag>Status</Tag>
+    <Tag>Problems only</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 6, label: 'schedules · 5 on, 1 paused' },
+      { value: '02:00', label: 'next run' },
+      { value: 318, label: 'scheduled jobs this week' },
+      { value: '$41.20', label: 'automatic AI · forecast $88' },
+      { value: 1, label: 'failing', tone: 'bad' },
+      { value: 1, label: 'partly failed', tone: 'warn' },
+      { value: 4, label: 'healthy', tone: 'ok' },
+    ]}
+  />
+  <Scroll>
+
+| Schedule                                  | When                                           | Teams    | Analyzers                      | Last 14 runs                        | Health                                     | Next        | On                      |                          |
+| ----------------------------------------- | ---------------------------------------------- | -------- | ------------------------------ | ----------------------------------- | ------------------------------------------ | ----------- | ----------------------- | ------------------------ |
+| **Nightly audit** · `nightly`             | `0 2 * * *` Every day at 02:00 · Europe/Berlin | Payments | audit, licenses                | <Ticks healthy={11} failing={3} />  | <Tag tone="bad">Failing · 3 in a row</Tag> | today 02:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Weekly guide refresh** · `weekly-guide` | `0 6 * * 1` Mon at 06:00                       | Widgets  | guide <Tag tone="acc">AI</Tag> | <Ticks healthy={12} warnings={2} /> | <Tag tone="warn">Partly failed</Tag>       | Mon 06:00   | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Office hours CI** · `office`            | `1h` Every hour · weekdays 09:00–18:00         | Payments | ci-jobs                        | <Ticks healthy={14} />              | <Tag tone="ok">Healthy</Tag>               | today 11:00 | <Tag tone="ok">On</Tag> | <Button>Run now</Button> |
+| **Bundle backfill** · `bundles`           | `0 3 * * 6` Sat at 03:00                       | Widgets  | bundle                         | <Ticks healthy={0} none={14} />     | <Tag>Paused</Tag>                          | —           | <Tag>Off</Tag>          | <Button>Run now</Button> |
+| _Other teams · 2 schedules_               |                                                |          |                                |                                     |                                            |             |                         |                          |
+
+  </Scroll>
+</Screen>
+
+## Read the list
+
+The list is the default view. The toolbar narrows it:
+
+- **Scope switch.** _My teams_ keeps rules that cover every repository or sit in one of your home groups; a picked group keeps rules that cover every repository or sit in that group.
+- **Text filter.** Matches a rule's name, id or analyzer.
+- **Rule kind.** **Triggers**, **Schedules** (the default), **MR policies** and **Freshness** (with its count of stale analyses), each with its count.
+- **Filters.** **Team** everywhere; on Schedules also **Status** and **Problems only**.
+
+**Schedules** opens with a strip: how many schedules are on and paused, the next run, the jobs schedules queued this budget week, and the automatic AI spend of the week with its forecast (the same figures as [AI spend](/guide/ops/ai-spend/)), then the failing, blocked, partly failed and healthy counts. The table shows each schedule's cadence in words with its time zone, teams, analyzers (an **AI** tag marks ones that call a model), the last 14 runs as ticks, health, the last and next run, an on/off switch and <Ui>Run now</Ui>. Other teams' schedules fold into one row.
+
+**Triggers** and **MR policies** list one row per rule with what fires it (or its conditions), its status, teams and actions. A row opens the rule's form in a sheet with **Rule** and **Activity** tabs.
+
+### Schedule health
+
+| Health        | Means                                                                  |
+| ------------- | ---------------------------------------------------------------------- |
+| Healthy       | The newest finished run succeeded.                                     |
+| Partly failed | Some of its jobs failed and some succeeded.                            |
+| Failing       | Jobs failed and none succeeded; the tag counts how many runs in a row. |
+| Blocked       | The AI budget stopped its jobs.                                        |
+| No runs yet   | It never finished a run.                                               |
+| Paused        | It is switched off.                                                    |
+
+Runs that queued nothing, or whose jobs were all cancelled, count as skipped and do not change the health.
+
+## Inspect a schedule
+
+Click a schedule, or step with <Kbd>J</Kbd> / <Kbd>K</Kbd>. The sheet shows the last run as its progress bar, <Ui>Run now</Ui> and <Ui>Pause</Ui> (or <Ui>Resume</Ui>), and <Ui>Show runs</Ui> and <Ui>Show on map</Ui> in the ⋯ menu.
+
+<Screen title="Ops › Automation › Nightly audit">
+  <Sheet id="nightly" title="Nightly audit" position="1 of 6">
+    <Tag tone="bad" slot="tags">
+      Failing
+    </Tag>
+    <Button slot="actions">Run now</Button>
+    <Button slot="actions">Pause</Button>
+    <Button slot="actions">⋯</Button>
+    <Tabs items={['Overview', 'Edit rule', 'Activity']} />
+    <Stack>
+      <Facts
+        items={[
+          ['Failed', '3 runs in a row · audit on acme/checkout-web, acme/admin-ui'],
+          ['First error', 'osv-scanner: lockfile not found'],
+          ['Cadence', 'Every day at 02:00 · Europe/Berlin · jitter 10 min'],
+          ['Next runs', 'Thu 02:04 · Fri 02:01 · Sat 02:07 · Sun 02:03 · Mon 02:09'],
+          ['Groups', 'Payments'],
+          ['Analyzers', 'audit, licenses'],
+          ['Spread', 'On — repository jobs spread over the run window'],
+        ]}
+      />
+      <Toolbar>
+        <Button>View log</Button>
+        <Button ghost>All jobs of this schedule</Button>
+      </Toolbar>
+    </Stack>
+  </Sheet>
+</Screen>
+
+| Tab       | What it shows                                                                                                                                                                                                    |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview  | A failure callout when the newest run failed or partly failed (first error, failed repositories, runs in a row, <Ui>View log</Ui>), the last 30 runs as ticks, the cron fields, the next five runs and the rule. |
+| Edit rule | The schedule form.                                                                                                                                                                                               |
+| Activity  | Audit events about this schedule: who created, changed, paused or ran it.                                                                                                                                        |
+
+<Ui>Show runs</Ui> opens [Ops › Runs](/guide/ops/runs/) filtered to the schedule.
+
+## Add a schedule
+
+1. Click <Ui>New rule</Ui> and pick the **Schedule** tab.
+2. Name it and give it a cadence: a cron expression (`0 3 * * 1-5`) or an interval (`1h`, `2d`), and its time zone.
+3. Pick the analyzers, and the groups and repositories it covers. Without groups it covers every top-level group.
+4. Optionally limit when it may run, add jitter or spread its jobs.
+5. Save. The sheet shows the next five runs, so check them before you leave.
+
+<Screen
+  title="Ops › Automation · New rule"
+  caption="The schedule form; the cron expression is read back in words as you type."
+>
+  <Stack>
+    <Tabs items={['Event trigger', 'Schedule', 'Merge request policy']} active={1} />
+    <Fields>
+      <Field label="Title" value="Office hours CI" />
+      <Field label="Id" value="office" mono />
+      <Field label="Cadence" value="1h" mono hint="Every hour" />
+      <Field label="Time zone" value="Europe/Berlin" />
+      <Field label="Analyzers" value="ci-jobs" />
+      <Field label="Groups" value="Payments" />
+      <Field
+        label="Repositories"
+        placeholder="acme/checkout-*"
+        mono
+        hint="Optional path globs inside the groups"
+      />
+      <Field label="Allowed windows" value="Mon–Fri 09:00–18:00" />
+      <Field label="Skip weekends" toggle={true} />
+      <Field label="Skip nights" value="22:00–07:00" toggle={true} />
+      <Field label="Holidays" value="2026-12-24, 2026-12-31" mono />
+      <Field label="Jitter, minutes" value="10" mono />
+      <Field label="Spread jobs over the window" toggle={true} />
+      <Field label="Enabled" toggle={true} />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Discard</Button>
+      <Button primary>Save rule</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+How the time controls behave:
+
+- **Windows.** With allowed windows a run must fall inside one of them; denied windows, skipped nights, weekends and holidays always win. A window whose end is before its start runs past midnight (`Fri 22:00–02:00` covers Saturday 01:00).
+- **Moved runs.** A cron run that lands in a denied minute moves to the next allowed minute. Several runs that collapse onto one minute run once, so an hourly schedule with nights skipped runs once at 07:00, then hourly.
+- **Intervals** start at the first allowed minute of each allowed stretch of a day and repeat while allowed: `1h` inside 09:00–18:00 runs at 09:00, 10:00, …, 17:00.
+- **Jitter** delays each run by a stable random amount, the same in the preview and in real runs.
+- **Spread** spaces the repository jobs of one run evenly over the allowed stretch, so 40 repositories do not hit the forge at once.
+- **Time zones.** Times stay local across daylight saving changes: a 03:00 run stays at 03:00.
+
+:::tip
+
+<Ui>Run now</Ui> starts a schedule at once, even a paused one, with you recorded as the person who
+ran it. It needs `analyses:run`. :::
+
+## Add an event trigger
+
+<Ui>New rule</Ui> › **Event trigger** queues analyzers when the forge reports something:
+
+| Event          | Queues its analyzers when…                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| Push           | a branch matching one of the rule's globs gets new commits. A burst of pushes runs once, for the newest commit. |
+| Tag            | a tag is pushed, on the tagged commit.                                                                          |
+| Merge request  | a merge request is opened, reopened, gets new commits or leaves draft. Title or description edits do not count. |
+| Label          | a given label is added to a merge request, drafts included.                                                     |
+| New repository | a repository appears in a group for the first time. A built-in rule runs every read-only analyzer once on it.   |
+
+Each trigger can be limited to some groups. Pushes by Holtkeeper's own bot user, deleted branches and deleted tags never fire.
+
+## Add a merge request policy
+
+A policy is an **If / Then** rule on merge request events. Conditions are all optional and must all hold; actions run in order.
+
+<Screen
+  title="Ops › Automation › docs-only fast lane"
+  kind="example"
+  caption="A policy that approves and merges documentation-only merge requests once the pipeline is green."
+>
+  <Split>
+    <Stack>
+      <Toolbar title="If" />
+      <Facts
+        items={[
+          ['Event', 'open, update'],
+          ['Target branch', 'main'],
+          ['Changed paths', 'all match **/*.md'],
+          ['Size', 'at most 200 lines'],
+          ['Pipeline', 'success'],
+        ]}
+      />
+    </Stack>
+    <Stack>
+      <Toolbar title="Then" />
+      <Rows>
+        <Row title="Approve" sub="summary: Docs only, pipeline green" />
+        <Row title="Merge" sub="squash · remove source branch" />
+        <Row title="Skip analyzers" sub="review" />
+      </Rows>
+    </Stack>
+  </Split>
+</Screen>
+
+| Conditions                                                                                                                                                                                                                   | Actions                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| event, source and target branch, author (or whether it is a bot), labels present or just added, title pattern, draft state, a `/holtkeeper` command, changed paths, diff size, pipeline state; combine with all, any and not | approve, merge, add or remove labels, comment, close, mark draft or ready, assign reviewers, queue an analyzer, call a webhook; skip analyzers for the event |
+
+- Policies from narrower scopes run first; a policy marked **stop** ends evaluation.
+- Approve, merge and comment happen once per head commit, so a redelivered event never approves twice. An approve waits while the pipeline runs and is skipped when it is not green.
+- Holtkeeper never approves its own merge requests unless the policy explicitly allows it.
+- A repository can switch off or replace a group policy by giving its own entry the same id.
+
+:::note
+When [merge request reviews are off](/guide/settings/policies/#merge-request-reviews) for a repository, policy comments and labels are skipped and approvals go out without their summary. Everything else runs as usual.
+:::
+
+## Tune freshness
+
+Freshness keeps analyses current without schedules: every analyzer says when its record goes stale (the code changed, or a cadence passed), and a sweep every five minutes queues what is stale. **Freshness** in the list shows tiles for stale, waiting and fresh analyses and the next sweep, then each team:
+
+<Screen title="Ops › Automation · Freshness">
+  <Strip
+    items={[
+      { value: 14, label: 'stale', tone: 'warn' },
+      { value: 6, label: 'waiting' },
+      { value: 1204, label: 'fresh', tone: 'ok' },
+      { value: 'in 3 min', label: 'next sweep' },
+    ]}
+  />
+  <Rows>
+    <Row title="Every repository" sub="On · last sweep: 2 queued, 4 waiting">
+      <Segmented items={['On', 'Slower', 'Off']} />
+    </Row>
+    <Row title="Payments" sub="Slower × 3 · own setting">
+      <Segmented items={['On', 'Slower', 'Off']} active={1} />
+      <Button ghost>Use the every-repository setting</Button>
+    </Row>
+    <Row title="Widgets" sub="On · from every repository">
+      <Segmented items={['On', 'Slower', 'Off']} />
+    </Row>
+  </Rows>
+</Screen>
+
+1. Find the team.
+2. Pick **On**, **Slower** (every interval and cadence multiplied by a factor from 2 to 10) or **Off**.
+3. To go back to the shared setting, click <Ui>Use the every-repository setting</Ui>.
+
+Pick a team to see which analyzers refresh for it and how. The footer names the sweeper's night window and hourly caps, with a link to [Settings › System](/guide/settings/system/#background-work) to change them.
+
+:::caution
+Analyzers that call a model refresh only after they have a record of a commit, wait while automatic work has used the weekly budget minus its reserve, and run at most two an hour by default. Heavy analyzers (coverage, bundles, assets) wait for the night window.
+:::
+
+## The map
+
+**Map** draws the same rules on one canvas for one team at a time: that team's rules together with those covering every repository, linked to the events that fire them and the analyzers and actions they lead to.
+
+- The team segments count each team's rules.
+- Narrow the canvas by kind (**Triggers**, **Schedules**, **Policies**, **Built in**), with **Calls AI only**, or with text that matches titles, chips and linked events or actions.
+- A rule node shows an **AI** tag, _Off_, or a status badge: a failing, partly failed or budget-blocked schedule, or stale freshness.
+- Click a node to edit it in the drawer, whose footer (<Ui>Remove</Ui>, <Ui>Discard</Ui>, <Ui>Save rule</Ui>) stays pinned. A schedule also has **Health** and **Activity** tabs and <Ui>Open in the schedules list</Ui>.
+
+<Ui>Show on Automation</Ui> on a run in [Ops › Runs](/guide/ops/runs/) opens the map with a notice
+explaining why the job ran and the path that could have queued it highlighted, on the job's team.
+
+## Who can do what
+
+Seeing Automation needs `settings:read` over everything. Saving rules, switching schedules and changing freshness need `settings:write`; <Ui>Run now</Ui> needs `analyses:run`. <Ui>Configure</Ui> opens [Settings › Analyzers](/guide/settings/analyzers/), where every analyzer's state is read from these rules.
+
+## Related
+
+- [Runs](/guide/ops/runs/) — the jobs these rules queue, with why each one ran.
+- [Settings › Analyzers](/guide/settings/analyzers/) — on, some repositories or off, read from Automation.
+- [Settings › System](/guide/settings/system/) — the freshness sweep's caps and night window.
+- [Analyzers and runs](/start/concepts/analyzers-and-runs/) — the model behind rules and jobs.
+- [Merge request policies](/modules/mr-policies/) — every condition and action in detail.
+- [Jobs engine](/modules/jobs/) — schedules, windows and freshness decisions.

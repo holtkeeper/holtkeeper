@@ -1,0 +1,153 @@
+---
+title: Overview
+description: See in one place what needs you, what changed this week, how your repositories are doing and how much of the AI budget is spent.
+panel: Home › Overview
+route: /
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Stack,
+  Strip,
+  Tag,
+  Ticks,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See in one place what needs you, what changed this week, how your repositories are doing and how much of the AI budget is spent. Home is the first page after sign-in and is open to every role; each card shows only what your permissions let through.
+
+<Screen title="Home › Overview" caption="The strip sums the repositories in the current scope; the right end counts analyses that are not current.">
+  <Toolbar title="Home">
+    <Segmented slot="start" items={['My teams:24', 'All I can see:61']} />
+    <Tag>Group: Any ▾</Tag>
+    <Button primary>Review inbox · 5</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 24, label: 'repositories' },
+      { value: 15, label: 'healthy', tone: 'ok' },
+      { value: 6, label: 'with warnings', tone: 'warn' },
+      { value: 2, label: 'failing', tone: 'bad' },
+      { value: 7, label: 'need attention' },
+      { value: 5, label: 'decisions waiting' },
+    ]}
+    end="9 stale analyses"
+  />
+  <Toolbar title="Needs attention">
+    <Segmented items={['By severity', 'By kind', 'By repository']} />
+    <Tag>Snoozed 1</Tag>
+  </Toolbar>
+  <Scroll>
+
+| Severity                      | Item                                                                       | Repositories        | Age | Action                  |
+| ----------------------------- | -------------------------------------------------------------------------- | ------------------- | --- | ----------------------- |
+| <Tag tone="bad">High</Tag>    | **2 critical vulnerabilities** · audit · `some-lib` 4.1.0 → fixed in 4.1.3 | `acme/checkout-web` | 3h  | <Button>Open</Button>   |
+| <Tag tone="bad">High</Tag>    | **coverage failed 3 times** · job failures · `ENOENT lcov.info`            | `acme/admin-ui`, +2 | 5h  | <Button>Retry</Button>  |
+| <Tag tone="warn">Medium</Tag> | **Release waits for acceptance** · release · `v8.3.0`                      | `acme/checkout-web` | 1d  | <Button>Review</Button> |
+| <Tag tone="warn">Medium</Tag> | **Allowlist entry expires in 4 days** · `GHSA-xxxx-1234`                   | `acme/widget-kit`   | 2d  | <Button>Renew</Button>  |
+| <Tag>Low</Tag>                | **No bundle analysis for 16 days**                                         | `acme/docs-site`    | 16d | <Button>Open</Button>   |
+
+  </Scroll>
+</Screen>
+
+## Pick the scope
+
+The switch at the top narrows every card on Home at once.
+
+- **My teams** shows the repositories of your home groups. Pick them on [Account › My teams](/guide/account/profile/#choose-your-teams).
+- **All I can see** shows every repository your grants reach.
+- **Group: Any ▾** narrows Home to one group; <Ui>Clear</Ui> goes back to _My teams_.
+
+Your choice is remembered in this browser. Items about no repository, such as a budget warning, show in every position; an item about several repositories shows when any of them is in scope.
+
+:::tip
+If you have not picked any teams, the switch reads _My teams 0_ and a **Choose your teams** link appears. Until then _Needs attention_, _What changed_ and _Repositories_ point you there instead of showing an empty card.
+:::
+
+## Work through Needs attention
+
+The table lists what Holtkeeper thinks a person should look at, most urgent first:
+
+| Kind                | When it shows                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| Job failures        | An analyzer failed in the last 24 hours, grouped by analyzer and error.                    |
+| Budget stops        | An AI budget stopped jobs in the last 24 hours.                                            |
+| Vulnerabilities     | Critical and high findings of a repository's latest audit, with the change since the last. |
+| Allowlist           | An allowlist entry you may edit expired or expires within 7 days.                          |
+| Releases            | A failed read or deploy, an acceptance nobody gave, or a version blocked by a gate.        |
+| Learnings and notes | Proposed rules and knowledge entries you may decide.                                       |
+| Stale or missing    | The newest analysis is older than 14 days, or a repository has never been analysed.        |
+
+Each row has one action:
+
+- <Ui>Retry</Ui> queues the analyzer again on every repository of the item. It shows only when you
+  may run analyzers on all of them; the arrow beside it opens the item.
+- <Ui>Review</Ui> and <Ui>Renew</Ui> open the decision in the [Inbox](/guide/home/inbox/).
+- <Ui>Open</Ui> goes to the page that explains the item.
+
+Group the rows with **By severity**, **By kind** or **By repository** in the card's header.
+
+### Snooze an item
+
+Snooze a row for a day when you know about it and will get to it later. Snoozed rows are hidden and left out of the strip's count. Turn on **Snoozed N** in the card's header to see them again, tagged _Snoozed_ after the rest of their group, and unsnooze any of them there.
+
+:::note
+Snoozing is private: it hides the item for you only and is not a decision. An allowlist item shares its snooze with the Inbox.
+:::
+
+## Read the other cards
+
+<Screen title="Home › Overview" caption="Fleet health, the week's AI spend and the audit log of the last 7 days.">
+  <Stack>
+
+**Fleet health** · worst first
+
+<Ticks healthy={15} warnings={6} failing={2} none={1} />
+
+15 healthy · 6 with warnings · 2 failing · 1 not analysed · 9 stale analyses
+
+**AI spend this week**
+
+<Meter value={62} label={'$93.40 of $150'} />
+
+<Tag tone="warn">Projected $162</Tag> Reserve $20 · Resets Monday · Reviews $51.10 · Chat $18.30 ·
+Tasks $14.00 · Other $10.00
+
+**What changed** · <Ui>Full history</Ui>
+
+  </Stack>
+  <Scroll>
+
+| Event                                         | Repository          | Who     | When |
+| --------------------------------------------- | ------------------- | ------- | ---- |
+| Version `v3.14.0` was created                 | `acme/admin-ui`     | Mira K. | 2h   |
+| Setting `analyzers.bundle` was changed        | `acme/checkout-web` | Jon D.  | 1d   |
+| Release `v8.2.1` was deployed to `production` | `acme/checkout-web` | Jon D.  | 2d   |
+| A learned rule was accepted                   | `acme/widget-kit`   | Mira K. | 4d   |
+
+  </Scroll>
+</Screen>
+
+| Card               | What it shows                                                                                                                                                                            | Needs        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| Fleet health       | One tick per repository in scope, worst first, the count per status and how many analyses are stale.                                                                                     | `repos:read` |
+| AI spend this week | Spend of the broadest budget you may read against its weekly limit, split by product feature, with a marker where automatic work stops, the projection, the reserve and _Resets Monday_. | `ai:read`    |
+| What changed       | One sentence per notable event of the last 7 days: versions, deploys, setting changes, accepted rules, new repositories and the like. <Ui>Full history</Ui> opens the audit log.         |              |
+| Repositories       | The ten worst repositories in scope with one cell per health area you may read.                                                                                                          | `repos:read` |
+
+In **Repositories**, a health cell opens that area of the repository hub (Security, Libraries, Coverage, Bundles, CI, Releases…) and the path opens its Overview. The footer names the scope and links to the full list when there are more.
+
+## Related
+
+- [Inbox](/guide/home/inbox/) — the decisions waiting for you.
+- [Repositories](/guide/repos/repositories/) — the whole fleet with every health cell.
+- [AI spend](/guide/ops/ai-spend/) — budgets, forecasts and spend per feature.
+- [Audit log](/guide/settings/audit-log/) — the full history behind _What changed_.
+- [Fleet concepts](/start/concepts/fleet/) — repositories, groups and health.

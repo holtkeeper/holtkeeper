@@ -1,0 +1,26 @@
+---
+import { botAvatar } from './slack.ts'
+
+interface Props {
+  /** Defaults to Holtkeeper with its avatar. */
+  author?: string
+  severity?: 'critical' | 'major' | 'minor' | 'info'
+  /** Where it points: `line 43`. */
+  where?: string
+}
+
+const { author = 'Holtkeeper', severity, where } = Astro.props
+const tone = { critical: 'bad', major: 'warn', minor: undefined, info: 'info' } as const
+---
+
+<div class="hk-comment">
+  <div class="hk-comment-who">
+    {author === 'Holtkeeper' && <img src={botAvatar} alt="" width="20" height="20" />}
+    <b>{author}</b>
+    {severity && <span class:list={['hk-tag', tone[severity]]}>{severity}</span>}
+    <span class="hk-sp"></span>
+    {where && <span class="hk-dim">{where}</span>}
+  </div>
+  <div class="hk-comment-body"><slot /></div>
+  <slot name="actions" />
+</div>

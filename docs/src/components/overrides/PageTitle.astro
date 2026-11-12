@@ -1,6 +1,8 @@
 ---
+import Tag from '../ui/Tag.astro'
+
 const { entry, sidebar } = Astro.locals.starlightRoute
-const { title, editUrl } = entry.data
+const { title, editUrl, panel, route, permission } = entry.data
 
 type SidebarEntry = (typeof sidebar)[number]
 
@@ -15,25 +17,43 @@ const groupOf = (entries: SidebarEntry[], parent?: string): string | undefined =
   return undefined
 }
 const topic = Astro.locals.starlightSidebarTopics?.topics.find((t) => t.isCurrent)?.label
-const group = groupOf(sidebar) ?? topic
+const group = groupOf(sidebar)
+const crumbs = [topic, group].filter((c): c is string => Boolean(c) && c !== title)
 const source = typeof editUrl === 'string' ? editUrl.replace('/edit/', '/blob/') : undefined
 const sourcePath = source?.split('/blob/main/')[1]
+const showSource = sourcePath && !sourcePath.startsWith('docs/src/')
+const hasMeta = panel || route || permission || showSource
 ---
 
 <div class="hk-title">
-  {group && <p class="hk-eyebrow">{group}</p>}
+  {
+    crumbs.length > 0 && (
+      <p class="hk-crumbs">
+        {crumbs.map((c) => (
+          <span>{c}</span>
+        ))}
+      </p>
+    )
+  }
   <h1 id="_top">{title}</h1>
   {
-    sourcePath && !sourcePath.startsWith('docs/src/') && (
-      <a class="hk-source" href={source}>
-        <svg viewBox="0 0 16 16" aria-hidden="true">
-          <path
-            fill="currentColor"
-            d="M3.5 1h6.1L13 4.4v9.1c0 .8-.7 1.5-1.5 1.5h-8C2.7 15 2 14.3 2 13.5v-11C2 1.7 2.7 1 3.5 1Zm5.6 1.2H3.5a.3.3 0 0 0-.3.3v11c0 .2.1.3.3.3h8c.2 0 .3-.1.3-.3V4.9H9.6a.5.5 0 0 1-.5-.5V2.2Z"
-          />
-        </svg>
-        {sourcePath}
-      </a>
+    hasMeta && (
+      <div class="hk-meta">
+        {panel && <Tag icon="panel">In the panel: {panel}</Tag>}
+        {route && <Tag mono>{route}</Tag>}
+        {permission && <Tag tone="info">Needs {permission}</Tag>}
+        {showSource && (
+          <a class="hk-source" href={source}>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M3.5 1h6.1L13 4.4v9.1c0 .8-.7 1.5-1.5 1.5h-8C2.7 15 2 14.3 2 13.5v-11C2 1.7 2.7 1 3.5 1Zm5.6 1.2H3.5a.3.3 0 0 0-.3.3v11c0 .2.1.3.3.3h8c.2 0 .3-.1.3-.3V4.9H9.6a.5.5 0 0 1-.5-.5V2.2Z"
+              />
+            </svg>
+            {sourcePath}
+          </a>
+        )}
+      </div>
     )
   }
 </div>

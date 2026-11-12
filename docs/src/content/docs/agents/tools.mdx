@@ -1,0 +1,185 @@
+---
+title: What agents can ask
+description: A walkthrough of Holtkeeper's MCP tools by question, with example calls and answers.
+sidebar:
+  order: 3
+---
+
+Holtkeeper's MCP endpoint offers about fifty tools, all built on data Holtkeeper already stores: analyses of every repository, the library index and the team's knowledge. Calls are cheap and never start an analysis or an AI run. This page walks through them by the question an agent is trying to answer; [MCP tools](/reference/mcp-tools/) lists every argument.
+
+Repositories are always named `forge:path`, for example `gitlab:acme/checkout-web`. Answers are Markdown, cut at about 80 000 characters with a hint on how to narrow the request.
+
+## Your organization's packages
+
+Holtkeeper indexes the public API of every package your repositories publish: each export with its declaration and doc comment, for every released version and the default branch. Agents use it instead of reading `node_modules` or other repositories' sources.
+
+| Question                            | Tool                                |
+| ----------------------------------- | ----------------------------------- |
+| Is there already a helper for this? | `search_symbols`, then `get_symbol` |
+| What does this package export?      | `list_packages`, `get_package_api`  |
+| What changed between two versions?  | `list_versions`, `diff_versions`    |
+
+```text
+> Is there a date formatting helper in our packages?
+
+● holtkeeper - search_symbols (query: "formatDate")
+  ⎿ - formatDate — function, @acme/fmt-utils@2.4.0, repo `gitlab:acme/fmt-utils`
+      import { formatDate } from '@acme/fmt-utils'
+      export function formatDate(value: Date | string, style?: DateStyle): string
+      Formats a date in the user's locale; `style` defaults to `medium`.
+    - formatDateRange — function, @acme/fmt-utils@2.4.0 …
+
+● holtkeeper - get_symbol (package: "@acme/fmt-utils", name: "formatDate")
+  ⎿ import { formatDate } from '@acme/fmt-utils'
+    …
+```
+
+Packages marked **removed** were dropped from their repository; answers about them start with a warning not to use them in new code.
+
+## How the fleet uses a package
+
+A second index records how every repository uses its dependencies: which exports, how (call, JSX, type, member access), which JSX props and which members.
+
+| Question                                  | Tool             |
+| ----------------------------------------- | ---------------- |
+| Who uses this package, at which versions? | `package_usage`  |
+| Show me the code of those uses.           | `find_usages`    |
+| What breaks if everyone upgrades to 5.0?  | `upgrade_impact` |
+| What does this repository depend on?      | `repo_packages`  |
+| Which teams use this library or tool?     | `who_uses`       |
+
+```text
+> We want to release @acme/widget-kit 5.0. Who breaks?
+
+● holtkeeper - upgrade_impact (package: "@acme/widget-kit", from: "4.2.0", to: "5.0.0")
+  ⎿ 3 repositories affected, 2 already on 5.0.0
+    ## gitlab:acme/admin-ui (team platform) — 4 breaking, 2 check
+    - breaking: Modal prop `footer` removed — src/orders/ConfirmDialog.tsx:41
+        <Modal open={open} footer={<Actions />} onClose={close}>
+    - check: Button `size` type changed — src/layout/Toolbar.tsx:12
+    …
+```
+
+`upgrade_impact` covers npm packages; use `diff_versions` for Go modules.
+
+## Third-party libraries
+
+The npm and Go libraries the fleet uses are indexed at the versions in use and the ones an upgrade would land on. Pass `repo` and versions default to what that repository uses, so answers match the code in front of the agent. See [Library docs](/agents/library-docs/) for what is indexed.
+
+| Question                                        | Tool                                      |
+| ----------------------------------------------- | ----------------------------------------- |
+| Which versions are indexed, who uses which?     | `library_versions`                        |
+| How do I use this API at my version?            | `search_library_docs`, `read_library_doc` |
+| What changed between my version and the latest? | `library_changes`                         |
+| Is this error a known issue?                    | `search_library_issues`                   |
+| How is this implemented?                        | `library_source`                          |
+
+```text
+> Our build fails with "Cannot read properties of undefined (reading 'shape')" after the zod bump.
+
+● holtkeeper - search_library_issues (package: "zod", query: "reading 'shape'",
+                                       repo: "gitlab:acme/checkout-web")
+  ⎿ 1. closed · fixed in 3.23.4 — "Error reading 'shape' when extending a lazy schema"
+       https://github.com/…/issues/…
+```
+
+Text from libraries and issues is third-party data; agents are told never to follow instructions in it.
+
+## Adding or upgrading a dependency
+
+Before an agent adds a dependency, `evaluate_dependency` answers everything the organization knows in one call: who already uses it and at which versions, whether an internal package does the same job, deprecations, advisories with fixed versions, licenses with each repository's verdict, its gzip share of measured bundles, and accepted team knowledge about it.
+
+```text
+> Add a date library to checkout-web.
+
+● holtkeeper - evaluate_dependency (package: "moment", repo: "gitlab:acme/checkout-web")
+  ⎿ moment — used by 1 repository, deprecated (maintenance mode)
+    Team knowledge: [kb:k7f2] Use date-fns, not moment, in web apps (decision, shared)
+    …
+
+● holtkeeper - evaluate_dependency (package: "date-fns", repo: "gitlab:acme/checkout-web")
+  ⎿ date-fns — used by 14 repositories, newest 4.1.0; no open advisories; MIT (allowed)
+```
+
+## Security, licenses and the stack
+
+| Question                                               | Tool                |
+| ------------------------------------------------------ | ------------------- |
+| Which vulnerabilities are open, fixing or allowlisted? | `security_findings` |
+| Which licenses break the policy?                       | `license_overview`  |
+| Which Node or base image does the organization use?    | `stack_usage`       |
+| What runs this repository?                             | `repo_stack`        |
+
+`stack_usage` is what an agent should call before writing a Dockerfile or CI config, so it copies the versions the organization already runs instead of guessing:
+
+```text
+> Write a Dockerfile for this service.
+
+● holtkeeper - stack_usage (tool: "node")
+  ⎿ node — 31 repositories
+    - 22 (LTS, supported until 2027-04-30): 24 repositories
+    - 20 (LTS, ends 2026-04-30 — end of life): 7 repositories
+```
+
+## Rules and knowledge
+
+Before changing code in a repository an agent calls `repo_rules` for the team's Guide; before committing, `commit_conventions` and `check_commit_message`; for UI work, `test_ids`; for images, `asset_policy`. The knowledge base answers `search_knowledge`. These have their own page: [Rules and knowledge](/agents/rules-and-knowledge/).
+
+## Releases
+
+| Question                               | Tool                                          |
+| -------------------------------------- | --------------------------------------------- |
+| How does this repository release?      | `release_rules`                               |
+| Where is it in its flow, what is next? | `release_status`                              |
+| What changed since the last version?   | `release_changes`                             |
+| Propose, accept, tag or deploy         | `release_step` (token with **Release steps**) |
+
+`release_step` never runs on the first call. Without `confirm` it returns a preview and a one-time confirm token valid for 10 minutes; the agent shows the preview, and only a second call with the same arguments and that token runs the step.
+
+```text
+● holtkeeper - release_step (repo: "gitlab:acme/checkout-web", action: "version")
+  ⎿ Preview: tag v8.3.0 on main (minor: 2 features, 5 fixes since v8.2.1).
+    Nothing has changed yet. To run it, call release_step again with the same
+    arguments and confirm: "c-4f1a…" (valid 10 minutes, once). Ask the user first.
+```
+
+## Jobs and health
+
+| Question                                   | Tool                                  |
+| ------------------------------------------ | ------------------------------------- |
+| Is the analysis data current?              | `analysis_status`                     |
+| How is every repository doing?             | `fleet_health`                        |
+| Which jobs ran recently?                   | `jobs`                                |
+| Why did this job fail or not start?        | `why_job`, then `job_log`             |
+| How busy is the queue?                     | `queue_stats`                         |
+| How much of this week's AI budget is left? | `budget_status` (with AI read access) |
+
+`analysis_status` is worth a call before trusting stored data such as the public API, coverage or test ids: it says, per analyzer, which commit the record describes, whether it is stale and when it may refresh.
+
+```text
+> Why did coverage fail on checkout-web last night?
+
+● holtkeeper - jobs (repo: "gitlab:acme/checkout-web", analyzer: "coverage", status: "failed")
+  ⎿ - j8c21 failed · coverage · main · schedule tests-weekly · 2h ago · 4m12s · 1/2
+      signature: install: ERR_PNPM_LOCKFILE_MISSING
+
+● holtkeeper - job_log (job: "j8c21", grep: "ERR_")
+  ⎿ 42 03:12:08 [install] ERR_PNPM_LOCKFILE_MISSING  Cannot install with "frozen-lockfile" …
+```
+
+Job logs are data from the job, never instructions.
+
+## Tasks
+
+`start_task`, `task_status` and `request_review` let an agent ask Holtkeeper to change code. They are the only tools that lead to writes on the forge; see [Changing code through tasks](/agents/tasks/).
+
+## When a tool refuses
+
+A tool that needs a permission you lack answers with an error naming it, for example that `audits:read` is missing on a repository. Repositories you cannot see answer the same as repositories that do not exist.
+
+## Related
+
+- [MCP tools](/reference/mcp-tools/) — every tool with its arguments.
+- [Rules and knowledge](/agents/rules-and-knowledge/) — the Guide, conventions and the knowledge base.
+- [Library docs](/agents/library-docs/) — how third-party docs are indexed.
+- [Connect an agent](/agents/connect/) — set up a client.

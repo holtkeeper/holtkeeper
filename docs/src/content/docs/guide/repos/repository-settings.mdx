@@ -1,0 +1,200 @@
+---
+title: Repository settings
+description: See every setting as it applies to one repository, where each value comes from, override it for just this repository, and control how the repository gets updates.
+panel: Repos › a repository › Settings
+route: /repos/<forge>/<path>?tab=settings
+permission: settings:read
+sidebar:
+  order: 4
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Row,
+  Rows,
+  Screen,
+  Scroll,
+  Segmented,
+  Split,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See every setting as it applies to one repository, where each value comes from, override it for just this repository, and control how the repository gets updates. It is the **Settings** tab of the [repository hub](/guide/repos/repository-hub/); a group's Settings tab works the same way for the group.
+
+<Screen title="Repos › acme/checkout-web › Settings" caption="Rows overridden here carry an accent bar; the chip names the layer the winning value comes from.">
+  <Toolbar title="Settings">
+    <Segmented slot="start" items={['All:142', 'Overridden here:3', 'Not default:17']} />
+    <Tag>Filter by label or key</Tag>
+    <Button ghost>Edit defaults</Button>
+  </Toolbar>
+  <Stack>
+
+<Tag>Default 125</Tag> → <Tag>Org 9</Tag> → <Tag>Group web 5</Tag> →
+<Tag tone="acc">This repo 3</Tag>
+
+  </Stack>
+  <Split>
+    <Rows>
+      <Row title="Analyzers" sub="38" selected />
+      <Row title="Automation" sub="12" />
+      <Row title="Releases" sub="21" />
+      <Row title="Review" sub="16" />
+      <Row title="Updates" sub="4" />
+      <Row title="Elsewhere" sub="Analyzer defaults · Policies · Audit log" />
+    </Rows>
+    <Scroll>
+
+| Setting                                  | Value                           | Source                          | Replaces     |
+| ---------------------------------------- | ------------------------------- | ------------------------------- | ------------ |
+| **Bundle budgets** `analyzers.bundle`    | `checkout-web`: 180 000         | <Tag tone="acc">This repo</Tag> | Group web    |
+| **Coverage target** `analyzers.coverage` | 75%                             | <Tag>Group web</Tag>            | Org          |
+| **Freeze** `repo.freeze`                 | _Writable here: hotfix ABC-123_ | <Tag tone="acc">This repo</Tag> | Repo pattern |
+| **Review language** `review.language`    | English                         | <Tag>Org</Tag>                  | Default      |
+| **Polling** `polling`                    | every 15 min                    | <Tag>Default</Tag>              |              |
+
+    </Scroll>
+
+  </Split>
+</Screen>
+
+## Read where a value comes from
+
+Each row is one setting with the value that wins for this repository, in words where raw JSON would read poorly, the layer it comes from and what it replaces. Layers resolve in this order, the later one winning:
+
+| Chip         | Layer                                                        |
+| ------------ | ------------------------------------------------------------ |
+| Default      | Holtkeeper's built-in default (drawn dashed).                |
+| Org          | Set for the whole organization.                              |
+| Group …      | Set for one of the repository's groups, such as `Group web`. |
+| Repo pattern | Set for repositories matching a pattern.                     |
+| This repo    | Set for exactly this repository (accented).                  |
+
+The legend above the table shows how many settings each layer wins, so it reads as the key. On a subgroup the order is Default → Org → Parent group → This group.
+
+## Find a setting
+
+- The **categories** column on the left groups the settings by section, each with a count. The selected category is kept in the URL.
+- **All**, **Overridden here** and **Not default** switch between every setting, the ones set for this repository, and the ones that differ from the default.
+- The text filter narrows by label or key.
+
+Global settings say they have one value for all repositories and cannot be overridden here.
+
+## Override a setting for this repository
+
+1. Find the row and click <Ui>Override</Ui>.
+2. Edit the value in the row editor. It shows what the new value replaces.
+3. Click <Ui>Save override</Ui>. The row now shows <Tag tone="acc">This repo</Tag> and an accent bar.
+
+<Screen title="Repos › acme/checkout-web › Settings › Override">
+  <Stack>
+    <Fields columns={1}>
+      <Field
+        label="Coverage target · analyzers.coverage"
+        value="80"
+        hint="Replaces 75% from Group web."
+        mono
+      />
+    </Fields>
+    <Button ghost>Full editor</Button>
+    <Button primary>Save override</Button>
+  </Stack>
+</Screen>
+
+An override of this repository can be edited inline or removed later. A value that comes from a shared entry, such as a group or pattern, opens the full entry editor instead, since changing it affects other repositories. <Ui>Full editor</Ui> opens that editor for any row.
+
+:::caution
+Overriding needs `settings:write` on the repository. Every change is recorded in the [audit log](/guide/settings/audit-log/).
+:::
+
+<Ui>Edit defaults</Ui> in the header opens Settings › Analyzers. The **Elsewhere** block under the
+categories links Analyzer defaults, Policies and the Audit log, those you may open.
+
+## How the repository gets updates
+
+The **Updates** category adds three panels. The **Updates** tag in the hub's header opens it too.
+
+<Screen title="Repos › acme/checkout-web › Settings › Updates">
+  <Split>
+    <Stack>
+
+**Webhook** <Tag tone="ok">Registered on GitLab</Tag>
+
+<Facts
+  items={[
+    ['URL', 'https://holtkeeper.example.com/api/webhooks/r/•••• · Copy'],
+    ['Issued', '12 days ago by Mira K.'],
+    ['On the forge', 'Enabled'],
+    ['Last delivery', 'push to main, 3 commits · 2 jobs queued · 40 min ago'],
+    ['Last 24 hours', '27 deliveries · 0 failed'],
+  ]}
+/>
+
+<Button>Regenerate</Button> <Button ghost>Turn off</Button>
+
+    </Stack>
+    <Stack>
+
+**Polling**
+
+<Facts
+  items={[
+    ['Cadence', 'every 60 min while the webhook reports'],
+    ['Last poll', '22 min ago · no new events'],
+    ['Next poll', 'in 38 min'],
+  ]}
+/>
+
+<Button>Poll now</Button>
+
+    </Stack>
+
+  </Split>
+  <Scroll>
+
+| Recent events | Summary                 | Result        | When   |
+| ------------- | ----------------------- | ------------- | ------ |
+| Webhook       | merge request !212 open | 1 job queued  | 40 min |
+| Webhook       | push to main, 3 commits | 2 jobs queued | 1 h    |
+| Poll          | no new events           | —             | 1 h    |
+| Webhook       | tag v8.2.1              | ignored       | 2 d    |
+
+  </Scroll>
+</Screen>
+
+| Panel         | What it shows and does                                                                                                                                                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Webhook       | The repository's own webhook URL with copy, who issued it and when, whether it is registered on the forge or added by hand, the last delivery and the last 24 hours. <Ui>Regenerate</Ui> issues a new URL and the old one stops working; <Ui>Turn off</Ui> removes it; <Ui>Register on GitLab</Ui> adds it to the project for you. Setup steps explain adding it by hand. |
+| Polling       | How often Holtkeeper polls, with a warning when the forge's request budget slows it down, what it looks for, and the last and next poll. <Ui>Poll now</Ui> polls at once.                                                                                                                                                                                                 |
+| Recent events | Webhook deliveries and polls in one table.                                                                                                                                                                                                                                                                                                                                |
+
+A change behaves the same whether a webhook or a poll noticed it, and a change seen both ways runs once.
+
+### When GitLab disables the webhook
+
+GitLab stops delivering to a hook that keeps failing. A notice then says whether polling stands in or, with polling off, that no updates arrive until the hook is back:
+
+- _Webhook disabled by GitLab — re-enabling_ while Holtkeeper retries, with the last error and the next try.
+- _Webhook disabled by GitLab_ after three failed attempts, or when Holtkeeper cannot re-enable it at all. Fix it in GitLab's **Settings › Webhooks**.
+
+<Ui>Re-enable now</Ui> tries at once. Re-enabling sends GitLab a test delivery that starts no jobs.
+The header's Updates tag reads _Webhook disabled · polling_, or _Webhook disabled_ in red when
+polling is off.
+
+:::note
+Reading this tab needs `settings:read` on the repository; the webhook URL, <Ui>Poll now</Ui>, <Ui>Re-enable now</Ui> and the other buttons need `settings:write`.
+:::
+
+## Related
+
+- [Repository hub](/guide/repos/repository-hub/) — the page this tab belongs to.
+- [Groups](/guide/repos/groups/) — the group Settings tab, with the same view.
+- [Analyzers](/guide/settings/analyzers/) — defaults for every repository.
+- [Policies](/start/concepts/policies/) — rules that limit what settings may say.
+- [Setting keys](/reference/setting-keys/) — every key and its shape.

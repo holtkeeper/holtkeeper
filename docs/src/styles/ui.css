@@ -1,0 +1,1016 @@
+/* Interface examples (src/components/ui): small, static replicas of the panel and Slack. */
+
+.hk-ui-root {
+  color: var(--hk-fg);
+  font-family: var(--sl-font);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.hk-ui-root * {
+  box-sizing: border-box;
+}
+
+.sl-markdown-content .hk-ui-root :is(p, ul, ol, table, figure) {
+  margin: 0;
+}
+
+.hk-mono {
+  font-family: var(--sl-font-mono);
+  font-size: 0.95em;
+  letter-spacing: -0.01em;
+}
+
+.hk-mut {
+  color: var(--hk-mut);
+}
+
+.hk-dim {
+  color: var(--hk-dim);
+}
+
+.hk-sp {
+  flex: 1;
+}
+
+/* Screen: a framed piece of the panel */
+
+.hk-screen {
+  margin: 1.25rem 0 0;
+  overflow: hidden;
+  border: 1px solid var(--hk-line2);
+  border-radius: 0.75rem;
+  background: var(--hk-panel);
+}
+
+.hk-screen-cap {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--hk-line);
+  background: var(--hk-sunk);
+  color: var(--hk-dim);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hk-screen-cap svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.hk-screen-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hk-screen-body > .hk-pad {
+  padding: 0.75rem;
+}
+
+.hk-screen-body > :is(p, ul, ol):not([class]) {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.sl-markdown-content .hk-screen + p.hk-caption,
+.hk-caption {
+  margin: 0.5rem 0 0;
+  color: var(--hk-dim);
+  font-size: 0.8rem;
+}
+
+.hk-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+}
+
+.hk-split > * + * {
+  border-left: 1px solid var(--hk-line);
+}
+
+@media (max-width: 40rem) {
+  .hk-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hk-split > * + * {
+    border-top: 1px solid var(--hk-line);
+    border-left: 0;
+  }
+}
+
+/* Toolbar and strip */
+
+.hk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  min-height: 2.6rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--hk-line);
+}
+
+.hk-toolbar-title {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-weight: 600;
+}
+
+.hk-toolbar-title .hk-crumb {
+  color: var(--hk-mut);
+  font-weight: 400;
+}
+
+.hk-toolbar-title .hk-crumb::after {
+  content: '›';
+  margin-left: 0.35rem;
+  color: var(--hk-dim);
+}
+
+.hk-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--hk-line);
+  color: var(--hk-mut);
+  font-size: 0.75rem;
+}
+
+.hk-strip b {
+  color: var(--hk-fg);
+  font-weight: 600;
+}
+
+.hk-strip .hk-tone-ok b,
+.hk-strip .hk-tone-ok {
+  color: var(--hk-ok);
+}
+
+.hk-strip .hk-tone-warn b,
+.hk-strip .hk-tone-warn {
+  color: var(--hk-warn);
+}
+
+.hk-strip .hk-tone-bad b,
+.hk-strip .hk-tone-bad {
+  color: var(--hk-bad);
+}
+
+/* Controls */
+
+.hk-tag {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  height: 1.3rem;
+  padding: 0 0.42rem;
+  border: 1px solid var(--hk-line);
+  border-radius: 0.3rem;
+  background: var(--hk-chip);
+  color: var(--hk-mut);
+  font-family: var(--sl-font);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.hk-tag svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.hk-tag.hk-mono {
+  font-family: var(--sl-font-mono);
+}
+
+.hk-tag:is(.ok, .warn, .bad, .info, .acc) {
+  background: color-mix(in oklab, var(--tone) 11%, transparent);
+  border-color: color-mix(in oklab, var(--tone) 26%, transparent);
+  color: var(--tone);
+}
+
+.hk-tag.ok {
+  --tone: var(--hk-ok);
+}
+
+.hk-tag.warn {
+  --tone: var(--hk-warn);
+}
+
+.hk-tag.bad {
+  --tone: var(--hk-bad);
+}
+
+.hk-tag.info {
+  --tone: var(--hk-info);
+}
+
+.hk-tag.acc {
+  --tone: var(--hk-acc);
+}
+
+.hk-btn {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: center;
+  height: 1.6rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--hk-line2);
+  border-radius: 0.4rem;
+  background: var(--hk-panel);
+  color: var(--hk-fg);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hk-btn.primary {
+  border-color: transparent;
+  background: var(--hk-fg);
+  color: var(--hk-bg);
+}
+
+.hk-btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--hk-mut);
+}
+
+.hk-uiref {
+  display: inline-flex;
+  align-items: center;
+  height: 1.3rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--hk-line2);
+  border-radius: 0.3rem;
+  background: var(--hk-panel);
+  color: var(--hk-fg);
+  font-size: 0.82em;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  vertical-align: 0.05em;
+}
+
+.hk-kbd {
+  display: inline-flex;
+  align-items: center;
+  min-width: 1.25rem;
+  height: 1.2rem;
+  padding: 0 0.3rem;
+  border: 1px solid var(--hk-line2);
+  border-bottom-width: 2px;
+  border-radius: 0.3rem;
+  color: var(--hk-mut);
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+  line-height: 1;
+  justify-content: center;
+  vertical-align: 0.05em;
+}
+
+.hk-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--hk-line);
+  border-radius: 0.45rem;
+  background: var(--hk-raise);
+}
+
+.hk-seg span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  height: 1.45rem;
+  padding: 0 0.55rem;
+  border-radius: 0.35rem;
+  color: var(--hk-mut);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.hk-seg span.on {
+  background: var(--hk-panel);
+  box-shadow: 0 0 0 1px var(--hk-line2);
+  color: var(--hk-fg);
+}
+
+.hk-tabs-ui {
+  display: flex;
+  gap: 1.1rem;
+  padding: 0 0.75rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--hk-line);
+}
+
+.hk-tabs-ui span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  height: 2.1rem;
+  margin-bottom: -1px;
+  border-bottom: 1.5px solid transparent;
+  color: var(--hk-mut);
+  font-size: 0.78rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hk-tabs-ui span.on {
+  border-bottom-color: var(--hk-fg);
+  color: var(--hk-fg);
+}
+
+.hk-count-ui {
+  padding: 0 0.3rem;
+  border: 1px solid var(--hk-line);
+  border-radius: 0.25rem;
+  background: var(--hk-chip);
+  color: var(--hk-mut);
+  font-size: 0.68rem;
+  line-height: 1rem;
+}
+
+.hk-meter {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  min-width: 8rem;
+}
+
+.hk-meter-bar {
+  display: block;
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--hk-raise);
+  box-shadow: inset 0 0 0 1px var(--hk-line);
+}
+
+.hk-meter-bar b {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--tone, var(--hk-fg));
+}
+
+.hk-meter-value {
+  color: var(--tone, var(--hk-mut));
+  font-family: var(--sl-font-mono);
+  font-size: 0.72rem;
+}
+
+.hk-ticks {
+  display: flex;
+  gap: 2px;
+  height: 1.15rem;
+}
+
+.hk-ticks i {
+  flex: 1;
+  border-radius: 1.5px;
+  background: var(--hk-ok);
+}
+
+.hk-ticks i.w {
+  background: var(--hk-warn);
+}
+
+.hk-ticks i.b {
+  background: var(--hk-bad);
+}
+
+.hk-ticks i.n {
+  background: var(--hk-line2);
+}
+
+/* Fields */
+
+.hk-fields {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+@media (max-width: 40rem) {
+  .hk-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.hk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.hk-field.wide {
+  grid-column: 1 / -1;
+}
+
+.hk-field-label {
+  color: var(--hk-mut);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.hk-field-box {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  min-height: 1.9rem;
+  padding: 0.25rem 0.6rem;
+  overflow: hidden;
+  border: 1px solid var(--hk-line);
+  border-radius: 0.45rem;
+  background: var(--hk-raise);
+  color: var(--hk-fg);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.hk-field-box.placeholder {
+  color: var(--hk-dim);
+}
+
+.hk-field-hint {
+  color: var(--hk-dim);
+  font-size: 0.7rem;
+}
+
+.hk-switch {
+  display: inline-flex;
+  flex: none;
+  width: 1.75rem;
+  height: 1rem;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--hk-line2);
+}
+
+.hk-switch::after {
+  content: '';
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: var(--hk-fg);
+}
+
+.hk-switch.on {
+  justify-content: flex-end;
+  background: var(--hk-ok);
+}
+
+/* Tables and lists inside screens */
+
+.hk-ui-root table {
+  display: table;
+  width: 100%;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.hk-ui-root .hk-table-wrap {
+  overflow-x: auto;
+}
+
+.hk-ui-root th {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--hk-line);
+  background: transparent;
+  color: var(--hk-mut);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.hk-ui-root td {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--hk-line);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.hk-ui-root tr:last-child td {
+  border-bottom: 0;
+}
+
+.hk-ui-root td code,
+.hk-ui-root li code,
+.hk-ui-root p code {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: var(--sl-font-mono);
+  font-size: 0.95em;
+}
+
+.hk-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.hk-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  border-top: 1px solid var(--hk-line);
+}
+
+.hk-row:first-child {
+  border-top: 0;
+}
+
+.hk-row.selected {
+  background: var(--hk-raise);
+  box-shadow: inset 2px 0 var(--hk-fg);
+}
+
+.hk-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 10rem;
+}
+
+.hk-row-main small {
+  color: var(--hk-mut);
+  font-size: 0.72rem;
+}
+
+/* Side sheet */
+
+.hk-sheet {
+  max-width: 34rem;
+}
+
+.hk-sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--hk-line);
+}
+
+.hk-sheet-head b {
+  font-weight: 600;
+}
+
+.hk-kv {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: 0.45rem 0.75rem;
+  padding: 0.75rem;
+  font-size: 0.78rem;
+}
+
+.hk-kv dt {
+  color: var(--hk-mut);
+}
+
+.hk-kv dd {
+  margin: 0;
+}
+
+/* Diff and review comment */
+
+.hk-diff {
+  overflow: hidden;
+  border: 1px solid var(--hk-line);
+  border-radius: 0.5rem;
+  background: var(--hk-sunk);
+  font-family: var(--sl-font-mono);
+  font-size: 0.74rem;
+  line-height: 1.65;
+}
+
+.hk-diff-file {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--hk-line);
+  color: var(--hk-mut);
+}
+
+.hk-diff-line {
+  display: grid;
+  grid-template-columns: 2.4rem 1rem minmax(0, 1fr);
+  overflow: hidden;
+  white-space: pre;
+}
+
+.hk-diff-line .n {
+  padding-right: 0.5rem;
+  color: var(--hk-dim);
+  text-align: right;
+}
+
+.hk-diff-line.add {
+  background: color-mix(in oklab, var(--hk-ok) 12%, transparent);
+}
+
+.hk-diff-line.del {
+  background: color-mix(in oklab, var(--hk-bad) 12%, transparent);
+}
+
+.hk-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--hk-line2);
+  border-radius: 0.6rem;
+  background: var(--hk-panel);
+  font-size: 0.8rem;
+}
+
+.hk-comment-who {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.hk-comment-who img {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.3rem;
+}
+
+.hk-comment-body > * + * {
+  margin-top: 0.4rem !important;
+}
+
+.hk-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+}
+
+/* Slack */
+
+.hk-slack {
+  --s-bg: #1a1d21;
+  --s-side: #19171d;
+  --s-top: #121016;
+  --s-fg: #d1d2d3;
+  --s-dim: #ababad;
+  --s-line: rgb(255 255 255 / 0.1);
+  --s-link: #1d9bd1;
+  --s-code: #e8912d;
+
+  display: flex;
+  flex-direction: column;
+  margin: 1.25rem 0 0;
+  overflow: hidden;
+  border: 1px solid var(--hk-line2);
+  border-radius: 0.75rem;
+  background: var(--s-bg);
+  color: var(--s-fg);
+  font-family: Lato, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.46;
+  container-type: inline-size;
+}
+
+:root[data-theme='light'] .hk-slack {
+  --s-bg: #ffffff;
+  --s-side: #3f0e40;
+  --s-top: #350d36;
+  --s-fg: #1d1c1d;
+  --s-dim: #616061;
+  --s-line: rgb(29 28 29 / 0.13);
+  --s-link: #1264a3;
+  --s-code: #e01e5a;
+}
+
+.hk-slack-top {
+  display: flex;
+  justify-content: center;
+  padding: 0.4rem 0.75rem;
+  background: var(--s-top);
+}
+
+.hk-slack-top span {
+  width: 60%;
+  padding: 0.15rem 0.6rem;
+  border-radius: 0.35rem;
+  background: rgb(255 255 255 / 0.12);
+  color: rgb(255 255 255 / 0.75);
+  font-size: 0.75rem;
+}
+
+.hk-slack-main {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  min-height: 0;
+}
+
+.hk-slack-main.no-side {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container (max-width: 30rem) {
+  .hk-slack-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hk-slack-side {
+    display: none;
+  }
+}
+
+.hk-slack-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 0.6rem 0.5rem;
+  overflow: hidden;
+  background: var(--s-side);
+  color: rgb(255 255 255 / 0.72);
+  font-size: 0.82rem;
+}
+
+.hk-slack-side .ws {
+  margin: 0 -0.5rem 0.4rem;
+  padding: 0 1rem 0.6rem;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.hk-slack-side .lab {
+  padding: 0.5rem 0.5rem 0.2rem;
+  color: rgb(255 255 255 / 0.6);
+  font-size: 0.78rem;
+}
+
+.hk-slack-side .ch {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  overflow: hidden;
+  border-radius: 0.35rem;
+  white-space: nowrap;
+}
+
+.hk-slack-side .ch.on {
+  background: #1164a3;
+  color: #fff;
+}
+
+.hk-slack-chan {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hk-slack-head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  min-width: 0;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--s-line);
+  font-size: 0.95rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.hk-slack-head span {
+  overflow: hidden;
+  color: var(--s-dim);
+  font-size: 0.75rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.hk-slack-msgs {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0;
+}
+
+.hk-slack-msg {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.4rem 1rem;
+}
+
+.hk-slack-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.375rem;
+  object-fit: cover;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.hk-slack-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.hk-slack-name {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+
+.hk-slack-name b {
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.hk-slack-app {
+  padding: 1px 3px;
+  border-radius: 2px;
+  background: rgb(128 128 128 / 0.25);
+  color: var(--s-dim);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hk-slack-time {
+  color: var(--s-dim);
+  font-size: 0.75rem;
+}
+
+.hk-slack-text {
+  overflow-wrap: anywhere;
+}
+
+.sl-markdown-content .hk-slack-text :is(p, ul) {
+  margin: 0 0 0.45rem;
+}
+
+.sl-markdown-content .hk-slack-text ul {
+  padding-left: 1.1rem;
+}
+
+.sl-markdown-content .hk-slack-text li + li {
+  margin-top: 0;
+}
+
+.hk-slack-text :last-child {
+  margin-bottom: 0;
+}
+
+.hk-slack a {
+  color: var(--s-link) !important;
+  text-decoration: none !important;
+}
+
+.hk-slack code {
+  padding: 1px 3px !important;
+  border: 1px solid var(--s-line) !important;
+  border-radius: 3px !important;
+  background: rgb(128 128 128 / 0.12) !important;
+  color: var(--s-code) !important;
+  font-family: Monaco, Menlo, var(--sl-font-mono);
+  font-size: 0.75rem !important;
+}
+
+.hk-slack em {
+  font-style: italic;
+}
+
+.hk-slack-header {
+  margin: 0.1rem 0 0.2rem;
+  font-size: 1.05rem;
+  font-weight: 900;
+  line-height: 1.33;
+}
+
+.hk-slack-context {
+  color: var(--s-dim);
+  font-size: 0.75rem;
+}
+
+.hk-slack-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.hk-slack-reaction {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  height: 1.4rem;
+  padding: 0 0.4rem;
+  border-radius: 0.75rem;
+  background: rgb(29 155 209 / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(29 155 209 / 0.6);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.hk-slack-reaction.plain {
+  background: rgb(128 128 128 / 0.1);
+  box-shadow: inset 0 0 0 1px var(--s-line);
+}
+
+.hk-slack-reaction img {
+  width: 1rem;
+  height: 1rem;
+}
+
+.hk-slack-composer {
+  margin: 0 1rem 0.75rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--s-line);
+  border-radius: 0.5rem;
+  color: var(--s-dim);
+}
+
+.hk-emoji {
+  display: inline-block;
+  width: 1.75rem;
+  height: 1.75rem;
+  vertical-align: middle;
+}
+
+/* Cards */
+
+.hk-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.hk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--hk-line);
+  border-radius: 0.6rem;
+  background: var(--hk-panel);
+  color: var(--hk-fg);
+  text-decoration: none;
+}
+
+.hk-card:hover {
+  border-color: var(--hk-line2);
+  background: var(--hk-raise);
+}
+
+.hk-card-title {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.hk-card-title svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--hk-mut);
+}
+
+.hk-card-text {
+  color: var(--hk-mut);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}

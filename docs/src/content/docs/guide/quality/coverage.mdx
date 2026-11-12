@@ -1,0 +1,235 @@
+---
+title: Coverage
+description: See how much of every repository's code its tests cover, which repositories fall below their target and which files and folders need tests first.
+panel: Quality › Coverage
+route: /quality/coverage
+permission: analyses:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See how much of every repository's code its tests cover, which repositories fall below their target and which files and folders need tests first.
+
+<Screen title="Quality › Coverage" caption="Lowest line coverage first; repositories without a record follow as Not measured, and repositories with no tests by design come last.">
+  <Toolbar title="Coverage">
+    <Tag>My teams</Tag>
+    <Tag>Freshness: any</Tag>
+    <Tag>Below 60% only</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '64.2%', label: 'median lines' },
+      { value: '51.8%', label: 'median branches' },
+      { value: 7, label: 'below 60% target', tone: 'bad' },
+      { value: 312, label: 'untested files', tone: 'warn' },
+      { value: 4, label: 'not measured' },
+      { value: 2, label: 'no tests by design' },
+    ]}
+  />
+  <Scroll>
+
+| Repository           | Lines                                                                                 | Branches | Change  | Untested files | Freshness                               |
+| -------------------- | ------------------------------------------------------------------------------------- | -------- | ------- | -------------- | --------------------------------------- |
+| `acme/legacy-portal` | <Meter value={38} tone="bad" label="38.4%" /> <Tag tone="bad">Below 60% target</Tag>  | 22.1%    | −1.2 pt | 96 of 240      | <Tag tone="warn">Over a month old</Tag> |
+| `acme/admin-ui`      | <Meter value={57} tone="warn" label="57.0%" /> <Tag tone="bad">Below 60% target</Tag> | 44.9%    | +3.5 pt | 41 of 388      | <Tag>Behind HEAD</Tag>                  |
+| `acme/checkout-web`  | <Meter value={82} tone="ok" label="82.3%" />                                          | 71.0%    | +0.4 pt | 12 of 506      | <Tag tone="ok">Current</Tag>            |
+| `acme/widget-kit`    | <Meter value={91} tone="ok" label="91.6%" />                                          | 85.2%    | 0.0 pt  | 2 of 117       | <Tag tone="ok">Current</Tag>            |
+| `acme/billing-api`   | <Tag>Not measured</Tag>                                                               | —        | —       | —              | Not measured                            |
+| `acme/brand-assets`  | <Tag>No tests by design</Tag>                                                         | —        | —       | —              | No tests by design                      |
+
+  </Scroll>
+</Screen>
+
+## What the table shows
+
+One row per repository you can read, from its newest coverage record. Repositories that were never measured stay in the table as **Not measured**, so gaps are visible. Opening the page never runs tests.
+
+| Column         | Meaning                                                                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Repository     | Opens the repository hub at Quality › Coverage.                                                                                                                                      |
+| Lines          | Share of code lines covered: good from 80%, bad below 50%. A **Below N% target** tag uses the row's own target. The bar splits covered, uncovered and lines in files no test loaded. |
+| Branches       | Share of branches taken by the tests.                                                                                                                                                |
+| Trend          | A sparkline of the last 12 records.                                                                                                                                                  |
+| Change         | Points gained or lost since the previous record.                                                                                                                                     |
+| Untested files | Source files no test loaded, of all source files.                                                                                                                                    |
+| Freshness      | Whether the record is current, behind the default branch's HEAD, or more than a week or a month old, with its age and short commit.                                                  |
+
+The toolbar narrows the table: the scope switch (_My teams_ folds other teams' rows into one row with their median and how many are below target; its group picker filters by group), the **Freshness** filter (it also offers **No tests by design**) and **Below 60% only**, which names the organization-wide target. The search in the header matches a path or group. Every column but the sparkline sorts, and filters live in the URL, so a link shows the same view.
+
+The strip counts the rows in scope: median line and branch coverage of measured repositories, how many are below their target, untested files, and repositories per freshness state. Repositories with no tests by design are left out of every figure and counted in their own cell.
+
+## Set the target
+
+Every repository should reach a line coverage target, 60% unless a setting says otherwise. Groups and repositories may set their own; the table footer names the organization-wide one.
+
+1. Open <Ui>Configure</Ui> on the page, or **Settings › Analyzers › coverage**.
+2. Add or edit an entry for everything, a group or a repository, and set **target** to a percentage from 0 to 100.
+3. Save. The table and repository health judge coverage by the new target at once; the target changes nothing in how tests run.
+
+<Screen
+  title="Settings › Analyzers › coverage"
+  caption="An entry for one group; the most specific entry wins."
+>
+  <Stack>
+    <Fields>
+      <Field label="Scope" value="Group · payments" />
+      <Field label="target" value="75" mono hint="Line coverage in percent, 0–100." />
+      <Field
+        label="exclude"
+        value="src/generated/**, **/*.stories.tsx"
+        mono
+        wide
+        hint="Globs of files left out of coverage."
+      />
+      <Field label="components" toggle hint="Count component files (.tsx, .jsx). Off by default." />
+      <Field
+        label="untested"
+        toggle
+        value="on"
+        hint="Files no test loaded count as fully uncovered."
+      />
+      <Field
+        label="file"
+        placeholder="coverage/lcov.info"
+        mono
+        hint="Read this report instead of running the tests."
+      />
+    </Fields>
+  </Stack>
+</Screen>
+
+```json title="analyzers.coverage · one repository"
+{
+  "target": 70,
+  "exclude": ["src/generated/**"],
+  "components": true
+}
+```
+
+:::note
+Component files (`.tsx`, `.jsx`) are left out by default, so components need no tests. Turn **components** on for a repository or group that tests them.
+:::
+
+## Inspect a repository
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. A side sheet opens with the line share as a progress bar, the freshness, line, branch and function shares, the change and the coverage bar with its legend.
+
+<Screen title="Quality › Coverage › acme/admin-ui">
+  <Sheet id="COV-2207" title="acme/admin-ui" position="2 of 38">
+    <Tag tone="bad" slot="tags">
+      Below target
+    </Tag>
+    <Button slot="actions">Open as page</Button>
+    <Button slot="actions" primary>
+      Run coverage
+    </Button>
+    <Facts
+      items={[
+        ['Freshness', 'Behind HEAD · 5 days ago · 3f9c2a1'],
+        ['Lines', '57.0% · +3.5 pt'],
+        ['Branches', '44.9%'],
+        ['Functions', '61.3%'],
+        ['Tools', 'vitest'],
+        ['Changed files', '68.2% covered'],
+        ['Target', '60%'],
+        ['Trigger', 'Schedule · tests-weekly'],
+      ]}
+    />
+    <Tabs items={['Breakdown', 'Files', 'Changes', 'Exclusions:2']} />
+  </Sheet>
+</Screen>
+
+| Tab        | What it shows                                                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Breakdown  | The record (commit and age, HEAD when behind, tools, coverage of changed files, files and files without tests, target, trigger and last run), then coverage per workspace package or top-level folder, lowest first. |
+| Files      | The files with the most uncovered lines.                                                                                                                                                                             |
+| Changes    | Files whose line coverage moved by 5 points or more since the previous record.                                                                                                                                       |
+| Exclusions | The globs left out of coverage for this repository and the scope that set them.                                                                                                                                      |
+
+<Ui>Open as page</Ui> turns the sheet into the full [analysis
+record](/guide/quality/analysis-record/), with a treemap of coverage by folder. <Ui>⋯</Ui> ›
+<Ui>Open repository</Ui> goes to the repository hub.
+
+## Exclude files
+
+Generated code, fixtures or vendored files drag coverage down without telling you anything. Leave them out:
+
+1. Open the repository's sheet and go to **Files**.
+2. Click <Ui>Exclude</Ui> on a file. A dialog offers globs for it: the file itself, its extension in that folder, each parent folder, or the name anywhere. Pick one or type your own.
+3. Confirm. The glob is added to the repository's own `analyzers.coverage` entry.
+
+To add a glob without starting from a file, use <Ui>Add pattern</Ui> on the **Exclusions** tab. Each glob there has a remove button. Removing a glob that a broader scope set copies that list into a repository entry without it, so the group keeps its own.
+
+<Screen title="Quality › Coverage › Exclude">
+  <Stack>
+    <b>Exclude from coverage</b>
+    <Fields columns={1}>
+      <Field label="File" value="src/generated/api-client.ts" mono />
+      <Field
+        label="Pattern"
+        value="src/generated/**"
+        mono
+        hint="Applies to acme/admin-ui from the next run."
+      />
+    </Fields>
+    <div>
+      <Button ghost>Cancel</Button> <Button primary>Exclude</Button>
+    </div>
+  </Stack>
+</Screen>
+
+:::caution
+Exclusions apply from the next run, not to the stored record. <Ui>Exclude</Ui>, <Ui>Add pattern</Ui> and the remove buttons need permission to write settings for the repository.
+:::
+
+## Repositories with no tests by design
+
+Some repositories have nothing to test: a brand asset bundle, a config repository, a docs site. Mark them so they stop counting as below target.
+
+1. Open the repository's sheet, then <Ui>⋯</Ui> › <Ui>Mark as no tests by design…</Ui>. The empty state and the hub section offer the same action.
+2. Give the reason and confirm.
+
+The row then reads **No tests by design** (the reason shows as a tooltip), never counts as below target and sorts last. The sheet shows a notice with the reason and the scope that set it instead of <Ui>Run coverage</Ui>. Agents get the same signal: reviews stop asking for tests there, and the Guide's Testing section is skipped.
+
+To undo it, click <Ui>Expect tests again</Ui> in the notice. When a group marked the repository, the button names the broader scope it overrides.
+
+## How coverage is measured
+
+Coverage runs once a week, on Wednesday nights, in the default `tests-weekly` schedule. <Ui>Run coverage</Ui> in the sheet runs it at once for one repository (it needs `analyses:run`).
+
+A run installs the project's JavaScript dependencies when the checkout has none, builds workspace packages whose build output is missing, then runs the primary test framework of each language with coverage: `bun test`, vitest, jest, c8 with mocha, `node --test`, pytest-cov or `go test`. Failing tests are fine as long as a report is written. Source files no test loaded count as fully uncovered.
+
+:::tip
+If your CI already writes an lcov report or a Go cover profile, set **file** to its path in the checkout and Holtkeeper reads it instead of running the tests.
+:::
+
+Nothing on these pages calls an AI model.
+
+## In one repository
+
+The repository hub's **Quality › Coverage** shows the headline, the trend, <Ui>Full record</Ui>, <Ui>Run coverage</Ui> and the same four tabs for that repository. Until a record exists it shows <Ui>Run coverage</Ui> alone. Its header links **Open in Quality** back to the fleet view.
+
+## Related
+
+- [Analysis record](/guide/quality/analysis-record/) — the full coverage report with its folder treemap and version history.
+- [Settings › Analyzers](/guide/settings/analyzers/) — switch analyzers per scope and set their options.
+- [Team guide](/guide/knowledge/guide/) — the Testing section agents follow.
+- [Coverage analyzer](/modules/coverage/) — how tests are run and reports are read.

@@ -1,0 +1,201 @@
+---
+title: Kubernetes
+description: Install Holtkeeper with its Helm chart — web pods with the scheduler, worker Deployments or one pod per job, an optional egress proxy and write workers, all non-root and read-only.
+sidebar:
+  order: 3
+---
+
+The chart in `deploy/helm/holtkeeper` runs every role from one image: web pods that serve the panel and run the scheduler, worker pods that take jobs, and optional pieces for a dedicated scheduler, write tasks, an egress proxy, autoscaling and NetworkPolicies. It needs Postgres and an S3-compatible bucket you provide.
+
+```mermaid
+flowchart LR
+  ingress[Ingress] --> web[web Deployment: web,scheduler]
+  web --> pg[(Postgres)]
+  web --> s3[(S3 bucket)]
+  worker[worker Deployment or KEDA ScaledJob] --> pg
+  worker --> s3
+  worker -- job traffic --> proxy[egress proxy]
+  write[write worker: --pool write] -- all traffic --> proxy
+  proxy -- rules --> web
+  proxy --> internet[GitLab, registries, AI provider]
+```
+
+## What the chart renders
+
+| Object                                                          | When                  | Notes                                                                                                                         |
+| --------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| ConfigMap `holtkeeper.config.ts`                                | always                | `config.content`, else the chart's `files/holtkeeper.config.ts`; or `config.existingConfigMap`. Pods restart when it changes. |
+| `web` Deployment and Service                                    | always                | Roles `web,scheduler`; optional Ingress, HPA on CPU, PodDisruptionBudget.                                                     |
+| `worker` Deployment                                             | always                | Headless Service for metrics, PDB; one Deployment per entry of `worker.pools`.                                                |
+| `scheduler` Deployment                                          | `scheduler.enabled`   | The web pods then run `web` only.                                                                                             |
+| `write-worker` Deployment                                       | `writeWorker.enabled` | See [Write workers](#write-workers).                                                                                          |
+| Egress proxy                                                    | `egressProxy.enabled` | See [Egress](/self-host/configure/egress/).                                                                                   |
+| ServiceMonitor, KEDA ScaledObject or ScaledJob, NetworkPolicies | opt-in                |                                                                                                                               |
+| ServiceAccount                                                  | always                | No Role and no token mounted: nothing talks to the Kubernetes API.                                                            |
+| `extraObjects`                                                  | when set              | Anything else, such as an ExternalSecret or a database cluster.                                                               |
+
+Every pod runs as uid 10001 with a read-only root filesystem, no capabilities and the `RuntimeDefault` seccomp profile. `/tmp` (also `HOME`, `tmpSizeLimit` default 8Gi), `/workspace` and `/mise` are emptyDirs. Probes: startup and liveness on `/healthz`, readiness on `/readyz`.
+
+## Install
+
+1. Create a Secret with the environment every container needs:
+
+   ```sh title="holtkeeper.env"
+   HOLTKEEPER_VAULT_KEY=...
+   HOLTKEEPER_SESSION_SECRET=...
+   HOLTKEEPER_WEBHOOK_SECRET=...
+   HOLTKEEPER_DATABASE_URL=postgres://holtkeeper:...@postgres.example.internal:5432/holtkeeper
+   HOLTKEEPER_S3_BUCKET=holtkeeper
+   HOLTKEEPER_S3_ENDPOINT=https://s3.example.com
+   HOLTKEEPER_S3_REGION=eu-north-1
+   HOLTKEEPER_S3_ACCESS_KEY_ID=...
+   HOLTKEEPER_S3_SECRET_ACCESS_KEY=...
+   ```
+
+   ```sh title="Terminal"
+   kubectl create secret generic holtkeeper --from-env-file=holtkeeper.env
+   ```
+
+2. Write your values:
+
+   ```yaml title="values.yaml"
+   existingSecret: holtkeeper
+   image:
+     tag: '<version>' # a release such as 1.4.0, or a commit SHA
+   env:
+     - { name: HOLTKEEPER_AUTH, value: users }
+     - { name: HOLTKEEPER_PUBLIC_URL, value: https://holtkeeper.example.com }
+     - { name: HOLTKEEPER_ADMIN_EMAIL, value: admin@example.com }
+   web:
+     ingress:
+       enabled: true
+       hosts:
+         - host: holtkeeper.example.com
+           paths: ['/']
+   ```
+
+3. Install the chart:
+
+   ```sh title="Terminal"
+   helm install holtkeeper deploy/helm/holtkeeper -f values.yaml
+   ```
+
+4. Read the admin's setup link from the web pod log and register a passkey ([Sign-in](/self-host/configure/sign-in/#first-admin)):
+
+   ```sh title="Terminal"
+   kubectl logs deploy/holtkeeper-web
+   ```
+
+5. Add the GitLab forge, its token credential and groups in [Settings › Integrations](/guide/settings/integrations/). The chart's config has no forge.
+
+The image defaults to `ghcr.io/holtkeeper/holtkeeper` at the chart's `appVersion`; set `image.tag` to the release you run. Every container gets `HOLTKEEPER_VERSION` (from `version`, else `image.tag`, else `appVersion`), which the panel shows in the Settings footer. `values.schema.json` validates the values.
+
+:::caution
+Without `existingSecret` the pods do not start: the chart's config reads `HOLTKEEPER_VAULT_KEY` and the other secrets from the environment. Keep the Secret, and the vault key in particular, outside the cluster as well.
+:::
+
+## Roles and scaling
+
+- **Web** is stateless: scale with `web.replicas` (default 2) or `web.hpa`. Only one pod runs the scheduler at a time, under a lease in the store.
+- **Workers**: `worker.replicas` × `worker.concurrency` (summed over pools) is how many jobs run at once. `worker.concurrency` empty means `jobs.concurrency` from the config (2 in the chart's config).
+- **Pools** split workers by node class, each pool a Deployment `<release>-worker-<name>` with its own fields on top of `worker`:
+
+  ```yaml title="values.yaml"
+  worker:
+    pools:
+      - { name: small, replicas: 3, concurrency: 2, spread: true, claimDelay: 15s }
+      - {
+          name: big,
+          replicas: 1,
+          concurrency: 4,
+          nodeSelector: { kubernetes.io/hostname: big-node },
+        }
+  ```
+
+  `claimDelay` makes a pool take only jobs nobody else claimed within that time, so pools without one fill first. `spread: true` keeps a pool's pods on different nodes.
+
+- **KEDA**: `keda.enabled` scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus, `keda.threshold` queued jobs per replica (default `2`).
+
+More in [Scaling](/self-host/operate/scaling/).
+
+## Caches on volumes
+
+| Value                        | Default                       | Use a PVC when                                                                                                                             |
+| ---------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `worker.mirrorCache.type`    | `workspace` (in the emptyDir) | New pods should not clone every repository again. `pvc` (50Gi, ReadWriteMany) is shared by workers with a lock file per mirror; NFS works. |
+| `worker.miseCache.type`      | `emptyDir` (10Gi)             | Workers should share installed tools (`pvc`, ReadWriteMany).                                                                               |
+| `worker.workspace.sizeLimit` | `20Gi`                        | —                                                                                                                                          |
+
+Workers report what these caches use, and **Settings › System** shows it per worker (a shared volume once).
+
+## Isolation: one job per pod
+
+Jobs run analyzers and repository tooling inside the worker pod. For repositories you do not fully trust, give every job a fresh pod:
+
+- `keda.scaledJob.enabled: true` (with `keda.enabled`): one Kubernetes Job per queued job, running `--max-jobs 1`, never reused. `activeDeadlineSeconds` (default 7200) bounds a pod that found no job.
+- Without KEDA, `worker.maxJobs: 1` restarts the container after each job. The emptyDirs survive the restart and kubelet backs off repeated restarts, so this is weaker and slower.
+
+Job commands do not inherit the worker's secrets: nothing named `HOLTKEEPER_*` reaches them. That stops accidental leaks, not a hostile command: commands run as the worker's uid and can still read `/proc/<worker pid>/environ`, the config file and other checkouts in `/workspace`, and reach whatever the worker's NetworkPolicy allows.
+
+:::caution
+Analyze only repositories whose code you would let run with the worker's credentials, or combine ScaledJob with NetworkPolicies to limit what a stolen credential reaches. The [deployment reference](/self-host/reference/deployment/#isolation-one-job-per-worker-pod) explains the remaining gap.
+:::
+
+## NetworkPolicies
+
+`networkPolicy.enabled` restricts traffic:
+
+- web pods accept traffic only from `webIngressFrom` (your ingress controller; empty means anyone);
+- worker and scheduler pods accept only metrics scrapes from `metricsFrom`, and reach only DNS, `workerEgress` (ports 443, 80 and 22 to `0.0.0.0/0` by default: GitLab, package registries, the AI provider, Slack) and `extraEgress`, where you list Postgres and the object store.
+
+```yaml title="values.yaml"
+networkPolicy:
+  enabled: true
+  webIngressFrom:
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } }
+  extraEgress:
+    - to: [{ ipBlock: { cidr: 10.20.0.0/24 } }] # Postgres and the object store
+      ports: [{ port: 5432 }, { port: 443 }]
+```
+
+If you narrow `workerEgress.cidrs`, keep GitLab, the registries, your AI provider and `slack.com` reachable. See [Egress](/self-host/configure/egress/).
+
+## Write workers
+
+Write tasks let an agent edit a checkout, run the repository's checks, push a branch and open a draft merge request. Only workers of the `write` pool claim them. `writeWorker.enabled` (needs `egressProxy.enabled`) adds that pool:
+
+```yaml title="values.yaml"
+writeWorker:
+  enabled: true
+  replicas: 1
+  concurrency: 1
+egressProxy:
+  enabled: true
+  ca:
+    certManager: true
+networkPolicy:
+  enabled: true
+  extraEgress: [] # Postgres and the object store, as for the other workers
+```
+
+- The Deployment `<release>-write-worker` runs `--role worker --pool write`. Fields it does not set come from `worker`. It has no KEDA scaling.
+- All of its traffic — GitLab API, git over HTTPS, the AI provider, the agent's commands and package installs — goes through the egress proxy, which adds the registry tokens it holds. With NetworkPolicies it reaches only DNS, the proxy, `networkPolicy.extraEgress` and `writeWorker.extraEgress`. Git over SSH needs port 22 to GitLab in `writeWorker.extraEgress`; otherwise use HTTPS.
+- Write workers refuse to start while `jobs.execution.mode` is `host`. The chart's config uses `mise`.
+- Write tasks stay refused until an admin turns on the `tasks.write` setting in the panel (Ops › Tasks).
+
+Keep `writeWorker.replicas` × `concurrency` small: the agent's commands run as the worker's uid, with the same `/proc` caveat as other jobs.
+
+## Webhooks behind the Ingress
+
+GitLab posts to `https://holtkeeper.example.com/api/webhooks/<forge>`. Set `HOLTKEEPER_PUBLIC_URL` so the hooks Holtkeeper registers point at the Ingress host, allow request bodies of a few MB (for ingress-nginx, `nginx.ingress.kubernetes.io/proxy-body-size`), and add GitLab's addresses to `webIngressFrom` when NetworkPolicies are on. Any web pod can take a webhook.
+
+:::caution
+`/metrics` is served on the web Service too and needs no authentication. Block the path at the ingress if the host is public.
+:::
+
+## Related
+
+- [Egress](/self-host/configure/egress/) — the proxy, registry tokens and the download cache.
+- [Scaling](/self-host/operate/scaling/) — pools, KEDA and limits.
+- [Upgrades](/self-host/operate/upgrades/) — image tags and migrations.
+- [Deployment reference](/self-host/reference/deployment/#kubernetes) — every chart option.

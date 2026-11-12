@@ -1,19 +1,20 @@
 ---
+import '../styles/theme.css'
+import '../styles/ui.css'
 import '../styles/landing.css'
 
-import BuiltOn from '../components/landing/BuiltOn.astro'
-import Bento from '../components/landing/Bento.astro'
-import Contracts from '../components/landing/Contracts.astro'
-import Cta from '../components/landing/Cta.astro'
-import Deploy from '../components/landing/Deploy.astro'
+import Agents from '../components/landing/Agents.astro'
+import Flow from '../components/landing/Flow.astro'
 import Footer from '../components/landing/Footer.astro'
 import Hero from '../components/landing/Hero.astro'
-import HowItWorks from '../components/landing/HowItWorks.astro'
 import Nav from '../components/landing/Nav.astro'
+import Platform from '../components/landing/Platform.astro'
+import Scale from '../components/landing/Scale.astro'
+import Workspaces from '../components/landing/Workspaces.astro'
 
-const title = 'Holtkeeper — keep every repository in shape'
+const title = 'Holtkeeper — a cozy holt for every repository'
 const description =
-  'Self-hosted automation engine for fleets of GitLab and GitHub repositories: AI code review with one-click suggestions, dependency waves that fix breaking changes, audits and releases, built on contracts you can swap.'
+  'Self-hosted AI review, dependency waves, audits and releases for fleets of GitLab repositories, from a homelab to a production zoo. People work in the panel; agents use the same data over MCP.'
 ---
 
 <!doctype html>
@@ -24,7 +25,6 @@ const description =
     <script is:inline>
       ;(() => {
         const root = document.documentElement
-        root.dataset.js = ''
         let stored = null
         try {
           stored = localStorage.getItem('starlight-theme')
@@ -37,7 +37,11 @@ const description =
     <meta name="description" content={description} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="canonical" href={new URL('/', Astro.site)} />
-    <meta name="theme-color" content="#0a0907" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400&display=swap"
+    />
+    <meta name="theme-color" content="#0b0b0c" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
@@ -48,45 +52,18 @@ const description =
     <Nav />
     <main>
       <Hero />
-      <HowItWorks />
-      <Bento />
-      <Contracts />
-      <Deploy />
-      <BuiltOn />
-      <Cta />
+      <Workspaces />
+      <Flow />
+      <Agents />
+      <Scale />
+      <Platform />
     </main>
     <Footer />
     <script>
-      const root = document.documentElement
-      const mark = () => root.toggleAttribute('data-scrolled', window.scrollY > 8)
-      mark()
-      addEventListener('scroll', mark, { passive: true })
-
-      const reveal = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue
-            entry.target.setAttribute('data-shown', '')
-            reveal.unobserve(entry.target)
-          }
-        },
-        { rootMargin: '0px 0px -8% 0px' },
-      )
-      document.querySelectorAll('.l-reveal').forEach((el) => reveal.observe(el))
-
-      for (const card of document.querySelectorAll<HTMLElement>('.l-card')) {
-        card.addEventListener('pointermove', (e) => {
-          const box = card.getBoundingClientRect()
-          card.style.setProperty('--x', `${e.clientX - box.left}px`)
-          card.style.setProperty('--y', `${e.clientY - box.top}px`)
-        })
-      }
-
       for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
         button.addEventListener('click', async () => {
-          const text = button.dataset.copy ?? ''
           try {
-            await navigator.clipboard.writeText(text)
+            await navigator.clipboard.writeText(button.dataset.copy ?? '')
           } catch {
             return
           }

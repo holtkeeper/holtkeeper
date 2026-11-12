@@ -1,0 +1,23 @@
+---
+interface Props {
+  /** Short record id: `BND-418`. */
+  id?: string
+  title: string
+  /** Position in the list: `3 of 41`. */
+  position?: string
+}
+
+const { id, title, position } = Astro.props
+---
+
+<div class="hk-sheet">
+  <div class="hk-sheet-head">
+    {id && <span class="hk-mono hk-mut">{id}</span>}
+    <b>{title}</b>
+    <slot name="tags" />
+    <span class="hk-sp"></span>
+    {position && <span class="hk-mono hk-mut">{position}</span>}
+    <slot name="actions" />
+  </div>
+  <slot />
+</div>

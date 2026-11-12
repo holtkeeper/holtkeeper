@@ -1,0 +1,17 @@
+---
+import { type StatusEmoji, statusEmoji } from './slack.ts'
+
+interface Props {
+  /** A Holtkeeper status emoji, or any text for a plain reaction. */
+  emoji: StatusEmoji | string
+  count?: number
+}
+
+const { emoji, count = 1 } = Astro.props
+const src = emoji in statusEmoji ? statusEmoji[emoji as StatusEmoji] : undefined
+---
+
+<span class:list={['hk-slack-reaction', { plain: !src }]}>
+  {src ? <img src={src} alt={`:${emoji}:`} width="16" height="16" /> : emoji}
+  {count}
+</span>

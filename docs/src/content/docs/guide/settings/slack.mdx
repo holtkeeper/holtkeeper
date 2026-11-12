@@ -1,0 +1,276 @@
+---
+title: Slack app
+description: Show the AI review status on every merge request link posted in your channels, and announce new versions with their changes and the repositories an upgrade would break.
+panel: Settings › Integrations › Slack
+route: /settings/integrations
+permission: settings:write
+sidebar:
+  order: 4
+---
+
+import {
+  Button,
+  Emoji,
+  Field,
+  Fields,
+  Row,
+  Rows,
+  Screen,
+  SlackContext,
+  SlackHeader,
+  SlackMessage,
+  SlackReaction,
+  SlackReactions,
+  SlackWindow,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+import { botAvatar, slackAssetsUrl } from '../../../../components/ui/slack.ts'
+
+Show the AI review status on every merge request link posted in your channels, and announce new versions with their changes and the repositories an upgrade would break.
+
+<img
+  src={botAvatar}
+  alt="The Holtkeeper Slack app's avatar"
+  width="96"
+  height="96"
+  style="border-radius: 20px; border: 1px solid var(--hk-line2)"
+/>
+
+The app does two things:
+
+- **Review status.** When a message in a channel the app is in links a merge request of a connected repository, the app puts one emoji on the message and keeps it current as reviews run. For this it never posts, replies or edits: it only adds and removes its own reaction.
+- **Release announcements.** New versions of a repository get one message in the channels you choose, whatever created the tags.
+
+## What it looks like
+
+<SlackWindow channel="widgets-reviews" topic="Merge requests that need eyes" channels={['general', 'widgets-reviews', 'releases']}>
+  <SlackMessage author="Mira K." time="10:42">
+
+Could someone look at the new pager? [gitlab.example.com/acme/widget-kit/-/merge_requests/1824](#what-it-looks-like)
+
+    <SlackReactions><SlackReaction emoji="hk-reviewing" /></SlackReactions>
+
+  </SlackMessage>
+  <SlackMessage author="Jon D." time="11:05" color="#2f7d6b">
+
+Fixed the flaky date test [!1819](#what-it-looks-like)
+
+    <SlackReactions><SlackReaction emoji="hk-clean" /><SlackReaction emoji="+1" count={2} /></SlackReactions>
+
+  </SlackMessage>
+  <SlackMessage author="Ana L." time="11:31" color="#a0522d">
+
+Token refresh rework, ready for eyes [!1822](#what-it-looks-like)
+
+    <SlackReactions><SlackReaction emoji="hk-changes" /></SlackReactions>
+
+  </SlackMessage>
+</SlackWindow>
+
+<p class="hk-caption">
+  The reaction is the only thing the app adds. A new push queues a review, and the emoji goes back
+  to reviewing.
+</p>
+
+| Emoji                         | Status    | When                                                       | Default emoji           |
+| ----------------------------- | --------- | ---------------------------------------------------------- | ----------------------- |
+| <Emoji name="hk-reviewing" /> | reviewing | A review of the merge request is queued or running         | `:eyes:`                |
+| <Emoji name="hk-clean" />     | clean     | The latest review says looks good and posted no findings   | `:large_green_circle:`  |
+| <Emoji name="hk-minor" />     | minor     | Looks good, with minor or info findings posted             | `:large_orange_circle:` |
+| <Emoji name="hk-changes" />   | changes   | Needs changes, or any major or critical finding            | `:red_circle:`          |
+| <Emoji name="hk-skipped" />   | skipped   | Not reviewed: the diff is too large or nothing is in scope | `:white_circle:`        |
+
+A message that links several merge requests shows the worst of them: changes, then reviewing, minor, skipped, clean. The status follows the newest review, so an incremental review that finds nothing new shows clean even while earlier findings are still open.
+
+## Set up the app
+
+Slack checks the events URL the moment you save it, and Holtkeeper only answers once it has the signing secret. So create the app first, save its credentials in Holtkeeper, and turn events on last.
+
+1. **Create the app from the manifest.** At [api.slack.com/apps](https://api.slack.com/apps) choose <Ui>Create New App</Ui> › <Ui>From a manifest</Ui>, pick the workspace and paste the manifest below. The full manifest with the long description lives in <a href={slackAssetsUrl}>holtkeeper/.github › slack</a>.
+
+   ```yaml title="manifest.yml"
+   display_information:
+     name: Holtkeeper
+     description: 'Keeps your Git repositories in order: reviews, updates, audits and releases.'
+     background_color: '#1e140d'
+   features:
+     bot_user:
+       display_name: holtkeeper
+       always_online: true
+   oauth_config:
+     scopes:
+       bot:
+         - channels:history
+         - groups:history
+         - reactions:write
+         - chat:write
+   settings:
+     org_deploy_enabled: false
+     socket_mode_enabled: false
+     token_rotation_enabled: false
+   ```
+
+2. **Give it a face.** Under <Ui>Basic Information</Ui> › <Ui>Display Information</Ui> upload the <a href={botAvatar}>avatar</a> and keep the background `#1E140D`. Slack rounds the corners itself.
+3. **Install and copy the credentials.** Choose <Ui>Install to Workspace</Ui>, then copy the **Bot User OAuth Token** (`xoxb-…`, under OAuth & Permissions) and the **Signing Secret** (under Basic Information › App Credentials).
+4. **Save them in Holtkeeper.** Open **Settings › Integrations › Slack**, paste both and save. They are sealed with the server's vault key and never shown again. The section then shows the request URL to copy.
+
+   <Screen title="Settings › Integrations › Slack">
+     <Toolbar title="Slack">
+       <Tag slot="start">Not connected</Tag>
+       <Button primary>Save</Button>
+     </Toolbar>
+     <Fields>
+       <Field label="Bot token" value="xoxb-••••••••••••" hint="OAuth & Permissions" mono />
+       <Field
+         label="Signing secret"
+         value="••••••••••••••••"
+         hint="Basic Information › App Credentials"
+         mono
+       />
+       <Field
+         label="Request URL for Event Subscriptions"
+         value="https://holtkeeper.example.com/api/slack/events"
+         hint="Sealed with the vault key after saving and never shown again."
+         mono
+         wide
+       />
+     </Fields>
+   </Screen>
+
+5. **Turn events on.** In the Slack app, <Ui>Event Subscriptions</Ui>: paste the request URL (Slack verifies it at once), add the bot events `message.channels` and `message.groups`, save, and reinstall when Slack asks. You can add the same block to the manifest instead:
+
+   ```yaml title="manifest.yml · settings"
+   event_subscriptions:
+     request_url: https://holtkeeper.example.com/api/slack/events
+     bot_events:
+       - message.channels
+       - message.groups
+   ```
+
+6. **Invite the app** to each channel it should watch: `/invite @holtkeeper`.
+7. **Bind channels to repositories** (next section).
+
+| Scope              | For                                                                         |
+| ------------------ | --------------------------------------------------------------------------- |
+| `channels:history` | Read messages in public channels the app is in, to find merge request links |
+| `groups:history`   | The same in private channels                                                |
+| `reactions:write`  | Set the review status emoji                                                 |
+| `chat:write`       | Post release announcements; review status works without it                  |
+
+:::caution[Behind a NetworkPolicy or egress proxy]
+Holtkeeper calls `https://slack.com/api` from both web and worker pods: a review that finishes on a worker updates the emoji from there. Allow `slack.com` for both roles.
+:::
+
+## Bind channels
+
+The `slack.reviews` setting maps a scope to Slack channel ids. The most specific entry wins as a whole: an entry for everything sets the default channels, a group or repository entry replaces them for its repositories, and an entry with no channels keeps a group quiet. A message about a repository is handled only in a channel bound to it, so groups can share channels or keep their own.
+
+<Screen title="Settings › Integrations › slack.reviews">
+  <Rows>
+    <Row title="Everything" sub="Default channels">
+      <Tag mono>C0123ABCD</Tag>
+      <Tag>default</Tag>
+    </Row>
+    <Row title="Group Widgets" sub="Replaces the default for its repositories">
+      <Tag mono>C04WIDGET</Tag>
+      <Tag mono>G07PRIVATE</Tag>
+      <Tag tone="ok">own channels</Tag>
+    </Row>
+    <Row title="Group Sandbox" sub="channels: []">
+      <Tag>quiet</Tag>
+    </Row>
+  </Rows>
+</Screen>
+
+<p class="hk-caption">
+  Use channel ids, not names: open the channel's details; the id is at the bottom of About. Private
+  channels may start with G.
+</p>
+
+## Use the Holtkeeper emoji
+
+The app works with Slack's standard emoji. To use the Holtkeeper set, download it from <a href={`${slackAssetsUrl}/emoji`}>holtkeeper/.github › slack › emoji</a>, upload each file under <Ui>Customize workspace</Ui> › <Ui>Emoji</Ui> with the name below, then enter the names under the tokens. Blank fields keep the defaults; a changed emoji shows on a message the next time its status changes.
+
+<Screen title="Settings › Integrations › Slack › Status emoji">
+  <Fields columns={5}>
+    <Field label="Reviewing" value="hk-reviewing" mono />
+    <Field label="Clean" value="hk-clean" mono />
+    <Field label="Minor" value="hk-minor" mono />
+    <Field label="Changes" value="hk-changes" mono />
+    <Field label="Skipped" value="hk-skipped" mono />
+  </Fields>
+</Screen>
+
+All five are 128 × 128 with a transparent background. Only reviewing is animated, so a channel of finished reviews does not flicker; `hk-reviewing.png` is its still twin for workspaces that turn animation off.
+
+## Release announcements
+
+With `releases.announce` set for a repository, its new versions get a message in the listed channels — whether the tags come from Holtkeeper's version step, changesets, release-please or a CI job. Tags found within ten minutes of each other make one message. The app needs `chat:write` and an invitation to those channels.
+
+<SlackWindow channel="releases" topic="Versions of everything we publish">
+  <SlackMessage author="holtkeeper" time="14:20">
+    <SlackHeader>@acme/widget-kit 5.0.0</SlackHeader>
+    <SlackContext>since 4.8.2 · [Compare](#release-announcements)</SlackContext>
+
+Pager and DatePicker now share one focus model, and theming moves to CSS variables.
+
+- Pager pages with the keyboard
+- DatePicker opens on the selected month
+
+**Breaking changes**
+
+- `WidgetTheme` is removed<br />_Set the `--widget-*` CSS variables instead._
+
+**Changes**<br />_Features_
+
+- [Keyboard paging in Pager (!1824)](#release-announcements)
+
+_Bug fixes_
+
+- [Keep focus when DatePicker closes (!1819)](#release-announcements)
+
+**Tasks**
+
+- [ABC-123 Pager keyboard support](#release-announcements)
+
+**Will break on upgrade**
+
+- [acme/checkout-web](#release-announcements) (on 4.6.0): 3 broken uses of `WidgetTheme` — [src/theme.ts](#release-announcements), [src/App.tsx](#release-announcements)
+
+      </SlackMessage>
+
+  </SlackWindow>
+
+| Field                | Default              | What it does                                                                             |
+| -------------------- | -------------------- | ---------------------------------------------------------------------------------------- |
+| `channels`           | none                 | Slack channel ids; without any, nothing is announced                                     |
+| `tags`               | flow tags + packages | Glob patterns of tag names such as `@acme/*@*`                                           |
+| `groupWindowMinutes` | 10                   | Tags found within this many minutes of the first make one message                        |
+| `notes`              | on                   | AI notes: overview, highlights, breaking changes with migration hints                    |
+| `tasks`              | on                   | Tracker tasks named by the commits                                                       |
+| `impact`             | on                   | "Will break on upgrade": connected repositories whose code uses what the version removed |
+| `language`           | review language      | Language of the AI prose; code and technical terms stay in English                       |
+
+The first look at a repository records every existing tag as seen, so history is never announced. When the compatibility analysis is not ready, the message goes out with _Compatibility analysis is still running_ and is updated in place once it lands. When the AI budget blocks the notes, the message goes out without them.
+
+## Nothing shows up?
+
+The app stays silent, and stores nothing, when:
+
+- the link's host is not a configured forge, or the repository is in no group;
+- **Merge request reviews** are off for the repository;
+- the channel is not bound to the repository, or the app was not invited to it;
+- no Slack credential is saved.
+
+A merge request with no review yet gets no emoji until its first review is queued. When reviews are turned off or a channel is unbound after a message got its emoji, the emoji is removed at the merge request's next review change. Messages older than 30 days stop changing.
+
+## Related
+
+- [Integrations](/guide/settings/integrations/) — forges, trackers and other credentials.
+- [Reviews](/guide/quality/reviews/) — the AI reviews behind the status.
+- [Release overview](/guide/releases/overview/) — what gets released and announced.
+- [Egress and package registries](/self-host/configure/egress/) — allowing `slack.com` from the cluster.
+- [Server: Slack](/modules/server/) — how events, statuses and announcements work inside.

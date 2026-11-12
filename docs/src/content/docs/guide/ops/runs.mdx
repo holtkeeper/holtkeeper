@@ -1,0 +1,237 @@
+---
+title: Runs
+description: Follow every background analyzer run from the queue to its result, see why it ran, what it cost and why it failed, and start or cancel runs by hand.
+panel: Ops › Runs
+route: /ops/runs
+permission: analyses:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Meter,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Follow every background analyzer run (a job) from the queue to its result, see why it ran, what it cost and why it failed, and start or cancel runs by hand.
+
+<Screen title="Ops › Runs" caption="Newest runs first, with the queue at a glance above them and recurring failures below.">
+  <Toolbar title="Runs" crumbs={['Ops']}>
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+    <Button primary>Run analyzer</Button>
+  </Toolbar>
+  <Toolbar>
+    <Segmented slot="start" items={['All', 'Failures:4', 'Queue:12']} />
+    <Tag>My teams</Tag>
+    <Tag>Status</Tag>
+    <Tag>Analyzer</Tag>
+    <Tag>Repository</Tag>
+    <Tag>Trigger</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '3 / 4', label: 'workers busy' },
+      { value: 12, label: 'queued' },
+      { value: 3, label: 'running · $0.84 so far' },
+      { value: '4 s / 38 s', label: 'claim delay p50 / p95' },
+      { value: 4, label: 'failed', tone: 'bad' },
+      { value: 1, label: 'blocked by budget', tone: 'warn' },
+    ]}
+  />
+  <Scroll>
+
+| Status                         | Analyzer                                    | Repository · ref             | Trigger   | Duration | Tries | Cost  | Started            |
+| ------------------------------ | ------------------------------------------- | ---------------------------- | --------- | -------- | ----- | ----- | ------------------ |
+| <Tag tone="info">Running</Tag> | **review** · retried after `timeout`        | `acme/checkout-web` · `!214` | webhook   | 2 min    | 2/3   | $0.31 | 3 min ago          |
+| <Tag>Queued</Tag>              | **bundle** · 2 runs ahead for a free worker | `acme/admin-ui` · `main`     | `nightly` | —        | 0/3   | —     | waiting 2 min 10 s |
+| <Tag tone="bad">Failed</Tag>   | **coverage** · `test command exited with 1` | `acme/widget-kit` · `main`   | freshness | 4 min    | 3/3   | —     | 25 min ago         |
+| <Tag tone="warn">Blocked</Tag> | **guide** · Stopped by the AI budget        | `acme/admin-ui` · `main`     | Mira K.   | —        | 1/3   | —     | 1 h ago            |
+| <Tag tone="ok">Done</Tag>      | **depgraph**                                | `acme/checkout-web` · `main` | push      | 48 s     | 1/3   | —     | 2 h ago            |
+
+  </Scroll>
+</Screen>
+
+## Find a run
+
+The page lists the runs of every repository you can read. Three ways to narrow it:
+
+- **Scope switch.** _My teams_ keeps the repositories of your home groups, a picked group keeps that group's, and the widest setting shows everything you may read. A repository picked in the **Repository** filter wins over the scope.
+- **Segments.** **All**, **Failures** (failed runs) and **Queue** (queued runs), each with its count. Failures and Queue fix the status, so switching to them drops the **Status** filter.
+- **Filters and search.** **Status** (in All only), **Analyzer**, **Repository** and **Trigger** pick one value each. Press <Kbd>/</Kbd> to search by run id prefix, repository or group, analyzer kind or label. The search covers every run you may read, not only the loaded pages, and the footer counts the matches.
+
+A link from Automation adds a **schedule** chip, and a recurring failure adds a **failure signature** chip; remove either with its ×. Filters live in the URL, so <Ui>⋯</Ui> › <Ui>Copy link</Ui> shares the same view.
+
+## What the table shows
+
+| Column           | Meaning                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| Status           | Queued, running, finished, failed, cancelled, or blocked by the AI budget.                                  |
+| Analyzer         | The analyzer, with a line under it (see below).                                                             |
+| Repository · ref | Where it ran: a branch, a tag or a merge request head.                                                      |
+| Trigger          | The schedule name, the person who started it, or the event (push, tag, webhook, freshness, new repository). |
+| Duration         | From start to finish.                                                                                       |
+| Tries            | Attempts out of the most allowed; amber after a retry.                                                      |
+| Cost             | What the run's AI agents spent; `—` when it called no model.                                                |
+| Started          | When it started, or _waiting 2 min 10 s_ and _due in 5 minutes_ for a queued run.                           |
+
+The line under the analyzer says what matters most about the run: why a queued run still waits (its first reason, or that it waits for a free worker with N runs ahead), _Stopped by the AI budget_ for a blocked run, the failure signature or first error line of a failed run, and the last failed attempt of a run that was retried. The footer counts the shown runs and loads older pages.
+
+## Check the queue
+
+Above the table a strip shows the queue over the same scope, refreshed every 10 seconds: workers busy out of live workers, queued, running with what their agents spent so far, the claim delay (p50 and p95: how long runs wait before a worker picks them up), and the failed and budget-blocked runs of the recent window.
+
+<Screen title="Ops › Runs · Queue">
+  <Stack>
+    <Toolbar title="Workers" />
+    <Rows>
+      <Row title="worker-7f2c" sub="busy with 2 runs">
+        <Tag>heartbeat 4 s ago</Tag>
+      </Row>
+      <Row title="worker-a91e" sub="busy with 1 run">
+        <Tag>heartbeat 6 s ago</Tag>
+      </Row>
+      <Row title="worker-0d44" sub="idle">
+        <Tag>heartbeat 3 s ago</Tag>
+      </Row>
+    </Rows>
+    <Toolbar title="Why queued">
+      <Button ghost>Open Queue view</Button>
+    </Toolbar>
+    <Rows>
+      <Row title="8 wait for a free worker slot" />
+      <Row title="3 wait for a run of the same analyzer on the same target" />
+      <Row title="1 is not due yet" />
+    </Rows>
+  </Stack>
+</Screen>
+
+- **Workers** shows each live worker with how many runs it is busy with and its newest heartbeat. You see it only with `analyses:read` over everything; an empty list means no worker announced itself recently.
+- **Why queued** groups the oldest queued runs by what they wait for, largest first, and says how many were sampled. <Ui>Open Queue view</Ui> switches to the Queue segment.
+
+:::tip
+A long queue with no busy workers means no worker is running. Runs that sit in the Failures segment as _blocked by budget_ were stopped by the weekly AI budget; see [AI spend](/guide/ops/ai-spend/).
+:::
+
+## Open a run
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd>. A side sheet opens with the steps of the latest attempt as its progress bar and four tabs.
+
+<Screen title="Ops › Runs › 8f3a2c1d">
+  <Sheet id="8f3a2c1d" title="coverage · acme/widget-kit" position="3 of 50">
+    <Tag tone="bad" slot="tags">
+      Failed
+    </Tag>
+    <Button slot="actions">Open as page</Button>
+    <Button slot="actions">⋯</Button>
+    <Tabs items={['Steps', 'Logs', 'Findings', 'Cost']} />
+    <Facts
+      items={[
+        ['Why it ran', 'freshness · sha 1a2b3c4 != head 5d6e7f8'],
+        ['Error', 'test command exited with 1'],
+        ['Attempts', '3 of 3 · all failed'],
+        ['Worker', 'worker-7f2c · mise'],
+        ['Created', 'today 10:02'],
+        ['Started', 'today 10:02 · claimed after 6 s'],
+        ['Finished', 'today 10:06 · 4 min'],
+        ['Options', 'branch: main · Show'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+| Tab      | What it shows                                                                                                                                                                                                                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Steps    | Status, target, ref and attempt; **why it ran** (its origin, outcome and wait reasons) with <Ui>Show on Automation</Ui> and <Ui>Runs with the same failure</Ui>; the error; one segment per attempt, and the picked attempt's step timeline and log tail; then the run facts. |
+| Logs     | The picked attempt's full log, following new lines while it runs.                                                                                                                                                                                                             |
+| Findings | The stored result's title and headline figures, with <Ui>Open result</Ui>.                                                                                                                                                                                                    |
+| Cost     | What the agent runs cost, a bar of the cost cap spent when the run has one, and each agent run with its transcript. The model's reasoning, when the provider returns it, folds out above its text.                                                                            |
+
+The ⋯ menu holds <Ui>Cancel run</Ui> for a queued or running run, <Ui>Run again</Ui> for a finished one, and <Ui>Open result</Ui>. <Ui>Open as page</Ui> shows the same sections one after another on a page of its own with a link you can share.
+
+<Screen title="Ops › Runs › 2d9e71b0 · Cost">
+  <Sheet id="2d9e71b0" title="review · acme/checkout-web !214" position="1 of 50">
+    <Tag tone="info" slot="tags">
+      Running
+    </Tag>
+    <Tabs items={['Steps', 'Logs', 'Findings', 'Cost']} active={3} />
+    <Stack>
+      <Meter value={21} label={'$0.31 of $1.50 cap'} />
+      <Rows>
+        <Row title="Review pass 1 · main tier" sub="18 turns · 74% cached">
+          <Tag mono>$0.22</Tag>
+        </Row>
+        <Row title="Review pass 2 · main tier" sub="9 turns · 81% cached">
+          <Tag mono>$0.09</Tag>
+        </Row>
+      </Rows>
+    </Stack>
+  </Sheet>
+</Screen>
+
+## Start a run by hand
+
+1. Click <Ui>Run analyzer</Ui> in the header.
+2. Pick the analyzer and where it should run.
+3. Start it. The run joins the queue like any other, with you as its trigger.
+
+<Ui>Run analyzer</Ui>, <Ui>Run again</Ui> and <Ui>Cancel run</Ui> need `analyses:run`.
+<Ui>Configure</Ui> (with `settings:read`) opens [Settings › Analyzers](/guide/settings/analyzers/),
+on the filtered analyzer's sheet when the **Analyzer** filter is set.
+
+## Deal with recurring failures
+
+Under the table, in All and Failures, **Recurring failures** groups failed runs by analyzer and error signature over 24 hours, 7 days or 30 days.
+
+<Screen title="Ops › Runs · Recurring failures">
+  <Toolbar title="Recurring failures">
+    <Segmented items={['24 h', '7 d', '30 d']} active={1} />
+    <Button ghost>All failures</Button>
+  </Toolbar>
+  <Scroll>
+
+| Analyzer | Signature                           | Runs | Repositories | Latest     |
+| -------- | ----------------------------------- | ---- | ------------ | ---------- |
+| coverage | `test command exited with 1`        | 9    | 3            | `8f3a2c1d` |
+| renovate | `registry answered 401 for @acme/*` | 5    | 5            | `51c0aa7e` |
+| bundle   | `build timed out after 30 min`      | 2    | 1            | `0b7d3e12` |
+
+  </Scroll>
+</Screen>
+
+- Click a row to switch to Failures filtered to that analyzer and signature.
+- Click the id to open the latest run with it.
+- <Ui>All failures</Ui> switches to the Failures segment.
+
+:::note
+A failure that hits many repositories at once usually has one cause outside them: an expired token, a registry outage, or a tool missing on the workers. Open one run, read its log, then use <Ui>Runs with the same failure</Ui> to see how far it spread.
+:::
+
+## Why a run ran
+
+<Ui>Show on Automation</Ui> in a run's Steps tab opens the [automation
+map](/guide/ops/automation/#the-map) with the path that could have queued the run highlighted: the
+schedule, trigger, policy or freshness rule behind it. Coding agents ask the same question over MCP
+with `why_job` and `job_log` ([MCP tools](/reference/mcp-tools/)).
+
+## Related
+
+- [Automation](/guide/ops/automation/) — the schedules, triggers and freshness rules that queue runs.
+- [AI spend](/guide/ops/ai-spend/) — the budget that can block runs that call a model.
+- [Settings › Analyzers](/guide/settings/analyzers/) — every analyzer's state, health and options.
+- [Analyzers and runs](/start/concepts/analyzers-and-runs/) — how analyzers, jobs and records fit together.
+- [Jobs engine](/modules/jobs/) — scheduling, claiming and retries in depth.

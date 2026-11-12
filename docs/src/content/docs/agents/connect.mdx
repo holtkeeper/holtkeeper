@@ -1,0 +1,199 @@
+---
+title: Connect an agent
+description: Create an MCP token in Account › Connect agents and add Holtkeeper to Claude Code, Cursor or any Streamable HTTP client.
+panel: Account › Connect agents
+route: /account/agents
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Screen,
+  Scroll,
+  Segmented,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Every agent connects to one endpoint, `https://<your instance>/mcp`, with a personal token in the `Authorization` header. Create the token in the panel, paste the setup line into your client, and the agent can read the fleet with your permissions. It takes about a minute.
+
+## 1. Create a token
+
+Open **Account › Connect agents** (your avatar › **Account**, then **Connect agents**) and press <Ui>New token</Ui>.
+
+<Screen
+  title="Account › Connect agents › New MCP token"
+  caption="One token per machine or agent. Read-only unless you allow release steps or tasks."
+>
+  <Stack>
+    <Fields columns={1}>
+      <Field label="Name" placeholder="Laptop, CI agent, …" value="Work laptop" />
+      <Field label="Expires after" value="90 days" hint="30 days, 90 days, 1 year or Never." />
+      <Field
+        label="Release steps"
+        toggle
+        hint="Lets agents run release_step where you may run releases; each step still needs a preview and a confirm token."
+      />
+      <Field
+        label="Run tasks"
+        toggle
+        hint="Lets start_task queue code changes and request_review ask for reviews where you may run tasks; without it start_task only proposes them for approval."
+      />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Create</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+1. Give it a name you will recognize in the token list: the machine or the agent that uses it.
+2. Pick how long it lives. 90 days is the default; **Never** is there for a service account you rotate by hand.
+3. Leave both switches off for a token that only reads. Turn them on only if this agent should run release steps or start tasks; see [Tokens and scopes](/agents/tokens/).
+4. Press <Ui>Create</Ui>. The dialog shows the token once, with the ready Claude Code command. **Copy it now; it is not shown again.**
+
+Tokens start with `hk_mcp_`. Treat one like a password: anyone holding it reads what you can read.
+
+## 2. Add the server to your client
+
+Under the tokens, **Client setup** shows the endpoint and one tab per client, each with a <Ui>Copy</Ui> button. Replace `<token>` with the secret you just copied.
+
+<Screen
+  title="Account › Connect agents"
+  caption="Client setup: Streamable HTTP, stateless, read by default."
+>
+  <Toolbar title="Client setup">
+    <Button>Copy</Button>
+  </Toolbar>
+  <Stack>
+    <Field label="MCP endpoint" value="https://holtkeeper.example.com/mcp" mono wide />
+    <Segmented items={['Claude Code', 'Cursor', '.mcp.json', 'curl check']} active={0} />
+  </Stack>
+</Screen>
+
+### Claude Code
+
+```sh
+claude mcp add --transport http holtkeeper https://holtkeeper.example.com/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Run it once per machine. `claude mcp list` should then show `holtkeeper` as connected.
+
+### Cursor
+
+Add the server to Cursor's MCP settings (`~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project):
+
+```json title="mcp.json"
+{
+  "mcpServers": {
+    "holtkeeper": {
+      "url": "https://holtkeeper.example.com/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+### .mcp.json and other clients
+
+Any client that speaks Streamable HTTP can use the same block with `"type": "http"`. A project-level `.mcp.json` is convenient, but keep the token out of version control: put the file in `.gitignore` or use your client's environment variable expansion.
+
+```json title=".mcp.json"
+{
+  "mcpServers": {
+    "holtkeeper": {
+      "type": "http",
+      "url": "https://holtkeeper.example.com/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+### Check with curl
+
+The **curl check** tab lists the tools the token gets. A JSON answer with a `tools` array means the token and the endpoint work; `401` means the token is wrong, expired or revoked.
+
+```sh
+curl -s https://holtkeeper.example.com/mcp \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+The same token also reads the catalog API (`/api/api-surface/*` and `/api/dependencies*`) with the same header, for scripts that want the data without MCP.
+
+## 3. Ask about your code
+
+Agents get server instructions that tell them when to use which tool, so a plain question usually works:
+
+```text
+> Which repositories still use the old Modal from @acme/widget-kit, and with which props?
+
+● holtkeeper - package_usage (package: "@acme/widget-kit")
+  ⎿ @acme/widget-kit — used by 7 repositories
+    - gitlab:acme/checkout-web (team storefront) 4.2.0 — Modal ×12 (jsx; props: open, onClose, size)
+    - gitlab:acme/admin-ui (team platform) 3.9.1 — Modal ×31 (jsx; props: open, onClose, footer)
+    …
+
+● Seven repositories use Modal. admin-ui is still on 3.9.1 and passes `footer`,
+  which 4.x removed; the others are on 4.x.
+```
+
+Paste the token into one client only, and create another token for each machine. Then the token list shows which machine made which calls, and revoking one never cuts off the others.
+
+## What you see after connecting
+
+The rest of the screen fills in as the agent works:
+
+<Screen title="Account › Connect agents" caption="Your tokens, with calls in the last 7 days per token.">
+  <Toolbar title="Your tokens">
+    <Tag>Filter tokens</Tag>
+    <Button primary>New token</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 2, label: 'active', tone: 'ok' },
+      { value: 1, label: 'expires soon', tone: 'warn' },
+      { value: 0, label: 'expired' },
+      { value: 1, label: 'never used' },
+    ]}
+  />
+  <Scroll>
+
+| Name         | Status                              | Allows                                           | Token          | Expires     | Last used | Calls, 7 days |
+| ------------ | ----------------------------------- | ------------------------------------------------ | -------------- | ----------- | --------- | ------------- |
+| Work laptop  | <Tag tone="ok">Active</Tag>         | <Tag>Read</Tag>                                  | `hk_mcp_3f9a…` | 14 Feb 2027 | 2 min ago | 418           |
+| CI agent     | <Tag tone="warn">Expires soon</Tag> | <Tag>Read</Tag> <Tag tone="warn">Run tasks</Tag> | `hk_mcp_b21c…` | 22 Nov 2026 | yesterday | 64            |
+| Home desktop | <Tag>Never used</Tag>               | <Tag>Read</Tag>                                  | `hk_mcp_77e0…` | never       | never     | 0             |
+
+  </Scroll>
+</Screen>
+
+- **My usage** shows your own calls over 7, 30 or 90 days and your most used tools, packages and clients.
+- **Tool reference** lists the tools your token gets right now, grouped into your packages, third-party libraries and team knowledge, each with its arguments. It is the live list, so it matches what your client sees.
+
+## Troubleshooting
+
+| Symptom                                  | Cause and fix                                                                                                                        |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `401` with `WWW-Authenticate: Bearer`    | No token, or the token is wrong, expired or revoked. Create a new one.                                                               |
+| `405` from the endpoint                  | The client sent `GET` or `DELETE`. The endpoint is stateless and takes `POST` only; pick the HTTP transport, not SSE.                |
+| A tool answers with a missing permission | Your account lacks it on that repository. The answer names the permission; ask an admin, see [Permissions](/reference/permissions/). |
+| Fewer tools than a colleague             | Some tools depend on your access or the token's scopes (`release_step`, `budget_status`).                                            |
+| "Tokens are unavailable" in the panel    | The instance runs without a key–value store. Ask whoever runs it.                                                                    |
+
+## Related
+
+- [Tokens and scopes](/agents/tokens/) — what a token can see and how to revoke it.
+- [What agents can ask](/agents/tools/) — the tools with example questions.
+- [Account › Connect agents](/guide/account/connect-agents/) — the panel screen in full.
+- [MCP tools](/reference/mcp-tools/) — every tool and its arguments.

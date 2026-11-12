@@ -1,0 +1,124 @@
+---
+title: Environment variables
+description: Every HOLTKEEPER_* environment variable — which are required, which are secret, their defaults and what they do — grouped by what they configure.
+sidebar:
+  order: 1
+---
+
+Holtkeeper reads its environment in two places. The `holtkeeper serve` command reads the process flags (role, concurrency, pools) itself. Everything else is read by the config file, so the variables below exist because the starting configs in the repository — `deploy/holtkeeper.config.ts` and the chart's `files/holtkeeper.config.ts` — read them. A config of your own may read other names.
+
+Secret values belong in an env file or a Kubernetes Secret (`existingSecret`), never in values files or the config. Generate secrets with `openssl rand -hex 32`.
+
+:::caution
+`HOLTKEEPER_VAULT_KEY` seals every stored credential. Never rotate or regenerate it, give every process the same value, and keep a copy outside the instance.
+:::
+
+## Core secrets
+
+| Variable                    | Required     | Secret | Default | Meaning                                                                                       |
+| --------------------------- | ------------ | ------ | ------- | --------------------------------------------------------------------------------------------- |
+| `HOLTKEEPER_VAULT_KEY`      | yes          | yes    | —       | At least 32 characters. Seals credentials and secret settings (`server.vaultKey`).            |
+| `HOLTKEEPER_SESSION_SECRET` | yes          | yes    | —       | At least 32 characters. Signs session cookies for password and passkey sign-in.               |
+| `HOLTKEEPER_WEBHOOK_SECRET` | for webhooks | yes    | —       | The secret GitLab webhooks must send (`jobs.webhookSecret`); webhooks are refused without it. |
+
+## Sign-in
+
+| Variable                      | Required                     | Secret | Default | Meaning                                                                                                                  |
+| ----------------------------- | ---------------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `HOLTKEEPER_AUTH`             | no                           | no     | —       | `users` selects accounts with passkeys; anything else the `root` password. Chart config only.                            |
+| `HOLTKEEPER_ROOT_PASSWORD`    | with password sign-in        | yes    | —       | The password of the `root` user.                                                                                         |
+| `HOLTKEEPER_PUBLIC_URL`       | with `HOLTKEEPER_AUTH=users` | no     | —       | The address people and GitLab use (`server.publicUrl`): passkey relying party, links, webhook URLs, the Settings footer. |
+| `HOLTKEEPER_ADMIN_NAME`       | no                           | no     | `Admin` | Name of the first admin created on an empty store. Chart config only.                                                    |
+| `HOLTKEEPER_ADMIN_EMAIL`      | no                           | no     | —       | Email of that first admin. Chart config only.                                                                            |
+| `HOLTKEEPER_INSECURE_COOKIES` | no                           | no     | —       | `1` drops the `Secure` flag from session cookies. Plain-HTTP local tests only.                                           |
+
+See [Sign-in](/self-host/configure/sign-in/).
+
+## Server
+
+| Variable             | Required | Secret | Default              | Meaning                                                                                                         |
+| -------------------- | -------- | ------ | -------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `HOLTKEEPER_PORT`    | no       | no     | `7420`               | HTTP port of every process. The image and the chart set it.                                                     |
+| `HOLTKEEPER_VERSION` | no       | no     | baked into the image | The release the panel shows in the Settings footer and Settings › System. Set by the image build and the chart. |
+
+## Database
+
+| Variable                  | Required                  | Secret | Default | Meaning                                                                                                                  |
+| ------------------------- | ------------------------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `HOLTKEEPER_DATABASE_URL` | for more than one process | yes    | —       | `postgres://user:password@host:5432/db`. Set: Postgres and `limits.distributed`. Unset: SQLite at `/data/holtkeeper.db`. |
+
+## Artifacts
+
+| Variable                          | Required                    | Secret | Default | Meaning                                                                                               |
+| --------------------------------- | --------------------------- | ------ | ------- | ----------------------------------------------------------------------------------------------------- |
+| `HOLTKEEPER_S3_BUCKET`            | for more than one process   | no     | —       | Set: artifacts in this S3-compatible bucket. Unset: `/data/artifacts`.                                |
+| `HOLTKEEPER_S3_ENDPOINT`          | no                          | no     | AWS     | Endpoint of non-AWS storage, e.g. `https://s3.example.com`.                                           |
+| `HOLTKEEPER_S3_REGION`            | no                          | no     | —       | Bucket region.                                                                                        |
+| `HOLTKEEPER_S3_ACCESS_KEY_ID`     | with `HOLTKEEPER_S3_BUCKET` | yes    | —       | Access key.                                                                                           |
+| `HOLTKEEPER_S3_SECRET_ACCESS_KEY` | with `HOLTKEEPER_S3_BUCKET` | yes    | —       | Secret key.                                                                                           |
+| `HOLTKEEPER_S3_QUOTA`             | no                          | no     | —       | The bucket's space in bytes as you know it, shown against usage in Settings › System. Never enforced. |
+
+## Workers and roles
+
+Read by `holtkeeper serve`; each matches a command-line flag, and the flag wins.
+
+| Variable                   | Flag              | Default            | Meaning                                                                       |
+| -------------------------- | ----------------- | ------------------ | ----------------------------------------------------------------------------- |
+| `HOLTKEEPER_ROLE`          | `--role`          | `all`              | `web`, `worker`, `scheduler` or `all`; combine with commas (`web,scheduler`). |
+| `HOLTKEEPER_CONCURRENCY`   | `--concurrency`   | `jobs.concurrency` | Jobs this worker runs at once.                                                |
+| `HOLTKEEPER_CLAIM_DELAY`   | `--claim-delay`   | —                  | Take only jobs queued at least this long, e.g. `15s`.                         |
+| `HOLTKEEPER_WORKER_POOL`   | `--pool`          | `default`          | Worker pools served, comma-separated, e.g. `write` or `default,write`.        |
+| `HOLTKEEPER_MAX_JOBS`      | `--max-jobs`      | —                  | Exit 0 after this many jobs, for a fresh container or pod per job.            |
+| `HOLTKEEPER_DRAIN_TIMEOUT` | `--drain-timeout` | `30s`              | How long running jobs may finish on `SIGTERM` before they are requeued.       |
+
+See [Scaling](/self-host/operate/scaling/) and the [CLI reference](/reference/cli/).
+
+## Egress proxy
+
+Chart config only. The chart's `egressProxy` sets the first three on workers and `HOLTKEEPER_EGRESS_CACHE` on web pods.
+
+| Variable                     | Required                      | Secret | Meaning                                                                                                                            |
+| ---------------------------- | ----------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `HOLTKEEPER_EGRESS_PROXY`    | no                            | no     | URL of the forward proxy job commands use (`jobs.execution.egress.url`).                                                           |
+| `HOLTKEEPER_EGRESS_CA`       | with an intercepting proxy    | no     | Path of the proxy's CA certificate, which job commands trust.                                                                      |
+| `HOLTKEEPER_EGRESS_NO_PROXY` | no                            | no     | Comma-separated hosts job commands reach directly.                                                                                 |
+| `HOLTKEEPER_EGRESS_SECRET`   | with `egressProxy.forgeRules` | yes    | Shared by web and proxy: the proxy reads forge registry rules with it, and web reaches the cache with it (`server.egress.secret`). |
+| `HOLTKEEPER_EGRESS_CACHE`    | no                            | no     | The proxy's URL, so Settings › System can show and clear its download cache (`server.egress.proxy`).                               |
+
+See [Egress](/self-host/configure/egress/).
+
+## AI providers
+
+| Variable         | Required | Secret | Meaning                                                                                                        |
+| ---------------- | -------- | ------ | -------------------------------------------------------------------------------------------------------------- |
+| `WAIBEE_API_KEY` | no       | yes    | Chart config only. Lists the Waibee Router catalog with that account's prices instead of the bundled snapshot. |
+
+AI provider keys themselves are credentials in [Settings › AI](/guide/settings/ai/), not variables.
+
+## Compose file
+
+Read by `deploy/docker-compose.yml`, not by Holtkeeper. Compose turns them into the variables above.
+
+| Variable                                   | Default                   | Meaning                                                              |
+| ------------------------------------------ | ------------------------- | -------------------------------------------------------------------- |
+| `HOLTKEEPER_IMAGE`                         | `holtkeeper:latest`       | Image of the web, worker and single-container services.              |
+| `HOLTKEEPER_HTTP_PORT`                     | `7420`                    | Host port of the web service.                                        |
+| `POSTGRES_PASSWORD`                        | required                  | Password of the bundled Postgres; becomes `HOLTKEEPER_DATABASE_URL`. |
+| `S3_ENDPOINT`                              | `http://versitygw:7070`   | Your S3 endpoint; unset uses the local S3 profile.                   |
+| `S3_BUCKET`, `S3_REGION`                   | `holtkeeper`, `us-east-1` | Bucket and region.                                                   |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | required                  | Keys; also the local gateway's credentials.                          |
+| `S3_QUOTA`                                 | —                         | Becomes `HOLTKEEPER_S3_QUOTA`.                                       |
+
+## Set by Holtkeeper
+
+Do not set these; Holtkeeper sets them for commands it runs. `HOLTKEEPER_GIT_USERNAME` and `HOLTKEEPER_GIT_PASSWORD` hand forge credentials to one git process through a credential helper, so they never appear in argv or a remote URL. `HOLTKEEPER_ROOT` points some analyzer commands at the checkout. In `mise` mode no `HOLTKEEPER_*` variable of the worker ever reaches a job command.
+
+## Development and tests
+
+`HOLTKEEPER_SERVER` (the web UI dev server's API target), `HOLTKEEPER_PG_URL` (Postgres for tests), `HOLTKEEPER_DOCKER_TESTS` and `HOLTKEEPER_WORKER_IMAGE` (container sandbox tests) are for working on Holtkeeper itself; see [Development setup](/develop/setup/).
+
+## Related
+
+- [Configuration](/self-host/configure/configuration/) — what the config does with these values.
+- [Deployment reference](/self-host/reference/deployment/) — how the chart and Compose set them.
+- [CLI reference](/reference/cli/) — the flags behind the worker variables.

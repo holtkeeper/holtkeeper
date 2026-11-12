@@ -1,0 +1,19 @@
+---
+interface Props {
+  /** Label and value pairs, in order. */
+  items: [string, string][]
+}
+
+const { items } = Astro.props
+---
+
+<dl class="hk-kv">
+  {
+    items.map(([label, value]) => (
+      <>
+        <dt>{label}</dt>
+        <dd>{value}</dd>
+      </>
+    ))
+  }
+</dl>

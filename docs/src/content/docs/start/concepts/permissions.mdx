@@ -1,0 +1,88 @@
+---
+title: Roles and permissions
+description: Grants pair actions with a scope; four role presets cover most people, and nobody can hand out more than they hold.
+sidebar:
+  order: 5
+---
+
+import { Screen, Scroll, Tag, Toolbar, Facts, Sheet, Button } from '@ui'
+
+Whoever signs in, and however they sign in, ends up with a set of **grants**. A grant is a list of actions on a scope: _read and run analyses on group `web`_, or _everything on every repository_. Every request is checked against them, in the panel, over MCP and in chat, so a person or an agent sees exactly the repositories their grants cover and nothing else. Lists never show what you cannot read, and a page you may not open names the permission you are missing.
+
+## Actions
+
+| Action                                      | Allows                                                          |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| `repos:read`                                | See repositories and their health.                              |
+| `analyses:read`, `analyses:run`             | Read analysis results and runs; run analyzers.                  |
+| `audits:read`, `audits:run`                 | Read and run security audits.                                   |
+| `releases:read`, `releases:run`             | See release state; run release steps.                           |
+| `tasks:run`                                 | Approve agent tasks that push branches and open merge requests. |
+| `knowledge:read`, `knowledge:write`         | Read and edit the Guide, notes and learnings.                   |
+| `settings:read`, `settings:write`           | Read and change settings in the scope.                          |
+| `credentials:read`, `credentials:write`     | See and manage credentials such as forge tokens.                |
+| `ai:read`, `ai:admin`                       | See AI spend; manage AI usage.                                  |
+| `users:read`, `users:invite`, `users:write` | See people, invite them, change their access.                   |
+| `audit:read`                                | Read the whole audit log (only meaningful on everything).       |
+
+`*` allows every action. The full list with what each screen needs is in [Permissions](/reference/permissions/).
+
+Some objects belong to the whole instance rather than to repositories: forges, Automation, Settings › System. They need the action on a grant over **everything**, so a group admin with `settings:write` on `web` edits `web`'s settings but not the forges.
+
+## Role presets
+
+Settings › People & access offers four presets. Each is one grant on one scope you pick, except Admin, which always covers everything.
+
+| Role       | On its scope                                                                       |
+| ---------- | ---------------------------------------------------------------------------------- |
+| Viewer     | Reads health, analyses, audits, releases, knowledge and settings.                  |
+| Developer  | Viewer, plus runs analyzers and audits, approves agent tasks and writes knowledge. |
+| Maintainer | Developer, plus runs release steps and edits settings.                             |
+| Admin      | Everything on every repository: people, credentials, AI budget and integrations.   |
+
+Grants that match no preset show as **Custom**. A person can hold several grants, for example Maintainer on `web` and Viewer on everything.
+
+<Screen title="Settings › People & access › Mira K.">
+  <Sheet title="Mira K." position="4 of 12">
+    <Tag slot="tags">Maintainer</Tag>
+    <Button slot="actions">Create recovery link</Button>
+    <Facts
+      items={[
+        ['Role', 'Maintainer'],
+        ['Applies to', 'Group web'],
+        ['Teams', 'web, web.payments'],
+        ['Sign-in', 'Passkey · 2'],
+        ['Last seen', '12 minutes ago'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+## Delegation
+
+People hand out access only within what they hold. Inviting someone needs `users:invite` over the scope, and the new grants must fit inside the inviter's own: an admin of `web` can make someone admin of `web.payments` or of `web + payments`, but not of `tools` or of everything. Nobody changes their own grants. Changing a person's grants or disabling them takes effect on their next request.
+
+## Teams are not permissions
+
+Your **teams** (home groups, Account › My teams) only decide what the **My teams** switch shows on list pages. They start as the groups in your grants and you can change them freely; they never widen or narrow access.
+
+## Other teams' catalog
+
+**Reach** is one instance-wide level that decides how much of other teams' low-sensitivity catalog everyone reads: package inventories, public APIs, stack and usage counts. Off keeps people to their own teams; the middle level opens the catalog without code; the default also opens usage snippets. It never covers findings, audits, runs, releases or review output.
+
+## How people sign in
+
+Sign-in is set in the config file, and the permission model is the same for each:
+
+| Sign-in  | Who                                                                                 |
+| -------- | ----------------------------------------------------------------------------------- |
+| Password | One `root` admin behind a password. The quickstart default.                         |
+| Users    | Personal accounts with passkeys, optional single sign-on (OIDC), invites and roles. |
+| Header   | Users and grants from a reverse proxy's headers.                                    |
+| None     | No sign-in, one root user. For local trials only.                                   |
+
+## Related
+
+- [Invite your team](/start/first-steps/invite-team/) — switch to accounts and hand out roles.
+- [People & access](/guide/settings/people/) — the screen in detail.
+- [Connect coding agents](/agents/connect/) — what agents may do with your grants.

@@ -1,0 +1,217 @@
+---
+title: Threads
+description: Talk with your team and Holtkeeper in threads scoped to the team, a group or a repository, run commands, and approve the tasks Holtkeeper proposes right in the conversation.
+panel: Chat
+route: /chat
+permission: repos:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Row,
+  Rows,
+  Screen,
+  Segmented,
+  Sheet,
+  Split,
+  Stack,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Talk with your team and Holtkeeper in threads scoped to the team, a group or a repository, run commands, and approve the tasks Holtkeeper proposes right in the conversation. Chat fills the screen in three columns: the thread list, the open thread and, on wide screens, its context.
+
+<Screen title="Chat" caption="Holtkeeper replies when mentioned, or to every message in a thread with Auto reply on.">
+  <Split>
+    <Stack>
+      <Toolbar title="Threads">
+        <Button primary>New</Button>
+      </Toolbar>
+      <Segmented items={['My teams', 'All I can see']} />
+      <Rows>
+        <Row title="Why did the bundle grow?" sub="acme/checkout-web · 4 min" selected>
+          <Tag tone="acc">2</Tag>
+        </Row>
+        <Row title="Upgrade some-lib across widgets" sub="group widgets · 1 h" />
+        <Row title="Naming…" sub="whole team · just now" />
+        <Row title="Release checklist" sub="acme/admin-ui · 2 d · muted" />
+        <Row title="Other teams · 3 threads ▸" />
+      </Rows>
+    </Stack>
+    <Stack>
+      <Toolbar title="Why did the bundle grow?">
+        <Tag mono>acme/checkout-web</Tag>
+        <Tag>Auto reply</Tag>
+        <Button ghost>⋯</Button>
+      </Toolbar>
+
+**Mira K.** · 10:42
+
+`checkout-web` jumped 6 kB since `v8.2.0`. @holtkeeper what changed?
+
+**Holtkeeper** <Tag>AI</Tag> · 10:43
+
+The growth comes from `@acme/widget-kit` 5.0.0, which now ships its date helpers in the main entry. Moving the import to `@acme/widget-kit/date` would bring it back under budget.
+
+<Tag mono>acme/checkout-web</Tag> <Tag mono>Run 3fa81c02</Tag> <Tag mono>kb:91d0e4</Tag> · ▸ 4 tool
+calls · $0.06
+
+<Fields columns={1}>
+  <Field
+    label=""
+    placeholder="Message · @ to mention · / for commands"
+    hint="Holtkeeper will reply."
+    wide
+  />
+</Fields>
+
+    </Stack>
+
+  </Split>
+</Screen>
+
+## Start a thread
+
+1. Click <Ui>New</Ui> above the thread list.
+2. Give it a title, or leave it blank: Holtkeeper names the thread from its first message, and the list shows _Naming…_ until then.
+3. Pick the scope: the whole team, one repository or one of the groups you may use.
+4. Choose whether Holtkeeper replies to every message.
+5. Create the thread and write the first message.
+
+<Screen title="Chat › New thread">
+  <Sheet title="New thread">
+    <Button primary slot="actions">
+      Create
+    </Button>
+    <Fields columns={1}>
+      <Field label="Title" placeholder="Named from the first message" hint="Optional." />
+      <Field label="Scope" value="Repository · acme/checkout-web" />
+      <Field label="Holtkeeper replies to every message" toggle />
+    </Fields>
+  </Sheet>
+</Screen>
+
+The scope decides who sees the thread: a repository or group thread is visible to everyone who may read that repository or group, a team-wide thread to everyone who can use chat. It also decides what Holtkeeper knows when it answers: the repository's or group's Guide and notes.
+
+:::tip
+**Ask in chat** on a Knowledge page starts a new thread with that repository as context.
+:::
+
+## Find a thread
+
+- **Search** filters the list by title.
+- The **archive** toggle shows how many archived threads match and switches between open and archived ones.
+- The **scope switch** works as on other list pages. Team-wide threads count as _My teams_; on _My teams_, threads of other teams fold into a collapsed **Other teams** section under the list.
+
+Each row shows the title, the scope, the last activity, a writing indicator while Holtkeeper replies, a muted icon and the unread count. The Chat icon on the rail shows the total unread count; muted threads never count.
+
+## Write messages
+
+The composer takes focus when you open a thread.
+
+| Key                                      | Does                                                                   |
+| ---------------------------------------- | ---------------------------------------------------------------------- |
+| <Kbd>↵</Kbd>                             | Send.                                                                  |
+| <Kbd>Shift</Kbd> <Kbd>↵</Kbd>            | New line.                                                              |
+| <Kbd>@</Kbd>                             | Mention a person who can see the thread, or Holtkeeper (listed first). |
+| <Kbd>/</Kbd> at the start                | Command mode, with matching commands as hints.                         |
+| <Kbd>↑</Kbd> <Kbd>↓</Kbd> <Kbd>Tab</Kbd> | Pick from the list.                                                    |
+| <Kbd>Esc</Kbd>                           | Close the list.                                                        |
+
+Messages are Markdown. The footer under the composer says whether Holtkeeper will reply: when you mention `@holtkeeper`, or always when the thread has **Auto reply** on. Messages that mention you are tinted.
+
+### Run a command
+
+Start a message with `/` to run a command about the thread's repository, or another one with `repo=<forge>:<path>`. The answer comes back as a card.
+
+| Command                         | Needs           | Does                                                                         |
+| ------------------------------- | --------------- | ---------------------------------------------------------------------------- |
+| `/release` or `/release status` | `releases:read` | Where the release stands, the flow as stages, versions and the next steps.   |
+| `/release propose`              | `releases:run`  | Opens or updates the release candidate.                                      |
+| `/release accept note=...`      | `releases:run`  | Records your acceptance.                                                     |
+| `/release version`              | `releases:run`  | Shows the plan; add `--yes` to create the version.                           |
+| `/release deploy <environment>` | `releases:run`  | Asks first; add `--yes` to start the deploy. The card follows it as it runs. |
+
+:::note
+Commands run in repository and group threads only. In a team-wide thread the composer says so and does not send.
+:::
+
+## Read Holtkeeper's answers
+
+- **References.** A message lists what it refers to as chips: repositories, merge requests (`acme/checkout-web!212`), task groups, runs and knowledge notes (`kb:91d0e4`). Each opens where it lives. Repositories you may not read are left out.
+- **Tool trace.** A collapsible line counts the tools the reply used; open it to see each call with its input and result.
+- **Cost.** With `ai:read` on the thread's scope you also see what the reply cost.
+- **Cards.** Holtkeeper's command answers are cards with a status stripe, fields, steps, buttons and sometimes a small form. Danger buttons ask first.
+
+Holtkeeper reads only what both the thread and you may read, and sees people as _Participant A_, _Participant B_ rather than by name. One reply runs per thread at a time.
+
+## Approve a task from the thread
+
+When you ask for a change, Holtkeeper may propose up to three tasks. Each becomes a task card that updates as the work moves on.
+
+<Screen title="Chat › Upgrade some-lib across widgets">
+  <Stack>
+
+**Task** · Bump `some-lib` to 4.1.3 in the widget repositories <Tag tone="warn">Waiting for approval</Tag>
+
+  </Stack>
+  <Rows>
+    <Row title="acme/widget-kit" sub="Waiting for approval" />
+    <Row title="acme/widget-docs" sub="Waiting for approval" />
+  </Rows>
+  <Stack>
+
+Spend cap $4.00
+
+<Button primary>Approve</Button> <Button>Reject</Button> <Button ghost>Open in Inbox</Button>
+<Button ghost>Task details</Button>
+
+  </Stack>
+</Screen>
+
+1. Read the plan and the repositories on the card.
+2. Click <Ui>Approve</Ui> or <Ui>Reject</Ui>; both ask first. You need the same permission as in the [Inbox](/guide/home/inbox/), where the card's <Ui>Open in Inbox</Ui> leads.
+3. Follow each repository's step: queued, the agent at work, a merge request open (linked as `!id`), done, failed with its error, or cancelled.
+4. While something can still stop, <Ui>Cancel task</Ui> stops it; it asks first.
+
+<Ui>Task details</Ui> opens the group on [Ops › Tasks](/guide/ops/tasks/).
+
+## Manage a thread
+
+<Screen title="Chat › Why did the bundle grow? › Context">
+  <Stack>
+    <Facts
+      items={[
+        ['Thread', 'c1a7e2f0 · acme/checkout-web · repository thread · 14 messages'],
+        ['Context', 'acme/checkout-web, acme/widget-kit · Add repo'],
+        ['Mentioned', 'acme/admin-ui'],
+        ['Agent', 'Auto reply on · older messages summarized · 11 tool calls'],
+        ['Participants', 'Mira K. (A) 6 · Jon D. (B) 3'],
+        ['Agent cost', '$0.31 · Open AI spend'],
+      ]}
+    />
+  </Stack>
+</Screen>
+
+- **Rename** the thread by clicking its title in the header. Your title is never replaced by a generated one.
+- The <Ui>⋯</Ui> menu has <Ui>Mute thread</Ui> (for you only: no unread counts), <Ui>Export as Markdown</Ui> and <Ui>Archive thread</Ui> / <Ui>Restore thread</Ui>. An archived thread takes no new messages.
+- **Context** lists the repositories attached to the thread. <Ui>Add repo</Ui> attaches another you may read, so Holtkeeper reads it too, but only where the person asking may read it. Repositories you cannot see stay attached and are only counted.
+- **Agent** holds the auto reply switch and the tool calls summed over every reply.
+- **Agent cost** and <Ui>Open AI spend</Ui> show only with `ai:read` on the thread's scope.
+
+New messages arrive on their own; <Ui>Load older messages</Ui> fetches earlier ones. A **New** line marks the first message you had not read.
+
+## Related
+
+- [Inbox](/guide/home/inbox/) — the same task approvals, with diffs.
+- [Tasks](/guide/ops/tasks/) — task groups and their merge requests.
+- [Release overview](/guide/releases/overview/) — what the `/release` commands drive.
+- [Guide](/guide/knowledge/guide/) — the rules Holtkeeper follows when it answers.
+- [AI spend](/guide/ops/ai-spend/) — Chat spend by thread and person.

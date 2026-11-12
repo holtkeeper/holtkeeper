@@ -1,0 +1,58 @@
+---
+title: Guide
+description: Every screen of the Holtkeeper panel, laid out the way the rail lays them out.
+sidebar:
+  label: Overview
+---
+
+import { Card, Cards } from '@ui'
+
+Every screen of the panel has one page here, in the same place. If you can see it on the rail, you can find it in the sidebar: the breadcrumb at the top of each page is the breadcrumb in the panel.
+
+## Workspaces
+
+<Cards>
+  <Card title="Home" href="/guide/home/overview/" icon="home">
+    What needs you now: fleet health, spend, and everything waiting for an approval.
+  </Card>
+  <Card title="Repos" href="/guide/repos/repositories/" icon="repos">
+    Add repositories, group them by team and open one repository's hub.
+  </Card>
+  <Card title="Chat" href="/guide/chat/threads/" icon="chat">
+    Ask Holtkeeper about the fleet and turn an answer into a task.
+  </Card>
+  <Card title="Supply chain" href="/guide/supply-chain/libraries/" icon="supply">
+    Libraries, advisories, licenses, runtimes and public APIs across every repository.
+  </Card>
+  <Card title="Quality" href="/guide/quality/coverage/" icon="quality">
+    Coverage, bundle budgets, assets, CI health, branches and AI reviews.
+  </Card>
+  <Card title="Releases" href="/guide/releases/overview/" icon="releases">
+    What is ready to ship, what changed and who has to sign off.
+  </Card>
+  <Card title="Knowledge" href="/guide/knowledge/guide/" icon="knowledge">
+    The team's guide, notes and the learnings agents propose.
+  </Card>
+  <Card title="Ops" href="/guide/ops/runs/" icon="ops">
+    Runs, tasks and schedules behind everything else, and what the AI spends.
+  </Card>
+</Cards>
+
+## Administration
+
+<Cards>
+  <Card title="Settings" href="/guide/settings/people/" icon="settings">
+    People and access, AI providers, integrations, analyzers, policies, system and the audit log.
+  </Card>
+  <Card title="Account" href="/guide/account/profile/" icon="account">
+    Your profile, sign-in, the teams you belong to and tokens for your agents.
+  </Card>
+</Cards>
+
+## Moving around
+
+- <kbd>⌘K</kbd> (or <kbd>Ctrl K</kbd>) opens the [command palette](/guide/home/command-palette/):
+  jump to any repository, library or page.
+- Lists keep their place: a row opens as a side sheet with its id and position, and <kbd>J</kbd> / <kbd>K</kbd> step through the list.
+- Filters and the open sheet live in the URL, so a copied link shows the same view to a colleague.
+- **My teams** and **All I can see** switch every fleet page between your teams and everything your role can read.

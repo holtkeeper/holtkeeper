@@ -1,0 +1,26 @@
+---
+interface Props {
+  /** The page or section name in bold. */
+  title?: string
+  /** Breadcrumb parts before the title. */
+  crumbs?: string[]
+}
+
+const { title, crumbs = [] } = Astro.props
+---
+
+<div class="hk-toolbar">
+  {
+    title && (
+      <span class="hk-toolbar-title">
+        {crumbs.map((c) => (
+          <span class="hk-crumb">{c}</span>
+        ))}
+        {title}
+      </span>
+    )
+  }
+  <slot name="start" />
+  <span class="hk-sp"></span>
+  <slot />
+</div>

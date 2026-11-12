@@ -1,0 +1,94 @@
+---
+title: Permissions
+description: Every permission (action) Holtkeeper checks, the four roles People hands out, and what MCP tokens keep of them.
+sidebar:
+  order: 5
+---
+
+Access in Holtkeeper is a list of **grants**. Each grant pairs a scope (everything, some groups, or repository path globs) with a list of actions; `*` allows every action. A check asks whether a person may do one action on one repository, on an object owned by a scope (a credential, a setting), or on the whole system, which needs a grant scoped to everything. See [Permissions and scopes](/start/concepts/permissions/) for how scopes match.
+
+## Actions
+
+| Action              | Lets a person                                                                                                                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repos:read`        | Read repositories: the fleet, health, a repository's hub.                                                                                                                                                      |
+| `analyses:read`     | Read analyses: public API, usages, coverage, bundles, assets, CI, reviews, jobs.                                                                                                                               |
+| `analyses:run`      | Run analyzers: **Measure now**, **Run analyzer…**, **Review a merge request**.                                                                                                                                 |
+| `audits:read`       | Read security audits and their findings.                                                                                                                                                                       |
+| `audits:run`        | Run security audits and fixes.                                                                                                                                                                                 |
+| `catalog:read`      | Read other teams' catalog: packages, versions, public API, stack, usage counts and shared notes. Implied by `analyses:read` on the same scope; never covers findings, audits, jobs, releases, reviews or code. |
+| `releases:read`     | Read release plans, status and timelines.                                                                                                                                                                      |
+| `releases:run`      | Run release steps: propose, accept, version, deploy.                                                                                                                                                           |
+| `tasks:run`         | Approve agent tasks that push a branch and open a merge request. For another team's repository the grant must name it or its group explicitly.                                                                 |
+| `settings:read`     | Read settings and the effective config.                                                                                                                                                                        |
+| `settings:write`    | Change settings in scope.                                                                                                                                                                                      |
+| `credentials:read`  | See credentials.                                                                                                                                                                                               |
+| `credentials:write` | Add, rotate or delete credentials.                                                                                                                                                                             |
+| `knowledge:read`    | Read the knowledge base and the Guide.                                                                                                                                                                         |
+| `knowledge:write`   | Write notes, accept or reject notes and learnings.                                                                                                                                                             |
+| `ai:read`           | See AI spend.                                                                                                                                                                                                  |
+| `ai:admin`          | Manage AI spend: the budget and the provider. Includes `ai:read`.                                                                                                                                              |
+| `users:read`        | See people.                                                                                                                                                                                                    |
+| `users:invite`      | Invite people, with grants no wider than their own.                                                                                                                                                            |
+| `users:write`       | Change people and their access.                                                                                                                                                                                |
+| `audit:read`        | Read the whole audit log. Only checked on a grant scoped to everything.                                                                                                                                        |
+
+Without `audit:read`, the audit log still lists events about repositories you can read.
+
+## Roles
+
+**Settings › People** hands out four presets. Each applies to one scope, except Admin, which always covers every repository. Grants that match no preset show as **Custom**; no grants at all as **No access**.
+
+| Role       | Actions                                                                                          | Summary                                     |
+| ---------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| Viewer     | `repos:read`, `analyses:read`, `audits:read`, `releases:read`, `knowledge:read`, `settings:read` | Read only.                                  |
+| Developer  | Viewer, plus `analyses:run`, `audits:run`, `tasks:run`, `knowledge:write`                        | Run analyzers, start agent tasks.           |
+| Maintainer | Developer, plus `releases:run`, `settings:write`                                                 | Run release steps, edit settings in scope.  |
+| Admin      | `*` on everything                                                                                | Org-wide, including people and credentials. |
+
+### What each role can do
+
+| Ability                                       | Viewer | Developer | Maintainer | Admin |
+| --------------------------------------------- | :----: | :-------: | :--------: | :---: |
+| See repositories, health and analysis records |   ✓    |     ✓     |     ✓      |   ✓   |
+| Run analyzers and audits                      |        |     ✓     |     ✓      |   ✓   |
+| Start agent tasks that change code            |        |     ✓     |     ✓      |   ✓   |
+| See release plans and timelines               |   ✓    |     ✓     |     ✓      |   ✓   |
+| Run release steps                             |        |           |     ✓      |   ✓   |
+| Read knowledge                                |   ✓    |     ✓     |     ✓      |   ✓   |
+| Write notes, approve learnings                |        |     ✓     |     ✓      |   ✓   |
+| Read settings and the effective config        |   ✓    |     ✓     |     ✓      |   ✓   |
+| Change settings in scope                      |        |           |     ✓      |   ✓   |
+| See AI spend                                  |        |           |            |   ✓   |
+| Change the AI budget and provider             |        |           |            |   ✓   |
+| Invite and edit people                        |        |           |            |   ✓   |
+| Add, rotate or delete credentials             |        |           |            |   ✓   |
+| Read the whole audit log                      |        |           |            |   ✓   |
+
+AI, people, credentials and audit-log actions are not part of any narrower preset; give them with a custom grant.
+
+## Delegation
+
+A person may hand grants to someone else only with `users:invite` over each scope and only within their own grants. An admin of the `storefront` group can invite an admin of `storefront`, or of a subgroup of it, but never of another group or of everything.
+
+## MCP tokens
+
+A token acts as its owner, cut down to `repos:read`, `analyses:read`, `audits:read`, `knowledge:read` and `releases:read`. Two scopes add one action each, never more than the owner has:
+
+| Token scope | Switch in the dialog | Adds           |
+| ----------- | -------------------- | -------------- |
+| `release`   | Release steps        | `releases:run` |
+| `tasks`     | Run tasks            | `tasks:run`    |
+
+See [Tokens and scopes](/agents/tokens/).
+
+## Refusals
+
+A refused request answers `403` with the missing action and, for a repository, its `forge:path`. It never names groups, and a repository you cannot see gets the same answer as one that does not exist. MCP tools answer the same as an error result. The panel hides buttons you lack the permission for and shows a card naming it on pages you cannot open.
+
+## Related
+
+- [Permissions and scopes](/start/concepts/permissions/) — grants, scopes and groups.
+- [Settings › People](/guide/settings/people/) — invite people and change roles.
+- [Tokens and scopes](/agents/tokens/) — what agents keep of your access.
+- [Access module](/modules/access/) — the model and its checks.

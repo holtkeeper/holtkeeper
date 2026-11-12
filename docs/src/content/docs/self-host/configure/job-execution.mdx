@@ -1,0 +1,109 @@
+---
+title: Job execution
+description: Decide where job commands run — on the host, in the worker through mise, or in a sandbox container per job — how many run at once, and which tool versions they get.
+sidebar:
+  order: 3
+---
+
+import { Screen, Scroll, Toolbar } from '@ui'
+
+Many analyzers run the repository's own tooling: they install dependencies, build bundles, run tests. `jobs.execution` in the config file decides where those commands run and what they can reach. Tool versions come from the repository itself, with overrides you set in the panel.
+
+## Execution modes
+
+| Mode        | Commands run                                              | Isolation                                                                        | Use it for                                           |
+| ----------- | --------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `host`      | Directly in the server process's environment              | None                                                                             | Development; the default when `execution` is missing |
+| `mise`      | In the worker process as `mise exec <tools> -- <command>` | The worker container or pod is the sandbox; secrets are filtered out of commands | Compose and Kubernetes; the starting configs use it  |
+| `container` | In a fresh container per job (docker or podman)           | Read-only root, no capabilities, non-root, limits, network per policy            | A single host with a container engine                |
+
+```ts title="holtkeeper.config.ts"
+jobs: {
+  execution: { mode: 'mise' },
+  concurrency: 2,
+},
+```
+
+:::caution
+Write workers refuse to start, and write tasks refuse to run, while the mode is `host`: their checks run scripts the agent may have edited, so they need the `mise` or `container` sandbox.
+:::
+
+### `mise` mode
+
+Tools are installed into `/mise` when a job starts and shared by later jobs. Commands start from an allowlist of the worker's variables — paths, locale, `MISE_*`, the proxy variables and CA bundles — and nothing named `HOLTKEEPER_*` ever passes, even when listed. Add variables jobs need with `envAllowlist`:
+
+```ts title="holtkeeper.config.ts"
+execution: { mode: 'mise', envAllowlist: ['GOPROXY'] },
+```
+
+Names that look secret (`TOKEN`, `SECRET`, `PASSWORD`, `…_KEY`) only pass when listed by their exact name.
+
+The filter keeps secrets out of a command's environment, not out of its reach: commands run as the worker's uid and can still read the worker's `/proc/<pid>/environ`, the config file and other checkouts. In Kubernetes, see [Isolation](/self-host/run/kubernetes/#isolation-one-job-per-pod) for one pod per job.
+
+### `container` mode
+
+```ts title="holtkeeper.config.ts"
+execution: {
+  mode: 'container',
+  image: 'holtkeeper-worker:latest',
+  limits: { cpus: 2, memory: '4g', pids: 1024 },
+  network: 'install',
+},
+```
+
+| Option    | Default                            | Meaning                                                                                                                                                                                                 |
+| --------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `image`   | `holtkeeper-worker:latest`         | The sandbox image, built from `docker/worker`.                                                                                                                                                          |
+| `engine`  | docker when installed, else podman |                                                                                                                                                                                                         |
+| `limits`  | none                               | CPUs, memory and process count per job container.                                                                                                                                                       |
+| `network` | `install`                          | `install`: tools are installed in a separate container without the checkout, the job container has no network. `none`: no network at all (tools must be cached). `full`: the job container has network. |
+| `user`    | the image's `holtkeeper` user      | uid:gid inside the container.                                                                                                                                                                           |
+
+Git always runs on the host with the forge credentials; containers never see them. Do not use this mode under Compose or Kubernetes: it needs the Docker socket inside the worker, which defeats the isolation.
+
+## Concurrency and timeouts
+
+- `jobs.concurrency` (default `2`) is how many jobs one worker process runs at once. `--concurrency` or `HOLTKEEPER_CONCURRENCY` overrides it per process, and the chart's `worker.concurrency` per Deployment.
+- `jobs.timeoutMinutes` (default `30`) stops a job that runs longer; it counts as a failed attempt and is retried with backoff.
+- One analyzer never runs twice at once on one repository, and analyzers that push or open merge requests run alone on their repository. More workers help until every repository runs one job per queued analyzer.
+
+## Tool versions
+
+For every checkout, Holtkeeper detects the tools the repository asks for (Node, Bun, pnpm, Yarn, Go, Python, Java, Ruby, Rust) from its own files and writes them to the job log. The scoped **Toolchain** setting overrides detection for everything, a group or a repository:
+
+| Field     | Meaning                                                                  |
+| --------- | ------------------------------------------------------------------------ |
+| `tools`   | Versions by mise name; `none` removes a detected tool.                   |
+| `image`   | Another container image for these repositories (`container` mode).       |
+| `network` | Another network policy for these repositories (`container` mode).        |
+| `env`     | Variables set for every command. Store secrets in Credentials, not here. |
+
+```json title="toolchain · group web"
+{
+  "tools": { "node": "22", "pnpm": "9.12.0" },
+  "env": { "TURBO_TOKEN": "6c1d7c9e-3a51-4b8e-9f0a-2d5e8b7c4f10" }
+}
+```
+
+Pin a version only when detection picks the wrong one, for example in a monorepo with several Node versions. A placeholder like the `TURBO_TOKEN` above can be swapped for a real secret by the egress proxy; see [Egress](/self-host/configure/egress/#secrets-jobs-never-see).
+
+<Screen title="Settings › System › Background work" caption="How often Holtkeeper looks for changes, which tool versions jobs use, and how stale analyses get swept.">
+  <Toolbar title="Background work" />
+  <Scroll>
+
+| Setting   | Value                                  | Set by    |
+| --------- | -------------------------------------- | --------- |
+| Toolchain | `node 22` · `pnpm 9.12.0` · 1 variable | group web |
+
+  </Scroll>
+</Screen>
+
+## The sandbox image
+
+`docker/worker` is `debian:stable-slim` with git, openssh-client, ca-certificates, curl, mise, osv-scanner and gitleaks, but no language runtimes: mise installs them on demand into the cache. The server image is built on top of it, so `mise` mode works in every Holtkeeper container without a container engine. Tools that compile from source (some Ruby or Python versions) need a compiler the image does not have.
+
+## Related
+
+- [Egress](/self-host/configure/egress/) — registry tokens and the download cache for job traffic.
+- [Scaling](/self-host/operate/scaling/) — workers, pools and concurrency.
+- [Jobs module](/modules/jobs/) and [exec-container module](/modules/exec-container/) — the details.

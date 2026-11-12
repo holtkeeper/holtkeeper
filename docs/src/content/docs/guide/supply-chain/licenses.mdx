@@ -1,0 +1,203 @@
+---
+title: Licenses
+description: Check every third-party package against your license policy, see which repositories pull in a denied or unknown license, and record exceptions with a reason and an end date.
+panel: Supply chain › Licenses
+route: /supply/licenses
+permission: analyses:read
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Check every third-party package against your license policy, see which repositories pull in a denied or unknown license, and record exceptions with a reason and an end date.
+
+<Screen title="Supply chain › Licenses" caption="Counts compare with the scans about a week ago.">
+  <Toolbar title="Licenses">
+    <Segmented slot="start" items={['My teams:6', 'All I can see:21']} />
+    <Tag>Group: Any ▾</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '4,812', label: 'packages checked · +36' },
+      { value: 2, label: 'denied · +1', tone: 'bad' },
+      { value: 5, label: 'need review', tone: 'warn' },
+      { value: 11, label: 'unknown license · −3', tone: 'warn' },
+    ]}
+  />
+  <Stack>
+    <Meter value={82} tone="ok" label="MIT 82%" />
+    <Meter value={9} tone="neutral" label="Apache-2.0 9%" />
+    <Meter value={5} tone="neutral" label="ISC 5%" />
+    <Meter value={4} tone="neutral" label="other 4%" />
+  </Stack>
+  <Scroll>
+
+| Package             | Version | License            | Verdict                             | Ecosystem | Repositories |
+| ------------------- | ------- | ------------------ | ----------------------------------- | --------- | ------------ |
+| `pdf-maker`         | `2.3.0` | `AGPL-3.0-only`    | <Tag tone="bad">denied</Tag>        | npm       | 1            |
+| `chart-core`        | `1.8.4` | `GPL-3.0-or-later` | <Tag tone="bad">denied</Tag>        | npm       | 2            |
+| `locale-data`       | `0.4.1` | `LGPL-2.1-only`    | <Tag tone="warn">needs review</Tag> | npm       | 5            |
+| `example.org/codec` | `0.2.0` | —                  | <Tag tone="warn">unknown</Tag>      | Go        | 1            |
+
+  </Scroll>
+</Screen>
+
+## What the page shows
+
+The newest license scan of every repository you may read analyses of, in four parts:
+
+- **The strip**: packages checked, denied, need review and unknown license, each with its change against the scans about a week older. Under _My teams_ the counts sum your teams' repositories, without changes.
+- **The license mix** as a bar.
+- **Violations**: denied, not-allowed and unknown packages with their versions, licenses and repositories. Filter by verdict and ecosystem, sort, and use the scope switch for groups.
+- **Repositories**: one row per repository with its counts per verdict, whether it has a license file and when it was last scanned. A row opens the repository hub's **Supply chain** tab.
+
+Below them sits the policy summary. Its <Ui>Edit</Ui> opens the license settings. You see the policy only with `settings:read` on the organization.
+
+## Verdicts
+
+Every package gets one verdict when the scan runs; the scan stores the policy it used, so a report always shows what was decided then.
+
+| Verdict      | Meaning                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------- |
+| allowed      | Its license matches the allow list.                                                                 |
+| needs review | Matches neither list, or matches the review list. Weak copyleft such as LGPL lands here by default. |
+| denied       | Matches the deny list. A violation.                                                                 |
+| unknown      | The registry declares nothing usable. A warning, or a violation if the policy says so.              |
+| excepted     | Would not pass, but an exception accepts it. Not a violation.                                       |
+| internal     | Published by one of your own repositories; not judged.                                              |
+| ignored      | Its name is on the ignore list, or it is dev-only and the policy skips dev dependencies.            |
+
+Expressions are judged as SPDX defines them: `MIT OR GPL-3.0` takes the better side and is allowed, `MIT AND GPL-3.0` takes the worse and is denied.
+
+:::note
+Your own libraries would come back unknown, since public license databases do not know them. Holtkeeper recognizes packages that another analyzed repository publishes and marks them **internal**, with no setup.
+:::
+
+## Inspect a violation
+
+Click a violation, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>.
+
+<Screen title="Supply chain › Licenses › chart-core">
+  <Sheet title="chart-core" position="2 of 18">
+    <Tag tone="bad" slot="tags">
+      denied
+    </Tag>
+    <Tag slot="tags">npm</Tag>
+    <Button slot="actions">Add exception…</Button>
+    <Button slot="actions">Copy request</Button>
+    <Tabs items={['Repositories:2', 'Policy']} active={1} />
+    <Facts
+      items={[
+        ['Declared license', 'GPL-3.0-or-later'],
+        ['Verdict', 'denied'],
+        ['Rule', 'deny: GPL-*'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+**Repositories** lists where the package is used, with versions and lockfiles. **Policy** shows the declared license, the verdict and the rule behind it.
+
+<Ui>Copy request</Ui> copies a note asking the team to find an alternative package, ready to paste
+into a ticket or a chat.
+
+## Add an exception
+
+Sometimes a license is fine for one package: a legal sign-off, a commercial license bought separately. <Ui>Add exception…</Ui> accepts it. It needs `settings:write`.
+
+<Screen title="Supply chain › Licenses › Add exception">
+  <Stack>
+    <Toolbar title="Exception for chart-core" />
+    <Fields>
+      <Field label="Package" value="chart-core" mono />
+      <Field
+        label="License"
+        value="GPL-3.0-or-later"
+        mono
+        hint="Leave empty to accept any license"
+      />
+      <Field label="Reason" value="Commercial license bought, see ABC-123" wide />
+      <Field
+        label="Last day"
+        placeholder="YYYY-MM-DD"
+        hint="Optional; scanned again after this day"
+      />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Add exception</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+1. Open the violation and choose <Ui>Add exception…</Ui>.
+2. Keep the package name, optionally narrow it to the declared license, and write the reason.
+3. Pick a last day if the exception should run out.
+4. Save. The entry goes into the license settings that apply to the package's repositories, or into a new entry for repositories on the defaults.
+
+The next scan turns the package **excepted**. Once the last day has passed, the next scan judges it again.
+
+:::caution
+A narrower settings entry replaces every field of a broader one. Repositories whose entry you cannot read are left out of the exception and named in the dialog.
+:::
+
+## Set the policy
+
+The policy is the `analyzers.licenses` setting, scoped like every setting. Presets set the allow list, the deny list and the handling of unknown licenses together:
+
+| Preset         | For                            | Allows                                     | Denies                           | Unknown                                    |
+| -------------- | ------------------------------ | ------------------------------------------ | -------------------------------- | ------------------------------------------ |
+| `commercial`   | products shipped to customers  | permissive                                 | GPL, AGPL, source-available      | warning                                    |
+| `no-copyleft`  | code that must stay permissive | permissive                                 | every copyleft, source-available | violation                                  |
+| `open-source`  | projects under a free license  | permissive, weak copyleft, GPL, AGPL, EUPL | source-available                 | warning; repository needs a license file   |
+| `internal`     | never distributed outside      | permissive, weak copyleft, GPL             | AGPL, source-available           | warning                                    |
+| `flag-missing` | on top of any policy           | unchanged                                  | unchanged                        | violation; repository needs a license file |
+
+Without a setting, permissive licenses (MIT, ISC, BSD, Apache-2.0 and similar) are allowed and `GPL-*`, `AGPL-*` and `SSPL-*` are denied. Further options:
+
+```json title="analyzers.licenses"
+{
+  "review": ["MPL-2.0"],
+  "ignore": ["@acme/*"],
+  "unknown": "violation",
+  "devDependencies": "ignore",
+  "requireProjectLicense": true
+}
+```
+
+| Option                  | Effect                                                                    |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `review`                | Licenses that need a sign-off even when the allow list matches.           |
+| `ignore`                | Package names (globs) whose licenses are not judged.                      |
+| `unknown`               | `warn` (default) reports unknown licenses apart; `violation` judges them. |
+| `devDependencies`       | `ignore` skips packages only dev dependencies pull in.                    |
+| `requireProjectLicense` | Warns when a repository has no license file at its root.                  |
+
+## In one repository
+
+The repository hub's **Supply chain** tab shows the same view for one repository, and says when it has no license scan yet.
+
+## Related
+
+- [Libraries](/guide/supply-chain/libraries/) — licenses next to every library's versions.
+- [Settings › Analyzers](/guide/settings/analyzers/) — switch the licenses analyzer and set its options.
+- [License analyzer](/modules/licenses/) — how packages are found and judged.
+- [Agents › Tools](/agents/tools/) — `license_overview` and `evaluate_dependency`.

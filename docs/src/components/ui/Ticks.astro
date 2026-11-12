@@ -1,0 +1,25 @@
+---
+interface Props {
+  healthy: number
+  warnings?: number
+  failing?: number
+  /** Not analysed yet. */
+  none?: number
+}
+
+const { healthy, warnings = 0, failing = 0, none = 0 } = Astro.props
+const ticks = [
+  ...Array.from({ length: healthy }, () => ''),
+  ...Array.from({ length: warnings }, () => 'w'),
+  ...Array.from({ length: failing }, () => 'b'),
+  ...Array.from({ length: none }, () => 'n'),
+]
+---
+
+<div
+  class="hk-ticks"
+  role="img"
+  aria-label={`${healthy} healthy, ${warnings} with warnings, ${failing} failing, ${none} not analysed`}
+>
+  {ticks.map((t) => <i class={t || undefined} />)}
+</div>

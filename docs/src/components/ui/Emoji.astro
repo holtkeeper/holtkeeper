@@ -1,0 +1,11 @@
+---
+import { type StatusEmoji, statusEmoji } from './slack.ts'
+
+interface Props {
+  name: StatusEmoji
+}
+
+const { name } = Astro.props
+---
+
+<img class="hk-emoji" src={statusEmoji[name]} alt={`:${name}:`} width="28" height="28" />

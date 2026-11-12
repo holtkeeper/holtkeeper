@@ -1,0 +1,37 @@
+---
+const steps = [
+  ['Trigger', 'Webhook or schedule', 'A push, a merge request or a cron line from Automation queues work.'],
+  ['Analyze', 'Analyzers run', 'Workers check out the repository with its own tool versions and record findings.'],
+  ['Task', 'Agent proposes a change', 'A task patches the code, runs CI and opens a merge request per repository.'],
+  ['Approve', 'Inbox', 'Policies decide what needs a person. It lands in their inbox with the diff.'],
+  ['Ship', 'Merge and release', 'Merged changes roll into the next release and its changelog.'],
+] as const
+---
+
+<section class="l-sec">
+  <div class="l-wrap">
+    <div class="l-head">
+      <span class="l-eyebrow">How work flows</span>
+      <h2>From a webhook to a merged fix, with a person at every gate.</h2>
+      <p>Every analyzer, review and upgrade goes through the same five stages. <a href="/start/concepts/analyzers-and-runs/">Concepts</a> explains each one.</p>
+    </div>
+    <ol class="l-flow">
+      {
+        steps.map(([stage, title, text], i) => (
+          <li>
+            <span class="l-step-n">
+              {String(i + 1).padStart(2, '0')} · {stage.toUpperCase()}
+            </span>
+            <b>{title}</b>
+            <span class="l-seg" aria-hidden="true">
+              {steps.map((_, j) => (
+                <i class={j < i ? 'ok' : j === i ? (i === 3 ? 'acc' : 'ok') : undefined} />
+              ))}
+            </span>
+            <p>{text}</p>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</section>

@@ -420,3 +420,21 @@ export const activeNav = (
 
 /** The public Holtkeeper documentation site. */
 export const docsUrl = 'https://holtkeeper.github.io'
+
+const workspaceGuides: Record<string, string> = {
+  home: 'home/overview',
+  repos: 'repos/repositories',
+  chat: 'chat/threads',
+  supply: 'supply-chain/libraries',
+  quality: 'quality/coverage',
+  releases: 'releases/overview',
+  knowledge: 'knowledge/guide',
+  ops: 'ops/runs',
+  settings: 'settings/people',
+}
+
+/** The guide page of a workspace on the documentation site, or the guide's start without one. */
+export const docsLinkFor = (workspace: string | undefined): string => {
+  const page = workspace ? workspaceGuides[workspace] : undefined
+  return page ? `${docsUrl}/guide/${page}/` : `${docsUrl}/guide/`
+}

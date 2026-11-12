@@ -7,6 +7,7 @@ import { settingItems } from '../../lib/palette.ts'
 import { settingsIndex } from '../../lib/settings-search.ts'
 import {
   activeNav,
+  docsLinkFor,
   groupByWorkspace,
   navBadgeWord,
   navKey,
@@ -291,4 +292,11 @@ test('the palette lists each Settings section once, from the settings index', ()
   const links = [...pages, ...settings]
   expect(settings.length).toBeGreaterThan(0)
   expect(new Set(links).size).toBe(links.length)
+})
+
+test('docsLinkFor opens the guide page of the current workspace', () => {
+  expect(docsLinkFor('quality')).toBe('https://holtkeeper.github.io/guide/quality/coverage/')
+  expect(docsLinkFor('supply')).toBe('https://holtkeeper.github.io/guide/supply-chain/libraries/')
+  expect(docsLinkFor(undefined)).toBe('https://holtkeeper.github.io/guide/')
+  expect(docsLinkFor('unknown')).toBe('https://holtkeeper.github.io/guide/')
 })

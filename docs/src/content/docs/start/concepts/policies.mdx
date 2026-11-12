@@ -1,0 +1,90 @@
+---
+title: Settings and policies
+description: Scoped settings, the policies built from them, and freezes that keep Holtkeeper from changing a repository.
+sidebar:
+  order: 4
+---
+
+import { Button, Field, Fields, Screen, Scroll, Toolbar } from '@ui'
+
+Almost everything you tune in Holtkeeper is a **setting**: analyzer options, the AI budget, the license policy, commit conventions, whether merge requests get reviewed, whether a repository may be changed at all. A setting can have one entry for everything, others for groups, globs or single repositories, and the [most specific entry wins](/start/concepts/fleet/#the-most-specific-entry-wins). The config file holds infrastructure only; settings live in the database and are edited in the panel, and every change is recorded in the audit log.
+
+## Entries and scopes
+
+Each setting has a default that applies where no entry covers a repository. You add entries on top:
+
+<Screen title="Settings › Policies › Largest upgrade" caption="One entry for everything, one tighter entry for a team.">
+  <Toolbar title="Largest upgrade" crumbs={['Settings', 'Policies']}>
+    <Button>Add entry</Button>
+  </Toolbar>
+  <Scroll>
+
+| Scope                | Value   | Changed              |
+| -------------------- | ------- | -------------------- |
+| Everything           | `minor` | system · on install  |
+| Group `web.payments` | `patch` | Mira K. · 2 days ago |
+
+  </Scroll>
+</Screen>
+
+A few settings are **global**: they have one value for the whole instance and no scope picker. The AI provider, Reach (how far people read other teams' catalog) and the write task switch are global.
+
+You meet settings in three places:
+
+- **On the page that owns them.** Analysis pages have a <Button ghost>Configure</Button> button that opens their analyzer's options.
+- **In Settings.** Sections for People & access, AI, Integrations, Analyzers, Policies and System; **Search settings** finds any key.
+- **On a repository or group.** Its **Settings** tab shows every setting as it applies there, with the source of each value and **Override** to add an entry for just that scope.
+
+## Policies
+
+**Settings › Policies** gathers the rules a team usually agrees on together, and saves changes to several of them as one draft:
+
+| Policy                               | Decides                                                                     |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| Licenses                             | Which licenses are allowed, need review or are denied, with exceptions.     |
+| Allowlist and its rules              | Advisories accepted on purpose, with a reason and an expiry.                |
+| Fix vulnerabilities, Largest upgrade | How far automatic fixes may move a dependency (`minor` on a fresh install). |
+| Commit conventions                   | Commit message and branch name templates that agents and checks follow.     |
+| Assets                               | Formats, sizes and dimensions images, fonts and media may have.             |
+| Stack, test ids                      | Expected runtimes and tools; the test id convention for end-to-end tests.   |
+
+Allowlist rules only tighten downwards: a team may require shorter expiries than the organization, never longer ones.
+
+**Merge request policies** are different: they act on merge request events (label, approve, comment, skip or queue analyzers) and are edited in **Ops › Automation**.
+
+## Switches per repository
+
+A few settings answer yes-or-no questions about a repository, each with an optional reason:
+
+| Setting               | Off means                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| Merge request reviews | No AI review and no comments on the repository's merge requests. Everything else goes on as usual. |
+| Tests                 | The repository has no tests by design: coverage is not run, reviews do not ask for tests.          |
+| Analyzers off         | The listed analyzers never run automatically there; their health cell reads **Off**.               |
+
+## Freezes
+
+**Read-only** freezes a repository, a glob, a group or everything: Holtkeeper still analyses it but never changes it. No comments, reviews, branches, merge requests or pushes, and merge request events are ignored. A freeze needs a reason and may have an end date, after which it lapses on its own.
+
+A narrower entry with **frozen** switched off **lifts** a broader freeze for its scope, for example one repository of a frozen group. Anyone with `settings:write` on that repository or group may lift a freeze set above it, even one for everything.
+
+<Screen title="Settings › People & access › Read-only repositories">
+  <Fields>
+    <Field label="Scope" value="Group tools" />
+    <Field label="Frozen" toggle />
+    <Field label="Reason" value="Code freeze until the platform migration lands" wide />
+    <Field label="Until" value="2026-12-01 18:00" mono />
+  </Fields>
+</Screen>
+
+The repository hub shows the result in words: _Read-only · reason_, or _Writable here_ when a lift applies.
+
+:::tip
+Use a freeze to try Holtkeeper on repositories you do not want touched yet: every analysis, health cell and MCP answer works, and nothing is written to the forge.
+:::
+
+## Related
+
+- [Settings › Policies](/guide/settings/policies/) and [Repository settings](/guide/repos/repository-settings/) — the screens in detail.
+- [Automation](/guide/ops/automation/) — triggers, schedules and merge request policies.
+- [Setting keys](/reference/setting-keys/) — every key with its shape and default.

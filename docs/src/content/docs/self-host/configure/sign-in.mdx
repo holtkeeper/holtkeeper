@@ -1,0 +1,112 @@
+---
+title: Sign-in
+description: Choose how people sign in to Holtkeeper — accounts with passkeys, one root password, headers from an authenticating proxy, or no sign-in — and set up the first admin.
+sidebar:
+  order: 2
+---
+
+import { Button, Field, Fields, Screen, Toolbar } from '@ui'
+
+`server.auth` in the config file picks one sign-in provider for the whole instance. Accounts with passkeys suit a team; a single root password suits a trial; header sign-in fits behind a proxy you already run. Once people can sign in, their access is managed in the panel under [Settings › People](/guide/settings/people/).
+
+| Provider         | Package                     | Who signs in                                            | Good for                                     |
+| ---------------- | --------------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| `usersAuth()`    | `@holtkeeper/auth-users`    | Named accounts with passkeys, optionally OpenID Connect | Teams; the recommended choice                |
+| `passwordAuth()` | `@holtkeeper/auth-password` | One `root` user behind a password                       | Trials and single-person instances           |
+| `headerAuth()`   | `@holtkeeper/auth-header`   | Whoever your authenticating proxy says                  | oauth2-proxy, Authelia, Pomerium and similar |
+| `noAuth()`       | `@holtkeeper/auth-none`     | Everyone, as root with every permission                 | Local runs on a trusted network only         |
+
+With the chart's config you switch between the first two with one variable: `HOLTKEEPER_AUTH=users` selects accounts with passkeys, anything else the root password.
+
+## Accounts with passkeys
+
+```yaml title="values.yaml"
+env:
+  - { name: HOLTKEEPER_AUTH, value: users }
+  - { name: HOLTKEEPER_PUBLIC_URL, value: https://holtkeeper.example.com }
+  - { name: HOLTKEEPER_ADMIN_NAME, value: Dana Admin }
+  - { name: HOLTKEEPER_ADMIN_EMAIL, value: admin@example.com }
+```
+
+- `HOLTKEEPER_PUBLIC_URL` is required: its hostname is the passkeys' relying party, and every link points at it. The start fails with `HOLTKEEPER_AUTH=users needs HOLTKEEPER_PUBLIC_URL` without it.
+- `HOLTKEEPER_SESSION_SECRET` signs sessions, as for the password provider. Sessions last 12 hours.
+- `HOLTKEEPER_ADMIN_NAME` (default `Admin`) and `HOLTKEEPER_ADMIN_EMAIL` name the first admin.
+
+Passkeys are tied to the host name. Pick the final public URL before people register; changing the host later means everyone registers a new passkey through a recovery link.
+
+### First admin
+
+While the store has no users, Holtkeeper creates the first admin and logs a setup link at start:
+
+```text title="web log"
+No users yet. Set up the first admin passkey: https://holtkeeper.example.com/link/3f9c…e1 (expires 2026-11-15T09:12:00.000Z)
+```
+
+1. Read the log of a web process: `docker logs holtkeeper`, or `kubectl logs deploy/holtkeeper-web`.
+2. Open the link in the browser you want to use and register a passkey.
+3. You are signed in as an admin with every permission. Invite everyone else from [Settings › People](/guide/settings/people/).
+
+Until that first admin has a passkey, every start logs a fresh link, so a lost log never locks you out.
+
+<Screen
+  title="Settings › People › Invite people"
+  caption="They get a one-time link to create a passkey. You can only give access you have yourself."
+>
+  <Toolbar title="Invite people">
+    <Button ghost>Cancel</Button>
+    <Button primary>Create invite link</Button>
+  </Toolbar>
+  <Fields>
+    <Field label="Name" value="Robin Example" />
+    <Field label="Email" value="robin@example.com" />
+    <Field label="Role" value="Viewer" />
+    <Field label="Exact grants instead of a role" toggle={false} />
+  </Fields>
+</Screen>
+
+### Links from the command line
+
+Operators with access to the config and its secrets can manage accounts with the CLI, which works directly on the store. In Kubernetes, run it in a web pod:
+
+```sh title="Terminal"
+kubectl exec deploy/holtkeeper-web -- holtkeeper users list -c /app/config/holtkeeper.config.ts
+kubectl exec deploy/holtkeeper-web -- holtkeeper users recover-link admin@example.com -c /app/config/holtkeeper.config.ts
+```
+
+`add`, `enroll-link`, `recover-link` and `login-link` are described in the [CLI reference](/reference/cli/). A `login-link` signs its holder in once without a passkey; treat it like a password until it expires.
+
+### OpenID Connect
+
+`usersAuth` also takes `oidc` providers (issuer, client id and secret, optional sign-up by email domain with default grants). Register `https://holtkeeper.example.com/auth/users/oidc/<id>/callback` with the provider. The starting configs do not set it up; add it to your own config. Details are in the [auth-users module](/modules/auth-users/).
+
+## Root password
+
+```sh title=".env"
+HOLTKEEPER_ROOT_PASSWORD=change-me
+HOLTKEEPER_SESSION_SECRET=0d1f…  # at least 32 characters
+```
+
+One user named `root` with every permission. Five failed attempts a minute per process get `429` for a minute; put a rate limit at your proxy for stronger protection. Changing the password signs everyone out.
+
+## Header sign-in
+
+`headerAuth()` trusts the user, name, email and groups headers your proxy sets (`x-forwarded-user` and friends by default) and maps proxy groups to grants. It has no sessions or logout of its own.
+
+:::caution
+The proxy must strip these headers from incoming requests, and Holtkeeper must not be reachable around it. Set `proxySecret`: without the shared-secret header, every request is anonymous.
+:::
+
+## No sign-in
+
+`noAuth()` makes every request root. Never expose it beyond a trusted network.
+
+## Cookies over plain HTTP
+
+Session cookies are `Secure`, so browsers drop them over plain HTTP and sign-in appears to do nothing. Use HTTPS; for a local test only, set `HOLTKEEPER_INSECURE_COOKIES=1`.
+
+## Related
+
+- [Settings › People](/guide/settings/people/) — invite people and give them access.
+- [Environment variables](/reference/environment/#sign-in) — every sign-in variable.
+- [Agent access to the panel](/develop/agent-access/) — login links for AI agents.
+- [auth-users](/modules/auth-users/), [auth-password](/modules/auth-password/), [auth-header](/modules/auth-header/) modules.

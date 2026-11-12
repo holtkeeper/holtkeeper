@@ -1,0 +1,85 @@
+---
+title: CLI
+description: The holtkeeper command — serve starts the server and its workers, users manages passkey accounts — with every option.
+sidebar:
+  order: 3
+---
+
+The `holtkeeper` command is the server's entrypoint: it starts the server (`serve`, the command of the container image and the Helm chart) and handles operator account tasks (`users`). Everything else happens in the web panel, or over MCP for agents. It runs from source with Bun.
+
+```sh
+holtkeeper <command> [options]
+```
+
+## Global options
+
+| Option                | Description                                                             |
+| --------------------- | ----------------------------------------------------------------------- |
+| `-c, --config <file>` | Config file. Default: `holtkeeper.config.ts` in the current directory.  |
+| `-h, --help`          | Show usage. Without a command, usage is printed and the exit code is 1. |
+
+An unknown command or an invalid config prints the error and exits 1.
+
+## serve
+
+Starts the server described by the config's `server` section and runs until `SIGINT` or `SIGTERM`, then lets running jobs finish and exits 0.
+
+```sh
+holtkeeper serve -c /app/config/holtkeeper.config.ts --role worker --pool default,write
+```
+
+| Option                   | Environment variable       | Default            | Description                                                                                                                                   |
+| ------------------------ | -------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--role <roles>`         | `HOLTKEEPER_ROLE`          | `all`              | `web`, `worker`, `scheduler` or `all`; combine with commas, e.g. `web,scheduler`.                                                             |
+| `--concurrency <n>`      | `HOLTKEEPER_CONCURRENCY`   | `jobs.concurrency` | Jobs this worker runs at once.                                                                                                                |
+| `--claim-delay <time>`   | `HOLTKEEPER_CLAIM_DELAY`   | none               | Take only jobs queued at least this long, e.g. `15s`, so workers without a delay get new jobs first and this one takes the overflow.          |
+| `--pool <pools>`         | `HOLTKEEPER_WORKER_POOL`   | `default`          | Worker pools this worker serves, comma-separated. `--pool write` makes a dedicated write task worker; `--pool default,write` runs everything. |
+| `--max-jobs <n>`         | `HOLTKEEPER_MAX_JOBS`      | none               | Exit 0 after running `n` jobs, for a fresh container or pod per job.                                                                          |
+| `--drain-timeout <time>` | `HOLTKEEPER_DRAIN_TIMEOUT` | `30s`              | How long running jobs may finish on shutdown before they are requeued.                                                                        |
+
+Agent tasks that change code run only on workers that serve the `write` pool. See [Environment variables](/reference/environment/) for everything else the server reads.
+
+## users
+
+Manages accounts of passkey sign-in (`HOLTKEEPER_AUTH=users`) directly in the config's store, without permission checks: whoever can read the config and its secrets is an operator. Every change is logged in the audit log with actor `cli`. `<user>` is an id, an email or a name only one user has.
+
+| Action                      | Options                        | Does                                                                                                                                                  |
+| --------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users list`                | `--json`                       | One tab-separated line per user: id, name, email, `admin` or grant count, state. `--json` prints the stored users.                                    |
+| `users add <name>`          | `--email <address>`, `--admin` | An enabled user without passkeys. `--admin` grants every action on everything; otherwise no grants (add them in **Settings › People**).               |
+| `users login-link <user>`   | `--ttl <time>` (default `15m`) | A single-use link that signs its holder in without a passkey and opens the panel. This is how an AI agent gets a browser session to drive the web UI. |
+| `users enroll-link <user>`  | `--ttl <time>` (default `72h`) | The passkey registration link, as an admin would issue it in the panel.                                                                               |
+| `users recover-link <user>` | `--ttl <time>` (default `72h`) | A recovery link to register a new passkey.                                                                                                            |
+
+`--ttl` takes durations such as `15m` or `2h`. Links need `server.publicUrl` in the config.
+
+:::caution
+A login link is a password until it expires or is used. Hand it only to the person or agent it is for, and prefer a short `--ttl`.
+:::
+
+### In Kubernetes
+
+Run the command in a web pod, where the config and its secrets are mounted:
+
+```sh
+kubectl exec deploy/holtkeeper-web -- \
+  holtkeeper users login-link "Dana Novak" -c /app/config/holtkeeper.config.ts
+```
+
+```text
+https://holtkeeper.example.com/auth/users/link/Xk3…q9/login
+```
+
+## Exit codes
+
+| Code | Meaning                                                                              |
+| ---- | ------------------------------------------------------------------------------------ |
+| `0`  | Done, or `serve` stopped by a signal after draining or after `--max-jobs`.           |
+| `1`  | Usage error, unknown command, invalid config, or `users` without a `server` section. |
+
+## Related
+
+- [Environment variables](/reference/environment/) — what the server reads besides the config.
+- [Configuration](/self-host/configure/configuration/) — the config file.
+- [Permissions](/reference/permissions/) — grants a user can get.
+- [CLI module](/modules/cli/) — the package behind the command.

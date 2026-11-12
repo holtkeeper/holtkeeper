@@ -1,0 +1,227 @@
+---
+title: Tasks
+description: Approve, follow and retry agent tasks that change code in one or many repositories, each ending in a draft merge request, and decide whether agents may write code at all.
+panel: Ops › Tasks
+route: /ops/tasks
+permission: repos:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Meter,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Approve, follow and retry agent tasks that change code in one or many repositories, each ending in a draft merge request, and decide whether agents may write code at all.
+
+A **task** is one request ("bump `@acme/widget-kit` to 6.0 and fix the breaking calls"). It becomes one task per repository, and each opens a draft merge request. Tasks come from Chat, from coding agents over MCP and from Holtkeeper itself (fixes and upgrades).
+
+<Screen title="Ops › Tasks" caption="Groups land in sections by state; the Ended section folds into one row in the Open view.">
+  <Toolbar title="Tasks" crumbs={['Ops']}>
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+    <Button primary>New task in Chat</Button>
+  </Toolbar>
+  <Toolbar>
+    <Segmented slot="start" items={['Open:7', 'Ended:47', 'All:54']} />
+    <Tag>My teams</Tag>
+    <Tag>Kind</Tag>
+    <Tag>Source</Tag>
+    <Tag>Repository</Tag>
+    <Tag>Proposed by</Tag>
+  </Toolbar>
+  <Scroll>
+
+| Status                          | Task                                                         | Repositories        | Progress                    | Merge requests | CI                                    | Spend   | Updated   |                          |
+| ------------------------------- | ------------------------------------------------------------ | ------------------- | --------------------------- | -------------- | ------------------------------------- | ------- | --------- | ------------------------ |
+| **Needs approval**              |                                                              |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="warn">Proposed</Tag> | **Upgrade @acme/widget-kit to 6.0** · upgrade · MCP · Jon D. | `acme/admin-ui` +4  | 0 of 5                      | —              | —                                     | ≤ $7.50 | 4 min ago | <Button>Approve</Button> |
+| **Running**                     |                                                              |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="info">Running</Tag>  | **Add test ids to checkout forms** · tests · Chat · Mira K.  | `acme/checkout-web` | 1 MR · 1 running · 1 queued | `!221`         | <Tag tone="info">Running</Tag>        | $1.12   | 1 min ago | <Button>Cancel</Button>  |
+| **Opened MR**                   |                                                              |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="ok">Opened MR</Tag>  | **Fix ABC-123 date parsing** · fix · Chat · Jon D.           | `acme/widget-kit`   | 1 of 1                      | `!88`          | <Tag tone="ok">Passed</Tag>           | $0.64   | 2 h ago   | <Button>Open MR</Button> |
+| **Failed**                      |                                                              |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="bad">Failed</Tag>    | `lockfile is out of date after install`                      | `acme/admin-ui` +2  | 2 MR · 1 failed             | `!301` `!57`   | <Tag tone="bad">Failed · 1 of 2</Tag> | $3.40   | yesterday | <Button>Retry</Button>   |
+| _Ended · 41 done, 6 cancelled_  |                                                              |                     |                             |                |                                       |         |           |                          |
+
+  </Scroll>
+</Screen>
+
+## Let agents change code
+
+Agents write code only while the instance-wide switch **Agents may change code** is on. The block above the list shows it with an _On_ / _Off_ tag, who changed it last and when, and a link to the [Audit log](/guide/settings/audit-log/).
+
+<Screen title="Ops › Tasks · Write control">
+  <Stack>
+    <Toolbar title="Agents may change code">
+      <Tag tone="ok">On</Tag>
+      <Button ghost>Edit caps</Button>
+    </Toolbar>
+    <Strip
+      items={[
+        { value: 'Working', label: 'write pool' },
+        { value: '1 / 3', label: 'workers' },
+        { value: 2, label: 'running' },
+        { value: 1, label: 'queued' },
+        { value: '40 s', label: 'oldest wait' },
+      ]}
+      end="Changed by Mira K. · 3 days ago"
+    />
+    <Meter value={31} label={'$12.40 of $40 written this week'} />
+    <Fields columns={4}>
+      <Field label="Per repository" value={'$1.50'} mono />
+      <Field label="Per task" value={'$5.00'} mono />
+      <Field label="Repositories per task" value="10" mono />
+      <Field label="Weekly" value={'$40.00'} mono />
+    </Fields>
+  </Stack>
+</Screen>
+
+To turn it on:
+
+1. Click the switch. A confirmation names the risks.
+2. Read them: repository scripts run on write workers without a sandbox and can read the worker's environment and other checkouts; merge requests go out under the bot with the forge token; a wrong change can reach many repositories at once; tasks spend from the weekly AI budget.
+3. Confirm. Turning it off saves at once and holds queued tasks.
+
+The switch needs `settings:write` over everything.
+
+:::caution
+Keep the switch off until checks run in an isolated sidecar. A task that runs the repository's own install and test scripts can do anything those scripts can do on the worker.
+:::
+
+Next to the switch:
+
+- **Write pool**: its state (_Turned off_, _Idle_, _Working_, or _No write worker_ when a task waited over five minutes with nothing running), busy against live workers, queued and running counts, the oldest wait and the last start.
+- **This week's write spend** against the weekly cap, linking to [AI spend](/guide/ops/ai-spend/).
+- **Caps**: per repository, per task, repositories per task and weekly. <Ui>Edit caps</Ui> opens the editor for them.
+
+## Approve a task
+
+Groups with a task still proposed sit in **Needs approval**; nothing runs until someone approves. The **Tasks** tab shows how many wait for you as a badge, and the same groups appear in the [Inbox](/guide/home/inbox/) (_Also in Inbox_ on the section header).
+
+1. Open the group and read its **Plan**: the plan or request, the expected diff per file and the repositories with their spend caps.
+2. Click <Ui>Approve</Ui>. The confirmation names the spend cap.
+3. Confirm. The tasks queue on the write workers and move to **Running**.
+
+<Ui>Reject</Ui> asks first, then cancels the proposal. Both buttons show only to people who may
+decide: `tasks:run` on every repository of the group. Approval cannot be confirmed while **Agents
+may change code** is off.
+
+<Screen
+  title="Ops › Tasks · Approve"
+  kind="example"
+  caption="The approval confirmation names the cap before anything runs."
+>
+  <Stack>
+    <Toolbar title="Approve “Upgrade @acme/widget-kit to 6.0”?" />
+    <p>
+      Five repositories, one draft merge request each. The task may spend up to{' '}
+      <strong>$7.50</strong> from the weekly AI budget.
+    </p>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Approve and run</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+## Follow and fix tasks
+
+Groups move through sections as their tasks go:
+
+| Section        | A group is here when…                                                                              | Row action                                 |
+| -------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Needs approval | a task is still proposed.                                                                          | <Ui>Approve</Ui>, <Ui>Reject</Ui>          |
+| Running        | tasks are approved, queued or running; the caption counts repositories on workers and queued ones. | <Ui>Cancel</Ui> (asks first)               |
+| Opened MR      | merge requests are open and nothing failed; the caption counts drafts.                             | opens the first merge request on the forge |
+| Failed         | a task failed and none still works, even with other merge requests open.                           | <Ui>Retry</Ui>                             |
+| Ended          | everything is done or cancelled.                                                                   | —                                          |
+
+**Progress** reads _0 of 5_ before anything starts, _2 of 2_ once every repository has a merge request, else a mix such as _1 MR · 1 running · 1 queued_. **CI** shows the most pressing pipeline state among the group's merge requests (failed, running, pending, canceled, passed, no pipeline) and how many share it when they differ: _Failed · 1 of 3_. **Spend** shows the cap as _≤ $10.00_ while waiting for approval.
+
+<Ui>Retry</Ui> queues every failed or cancelled task of the group again without asking, since the
+group was approved before.
+
+### Narrow the list
+
+The scope switch keeps groups that touch your home groups' repositories (_My teams_) or one picked group's. The text filter (<Kbd>/</Kbd>) matches the title, a repository, a merge request like `!12` or the start of an id. **Open**, **Ended** and **All** switch the view; **Kind**, **Source**, **Repository** and **Proposed by** offer the values of the groups in scope.
+
+## Open a task
+
+Click a row, or press <Kbd>J</Kbd> to open the first row and <Kbd>K</Kbd> the last, then step with them. The sheet shows the progress as _2 of 5 repositories finished · $1.20 of $10.00_, the actions that fit (<Ui>Approve and run</Ui>, <Ui>Reject</Ui>, <Ui>Retry failed</Ui>, <Ui>Cancel task</Ui>) and six tabs.
+
+<Screen title="Ops › Tasks › task 6c1e0f">
+  <Sheet id="task 6c1e0f" title="Upgrade @acme/widget-kit to 6.0" position="1 of 7">
+    <Tag tone="warn" slot="tags">
+      Needs approval
+    </Tag>
+    <Button slot="actions">Approve and run</Button>
+    <Button slot="actions">Reject</Button>
+    <Button slot="actions">⋯</Button>
+    <Tabs items={['Plan', 'Repositories:5', 'Diff', 'Agent runs', 'Request', 'Flow']} />
+    <Facts
+      items={[
+        ['Kind', 'upgrade · MCP · patch first'],
+        ['Proposed by', 'Jon D. · 4 min ago'],
+        ['May approve', 'anyone with tasks:run on every repository'],
+        ['Branch', 'holtkeeper/widget-kit-6'],
+        ['Write switch', 'On'],
+      ]}
+    />
+    <Rows>
+      <Row title="acme/admin-ui" sub={'Proposed · cap $1.50'} />
+      <Row title="acme/checkout-web" sub={'Proposed · cap $1.50'} />
+      <Row title="acme/docs-site" sub="Asked to join">
+        <Button>Add</Button>
+        <Button ghost>Reject</Button>
+      </Row>
+    </Rows>
+  </Sheet>
+</Screen>
+
+| Tab          | What it shows                                                                                                                                                                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plan         | Kind, source, the plan or the request, the expected diff per file, repositories that asked to join (<Ui>Add</Ui> / <Ui>Reject</Ui>), the repositories with status and cap, who proposed, approved or stopped it, the budget class, the branch and the write switch. |
+| Repositories | One row per repository. Open one for its branch, job, spend, CI, error, its own patch, its agent runs, <Ui>Retry this repository</Ui> and <Ui>Cancel this repository</Ui>.                                                                                          |
+| Diff         | Each repository's diffstat as bars with the total, then the patch per file and in full.                                                                                                                                                                             |
+| Agent runs   | Each started repository's write job with its agent runs and transcripts.                                                                                                                                                                                            |
+| Request      | Where the request came from (a link to the chat thread), who asked and when, and the prompt.                                                                                                                                                                        |
+| Flow         | The group as a diagram: the source, one node per repository colored by status, its merge request and CI. Repositories a task asked for hang off it, dashed.                                                                                                         |
+
+The ⋯ menu has <Ui>Open the chat thread</Ui> for chat requests and <Ui>Copy link</Ui>.
+
+## Start a task
+
+<Ui>New task in Chat</Ui> opens [Chat](/guide/chat/threads/), where you describe the change and
+Holtkeeper proposes the task. Coding agents start tasks with the `start_task` MCP tool and poll
+`task_status` ([Agent tasks](/agents/tasks/)). <Ui>Configure</Ui> opens [Settings ›
+AI](/guide/settings/ai/).
+
+:::note
+Every task spends from the same weekly AI budget as reviews and chat. Its own caps stop it earlier: by default $1.50 per repository and $5 per task, both changed with <Ui>Edit caps</Ui>.
+:::
+
+## Related
+
+- [Tasks and Inbox](/start/concepts/tasks-and-inbox/) — what a task is and where approvals land.
+- [Agent tasks](/agents/tasks/) — starting tasks from a coding agent.
+- [AI spend](/guide/ops/ai-spend/) — the weekly budget tasks spend from.
+- [Inbox](/guide/home/inbox/) — proposals waiting for your approval.
+- [Write tasks](/modules/write-task/) — how a task checks out, edits, verifies and pushes.

@@ -1,0 +1,215 @@
+---
+title: Integrations
+description: Connect GitLab forges, store the tokens Holtkeeper uses for Jira, Confluence, registries and GitHub, keep webhooks delivering, and watch request limits per credential.
+panel: Settings › Integrations
+route: /settings/integrations
+permission: settings:read
+sidebar:
+  order: 3
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Meter,
+  Screen,
+  Scroll,
+  Segmented,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Connect GitLab forges, store the tokens Holtkeeper uses for Jira, Confluence, registries and GitHub, keep webhooks delivering, and watch request limits per credential.
+
+<Screen
+  title="Settings › Integrations"
+  caption="AI provider keys live in Settings › AI; everything else is here."
+>
+  <Toolbar title="Integrations" crumbs={['Settings']}>
+    <Tag>Forges</Tag>
+    <Tag>Credentials</Tag>
+    <Tag>Trackers</Tag>
+    <Tag>Request limits</Tag>
+    <Button primary>Add forge</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 1, label: 'forge · 142 repositories' },
+      { value: 'webhook', label: 'work · last delivery 1 min ago', tone: 'ok' },
+      { value: 9, label: 'credentials' },
+      { value: 1, label: 'need attention', tone: 'warn' },
+    ]}
+  />
+  <Stack>
+    <Toolbar title="work">
+      <Tag slot="start" mono>
+        https://gitlab.acme.dev
+      </Tag>
+      <Tag tone="ok">Webhooks delivering</Tag>
+      <Button ghost>Edit</Button>
+    </Toolbar>
+    <Facts
+      items={[
+        ['Token', 'gitlab-bot · expires in 41 days'],
+        ['Repositories', '142 · named work:acme/…'],
+        ['Last webhook', '1 min ago'],
+        ['Hooks', '12 checked · 0 disabled · 1 re-enabled today'],
+        ['SSH key', 'clone and push · signing · 90 days'],
+      ]}
+    />
+  </Stack>
+</Screen>
+
+## Add a forge
+
+A forge is a GitLab instance Holtkeeper reads repositories from and opens merge requests on.
+
+1. Add the GitLab token first: <Ui>Add credential</Ui> under **Credentials**, kind GitLab. Give the bot account the rights it needs on the groups you want analyzed.
+2. Click <Ui>Add forge</Ui> (needs `settings:write` over everything).
+3. Enter an id (it prefixes repository names, `work:acme/checkout-web`), the GitLab URL, the token credential and, optionally, the bot username Holtkeeper posts as.
+4. Save. Repositories appear once groups that include them are set up in [Groups](/guide/repos/groups/).
+
+<Screen title="Settings › Integrations · Add forge" kind="example">
+  <Stack>
+    <Toolbar title="Add forge" />
+    <Fields>
+      <Field label="Id" value="work" mono hint="Repositories read as work:group/project" />
+      <Field label="URL" value="https://gitlab.acme.dev" mono />
+      <Field label="Token" value="gitlab-bot" hint="A GitLab token credential" />
+      <Field
+        label="Bot username"
+        value="holtkeeper-bot"
+        mono
+        hint="Optional. Pushes and notes by this user are ignored."
+      />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Save forge</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+Each forge shows its token, how its repositories are named, the repository count and the last webhook delivery. <Ui>Edit</Ui> and delete change or remove it.
+
+### SSH key
+
+A forge can have an SSH key Holtkeeper issues itself: for clone and push, for signing commits, or both, with a lifetime and an optional commit identity. Issue, rotate or remove it on the forge.
+
+## Keep webhooks delivering
+
+Changes arrive by webhook, or by polling where no webhook delivers. GitLab disables a hook that keeps failing, for example while Holtkeeper was down. Holtkeeper checks its own hooks every 15 minutes and re-enables disabled ones by itself; the forge's hook line shows the last check: hooks checked, disabled by GitLab, re-enabled today, gone or not readable.
+
+While some are disabled, <Ui>Re-enable now</Ui> (needs `settings:write` over everything) runs the check at once.
+
+:::note
+Re-enabling sends GitLab a test delivery of an event Holtkeeper ignores, so it never starts analyzers, triggers or release work. While a hook is disabled, its repositories fall back to polling.
+:::
+
+## Store a credential
+
+**Credentials** lists every stored secret except AI provider keys, which live in [Settings › AI](/guide/settings/ai/).
+
+<Screen title="Settings › Integrations · Credentials">
+  <Toolbar>
+    <Segmented slot="start" items={['All:9', 'Forge tokens:2', 'Proxy secrets:3', 'Other:4']} />
+    <Button ghost>Add credential</Button>
+  </Toolbar>
+  <Scroll>
+
+| Name                                  | Kind          | Used by           | Usable by  | Expires | Rotation      | Last used       | Status                                        |
+| ------------------------------------- | ------------- | ----------------- | ---------- | ------- | ------------- | --------------- | --------------------------------------------- |
+| **gitlab-bot** · `gitlab.acme.dev`    | gitlab        | Forge work        | Everything | 41 days | 7 days before | Within a minute | <Tag tone="ok">Healthy</Tag>                  |
+| **npm-registry** · `npm.acme.dev`     | egress-secret | Job network proxy | Everything | —       | —             | 3 min ago       | <Tag tone="ok">Healthy</Tag>                  |
+| **jira-cloud** · `acme.atlassian.net` | jira          | Issue lookups     | Payments   | 9 days  | —             | 1 h ago         | <Tag tone="warn">Expires soon</Tag> in 9 days |
+| **wiki** · `acme.atlassian.net/wiki`  | confluence    | Documents         | Everything | —       | —             | yesterday       | <Tag tone="ok">Healthy</Tag>                  |
+| **gh-index** · `api.github.com`       | github        | Library index     | Everything | —       | —             | 12 min ago      | <Tag tone="ok">Healthy</Tag>                  |
+| **old-bot** · `gitlab.acme.dev`       | gitlab        | —                 | Widgets    | —       | —             | 2 months ago    | <Tag>Unused</Tag>                             |
+
+  </Scroll>
+</Screen>
+
+1. Click <Ui>Add credential</Ui>.
+2. Pick the kind, name it, enter the URL and the secret.
+3. Choose who may use it: everything, some groups or some repositories. When several credentials of a kind cover a repository, the most specific one wins.
+4. Optionally set an expiry and rotation. GitLab tokens can rotate themselves a set number of days before they expire.
+
+Search matches name, host or kind. **Used by** names what refers to the credential and links to it; empty means nothing does. Rows sort by status, then expiry. <Ui>Rotate</Ui>, <Ui>Edit</Ui> and <Ui>Delete</Ui> need `credentials:write`; deleting names what stops working.
+
+| Status       | Means                                                 |
+| ------------ | ----------------------------------------------------- |
+| Expired      | The expiry date has passed.                           |
+| Failing      | The last rotation failed.                             |
+| Expires soon | It expires within 14 days.                            |
+| Unused       | Nothing refers to it and nothing used it for 30 days. |
+| Healthy      | None of the above.                                    |
+
+:::caution
+Secrets are sealed when saved and never shown again. The sub-navigation counts credentials that need attention: a failed rotation or test, or a secret expiring within 14 days.
+:::
+
+### What each kind is for
+
+| Kind         | Holtkeeper uses it to                                                                                                                                                                                                         |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GitLab       | Read repositories and act on merge requests through a forge.                                                                                                                                                                  |
+| Jira         | Show a ticket's title, status and type next to keys like `ABC-123` in releases. Cloud takes an email and API token, Data Center a personal access token. Nothing is ever written to Jira, and the token never reaches agents. |
+| Confluence   | Read pages, and replace one marked section of a page, for trackers.                                                                                                                                                           |
+| GitHub       | Index third-party libraries' docs, releases and issues. Without the library index setting naming some, every GitHub credential is used; each row shows its usage.                                                             |
+| Proxy secret | Let jobs download from private registries: the egress proxy adds it to matching requests, so the secret never reaches the job.                                                                                                |
+
+## Trackers
+
+**Trackers** lists the trackers that are configured: name, id, entity, sources, rules, outputs and scope. A tracker reads sources such as Confluence pages, applies rules and writes outputs. Its editor, among the section's settings below, draws sources, rules and outputs as a map: drag from a source to a rule to connect them, and it calls out rules that read nothing and sources no rule reads.
+
+## Request limits
+
+**Request limits** (needs `settings:read` over everything) shows how hard each credential is used, refreshed every 15 seconds.
+
+<Screen title="Settings › Integrations · Request limits">
+  <Scroll>
+
+| Credential              | Limit                             | Last hour                                  | In flight | Daily caps            | Status                            |
+| ----------------------- | --------------------------------- | ------------------------------------------ | --------- | --------------------- | --------------------------------- |
+| **gitlab-bot** · gitlab | 18,000 requests / hour · set here | <Meter value={41} label="7,380" />         | 3 / 8     | —                     | <Tag tone="ok">Within limit</Tag> |
+| **acme-gateway** · AI   | 2 M tokens / hour · default       | <Meter value={92} label="1.84 M tokens" /> | 4 / 4     | $40 / day · $31 today | <Tag tone="warn">Near limit</Tag> |
+| **Forge work**          | No limit                          | 212                                        | 0         | —                     | <Tag>No limit</Tag>               |
+
+  </Scroll>
+</Screen>
+
+| Status                   | Means                                                                                                                                        |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Daily cap reached        | Today's tokens or cost reached the daily cap.                                                                                                |
+| Cooling down until 14:20 | The provider answered "too many requests" and Holtkeeper waits.                                                                              |
+| Near limit               | 90% of an hourly or daily limit used, or a rate-limit answer in the last hour (which also catches use of the same token outside Holtkeeper). |
+| Within limit             | Under every limit.                                                                                                                           |
+| No limit                 | No limit is set.                                                                                                                             |
+
+Limits per minute show per hour (`300 per minute` reads `18,000 requests / hour`); AI keys count tokens. Set or change them in the request limits setting below the tables.
+
+:::note
+Without shared limits across processes, each server process counts only its own calls; the description under the table says so. Calls made with the same token outside Holtkeeper and proxy downloads are not counted.
+:::
+
+## Release webhooks and Slack
+
+Among the section's settings you also edit where release events are sent and the tracker analyzer's options. The Slack app's tokens, review status emoji and channels have their own page: [Slack](/guide/settings/slack/).
+
+## Who sees this section
+
+The section needs `settings:read` or `credentials:read`. Forges, request limits and Slack need `settings:read` over everything; the credentials table needs `credentials:read` and shows only credentials whose scope you may read.
+
+## Related
+
+- [Slack](/guide/settings/slack/) — the Slack app, review status emoji and release announcements.
+- [AI](/guide/settings/ai/) — AI provider keys and the model tiers.
+- [Groups](/guide/repos/groups/) — which forge repositories Holtkeeper analyzes.
+- [Release timeline](/guide/releases/timeline/) — where Jira tickets show next to versions.
+- [Configuration](/self-host/configure/configuration/) — the config file, environment and the egress proxy.
+- [Credentials](/modules/credentials/) and [Limits](/modules/limits/) — sealing, rotation and limiters in depth.

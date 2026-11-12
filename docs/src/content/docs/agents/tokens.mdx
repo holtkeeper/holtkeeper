@@ -1,0 +1,112 @@
+---
+title: Tokens and scopes
+description: What an MCP token may read, the Release steps and Run tasks scopes, how tokens expire and are revoked, and where their usage shows.
+panel: Account › Connect agents
+route: /account/agents
+sidebar:
+  order: 2
+---
+
+import { Button, Screen, Scroll, Tag, Toolbar, Ui } from '@ui'
+
+An MCP token is a personal access token: it acts as the person who created it, cut down to reading. It never reaches further than its owner, and two optional scopes let it do the two things agents may do on their own: run release steps and start tasks.
+
+## What a token can see
+
+A token carries its owner's grants, limited to these permissions:
+
+| Permission       | What the agent can read with it                                                |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `repos:read`     | Repositories, their health and analysis freshness.                             |
+| `analyses:read`  | Analysis records: public API, usages, stack, coverage, assets, test ids, jobs. |
+| `audits:read`    | Vulnerability findings from audits.                                            |
+| `knowledge:read` | The knowledge base and the Guide.                                              |
+| `releases:read`  | Release rules, status and changes.                                             |
+
+So a developer of the storefront team gets an agent that sees the storefront's repositories, and other teams' repositories only as far as the **Reach** setting (`access.crossTeam`) lets everyone read their catalog. An admin's token reads everything, but still cannot write anything a read-only token cannot.
+
+Whatever your grants, a token never gets `settings:write`, `credentials:*`, `users:*` or AI administration, and it cannot create or revoke tokens.
+
+:::note
+With passkey sign-in (`users` accounts) a token follows your **current** grants: when an admin narrows your access, your agents see less at once. Disabling your account or signing out everywhere revokes all your tokens. With other sign-in providers a token keeps the grants you had when you created it.
+:::
+
+## Scopes
+
+Both switches are off by default. Turn one on only for a token whose agent should act, not just read.
+
+| Switch in the dialog | Scope     | Adds           | What it unlocks                                                                                                     |
+| -------------------- | --------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Release steps**    | `release` | `releases:run` | The `release_step` tool, where you may run releases. Every step still needs a preview and a one-time confirm token. |
+| **Run tasks**        | `tasks`   | `tasks:run`    | `start_task` starts the tasks it proposes, and `request_review` asks for a review, where you may run tasks.         |
+
+A scope never adds what you lack. A Run tasks token of a viewer still only proposes tasks, because its owner may not run them.
+
+Without **Run tasks**, `start_task` still works: the task group waits as a proposal until a person approves it in the Inbox or in **Ops › Tasks**. See [Changing code through tasks](/agents/tasks/).
+
+`release_step` is offered only to requests that authenticate with a token carrying the `release` scope, never to a signed-in browser session, and each call needs `releases:run` on a repository Holtkeeper may write to. A refused call is written to the audit log.
+
+## Expiry and status
+
+Tokens live 30 days, 90 days (the default), a year, or never expire. The table shows each token's state:
+
+| Status       | Meaning                                       |
+| ------------ | --------------------------------------------- |
+| Active       | Used at least once and not about to expire.   |
+| Expires soon | Expires within 14 days. Create its successor. |
+| Expired      | Stopped working; agents get `401`.            |
+| Never used   | Created but no call yet.                      |
+
+**Last used** is updated at most once an hour, so it can lag a little behind a busy agent.
+
+## Revoke a token
+
+Press the trash icon on the token's row and confirm.
+
+<Screen title="Account › Connect agents › Revoke this token?">
+  <Toolbar title="Revoke this token?">
+    <Button ghost>Cancel</Button>
+    <Button primary>Revoke</Button>
+  </Toolbar>
+
+Agents using it lose access right away.
+
+</Screen>
+
+A revoked token stops working at once. Revoke a token when a machine is lost, a colleague leaves a shared agent behind, or you no longer recognize its calls. Creating and revoking tokens are logged as `mcp.token.created` and `mcp.token.revoked` in the audit log.
+
+## Usage
+
+Every tool call is recorded with the tool, what it was about (a package or a repository), the client and the token.
+
+- **Account › Connect agents** shows **Calls, 7 days** per token and, under **My usage**, your own calls over 7, 30 or 90 days with your most used tools, packages and clients.
+- **Ops › AI spend** shows everyone's MCP usage to people who may see people (`users:read`); see [AI spend](/guide/ops/ai-spend/).
+
+<Screen title="Account › Connect agents" caption="My usage: your calls, then the most used tools, packages and clients.">
+  <Toolbar title="My usage">
+    <Tag>7 days</Tag>
+  </Toolbar>
+  <Scroll>
+
+| Tools            | Calls | Packages           | Calls | Clients     | Calls |
+| ---------------- | ----- | ------------------ | ----- | ----------- | ----- |
+| `repo_rules`     | 96    | `@acme/widget-kit` | 71    | claude-code | 402   |
+| `package_usage`  | 71    | `date-fns`         | 18    | cursor      | 80    |
+| `search_symbols` | 54    | `@acme/forms`      | 12    | curl        | 3     |
+
+  </Scroll>
+</Screen>
+
+## Good practice
+
+- One token per machine or agent, named after it. A leak then costs one revocation.
+- Keep tokens out of repositories: no `.mcp.json` with a secret in version control.
+- Give CI agents short-lived tokens and rotate them; give people's laptops 90 days.
+- Switch on **Run tasks** or **Release steps** only for the agent that needs it, and keep a read-only token for everything else.
+
+## Related
+
+- [Connect an agent](/agents/connect/) — create a token and set up your client.
+- [Permissions](/reference/permissions/) — every permission and role.
+- [Permissions and scopes](/start/concepts/permissions/) — how grants and scopes work.
+- [Settings › People](/guide/settings/people/) — where admins change grants.

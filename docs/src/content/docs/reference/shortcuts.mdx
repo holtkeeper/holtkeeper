@@ -1,0 +1,82 @@
+---
+title: Keyboard shortcuts
+description: The keys of the Holtkeeper panel — the command palette, list and side-sheet navigation, Inbox decisions, learnings and the chat composer.
+sidebar:
+  order: 7
+---
+
+import { Kbd } from '@ui'
+
+The panel works without a mouse: <Kbd>⌘K</Kbd> finds anything, <Kbd>J</Kbd> and <Kbd>K</Kbd> step through records, and decisions have single keys. Single-letter keys work only outside text fields, so typing in a search box never approves anything. On Windows and Linux, read <Kbd>Ctrl</Kbd> for <Kbd>⌘</Kbd>.
+
+## Everywhere
+
+| Keys                               | Does                                                                                         |
+| ---------------------------------- | -------------------------------------------------------------------------------------------- |
+| <Kbd>⌘K</Kbd> or <Kbd>Ctrl K</Kbd> | Opens or closes the command palette, on every page, even inside a text field.                |
+| <Kbd>/</Kbd>                       | Focuses the page's search or filter field (lists, Ops › Runs, Ops › Tasks, Settings search). |
+| <Kbd>Esc</Kbd>                     | Closes dialogs, the side sheet and the palette.                                              |
+
+A skip link at the start of every page jumps to the content.
+
+## Command palette
+
+| Keys                      | Does                                 |
+| ------------------------- | ------------------------------------ |
+| <Kbd>↑</Kbd> <Kbd>↓</Kbd> | Move the selection; it wraps around. |
+| <Kbd>↵</Kbd>              | Opens the selected result.           |
+| <Kbd>⌘</Kbd>-click        | Opens a page result in a new tab.    |
+| <Kbd>Esc</Kbd>            | Closes the palette.                  |
+
+A query starting with `>` searches actions, `#` repositories and `@` people. See [Command palette](/guide/home/command-palette/).
+
+## Lists and side sheets
+
+| Keys           | Does                                                  |
+| -------------- | ----------------------------------------------------- |
+| <Kbd>J</Kbd>   | Next row. With no sheet open, opens the first row.    |
+| <Kbd>K</Kbd>   | Previous row. With no sheet open, opens the last row. |
+| <Kbd>↵</Kbd>   | Opens the focused row in the side sheet.              |
+| <Kbd>Esc</Kbd> | Closes the side sheet.                                |
+
+The sheet's header shows where you are ("3 of 41"), and the open row lives in the URL, so a copied link opens the same record.
+
+## Inbox
+
+With an item open in the side sheet:
+
+| Keys         | Does                    |
+| ------------ | ----------------------- |
+| <Kbd>A</Kbd> | Approves the open item. |
+| <Kbd>R</Kbd> | Rejects it.             |
+| <Kbd>S</Kbd> | Snoozes it.             |
+
+Approving and rejecting a task group still ask for confirmation. See [Inbox](/guide/home/inbox/).
+
+## Knowledge › Learnings
+
+| Keys                      | Does                                                                       |
+| ------------------------- | -------------------------------------------------------------------------- |
+| <Kbd>J</Kbd> <Kbd>K</Kbd> | Move the focused row.                                                      |
+| <Kbd>X</Kbd>              | Toggles the focused row's selection.                                       |
+| <Kbd>P</Kbd>              | Accepts the selected rows, or else the focused one, into its chosen scope. |
+| <Kbd>D</Kbd>              | Rejects them.                                                              |
+
+The table's footer shows these keys. See [Learnings](/guide/knowledge/learnings/).
+
+## Chat composer
+
+| Keys                      | Does                                                       |
+| ------------------------- | ---------------------------------------------------------- |
+| <Kbd>↵</Kbd>              | Sends the message.                                         |
+| <Kbd>Shift ↵</Kbd>        | Starts a new line.                                         |
+| <Kbd>@</Kbd>              | Mentions someone who can see the thread, Holtkeeper first. |
+| <Kbd>/</Kbd> at the start | Switches to command mode with matching commands.           |
+| Arrows, <Kbd>Tab</Kbd>    | Pick a mention or command from the list.                   |
+| <Kbd>Esc</Kbd>            | Closes the list.                                           |
+
+## Related
+
+- [Command palette](/guide/home/command-palette/) — what the palette searches.
+- [Inbox](/guide/home/inbox/) — decisions waiting for you.
+- [Guide overview](/guide/) — moving around the panel.

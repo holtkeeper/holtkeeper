@@ -1,0 +1,242 @@
+---
+title: Releases overview
+description: See where every repository stands in its release flow, which ones wait for a person, and what runs in each environment, then act from the queue.
+panel: Releases › Overview
+route: /releases
+permission: releases:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Kbd,
+  Screen,
+  Scroll,
+  Segmented,
+  SlackContext,
+  SlackHeader,
+  SlackMessage,
+  SlackWindow,
+  Stack,
+  Strip,
+  Tag,
+  Ticks,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See where every repository stands in its release flow, which ones wait for a person, and what runs in each environment, then act from the queue.
+
+<Screen title="Releases › Overview" caption="Repositories that need a person sit in the queue; the table below lists every one.">
+  <Toolbar title="Releases">
+    <Segmented slot="start" items={['My teams:7', 'All I can see:19']} />
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+    <Button primary>Set up releases</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 7, label: 'release here' },
+      { value: 3, label: 'need action', tone: 'warn' },
+      { value: 1, label: 'waiting for acceptance', tone: 'warn' },
+      { value: 1, label: 'deploy failed', tone: 'bad' },
+      { value: 64, label: 'unreleased commits' },
+      { value: 'Live', label: 'steps change the forge' },
+    ]}
+    end="forges read 3 min ago"
+  />
+  <Stack>
+    <Segmented items={['Needs action:3', 'Waiting for acceptance:1', 'Ready to tag:1', 'Deploy failed:1']} />
+  </Stack>
+  <Stack>
+    <Toolbar title="acme/checkout-web">
+      <Tag tone="warn" slot="start">Waiting for acceptance</Tag>
+      <Button>Accept 8.3.0</Button>
+      <Button ghost>Edit notes</Button>
+      <Button ghost>Review changes</Button>
+    </Toolbar>
+
+`8.2.1 → 8.3.0` · minor ← 3 feat · 14 unreleased commits · 4 tasks · 2 left out<br />
+Gates: target pipeline passed · staging <Tag tone="ok">8.2.1</Tag> production <Tag tone="ok">8.2.1</Tag>
+
+  </Stack>
+</Screen>
+
+## What the page shows
+
+Every repository with releases turned on, in three parts. The scope switch applies to all of them: _My teams_ by default, other teams folded under the table.
+
+- **The strip**: how many repositories release here and how many need action; when present, how many wait for acceptance, have a release merge request open, are deploying, failed a deploy or could not be read; unreleased commits on the target branches; whether steps change the forges (**Live**) or nothing (**Dry run**, also shown as a notice); and when the forges were last read.
+- **The queue**: a card for each repository that waits for a person.
+- **All repositories**: a table of every repository, the ones that need action first.
+
+Search with <Kbd>/</Kbd> by path, latest or next version.
+
+## Work the queue
+
+Filter the queue by **Needs action** or by one state: waiting for acceptance, ready to tag, release MR open, deploy failed. A filter shows only when it has a count.
+
+A card shows:
+
+- the repository and its state;
+- current → next version, the bump and why it is that bump (`minor ← 3 feat`);
+- unreleased commits on the target, tasks and left-out changes;
+- the gate line: the failing blockers, otherwise the target branch pipeline;
+- every environment with its status and the version that runs there.
+
+Its buttons:
+
+| Button                  | Shows when                                                                     | Does                                              |
+| ----------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------- |
+| <Ui>Accept 8.3.0</Ui>   | the version waits for acceptance and you have `releases:run` on the repository | records your acceptance of the target branch head |
+| <Ui>Edit notes</Ui>     | you may run steps and the repository is not read-only                          | opens the [timeline](/guide/releases/timeline/)   |
+| <Ui>Review changes</Ui> | always                                                                         | opens the timeline                                |
+
+A card of a repository the forge could not read shows the error instead.
+
+## All repositories
+
+<Screen title="Releases › Overview › All repositories">
+  <Toolbar title="All repositories">
+    <Tag>Needs action first</Tag>
+    <Tag>Stage: any</Tag>
+    <Tag>Environment: any</Tag>
+  </Toolbar>
+  <Scroll>
+
+| Repository          | Stage                                         | Latest          | Next            | Unreleased   | CI     | staging                      | production                   | Next step                       |
+| ------------------- | --------------------------------------------- | --------------- | --------------- | ------------ | ------ | ---------------------------- | ---------------------------- | ------------------------------- |
+| `acme/billing-api`  | <Tag tone="bad">Deploy failed</Tag>           | `v3.4.0` · 1 h  | —               | 0            | passed | <Tag tone="ok">v3.4.0</Tag>  | <Tag tone="bad">failed</Tag> | <Button>Retry</Button>          |
+| `acme/checkout-web` | <Tag tone="warn">Waiting for acceptance</Tag> | `v8.2.1` · 6 d  | `v8.3.0` minor  | 14 · 4 tasks | passed | <Tag tone="ok">v8.2.1</Tag>  | <Tag tone="ok">v8.2.1</Tag>  | <Button>Accept</Button>         |
+| `acme/admin-ui`     | <Tag tone="info">Ready to tag</Tag>           | `v3.14.0` · 2 d | `v3.14.1` patch | 3 · 1 task   | passed | <Tag tone="ok">v3.14.0</Tag> | <Tag tone="ok">v3.14.0</Tag> | <Button>Create v3.14.1</Button> |
+| `acme/widget-kit`   | <Tag>Released</Tag>                           | `5.0.0` · 3 d   | —               | 0            | passed | —                            | —                            | Open timeline                   |
+
+  </Scroll>
+</Screen>
+
+| Column       | Meaning                                                                                                                                 |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Stage        | Where the repository is, in words (see below).                                                                                          |
+| Latest       | The newest version and how old it is.                                                                                                   |
+| Next         | The version the pending step would create, with its bump.                                                                               |
+| Unreleased   | Commits on the target branch since the latest version, with the task count.                                                             |
+| CI           | The target branch pipeline in a word.                                                                                                   |
+| Environments | One column per environment with its status and version; more than three collapse into ticks.                                            |
+| Next step    | A button when something waits, a quiet link otherwise. A forge error links to [Settings › Integrations](/guide/settings/integrations/). |
+
+With many environments the columns fold into one strip of ticks per row:
+
+<Screen title="Releases › Overview › Environments">
+  <Stack>
+    <Ticks healthy={3} failing={1} none={1} />
+  </Stack>
+</Screen>
+
+Repository, stage, latest, next, unreleased and CI sort; <Ui>Needs action first</Ui> restores the default order. **Stage** filters by state and **Environment** keeps repositories that deploy to the chosen environments. A row opens the repository's [timeline](/guide/releases/timeline/).
+
+Repositories you may set up but that do not release here yet are listed under the table with a picker and <Ui>Set up</Ui>.
+
+## Stages
+
+From most to least urgent:
+
+| Stage                    | Meaning                                                                          |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| Could not read the forge | The forge answered with an error.                                                |
+| Deploy failed            | A deploy job of the latest version failed.                                       |
+| Waiting for acceptance   | The flow needs an acceptance and nobody accepted the target branch head yet.     |
+| Ready to tag             | The target has unreleased changes and nothing holds the version back.            |
+| Release MR open          | The release merge request from the source branch is open.                        |
+| Ready to propose         | The source branch is ahead of the target; a release merge request can be opened. |
+| Ready to deploy          | The latest version waits for its deploy jobs.                                    |
+| Deploying                | A deploy job runs.                                                               |
+| Released                 | Everything released and deployed.                                                |
+| Nothing to release       | No new changes.                                                                  |
+| Released elsewhere       | Another tool, such as changesets or release-please, releases the repository.     |
+
+## Turn releases on
+
+Releases are off for every repository until someone sets them up.
+
+1. Choose <Ui>Set up releases</Ui>, or <Ui>Set up</Ui> under the table. You need `settings:write` on the repository.
+2. Follow the [flow setup](/guide/releases/flow-setup/) wizard; it reads the repository and suggests a flow.
+3. Save with **Turn releases on when I finish**. The repository joins the overview.
+
+<Ui>Configure</Ui> opens the `releases` setting for broader scopes. <Ui>⋯</Ui> ›
+<Ui>Read the forges again</Ui> rereads every repository in the background; the page refreshes until
+it finishes.
+
+:::note
+Holtkeeper never creates a version or starts a deploy on its own. Every step is a person's click, a CI call or an agent with the release scope.
+:::
+
+## Announce new versions in Slack
+
+With `releases.announce` set, every new version gets a message in the channels you list, whatever created the tag: Holtkeeper, changesets, release-please or a CI job. It is set under [Settings › Integrations](/guide/settings/integrations/) and scoped like other settings.
+
+<Screen title="Slack · #releases" kind="example" caption="One message per version; package tags found within ten minutes of each other share one.">
+  <SlackWindow channel="releases" topic="New versions of shared libraries" channels={['general', 'releases', 'web-team']}>
+    <SlackMessage author="holtkeeper" time="14:05">
+      <SlackHeader>@acme/widget-kit 5.0.0</SlackHeader>
+      <SlackContext>since 4.3.2 · [Compare](#)</SlackContext>
+
+A major cleanup of the dialog API: dialogs now manage their own focus, and the deprecated store helpers are gone.
+
+- `Dialog` traps focus and restores it on close.
+- New `useToastQueue` shows one toast at a time.
+
+**Breaking changes**
+
+- `createStore` was removed.<br />_Use `createWidgetStore` from `@acme/widget-kit/store` instead._
+- `Widget` no longer accepts `size`.<br />_Pass `density="compact"` for the small variant._
+
+**Changes**
+
+_Features_
+
+- dialog: trap focus inside open dialogs ([!412](#))
+- toast: add `useToastQueue` ([!418](#))
+
+_Fixes_
+
+- grid: keep the sort when rows change ([a1b2c3d](#))
+
+**Tasks**
+
+- [ABC-123](#) Accessible dialogs
+- [ABC-131](#) Toast stacking
+
+**Will break on upgrade**
+
+- [acme/checkout-web](#) (on 4.3.2): 9 broken uses of `createStore`, `Widget` — [src/cart/store.ts](#), [src/ui/Banner.tsx](#)
+- [acme/docs-site](#) (on 4.3.2): 2 broken uses of `Widget` — [src/pages/home.tsx](#)
+
+        </SlackMessage>
+
+      </SlackWindow>
+
+  </Screen>
+
+The message has, in order: the package (or repository) and version, the previous version and a compare link, AI notes with highlights, **Breaking changes** with migration hints in italics, **Changes** grouped by changelog section, **Tasks** named by the commits, and **Will break on upgrade**: each connected repository whose code uses what the new version removed, with its current version, the number of broken uses, the exports and up to three files.
+
+| Field                | Default               | Effect                                                                      |
+| -------------------- | --------------------- | --------------------------------------------------------------------------- |
+| `channels`           | none                  | Slack channel ids. Without any, nothing is announced. Invite the app there. |
+| `tags`               | flow and package tags | Globs over tag names, such as `@acme/*@*`.                                  |
+| `groupWindowMinutes` | 10                    | Tags found within this window make one message.                             |
+| `notes`              | on                    | The AI overview, highlights, breaking changes and migration hints.          |
+| `tasks`              | on                    | Tracker tasks named by the commits.                                         |
+| `impact`             | on                    | The **Will break on upgrade** block.                                        |
+| `language`           | review language       | Language of the AI prose; code and technical terms stay in English.         |
+
+:::tip
+The impact block needs the new version's API to be read first, so a message can wait a few minutes after the tag. When the analysis cannot finish in time the message goes out and says that compatibility analysis is still running or unavailable.
+:::
+
+## Related
+
+- [Timeline](/guide/releases/timeline/) — one repository's next version, environments and past versions.
+- [Flow setup](/guide/releases/flow-setup/) — branches, versions, gates and environments.
+- [Slack](/guide/settings/slack/) — connect the Slack app.
+- [Agents › Tools](/agents/tools/) — `release_rules`, `release_status` and `release_changes`.

@@ -1,0 +1,106 @@
+---
+title: Troubleshooting
+description: Common failures when running Holtkeeper — startup errors, sign-in that does nothing, unready pods, idle workers, webhooks, the egress proxy — with what you see and how to fix it.
+sidebar:
+  order: 5
+---
+
+Most problems show up in one of three places: the process log at start, the `/readyz` body, or the health strip of **Settings › System**. Start there, then find the symptom below.
+
+```sh title="Terminal"
+kubectl logs deploy/holtkeeper-web          # or: docker compose logs web
+curl -s https://holtkeeper.example.com/readyz
+```
+
+## The process does not start
+
+**The config is rejected.** The start stops with a config error that lists every problem by path. Fix each one; a config validates without its secrets, so a missing variable is not the cause here.
+
+**`HOLTKEEPER_AUTH=users needs HOLTKEEPER_PUBLIC_URL`.** Passkey sign-in needs the public origin. Set `HOLTKEEPER_PUBLIC_URL` to the URL people open, such as `https://holtkeeper.example.com`.
+
+**Pods crash right away in Kubernetes.** The chart's config reads `HOLTKEEPER_VAULT_KEY` and the other secrets from the environment; without `existingSecret` they are missing. `helm install` prints a warning about it. Create the Secret and set `existingSecret`.
+
+**Write workers refuse to start.** They need `jobs.execution.mode` `mise` or `container`; `host` is refused. The chart's config uses `mise`.
+
+**Warnings about `forges`, `groups` or `jobs.schedules`.** These keys moved to the panel. The process starts and ignores them; add the forge and groups again in [Settings › Integrations](/guide/settings/integrations/) and remove the keys.
+
+## Sign-in does nothing
+
+The browser drops `Secure` session cookies over plain HTTP, so the login form returns and nothing changes. Serve the panel over HTTPS. For a local test only, set `HOLTKEEPER_INSECURE_COOKIES=1`.
+
+**Passkeys fail after a move to a new host name.** Passkeys belong to the host name of `HOLTKEEPER_PUBLIC_URL`. Issue recovery links (`holtkeeper users recover-link <user>`) so people register a passkey for the new host.
+
+**No setup link in the log.** The link is logged only while no user exists, or the only user has no passkey yet. Look at the web process log, not the workers'. If an admin exists already, issue a link with `holtkeeper users recover-link` ([Sign-in](/self-host/configure/sign-in/#links-from-the-command-line)).
+
+**Too many attempts.** The password provider answers `429` for a minute after five failures a minute per process.
+
+## `/readyz` answers 503
+
+The body has a `status` (`unavailable` or `draining`) and, per check, `ok` or the error message:
+
+```json title="/readyz"
+{
+  "status": "unavailable",
+  "checks": { "migrations": "ok", "store": "ok", "artifacts": "connect ECONNREFUSED" }
+}
+```
+
+| Check failing                | Likely cause                                              | Fix                                                                                                     |
+| ---------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| store                        | Postgres unreachable, wrong URL or password               | Check `HOLTKEEPER_DATABASE_URL` and the NetworkPolicy `extraEgress`.                                    |
+| migrations                   | The role lacks `CREATE` on the database, or a step failed | Grant `CREATE`, or create the `holtkeeper` schema owned by the role; read the log for the failing step. |
+| artifacts                    | Bucket missing, wrong endpoint, region or keys            | Check `HOLTKEEPER_S3_*`; with the local S3 profile, make sure `versitygw-init` ran.                     |
+| none, `status` is `draining` | The process received `SIGTERM`                            | Expected during shutdown.                                                                               |
+
+## Jobs stay queued
+
+**Settings › System shows "no worker reported in 15 minutes".** No worker is running, or none reaches the store. Check the worker pods or the `worker` service and their logs.
+
+**Workers run, the queue stays high.** Look at a waiting job's reason in the panel, or ask `why_job` over MCP. Common reasons:
+
+- the job's forge or AI credential is at its rate or concurrency limit (`holtkeeper_limiter_saturated`);
+- another job of the same analyzer, or an analyzer that changes the repository, is running on that repository;
+- the job belongs to the `write` pool and no write worker runs;
+- a pool with `claimDelay` waits for other pools first.
+
+**Each pod spends a token's whole rate limit.** `limits.distributed` is off. Turn it on with Postgres so workers share the counters.
+
+**Jobs repeat after a deploy.** Jobs still running when the drain timeout ran out are requeued, and the interrupted attempt counts. Raise `--drain-timeout` (and the grace period above it) if long jobs keep being cut.
+
+## Webhooks do not arrive
+
+- `HOLTKEEPER_PUBLIC_URL` must be the address GitLab can reach; the hooks Holtkeeper registers point at it.
+- GitLab must send the webhook secret; webhooks are refused without it.
+- Large pushes need request bodies of a few MB at the ingress (`nginx.ingress.kubernetes.io/proxy-body-size` for ingress-nginx).
+- With NetworkPolicies, GitLab's addresses must be allowed in `webIngressFrom`.
+
+`holtkeeper_webhook_events_total{forge,status}` counts deliveries by outcome. Details per forge are in the [webhooks reference](/reference/webhooks/).
+
+## Jobs cannot install private packages
+
+- **TLS errors in the job log** (`self-signed certificate`, `unable to get local issuer certificate`): the client does not trust the proxy CA. Check that `HOLTKEEPER_EGRESS_CA` points at the CA certificate on the workers. Restart the proxy after changing the CA.
+- **401 or 403 from the registry**: the forge's **Packages for jobs** switch is off, or the web pods cannot serve rules: `forgeRules` needs `HOLTKEEPER_EGRESS_SECRET` in the top-level `existingSecret`, the same value on web and proxy.
+- **A static rule's token is wrong**: `${NAME}` comes from `egressProxy.existingSecret`; restart the proxy after changing it.
+- **The Caches panel says the proxy did not answer**: the web pods need `HOLTKEEPER_EGRESS_SECRET` and must be allowed to reach the proxy.
+
+## Slack or the AI provider times out
+
+Holtkeeper calls `https://slack.com/api` from web and worker processes, and the AI provider's API from workers. When NetworkPolicies or a narrowed `workerEgress` limit outbound traffic, allow both. Write workers reach them through the egress proxy. See [Egress](/self-host/configure/egress/#networkpolicies).
+
+## Disks fill up
+
+- **`/tmp`** holds package manager caches (`HOME` is `/tmp`). Raise `tmpSizeLimit` in the chart.
+- **`/workspace`** holds checkouts and git mirrors. Raise `worker.workspace.sizeLimit`, or move mirrors to a PVC.
+- **Artifacts** grow without `server.retention`. Set `days` or `maxBytes`.
+
+**Settings › System › Storage and caches** shows each area per worker, with the change over seven days, and lets admins clear them.
+
+## Stored credentials cannot be read
+
+Every credential fails to decrypt at once: the vault key changed, or one process has a different key. Put the original `HOLTKEEPER_VAULT_KEY` back on every process. There is no way to recover the values without it; otherwise every forge token and secret setting has to be entered again.
+
+## Related
+
+- [Health and metrics](/self-host/operate/health/) — probes and the health strip.
+- [Environment variables](/reference/environment/) — every variable the configs read.
+- [Deployment reference](/self-host/reference/deployment/) — the details behind each fix.

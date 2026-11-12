@@ -1,0 +1,92 @@
+---
+title: Health and metrics
+description: The probes every Holtkeeper process answers, the Prometheus metrics worth watching, and the health strip under Settings › System.
+sidebar:
+  label: Health
+  order: 1
+---
+
+import { Button, Screen, Strip, Toolbar, Ui } from '@ui'
+
+Every Holtkeeper process, whatever its role, answers three endpoints without authentication: a liveness probe, a readiness probe and Prometheus metrics. Inside the panel, **Settings › System** runs the same checks on demand and adds storage, the database and the worker reports.
+
+## Probes
+
+| Endpoint       | Answers 200 when                                                                                                              | Use it for                              |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `GET /healthz` | The process answers.                                                                                                          | Liveness, startup, Docker `HEALTHCHECK` |
+| `GET /readyz`  | The store answers a query (Postgres: migrations applied), the artifact store answers a ping, and the process is not draining. | Readiness, load balancers               |
+
+`/readyz` answers 503 with a JSON body per check when one fails, so the body tells you which dependency is down.
+
+```sh title="Terminal"
+curl -s https://holtkeeper.example.com/readyz
+```
+
+The Helm chart wires startup and liveness probes to `/healthz` and readiness to `/readyz`; the image's own health check calls `/healthz`.
+
+:::caution
+`/metrics` needs no authentication and is served on the web Service too. If the host is public, block the path at the ingress.
+:::
+
+## Metrics
+
+`GET /metrics` serves Prometheus text format. The ones to watch first:
+
+| Metric                                            | Type      | Tells you                                             |
+| ------------------------------------------------- | --------- | ----------------------------------------------------- |
+| `holtkeeper_jobs_queued`                          | gauge     | Queued jobs due now; the scaling signal for KEDA.     |
+| `holtkeeper_jobs{status="queued"\|"running"}`     | gauge     | Queue and running jobs.                               |
+| `holtkeeper_jobs_finished_total{analyzer,status}` | counter   | Finished jobs by analyzer and outcome.                |
+| `holtkeeper_job_duration_seconds{analyzer}`       | histogram | How long jobs take.                                   |
+| `holtkeeper_webhook_events_total{forge,status}`   | counter   | Webhook deliveries from GitLab.                       |
+| `holtkeeper_ai_cost_usd_total{provider,model}`    | counter   | AI spend; tokens and runs have their own counters.    |
+| `holtkeeper_limiter_saturated{key}`               | gauge     | A forge or AI token at its rate or concurrency limit. |
+| `holtkeeper_artifact_store_bytes`                 | gauge     | Artifact store size, listed at most every 5 minutes.  |
+| `holtkeeper_draining`                             | gauge     | The process is shutting down.                         |
+
+Store-backed series (queue, AI usage) are reported only by processes with the web role, each with the same value: aggregate them with `max`, not `sum`. The chart's `metrics.serviceMonitor.enabled` adds a ServiceMonitor for the Prometheus Operator. The full list is in the [deployment reference](/self-host/reference/deployment/#health-readiness-metrics-shutdown).
+
+## Settings › System
+
+Admins with global `settings:read` see the instance's health at the top of **Settings › System**. <Ui>Check health now</Ui> measures again; each check gives up after 3 seconds.
+
+<Screen
+  title="Settings › System"
+  caption="The health strip: every check with its state, then the running release and when it was measured."
+>
+  <Toolbar title="Health">
+    <Button primary>Check health now</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 'Store', label: 'ok · answering', tone: 'ok' },
+      { value: 'Migrations', label: 'ok · up to date', tone: 'ok' },
+      { value: 'Artifacts', label: 'ok · answering', tone: 'ok' },
+      { value: 'Workers', label: 'ok · 4 workers reporting', tone: 'ok' },
+      { value: 'Library index', label: 'needs a look · waiting for GitHub quota', tone: 'warn' },
+    ]}
+    end="1.4.0 · checked 09:41"
+  />
+</Screen>
+
+| Check             | Shown when                        | Not ok means                                                                                 |
+| ----------------- | --------------------------------- | -------------------------------------------------------------------------------------------- |
+| Store             | always                            | A one-row query failed.                                                                      |
+| Migrations        | Postgres                          | Migrations are not applied.                                                                  |
+| Artifacts         | an artifact store is configured   | The bucket or directory did not answer.                                                      |
+| Workers           | the store has a key-value store   | No worker reported its disks in 15 minutes: no worker is running, or none reaches the store. |
+| Library index     | the library index is on           | Waiting for GitHub quota, or the last run failed.                                            |
+| Read-only entries | old `repo.readOnly` entries exist | Those entries no longer stop writes; set them again as `repo.freeze`.                        |
+
+Below the strip, the same page shows **Storage and caches** (the database, artifacts with the declared quota and retention, git mirrors and tool caches per worker, with the change over seven days), the **Egress proxy cache**, **Database** (tables, indexes, advice, and with Postgres rights the slow queries and sessions), the **Library index**, **Background work** and **All keys**. Those panels are described in [Settings › System](/guide/settings/system/).
+
+## Shutdown
+
+On `SIGTERM` a process fails readiness at once, stops claiming jobs and gives running jobs the drain timeout (`--drain-timeout`, default `30s`; the chart's workers use `120s`) to finish. Jobs still running are then requeued and run again on another worker; the interrupted attempt counts. Give the container a grace period longer than the drain timeout — Compose uses 60 s, the chart's workers 150 s.
+
+## Related
+
+- [Troubleshooting](/self-host/operate/troubleshooting/) — what failing checks usually mean.
+- [Scaling](/self-host/operate/scaling/) — use the queue metric to scale workers.
+- [Settings › System](/guide/settings/system/) — the panel page in full.

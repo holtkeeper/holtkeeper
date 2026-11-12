@@ -1,0 +1,39 @@
+---
+title: What is Holtkeeper
+description: A self-hosted keeper for a fleet of repositories — AI review, dependency waves, audits and releases, for people in a panel and for agents over MCP.
+sidebar:
+  label: Overview
+  order: 0
+---
+
+import { Card, Cards } from '@ui'
+
+Holtkeeper is a self-hosted keeper for a fleet of repositories. It reviews merge requests, ships dependency upgrades that fix their own breaking changes, audits security and licenses, and runs releases — across monorepos and polyrepos, npm and Go, from a homelab with five repositories to a production fleet with hundreds.
+
+People work in the panel. Coding agents read the same data over MCP before they change code.
+
+## What it does
+
+- **Reviews** every merge request with an AI reviewer that posts findings on the line, with suggestions you apply in one click.
+- **Indexes the fleet**: which repository uses which library at which version, the public API of every package, runtimes, base images and licenses.
+- **Upgrades dependencies in waves**: an agent opens one merge request per repository, fixes what the upgrade breaks and waits for CI.
+- **Audits** advisories and licenses, and fixes them the same way.
+- **Releases**: knows what is ready, writes the changelog and announces the version with the repositories it would break.
+- **Remembers**: a team guide, notes and learnings that both people and agents read.
+
+## Where to go next
+
+<Cards>
+  <Card title="Quickstart" href="/start/quickstart/" icon="start">
+    Run one container, connect GitLab and see your first analysed repository.
+  </Card>
+  <Card title="Concepts" href="/start/concepts/fleet/" icon="book">
+    Repositories, groups, analyzers, runs, tasks and the Inbox in five minutes.
+  </Card>
+  <Card title="Guide" href="/guide/" icon="home">
+    Every screen of the panel, one page each.
+  </Card>
+  <Card title="Self-host" href="/self-host/" icon="server">
+    From a single container to Kubernetes with workers.
+  </Card>
+</Cards>

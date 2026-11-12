@@ -1,0 +1,118 @@
+---
+title: Setting keys
+description: Every setting key Holtkeeper defines, with its section, value shape, default and where the panel edits it.
+sidebar:
+  order: 4
+---
+
+Settings are values that can differ per repository, group or the whole organization. Each key can have entries for several scopes; for a repository, the most specific covering entry wins as a whole (an exact repository, then path globs, subgroups and group intersections, groups, then everything; ties go to the newest). Keys marked **global** take one value for every repository. Values are never merged field by field, but unset fields of an object keep their defaults.
+
+**Settings › Policies** and **Settings › Analyzers** also list keys whose home is another page, and the **Search settings** field in Settings finds every key wherever it lives. See [Settings](/guide/settings/people/) for the editors and [Policies](/start/concepts/policies/) for how scopes resolve.
+
+:::note
+This page follows the current definitions in the code, which are still moving. The settings editor in the panel always shows what your instance defines, with each key's help text.
+:::
+
+## AI and access
+
+| Key                | Section         | Value                                                                                                                      | Default                                                             | Edited in                  |
+| ------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------- |
+| `llm.provider`     | AI · global     | Id or name of an AI provider credential.                                                                                   | none: no agent runs                                                 | Settings › AI              |
+| `llm.budget`       | AI              | `{ weeklyUsd, reserveUsd, action, warnPercent }`; `action` is `block` or `warn`. Presets `default`, `learn`, `small-team`. | $150 a week, $25 reserve, `block`, warn at 80%                      | Settings › AI              |
+| `agent.tools`      | AI              | `{ knowledgeTokens }`: tokens of team knowledge in every agent task, `0` leaves it out.                                    | 1500                                                                | Settings › AI (Advanced)   |
+| `tasks.write`      | AI · global     | `{ enabled, perRepoUsd, perGroupUsd, weeklyUsd, maxRepos }`.                                                               | off; $1.50 per repository, $5 per task, $40 a week, 10 repositories | Ops › Tasks                |
+| `access.crossTeam` | Access · global | `off`, `metadata` or `snippets`: what everyone reads of other teams' repositories.                                         | `snippets`                                                          | Settings › People & access |
+
+## Knowledge
+
+| Key                    | Section   | Value                                                                                                                                                       | Default                                    | Edited in           |
+| ---------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------------------- |
+| `knowledge.autoAccept` | Knowledge | Knowledge kinds agent proposals are accepted for without review: `decision`, `convention`, `migration`, `quirk`, `howto`.                                   | none (`quirk`, `howto` on a fresh install) | Settings › Policies |
+| `learnings.autoAccept` | Knowledge | `{ sources, scope }`: rule candidates accepted into the Guide without review when they come from `mcp` or `review-reply`; `scope` is `suggested` or `repo`. | `{ sources: [], scope: 'suggested' }`      | Settings › Policies |
+| `guide.autoAccept`     | Knowledge | Guide sections whose generated text agents use without review: `general`, `testing`, `testids`, `commits`, ….                                               | none                                       | Settings › Policies |
+
+## Repositories
+
+| Key                   | Section      | Value                                                                                                                                           | Default                                                                     | Edited in                                        |
+| --------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| `repo.freeze`         | Repositories | `{ frozen, reason, until? }`: only analyze; never comment, review, open merge requests or push. A `frozen: false` entry lifts a broader freeze. | none: writable                                                              | Settings › People & access                       |
+| `repo.tests`          | Repositories | `{ expected, reason? }`: off marks repositories with no tests by design.                                                                        | `{ expected: true }`                                                        | Quality › Coverage, Settings › Policies          |
+| `repo.analyzers`      | Repositories | `{ off, reason? }`: analyzer kinds that never run automatically here.                                                                           | `{ off: [] }`                                                               | Settings › Policies                              |
+| `commits.conventions` | Repositories | Rules for commit messages and branch names on top of history. Presets `conventional`, `ticket`.                                                 | `{ history: true }`                                                         | Knowledge › Guide (Commits), Settings › Policies |
+| `assets.policy`       | Repositories | Formats, size and dimension limits, ignored globs, budgets and `mode`. Presets `web`, `game`.                                                   | WebP for raster, optimized SVG, warn 500 kB, error 1 MB, 2560 px, `comment` | Knowledge › Guide (Assets), Settings › Policies  |
+
+## Merge requests
+
+| Key                      | Section        | Value                                                                                                                        | Default             | Edited in               |
+| ------------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------- |
+| `mergeRequests.comments` | Merge requests | `{ enabled, reason? }`: off means no AI review and nothing posted on merge requests.                                         | `{ enabled: true }` | Settings › Policies     |
+| `mergeRequests.policies` | Merge requests | Rules run on merge request events: approve, merge, label, comment or skip analyzers. Policies of every covering scope apply. | none                | Ops › Automation        |
+| `slack.reviews`          | Merge requests | `{ channels }`: Slack channel ids where merge request links get a review status emoji.                                       | `{ channels: [] }`  | Settings › Integrations |
+
+## Audit
+
+| Key                     | Section | Value                                                                  | Default                              | Edited in         |
+| ----------------------- | ------- | ---------------------------------------------------------------------- | ------------------------------------ | ----------------- |
+| `audit.fix`             | Audit   | Whether audits change dependencies and open merge requests with fixes. | `false`                              | Supply › Security |
+| `audit.upgrade`         | Audit   | Largest version jump a fix may make: `major`, `minor` or `patch`.      | `major` (`minor` on a fresh install) | Supply › Security |
+| `audit.allowlist`       | Audit   | Advisories to ignore, each with a reason and an optional expiry.       | none                                 | Supply › Security |
+| `audit.allowlistPolicy` | Audit   | `{ maxDays?, requireReason }`: limits on allowlist entries.            | `{ requireReason: true }`            | Supply › Security |
+
+## Releases and tracking
+
+| Key                 | Section  | Value                                                                                                     | Default                                            | Edited in               |
+| ------------------- | -------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------- |
+| `releases`          | Releases | Release flow: `enabled`, `flow`, `version`, `acceptance`, `changelog`, `mergeRequest`, `deploy`, `gates`. | off; merge request flow, semver, tags `v{version}` | Releases                |
+| `releases.notify`   | Releases | `{ targets }`: webhook targets for release events. Secret: never sent to the browser.                     | `{ targets: [] }`                                  | Settings › Integrations |
+| `releases.announce` | Releases | `{ channels, groupWindowMinutes, notes, tasks, impact }`: Slack channels for every new version.           | no channels, 10-minute window                      | Settings › Integrations |
+| `trackers`          | Tracking | Declarative trackers of entities such as feature flags: sources, rules and outputs.                       | none                                               | Settings › Integrations |
+
+## Updates, automation and system
+
+| Key                  | Section             | Value                                                                                                                                           | Default                                                                  | Edited in               |
+| -------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------- |
+| `polling`            | Updates             | Whether and how often to poll the forge for repositories webhooks do not reach. Presets `webhook-first`, `responsive`, `relaxed`, `off`.        | off (on a fresh install: every 5 minutes, hourly while webhooks deliver) | Settings › System       |
+| `freshness`          | Automation          | `{ mode, factor }`: whether analyses refresh on their own: `on`, `off` or slower by a factor.                                                   | `on`, factor 3                                                           | Ops › Automation        |
+| `freshness.sweep`    | Automation · global | `{ maxJobsPerHour, maxAiJobsPerHour, nightWindow, headPollMinutes }`.                                                                           | 10 jobs, 2 AI jobs an hour, night 01:00–07:00, heads every 30 minutes    | Settings › System       |
+| `libraries`          | Libraries           | Indexing of third-party library docs: `enabled`, `include`, `exclude`, `maxVersions`, `sources`, `interval`, `digests`, …. Presets `on`, `off`. | on, excluding `@types/*`, daily                                          | Settings › System       |
+| `limits.credentials` | Runtime             | Concurrency, request and token rates, daily caps per credential id or name.                                                                     | kind defaults                                                            | Settings › Integrations |
+| `toolchain`          | Runtime             | Tool versions, container image, network access and environment for jobs.                                                                        | detected versions                                                        | Settings › System       |
+
+## Analyzer options
+
+Every analyzer with options has a key `analyzers.<kind>` (section Analyzers): a partial options object, validated field by field and stored without defaults. **Configure** on the page that owns the analyzer opens it; **Settings › Analyzers** lists them all.
+
+| Key                      | Analyzer              | Presets                                                                | Edited in                                         |
+| ------------------------ | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
+| `analyzers.bundle`       | Bundle size           |                                                                        | Quality › Bundles                                 |
+| `analyzers.coverage`     | Test coverage         |                                                                        | Quality › Coverage                                |
+| `analyzers.branches`     | Branches              |                                                                        | Quality › Branches                                |
+| `analyzers.ci-jobs`      | CI jobs               |                                                                        | Quality › CI                                      |
+| `analyzers.review`       | Code review           |                                                                        | Quality › Reviews                                 |
+| `analyzers.depgraph`     | Dependencies          |                                                                        | Supply › Libraries                                |
+| `analyzers.renovate`     | Renovate              | `report`, `calm`, `fresh`, `security`                                  | Supply › Libraries                                |
+| `analyzers.api-surface`  | Public API            |                                                                        | Supply › Public API                               |
+| `analyzers.usages`       | Package usage         |                                                                        | Supply › Public API                               |
+| `analyzers.stack`        | Tech stack            |                                                                        | Supply › Stack                                    |
+| `analyzers.browserslist` | Browserslist database |                                                                        | Supply › Stack                                    |
+| `analyzers.audit`        | Vulnerability audit   |                                                                        | Supply › Security                                 |
+| `analyzers.licenses`     | Licenses              | `commercial`, `no-copyleft`, `open-source`, `internal`, `flag-missing` | Supply › Licenses, Settings › Policies            |
+| `analyzers.assets`       | Asset budgets         |                                                                        | Repository › Assets                               |
+| `analyzers.testids`      | Test ids              | `testing-library`, `cypress`, `react-native`                           | Knowledge › Guide (Test ids), Settings › Policies |
+| `analyzers.tracker`      | Tracker               |                                                                        | Settings › Integrations                           |
+| `analyzers.i18n`         | Translations          |                                                                        | Settings › Analyzers                              |
+| `analyzers.propagate`    | Package rollout       |                                                                        | Settings › Analyzers                              |
+
+The defaults of each analyzer's options are in its module docs. The review options are listed on [The review agent](/agents/review-agent/#configure-it).
+
+## Retired keys
+
+Holtkeeper no longer reads these keys; the panel hides stored entries and refuses new values: `llm.model`, `llm.models`, `review.instructions`, `agent.instructions` (team rules now live in the Guide), `repo.readOnly` (replaced by `repo.freeze`; set freezes again), and the options of removed analyzers `analyzers.changelog`, `analyzers.delivery`, `analyzers.fleet`, `analyzers.port`, `analyzers.quality`, `analyzers.release-risk`, `analyzers.warmup`.
+
+## Related
+
+- [Policies](/start/concepts/policies/) — scopes and which entry wins.
+- [Settings › Policies](/guide/settings/policies/) — the policy editors.
+- [Settings › Analyzers](/guide/settings/analyzers/) — analyzer options per scope.
+- [Configuration](/self-host/configure/configuration/) — what lives in the config file instead.
+- [Settings module](/modules/settings/) — definitions and resolution.

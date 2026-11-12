@@ -1,0 +1,19 @@
+---
+interface Props {
+  /** Percent used; values above 100 fill the bar. */
+  value: number
+  /** Colour; by default over 100 is bad, from 90 warn, else ok. */
+  tone?: 'ok' | 'warn' | 'bad' | 'neutral'
+  /** Text after the bar; default `<value>%`. */
+  label?: string
+}
+
+const { value, label } = Astro.props
+const tone = Astro.props.tone ?? (value > 100 ? 'bad' : value >= 90 ? 'warn' : 'ok')
+const color = tone === 'neutral' ? 'var(--hk-fg)' : `var(--hk-${tone})`
+---
+
+<span class="hk-meter" style={`--tone: ${color}`} role="img" aria-label={label ?? `${value}%`}>
+  <span class="hk-meter-bar"><b style={`width: ${Math.min(value, 100)}%`}></b></span>
+  <span class="hk-meter-value">{label ?? `${value}%`}</span>
+</span>

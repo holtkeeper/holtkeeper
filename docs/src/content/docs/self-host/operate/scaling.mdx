@@ -1,0 +1,78 @@
+---
+title: Scaling
+description: Scale web and worker processes, split workers into pools, autoscale on the job queue with KEDA, and share credential limits across workers.
+sidebar:
+  order: 2
+---
+
+Web processes are stateless and scale on CPU; workers scale on the job queue. Before adding either, make sure the instance runs on Postgres and S3 with distributed limits — the [requirements for more than one process](/self-host/#more-than-one-process).
+
+## How much runs at once
+
+Job parallelism is workers × concurrency:
+
+| Layout           | Workers                                       | Concurrency per worker                                       |
+| ---------------- | --------------------------------------------- | ------------------------------------------------------------ |
+| Single container | 1                                             | `jobs.concurrency` (default 2)                               |
+| Compose          | `--scale worker=N`                            | `jobs.concurrency`, or `--concurrency` in the worker command |
+| Kubernetes       | `worker.replicas`, summed over `worker.pools` | `worker.concurrency`, else `jobs.concurrency`                |
+
+More workers help only while there is work they may start. The queue runs at most one job per analyzer and repository at a time, and analyzers that push or open merge requests run alone on their repository or group. Jobs of other analyzers of one repository run side by side. A worker hands a free slot to the oldest job its credential limits admit, so a long-waiting job is not starved by a stream of short ones.
+
+Watch `max(holtkeeper_jobs_queued)`: queued jobs due now. A queue that stays high with idle workers points at limits or exclusive analyzers, not at too few workers; `why_job` over MCP or the job's wait reason in the panel says which.
+
+## Web
+
+- `web.replicas` (default 2) or `web.hpa` (CPU, 2–5 replicas by default).
+- Any web pod can take a webhook; it only enqueues jobs in the shared store.
+- Only one process runs the scheduler at a time, under a lease in the store (30 s TTL, renewed every 10 s). With `scheduler.enabled` the scheduler gets its own Deployment and web pods run `web` only.
+
+## Worker pools
+
+Pools split workers by node class. Each pool is a Deployment with the `worker` fields plus its own:
+
+```yaml title="values.yaml"
+worker:
+  pools:
+    - { name: small, replicas: 3, concurrency: 2, spread: true, claimDelay: 15s }
+    - { name: big, replicas: 1, concurrency: 4, nodeSelector: { kubernetes.io/hostname: big-node } }
+```
+
+- `claimDelay` makes a pool take only jobs queued at least that long, so pools without a delay take new jobs first and this one gets the overflow. Keep it above the 5 s poll interval.
+- `spread: true` keeps a pool's pods on different nodes, counting only the current ReplicaSet.
+- Pools do not combine with KEDA.
+
+Outside Kubernetes, `--claim-delay` (or `HOLTKEEPER_CLAIM_DELAY`) does the same per process.
+
+Write tasks have a pool of their own, `write`, which only write workers serve; see [Kubernetes › Write workers](/self-host/run/kubernetes/#write-workers).
+
+## Autoscaling with KEDA
+
+```yaml title="values.yaml"
+keda:
+  enabled: true
+  serverAddress: http://prometheus-operated.monitoring.svc:9090
+  threshold: '2' # queued jobs per worker replica
+  minReplicaCount: 1
+  maxReplicaCount: 10
+```
+
+A ScaledObject scales the worker Deployment on `max(holtkeeper_jobs_queued)` from Prometheus, which must scrape the web pods. With `keda.scaledJob.enabled` KEDA instead creates one Kubernetes Job per queued job (`maxReplicaCount` 20 by default), each pod running a single job and exiting — the strongest isolation the chart offers.
+
+## Credential limits
+
+GitLab and AI tokens have rate and concurrency limits per credential. With `limits: { distributed: true }` the counters live in the store, so all workers share one token's budget instead of each pod spending it in full. The starting configs turn it on with Postgres. Slots held by a process that dies return after 2 minutes without its heartbeat. Live usage per credential is in [Settings › Integrations](/guide/settings/integrations/); `holtkeeper_limiter_saturated` shows a saturated token in Prometheus.
+
+## Caches as you scale
+
+Every new worker pod starts with empty caches unless you share them. A ReadWriteMany PVC for `worker.mirrorCache` saves cloning every repository again; one for `worker.miseCache` saves installing tools again; the egress proxy's download cache saves package downloads. See [Kubernetes › Caches on volumes](/self-host/run/kubernetes/#caches-on-volumes).
+
+## Draining
+
+Scaling down sends `SIGTERM`: the worker stops claiming, running jobs get the drain timeout (`worker.drainTimeout`, default `120s` in the chart) and are then requeued on another worker. Keep `terminationGracePeriodSeconds` above it (150 by default).
+
+## Related
+
+- [Health and metrics](/self-host/operate/health/) — the queue and limiter metrics.
+- [Kubernetes](/self-host/run/kubernetes/) — the chart's roles and values.
+- [Deployment reference](/self-host/reference/deployment/#scaling)

@@ -1,0 +1,207 @@
+---
+title: AI
+description: Connect the AI provider agents run on, see which model each tier resolves to, and set the weekly budget with caps for groups and repositories.
+panel: Settings › AI
+route: /settings/ai
+permission: settings:read
+sidebar:
+  order: 2
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Meter,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Connect the AI provider agents run on, see which model each tier resolves to, and set the weekly budget with caps for groups and repositories.
+
+<Screen title="Settings › AI" caption="The summary line leaves out figures you may not read.">
+  <Toolbar title="AI" crumbs={['Settings']}>
+    <Tag>Providers</Tag>
+    <Tag>Budgets</Tag>
+    <Tag>Agent tools</Tag>
+    <Button primary>Add provider</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 'acme-gateway', label: 'agents run on' },
+      { value: '$63.40 / $150', label: 'this week' },
+      { value: 412, label: 'runs' },
+      { value: 3, label: 'failed', tone: 'warn' },
+      { value: '71%', label: 'cache hits' },
+    ]}
+  />
+  <Stack>
+    <Toolbar title="acme-gateway">
+      <Tag slot="start">anthropic-compatible</Tag>
+      <Tag tone="acc">Agents use it</Tag>
+      <Tag tone="ok">Healthy</Tag>
+      <Button>Models</Button>
+      <Button>Test</Button>
+      <Button ghost>Rotate</Button>
+      <Button ghost>Edit</Button>
+      <Button ghost>Delete</Button>
+    </Toolbar>
+    <Facts
+      items={[
+        ['Endpoint', 'https://llm.acme.dev'],
+        ['Usable by', 'Everything'],
+        ['Expires', 'in 64 days · rotation off'],
+        ['This week', '$63.40 · 412 runs'],
+        ['Last used', 'Within a minute'],
+      ]}
+    />
+  </Stack>
+</Screen>
+
+## Connect a provider
+
+An AI provider is a credential: a key for an API, plus where it lives. Agents run on one of them, the one the **AI provider** setting names.
+
+1. Click <Ui>Add provider</Ui>.
+2. Pick the kind:
+   - **anthropic** for the Anthropic API,
+   - **anthropic-compatible** for a gateway that speaks the Anthropic Messages API,
+   - **ai-sdk** for any other API, OpenAI-compatible ones included.
+3. Enter a name, the endpoint URL and the key, and who may use it (everything, some groups or some repositories). Optionally an expiry date.
+4. Save, then click <Ui>Test</Ui> on the card to check the key works and the provider can call tools.
+5. Set the **AI provider** setting (below the budgets) to the new credential. It has one value for the whole instance.
+
+<Screen title="Settings › AI · Add provider" kind="example">
+  <Stack>
+    <Toolbar title="Add provider" />
+    <Fields>
+      <Field label="Name" value="acme-gateway" mono />
+      <Field label="Kind" value="anthropic-compatible" />
+      <Field label="URL" value="https://llm.acme.dev" mono wide />
+      <Field
+        label="Key"
+        placeholder="Paste the API key"
+        hint="Stored sealed; never shown again."
+        wide
+      />
+      <Field label="Usable by" value="Everything" />
+      <Field label="Expires" placeholder="Optional" />
+    </Fields>
+    <Toolbar>
+      <Button ghost>Cancel</Button>
+      <Button primary>Add provider</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+Each provider card shows kind, endpoint, an _Agents use it_ tag on the active one, expiry, scope, rotation, this week's spend and runs, the last use and a status:
+
+| Status       | Means                                                    |
+| ------------ | -------------------------------------------------------- |
+| Expired      | The expiry date has passed.                              |
+| Failing      | The last test of tool use, or the last rotation, failed. |
+| Expires soon | It expires within 14 days.                               |
+| Unused       | Nothing refers to it and nothing used it for 30 days.    |
+| Healthy      | None of the above.                                       |
+
+:::caution
+The key is sealed when you save it and never sent back to the browser. To change it, use <Ui>Edit</Ui> and paste a new one; deleting a provider names what stops working first.
+:::
+
+## Models and tiers
+
+There is no model setting. Holtkeeper asks for a **tier** and runs the newest model of that tier the provider lists:
+
+| Tier   | Model                | Effort | Used for                                                |
+| ------ | -------------------- | ------ | ------------------------------------------------------- |
+| `fast` | newest Claude Haiku  | low    | summaries, release notes, classification, one-shots     |
+| `main` | newest Claude Sonnet | medium | reviews, thread replies, chat, agent tasks; the default |
+| `deep` | newest Claude Opus   | high   | reviews whose depth setting asks for deep               |
+
+<Ui>Models</Ui> on a card lists what the provider offers. When it lists no model of a tier's family,
+that tier runs on the nearest tier that has one; when the listing fails, tiers fall back to fixed
+model ids. Without any Claude model listed, agents do not run.
+
+<Screen title="Settings › AI · Models of acme-gateway">
+  <Rows>
+    <Row title="claude-haiku-5-5" sub="fast tier" />
+    <Row title="claude-sonnet-5-5" sub="main tier" selected />
+    <Row title="claude-opus-5-5" sub="deep tier" />
+    <Row title="claude-sonnet-4-6" sub="not used" />
+  </Rows>
+</Screen>
+
+:::note
+Runs on models without a price show their cost as _unknown_ on [AI spend](/guide/ops/ai-spend/), so totals understate spend for them.
+:::
+
+## Budgets
+
+The **Budgets** block (needs `ai:read`) shows the broadest budget you may read: spend, percent and status, and a meter split by feature, darkest first, with a warning line at **Warn at** and the stop line at the weekly limit. A legend names each feature, and a pace line gives the forecast.
+
+<Screen title="Settings › AI · Budgets">
+  <Stack>
+    <Toolbar title="Weekly budget">
+      <Tag tone="ok">On track</Tag>
+    </Toolbar>
+    <Meter value={42} label={'$63.40 of $150 · warn at 80%'} />
+    <Facts
+      items={[
+        ['Reviews', '$31.20'],
+        ['Agent tasks', '$14.80'],
+        ['Chat', '$9.10'],
+        ['Guide and learnings', '$6.30'],
+        ['Release notes', '$2.00'],
+      ]}
+    />
+  </Stack>
+</Screen>
+
+With `settings:write` over everything the same editor as on AI spend sits here: weekly limit, amount kept for people, **Warn at** and _Block runs_ or _Warn_. How the limit and the reserve apply is on [AI spend](/guide/ops/ai-spend/#how-the-weekly-budget-works). Past **Warn at**, people who may change the budget get one Inbox item that week.
+
+### Cap a group or a repository
+
+A budget entry scoped to groups or repositories is a **cap**: a weekly limit for those repositories on top of the instance's. It never lifts them out of the broader budget.
+
+<Screen title="Settings › AI · Caps">
+  <Scroll>
+
+| Scope             | Kind       | Cap | Spend  | Used                 | Status                        |
+| ----------------- | ---------- | --- | ------ | -------------------- | ----------------------------- |
+| Payments          | Group      | $60 | $31.10 | <Meter value={52} /> | <Tag tone="ok">On track</Tag> |
+| `acme/widget-kit` | Repository | $10 | $9.80  | <Meter value={98} /> | <Tag tone="warn">Close</Tag>  |
+| Reviews           | Feature    | —   | $31.20 | 49% of the budget    | —                             |
+| Agent tasks       | Feature    | —   | $14.80 | 23% of the budget    | —                             |
+
+  </Scroll>
+</Screen>
+
+1. Click <Ui>Add cap</Ui>. It jumps to the budget setting's entries.
+2. Add an entry, pick the groups or repositories and set its weekly limit, reserve, warning share and mode.
+3. Save. The cap shows in the table with its spend.
+
+Features have no caps of their own; their rows show spend and share only. A **Preset** picker offers ready-made budgets (_default_, _learn_, _small team_).
+
+## Agent tools
+
+**Advanced: agent tools** lists every tool agents can call, read only: its toolset, who gets it (Reviews, Chat, Agent tasks, MCP clients) and whether it writes. Tools cannot be switched off. Under **Advanced** you also find the setting for how much of an agent's Guide knowledge notes may take.
+
+## Who sees this section
+
+The section needs `settings:read` or `credentials:read`. Provider cards need `credentials:read`, changing them `credentials:write`; budgets need `ai:read`. Spend in detail is on [Ops › AI spend](/guide/ops/ai-spend/).
+
+## Related
+
+- [AI spend](/guide/ops/ai-spend/) — spend by day, feature, repository and model.
+- [Integrations](/guide/settings/integrations/) — every other credential, and request limits for AI keys.
+- [Reviews](/guide/quality/reviews/) — the biggest spender, and its depth setting.
+- [Agent](/modules/agent/) — providers, tiers and model resolution in depth.
+- [AI usage](/modules/ai-usage/) — how budgets are enforced.

@@ -1,0 +1,180 @@
+---
+title: Profile and access
+description: Your own account — profile and avatar, the teams list pages default to, passkeys, linked forge accounts, what your grants allow, and preferences.
+panel: Account
+route: /account/profile
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Field,
+  Fields,
+  Row,
+  Rows,
+  Screen,
+  Scroll,
+  Segmented,
+  Split,
+  Stack,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Your own account — profile and avatar, the teams list pages default to, passkeys, linked forge accounts, what your grants allow, and preferences. Open it from your avatar at the bottom of the rail; every signed-in person has one.
+
+<Screen
+  title="Account › Profile"
+  caption="The header names you and your role; the sections on the left each carry a short count."
+>
+  <Toolbar title="Mira K.">
+    <Tag slot="start">Maintainer</Tag>
+    <Tag slot="start">2 passkeys</Tag>
+    <Button ghost>Docs</Button>
+    <Button>Sign out</Button>
+  </Toolbar>
+  <Split>
+    <Rows>
+      <Row title="Profile" selected />
+      <Row title="My teams" sub="2 groups" />
+      <Row title="Sign-in" sub="2 passkeys" />
+      <Row title="Linked accounts" sub="1 to verify" />
+      <Row title="My access" sub="Maintainer" />
+      <Row title="Connect agents" sub="3 tokens" />
+      <Row title="Preferences" />
+    </Rows>
+    <Stack>
+      <Facts
+        items={[
+          ['Name', 'Mira K.'],
+          ['Email', 'mira@acme.example'],
+          ['Member since', 'March 2026'],
+          ['User id', 'u_4f2a9c'],
+        ]}
+      />
+      <Button>New avatar</Button>
+    </Stack>
+  </Split>
+</Screen>
+
+The header shows your avatar, email, role, how you sign in and since when you are a member, then <Ui>Docs</Ui> and <Ui>Sign out</Ui>. Admins also get a pointer to Settings.
+
+## Profile
+
+With Holtkeeper's own accounts (passkey sign-in), Profile shows your stored name, email, member-since date and user id. <Ui>New avatar</Ui> rolls a new generated avatar. With another sign-in provider, it shows what that provider reports and the avatar cannot be changed.
+
+## Choose your teams
+
+**My teams** decides what the _My teams_ position of the scope switch shows on every list page: Home, Repositories, the Inbox sections, Chat and the fleet pages. It is a default view, not a permission; lists only ever hold what you may see.
+
+<Screen title="Account › My teams">
+  <Scroll>
+
+| In My teams | Group                                            | Repositories | Health           | Forge  |
+| ----------- | ------------------------------------------------ | ------------ | ---------------- | ------ |
+| ☑           | **Web** · `web`                                  | 14           | ● 9 ● 4 ● 1      | `work` |
+| ☐           | &nbsp;&nbsp; **Web › Payments** · `web.payments` | 4            | ● 2 ● 2          | `work` |
+| ☑           | **Widgets** · `widgets`                          | 6            | ● 6              | `work` |
+| ☐           | **Docs** · `docs`                                | 1            | ● 1 not analysed | `work` |
+
+  </Scroll>
+  <Stack>
+    <Fields columns={1}>
+      <Field label="Combinations" value="web + payments" hint="Join two or more groups with +; tick single groups above" mono />
+    </Fields>
+
+_My teams_ covers 20 repositories. Picked by you. <Button ghost>Use my grants</Button>
+
+  </Stack>
+</Screen>
+
+1. Tick the groups you work in. Subgroups are listed indented and can be picked on their own.
+2. To mean "repositories in both groups", type a combination such as `web + payments`.
+3. Check how many repositories _My teams_ now covers, under the table.
+4. To go back to the groups in your grants, click <Ui>Use my grants</Ui>.
+
+Until you change them, your home groups are the groups named in your grants.
+
+## Sign-in
+
+Shown when Holtkeeper keeps its own accounts. Each passkey signs you in on its own.
+
+- <Ui>Add a passkey</Ui> asks your browser which device or password manager keeps it. An optional
+  name helps you tell them apart.
+- Rename or remove a passkey from its row. The last one cannot be removed: add another first.
+- Single sign-on identities you used are listed too.
+
+:::tip
+Keep a second passkey on another device. If you lose every passkey, an admin can send you a recovery link.
+:::
+
+## Linked accounts
+
+Link your accounts on forges and chat so bots and merge request commands act as you. A link counts only once it is verified.
+
+<Screen title="Account › Linked accounts">
+  <Scroll>
+
+| Provider        | Account id | Username | Status                            |                         |
+| --------------- | ---------- | -------- | --------------------------------- | ----------------------- |
+| GitLab · `work` | `4817`     | `mira.k` | <Tag tone="ok">Verified</Tag>     |                         |
+| GitLab · `oss`  | `90210`    |          | <Tag tone="warn">Unverified</Tag> | <Button>Verify</Button> |
+
+  </Scroll>
+  <Stack>
+
+**Code** `K7QD-2M9X` · post `/holtkeeper verify K7QD-2M9X` as a comment on a merge request or issue from that account within 30 minutes.
+
+  </Stack>
+</Screen>
+
+### Link and verify a GitLab account
+
+1. Add a link: pick the provider and enter your **numeric GitLab user id**, the stable id the provider assigns to your account. Usernames can change, so they are not used.
+2. The link starts _unverified_. Click <Ui>Verify</Ui> to get a one-time code; it is shown once.
+3. From that GitLab account, post the command shown, such as `/holtkeeper verify K7QD-2M9X`, as a comment on any merge request or issue Holtkeeper watches.
+4. Holtkeeper checks the comment's author and marks the link verified. <Ui>New code</Ui> issues a fresh code if this one expired.
+
+:::caution
+An unverified link never lets a bot act as you, and anyone else may claim the same id until you verify it. Codes last 30 minutes and five wrong tries drop them. Once verified, nobody can take the id over by linking it themselves; an admin must unlink it first.
+:::
+
+## My access
+
+**My access** shows your role in words (_Developer_, _Maintainer_, or _Custom_ when your grants match no preset), a summary of your grants, and each grant with where it applies and what it allows. With Holtkeeper's own accounts, **Given by** names who invited you and when.
+
+<Screen title="Account › My access">
+  <Stack>
+    <Facts
+      items={[
+        ['Role', 'Maintainer'],
+        ['Given by', 'Jon D. · 8 months ago'],
+      ]}
+    />
+  </Stack>
+  <Scroll>
+
+| Where           | Allows                                                                            |
+| --------------- | --------------------------------------------------------------------------------- |
+| Group `web`     | Read repositories, analyses and audits; run analyzers; change settings; run tasks |
+| Group `widgets` | Read repositories and analyses; read releases                                     |
+| Everything      | Read knowledge                                                                    |
+
+  </Scroll>
+</Screen>
+
+When a page refuses you, it names the permission you are missing and offers <Ui>Copy request</Ui>, a message you can send to an admin. Grants are changed on [Settings › People](/guide/settings/people/).
+
+## Preferences
+
+**Theme** switches between System, Light and Dark. **Lists open on** picks where list pages start: _My teams_, _All I can see_ or one group. Both are kept in this browser.
+
+## Related
+
+- [Connect agents](/guide/account/connect-agents/) — MCP tokens for your coding agents.
+- [People](/guide/settings/people/) — invitations, roles and grants (admins).
+- [Permissions](/start/concepts/permissions/) — roles, grants and scopes.
+- [Permission reference](/reference/permissions/) — every action a grant can allow.

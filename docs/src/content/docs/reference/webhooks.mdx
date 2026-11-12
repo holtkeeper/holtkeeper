@@ -1,0 +1,83 @@
+---
+title: Webhooks
+description: The forge webhooks Holtkeeper receives, how each is secured, and what every GitLab event makes it do.
+sidebar:
+  order: 6
+---
+
+Holtkeeper learns about changes on the forge in two ways: webhooks, which arrive the moment something happens, and polling, which looks on a schedule for repositories webhooks do not reach. Both feed the same handling, so a repository behaves the same either way, and a change seen both ways runs once. While a webhook delivers for a repository, polling slows down to a safety net. Only GitLab payloads are understood for now.
+
+## Endpoints
+
+| URL                             | Secret                                                                                                             | Use it for                                                        |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `POST /api/webhooks/<forge id>` | `X-Gitlab-Token` equal to the forge's own secret, generated in the panel.                                          | A forge added in **Settings › Integrations**: one hook per group. |
+| `POST /api/webhooks/r/<token>`  | The token in the URL is the secret; the secret token field can stay empty.                                         | One repository, from its hub's **Updates** panel.                 |
+| `POST /api/webhooks/gitlab`     | `X-Gitlab-Token` equal to `jobs.webhookSecret` of the config file (`HOLTKEEPER_WEBHOOK_SECRET` in the Helm chart). | A forge declared in the config file.                              |
+
+URLs are built from `server.publicUrl`, for example `https://holtkeeper.example.com/api/webhooks/r/Xk3…`.
+
+Answers:
+
+| Status | When                                                                                            |
+| ------ | ----------------------------------------------------------------------------------------------- |
+| `200`  | Accepted. Events that queue nothing answer `{ enqueued: [], ignored: <reason> }`.               |
+| `400`  | A malformed payload of a handled event, or a repository webhook delivery about another project. |
+| `401`  | Wrong secret token.                                                                             |
+| `404`  | `/api/webhooks/gitlab` without `jobs.webhookSecret`, or an unknown repository token.            |
+
+The secret is compared in constant time. Treat it, and a repository webhook URL, like a password: anyone with it can make Holtkeeper queue jobs.
+
+## Registering hooks
+
+### For a forge
+
+A forge's webhook secret is generated in the panel (32 random bytes, shown once). With registration on, Holtkeeper creates the hook itself on the forge's root groups with every event GitLab has; GitLab group hooks need Premium, so on Free it registers one project hook per project instead. Calling it again rotates the secret and updates the hooks it registered. Removing the forge removes its hooks.
+
+The forge's token needs scope `api` and the **Maintainer** role (project hooks) or **Owner** role (group hooks) on the targets.
+
+### For one repository
+
+On the repository hub's **Updates** panel, **Generate and register on GitLab** issues a URL and creates the project hook. To add it by hand: in GitLab open the project's **Settings → Webhooks**, paste the URL and tick **Tag push**, **Merge request**, **Comments** and **Pipeline** events. Regenerating the URL stops the previous one at once; the panel keeps the last 50 deliveries with what each did.
+
+### Disabled hooks
+
+GitLab disables a hook that keeps failing, for example while Holtkeeper is down. Every 15 minutes Holtkeeper checks the hooks it registered and re-enables a disabled one with a test delivery of an event it ignores; **Re-enable now** in **Settings › Integrations** runs the check at once. Every hour it also re-registers hooks whose events are out of date, so new event kinds start arriving without a rotation.
+
+## Events
+
+| GitLab event       | What Holtkeeper does                                                                                                                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Push Hook          | Queues the analyzers of the push trigger for matching branches, newest commit only. A push to the default branch also records the new head for freshness. Deleted branches, tags and the bot's own pushes are ignored.                                                   |
+| Tag Push Hook      | Queues the analyzers of the tag trigger for the tag (by default a public API snapshot), once per package tag in monorepos. Deleted tags are ignored.                                                                                                                     |
+| Merge Request Hook | On open, reopen, new commits or leaving draft, queues the merge request trigger's analyzers (for example the review) and runs merge request policies. Labels added queue their label triggers. Title or description edits, closed and merged merge requests are ignored. |
+| Note Hook          | `/holtkeeper <command>` on a merge request runs that command. A reply in a thread Holtkeeper started queues an answer from the review agent and may become a rule candidate.                                                                                             |
+| Pipeline Hook      | When a merge request's head pipeline ends `success` or `failed`, runs the merge request policies again, so approvals and merges deferred during the pipeline happen.                                                                                                     |
+
+Triggers (which analyzers run on push, tag, merge request and label events) are edited in **Ops › Automation**. Events by the forge's bot account and notes carrying Holtkeeper's hidden markers are ignored, so Holtkeeper never answers itself. A job already queued or running for the same analyzer, repository, ref and options is not queued again.
+
+### Merge request commands
+
+| Command                   | Does                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `/holtkeeper help`        | Built in: the commands you can run here.                                                                    |
+| `/holtkeeper release`     | Built in: shows where the repository is in its release flow and runs its steps.                             |
+| `/holtkeeper verify`      | Built in: proves you own your forge account, with the code from **Account › Linked accounts**.              |
+| `/holtkeeper <command> …` | Runs a command the instance defines, with `key=value` options, for example `/holtkeeper review force=true`. |
+
+Anyone who can comment on the merge request can run commands, and their agent runs count as work a person started for the AI budget. Answers are posted as a note, or as a reply when the command was posted in a thread.
+
+## Read-only repositories
+
+A frozen repository (`repo.freeze`) is still analyzed: pushes queue their analyzers. Holtkeeper never comments, reviews, opens merge requests or reacts to merge request events there.
+
+## Outgoing webhooks
+
+Holtkeeper also sends webhooks: release events go to the targets of the `releases.notify` setting, edited in **Settings › Integrations**. Its URLs count as credentials and are never sent to the browser.
+
+## Related
+
+- [Settings › Integrations](/guide/settings/integrations/) — forges, their webhooks and disabled-hook checks.
+- [Environment variables](/reference/environment/) — `HOLTKEEPER_WEBHOOK_SECRET` and the rest.
+- [Configuration](/self-host/configure/configuration/) — `jobs.webhookSecret` and triggers in the config file.
+- [The review agent](/agents/review-agent/) — what merge request events start.

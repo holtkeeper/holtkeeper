@@ -1,5 +1,5 @@
 import { Link, Outlet, useMatch, useRouterState } from '@tanstack/react-router'
-import { Search } from 'lucide-react'
+import { CircleHelp, Search } from 'lucide-react'
 import { type ComponentType, type ReactNode, useEffect, useMemo, useState } from 'react'
 
 import {
@@ -18,6 +18,7 @@ import {
   type NavBadge,
   type NavItem,
   activeNav,
+  docsLinkFor,
   groupByWorkspace,
   navBadgeWord,
   navKey,
@@ -95,8 +96,8 @@ function RailLabel({
 }
 
 /**
- * The signed-in layout: a 60px rail of labelled workspaces with ⌘K, Settings and the account at
- * the bottom (a top strip on narrow screens), unread chat and open Inbox decisions as badges (and
+ * The signed-in layout: a 60px rail of labelled workspaces with Docs (the current workspace's guide
+ * page), ⌘K, Settings and the account at the bottom (a top strip on narrow screens), unread chat and open Inbox decisions as badges (and
  * task groups waiting for approval on the Tasks tab), the routed page in the main card, and the
  * side-sheet slot beside it. ⌘K or Ctrl+K opens the command palette from any page. Pages get the
  * workspace tabs and the slot through `ShellContext`.
@@ -209,6 +210,15 @@ export function AppShell() {
               })}
           </nav>
           <div className="shell-rail-group shell-rail-bottom">
+            <a
+              href={docsLinkFor(current?.workspace.id)}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Documentation (opens in a new tab)"
+              className={railItemClass(false)}
+            >
+              <RailLabel icon={CircleHelp} label="Docs" />
+            </a>
             <button
               type="button"
               aria-label="Search, Command K"

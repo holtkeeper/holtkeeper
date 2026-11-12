@@ -1,0 +1,23 @@
+---
+interface Props {
+  /** Options; `Name:3` adds a count. */
+  items: string[]
+  active?: number
+}
+
+const { items, active = 0 } = Astro.props
+---
+
+<span class="hk-seg">
+  {
+    items.map((item, i) => {
+      const [name, count] = item.split(':')
+      return (
+        <span class={i === active ? 'on' : undefined}>
+          {name}
+          {count && <span class="hk-count-ui">{count}</span>}
+        </span>
+      )
+    })
+  }
+</span>

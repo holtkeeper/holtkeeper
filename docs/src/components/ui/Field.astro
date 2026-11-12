@@ -1,0 +1,34 @@
+---
+interface Props {
+  label: string
+  /** The value shown in the box; without it `placeholder` shows dimmed. */
+  value?: string
+  placeholder?: string
+  hint?: string
+  mono?: boolean
+  /** A switch instead of a text box. */
+  toggle?: boolean
+  /** Spans every column of `Fields`. */
+  wide?: boolean
+}
+
+const { label, value, placeholder, hint, mono = false, toggle, wide = false } = Astro.props
+---
+
+<div class:list={['hk-field', { wide }]}>
+  <span class="hk-field-label">{label}</span>
+  {
+    toggle === undefined ? (
+      <span class:list={['hk-field-box', { placeholder: !value, 'hk-mono': mono }]}>
+        {value ?? placeholder}
+        <slot />
+      </span>
+    ) : (
+      <span class="hk-field-box">
+        <span class:list={['hk-switch', { on: toggle }]} />
+        {value}
+      </span>
+    )
+  }
+  {hint && <span class="hk-field-hint">{hint}</span>}
+</div>

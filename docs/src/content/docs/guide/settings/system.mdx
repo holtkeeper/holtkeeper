@@ -1,0 +1,188 @@
+---
+title: System
+description: Check the instance's health, see what storage, the proxy cache and the database hold, tune background work, and find any setting no other page edits.
+panel: Settings › System
+route: /settings/system
+permission: settings:read
+sidebar:
+  order: 7
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Meter,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Split,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Check the instance's health, see what storage, the proxy cache and the database hold, tune background work, and find any setting no other page edits.
+
+<Screen
+  title="Settings › System"
+  caption="Each health check fails after 3 seconds; the worst one sets the overall status."
+>
+  <Toolbar title="System" crumbs={['Settings']}>
+    <Tag>Storage</Tag>
+    <Tag>Caches</Tag>
+    <Tag>Database</Tag>
+    <Tag>Library index</Tag>
+    <Tag>Background work</Tag>
+    <Tag>All keys</Tag>
+    <Button primary>Check health now</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 'ok', label: 'store · answering', tone: 'ok' },
+      { value: 'ok', label: 'migrations · up to date', tone: 'ok' },
+      { value: 'ok', label: 'artifacts', tone: 'ok' },
+      { value: 'ok', label: 'workers · 4 reporting', tone: 'ok' },
+      { value: 'needs a look', label: 'library index · waiting for GitHub quota', tone: 'warn' },
+    ]}
+    end="v2.14.0 · checked 10:42"
+  />
+</Screen>
+
+## Check health
+
+The strip has one cell per check, with a status (`ok`, `needs a look`, `failing`) and a detail, then the running version and when it was checked. <Ui>Check health now</Ui> checks again.
+
+| Check             | Listed when                     | Needs a look or fails when                                                                                                                         |
+| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store             | always                          | a simple query fails.                                                                                                                              |
+| Migrations        | on Postgres                     | migrations are not applied.                                                                                                                        |
+| Artifacts         | an artifact store is configured | it cannot be reached.                                                                                                                              |
+| Workers           | always with a key-value store   | no worker reported its disks in 15 minutes.                                                                                                        |
+| Library index     | the library index is on         | it waits for GitHub quota, or its last run failed.                                                                                                 |
+| Retired read-only | old read-only entries exist     | always: those entries no longer stop writes; set them again as a freeze in [People & access](/guide/settings/people/#make-repositories-read-only). |
+
+## Storage and caches
+
+The title row shows the total and its change over seven days. A stacked bar and a table break it down by area: size, items, share, the change against a week ago (shrinking is green) and <Ui>Clear</Ui> for areas that allow it.
+
+<Screen title="Settings › System · Storage and caches">
+  <Split>
+    <Scroll>
+
+| Area             | Size    | Items   | Share | 7 days  |                        |
+| ---------------- | ------- | ------- | ----- | ------- | ---------------------- |
+| Analysis records | 18.2 GB | 412,880 | 61%   | +1.4 GB | —                      |
+| Git mirrors      | 7.9 GB  | 142     | 26%   | +0.2 GB | <Button>Clear</Button> |
+| Tool cache       | 3.1 GB  | 38      | 10%   | −0.6 GB | <Button>Clear</Button> |
+| Job logs         | 0.8 GB  | 96,400  | 3%    | +0.1 GB | —                      |
+
+    </Scroll>
+    <Stack>
+      <Toolbar title="S3 bucket">
+        <Tag tone="ok">Reachable</Tag>
+      </Toolbar>
+      <Facts
+        items={[
+          ['Endpoint', 's3.acme.dev'],
+          ['Bucket', 'holtkeeper · eu-north-1'],
+          ['Prefix', 'prod/'],
+          ['Objects', '512,104'],
+          ['Retention', '180 days'],
+        ]}
+      />
+      <Meter value={62} label="18.6 GB of 30 GB quota" />
+    </Stack>
+
+  </Split>
+</Screen>
+
+- **Git mirrors** and the **tool cache** are broken down by worker as the workers report them; clearing them asks every worker.
+- The side column shows the artifact store: an S3 bucket (endpoint host, bucket, region, prefix) or a directory, whether it is reachable, what it uses, its objects and how long Holtkeeper keeps artifacts. With a declared quota, a bar shows the share used: amber from 80%, red from 95%.
+- The 7-days column shows `—` until a snapshot a week old exists; a daily snapshot is kept for 90 days.
+
+<Ui>Clear</Ui> needs `settings:write` over everything.
+
+## Egress proxy cache
+
+Jobs download packages and tools through the egress proxy, which caches them. The block shows the cache's size, what it saved, the hit rate and its entries, and removes entries with `settings:write` over everything.
+
+## Database
+
+The version, a _Healthy_ tag or how many warnings there are, figures (size with 7-day growth, cache hit ratio, connections and uptime on Postgres; tables, rows and migrations on SQLite), findings worth a look, and tabs:
+
+<Screen title="Settings › System · Database">
+  <Stack>
+    <Toolbar title="PostgreSQL 17.2">
+      <Tag tone="ok">Healthy</Tag>
+    </Toolbar>
+    <Strip
+      items={[
+        { value: '24.6 GB', label: 'size · +0.9 GB in 7 days' },
+        { value: '99.2%', label: 'cache hits', tone: 'ok' },
+        { value: '18 / 100', label: 'connections' },
+        { value: '41 days', label: 'uptime' },
+      ]}
+    />
+    <Tabs
+      items={['Tables and size', 'Growth', 'Slow queries', 'Sessions', 'Indexes', 'Migrations']}
+      active={2}
+    />
+  </Stack>
+</Screen>
+
+**Slow queries** and **Sessions** are Postgres only. **Reset** on Slow queries clears the statistics and needs `settings:write` over everything.
+
+## Library index
+
+Holtkeeper indexes the docs, releases and issues of third-party libraries the fleet uses, through GitHub. The block shows its state and the GitHub credentials it uses; add them in [Integrations](/guide/settings/integrations/).
+
+## Background work
+
+The System section's own settings at the organization level, grouped by category: the library index, polling, the toolchain and the freshness sweep (its hourly caps and night window).
+
+<Screen title="Settings › System · Background work">
+  <Rows>
+    <Row title="Polling" sub="enabled · every 5m · 1h while webhooks deliver">
+      <Tag>Default</Tag>
+      <Button ghost>Change</Button>
+    </Row>
+    <Row title="Freshness sweep" sub="10 jobs / hour · 2 AI jobs / hour · night 01:00–07:00">
+      <Tag>Organization</Tag>
+      <Tag>1 narrower entry</Tag>
+      <Button ghost>Change</Button>
+      <Button ghost>Reset</Button>
+    </Row>
+    <Row title="Library index" sub="on · every GitHub credential">
+      <Tag>Default</Tag>
+      <Button ghost>Change</Button>
+    </Row>
+    <Row title="Agents may change code" sub="Off · change it in Ops › Tasks" />
+  </Rows>
+</Screen>
+
+Each row shows the value and who sets it (_Default_ or _Organization_, and how many narrower entries replace it somewhere). With `settings:write` over everything, <Ui>Change</Ui> edits the organization's entry and <Ui>Reset</Ui> removes it. The last line says whether agents may change code and links to [Tasks](/guide/ops/tasks/#let-agents-change-code).
+
+## Find any setting
+
+**All keys** says how many settings exist and lists, as tags, those no page or section edits. <Ui>Show all keys</Ui> opens every non-secret setting with the value that wins and where it comes from, filterable by text and to those not at their default; each names where it is edited. Pick a group in **Resolve for** to see what applies to that group instead.
+
+:::tip
+The **Search settings** field above the Settings sub-navigation (<Kbd>/</Kbd>) finds any setting by name or key and jumps to where it is edited, even when that is another page.
+:::
+
+## Who sees this section
+
+System needs `settings:read` over everything. Clearing storage and caches, resetting slow query statistics and changing background work need `settings:write` over everything.
+
+## Related
+
+- [Configuration](/self-host/configure/configuration/) — the config file behind storage, artifacts and the database.
+- [Environment](/reference/environment/) — environment variables the instance reads.
+- [Automation](/guide/ops/automation/#tune-freshness) — freshness per team.
+- [Setting keys](/reference/setting-keys/) — every key and its default.
+- [Audit log](/guide/settings/audit-log/) — every settings change, recorded.

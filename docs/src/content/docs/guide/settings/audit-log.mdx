@@ -1,0 +1,158 @@
+---
+title: Audit log
+description: See who did what and when — people, agents and Holtkeeper itself — check that the log was not tampered with, and export it.
+panel: Settings › Audit log
+route: /settings/audit
+permission: repos:read
+sidebar:
+  order: 8
+---
+
+import {
+  Button,
+  Facts,
+  Kbd,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See who did what and when — people, agents and Holtkeeper itself — check that the log was not tampered with, and export it.
+
+<Screen title="Settings › Audit log" caption="Events newest first, grouped by your local day.">
+  <Toolbar title="Audit log" crumbs={['Settings']}>
+    <Button ghost>Verify chain</Button>
+    <Button ghost>⋯</Button>
+  </Toolbar>
+  <Toolbar>
+    <Tag slot="start">Search events</Tag>
+    <Tag>All I can see</Tag>
+    <Tag>Area</Tag>
+    <Tag>Repository</Tag>
+    <Tag>Person</Tag>
+    <Tag>Outcome</Tag>
+    <Segmented items={['24 h', '7 days', '30 days', 'All']} active={1} />
+  </Toolbar>
+  <Stack>
+    <Toolbar title="Chain intact">
+      <Tag slot="start" tone="ok">#1–#48,206</Tag>
+      <Tag>checked today 03:12 · 37 newer events wait for the next check</Tag>
+    </Toolbar>
+    <Strip
+      items={[
+        { value: 1284, label: 'events' },
+        { value: 6, label: 'denied', tone: 'warn' },
+        { value: 2, label: 'failed', tone: 'bad' },
+        { value: 9, label: 'people' },
+        { value: 3, label: 'agents' },
+        { value: 'system', label: 'Holtkeeper' },
+      ]}
+    />
+  </Stack>
+  <Scroll>
+
+| Time                   | Actor        | Action                                          | Target                   | Scope             |
+| ---------------------- | ------------ | ----------------------------------------------- | ------------------------ | ----------------- |
+| **Today**              |              |                                                 |                          |                   |
+| 10:42 · `#48,243`      | Mira K.      | Approved a task                                 | Upgrade @acme/widget-kit | Organization      |
+| 10:31 · `#48,241`      | Jon D.       | Saved 2 setting changes at once                 | `mergeRequests.comments` | Payments          |
+| 09:58 · `#48,236`      | agent:ci-bot | Ran an analyzer · <Tag tone="warn">denied</Tag> | coverage                 | `acme/widget-kit` |
+| 03:12 · `#48,206`      | system       | Checked the audit chain                         | audit                    | Organization      |
+| **Yesterday** · Nov 11 |              |                                                 |                          |                   |
+| 17:05 · `#48,190`      | Mira K.      | Rotated a credential                            | gitlab-bot               | Organization      |
+
+  </Scroll>
+</Screen>
+
+## What you see
+
+Your access decides what the log shows:
+
+| You have                     | You see                                                                                                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `audit:read` over everything | Every event, the chain banner, <Ui>Verify chain</Ui> and export.                                                              |
+| `repos:read` only            | Events about repositories you can read. Never instance events: settings for everything, people, credentials, the chain check. |
+
+The server enforces this; the page only hides what you could not use.
+
+## Find an event
+
+1. Pick the scope: _My teams_, one group, or _All I can see_.
+2. Narrow with **Area**, **Repository**, **Person** and **Outcome**, and pick the time range: 24 h, 7 days (the default), 30 days or All.
+3. Search the loaded events by action, target, `#seq` or the start of an event id.
+
+A repository's **Activity** tab links here already filtered to that repository. The strip counts events in the range, the denied and failed ones, and how many people and agents acted, plus Holtkeeper itself when it did.
+
+The table shows the time with the event's sequence number, the actor (click to filter by them), the action as a sentence (with the outcome when it was not a success), the target and the scope (a repository or _Organization_). The footer says how many of the total are shown and loads older events.
+
+## Open an event
+
+Click a row, or press <Kbd>J</Kbd> to open the first row and <Kbd>K</Kbd> the last, then step with them.
+
+<Screen title="Settings › Audit log › #48,241">
+  <Sheet id="#48,241" title="Saved 2 setting changes at once" position="2 of 1,284">
+    <Tag tone="ok" slot="tags">
+      ok
+    </Tag>
+    <Button slot="actions">Only Jon D.</Button>
+    <Tabs items={['Event', 'Changes', 'Details']} />
+    <Facts
+      items={[
+        ['Who', 'Jon D. · panel'],
+        ['When', 'today 10:31:07'],
+        ['Scope', 'Payments'],
+        ['Hash', '9c1f…a04e'],
+        ['Previous', '#48,240 · 3b7d…e211'],
+        ['Chain check', 'Not covered yet'],
+      ]}
+    />
+  </Sheet>
+</Screen>
+
+| Tab     | What it shows                                                                                                                |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Event   | Who, outcome, request facts, scope, the event's hash, the previous event's hash and whether the last chain check covered it. |
+| Changes | What changed, field by field. Secrets show as redacted.                                                                      |
+| Details | Everything else the event recorded.                                                                                          |
+
+<Ui>Only Jon D.</Ui> filters the log to that person.
+
+## Verify the chain
+
+Every event carries a hash of the one before it, so changing or deleting an event breaks the chain from there on. Holtkeeper checks the whole chain once a day and records the check in the log.
+
+The banner reads one of:
+
+- **Chain intact**, with the range the check covered, when it ran and how many newer events wait for the next check.
+- **Chain broken at #n**, with the reason.
+- **Not checked yet**, before the first daily check.
+
+<Ui>Verify chain</Ui> checks now and shows the result in the banner. A check by hand is not recorded
+in the log.
+
+:::caution
+A broken chain means events were changed or removed outside Holtkeeper, usually straight in the database. Find out who had database access before trusting events after the break.
+:::
+
+## Export
+
+<Ui>⋯</Ui> › <Ui>Export</Ui> downloads the filtered events as CSV or NDJSON. Export and chain checks
+need `audit:read` over everything.
+
+## What gets recorded
+
+Every change through the panel, the API and MCP: settings, people and access, credentials, rules, tasks and their approvals, runs started by hand, forge actions such as re-enabled webhooks, refusals (as _denied_), and what Holtkeeper does on its own, such as rotating a credential, a budget stopping work or the daily chain check.
+
+## Related
+
+- [People & access](/guide/settings/people/) — a person's Activity tab reads this log.
+- [Permissions](/reference/permissions/) — `audit:read` and `repos:read`.
+- [Repository hub](/guide/repos/repository-hub/) — a repository's Activity tab.
+- [Store](/modules/store/) — how events are chained and verified.

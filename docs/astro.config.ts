@@ -1,23 +1,31 @@
 import { fileURLToPath } from 'node:url'
 
-import react from '@astrojs/react'
 import starlight from '@astrojs/starlight'
-import tailwindcss from '@tailwindcss/vite'
 import mermaid from 'astro-mermaid'
 import { defineConfig } from 'astro/config'
 import starlightSidebarTopics from 'starlight-sidebar-topics'
 
 import { repositoryLinks } from './src/docs/links.ts'
-import { createLinkResolver, discoverDocs, repoUrl, sidebarTopics } from './src/docs/sources.ts'
+import { createLinkResolver, developSidebar, discoverDocs, repoUrl } from './src/docs/sources.ts'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const sources = discoverDocs(root)
-const sidebar = sidebarTopics(sources)
+const develop = developSidebar(sources)
+
+const group = (label: string, directory: string, collapsed = false) => ({
+  label,
+  collapsed,
+  items: [{ autogenerate: { directory } }],
+})
 
 export default defineConfig({
   site: 'https://holtkeeper.github.io',
   outDir: './dist',
-  vite: { plugins: [tailwindcss()] },
+  vite: {
+    resolve: {
+      alias: { '@ui': fileURLToPath(new URL('./src/components/ui/index.ts', import.meta.url)) },
+    },
+  },
   integrations: [
     mermaid({
       theme: 'base',
@@ -29,38 +37,37 @@ export default defineConfig({
         themeVariables: {
           darkMode: true,
           fontSize: '14px',
-          background: '#0b0a08',
-          mainBkg: '#16130e',
-          primaryColor: '#16130e',
-          primaryTextColor: '#f1ece2',
-          primaryBorderColor: '#6b4f1d',
-          nodeBorder: '#6b4f1d',
-          secondaryColor: '#12100c',
-          tertiaryColor: '#0f0d0a',
-          textColor: '#cfc8ba',
-          lineColor: '#b8862f',
-          clusterBkg: '#0f0d0a',
-          clusterBorder: '#2e2a22',
-          titleColor: '#a19a8c',
-          edgeLabelBackground: '#0b0a08',
-          actorBkg: '#16130e',
-          actorBorder: '#6b4f1d',
-          actorTextColor: '#f1ece2',
-          actorLineColor: '#2e2a22',
-          signalColor: '#b8862f',
-          signalTextColor: '#cfc8ba',
-          noteBkgColor: '#12100c',
-          noteBorderColor: '#2e2a22',
-          noteTextColor: '#cfc8ba',
+          background: '#0b0b0c',
+          mainBkg: '#18181b',
+          primaryColor: '#18181b',
+          primaryTextColor: '#ededef',
+          primaryBorderColor: '#3a3a40',
+          nodeBorder: '#3a3a40',
+          secondaryColor: '#111113',
+          tertiaryColor: '#0e0e10',
+          textColor: '#b4b4bb',
+          lineColor: '#f0a63a',
+          clusterBkg: '#0e0e10',
+          clusterBorder: '#2a2a2e',
+          titleColor: '#9a9aa2',
+          edgeLabelBackground: '#0b0b0c',
+          actorBkg: '#18181b',
+          actorBorder: '#3a3a40',
+          actorTextColor: '#ededef',
+          actorLineColor: '#2a2a2e',
+          signalColor: '#f0a63a',
+          signalTextColor: '#b4b4bb',
+          noteBkgColor: '#111113',
+          noteBorderColor: '#2a2a2e',
+          noteTextColor: '#b4b4bb',
           dropShadow: 'none',
         },
       },
     }),
-    react(),
     starlight({
       title: 'Holtkeeper',
       description:
-        'Self-hosted automation engine for fleets of GitLab and GitHub repositories: AI code review, dependency waves, audits and releases.',
+        'A cozy holt for every repository: self-hosted AI review, dependency waves, audits and releases for fleets of GitLab repositories, from a homelab to a production zoo.',
       logo: { src: '@holtkeeper/brand/holtkeeper.svg' },
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: repoUrl }],
@@ -70,8 +77,19 @@ export default defineConfig({
         '@fontsource-variable/geist',
         '@fontsource-variable/geist-mono',
         './src/styles/theme.css',
+        './src/styles/ui.css',
+      ],
+      head: [
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'stylesheet',
+            href: 'https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;0,900;1,400&display=swap',
+          },
+        },
       ],
       components: {
+        Header: './src/components/overrides/Header.astro',
         PageTitle: './src/components/overrides/PageTitle.astro',
         Sidebar: './src/components/overrides/Sidebar.astro',
         ThemeProvider: './src/components/overrides/ThemeProvider.astro',
@@ -79,7 +97,7 @@ export default defineConfig({
       expressiveCode: {
         themes: ['github-dark-default', 'github-light-default'],
         styleOverrides: {
-          borderRadius: '0.75rem',
+          borderRadius: '0.6rem',
           borderColor: 'var(--hk-code-border)',
           codeFontFamily: '"Geist Mono Variable", ui-monospace, monospace',
           codeFontSize: '0.8125rem',
@@ -90,16 +108,73 @@ export default defineConfig({
       plugins: [
         starlightSidebarTopics([
           {
-            label: 'Guide',
-            link: '/guide/getting-started/',
-            icon: 'open-book',
-            items: sidebar.guide,
+            id: 'start',
+            label: 'Start',
+            link: '/start/',
+            icon: 'rocket',
+            items: [
+              'start',
+              'start/quickstart',
+              group('Concepts', 'start/concepts'),
+              group('First steps', 'start/first-steps'),
+            ],
           },
           {
-            label: 'Modules',
-            link: '/modules/',
+            id: 'guide',
+            label: 'Guide',
+            link: '/guide/',
+            icon: 'open-book',
+            items: [
+              'guide',
+              group('Home', 'guide/home'),
+              group('Repos', 'guide/repos', true),
+              group('Chat', 'guide/chat', true),
+              group('Supply chain', 'guide/supply-chain', true),
+              group('Quality', 'guide/quality', true),
+              group('Releases', 'guide/releases', true),
+              group('Knowledge', 'guide/knowledge', true),
+              group('Ops', 'guide/ops', true),
+              group('Settings', 'guide/settings', true),
+              group('Account', 'guide/account', true),
+            ],
+          },
+          {
+            id: 'agents',
+            label: 'Agents',
+            link: '/agents/',
+            icon: 'seti:json',
+            items: [{ autogenerate: { directory: 'agents' } }, 'agents/library-docs'],
+          },
+          {
+            id: 'self-host',
+            label: 'Self-host',
+            link: '/self-host/',
+            icon: 'laptop',
+            items: [
+              'self-host',
+              group('Get running', 'self-host/run'),
+              group('Configure', 'self-host/configure'),
+              group('Operate', 'self-host/operate'),
+              { label: 'Reference', collapsed: true, items: ['self-host/reference/deployment'] },
+            ],
+          },
+          {
+            id: 'develop',
+            label: 'Develop',
+            link: '/develop/',
             icon: 'puzzle',
-            items: sidebar.modules,
+            items: [
+              'develop',
+              { label: 'Project', items: ['develop/architecture', ...develop.project] },
+              { label: 'Modules', items: develop.modules },
+            ],
+          },
+          {
+            id: 'reference',
+            label: 'Reference',
+            link: '/reference/',
+            icon: 'document',
+            items: [{ autogenerate: { directory: 'reference' } }],
           },
         ]),
       ],

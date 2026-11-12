@@ -1,0 +1,40 @@
+---
+import { botAvatar } from './slack.ts'
+
+interface Props {
+  /** Display name; `holtkeeper` shows the app's avatar and the APP badge. */
+  author: string
+  time?: string
+  /** Avatar colour for people (initials are drawn from the name). */
+  color?: string
+}
+
+const { author, time = '10:42', color = '#5b4fc4' } = Astro.props
+const isBot = author === 'holtkeeper'
+const initials = author
+  .split(/\s+/)
+  .map((part) => part[0] ?? '')
+  .join('')
+  .slice(0, 2)
+  .toUpperCase()
+---
+
+<div class="hk-slack-msg">
+  {
+    isBot ? (
+      <img class="hk-slack-avatar" src={botAvatar} alt="" width="36" height="36" />
+    ) : (
+      <span class="hk-slack-avatar" style={`background: ${color}`} aria-hidden="true">
+        {initials}
+      </span>
+    )
+  }
+  <div class="hk-slack-body">
+    <div class="hk-slack-name">
+      <b>{author}</b>
+      {isBot && <span class="hk-slack-app">APP</span>}
+      <span class="hk-slack-time">{time}</span>
+    </div>
+    <div class="hk-slack-text"><slot /></div>
+  </div>
+</div>

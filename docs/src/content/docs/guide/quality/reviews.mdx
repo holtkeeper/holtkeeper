@@ -1,0 +1,391 @@
+---
+title: Reviews
+description: Follow Holtkeeper's AI reviews of merge requests across the fleet — verdicts, findings, cost and how people react — request a review by hand and tune how reviews behave.
+panel: Quality › Reviews
+route: /quality/reviews
+permission: analyses:read
+sidebar:
+  order: 6
+---
+
+import {
+  Button,
+  Comment,
+  Diff,
+  Emoji,
+  Facts,
+  Field,
+  Fields,
+  Kbd,
+  Meter,
+  Screen,
+  Scroll,
+  Sheet,
+  SlackContext,
+  SlackMessage,
+  SlackReaction,
+  SlackReactions,
+  SlackWindow,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Follow Holtkeeper's AI reviews of merge requests across the fleet — verdicts, findings, cost and how people react — request a review by hand and tune how reviews behave.
+
+<Screen title="Quality › Reviews" caption="Newest first, a page at a time. Show older reviews loads the next page.">
+  <Toolbar title="Reviews">
+    <Tag>My teams</Tag>
+    <Tag>Verdict: any</Tag>
+    <Tag>Mode: any</Tag>
+    <Tag>Author: any</Tag>
+    <Tag>Last 30 days</Tag>
+    <Button>Configure</Button>
+    <Button primary>Review a merge request</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 342, label: 'reviews' },
+      { value: 201, label: 'looks good', tone: 'ok' },
+      { value: 118, label: 'needs changes', tone: 'warn' },
+      { value: 23, label: 'skipped' },
+      { value: 896, label: 'findings · 14 critical · 133 major', tone: 'warn' },
+      { value: 412, label: 'threads resolved' },
+      { value: '$61.20', label: 'AI cost' },
+    ]}
+  />
+  <Scroll>
+
+| Merge request                                           | Repository          | Verdict                              | Findings                           | Resolved | Cost  | When       |
+| ------------------------------------------------------- | ------------------- | ------------------------------------ | ---------------------------------- | -------- | ----- | ---------- |
+| **!318** Round cart totals per line · Mira K.           | `acme/checkout-web` | <Tag tone="warn">Needs changes</Tag> | 4 · 1 major · 3 minor              | 2        | $0.41 | 12 min ago |
+| **!77** Add size prop to Badge · Tomas R. · incremental | `acme/widget-kit`   | <Tag tone="ok">Looks good</Tag>      | 0                                  | 3        | $0.08 | 1 h ago    |
+| **!1204** Move session store to some-lib · Ivo P.       | `acme/admin-ui`     | <Tag tone="bad">Needs changes</Tag>  | 6 · 1 critical · 2 major · 3 minor | 0        | $0.93 | 3 h ago    |
+| **!205** Bump some-lib to 4.2.0 · holtkeeper · skipped  | `acme/billing-api`  | <Tag>Skipped</Tag>                   | —                                  | —        | —     | 5 h ago    |
+
+  </Scroll>
+</Screen>
+
+## What a review does
+
+When a merge request opens or gets new commits, Holtkeeper reviews it and posts on the merge request itself:
+
+- **Inline comments** on changed lines, each with a severity (critical, major, minor or info), a category and often a one-click suggestion.
+- **A summary note** with the verdict (_Looks good_ or _Needs changes_), a short summary, how hard the change is to review, a walkthrough of the logical changes, findings per severity, what happened to earlier threads and what was not reviewed.
+
+Later pushes get an **incremental** review of the new lines only. Holtkeeper re-checks its own open threads whose file changed and resolves the fixed ones with a short note; when the verdict comes back clean, it also resolves its earlier summary threads. A reply in one of its threads gets an answer: an explanation, a concession that resolves the thread, or an updated suggestion.
+
+<Screen title="Merge request !318 · acme/checkout-web" kind="example" caption="An inline comment with a suggestion, as it appears on the forge.">
+  <Stack>
+    <Diff
+      file="src/cart/totals.ts"
+      stat="+6 −2"
+      lines={[
+        [41, ' ', 'export function lineTotal(item: CartItem): number {'],
+        [42, '-', '  return item.price * item.quantity'],
+        [42, '+', '  const total = item.price * item.quantity'],
+        [43, '+', '  return Math.round(total)'],
+        [44, ' ', '}'],
+      ]}
+    />
+    <Comment severity="major" where="src/cart/totals.ts · line 43">
+
+**Rounding drops cents.** `Math.round` rounds to whole units, so a line of 3 × 1.15 becomes 3 instead of 3.45. Round to minor units instead.
+
+    <Diff
+      file="Suggested change"
+      lines={[
+        [43, '-', '  return Math.round(total)'],
+        [43, '+', '  return Math.round(total * 100) / 100'],
+      ]}
+    />
+
+    </Comment>
+
+  </Stack>
+</Screen>
+
+<Screen title="Merge request !318 · summary" kind="example">
+  <Stack>
+    <Comment>
+
+**Holtkeeper review: needs changes**
+
+Rounds cart totals per line before summing. The rounding loses cents for fractional prices, and the new branch in `orderTotal` has no test.
+
+Review effort: 2 of 5 · Findings: 1 major, 3 minor · Threads: 1 resolved, 1 still applies
+
+    </Comment>
+
+  </Stack>
+</Screen>
+
+:::note
+Reviews write in the language of the merge request description unless the **language** option says otherwise. Code, suggestions and technical terms always stay in English.
+:::
+
+### Merge requests that are not reviewed
+
+Some merge requests are stored as **skipped** instead of reviewed:
+
+- merges between release branches, such as `develop` into `main`, `release/*` into `main` or back-merges of `main` into `develop`; their code was reviewed on the way in, and nothing is posted;
+- merge requests authored by Holtkeeper itself (dependency updates, propagation), recognized by the forge's bot username set in the panel; nothing is posted;
+- diffs over the size limit, which get one note saying why until the merge request is small enough.
+
+<Ui>Review again</Ui> reviews release merges and Holtkeeper's own merge requests anyway.
+
+## What the table shows
+
+One row per review run of every repository you can read.
+
+| Column        | Meaning                                                                                             |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| Merge request | `!` number, title and author; the mode when it was not a full review (incremental, reply, skipped). |
+| Repository    | Opens the repository hub at Quality › Reviews.                                                      |
+| Verdict       | In words, with a dot.                                                                               |
+| Findings      | Posted findings with a bar of their severities.                                                     |
+| Resolved      | Threads the run resolved.                                                                           |
+| Cost          | What the AI model calls cost.                                                                       |
+| When          | Age of the run, and a link to the merge request on the forge.                                       |
+
+The toolbar filters by **Verdict**, **Mode**, **Author** and the period (**7**, **30** or **90** days; 30 by default). The search in the header matches the merge request number, title, author and repository path. Findings, Cost and When sort, and filters live in the URL.
+
+The strip sums the period: reviews, one figure per verdict, posted findings with their severities, resolved threads and the AI cost. Once you filter by mode, author or search, it sums the loaded rows instead and says so.
+
+## Inspect a review
+
+Click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>.
+
+<Screen title="Quality › Reviews › !318">
+  <Sheet id="!318" title="Round cart totals per line" position="1 of 50">
+    <Tag tone="warn" slot="tags">Needs changes</Tag>
+    <Button slot="actions">Open merge request</Button>
+    <Button slot="actions" primary>Review again</Button>
+    <Meter value={100} tone="warn" label="4 findings · 1 major · 3 minor" />
+    <Facts
+      items={[
+        ['Repository', 'acme/checkout-web'],
+        ['Branches', 'fix/ABC-412-cart-rounding → main'],
+        ['Author', 'Mira K.'],
+      ]}
+    />
+    <Tabs items={['Findings:4', 'Summary', 'Learnings:1']} />
+    <Stack>
+      <Comment severity="major" where="src/cart/totals.ts:43 · correctness">
+
+**Rounding drops cents.** Suggestion accepted by the forge · source: agent
+
+      </Comment>
+    </Stack>
+    <Facts
+      items={[
+        ['Mode', 'Full'],
+        ['Commit', '9b1e0c4'],
+        ['Model', 'claude-sonnet'],
+        ['Tokens', '48.2k in · 3.1k out'],
+        ['Cost', '$0.41 · 1m 52s'],
+        ['Guide', 'All repositories · Team storefront · This repository'],
+        ['Record', 'Open as page'],
+      ]}
+    />
+
+  </Sheet>
+</Screen>
+
+| Tab       | What it shows                                                                                                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Findings  | One card per finding: `path:line` linking to the comment, category, severity, title, body, the suggested replacement as a diff, whether the forge accepted it and why not, and its source. |
+| Summary   | The summary as posted.                                                                                                                                                                     |
+| Learnings | Rule candidates drawn from replies on this merge request, with their status and a link to decide them in [Knowledge › Learnings](/guide/knowledge/learnings/).                             |
+
+Under both Findings and Summary sit the run's facts: mode, reviewed commit, model, tokens, cost, duration, the [Guide](/guide/knowledge/guide/) scopes it read and the analysis record. The copy button next to the `!` number copies the merge request link. <Ui>Open as page</Ui> opens the [analysis record](/guide/quality/analysis-record/).
+
+## Request a review by hand
+
+1. Click <Ui>Review a merge request</Ui>.
+2. Pick the repository (fixed when the page is narrowed to one) and enter the merge request: `!318`, `318` or its URL.
+3. Confirm. A toast links to the queued job.
+
+<Screen title="Quality › Reviews › Review a merge request">
+  <Stack>
+    <b>Review a merge request</b>
+    <Fields columns={1}>
+      <Field label="Repository" value="acme/checkout-web" />
+      <Field label="Merge request" value="!318" mono hint="A number, !N, or a merge request URL." />
+    </Fields>
+    <div>
+      <Button ghost>Cancel</Button> <Button primary>Review</Button>
+    </div>
+  </Stack>
+</Screen>
+
+<Ui>Review again</Ui> in the sheet or on the record reviews the same merge request again, even when
+its head was already reviewed or it would be skipped.
+
+:::caution
+Both actions need `analyses:run`, and a review analyzer must be available. Without them the buttons are hidden.
+:::
+
+## See which findings people find helpful
+
+Under the table, **Reactions by finding category** counts 👍 and 👎 on review comments. A tag gives the share of 👍 among all reactions; then each category gets a bar of helpful against not helpful, its helpful share, and the counts of 👍, 👎 and commented findings.
+
+<Screen title="Quality › Reviews › Reactions by finding category">
+  <Toolbar title="Reactions by finding category">
+    <Tag slot="start" tone="info">71% helpful</Tag>
+  </Toolbar>
+  <Scroll>
+
+| Category    | Helpful                                      | 👍  | 👎  | Commented |
+| ----------- | -------------------------------------------- | --- | --- | --------- |
+| correctness | <Meter value={88} tone="ok" label="88%" />   | 44  | 6   | 9         |
+| security    | <Meter value={80} tone="ok" label="80%" />   | 12  | 3   | 4         |
+| tests       | <Meter value={52} tone="warn" label="52%" /> | 13  | 12  | 7         |
+| style       | <Meter value={31} tone="bad" label="31%" />  | 5   | 11  | 6         |
+
+  </Scroll>
+</Screen>
+
+A category people keep turning down is a hint to add a rule. Replies to review comments become rule candidates in [Knowledge › Learnings](/guide/knowledge/learnings/), linked from the block. Across the fleet the block needs `knowledge:read` for every repository; narrowed to one repository it shows that repository's reactions. It stays hidden until there are reactions.
+
+## Review status in Slack
+
+When a Slack channel bound to a repository gets a message with a link to one of its merge requests, Holtkeeper's Slack app puts one emoji on the message that shows the review status, and keeps it current as reviews run.
+
+<Screen title="Slack · #team-storefront" kind="example" caption="One status emoji per message, swapped as the review moves on.">
+  <SlackWindow channel="team-storefront" topic="Checkout and cart" channels={['team-storefront', 'releases', 'general']}>
+    <SlackMessage author="Mira K." time="10:12" color="#2f7d6d">
+
+Could someone look at the cart rounding fix? https://gitlab.acme.dev/acme/checkout-web/-/merge_requests/318
+
+      <SlackReactions>
+        <SlackReaction emoji="hk-changes" />
+        <SlackReaction emoji="👀" count={2} />
+      </SlackReactions>
+    </SlackMessage>
+    <SlackMessage author="Tomas R." time="10:31" color="#a3548f">
+
+Badge size prop is ready: https://gitlab.acme.dev/acme/widget-kit/-/merge_requests/77
+
+      <SlackReactions>
+        <SlackReaction emoji="hk-clean" />
+      </SlackReactions>
+    </SlackMessage>
+
+  </SlackWindow>
+</Screen>
+
+| Status    | Emoji in the examples         | Default emoji           | When                                                       |
+| --------- | ----------------------------- | ----------------------- | ---------------------------------------------------------- |
+| Reviewing | <Emoji name="hk-reviewing" /> | `:eyes:`                | A review is queued or running.                             |
+| Clean     | <Emoji name="hk-clean" />     | `:large_green_circle:`  | The latest review looks good and posted no findings.       |
+| Minor     | <Emoji name="hk-minor" />     | `:large_orange_circle:` | Looks good, with minor or info findings.                   |
+| Changes   | <Emoji name="hk-changes" />   | `:red_circle:`          | Needs changes, or any major or critical finding.           |
+| Skipped   | <Emoji name="hk-skipped" />   | `:white_circle:`        | The review was skipped (diff too large, nothing in scope). |
+
+The status follows the newest review run, so an incremental review that finds nothing new shows clean even while earlier findings are still open. A new push swaps the emoji back to reviewing until the next verdict.
+
+When one message links several merge requests, the emoji shows the worst status among them, and the app posts one reply in the message's thread with a line per merge request. It edits that reply whenever a status changes and never posts a second one.
+
+<Screen title="Slack · thread reply" kind="example">
+  <SlackWindow channel="team-storefront">
+    <SlackMessage author="Ivo P." time="14:02" color="#5b4fc4">
+
+Release prep, please review: https://gitlab.acme.dev/acme/admin-ui/-/merge_requests/1204 https://gitlab.acme.dev/acme/widget-kit/-/merge_requests/77 https://gitlab.acme.dev/acme/checkout-web/-/merge_requests/320
+
+      <SlackReactions>
+        <SlackReaction emoji="hk-changes" />
+      </SlackReactions>
+    </SlackMessage>
+    <SlackMessage author="holtkeeper" time="14:02">
+
+<SlackContext>Reply in thread</SlackContext>
+
+<Emoji name="hk-changes" /> Needs changes · admin-ui!1204 Move session store to some-lib
+<br />
+<Emoji name="hk-reviewing" /> Reviewing · checkout-web!320 Show unit price in cart
+<br />
+<Emoji name="hk-clean" /> Clean · widget-kit!77 Add size prop to Badge
+
+    </SlackMessage>
+
+  </SlackWindow>
+</Screen>
+
+### Set it up
+
+1. Create and install the Slack app, then paste its credential in **Settings › Integrations › Slack**. [Slack settings](/guide/settings/slack/) walks through it.
+2. Invite the app to each channel it should watch: `/invite @Holtkeeper`.
+3. Bind channels to repositories with the `slack.reviews` setting: channel ids such as `C0123ABCD`, per scope. A group entry with no channels keeps that group quiet.
+
+:::tip
+The emoji in the examples are Holtkeeper's own status emoji. Upload them to your workspace as custom emoji and enter their names as overrides under the Slack credential in **Settings › Integrations › Slack**. Blank fields use the default emoji.
+:::
+
+Nothing is posted when the repository has merge request reviews turned off, the channel is not bound to it, or no Slack credential is stored.
+
+## Tune reviews
+
+<Ui>Configure</Ui> opens the `analyzers.review` setting, per scope like every analyzer setting.
+**Settings › Analyzers** shows it too.
+
+| Option            | Default                                       | Meaning                                                                                                                               |
+| ----------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxComments`     | 15                                            | Inline comments per run.                                                                                                              |
+| `minSeverity`     | `minor`                                       | Lowest severity posted: `info`, `minor`, `major` or `critical`.                                                                       |
+| `depth`           | `standard`                                    | `deep` reviews with a stronger, more expensive model.                                                                                 |
+| `approve`         | `never`                                       | `when-clean` approves merge requests whose review is clean.                                                                           |
+| `resolveSummary`  | `when-clean`                                  | When Holtkeeper resolves its own summary threads: `when-clean` after a clean run, `always` after every run, `never` leaves them open. |
+| `ignore`          | lockfiles, generated, snapshots, build output | Path globs never reviewed.                                                                                                            |
+| `maxDiffLines`    | 3000                                          | Skip larger diffs.                                                                                                                    |
+| `language`        | the description's language                    | Language of comments, summary and replies.                                                                                            |
+| `instructions`    | —                                             | Extra rules appended after the Guide.                                                                                                 |
+| `includeChecks`   | test ids                                      | Deterministic checks run alongside the AI: `secrets`, `testids`.                                                                      |
+| `media`           | on                                            | Review images the merge request adds or changes.                                                                                      |
+| `releaseBranches` | release and back-merge pairs                  | `source:target` branch globs that are not reviewed; an empty list reviews them all.                                                   |
+| `reviewOwn`       | off                                           | Review Holtkeeper's own merge requests.                                                                                               |
+
+```json title="analyzers.review · one group"
+{
+  "minSeverity": "major",
+  "maxComments": 8,
+  "approve": "when-clean",
+  "ignore": ["src/generated/**", "**/*.snap"]
+}
+```
+
+Rules about what to flag belong in the [team guide](/guide/knowledge/guide/), which every review reads first: the Review, General, Testing, Test ids and Assets sections, and the repository's own `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`.
+
+### REVIEW.md
+
+A `REVIEW.md` at the repository root goes first into the review. Write it for a reviewer: what matters in this codebase, what not to flag, how tests should look. Two sections are read as settings:
+
+```md title="REVIEW.md"
+## Ignore
+
+- `src/generated/**`
+- legacy/*.js
+
+## Paths
+
+- `migrations/**`: every migration must be reversible.
+- `src/api/**`: keep the public contract; bump the version
+  on breaking changes.
+```
+
+`## Ignore` (or `## Skip`) adds path globs to **ignore**. `## Paths` gives rules for files matching a glob; they reach the review only when such a file changed. Keep both near the top: only the first 6,000 characters of the file are read.
+
+## In one repository
+
+The repository hub's **Quality › Reviews** shows the same table, sheet and reactions block for one repository, with <Ui>Review a merge request</Ui> for it.
+
+## Related
+
+- [Knowledge › Learnings](/guide/knowledge/learnings/) — turn replies to review comments into rules.
+- [Team guide](/guide/knowledge/guide/) — the rules every review reads, and the effective prompt.
+- [Slack settings](/guide/settings/slack/) — the Slack app, channels and status emoji.
+- [AI spend](/guide/ops/ai-spend/) — what reviews cost against the weekly budget.
+- [Review analyzer](/modules/review/) — the review flow step by step.

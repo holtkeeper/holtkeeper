@@ -1,0 +1,91 @@
+---
+import RailIcon from '../RailIcon.astro'
+import type { RailIconName } from '../rail-icons.ts'
+
+const workspaces: { icon: RailIconName; title: string; href: string; text: string; pages: string[] }[] = [
+  {
+    icon: 'home',
+    title: 'Home',
+    href: '/guide/home/overview/',
+    text: 'What needs you now: fleet health, spend and everything waiting for an approval.',
+    pages: ['Overview', 'Inbox', '⌘K palette'],
+  },
+  {
+    icon: 'repos',
+    title: 'Repos',
+    href: '/guide/repos/repositories/',
+    text: "Add repositories, group them by team and open one repository's hub with all its signals.",
+    pages: ['Repositories', 'Groups', 'Repository hub'],
+  },
+  {
+    icon: 'chat',
+    title: 'Chat',
+    href: '/guide/chat/threads/',
+    text: 'Ask Holtkeeper about the fleet and turn an answer into a task that opens merge requests.',
+    pages: ['Threads', 'Tasks from chat'],
+  },
+  {
+    icon: 'supply',
+    title: 'Supply chain',
+    href: '/guide/supply-chain/libraries/',
+    text: 'Who uses which library at which version, advisories, licenses, runtimes and public APIs.',
+    pages: ['Libraries', 'Security', 'Licenses', 'Stack', 'Public API'],
+  },
+  {
+    icon: 'quality',
+    title: 'Quality',
+    href: '/guide/quality/coverage/',
+    text: 'Coverage, bundle budgets, assets, CI health, stale branches and AI review results.',
+    pages: ['Coverage', 'Bundles', 'Assets', 'CI', 'Branches', 'Reviews'],
+  },
+  {
+    icon: 'releases',
+    title: 'Releases',
+    href: '/guide/releases/overview/',
+    text: 'Release flows per repository: what is ready, what changed and who has to sign off.',
+    pages: ['Overview', 'Timeline', 'Flow setup'],
+  },
+  {
+    icon: 'knowledge',
+    title: 'Knowledge',
+    href: '/guide/knowledge/guide/',
+    text: "The team's guide, notes and the learnings agents propose for people to accept.",
+    pages: ['Guide', 'Notes', 'Learnings'],
+  },
+  {
+    icon: 'ops',
+    title: 'Ops',
+    href: '/guide/ops/runs/',
+    text: 'Runs, tasks and schedules behind everything above, and what the AI spends on them.',
+    pages: ['Runs', 'Tasks', 'Automation', 'AI spend'],
+  },
+]
+---
+
+<section class="l-sec">
+  <div class="l-wrap">
+    <div class="l-head">
+      <span class="l-eyebrow">The guide follows the rail</span>
+      <h2>Eight workspaces. The docs are laid out the same way.</h2>
+      <p>Every page of the panel has one page in the guide, in the same place. If you can see it on the rail, you can find it in the sidebar.</p>
+    </div>
+    <div class="l-ws">
+      {
+        workspaces.map((w) => (
+          <a class="l-card" href={w.href}>
+            <span class="l-icon">
+              <RailIcon name={w.icon} />
+            </span>
+            <h3>{w.title}</h3>
+            <p>{w.text}</p>
+            <span class="l-chips">
+              {w.pages.map((p) => (
+                <span class="hk-tag">{p}</span>
+              ))}
+            </span>
+          </a>
+        ))
+      }
+    </div>
+  </div>
+</section>

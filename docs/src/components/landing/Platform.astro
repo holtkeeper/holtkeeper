@@ -1,0 +1,89 @@
+---
+const contracts = [
+  ['GitForge', 'Where repositories, merge requests and CI live.', [['GitLab', true], ['GitHub · soon', false]]],
+  ['Store', 'Runs, findings, settings and history.', [['Postgres', true], ['SQLite', true]]],
+  ['Auth', 'How people sign in to the panel.', [['Passkeys', true], ['Password', true], ['Header', true]]],
+  ['CommandRunner', 'Where jobs execute their tools.', [['mise', true], ['Container', true]]],
+  ['Scanner', 'Vulnerability and license sources.', [['OSV', true], ['npm', true], ['Go', true]]],
+  ['IssueTracker', 'Tickets behind releases and changelogs.', [['Jira', true]]],
+] as const
+
+const deploys = [
+  {
+    tag: 'Try it',
+    title: 'Single container',
+    text: 'SQLite and artifacts in one volume. Good for a homelab, a team or an evaluation.',
+    command: 'docker compose up -d holtkeeper',
+    href: '/self-host/run/single-container/',
+    link: 'Single container',
+  },
+  {
+    tag: 'Production',
+    title: 'Kubernetes with Helm',
+    text: 'Postgres, S3 artifacts, web and worker roles, worker scaling and NetworkPolicy.',
+    command: 'helm install holtkeeper ./deploy/helm/holtkeeper',
+    href: '/self-host/run/kubernetes/',
+    link: 'Kubernetes guide',
+  },
+  {
+    tag: 'Contribute',
+    title: 'From source',
+    text: 'No build step: Bun runs the TypeScript directly. mise pins every tool.',
+    command: 'mise install && bun install',
+    href: '/develop/setup/',
+    link: 'Development setup',
+  },
+]
+---
+
+<section class="l-sec">
+  <div class="l-wrap">
+    <div class="l-head">
+      <span class="l-eyebrow">Contracts, not vendors</span>
+      <h2>Swap any piece without forking the engine.</h2>
+      <p>Every integration sits behind a small interface. <a href="/develop/">Develop</a> documents each contract and the adapters that ship today.</p>
+    </div>
+    <div class="l-contracts">
+      {
+        contracts.map(([name, text, adapters]) => (
+          <div class="l-card static">
+            <span class="hk-mono l-contract">{name}</span>
+            <p>{text}</p>
+            <span class="l-chips">
+              {adapters.map(([a, ok]) => (
+                <span class:list={['hk-tag', { ok }]}>{a}</span>
+              ))}
+            </span>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<section class="l-sec" id="deploy">
+  <div class="l-wrap">
+    <div class="l-head">
+      <span class="l-eyebrow">Self-host</span>
+      <h2>One container to try it. A chart when you mean it.</h2>
+      <p>The config file holds infrastructure only. Forges, groups, schedules and budgets are set in the panel.</p>
+    </div>
+    <div class="l-deploy">
+      {
+        deploys.map((d) => (
+          <div class="l-dcard">
+            <div class="l-dcard-top">
+              <span class="hk-tag">{d.tag}</span>
+              <h3>{d.title}</h3>
+              <p>{d.text}</p>
+            </div>
+            <pre class="hk-mono">{d.command}</pre>
+            <a href={d.href}>
+              {d.link} <span aria-hidden="true">→</span>
+            </a>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>

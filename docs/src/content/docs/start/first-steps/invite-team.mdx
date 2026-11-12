@@ -1,0 +1,130 @@
+---
+title: Invite your team
+description: Switch from the shared admin password to personal accounts with passkeys, then invite people with a role on their team's groups.
+panel: Settings › People & access
+route: /settings/people
+permission: users:invite
+sidebar:
+  order: 3
+---
+
+import { Button, Field, Fields, Screen, Scroll, Segmented, Strip, Tag, Toolbar, Ui } from '@ui'
+
+The quickstart signs in one `root` admin with a password. To give people their own accounts, switch the instance to **users** sign-in: everyone signs in with a passkey (optionally also through single sign-on), and you invite each person with a single-use link and a role on the groups they work on.
+
+## Switch to accounts with passkeys
+
+The config file picks the sign-in. The Helm chart's config, `deploy/helm/holtkeeper/files/holtkeeper.config.ts`, switches with one variable; mount it instead of `deploy/holtkeeper.config.ts` if you started from the quickstart, or put `usersAuth()` in your own config ([Configuration](/self-host/configure/configuration/)).
+
+1. Set the public URL people open the panel at, and turn accounts on:
+
+   ```sh title=".env"
+   HOLTKEEPER_AUTH=users
+   HOLTKEEPER_PUBLIC_URL=https://holtkeeper.example.com
+   # Optional: name the first admin.
+   HOLTKEEPER_ADMIN_NAME=Mira K.
+   HOLTKEEPER_ADMIN_EMAIL=mira@example.com
+   ```
+
+   Passkeys are bound to that host name, so use the name people will keep using, over HTTPS.
+
+2. Restart Holtkeeper and read its log. On first start with no accounts it creates the first admin and logs a setup link:
+
+   ```sh
+   docker logs holtkeeper
+   ```
+
+   Until that admin has registered a passkey, every start logs a fresh link, so losing the log never locks you out.
+
+3. Open the link, create a passkey, and you land on Home as an Admin.
+
+<Screen
+  title="Setup link"
+  kind="example"
+  caption="The link page says what you get and when the link expires, never who issued it."
+>
+  <Toolbar title="Welcome to Holtkeeper">
+    <Tag>Step 2 of 3</Tag>
+  </Toolbar>
+  <Fields columns={1}>
+    <Field label="You get" value="Admin · 1 grant" />
+    <Field
+      label="Passkey name"
+      placeholder="Work laptop"
+      hint="Optional. The link expires in 3 days."
+    />
+  </Fields>
+  <Button primary>Create passkey</Button>
+</Screen>
+
+:::caution
+`HOLTKEEPER_ROOT_PASSWORD` no longer signs anyone in once accounts are on. Keep `HOLTKEEPER_SESSION_SECRET` and the vault key as they are.
+:::
+
+## Invite people
+
+1. Open **Settings › People & access** and choose <Ui>Invite people</Ui>.
+2. Enter a name and email.
+3. Pick a **role** and the scope it applies to, usually the person's team group (`web`). Admin always covers everything. For anything unusual, switch on **Exact grants instead of a role**.
+4. Choose **Create invite link** and copy the link. It is shown once and is valid for 72 hours.
+5. Send it to the person yourself, by chat or email. Holtkeeper does not send messages.
+
+<Screen title="Settings › People & access › Invite people">
+  <Toolbar title="Invite people" />
+  <Fields>
+    <Field label="Name" value="Jonah P." />
+    <Field label="Email" value="jonah@example.com" />
+    <Field label="Role" value="Developer" />
+    <Field label="Applies to" value="Group web" />
+  </Fields>
+  <Button primary>Create invite link</Button>
+</Screen>
+
+You can only hand out access you hold yourself: an admin of `web` can invite people to `web` or `web.payments`, not to `tools`. See [Roles and permissions](/start/concepts/permissions/).
+
+## Which role to give
+
+| Role       | Give it to                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| Viewer     | People who only look: managers, other teams.                                                  |
+| Developer  | Engineers of the team: run analyzers, approve agent tasks on their repositories, write notes. |
+| Maintainer | Team leads: also run release steps and change the team's settings.                            |
+| Admin      | The few who manage forges, credentials, people and the AI budget for the whole instance.      |
+
+## Follow up
+
+The people table shows everyone with their teams, role, last seen and sign-in.
+
+<Screen title="Settings › People & access">
+  <Toolbar title="People">
+    <Segmented items={['Table', 'Access map']} />
+    <Button primary>Invite people</Button>
+  </Toolbar>
+  <Strip items={[{ value: 6, label: 'people' }, { value: 4, label: 'active' }, { value: 2, label: 'invited' }, { value: 1, label: 'admin' }]} />
+  <Scroll>
+
+| Person   | Teams   | Role      | Last seen | Status                                              |
+| -------- | ------- | --------- | --------- | --------------------------------------------------- |
+| Mira K.  | `web`   | Admin     | now       | <Tag tone="ok">Active</Tag>                         |
+| Jonah P. | `web`   | Developer | —         | <Tag tone="warn">Link expires in 2 days</Tag>       |
+| Sam R.   | `tools` | Viewer    | —         | <Tag tone="bad">Link expired · send a new one</Tag> |
+
+  </Scroll>
+</Screen>
+
+- **Link expired?** Open the person and choose **Send a new invite**.
+- **Lost passkey?** **Create recovery link**: it registers a new passkey and ends every other session.
+- **Change access** on the person's **Role and access** tab; it applies on their next request.
+- **Someone leaves?** **Disable** them. Nobody can disable or re-grant themselves.
+
+Each person then picks their own **teams** in Account › My teams, which only changes what the _My teams_ switch shows on list pages.
+
+## Single sign-on
+
+With `usersAuth()` in your own config you can add OpenID Connect providers, including GitLab itself. Known identities sign in, a verified email links to an existing account, and with sign-up allowed new people from listed email domains get default grants. See [Configuration](/self-host/configure/configuration/).
+
+## Related
+
+- [People & access](/guide/settings/people/) — the screen in detail.
+- [Roles and permissions](/start/concepts/permissions/) — actions, presets and delegation.
+- [Turn on AI review](/start/first-steps/ai-review/) — the next step.

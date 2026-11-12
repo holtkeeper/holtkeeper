@@ -1,0 +1,81 @@
+---
+title: Single container
+description: Run Holtkeeper as one container with SQLite and artifacts in a data volume, the quickest way to a working instance.
+sidebar:
+  order: 1
+---
+
+One container with the `all` role serves the panel, runs the scheduler and works through jobs. The database is a SQLite file and artifacts sit next to it in the `/data` volume, so there is nothing else to run. This suits a trial or a small fleet on one host.
+
+## What you need
+
+- Docker (or another OCI runtime) on a host that can reach your GitLab, for example `https://gitlab.example.com`.
+- The image: `ghcr.io/holtkeeper/holtkeeper` (tagged with the release version, such as `1.4.0` for the tag `v1.4.0`, with the full commit SHA, and `main`), or one you build yourself.
+- A config file. Copy `deploy/holtkeeper.config.ts` from the repository; it reads every secret from the environment and uses SQLite and `/data` when no database or bucket variables are set.
+
+To build the image locally, build the sandbox base first:
+
+```sh title="Terminal"
+docker build -t holtkeeper-worker:latest docker/worker
+docker build -t holtkeeper:latest .
+```
+
+## Secrets
+
+Put the secrets in an env file next to the config. Generate each secret with `openssl rand -hex 32`; they need at least 32 characters.
+
+```sh title=".env"
+HOLTKEEPER_ROOT_PASSWORD=change-me
+HOLTKEEPER_SESSION_SECRET=
+HOLTKEEPER_VAULT_KEY=
+HOLTKEEPER_WEBHOOK_SECRET=
+HOLTKEEPER_PUBLIC_URL=https://holtkeeper.example.com
+```
+
+`HOLTKEEPER_PUBLIC_URL` is the address people and GitLab use; the webhooks Holtkeeper registers point at it. Every variable is listed in [Environment variables](/reference/environment/).
+
+:::caution
+Store `HOLTKEEPER_VAULT_KEY` somewhere outside the host as well, such as a password manager. It seals every forge token and secret setting; lose it and those values cannot be read again. Never change it once the instance holds credentials.
+:::
+
+## Run it
+
+```sh title="Terminal"
+docker run -d --name holtkeeper -p 7420:7420 --env-file .env --read-only --tmpfs /tmp \
+  -v "$PWD/holtkeeper.config.ts:/app/config/holtkeeper.config.ts:ro" \
+  -v holtkeeper-data:/data -v holtkeeper-workspace:/workspace -v holtkeeper-mise:/mise \
+  ghcr.io/holtkeeper/holtkeeper:<version> -c /app/config/holtkeeper.config.ts --role all
+```
+
+| Mount        | Holds                                               | Back up |
+| ------------ | --------------------------------------------------- | ------- |
+| `/data`      | The SQLite database and artifacts                   | yes     |
+| `/workspace` | Repository checkouts and the git mirror cache       | no      |
+| `/mise`      | Tools jobs install (Node, Go, ...)                  | no      |
+| `/tmp`       | Scratch space and `HOME`, so package manager caches | no      |
+
+The config must sit inside `/app` so its `@holtkeeper/*` imports resolve. The image runs as uid 10001, works with a read-only root filesystem and has a health check on `/healthz`.
+
+Open `http://localhost:7420` (or your public URL) and sign in as `root` with `HOLTKEEPER_ROOT_PASSWORD`. Then add your GitLab forge and its groups in [Settings › Integrations](/guide/settings/integrations/).
+
+:::note
+Session cookies are `Secure` by default, so the browser drops them over plain HTTP and sign-in seems to do nothing. Serve the panel over HTTPS, or set `HOLTKEEPER_INSECURE_COOKIES=1` for a local test only.
+:::
+
+## How jobs run here
+
+The starting config sets `jobs.execution.mode` to `mise`: jobs run inside this container with the tool versions each repository asks for, installed into `/mise`. The container is the sandbox; there is no container engine inside it. See [Job execution](/self-host/configure/job-execution/) for the other modes and their trade-offs.
+
+## Passkeys instead of a password
+
+The password config gives one `root` user. For named accounts with passkeys, use the chart's config (`deploy/helm/holtkeeper/files/holtkeeper.config.ts`) instead and set `HOLTKEEPER_AUTH=users`; see [Sign-in](/self-host/configure/sign-in/).
+
+## When to move on
+
+Move to [Compose](/self-host/run/compose/) or [Kubernetes](/self-host/run/kubernetes/) when one container cannot keep up with the queue or you want workers on other machines. That needs Postgres and S3: SQLite only works for processes that share the file.
+
+## Related
+
+- [Backups](/self-host/operate/backups/) — copy the SQLite file consistently.
+- [Health and metrics](/self-host/operate/health/) — probes and Settings › System.
+- [Deployment reference](/self-host/reference/deployment/#single-container) — the same command with every flag.

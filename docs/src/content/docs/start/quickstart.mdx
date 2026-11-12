@@ -1,0 +1,242 @@
+---
+title: Quickstart
+description: Run Holtkeeper in one container, sign in, connect GitLab, add a few repositories and read the first analysis.
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Card,
+  Cards,
+  Field,
+  Fields,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Stack,
+  Strip,
+  Tag,
+  Ticks,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+In about fifteen minutes you go from nothing to a running Holtkeeper that knows your repositories. One container holds everything: the panel, the API, the scheduler and a worker, with SQLite and artifacts in a volume. You sign in with the admin password, connect a GitLab instance, add a handful of repositories, and Holtkeeper analyses each of them once on its own.
+
+:::note
+Only GitLab works today, gitlab.com or self-managed. GitHub support is coming.
+:::
+
+## What you need
+
+- A machine with Docker. The published image is built for `linux/amd64`.
+- A GitLab account Holtkeeper can act as, and a personal access token for it with the `api` scope. A dedicated bot account is best: review comments, merge requests and notes then come from it, and Holtkeeper ignores its own activity.
+
+## 1. Prepare the config and secrets
+
+The repository ships a config that reads every secret from the environment and picks SQLite and local artifacts when no Postgres or S3 is set. Take it and the environment template from `deploy/`:
+
+```sh
+git clone https://github.com/holtkeeper/holtkeeper
+mkdir holtkeeper-run && cd holtkeeper-run
+cp ../holtkeeper/deploy/holtkeeper.config.ts .
+cp ../holtkeeper/deploy/.env.example .env
+```
+
+Edit `.env`. For a single container you only need these:
+
+```sh title=".env"
+HOLTKEEPER_ROOT_PASSWORD=pick-a-long-password
+# At least 32 characters each, e.g. `openssl rand -hex 32`.
+HOLTKEEPER_SESSION_SECRET=
+HOLTKEEPER_VAULT_KEY=
+HOLTKEEPER_WEBHOOK_SECRET=
+# Set it when people reach the panel by a real name.
+# HOLTKEEPER_PUBLIC_URL=https://holtkeeper.example.com
+# Only for plain-HTTP tests on localhost.
+HOLTKEEPER_INSECURE_COOKIES=1
+```
+
+Leave the Postgres and S3 lines out: without `HOLTKEEPER_DATABASE_URL` and `HOLTKEEPER_S3_BUCKET` the config stores everything in `/data`.
+
+:::caution[Keep the vault key]
+`HOLTKEEPER_VAULT_KEY` seals every stored credential, including the GitLab token you add later. Store it in a password manager. Without it a backup cannot be read, and changing it makes stored credentials unreadable.
+:::
+
+## 2. Start the container
+
+1. Run the image with the config mounted read-only and three volumes: data, job checkouts and tool downloads.
+
+   ```sh
+   docker run -d --name holtkeeper -p 7420:7420 --env-file .env --read-only --tmpfs /tmp \
+     -v "$PWD/holtkeeper.config.ts:/app/config/holtkeeper.config.ts:ro" \
+     -v holtkeeper-data:/data -v holtkeeper-workspace:/workspace -v holtkeeper-mise:/mise \
+     ghcr.io/holtkeeper/holtkeeper:main -c /app/config/holtkeeper.config.ts --role all
+   ```
+
+   Pin a version tag instead of `main` once you keep it running.
+
+2. Check that it is ready:
+
+   ```sh
+   curl -s http://localhost:7420/readyz
+   ```
+
+   It answers `200` once the database migrated and the artifact store answers.
+
+3. Open `http://localhost:7420`.
+
+Prefer Compose? `deploy/docker-compose.yml` has the same single container as a commented `holtkeeper` service; comment out `web`, `worker` and `postgres` and uncomment it. See [Single container](/self-host/run/single-container/) for backups and upgrades.
+
+## 3. Sign in
+
+The default config signs in one admin, `root`, with the password from `HOLTKEEPER_ROOT_PASSWORD`. Five wrong attempts in a minute lock the form for a minute.
+
+<Screen
+  title="Sign in to Holtkeeper"
+  kind="example"
+  caption="The password sign-in offers one method: the admin password."
+>
+  <Stack>
+    <Toolbar title="Sign in to Holtkeeper">
+      <Button ghost>Docs</Button>
+    </Toolbar>
+    <Fields columns={1}>
+      <Field label="Password" placeholder="••••••••••••" />
+    </Fields>
+    <Button primary>Sign in</Button>
+  </Stack>
+</Screen>
+
+:::note[Accounts for a team]
+The password sign-in is one shared admin. For personal accounts with passkeys, invites and roles, switch the instance to the `users` sign-in: on first start it logs a single-use setup link for the first admin. [Invite your team](/start/first-steps/invite-team/) shows both.
+:::
+
+After signing in you land on **Home**. It is empty: no forge, no repositories yet. A fresh install already has sensible defaults stored, such as a weekly AI budget of $150 and polling every five minutes.
+
+## 4. Connect GitLab
+
+Holtkeeper keeps forge tokens as sealed credentials, so you add the token first and the forge second. Both live in **Settings › Integrations**.
+
+1. Under **Credentials**, choose <Ui>Add credential</Ui>. Pick the GitLab kind, give it a name such as `gitlab-bot`, the instance URL (`https://gitlab.example.com`) and paste the token as the secret. It is never shown again.
+2. Choose <Ui>Add forge</Ui> in the section header.
+3. Fill in the forge:
+
+   - **Id**: a short name such as `work`. Repositories are addressed as `work:acme/checkout-web`, so the id cannot change later.
+   - **URL**: the GitLab base URL.
+   - **Token**: the credential from step 1.
+   - **Bot username**: the account behind the token, when it is a bot. Leave it empty when the token belongs to a person.
+
+4. Save.
+
+<Screen title="Settings › Integrations › Add forge">
+  <Stack>
+    <Toolbar title="Add forge" crumbs={['Settings', 'Integrations']} />
+    <Fields>
+      <Field
+        label="Id"
+        value="work"
+        mono
+        hint="Repositories are addressed as <forge>:<path>, so the id cannot change later."
+      />
+      <Field label="URL" value="https://gitlab.example.com" mono />
+      <Field label="Token" value="gitlab-bot" />
+      <Field label="Bot username" value="holtkeeper-bot" mono />
+    </Fields>
+    <Button primary>Add forge</Button>
+  </Stack>
+</Screen>
+
+[Connect a forge](/start/first-steps/connect-forge/) covers webhooks, SSH keys and private packages; none of them is needed to start.
+
+## 5. Add repositories
+
+Repositories belong to **groups**: a group is a set of path patterns on one forge, usually one team. The first time, you create the group while adding repositories.
+
+1. Open **Repos** on the rail and choose <Ui>Add repository</Ui>.
+2. **Step 1**: pick the forge `work`.
+3. **Step 2**: pick projects from the token's list, or paste paths or GitLab URLs, one per line. Holtkeeper checks that the token can read each one.
+4. **Step 3**: choose <Ui>New group</Ui>, give it an id such as `web`, and finish.
+
+<Screen
+  title="Repos › Add repository"
+  caption="Step 2 of 3: paths checked in one batch against the forge token."
+>
+  <Toolbar title="Add repository">
+    <Tag>Step 2 of 3</Tag>
+  </Toolbar>
+  <Rows>
+    <Row title="acme/checkout-web" sub="Readable by holtkeeper-bot">
+      <Tag tone="ok">OK</Tag>
+    </Row>
+    <Row title="acme/admin-ui" sub="Readable by holtkeeper-bot">
+      <Tag tone="ok">OK</Tag>
+    </Row>
+    <Row title="acme/widget-kit" sub="Not found: invite holtkeeper-bot to the project">
+      <Tag tone="bad">Not added</Tag>
+    </Row>
+  </Rows>
+</Screen>
+
+More on patterns, globs and subgroups: [Add repositories](/start/first-steps/add-repositories/).
+
+## 6. Watch the first analysis
+
+A repository a group finds for the first time gets every read-only analyzer once, on its default branch: dependencies, advisories, licenses, stack, public API, coverage, bundles and the Guide draft among them. You do not schedule anything. Follow the jobs in **Ops › Runs**; they start within a minute or two.
+
+When they finish, **Repos** fills in. Each row has an overall health and one cell per area; a cell opens the part of the repository hub that explains it.
+
+<Screen title="Repos" caption="Rows go worst first. Repositories not analysed yet show as such until their first runs finish.">
+  <Toolbar title="Repositories">
+    <Button ghost>Configure</Button>
+    <Button primary>Add repository</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 3, label: 'repositories' },
+      { value: 1, label: 'healthy', tone: 'ok' },
+      { value: 1, label: 'with warnings', tone: 'warn' },
+      { value: 1, label: 'failing', tone: 'bad' },
+    ]}
+    end="Updates 0 webhook · 3 polling"
+  />
+  <Scroll>
+
+| Repository          | Health                          | Security                     | Deps                             | Licenses                |
+| ------------------- | ------------------------------- | ---------------------------- | -------------------------------- | ----------------------- |
+| `acme/admin-ui`     | <Tag tone="bad">Failing</Tag>   | <Tag tone="bad">2 high</Tag> | <Tag tone="warn">14 behind</Tag> | <Tag tone="ok">OK</Tag> |
+| `acme/checkout-web` | <Tag tone="warn">Warnings</Tag> | <Tag tone="ok">OK</Tag>      | <Tag tone="warn">6 behind</Tag>  | <Tag tone="ok">OK</Tag> |
+| `acme/docs-site`    | <Tag tone="ok">Healthy</Tag>    | <Tag tone="ok">OK</Tag>      | <Tag tone="ok">OK</Tag>          | <Tag tone="ok">OK</Tag> |
+
+  </Scroll>
+</Screen>
+
+From here on analyses stay current by themselves: polling notices new commits, merge requests and tags, and the freshness sweep re-runs what went stale. Home shows the same fleet as health ticks.
+
+<Screen title="Home">
+  <Toolbar title="Home">
+    <Button primary>Review inbox</Button>
+  </Toolbar>
+  <Stack>
+    <Ticks healthy={1} warnings={1} failing={1} />
+  </Stack>
+</Screen>
+
+## Next
+
+<Cards>
+  <Card title="Turn on AI review" href="/start/first-steps/ai-review/" icon="quality">
+    Add an AI provider and review every merge request.
+  </Card>
+  <Card title="Invite your team" href="/start/first-steps/invite-team/" icon="settings">
+    Personal accounts with passkeys and roles per team.
+  </Card>
+  <Card title="Concepts" href="/start/concepts/fleet/" icon="book">
+    Forges, groups, analyzers, tasks and policies in a few pages.
+  </Card>
+  <Card title="Self-host for real" href="/self-host/" icon="server">
+    Postgres, S3 and workers with Compose or Kubernetes.
+  </Card>
+</Cards>

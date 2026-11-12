@@ -1,0 +1,314 @@
+---
+title: Team guide
+description: Write the rules every agent task follows — per team, family and repository — see how the layers stack up in the order an agent reads them, and check the exact prompt a review or task gets.
+panel: Knowledge › Guide
+route: /knowledge/guide
+permission: knowledge:read
+sidebar:
+  order: 1
+---
+
+import {
+  Button,
+  Facts,
+  Meter,
+  Row,
+  Rows,
+  Screen,
+  Scroll,
+  Segmented,
+  Split,
+  Stack,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Write the rules every agent task follows — per team, family and repository — see how the layers stack up in the order an agent reads them, and check the exact prompt a review or task gets.
+
+The Guide is the single place for the rules agents follow. Reviews, replies in review threads, agent tasks, release notes, chat and coding agents over MCP all read it. People write rules per scope and section; Holtkeeper adds rules learned from review replies, your policies as plain facts, and text generated from repository signals, always ranked below what people wrote.
+
+<Screen title="Knowledge › Guide" caption="The spaces sidebar on the left; the chosen space's sections on the right.">
+  <Toolbar crumbs={['Knowledge', 'All', 'storefront']} title="checkout-web">
+    <Segmented slot="start" items={['Guide', 'Notes:12', 'Learnings:3']} />
+    <Button>Effective prompt</Button>
+    <Button ghost>Configure</Button>
+  </Toolbar>
+  <Split>
+    <Rows>
+      <Row title="All repositories"><span class="hk-dim">9</span></Row>
+      <Row title="storefront" sub="team"><span class="hk-dim">14</span> <Tag tone="warn">2</Tag></Row>
+      <Row title="Storefront apps" sub="family · 3 repositories"><span class="hk-dim">4</span></Row>
+      <Row title="acme/checkout-web" selected><span class="hk-dim">18</span> <Tag tone="warn">3</Tag></Row>
+      <Row title="acme/admin-ui"><span class="hk-dim">6</span></Row>
+      <Row title="Other teams · 21 repositories" />
+    </Rows>
+    <Stack>
+      <Facts
+        items={[
+          ['Space', 'acme/checkout-web · repository · GitLab'],
+          ['Inherits from', 'All repositories › storefront › Storefront apps'],
+        ]}
+      />
+      <div class="hk-dim">5 sections in use · 11 team rules · 4 learned rules · 1 proposal waiting · you can edit</div>
+      <Scroll>
+
+| Section  | Layers      | Rules | Version | Last edit            | Status                                  |
+| -------- | ----------- | ----- | ------- | -------------------- | --------------------------------------- |
+| General  | `D O G R A` | 6     | 4       | Mira K. · 3 days ago | <Tag>Set here</Tag>                     |
+| Review   | `D G R L`   | 3     | 7       | Ivo P. · 1 week ago  | <Tag>Set here</Tag>                     |
+| Testing  | `G A`       | 0     | 2       | generated            | <Tag tone="warn">Proposal waiting</Tag> |
+| Test ids | `O`         | 0     | —       | —                    | <Tag>Inherited</Tag>                    |
+| Assets   | `G`         | 0     | —       | —                    | <Tag>Inherited</Tag>                    |
+| Commits  | `A`         | 0     | 1       | generated            | <Tag>Inherited</Tag>                    |
+| Releases |             | 0     | —       | —                    | <Tag>Not set</Tag>                      |
+
+      </Scroll>
+    </Stack>
+
+  </Split>
+</Screen>
+
+## Pick a space
+
+The **spaces sidebar** lists _All repositories_, then teams (top-level groups) with their subgroups, families and repositories. A repository sits under its deepest group. Each row shows the space's Guide sections plus notes as a quiet number, and learnings waiting as a warning badge. A team shows five children, then "N more".
+
+The scope switch at the top chooses _My teams_ (other teams fold into one "Other teams" row that expands in place), _All I can see_, or one group. _Not in a team_ shows on _All I can see_ only.
+
+The trail above the title follows the space from _All_ down to the current one; each step is a link. Switching between **Guide**, **Notes** and **Learnings** keeps the space.
+
+### Families
+
+A family is a named set of similar repositories, such as near-identical app frontends of one team, so they can share rules. A repository is in at most one family. Holtkeeper suggests families from repositories with the same framework, the same toolchain and mostly the same dependencies.
+
+With `settings:write`, suggested families show in the sidebar with their similarity, stack and up to four member paths. Click <Ui>Confirm</Ui> to create the family, <Ui>Edit</Ui> to change its name and members first (the dialog shows framework, toolchain and shared dependencies), or <Ui>Dismiss</Ui>.
+
+## Sections and layers
+
+The Guide has seven sections:
+
+| Section  | Read by                                               |
+| -------- | ----------------------------------------------------- |
+| General  | Every task.                                           |
+| Review   | Reviews and replies in review threads.                |
+| Testing  | Reviews, and agent tasks about tests.                 |
+| Test ids | Reviews; the test id convention for end-to-end tests. |
+| Assets   | Reviews; prose rules about images and media.          |
+| Commits  | Release notes.                                        |
+| Releases | Release notes.                                        |
+
+In the sections table, the **Layers** column shows which layers give a section text, as letters:
+
+| Letter | Layer                                                                      |
+| ------ | -------------------------------------------------------------------------- |
+| D      | Repository files: `REVIEW.md`, `CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md` |
+| O      | All repositories                                                           |
+| G      | Group (team)                                                               |
+| S      | Subgroup                                                                   |
+| F      | Family                                                                     |
+| R      | Repository                                                                 |
+| L      | Learned rules, accepted from review replies                                |
+| A      | Generated from repository signals                                          |
+
+The status reads _Proposal waiting_ (generated text waits for a person), _Set here_ (this space has its own rules), _Inherited_ (a broader space gives the text) or _Not set_. Click a row to open the section; click it again to close it.
+
+## Open a section
+
+In a repository space the open section lists its layers **in the order the agent reads them**, numbered: repository files, this repository, family, subgroups, teams, all repositories, learned rules, policies, generated text, notes. Each layer shows its size in characters and **cut** when the budget shortened it. Inherited layers show their text with a link to their space.
+
+<Screen title="Knowledge › Guide › checkout-web › Review">
+  <Stack>
+    <Toolbar title="Review">
+      <Tag slot="start">Version 7</Tag>
+    </Toolbar>
+    <Meter value={68} tone="neutral" label="8,160 of 12,000 characters · about 2,000 tokens" />
+    <div class="hk-dim">
+      Human 6,020 · Generated 980 · Notes 1,160 · Free 3,840 · Rules files get at most 4,800
+      characters, so team and learned rules keep room.
+    </div>
+    <Rows>
+      <Row title="1 · Repository files" sub="REVIEW.md · AGENTS.md · read at a41c09e">
+        <Tag>2,310 chars</Tag>
+      </Row>
+      <Row title="2 · This repository" sub="Edited by Ivo P. · 1 week ago">
+        <Tag>640 chars</Tag>
+      </Row>
+      <Row title="3 · Family Storefront apps">
+        <Tag>410 chars</Tag>
+      </Row>
+      <Row title="4 · Team storefront">
+        <Tag>1,880 chars</Tag>
+      </Row>
+      <Row title="5 · All repositories">
+        <Tag>790 chars</Tag>
+      </Row>
+      <Row title="6 · Learned rules" sub="2 candidates in Learnings">
+        <Tag>310 chars</Tag>
+      </Row>
+      <Row title="7 · Policies">
+        <Tag>220 chars</Tag>
+      </Row>
+      <Row title="8 · Notes">
+        <Tag tone="warn">1,160 chars · cut</Tag>
+      </Row>
+    </Rows>
+  </Stack>
+</Screen>
+
+### The 12k budget
+
+Everything a task reads from the Guide shares 12,000 characters. The bar splits it into **Human**, **Generated**, **Notes** and **Free**, for the whole prompt the section goes into (a review reads General, Review, Testing, Test ids and Assets together). Rules files in the repository get at most 4,800 characters and are cut with a pointer to the file, so they never crowd out the rules people accepted. Warnings from the budget show under the bar.
+
+:::tip
+If the repository's `AGENTS.md` or `REVIEW.md` is cut, move the parts every repository shares into a team rule. Team rules are stored once and keep their room.
+:::
+
+### Repository files
+
+`REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` as read from the default branch, read-only, with their line counts and the commit they were read at. Edit them in the repository.
+
+## Write rules for a space
+
+1. Pick the space in the sidebar: _All repositories_, a team, a family or a repository.
+2. Open the section.
+3. Under **This space's rules**, edit the Markdown and save.
+
+Write short imperative lines an agent can follow, and say why when it is not obvious:
+
+```md title="Review · team storefront"
+- Money amounts are integers in minor units; flag any float arithmetic on prices.
+- Do not flag missing `aria-label` on icons from @acme/widget-kit; the kit adds it.
+- New API routes need a contract test in `test/contract/`.
+```
+
+**History** lists earlier revisions inline, each with <Ui>Restore</Ui>.
+
+:::caution
+Saving checks the version you started from. If someone saved the section in the meantime, your save is refused; reload, merge and save again.
+:::
+
+### Learned rules and steering
+
+**Learned rules** lists the rules people accepted from review replies for this space; while candidates wait, a link leads to them in [Learnings](/guide/knowledge/learnings/).
+
+**Steering** (General, Testing and Test ids) tells the generator what to focus on. It is never sent to agents.
+
+### Policies
+
+Test ids, Assets and Commits show the setting entries made for this space: the test id convention, the [asset policy](/guide/quality/assets/) and commit conventions. Agents read them as plain facts in the matching section. Edit them in place.
+
+## Review generated text
+
+Holtkeeper writes the General, Testing, Test ids and Commits sections of each repository from what it measured: manifests, CI config, linters, test setup, coverage, test ids and commit rules. It states only what that evidence shows. It reruns at most weekly once the default branch moved, and only spends when the evidence changed.
+
+New text waits as a proposal. Until someone accepts it, agents keep the accepted text; text that was never accepted reaches agents only when a section has no human rules and the repository has no rules files.
+
+<Screen title="Knowledge › Guide › checkout-web › Testing › Generated">
+  <Stack>
+    <Toolbar title="Generated">
+      <Tag slot="start" tone="warn">
+        Proposal
+      </Tag>
+      <Button ghost>Compare</Button>
+      <Button ghost>Regenerate</Button>
+      <Button ghost>Decide in Inbox</Button>
+      <Button>Reject</Button>
+      <Button primary>Accept</Button>
+    </Toolbar>
+    <Facts
+      items={[
+        ['Version', '3 · proposed 2 days ago'],
+        ['Model', 'claude-haiku · $0.04'],
+        ['Commit', 'a41c09e · job 5be2d0f1'],
+      ]}
+    />
+    <ul>
+      <li>
+        Tests use vitest; put them next to the code as <code>*.test.ts</code>.
+      </li>
+      <li>
+        Run <code>pnpm test</code> before pushing; CI runs <code>pnpm test --coverage</code>.
+      </li>
+      <li>
+        Line coverage is between 50% and 60%; <code>src/cart/</code> has the least.
+      </li>
+    </ul>
+  </Stack>
+</Screen>
+
+- <Ui>Accept</Ui> makes the proposal the accepted text.
+- <Ui>Reject</Ui> drops it; the same evidence is not proposed again, even on a forced run.
+- <Ui>Decide in Inbox</Ui> leaves it for the [Inbox](/guide/home/inbox/).
+- <Ui>Regenerate</Ui> runs the generator again with an optional extra prompt. It needs
+  `analyses:run`.
+- <Ui>Compare</Ui> shows any two stored versions side by side or unified.
+
+Text the `guide.autoAccept` policy accepted carries an _Auto-accepted_ tag and <Ui>Reject auto-accepted text</Ui>, which brings back the text a person accepted before.
+
+:::note
+For a repository with no tests by design, the Testing row carries a **No tests by design** tag. Agents never read that section and the generator skips it.
+:::
+
+## Check the effective prompt
+
+<Ui>Effective prompt</Ui> opens a panel above the sections that shows exactly what one task of a
+repository gets from the Guide, block by block, with the repository's rules files first.
+
+<Screen title="Knowledge › Guide › Effective prompt">
+  <Toolbar title="Effective prompt">
+    <Tag slot="start">acme/checkout-web</Tag>
+    <Segmented slot="start" items={['Review', 'Chat', 'Release notes', 'Agent task']} />
+    <Button>Copy text</Button>
+    <Button primary>Ask in chat</Button>
+  </Toolbar>
+  <Stack>
+    <Meter value={68} tone="neutral" label="8,160 of 12,000 characters" />
+    <Tabs items={['Blocks', 'Full text', 'Warnings:1']} />
+    <Rows>
+      <Row title="REVIEW.md · AGENTS.md" sub="Repository files">
+        <Tag>2,310</Tag>
+      </Row>
+      <Row title="This repository" sub="Review">
+        <Tag>640</Tag>
+      </Row>
+      <Row title="Team storefront" sub="General · Review · Testing">
+        <Tag>1,880</Tag>
+      </Row>
+      <Row title="Policies" sub="Test ids · Assets">
+        <Tag>220</Tag>
+      </Row>
+      <Row title="Generated Testing" sub="lower priority">
+        <Tag>980</Tag>
+      </Row>
+      <Row title="Team knowledge" sub="3 notes">
+        <Tag tone="warn">1,160 · cut</Tag>
+      </Row>
+    </Rows>
+  </Stack>
+</Screen>
+
+1. In a team or family space, pick one of its repositories; in a repository space it is fixed.
+2. Pick the task: **Review**, **Chat**, **Release notes** or **Agent task**.
+3. Read **Blocks** (each tagged with its layer), **Full text** (the prompt as sent) or **Warnings**.
+
+<Ui>Copy text</Ui> copies the prompt. <Ui>Ask in chat</Ui> starts a [chat
+thread](/guide/chat/threads/) with the repository in context, so you can ask how an agent would read
+a rule.
+
+## Configure
+
+The ghost <Ui>Configure</Ui> (with `settings:read`) opens **Settings › Analyzers** at the guide generator. Its runs come from the schedule and from <Ui>Regenerate</Ui>. Whether generated text is accepted without a person is the `guide.autoAccept` policy in [Settings › Policies](/guide/settings/policies/).
+
+## In a repository or group
+
+The repository hub's **Knowledge** tab and the group page show the same Guide, with the effective prompt for a repository and links to its Notes and Learnings.
+
+## Related
+
+- [Notes](/guide/knowledge/notes/) — decisions, conventions and quirks agents look up.
+- [Learnings](/guide/knowledge/learnings/) — rules people teach by replying to review comments.
+- [Reviews](/guide/quality/reviews/) — the task that reads the most of the Guide.
+- [Settings › Policies](/guide/settings/policies/) — commit conventions, asset policy and auto-accept.
+- [Repository rules for agents](/agents/tools/) — `repo_rules` and `propose_rule_change` over MCP.
+- [Guide](/modules/guide/) and [Guide generator](/modules/guide-generator/) — how layers resolve and text is generated.

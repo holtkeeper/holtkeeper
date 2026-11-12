@@ -1,0 +1,234 @@
+---
+title: AI spend
+description: See what models cost this week against the weekly budget, who and what spent it, every model run, and how people use the MCP endpoint — and change the budget in place.
+panel: Ops › AI spend
+route: /ops/spend
+permission: ai:read
+sidebar:
+  order: 4
+---
+
+import {
+  Button,
+  Field,
+  Fields,
+  Meter,
+  Rows,
+  Row,
+  Screen,
+  Scroll,
+  Segmented,
+  Split,
+  Stack,
+  Strip,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+See what models cost this week against the weekly budget, who and what spent it, every model run, and how people use the MCP endpoint — and change the budget in place.
+
+<Screen
+  title="Ops › AI spend"
+  caption="The scope and the Feature, Model and Started by filters narrow everything except the budget card."
+>
+  <Toolbar title="AI spend" crumbs={['Ops']}>
+    <Button ghost>Configure</Button>
+    <Button ghost>⋯</Button>
+  </Toolbar>
+  <Toolbar>
+    <Segmented slot="start" items={['This week', 'This month', 'Last 30 days']} />
+    <Tag>All I can see</Tag>
+    <Tag>Feature</Tag>
+    <Tag>Model</Tag>
+    <Tag>Started by</Tag>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: '$63.40', label: 'spent · of $150 a week' },
+      { value: '$121', label: 'forecast' },
+      { value: '$41.20 / $22.20', label: 'automatic / people' },
+      { value: 412, label: 'runs' },
+      { value: '38.1 M', label: 'tokens' },
+      { value: '71%', label: 'cache hits' },
+      { value: '+12%', label: 'vs same span last week' },
+      { value: '3 · 0.7%', label: 'errors', tone: 'warn' },
+      { value: 0, label: 'blocked by budget', tone: 'ok' },
+    ]}
+  />
+  <Stack>
+    <Toolbar title="Weekly budget">
+      <Tag tone="ok">On track</Tag>
+    </Toolbar>
+    <Meter value={42} label={'$63.40 of $150 · 42% · resets Mon 00:00'} />
+    <p>Automatic work stops at $125. At this pace the week ends near $121, $4 to spare.</p>
+  </Stack>
+</Screen>
+
+## Read the week
+
+The page shows what agent runs cost: reviews, chat, agent tasks, the Guide and release notes. Everything is limited to the repositories you may read.
+
+- **Period.** _This week_ is the budget week, from Monday 00:00 in the instance's time zone. _This month_ and _Last 30 days_ widen the strip, the breakdowns and the runs. The budget card and the daily chart always show the budget week.
+- **Scope switch.** _My teams_ counts your home groups, a picked group just that group.
+- **Feature**, **Model** and **Started by** (_People_ or _Automatic_) narrow every figure on the page but the budget card, which always shows the real budget.
+
+The strip under the toolbar shows spend in the period (with the weekly limit on _This week_), the week's forecast, the automatic and people parts, runs, tokens, the cache hit ratio, the change against the same elapsed span before, errors with the error rate, runs blocked by the budget and runs whose cost is unknown.
+
+## How the weekly budget works
+
+One weekly limit covers every model run on the instance. Part of it, **kept for people**, is reserved for work a person started: a click in the panel, a chat message, a command on a merge request.
+
+| Work                                                    | Stops when this week's spend plus the run's estimate goes above |
+| ------------------------------------------------------- | --------------------------------------------------------------- |
+| **Automatic**: schedules, triggers, webhooks, freshness | the weekly limit minus the amount kept for people               |
+| **People**: anything a person started                   | the weekly limit                                                |
+
+With **When reached** set to _Block runs_ a run over the line is refused before the model is called, and a running agent stops when it has spent what is left. With _Warn_ the run goes on. A fresh install starts at $150 a week with $25 kept for people, blocking, warning at 80%.
+
+The card's status reads:
+
+| Status                 | Means                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| On track               | Spend and forecast stay under the automatic limit.                           |
+| Close to the limit     | Spend reached the warning share, or the forecast passes the automatic limit. |
+| Automatic work stopped | Spend reached the limit minus the reserve; only people's work runs.          |
+| Limit reached          | Spend reached the weekly limit.                                              |
+
+The meter shows spent, the forecast to week end hatched after it, and a marker at _Automatic work stops at $X_. A line below says when automatic work is expected to stop, or how much is left to spare at this pace. The forecast for the rest of the week is the mean of the same span over the last four full weeks.
+
+:::note
+When spend reaches the warning share, everyone who may change that budget gets one **Budget** item in the [Inbox](/guide/home/inbox/) for the week. There is nothing to approve: <Ui>Acknowledge</Ui> snoozes it until the week ends.
+:::
+
+### Narrower budgets and caps
+
+Under the card, **Narrower budgets and caps** lists the group and repository budgets you may read with their scope, mode, status and a small bar. A narrower budget adds a limit for its repositories; it never lifts them out of the broader one. Two fixed caps follow, which are not settings:
+
+<Screen title="Ops › AI spend · Narrower budgets and caps">
+  <Rows>
+    <Row title="Payments" sub={'Group · Block · $31.10 of $60'}>
+      <Meter value={52} />
+    </Row>
+    <Row title="acme/widget-kit" sub={'Repository · Warn · $9.80 of $10'}>
+      <Meter value={98} />
+    </Row>
+    <Row title="Write tasks" sub={'Default cap per task $1.50 · most a task may ask for $5'} />
+    <Row title="Chat replies" sub={'Cap per reply $0.40 · average this week $0.07'} />
+  </Rows>
+</Screen>
+
+## Change the budget
+
+With `settings:write` over everything, the global budget has an inline editor under the card.
+
+<Screen title="Ops › AI spend · Budget editor">
+  <Stack>
+    <Fields columns={4}>
+      <Field label="Weekly limit" value={'$150'} mono />
+      <Field label="Kept for people" value={'$25'} mono hint={'Automatic work stops at $125'} />
+      <Field label="Warn at, %" value="80" mono />
+      <Field label="When reached" value="Block runs" />
+    </Fields>
+    <Toolbar>
+      <Tag slot="start">Changed by Mira K. · 2 weeks ago</Tag>
+      <Button primary>Save budget</Button>
+    </Toolbar>
+  </Stack>
+</Screen>
+
+1. Enter the **Weekly limit**. `$` and thousands separators are fine; it must be above $0.
+2. Enter how much is **Kept for people**: not negative and not above the limit. The form shows the automatic limit that results.
+3. Set **Warn at, %**, a whole percent from 1 to 100.
+4. Pick **When reached**: _Block runs_ or _Warn_. There is no mode that pauses everything.
+5. Click <Ui>Save budget</Ui>. Every figure on the page refreshes.
+
+Group and repository budgets are entries of the same setting, added in [Settings › AI](/guide/settings/ai/#budgets).
+
+## See where it went
+
+**Daily cost** draws four Monday-to-Sunday weeks, each day a stacked bar of people over automatic spend, today in the accent colour. The rest of the budget week gets hatched forecast bars. Below it: the week's forecast, the mean automatic spend of full weeks, last week's total and the period's spend per analyzer.
+
+Three breakdowns follow, each narrowed like the rest of the page:
+
+<Screen title="Ops › AI spend · Breakdowns">
+  <Split>
+    <Stack>
+      <Toolbar title="By feature" />
+      <Rows>
+        <Row title="Reviews" sub={'$31.20 · 49%'} />
+        <Row title="Agent tasks" sub={'$14.80 · 23%'} />
+        <Row title="Chat" sub={'$9.10 · 14%'} />
+        <Row title="Guide and learnings" sub={'$6.30 · 10%'} />
+        <Row title="Release notes" sub={'$2.00 · 3%'} />
+      </Rows>
+    </Stack>
+    <Stack>
+      <Toolbar title="By model" />
+      <Rows>
+        <Row title="claude-sonnet-5-5" sub={'acme-gateway · 318 runs · $48.90'} />
+        <Row title="claude-haiku-5-5" sub={'acme-gateway · 82 runs · $3.10'} />
+        <Row title="claude-opus-5-5" sub={'acme-gateway · 12 runs · $11.40'} />
+      </Rows>
+    </Stack>
+  </Split>
+</Screen>
+
+- **By feature**: Reviews (reviews and triage), Agent tasks (write tasks, fixes, ports, upgrades, tests), Chat, Guide and learnings, Release notes, and Other for anything else.
+- **By repository**: the top eight, each linking to its [repository hub](/guide/repos/repository-hub/), the rest in one row.
+- **By model**: model, provider and runs. Models without a price say so and link to [Settings › AI](/guide/settings/ai/).
+
+## Find a model run
+
+**Model runs** lists every run of the period, newest first, with <Ui>Load older</Ui>. Segments pick _All_, _Errors_ or _Blocked by budget_.
+
+<Screen title="Ops › AI spend · Model runs">
+  <Toolbar>
+    <Segmented slot="start" items={['All:412', 'Errors:3', 'Blocked by budget:0']} />
+  </Toolbar>
+  <Scroll>
+
+| Time  | Feature                  | Repository          | Subject                | Model                            | Tokens                | Cost    | Duration | Outcome                                         | Started by     |
+| ----- | ------------------------ | ------------------- | ---------------------- | -------------------------------- | --------------------- | ------- | -------- | ----------------------------------------------- | -------------- |
+| 10:42 | <Tag>Reviews</Tag>       | `acme/checkout-web` | MR !214 · review       | claude-sonnet-5-5 · acme-gateway | 18 turns · 74% cached | $0.22   | 1 min    | <Tag tone="ok">ok</Tag>                         | job `2d9e71b0` |
+| 10:31 | <Tag>Chat</Tag>          | `acme/admin-ui`     | chat                   | claude-sonnet-5-5 · acme-gateway | 6 turns · 80% cached  | $0.05   | 22 s     | <Tag tone="ok">ok</Tag>                         | Jon D.         |
+| 09:58 | <Tag>Agent tasks</Tag>   | `acme/widget-kit`   | write-task             | claude-sonnet-5-5 · acme-gateway | 41 turns · 68% cached | $0.64   | 6 min    | <Tag tone="bad">error</Tag> `max turns reached` | job `7a10c3f2` |
+| 09:12 | <Tag>Release notes</Tag> | `acme/widget-kit`   | v5.4.0 · release-notes | claude-haiku-5-5 · acme-gateway  | 12.4 k in · 1.1 k out | unknown | 8 s      | <Tag tone="ok">ok</Tag>                         | release        |
+
+  </Scroll>
+</Screen>
+
+Tokens read _N turns · X% cached_ for agents, input and output otherwise, and _not sent_ for a refused run. **Started by** names the job or analysis by its short id, a person by name (with `users:read`, else a short id) or the automatic actor. Prompts and answers are never stored, only the figures.
+
+## MCP usage by person
+
+Last on the page, and never narrowed by the filters, a table shows how people use the [MCP endpoint](/agents/connect/) over seven days: avatar and name, teams, unexpired tokens, tool calls, a sparkline, the two most used tools, the error rate and the last call. MCP tool calls do not call a model, so they cost nothing here.
+
+<Screen title="Ops › AI spend · MCP usage by person">
+  <Toolbar title="MCP usage · 7 days">
+    <Button ghost>Your tokens</Button>
+  </Toolbar>
+  <Scroll>
+
+| Person  | Teams               | Tokens | Calls | Top tools                           | Errors | Last call |
+| ------- | ------------------- | ------ | ----- | ----------------------------------- | ------ | --------- |
+| Mira K. | <Tag>Payments</Tag> | 2      | 1,284 | `search_symbols`, `get_package_api` | 0.4%   | 2 min ago |
+| Jon D.  | <Tag>Widgets</Tag>  | 1      | 412   | `repo_rules`, `commit_conventions`  | 1.2%   | 1 h ago   |
+| Ana P.  | —                   | 1      | 37    | `fleet_health`, `why_job`           | 0%     | yesterday |
+
+  </Scroll>
+</Screen>
+
+With `users:read` over everything you see everyone; anyone else sees only their own row. The endpoint has no request limits, so there is no rate-limited column. <Ui>Your tokens</Ui> opens [Connect agents](/guide/account/connect-agents/).
+
+## Who can see it
+
+The page needs `ai:read` or `ai:admin`; others see a no-access card. <Ui>Configure</Ui> and <Ui>⋯</Ui> › <Ui>Providers and models</Ui> open [Settings › AI](/guide/settings/ai/).
+
+## Related
+
+- [Settings › AI](/guide/settings/ai/) — providers, model tiers, group and repository budgets.
+- [Tasks](/guide/ops/tasks/) — agent tasks and their own write caps.
+- [Runs](/guide/ops/runs/) — the jobs behind automatic spend, with each run's cost.
+- [Connect agents](/guide/account/connect-agents/) — MCP tokens for your coding agent.
+- [AI usage](/modules/ai-usage/) — how runs are metered, budgets checked and forecasts made.

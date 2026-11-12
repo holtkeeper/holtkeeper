@@ -1,0 +1,182 @@
+---
+title: Analysis record
+description: Open one analysis record as a full report, compare it with any earlier record of the same kind, read its job log and apply the changes it suggests.
+panel: Quality › … › Record
+route: /analyses/:id
+permission: analyses:read
+sidebar:
+  order: 7
+---
+
+import {
+  Button,
+  Diff,
+  Field,
+  Fields,
+  Screen,
+  Scroll,
+  Segmented,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+Open one analysis record as a full report, compare it with any earlier record of the same kind, read its job log and apply the changes it suggests.
+
+Every analyzer run stores a record: coverage, bundles, assets, CI, branches, reviews, and on the supply chain side dependency graphs, licenses and public API. The fleet pages show their headline numbers; the record page shows everything. Open it with <Ui>Open as page</Ui> in a side sheet, <Ui>Full record</Ui> in a repository hub, or <Ui>Details</Ui> on a row.
+
+<Screen title="Quality › Coverage › acme/admin-ui › Record">
+  <Toolbar crumbs={['Quality', 'Coverage', 'acme/admin-ui']} title="Record">
+    <Button>Run again</Button>
+    <Button ghost>⋯</Button>
+  </Toolbar>
+  <div style="padding: 0.4rem 0.75rem" class="hk-dim">acme/admin-ui · main · 3f9c2a1 · compared with 8d01e7b · 5 days ago by schedule · job 7c41e2a9 · took 4m 12s</div>
+  <Toolbar title="Version history">
+    <Segmented slot="start" items={['Lines', 'Branches', 'Untested files']} />
+    <Button ghost>Pick A</Button>
+    <Button ghost>Pick B</Button>
+    <Button ghost>Swap</Button>
+  </Toolbar>
+  <Scroll>
+
+| `v2.8.0` | `v2.9.0` |       |       | `v3.0.0` |           |
+| -------- | -------- | ----- | ----- | -------- | --------- |
+| 49.1%    | 51.0%    | 52.4% | 53.5% | 55.2%    | **57.0%** |
+|          |          |       |       | **A**    | **B**     |
+
+  </Scroll>
+  <Tabs items={['Report', 'Suggested changes:3', 'Job log']} />
+  <Strip
+    items={[
+      { value: '57.0%', label: 'lines · +1.8 pt', tone: 'ok' },
+      { value: '44.9%', label: 'branches · +0.6 pt' },
+      { value: '61.3%', label: 'functions' },
+      { value: 388, label: 'source files' },
+      { value: 41, label: 'files without tests · −4', tone: 'ok' },
+    ]}
+  />
+</Screen>
+
+## Read the header
+
+The breadcrumb follows the kind: the workspace (Quality or Supply chain), the kind's page, the repository, and **Record**. The repository crumb opens its hub at the matching area. Records have no sequence numbers; they are named by date, ref and commit.
+
+The line under the title names the repository, the ref, the short commit, the record it is compared against, when and how the record was made (schedule, push, by hand), the job's short id, which links to [Ops › Runs](/guide/ops/runs/), and how long the job took.
+
+## Compare two records
+
+**Version history** charts the repository's records of the same kind as bars of one metric, oldest first, with release tags above the bars. Up to 24 bars around the shown record are drawn. When the kind has several metrics, a switch picks one.
+
+- **A** is the base the report compares against: the previous record, unless you picked another.
+- **B** is the record shown.
+
+1. Click <Ui>Pick A</Ui>, then a bar. The report now shows B compared with that record.
+2. Click <Ui>Pick B</Ui>, then a bar. That record opens, still compared with A.
+3. Click <Ui>Swap</Ui> to open A compared with B.
+
+Bars that already hold A or B cannot be picked. The choice lives in the URL, so a link opens the same comparison.
+
+## Read the report
+
+The **Report** tab starts with metric cards, each with its change against A colored by whether up or down is better. Sections follow as cards with a table of contents that tracks your scroll. Depending on the kind, a section holds:
+
+| Block    | What you can do with it                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------------------ |
+| Metrics  | Headline numbers with their change.                                                                          |
+| Table    | Sort by any header, search, group rows. Long paths wrap after their slashes.                                 |
+| Chart    | Bars, stacked bars, lines, areas or donuts.                                                                  |
+| Treemap  | Click a tile to drill down; a breadcrumb walks back up. An accessible list sits beside it.                   |
+| Timeline | Events with repeated children folded into `×N` groups you can expand.                                        |
+| Graph    | A dependency graph with highlighted paths and a minimap; large graphs are capped at 250 nodes with a notice. |
+| Issues   | Callouts by tone.                                                                                            |
+| Text     | Formatted notes.                                                                                             |
+
+### Exclude a file from a report
+
+On reports that support it, such as coverage and assets, hovering a file path shows an exclude button.
+
+1. Hover the path and click the exclude button.
+2. Choose the option, for assets for example to skip optimization or ignore the file entirely.
+3. Pick a glob: the file itself, its extension in that folder, a parent folder or the name anywhere. Or type one.
+4. Confirm. The glob is added to the setting for this repository, extending its own entry or starting one from the broader value.
+
+<Screen title="Record › Exclude">
+  <Stack>
+    <b>Exclude public/images/hero-banner.png</b>
+    <Fields columns={1}>
+      <Field label="Option" value="Skip optimization" />
+      <Field
+        label="Pattern"
+        value="public/images/*.png"
+        mono
+        hint="Added to acme/checkout-web's own entry."
+      />
+    </Fields>
+    <div>
+      <Button ghost>Cancel</Button> <Button primary>Exclude</Button>
+    </div>
+  </Stack>
+</Screen>
+
+:::note
+Excluding needs permission to write settings for the repository. Without it the button does not show.
+:::
+
+## Apply suggested changes
+
+Some analyzers propose code changes, such as optimized images and SVGs from the assets analyzer. They sit in the **Suggested changes** tab with their count; the tab shows only when there are any.
+
+<Screen title="Record › Suggested changes">
+  <Toolbar title="Suggested changes">
+    <Segmented slot="start" items={['Unified', 'Split']} />
+    <Button ghost>Select all safe</Button>
+  </Toolbar>
+  <Stack>
+    <div><Tag tone="ok">safe</Tag> <Tag>svgo</Tag> <b>Optimize public/icons/logo.svg</b></div>
+    <Diff
+      file="public/icons/logo.svg"
+      stat="−15.6 kB"
+      lines={[
+        [1, '-', '<?xml version="1.0" encoding="UTF-8"?>'],
+        [2, '-', '<!-- Generator: Some Editor 12.0 -->'],
+        [3, ' ', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32">'],
+        [4, '-', '  <path d="M10.000 4.000 L22.500 4.000 L22.500 28.000"/>'],
+        [4, '+', '  <path d="M10 4h12.5v24"/>'],
+      ]}
+    />
+  </Stack>
+  <Toolbar title="2 of 3 selected">
+    <Button>Download patch</Button>
+    <Button>Copy patch</Button>
+    <Button primary>Open merge request</Button>
+  </Toolbar>
+</Screen>
+
+Each change carries a confidence (**safe** or needs **review**) and its source. Files collapse; diffs switch between unified and split layout. Long minified lines of SVG, XML and HTML files show indented, with a **Formatted** / **Raw** toggle.
+
+1. Tick the changes you want, or click <Ui>Select all safe</Ui>.
+2. In the bar at the bottom, choose <Ui>Download patch</Ui>, <Ui>Copy patch</Ui> or <Ui>Open merge request</Ui>.
+3. If a file changed on the branch since the record was made, the affected cards show the conflict.
+
+:::caution
+Selecting and applying changes needs `analyses:run`. Review suggestions are an exception: they are applied on the forge with its own suggestion button, so their changes are read-only here.
+:::
+
+## Read the job log
+
+The **Job log** tab shows the job that made the record: its status, trigger and timings, a link to it in Ops › Runs, and the log of its latest attempt. Uploaded records and jobs whose logs were pruned say there is no log.
+
+## Run it again
+
+<Ui>Run again</Ui> opens the run dialog for the record's analyzer and repository; for a review
+record it reads <Ui>Review again</Ui>. Both need `analyses:run`. <Ui>⋯</Ui> copies the link to the
+record.
+
+## Related
+
+- [Coverage](/guide/quality/coverage/), [Bundles](/guide/quality/bundles/), [Assets](/guide/quality/assets/), [CI](/guide/quality/ci/), [Branches](/guide/quality/branches/), [Reviews](/guide/quality/reviews/) — the fleet pages that open records.
+- [Ops › Runs](/guide/ops/runs/) — every job and its log.
+- [Analyzers and runs](/start/concepts/analyzers-and-runs/) — how analyzers produce records.

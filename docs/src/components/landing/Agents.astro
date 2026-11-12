@@ -1,0 +1,49 @@
+---
+const setup = `# Account › Connect agents › New token
+claude mcp add --transport http holtkeeper \\
+  https://holtkeeper.example.com/mcp \\
+  --header "Authorization: Bearer $HOLTKEEPER_TOKEN"`
+
+const tools = [
+  ['search_symbols', 'Find an exported name across every package'],
+  ['evaluate_dependency', 'Who uses it, advisories, licenses, bundle share'],
+  ['upgrade_impact', 'The uses an upgrade breaks'],
+  ['repo_rules', 'Team rules for one repository'],
+  ['release_status', 'What is ready to ship and what blocks it'],
+  ['why_job', 'Why a run failed or is stuck'],
+]
+---
+
+<section class="l-sec" id="agents">
+  <div class="l-wrap l-two">
+    <div class="l-col">
+      <div class="l-head">
+        <span class="l-eyebrow">For agents</span>
+        <h2>Your coding agents read the fleet before they touch it.</h2>
+        <p>The MCP endpoint gives Claude Code, Cursor and any MCP client the same answers the panel shows: public APIs, who uses what, team rules, release state and job logs.</p>
+      </div>
+      <ul class="l-checks">
+        <li><b>Personal tokens</b> from Account › Connect agents, scoped by what the person can see.</li>
+        <li><b>Rules and conventions</b> come from the repository, so agents follow the team's commit style and test ids.</li>
+        <li><b>Changes go through tasks</b>: an agent proposes, a person approves in the Inbox.</li>
+      </ul>
+      <div class="l-row">
+        <a class="l-btn primary" href="/agents/connect/">Connect an agent</a>
+        <a class="l-btn" href="/reference/mcp-tools/">MCP tool reference</a>
+      </div>
+    </div>
+    <div class="l-col">
+      <div class="l-code"><div class="l-code-bar"><span>Claude Code</span><button class="l-btn ghost icon" type="button" data-copy={setup.split('\n').slice(1).join('\n')} aria-label="Copy snippet">⧉</button></div><pre class="hk-mono">{setup}</pre></div>
+      <div class="l-tools hk-ui-root">
+        {
+          tools.map(([name, text]) => (
+            <div>
+              <span class="hk-mono">{name}</span>
+              <span class="hk-mut">{text}</span>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>

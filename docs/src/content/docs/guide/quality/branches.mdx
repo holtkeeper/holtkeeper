@@ -1,0 +1,179 @@
+---
+title: Branches
+description: List the branches worth deleting in every repository — merged, abandoned after a closed merge request, or stale — with who last committed to each, so everyone can clean up after themselves.
+panel: Quality › Branches
+route: /quality/branches
+permission: analyses:read
+sidebar:
+  order: 5
+---
+
+import {
+  Button,
+  Kbd,
+  Row,
+  Rows,
+  Screen,
+  Scroll,
+  Segmented,
+  Sheet,
+  Stack,
+  Strip,
+  Tabs,
+  Tag,
+  Toolbar,
+  Ui,
+} from '@ui'
+
+List the branches worth deleting in every repository — merged, abandoned after a closed merge request, or stale — with who last committed to each, so everyone can clean up after themselves.
+
+<Screen title="Quality › Branches" caption="Oldest first. Branches with an open merge request are never listed.">
+  <Toolbar title="Branches">
+    <Segmented slot="start" items={['All:214', 'Merged:131', 'Closed MR:22', 'Stale:61']} />
+    <Tag>My teams</Tag>
+    <Tag>Author: any</Tag>
+    <Tag>Age: any</Tag>
+    <Button>Configure</Button>
+    <Button primary>Run now</Button>
+  </Toolbar>
+  <Strip
+    items={[
+      { value: 214, label: 'to clean up · 19 repositories', tone: 'warn' },
+      { value: 131, label: 'merged' },
+      { value: 22, label: 'closed MR' },
+      { value: 61, label: 'stale · 90 days' },
+      { value: 486, label: 'besides default · 38 kept for an open MR' },
+      { value: '−17', label: 'since last run', tone: 'ok' },
+    ]}
+    end="Oldest: 1,284 days"
+  />
+  <Scroll>
+
+|     | Branch                                              | Reason                           | Author   | Last commit             | Merge request                    |
+| --- | --------------------------------------------------- | -------------------------------- | -------- | ----------------------- | -------------------------------- |
+| ☐   | **feature/ABC-88-legacy-search** · `acme/admin-ui`  | <Tag>Stale</Tag>                 | Ivo P.   | 1,284 days · 2023-05-08 | —                                |
+| ☑   | **fix/ABC-412-cart-rounding** · `acme/checkout-web` | <Tag tone="warn">Merged</Tag>    | Mira K.  | 212 days · 2026-04-14   | <Tag tone="ok">!318 merged</Tag> |
+| ☑   | **spike/ABC-530-new-theme** · `acme/widget-kit`     | <Tag tone="warn">Closed MR</Tag> | Tomas R. | 96 days · 2026-08-08    | <Tag>!77 closed</Tag>            |
+| ☐   | **chore/bump-some-lib** · `acme/billing-api`        | <Tag tone="warn">Merged</Tag>    | Mira K.  | 41 days · 2026-10-02    | <Tag tone="ok">!205 merged</Tag> |
+
+  </Scroll>
+</Screen>
+
+## What the table shows
+
+One row per branch worth deleting, from each repository's newest branches record. The page only reports; Holtkeeper never deletes a branch.
+
+| Column        | Meaning                                                                                            |
+| ------------- | -------------------------------------------------------------------------------------------------- |
+| Branch        | The branch, linking to it on the forge, with its repository (opens the hub at Quality › Branches). |
+| Reason        | Why it is worth deleting: **Merged**, **Closed MR** or **Stale**.                                  |
+| Author        | Who made the head commit.                                                                          |
+| Last commit   | Age and date of the head commit.                                                                   |
+| Merge request | The branch's merge request on the forge, with its state.                                           |
+
+Each repository lists its oldest branches up to a fixed number; the footer counts the ones left out. Without a sort rows go oldest first, and every column sorts.
+
+The toolbar narrows the list: the reason switch with counts, the scope switch (_My teams_ folds other teams' branches into one row), **Author**, and **Age** (older than 30, 90 or 365 days). The search in the header matches branch, repository or author.
+
+The strip comes from the stored counts of the repositories in scope, not from the listed rows: branches to clean up and in how many repositories, merged, closed merge request, stale (with the threshold when every repository uses the same), branches besides the default with those kept for an open merge request, the change since each repository's previous run, and the oldest branch.
+
+## How a branch is judged
+
+The default branch, protected branches and branches matching the ignore list are never judged. A branch with an open merge request is in review and never listed. Of the rest, the first reason that holds wins:
+
+1. **Merged** — the branch's head is reachable from the default branch, or its newest merged merge request points at its head. Squash and rebase merges count too.
+2. **Closed MR** — its newest merge request was closed without merging and the branch got no commits since.
+3. **Stale** — no commits for 90 days, or the repository's own threshold.
+
+The analyzer runs on Tuesday nights in the default `branches-weekly` schedule. <Ui>Run now</Ui> queues it at once and needs `analyses:run`.
+
+## Hand out a cleanup list
+
+The page has no delete button on purpose: each author deletes their own branches on the forge. Use the selection to build a list for them.
+
+1. Tick branches, click a row, or move with <Kbd>J</Kbd> / <Kbd>K</Kbd> and press <Kbd>↵</Kbd>. The header checkbox selects every shown row.
+2. A side sheet opens. **Selection** lists the selected branches by repository, each linking to the forge.
+3. Click <Ui>Copy list</Ui>. Each line holds the repository path and the branch name, ready to paste into a chat or a script.
+
+<Screen title="Quality › Branches › Selection">
+  <Sheet title="2 branches selected">
+    <Button slot="actions" ghost>
+      Select merged and closed
+    </Button>
+    <Button slot="actions" ghost>
+      Clear selection
+    </Button>
+    <Tabs items={['Selection:2', 'By author', 'Since last run']} />
+    <Rows>
+      <Row title="fix/ABC-412-cart-rounding" sub="acme/checkout-web · merged · Mira K.">
+        <Tag tone="warn">212 days</Tag>
+      </Row>
+      <Row title="spike/ABC-530-new-theme" sub="acme/widget-kit · closed MR · Tomas R.">
+        <Tag tone="warn">96 days</Tag>
+      </Row>
+    </Rows>
+    <Stack>
+      <div>
+        <Button primary>Copy list</Button>
+      </div>
+    </Stack>
+  </Sheet>
+</Screen>
+
+```text title="Copied list"
+acme/checkout-web fix/ABC-412-cart-rounding
+acme/widget-kit spike/ABC-530-new-theme
+```
+
+<Ui>Select merged and closed</Ui> picks every merged and closed-MR branch shown;
+<Ui>Clear selection</Ui> empties it. The selection lives in the page and is not kept in the URL.
+
+## See who has the most to clean up
+
+The sheet's other two tabs work without a selection; open them from <Ui>⋯</Ui> › <Ui>By author</Ui> or <Ui>Since last run</Ui>.
+
+- **By author** sums branches to clean up per author across the repositories in scope, with each author's oldest branch.
+- **Since last run** shows how every count of each repository changed against its previous run.
+
+<Screen title="Quality › Branches › By author">
+  <Sheet title="By author">
+    <Tabs items={['Selection', 'By author', 'Since last run']} active={1} />
+    <Scroll>
+
+| Author   | To clean up | Merged | Closed MR | Stale | Oldest     |
+| -------- | ----------- | ------ | --------- | ----- | ---------- |
+| Mira K.  | 38          | 31     | 2         | 5     | 402 days   |
+| Ivo P.   | 27          | 9      | 1         | 17    | 1,284 days |
+| Tomas R. | 14          | 8      | 4         | 2     | 96 days    |
+
+    </Scroll>
+
+  </Sheet>
+</Screen>
+
+## Change what counts
+
+<Ui>Configure</Ui> opens the `analyzers.branches` setting:
+
+| Option             | Default | Meaning                                                    |
+| ------------------ | ------- | ---------------------------------------------------------- |
+| `staleDays`        | 90      | Days without commits after which a branch is stale.        |
+| `ignore`           | none    | Globs of branch names never reported, such as `release/*`. |
+| `includeProtected` | off     | Judge protected branches too.                              |
+
+```json title="analyzers.branches · one group"
+{
+  "staleDays": 60,
+  "ignore": ["release/*", "demo/*"]
+}
+```
+
+## In one repository
+
+The repository hub's **Quality › Branches** shows the same table narrowed to that repository.
+
+## Related
+
+- [Repository hub](/guide/repos/repository-hub/) — every Quality area of one repository.
+- [Settings › Analyzers](/guide/settings/analyzers/) — switch analyzers per scope and set their options.
+- [Branches analyzer](/modules/branches/) — how branches are read and classified.
