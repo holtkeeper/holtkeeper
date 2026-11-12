@@ -181,6 +181,37 @@ describe('scheduler', () => {
     ])
   })
 
+  test('schedules without groups run group analyzers for root groups only', async () => {
+    const nested = parseConfig({
+      forges: { work: forge },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'] },
+        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      },
+    })
+    const asked: string[] = []
+    const members = async (group: string) => {
+      asked.push(group)
+      return group === 'shapes' ? [{ forge: 'work', path: 'shapes/circle' }] : []
+    }
+    const all = await planSchedule(
+      { analyzers: ['depgraph', 'fleet'] },
+      { config: nested, analyzers, resolveRepos: members },
+    )
+    expect(all.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
+      'depgraph shapes/circle',
+      'fleet shapes',
+    ])
+    expect(asked).toEqual(['shapes'])
+    const named = await planSchedule(
+      { analyzers: ['fleet'], groups: ['shapes.round'] },
+      { config: nested, analyzers, resolveRepos: members },
+    )
+    expect(named.map((r) => `${r.analyzer} ${r.repo.path} ${r.group}`)).toEqual([
+      'fleet shapes.round shapes.round',
+    ])
+  })
+
   test('repository jobs skip repositories the analyzer does not apply to', async () => {
     const reads: string[] = []
     const files: Record<string, string> = { 'games/a:bun.lock': 'caniuse-lite' }

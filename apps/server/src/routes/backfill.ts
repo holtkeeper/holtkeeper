@@ -3,6 +3,7 @@ import type {
   AnalysisBackfillResult,
   AnalysisBackfillStarted,
 } from '@holtkeeper/api'
+import { rootGroups } from '@holtkeeper/core'
 import type { GitForge, RepoRef } from '@holtkeeper/forge'
 import { type JobRequest, enqueueUnique, groupRepositories } from '@holtkeeper/jobs'
 import { releaseTarget } from '@holtkeeper/release'
@@ -87,7 +88,7 @@ export function backfillRoutes(deps: ServerDeps) {
     if (repo) return [repo]
     const resolve = groupRepositories(config)
     const found = new Map<string, RepoRef>()
-    for (const name of group ? [group] : Object.keys(config.groups))
+    for (const name of group ? [group] : rootGroups(config))
       // oxlint-disable-next-line no-await-in-loop -- groups one after another keep forge limits
       for (const member of await resolve(name)) found.set(`${member.forge}:${member.path}`, member)
     return [...found.values()]

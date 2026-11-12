@@ -1,7 +1,14 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { type GroupMatch, groupMatchSchema, groupNames } from '@holtkeeper/access'
+import {
+  GROUP_KEY_PATTERN,
+  type GroupMatch,
+  groupLineage,
+  groupMatchSchema,
+  groupNames,
+  parentGroup,
+} from '@holtkeeper/access'
 import type { AiProviderPlugin } from '@holtkeeper/agent'
 import type { AuthProvider } from '@holtkeeper/auth'
 import type { ForgeDefinition, Secret } from '@holtkeeper/forge'
@@ -10,6 +17,17 @@ import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
 const id = z.string().regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
+
+/**
+ * A group key: a root group (`shapes`) or one subgroup level below it (`shapes.round`), see
+ * `GROUP_KEY_PATTERN` of `@holtkeeper/access`.
+ */
+export const groupKeySchema = z
+  .string()
+  .regex(
+    GROUP_KEY_PATTERN,
+    'use lowercase letters, digits and dashes, with one optional dot for a subgroup (team.sub)',
+  )
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
@@ -448,7 +466,7 @@ export const configSchema = z
   .object({
     ...fileShape,
     forges: z.record(id, forgeSchema).default({}),
-    groups: z.record(id, groupSchema).default({}),
+    groups: z.record(groupKeySchema, groupSchema).default({}),
     repos: z.record(z.string(), repoSchema).default({}),
     jobs: jobsSchema.prefault({}),
   })
@@ -461,6 +479,22 @@ export const configSchema = z
           code: 'custom',
           path: ['groups', name, 'forge'],
           message: `unknown forge "${group.forge}"`,
+        })
+      }
+      const parent = parentGroup(name)
+      if (parent === undefined) continue
+      const parentConfig = config.groups[parent]
+      if (!parentConfig) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['groups', name],
+          message: `parent group "${parent}" is not configured`,
+        })
+      } else if (parentConfig.forge !== group.forge) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['groups', name, 'forge'],
+          message: `forge must match parent "${parent}" (${parentConfig.forge})`,
         })
       }
     }
@@ -524,11 +558,33 @@ type GroupTitles = Readonly<Record<string, { title?: string | undefined }>>
 /** What people see for group `key`: its title, or the key when it has none or is unknown. */
 export const groupTitle = (groups: GroupTitles, key: string): string => groups[key]?.title ?? key
 
+/** Keys of the configured groups that are not subgroups, in config order. */
+export const rootGroups = (config: Pick<HoltkeeperConfig, 'groups'>): string[] =>
+  Object.keys(config.groups).filter((key) => parentGroup(key) === undefined)
+
+/** Keys of the configured subgroups of `key`, in config order. */
+export const subgroupsOf = (config: Pick<HoltkeeperConfig, 'groups'>, key: string): string[] =>
+  Object.keys(config.groups).filter((candidate) => parentGroup(candidate) === key)
+
+/**
+ * Group `key` with its ancestors' titles, root first, and the key: `Shapes › Round (shapes.round)`.
+ * A group without a title shows its key in the path.
+ */
+export function groupPathLabel(groups: GroupTitles, key: string): string {
+  const path = groupLineage(key)
+    .toReversed()
+    .map((group) => groupTitle(groups, group))
+    .join(' › ')
+  return path === key ? key : `${path} (${key})`
+}
+
 /**
  * Group `key` for text a reader may act on: `Title (key)` when it has a title, else the key, so
- * the key needed for tool calls and settings is always there.
+ * the key needed for tool calls and settings is always there. A subgroup shows its parent's title
+ * first (`groupPathLabel`).
  */
 export function groupLabel(groups: GroupTitles, key: string): string {
+  if (parentGroup(key) !== undefined) return groupPathLabel(groups, key)
   const title = groups[key]?.title
   return title && title !== key ? `${title} (${key})` : key
 }

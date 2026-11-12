@@ -47,6 +47,39 @@ describe('resolveSetting', () => {
     expect(resolveSetting(entries, 'audit.fix', repo)).toBeUndefined()
   })
 
+  test('a subgroup beats its parent, and the parent beats everything', () => {
+    const round = { forge: 'work', path: 'shapes/circle', groups: ['shapes.round', 'shapes'] }
+    const layered = [
+      entry('global', { all: true }, 'major'),
+      entry('sub', { groups: ['shapes.round'] }, 'patch', '2026-09-01'),
+      entry('parent', { groups: ['shapes'] }, 'minor', '2026-10-05'),
+    ]
+    expect(resolveSetting(layered, 'audit.upgrade', round)?.id).toBe('sub')
+    expect(
+      resolveSetting(
+        layered.filter((e) => e.id !== 'sub'),
+        'audit.upgrade',
+        round,
+      )?.id,
+    ).toBe('parent')
+    expect(
+      resolveSetting(layered, 'audit.upgrade', {
+        ...round,
+        path: 'shapes/square',
+        groups: ['shapes'],
+      })?.id,
+    ).toBe('parent')
+  })
+
+  test('a parent listed with its subgroup ranks like the parent, so the newer entry wins', () => {
+    const square = { forge: 'work', path: 'shapes/square', groups: ['shapes'] }
+    const both = [
+      entry('union', { groups: ['shapes', 'shapes.round'] }, 'patch', '2026-09-01'),
+      entry('parent', { groups: ['shapes'] }, 'minor', '2026-10-05'),
+    ]
+    expect(resolveSetting(both, 'audit.upgrade', square)?.id).toBe('parent')
+  })
+
   test('exact paths beat globs and newer entries break ties', () => {
     const more = [
       ...entries,

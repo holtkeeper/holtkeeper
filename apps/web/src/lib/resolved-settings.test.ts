@@ -3,9 +3,11 @@ import { describe, expect, test } from 'bun:test'
 import type { ResolvedSettingRow, SettingDefinitionView, SettingView } from '@holtkeeper/api'
 
 import {
+  fromParentGroup,
   layerCounts,
   orgRowMatches,
   orgRows,
+  parentGroupCount,
   resolvedSections,
   rowMatches,
   sectionSlug,
@@ -86,6 +88,30 @@ describe('filters', () => {
 })
 
 describe('sourceLabel', () => {
+  test('a subgroup focus names entries of its parent group', () => {
+    const round: ScopeFocus = { kind: 'group', group: 'shapes.round' }
+    const parent = { layer: 'group' as const, groups: ['shapes'] }
+    const own = { layer: 'group' as const, groups: ['shapes.round', 'shapes'] }
+    expect(sourceLabel(parent, round)).toBe('Parent group')
+    expect(sourceLabel(own, round)).toBe('This group')
+    expect(fromParentGroup(parent, round)).toBe(true)
+    expect(fromParentGroup(own, round)).toBe(false)
+    expect(fromParentGroup(parent, { kind: 'group', group: 'shapes' })).toBe(false)
+    expect(sourceLabel(parent, { kind: 'group', group: 'shapes' })).toBe('This group')
+    const rows = [own, parent, { layer: 'org' as const }].map(
+      (source, index): ResolvedSettingRow => ({
+        key: `k${index}`,
+        label: `k${index}`,
+        section: 'Polling',
+        value: 1,
+        source,
+        overrides: 0,
+      }),
+    )
+    expect(parentGroupCount(rows, round)).toBe(1)
+    expect(parentGroupCount(rows, group)).toBe(0)
+  })
+
   test('names the layer in words', () => {
     expect(sourceLabel({ layer: 'default' }, repo)).toBe('Default')
     expect(sourceLabel({ layer: 'org' }, repo)).toBe('Org')

@@ -968,3 +968,83 @@ describe('knowledge counts', () => {
     expect(counts.spaces['repo:work:shop/b']?.notes).toBe(3)
   })
 })
+
+describe('subgroups', () => {
+  const nested = parseConfig({
+    forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
+    groups: {
+      shapes: { forge: 'work', include: ['shapes/*'], title: 'Shapes' },
+      'shapes.round': { forge: 'work', include: ['shapes/disc*'], title: 'Round' },
+    },
+  })
+  const nestedApp = (auth: AuthProvider = noAuth()) => {
+    const vault = aesVault('v'.repeat(32))
+    return createApp({
+      config: nested,
+      auth,
+      store,
+      vault,
+      credentials: createCredentialService({ credentials: store.credentials, vault }),
+      settings: builtinSettings,
+      analyses: [],
+      now: () => new Date(Date.UTC(2026, 10, 1, 12, clock++)),
+    })
+  }
+  const grants = headerAuth({
+    roles: {
+      round: [{ scope: { groups: ['shapes.round'] }, actions: ['knowledge:read'] }],
+      shapes: [{ scope: { groups: ['shapes'] }, actions: ['knowledge:read'] }],
+    },
+  })
+
+  test('the chain shows the subgroup layer before its parent, with path titles', async () => {
+    const app = nestedApp()
+    await put(app, 'group:shapes', 'review', { rules: 'PARENT review.' })
+    await put(app, 'group:shapes.round', 'review', { rules: 'SUB review.' })
+    const chain = await json<GuideChainView>(
+      app.request('/api/guide/chain?repo=work:shapes/disc&section=review'),
+    )
+    expect(chain.sections[0]?.layers.map((l) => [l.kind, l.scope, l.source])).toEqual([
+      ['subgroup', 'group:shapes.round', 'Team Shapes › Round (shapes.round)'],
+      ['group', 'group:shapes', 'Team Shapes (shapes)'],
+    ])
+    const flat = await json<GuideChainView>(
+      app.request('/api/guide/chain?repo=work:shapes/cube&section=review'),
+    )
+    expect(flat.sections[0]?.layers.map((l) => l.scope)).toEqual(['group:shapes'])
+  })
+
+  test('counts give a subgroup its own space, readable from its own or its parent grant', async () => {
+    const app = nestedApp()
+    await put(app, 'group:shapes', 'review', { rules: 'PARENT.' })
+    await put(app, 'group:shapes.round', 'review', { rules: 'SUB.' })
+    await note('n1', { groups: ['shapes.round'] })
+    await note('n2', { groups: ['shapes'] })
+    await candidate('c1', 'work:shapes/disc')
+
+    const everything = await json<KnowledgeCounts>(app.request('/api/knowledge/counts'))
+    expect(everything.spaces).toEqual({
+      all: { guide: 0, notes: 2, learnings: 1 },
+      'group:shapes': { guide: 1, notes: 1, learnings: 1 },
+      'group:shapes.round': { guide: 1, notes: 1, learnings: 1 },
+      'repo:work:shapes/disc': { guide: 0, notes: 2, learnings: 1 },
+    })
+
+    const counts = (role: string) =>
+      json<KnowledgeCounts>(
+        nestedApp(grants).request('/api/knowledge/counts', { headers: as(role) }),
+      )
+    expect(Object.keys((await counts('round')).spaces).toSorted()).toEqual([
+      'all',
+      'group:shapes.round',
+      'repo:work:shapes/disc',
+    ])
+    expect((await counts('round')).spaces['group:shapes.round']?.notes).toBe(1)
+    expect(Object.keys((await counts('shapes')).spaces).toSorted()).toEqual([
+      'all',
+      'group:shapes',
+      'group:shapes.round',
+      'repo:work:shapes/disc',
+    ])
+  })
+})

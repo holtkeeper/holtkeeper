@@ -1,4 +1,4 @@
-import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
+import { type Principal, type RepoTarget, can, groupLineage } from '@holtkeeper/access'
 import type {
   AgentTranscriptView,
   AnalyzerHealthList,
@@ -124,7 +124,9 @@ export const jobTarget = (
   config: ServerDeps['config'],
   job: { repo: RepoRef; group?: string },
 ): RepoTarget =>
-  job.group !== undefined ? { ...job.repo, groups: [job.group] } : repoTarget(config, job.repo)
+  job.group !== undefined
+    ? { ...job.repo, groups: groupLineage(job.group) }
+    : repoTarget(config, job.repo)
 
 /** The jobs whose agent cost `principal` may read: `ai:read` or `ai:admin` on the job's target. */
 export function costReaderOf(config: ServerDeps['config'], principal: Principal): CostReader {

@@ -1,4 +1,4 @@
-import { can } from '@holtkeeper/access'
+import { can, parentGroup } from '@holtkeeper/access'
 import type {
   GroupListingView,
   RepoPollResult,
@@ -56,6 +56,7 @@ const audit = (c: AppContext, action: string, repo: RepoRef, details: Record<str
  * hooks that cover it are included only for callers with global `settings:write`.
  * `GET /repos/updates/groups/:group` shows the repositories polling knows for a group, what its
  * include patterns matched before excludes, when it lists next and its recent listings; `POST /repos/updates/groups/:group/list` lists them on the forge now.
+ * A subgroup shows its parent's listing narrowed to its own patterns, and listing it lists the parent.
  * Reading needs `settings:read` on the repository (or group), the rest `settings:write`; the webhook URL is
  * only shown to callers with `settings:write`. All answer 503 without a key-value store.
  */
@@ -165,41 +166,50 @@ export function updateRoutes(deps: ServerDeps, options: UpdateRoutesOptions) {
     const definition = deps.config.groups[group]
     if (!definition) throw new HTTPException(404, { message: `group ${group} is not configured` })
     const principal = authorize(c, action, { kind: 'scope', scope: { groups: [group] } })
+    const parent = parentGroup(group)
     return {
       group,
+      parent,
       forge: definition.forge,
       withMatched: can(principal, 'settings:write', { kind: 'global' }),
+      withAttempts:
+        parent === undefined ||
+        can(principal, 'settings:read', { kind: 'scope', scope: { groups: [parent] } }),
     }
   }
 
-  const listingView = async (
-    group: string,
-    forge: string,
-    withMatched: boolean,
-  ): Promise<GroupListingView> => {
+  const listingView = async ({
+    group,
+    parent,
+    forge,
+    withMatched,
+    withAttempts,
+  }: ReturnType<typeof groupOf>): Promise<GroupListingView> => {
     const { poller } = parts()
     const listing = await poller.listing(group)
     const nextAt = poller.nextListingAt(listing)
     return {
       group,
       forge,
+      ...(parent !== undefined && { parent }),
       repos: listing?.repos ?? [],
       ...(withMatched && { matched: listing?.matched ?? listing?.repos ?? [] }),
       ...(listing?.listedAt && { listedAt: listing.listedAt }),
       ...(nextAt && { nextAt }),
-      attempts: listing?.attempts ?? [],
+      attempts: withAttempts ? (listing?.attempts ?? []) : [],
     }
   }
 
   app.get('/repos/updates/groups/:group', async (c) => {
-    const { group, forge, withMatched } = groupOf(c, 'settings:read')
-    return c.json<GroupListingView>(await listingView(group, forge, withMatched))
+    return c.json<GroupListingView>(await listingView(groupOf(c, 'settings:read')))
   })
 
   app.post('/repos/updates/groups/:group/list', async (c) => {
-    const { group, forge, withMatched } = groupOf(c, 'settings:write')
-    await parts().poller.listGroup(group)
-    return c.json<GroupListingView>(await listingView(group, forge, withMatched))
+    const scope = groupOf(c, 'settings:write')
+    if (scope.parent !== undefined)
+      authorize(c, 'settings:write', { kind: 'scope', scope: { groups: [scope.parent] } })
+    await parts().poller.listGroup(scope.parent ?? scope.group)
+    return c.json<GroupListingView>(await listingView(scope))
   })
 
   app.post('/repos/updates/poll', async (c) => {

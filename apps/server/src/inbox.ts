@@ -5,6 +5,7 @@ import {
   type Scope,
   can,
   groupsMatch,
+  outerGroups,
 } from '@holtkeeper/access'
 import { budgetKey, budgetStatuses } from '@holtkeeper/ai-usage'
 import type {
@@ -31,7 +32,7 @@ import type {
 import { type AllowlistEntry, allowlistSchema, isExpired } from '@holtkeeper/vuln'
 import { webPaths } from '@holtkeeper/web-paths'
 
-import { type ServerDeps, parseRepo, repoTarget } from './context.ts'
+import { type ServerDeps, groupLabeler, parseRepo, repoTarget } from './context.ts'
 import { releaseCan, releaseServiceFor } from './releases.ts'
 import { canReadAiScope } from './routes/ai.ts'
 import { peopleOf } from './routes/avatars.ts'
@@ -88,13 +89,21 @@ const firstLine = (text: string, max = 160) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
-const formatMatch = (entry: GroupMatch) => (typeof entry === 'string' ? entry : entry.join(' + '))
+const formatMatch = (entry: GroupMatch, label: (key: string) => string) =>
+  typeof entry === 'string' ? label(entry) : entry.map(label).join(' + ')
 
-/** A scope as people read it: `All repositories`, `Team web`, a repository path or pattern. */
-function scopeText(scope: Scope): string {
+/**
+ * A scope as people read it: `All repositories`, `Team Web (web)`, a repository path or pattern.
+ * A subgroup named next to its parent is left out: the parent already covers it.
+ */
+function scopeText(scope: Scope, label: (key: string) => string): string {
   if (scope.all) return 'All repositories'
+  const groups = scope.groups ?? []
+  const outer = new Set(outerGroups(groups.filter((entry) => typeof entry === 'string')))
   const parts = [
-    ...(scope.groups ?? []).map((entry) => `Team ${formatMatch(entry)}`),
+    ...groups
+      .filter((entry) => typeof entry !== 'string' || outer.has(entry))
+      .map((entry) => `Team ${formatMatch(entry, label)}`),
     ...(scope.repos ?? []).map((pattern) => {
       const repo = exactRepo(pattern)
       return repo ? repo.path : pattern
@@ -281,6 +290,7 @@ function inboxItems(
   now: Date,
 ): Placed[] {
   const { config } = deps
+  const label = groupLabeler(config)
   const groupsOfKey = (key: string) => {
     const repo = parseRepo(key)
     return repo ? repoTarget(config, repo).groups : []
@@ -353,7 +363,7 @@ function inboxItems(
         id: `note:${entry.id}`,
         kind: 'note',
         title: entry.title,
-        scope: scopeText(entry.scope),
+        scope: scopeText(entry.scope, label),
         repos: scopeRepos(entry.scope),
         ...(firstLine(entry.body) && { detail: firstLine(entry.body) }),
         href: webPaths.knowledge('notes'),
@@ -450,7 +460,7 @@ function inboxItems(
           id: notice.id,
           kind: 'allowlist',
           title: allowlistTitle(notice),
-          scope: scopeText(setting.scope),
+          scope: scopeText(setting.scope, label),
           repos: notice.repos.map(ref),
           detail: firstLine(entry.reason),
           href: webPaths.security(),
@@ -476,7 +486,7 @@ function inboxItems(
         id: `budget:${status.id}:${status.week.key}`,
         kind: 'budget',
         title: `AI spend reached ${Math.floor(status.percent)}% of the ${usd(status.weeklyUsd)} weekly budget`,
-        scope: scopeText(status.scope),
+        scope: scopeText(status.scope, label),
         repos: scopeRepos(status.scope),
         detail:
           status.action === 'block'

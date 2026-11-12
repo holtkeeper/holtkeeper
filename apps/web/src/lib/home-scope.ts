@@ -1,6 +1,6 @@
-import type { GroupMatch } from '@holtkeeper/api'
+import { type GroupMatch, leafGroups } from '@holtkeeper/api'
 
-import { type GroupTitleOf, keyAsTitle } from './group-titles.ts'
+import { type GroupTitleOf, byGroupTree, groupPathTitle, keyAsTitle } from './group-titles.ts'
 
 /**
  * A position of the scope switch every list page shares: *My teams*, *All I can see*, or one
@@ -17,13 +17,24 @@ export const groupView = (group: string): ScopeView => `group:${group}`
 export const viewGroup = (view: ScopeView): string | undefined =>
   view.startsWith(groupPrefix) ? view.slice(groupPrefix.length) : undefined
 
-/** Words naming a narrowed scope after a count: " of my teams", " in widgets", or nothing for *All I can see*. */
+/**
+ * Words naming a narrowed scope after a count: " of my teams", " in widgets", " in widgets ›
+ * round" for a subgroup, or nothing for *All I can see*.
+ */
 export const scopeSuffix = (view: ScopeView, titleOf: GroupTitleOf = keyAsTitle): string =>
-  view === 'all' ? '' : view === 'mine' ? ' of my teams' : ` in ${titleOf(viewGroup(view) ?? '')}`
+  view === 'all'
+    ? ''
+    : view === 'mine'
+      ? ' of my teams'
+      : ` in ${groupPathTitle(titleOf, viewGroup(view) ?? '')}`
 
-/** A position's name in running text: "My teams", "All I can see" or the group's title. */
+/** A position's name in running text: "My teams", "All I can see" or the group's path title. */
 export const scopeLabel = (view: ScopeView, titleOf: GroupTitleOf = keyAsTitle): string =>
-  view === 'all' ? 'All I can see' : view === 'mine' ? 'My teams' : titleOf(viewGroup(view) ?? '')
+  view === 'all'
+    ? 'All I can see'
+    : view === 'mine'
+      ? 'My teams'
+      : groupPathTitle(titleOf, viewGroup(view) ?? '')
 
 /** A stored scope position; anything else, including retired positions, is `undefined`. */
 export function parseScopeView(value: unknown): ScopeView | undefined {
@@ -87,28 +98,31 @@ export interface GroupCount {
   count: number
 }
 
-/** Item counts of the scope switch: per position and per group, groups sorted by name. */
+/** Item counts of the scope switch: per position and per group, subgroups right after their parent. */
 export interface ScopeCounts {
   mine: number
   all: number
   groups: readonly GroupCount[]
 }
 
-/** Items per group, given each item's groups; sorted by group name. */
+/** Items per group, given each item's groups; sorted by key, subgroups right after their parent. */
 export function groupCounts(groupLists: Iterable<readonly string[]>): GroupCount[] {
   const counts = new Map<string, number>()
   for (const groups of groupLists)
     for (const group of new Set(groups)) counts.set(group, (counts.get(group) ?? 0) + 1)
   return [...counts]
     .map(([group, count]) => ({ group, count }))
-    .toSorted((a, b) => a.group.localeCompare(b.group))
+    .toSorted((a, b) => byGroupTree(keyAsTitle)(a.group, b.group))
 }
 
 /** What a list shows for a scope position, plus the counts the switch and the folded line need. */
 export interface ScopedList<T> {
   shown: T[]
   counts: ScopeCounts
-  /** Items outside the home groups and the groups they are in, e.g. "4 repos of 2 other teams". */
+  /**
+   * Items outside the home groups and the deepest groups they are in, e.g. "4 repos of 2 other
+   * teams"; a subgroup's parent does not count as one more team.
+   */
   others: { items: number; teams: number }
 }
 
@@ -125,7 +139,9 @@ export function scopeList<T extends { groups: readonly string[] }>(
   const rest: T[] = []
   for (const item of items) (inHomeGroups(homeGroups, item.groups) ? mine : rest).push(item)
   const homeNames = new Set(homeGroups.filter((entry) => typeof entry === 'string'))
-  const teams = new Set(rest.flatMap((item) => item.groups).filter((g) => !homeNames.has(g)))
+  const teams = new Set(
+    rest.flatMap((item) => leafGroups(item.groups)).filter((g) => !homeNames.has(g)),
+  )
   return {
     shown: view === 'mine' ? mine : items.filter((item) => inView(view, homeGroups, item.groups)),
     counts: {
@@ -141,7 +157,7 @@ export function scopeList<T extends { groups: readonly string[] }>(
 export interface FoldedTeams<T> {
   mine: T[]
   others: T[]
-  /** Groups the other teams' items are in, home groups left out, sorted. */
+  /** The deepest groups the other teams' items are in, home groups left out, sorted. */
   teams: string[]
 }
 
@@ -163,7 +179,9 @@ export function foldOtherTeams<T>(
     ;(!groups.length || inHomeGroups(homeGroups, groups) ? mine : others).push(item)
   }
   const homeNames = new Set(homeGroups.flatMap(allOf))
-  const teams = [...new Set(others.flatMap(groupsOf))].filter((g) => !homeNames.has(g)).toSorted()
+  const teams = [...new Set(others.flatMap((item) => leafGroups(groupsOf(item))))]
+    .filter((g) => !homeNames.has(g))
+    .toSorted()
   return { mine, others, teams }
 }
 

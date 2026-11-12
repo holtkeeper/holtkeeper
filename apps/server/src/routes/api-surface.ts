@@ -1,4 +1,4 @@
-import { type Principal, can } from '@holtkeeper/access'
+import { type Principal, can, leafGroups, outerGroups } from '@holtkeeper/access'
 import type {
   CreateMcpTokenInput,
   CreateMcpTokenResult,
@@ -163,7 +163,7 @@ export function createApiSurface(
   const reach = catalogReach(store.settings, targetOf)
   const groupsOf = (repo: RepoRef) => targetOf(repo).groups
   const groupLabel = groupLabeler(config)
-  const ownerOf = (repo: RepoRef) => groupsOf(repo).map(groupLabel)
+  const ownerOf = (repo: RepoRef) => leafGroups(groupsOf(repo)).map(groupLabel)
   const readable = async (principal: Principal) => (await reach(principal)).catalog
   const analysesOf = (principal: Principal) => (repo: RepoRef) =>
     canSee(principal, 'analyses:read', targetOf(repo))
@@ -223,7 +223,8 @@ export function createApiSurface(
     store,
     canReadScope: (scope) => can(principal, 'knowledge:read', { kind: 'scope', scope }),
     canReadShared: (scope) => canReadShared(principal, scope, reached.policy),
-    ownerOf: (scope) => scopeOwner(scope, groupsOf).map(groupLabel),
+    ownerOf: (scope) =>
+      outerGroups(scopeOwner(scope, (other) => leafGroups(groupsOf(other)))).map(groupLabel),
     groupLabel,
     repoOf: (value) => {
       const separator = value.indexOf(':')
@@ -238,7 +239,7 @@ export function createApiSurface(
     now: deps.now,
   })
 
-  const resolveGuide = createGuideResolver({ store })
+  const resolveGuide = createGuideResolver({ store, groupTitle: groupLabel })
   const testIdsOf = testIdsReader({ store })
   const rulesContext = (
     principal: Principal,

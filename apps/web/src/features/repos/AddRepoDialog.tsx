@@ -1,4 +1,4 @@
-import type { RepoAccessBatch, RepoAccessResult } from '@holtkeeper/api'
+import { type RepoAccessBatch, type RepoAccessResult, parentGroup } from '@holtkeeper/api'
 import { X } from 'lucide-react'
 import { useState } from 'react'
 
@@ -12,6 +12,7 @@ import {
   useRepos,
 } from '../../api/queries.ts'
 import { plural } from '../../lib/format.ts'
+import { byGroupTree, groupPathTitle } from '../../lib/group-titles.ts'
 import {
   type PathCheck,
   parsePastedPaths,
@@ -19,7 +20,7 @@ import {
   validateGroupId,
   withRepos,
 } from '../../lib/repo.ts'
-import { suggestGroup } from '../../lib/repos.ts'
+import { excludedByPattern, globMatcher, suggestGroup } from '../../lib/repos.ts'
 import {
   Button,
   Dot,
@@ -41,8 +42,9 @@ const steps = ['Forge', 'Paths', 'Group'] as const
 /**
  * Adds repositories in three steps: a forge, then paths (picked from the token's projects or
  * pasted, URLs trimmed) checked against the forge token in one batch, then a group, existing or
- * new, whose include list gets the exact paths. Settings, schedules and access follow the group.
- * Opens as a side sheet beside the list. Needs global `settings:write`.
+ * new, whose include list gets the exact paths. A subgroup can be the target: the paths its parent
+ * does not match yet go into the parent's include list too. Settings, schedules and access follow
+ * the group. Opens as a side sheet beside the list. Needs global `settings:write`.
  */
 export function AddRepoDialog({ onClose }: { onClose: () => void }) {
   const titleOf = useGroupTitles()
@@ -92,14 +94,29 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
   const unchecked = paths.filter((path) => !added.has(path) && !resultOf(path))
   const tooMany = paths.length > MAX_PATHS
 
-  const forgeGroups = (groups.data?.entries ?? []).filter(
-    (entry) => entry.data.forge === selectedForge,
-  )
+  const forgeGroups = (groups.data?.entries ?? [])
+    .filter((entry) => entry.data.forge === selectedForge)
+    .toSorted((a, b) => byGroupTree(titleOf)(a.id, b.id))
   const suggested = suggestGroup(ready, forgeGroups)
   const groupMode = forgeGroups.length ? mode : 'new'
   const chosenGroup = groupId ?? suggested
   const target = groupMode === 'existing' ? chosenGroup : newGroup.trim()
   const existing = forgeGroups.find((entry) => entry.id === target)
+  const parentId = target === undefined ? undefined : parentGroup(target)
+  const parentEntry = forgeGroups.find((entry) => entry.id === parentId)
+  const outsideParent = parentEntry
+    ? ready.filter(
+        (path) =>
+          !parentEntry.data.include.some((pattern) => globMatcher(pattern)(path)) ||
+          parentEntry.data.exclude.some((pattern) => globMatcher(pattern)(path)),
+      )
+    : []
+  const blocked = selectedForge
+    ? [
+        ...(parentEntry ? excludedByPattern(parentEntry.data, selectedForge, outsideParent) : []),
+        ...(existing ? excludedByPattern(existing.data, selectedForge, ready) : []),
+      ]
+    : []
   const groupError =
     groupMode === 'new' && newGroup
       ? (validateGroupId(newGroup) ??
@@ -139,20 +156,23 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
       if (verdictsFor(merged).some((verdict) => verdict.check.ready)) setStep(2)
     })
 
-  const save = () => {
-    if (!selectedForge || !target || !ready.length) return
-    put.mutate(
-      { id: target, data: withRepos(existing?.data, selectedForge, ready) },
-      {
-        onSuccess: () => {
-          notify.success(
-            `${plural(ready.length, 'repository', 'repositories')} added`,
-            `Group ${titleOf(target)} on ${selectedForge}`,
-          )
-          onClose()
-        },
-      },
-    )
+  const save = async () => {
+    if (!selectedForge || !target || !ready.length || blocked.length) return
+    try {
+      if (parentEntry && outsideParent.length)
+        await put.mutateAsync({
+          id: parentEntry.id,
+          data: withRepos(parentEntry.data, selectedForge, outsideParent),
+        })
+      await put.mutateAsync({ id: target, data: withRepos(existing?.data, selectedForge, ready) })
+      notify.success(
+        `${plural(ready.length, 'repository', 'repositories')} added`,
+        `Group ${groupPathTitle(titleOf, target)} on ${selectedForge}`,
+      )
+      onClose()
+    } catch (error) {
+      notify.error('Not added', messageOf(error))
+    }
   }
 
   const footer =
@@ -199,8 +219,8 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
         </Button>
         <Button
           variant="primary"
-          onPress={save}
-          isDisabled={!target || !ready.length || groupError !== undefined}
+          onPress={() => void save()}
+          isDisabled={!target || !ready.length || groupError !== undefined || blocked.length > 0}
           isPending={put.isPending}
         >
           Add {plural(ready.length, 'repository', 'repositories')}
@@ -397,7 +417,9 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
                 options={forgeGroups.map((entry) => ({
                   id: entry.id,
                   label: (
-                    <span className="flex items-baseline gap-2">
+                    <span
+                      className={`flex items-baseline gap-2 ${parentGroup(entry.id) === undefined ? '' : 'ps-4'}`}
+                    >
                       {titleOf(entry.id)}
                       <span className="truncate font-mono text-[11px] text-muted">
                         {[
@@ -409,7 +431,7 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
                       </span>
                     </span>
                   ),
-                  text: titleOf(entry.id),
+                  text: groupPathTitle(titleOf, entry.id),
                 }))}
                 value={chosenGroup}
                 onChange={setGroupId}
@@ -425,6 +447,24 @@ export function AddRepoDialog({ onClose }: { onClose: () => void }) {
                 error={groupError}
               />
             )}
+            {groupMode === 'existing' && parentEntry && outsideParent.length ? (
+              <Notice tone="accent" title={`Also added to ${titleOf(parentEntry.id)}`}>
+                A subgroup holds only members of its parent; the parent's include list gets{' '}
+                {plural(outsideParent.length, 'path')} too.
+              </Notice>
+            ) : null}
+            {blocked.length ? (
+              <Notice tone="danger" title="Excluded by a pattern">
+                <ul className="flex flex-col gap-0.5">
+                  {blocked.map(({ path, pattern }) => (
+                    <li key={`${path}:${pattern}`}>
+                      <span className="mono">{path}</span> is excluded by pattern{' '}
+                      <span className="mono">{pattern}</span>. Edit that group's patterns first.
+                    </li>
+                  ))}
+                </ul>
+              </Notice>
+            ) : null}
             <ul className="flex flex-wrap gap-1.5" aria-label="Repositories to add">
               {ready.map((path) => (
                 <li key={path} className="mono rounded-md border border-line px-1.5 text-xs">

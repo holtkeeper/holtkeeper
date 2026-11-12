@@ -1,4 +1,13 @@
-import { type Action, type Principal, type RepoTarget, can, groupNames } from '@holtkeeper/access'
+import {
+  type Action,
+  type Principal,
+  type RepoTarget,
+  can,
+  groupLineage,
+  groupNames,
+  leafGroups,
+  parentGroup,
+} from '@holtkeeper/access'
 import type { ReleaseCard, RepoList, RepoSummary } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import { resolveRepoTests } from '@holtkeeper/settings'
@@ -15,7 +24,8 @@ const LISTING_ACTIONS: Action[] = ['repos:read', 'audits:read', 'analyses:read',
 
 /**
  * Config groups `principal` may know about: every group with global `settings:read`, otherwise the
- * groups its grants name plus the groups of listed repositories it holds a listing permission on.
+ * groups its grants name plus the groups of listed repositories it holds a listing permission on,
+ * with the subgroups of every such group and the parent of every such subgroup.
  */
 export async function reachableGroups(
   deps: Pick<ServerDeps, 'store' | 'config'>,
@@ -23,13 +33,18 @@ export async function reachableGroups(
 ): Promise<Set<string>> {
   const configured = Object.keys(deps.config.groups)
   if (can(principal, 'settings:read', { kind: 'global' })) return new Set(configured)
-  const reach = new Set(principal.grants.flatMap((grant) => groupNames(grant.scope.groups ?? [])))
+  const granted = new Set(principal.grants.flatMap((grant) => groupNames(grant.scope.groups ?? [])))
+  const reach = new Set(granted)
   for (const repo of await listedRepos(deps.store.kv, deps.config)) {
     const target = repoTarget(deps.config, repo)
     if (LISTING_ACTIONS.some((action) => canSee(principal, action, target)))
-      for (const group of target.groups) reach.add(group)
+      for (const group of leafGroups(target.groups)) reach.add(group)
   }
-  return new Set(configured.filter((group) => reach.has(group)))
+  const withSubgroups = configured.filter(
+    (group) => reach.has(group) || granted.has(parentGroup(group) ?? ''),
+  )
+  const withParents = new Set(withSubgroups.flatMap(groupLineage))
+  return new Set(configured.filter((group) => withParents.has(group)))
 }
 
 /** What `repoSummaries` reads from the server; `analyses` lets health compute missing metrics. */

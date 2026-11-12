@@ -53,6 +53,19 @@ describe('knowledgeAccess', () => {
     expect(results.map((r) => r.id).toSorted()).toEqual(['games', 'global', 'other'])
   })
 
+  test('a blank query lists a subgroup entry before its parent group', async () => {
+    await store.knowledge.put(
+      entry({ id: 'arcade', scope: { groups: ['games.arcade'] }, title: 'Arcade', body: 'x' }),
+    )
+    const kb = knowledgeAccess({ store, now })
+    const nested = repo('games/app', ['games.arcade', 'games'])
+    const results = await kb.search('', { repo: nested, taskKind: 'review', limit: 10 })
+    expect(results.map((r) => r.id).slice(0, 2)).toEqual(['arcade', 'games'])
+    expect(
+      (await kb.search('', { repo: app, taskKind: 'review', limit: 10 })).map((r) => r.id),
+    ).not.toContain('arcade')
+  })
+
   test('propose creates, dedupes and auto-accepts', async () => {
     const kb = knowledgeAccess({ store, now, autoAccept: ['quirk'] })
     const ctx = {

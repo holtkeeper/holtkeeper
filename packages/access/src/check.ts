@@ -1,3 +1,4 @@
+import { groupLineage } from './groups.ts'
 import {
   type Action,
   type Grant,
@@ -26,6 +27,8 @@ function allows(grant: Grant, action: Action): boolean {
 }
 
 const allOf = (entry: GroupMatch) => (typeof entry === 'string' ? [entry] : entry)
+
+const closureOf = (entry: GroupMatch) => new Set(allOf(entry).flatMap(groupLineage))
 
 /** Whether a repository in `memberOf` matches one of `entries` (see `GroupMatch`). */
 export const groupsMatch = (entries: readonly GroupMatch[], memberOf: readonly string[]): boolean =>
@@ -65,15 +68,19 @@ function patternWithin(inner: string, outer: string): boolean {
   return false
 }
 
-/** Whether everything `inner` covers is also covered by `outer`. Conservative, see `patternWithin`. */
+/**
+ * Whether everything `inner` covers is also covered by `outer`. Conservative, see `patternWithin`.
+ * A subgroup is within its parent (`shapes.round` within `shapes`), never the other way round.
+ */
 export function scopeWithin(inner: Scope, outer: Scope): boolean {
   if (outer.all) return true
   if (inner.all) return false
-  const groupsOk = (inner.groups ?? []).every((entry) =>
-    (outer.groups ?? []).some((candidate) =>
-      allOf(candidate).every((group) => allOf(entry).includes(group)),
-    ),
-  )
+  const groupsOk = (inner.groups ?? []).every((entry) => {
+    const closure = closureOf(entry)
+    return (outer.groups ?? []).some((candidate) =>
+      allOf(candidate).every((group) => closure.has(group)),
+    )
+  })
   const reposOk = (inner.repos ?? []).every((pattern) =>
     (outer.repos ?? []).some((candidate) => patternWithin(pattern, candidate)),
   )
@@ -82,14 +89,17 @@ export function scopeWithin(inner: Scope, outer: Scope): boolean {
 
 /**
  * How narrowly a scope targets repositories, for picking the entry that applies when several cover
- * one: everything (0) < groups (1) < group intersections (between 1 and 2, higher the more groups
- * must match at once) < path globs (2) < exact paths (3).
+ * one: everything (0) < groups (1) < subgroups and group intersections (between 1 and 2, higher
+ * the more groups must match at once, counting a subgroup's ancestors) < path globs (2) < exact
+ * paths (3). A subgroup (1.5) always ranks above its parent (1). Group entries are OR-ed, so a
+ * scope ranks by its broadest entry: `['shapes', 'shapes.round']` ranks like `['shapes']`.
  */
 export function scopeSpecificity(scope: Scope): number {
   if (scope.repos?.some((pattern) => !hasWildcard(splitPattern(pattern).glob))) return 3
   if (scope.repos?.length) return 2
-  const narrowest = Math.max(0, ...(scope.groups ?? []).map((entry) => new Set(allOf(entry)).size))
-  return narrowest ? 2 - 1 / narrowest : 0
+  const sizes = (scope.groups ?? []).map((entry) => closureOf(entry).size)
+  const widest = sizes.length ? Math.min(...sizes) : 0
+  return widest ? 2 - 1 / widest : 0
 }
 
 function grantCovers(grant: Grant, target: Target): boolean {

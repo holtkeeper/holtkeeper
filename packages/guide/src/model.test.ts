@@ -29,6 +29,23 @@ describe('scopes', () => {
     ])
   })
 
+  test('scopesFor puts subgroups before their parents', () => {
+    expect(
+      scopesFor({
+        forge: 'work',
+        path: 'shapes/disc',
+        groups: ['tools', 'shapes', 'shapes.round', 'tools.misc'],
+      }),
+    ).toEqual([
+      'repo:work:shapes/disc',
+      'group:shapes.round',
+      'group:tools.misc',
+      'group:tools',
+      'group:shapes',
+      'all',
+    ])
+  })
+
   test('guideTaskOf maps agent task kinds', () => {
     expect(guideTaskOf('review')).toEqual({ task: 'review' })
     expect(guideTaskOf('release-notes')).toEqual({ task: 'release-notes' })

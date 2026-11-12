@@ -351,6 +351,39 @@ describe('ops toolset', () => {
     expect(await call(mcp, 'fleet_health', { group: 'shapes' })).toContain('work:shapes/circle')
   })
 
+  test('fleet_health names the innermost group and filters by subgroup keys', async () => {
+    const nested = parseConfig({
+      forges: config.forges,
+      groups: {
+        ...config.groups,
+        shapes: { ...config.groups.shapes, title: 'Shape studio' },
+        'shapes.round': { forge: 'work', include: ['shapes/circle'], title: 'Round' },
+      },
+    })
+    await store.kv?.set('poll-group:shapes', {
+      repos: [
+        { forge: 'work', path: 'shapes/circle' },
+        { forge: 'work', path: 'shapes/square' },
+      ],
+      listedAt: '2026-05-06T11:00:00.000Z',
+      attempts: [],
+    })
+    const reader: Principal = {
+      id: 'header:sam',
+      name: 'Sam',
+      provider: 'header',
+      grants: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read'] }],
+    }
+    const mcp = opsToolset(principalOpsAccess({ ...deps(), config: nested }, reader), now)
+    const all = await call(mcp, 'fleet_health', {})
+    expect(all).toContain('- work:shapes/circle · groups Shape studio › Round (shapes.round) · ')
+    expect(all).toContain('- work:shapes/square · groups Shape studio (shapes) · ')
+    const round = await call(mcp, 'fleet_health', { group: 'shapes.round' })
+    expect(round).toContain('work:shapes/circle')
+    expect(round).not.toContain('work:shapes/square')
+    expect(await call(mcp, 'fleet_health', { group: 'shapes' })).toContain('work:shapes/square')
+  })
+
   test('fleet_health lists every readable member with the cells the caller may read', async () => {
     await store.kv?.set('poll-group:shapes', {
       repos: [

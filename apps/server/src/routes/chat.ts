@@ -1,4 +1,4 @@
-import { type Principal, can } from '@holtkeeper/access'
+import { type Principal, can, groupLineage } from '@holtkeeper/access'
 import type {
   AgentTranscriptView,
   ChatCommandView,
@@ -365,7 +365,7 @@ export function chatRoutes(deps: ServerDeps) {
   const groupsOf = (thread: ChatThread): string[] => {
     const repo = parseRepo(thread.repo)
     if (repo) return repoTarget(deps.config, repo).groups
-    return thread.group ? [thread.group] : []
+    return thread.group ? groupLineage(thread.group) : []
   }
 
   const threadView = async (

@@ -7,7 +7,7 @@ import type {
 } from '@holtkeeper/api'
 
 import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
-import { type ScopeFocus, namesFocus } from './scope.ts'
+import { type ScopeFocus, focusParent, namesFocus } from './scope.ts'
 
 /** Which rows the resolver shows: every key, those set on the focus itself, those not at their default. */
 export type ResolvedFilter = 'all' | 'here' | 'changed'
@@ -65,7 +65,29 @@ export function layerCounts(rows: readonly ResolvedSettingRow[]): Record<Setting
   return counts
 }
 
-/** Who a source is, in words: `Default`, `Org`, `Group web`, `This repo`, `This group`. */
+/**
+ * Whether a subgroup focus inherits the source from its parent group: a group entry that matched
+ * on the parent and not on the subgroup itself.
+ */
+export function fromParentGroup(source: SettingSource, focus: ScopeFocus): boolean {
+  const parent = focusParent(focus)
+  return (
+    source.layer === 'group' &&
+    parent !== undefined &&
+    focus.kind === 'group' &&
+    (source.groups ?? []).includes(parent) &&
+    !(source.groups ?? []).includes(focus.group)
+  )
+}
+
+/** How many rows a subgroup focus inherits from its parent group; 0 for any other focus. */
+export const parentGroupCount = (rows: readonly ResolvedSettingRow[], focus: ScopeFocus): number =>
+  rows.filter((row) => fromParentGroup(row.source, focus)).length
+
+/**
+ * Who a source is, in words: `Default`, `Org`, `Group web`, `This repo`, `This group`, and
+ * `Parent group` on a subgroup focus for an entry of its parent.
+ */
 export function sourceLabel(
   source: SettingSource,
   focus: ScopeFocus,
@@ -78,6 +100,7 @@ export function sourceLabel(
       ? 'This repo'
       : 'Repo pattern'
   if (focus.kind === 'group' && source.groups?.includes(focus.group)) return 'This group'
+  if (fromParentGroup(source, focus)) return 'Parent group'
   return `Group ${(source.groups ?? []).map(titleOf).join(' + ')}`.trim()
 }
 

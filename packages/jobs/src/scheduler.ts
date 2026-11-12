@@ -1,6 +1,6 @@
 import { groupsMatch } from '@holtkeeper/access'
 import type { AnyAnalyzer, ApplicabilityContext } from '@holtkeeper/analyzer'
-import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
+import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { Job, JobStore } from '@holtkeeper/store'
 
@@ -122,7 +122,7 @@ function memoizedReader(forge: ApplicabilityContext['forge']): ApplicabilityCont
 
 /**
  * The jobs one schedule produces: repo-scope analyzers once per repository of the schedule's
- * groups (every group when it names none) that matches its `repos` globs and the analyzer's
+ * groups (every root group when it names none, so subgroups add no second group-scope run) that matches its `repos` globs and the analyzer's
  * `appliesTo` (a failing check counts as applying) and that `skip` does not leave out, group-scope
  * analyzers once per group with
  * `repo` = `{ forge, path: <group> }`.
@@ -148,7 +148,7 @@ export async function planSchedule(
   },
 ): Promise<JobRequest[]> {
   const byKind = new Map(analyzers.map((analyzer) => [analyzer.kind, analyzer]))
-  const entries = schedule.groups ?? Object.keys(config.groups)
+  const entries = schedule.groups ?? rootGroups(config)
   const selected = schedule.analyzers.flatMap((kind) => {
     const analyzer = byKind.get(kind)
     return analyzer ? [analyzer] : []

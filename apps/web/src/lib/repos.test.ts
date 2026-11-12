@@ -5,18 +5,22 @@ import type { RepoSummary } from '@holtkeeper/api'
 import {
   filterRepos,
   cellTarget,
+  excludedByPattern,
   fleetKeyCommand,
   fleetSortValue,
   fleetStrip,
   globMatcher,
   groupMembership,
+  type GroupRow,
   groupRows,
+  groupTreeRows,
   healthSummaryText,
   membershipChangeText,
   parseReposSearch,
   patternChanges,
   pickGroupTab,
   reposSort,
+  siblingOverlaps,
   stepKey,
   suggestGroup,
   updatesText,
@@ -202,15 +206,93 @@ test('group rows merge configured groups with the groups of visible repositories
   expect(rows[0]?.groups).toEqual(['payments'])
 })
 
+const ids = (rows: readonly GroupRow[]) => rows.map((row) => row.id)
+
+describe('group tree', () => {
+  const shapes = { forge: 'gitlab.acme.dev', include: ['acme/*'], exclude: [] }
+  const tree = groupRows(
+    [
+      repo('acme/disc', { groups: ['shapes.round', 'shapes'], health: 'failing' }),
+      repo('acme/ring', { groups: ['shapes.round', 'shapes.flat', 'shapes'] }),
+      repo('acme/tile', { groups: ['shapes.flat', 'shapes'] }),
+      repo('acme/beep', { groups: ['sounds'] }),
+    ],
+    [
+      { id: 'shapes', data: shapes },
+      { id: 'shapes.round', data: { ...shapes, include: ['acme/disc', 'acme/ring'] } },
+      { id: 'shapes.flat', data: { ...shapes, include: ['acme/t*', 'acme/ring'] } },
+    ],
+  )
+
+  test('nests subgroups under their parent', () => {
+    expect(tree.map((row) => row.id)).toEqual(['shapes', 'sounds'])
+    const [root] = tree
+    expect(root?.subgroups.map((row) => [row.id, row.parent, row.members.length])).toEqual([
+      ['shapes.flat', 'shapes', 2],
+      ['shapes.round', 'shapes', 2],
+    ])
+    expect(root?.subgroups[1]?.groups).toEqual(['shapes.round', 'shapes'])
+    expect(root?.subgroups[1]?.counts.failing).toBe(1)
+    expect(root?.members).toHaveLength(3)
+  })
+
+  test('a subgroup whose parent is unknown stands as a root', () => {
+    expect(groupRows([repo('acme/x', { groups: ['lone.part'] })]).map((row) => row.id)).toEqual([
+      'lone.part',
+    ])
+  })
+
+  test('lists subgroups of open roots, or the ones a filter matches', () => {
+    expect(ids(groupTreeRows(tree, new Set()))).toEqual(['shapes', 'sounds'])
+    expect(ids(groupTreeRows(tree, new Set(['shapes'])))).toEqual([
+      'shapes',
+      'shapes.flat',
+      'shapes.round',
+      'sounds',
+    ])
+    expect(ids(groupTreeRows(tree, new Set(), (row) => row.id.includes('round')))).toEqual([
+      'shapes',
+      'shapes.round',
+    ])
+    expect(ids(groupTreeRows(tree, new Set(['shapes']), (row) => row.id === 'sounds'))).toEqual([
+      'sounds',
+    ])
+    expect(
+      ids(groupTreeRows(tree, new Set(['shapes']), undefined, (rows) => rows.toReversed())),
+    ).toEqual(['sounds', 'shapes', 'shapes.round', 'shapes.flat'])
+  })
+
+  test('finds members in two sibling subgroups', () => {
+    const members = tree[0]?.members ?? []
+    expect([...siblingOverlaps(members, 'shapes')]).toEqual([
+      ['gitlab.acme.dev:acme/ring', ['shapes.flat', 'shapes.round']],
+    ])
+    expect(siblingOverlaps(members, 'sounds').size).toBe(0)
+  })
+})
+
 test('group tabs follow permissions', () => {
   expect(pickGroupTab(only([]), 'membership')).toMatchObject({ tab: 'repos' })
-  expect(pickGroupTab(only([]), undefined).tabs.map((t) => t.id)).toEqual(['repos'])
+  expect(pickGroupTab(only([]), undefined).tabs.map((t) => t.id)).toEqual(['repos', 'subgroups'])
   const reader = pickGroupTab(only(['settings:read', 'analyses:read']), 'membership')
   expect(reader.tab).toBe('membership')
-  expect(reader.tabs.map((t) => t.id)).toEqual(['repos', 'stack', 'settings', 'membership'])
+  expect(reader.tabs.map((t) => t.id)).toEqual([
+    'repos',
+    'subgroups',
+    'stack',
+    'settings',
+    'membership',
+  ])
   const partial = pickGroupTab(only(['settings:read']), 'membership', only([]))
   expect(partial.tab).toBe('repos')
-  expect(partial.tabs.map((t) => t.id)).toEqual(['repos', 'settings'])
+  expect(partial.tabs.map((t) => t.id)).toEqual(['repos', 'subgroups', 'settings'])
+})
+
+test('a subgroup has no Subgroups tab', () => {
+  const sub = pickGroupTab(only(['settings:read']), 'subgroups', only([]), 'shapes.round')
+  expect(sub.tab).toBe('repos')
+  expect(sub.tabs.map((t) => t.id)).toEqual(['repos', 'settings'])
+  expect(pickGroupTab(only([]), 'subgroups', only([]), 'shapes').tab).toBe('subgroups')
 })
 
 describe('group patterns', () => {
@@ -224,6 +306,14 @@ describe('group patterns', () => {
     expect(globMatcher('acme/v[0-9]')('acme/v2')).toBe(true)
     expect(globMatcher('acme/a.b')('acme/aXb')).toBe(false)
     expect(globMatcher('acme/app?')('acme/app1')).toBe(true)
+  })
+
+  test('a path a glob exclude keeps out stays excluded after it is added', () => {
+    const group = { forge: 'work', include: ['team/*'], exclude: ['team/legacy-*', 'team/old'] }
+    expect(excludedByPattern(group, 'work', ['team/legacy-a', 'team/old', 'team/new'])).toEqual([
+      { path: 'team/legacy-a', pattern: 'team/legacy-*' },
+    ])
+    expect(excludedByPattern(undefined, 'work', ['team/legacy-a'])).toEqual([])
   })
 
   const forge = 'gitlab.acme.dev'
@@ -259,6 +349,12 @@ describe('group patterns', () => {
     expect([membership.members, membership.excluded, membership.joins, membership.leaves]).toEqual([
       3, 1, 0, 0,
     ])
+  })
+
+  test('a subgroup counts only what the parent listed, so outside exact paths match nothing', () => {
+    const membership = groupMembership(forge, matched, saved, saved, false)
+    expect(membership.rows.map((row) => row.repo.path)).not.toContain('acme/fx-rates')
+    expect(membership.members).toBe(2)
   })
 
   test('unsaved patterns preview who joins and who leaves on the last listing', () => {

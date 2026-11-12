@@ -1,8 +1,9 @@
-import type {
-  ConfigEntryView,
-  GroupDocumentData,
-  GroupListingView,
-  RepoSummary,
+import {
+  type ConfigEntryView,
+  type GroupDocumentData,
+  type GroupListingView,
+  type RepoSummary,
+  parentGroup,
 } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ChevronRight, RefreshCw, X } from 'lucide-react'
@@ -55,7 +56,8 @@ type Patterns = Pick<GroupDocumentData, 'include' | 'exclude'>
  * The group's Membership tab: its display name and its include and exclude patterns (editable
  * with global `settings:write`, unsaved pattern changes previewed on the last listing), the
  * listing on the forge with when it runs next, and every repository the patterns resolve to,
- * excluded ones included.
+ * excluded ones included. A subgroup is never listed on its own: its patterns resolve against
+ * the parent's last listing, and exact paths outside the parent match nothing.
  */
 export function GroupMembership({
   entry,
@@ -73,7 +75,14 @@ export function GroupMembership({
   const matched = listing.data
     ? [...(listing.data.matched ?? []), ...listing.data.repos]
     : members.map((summary) => summary.repo)
-  const membership = groupMembership(entry.data.forge, matched, entry.data, draft)
+  const parent = parentGroup(entry.id)
+  const membership = groupMembership(
+    entry.data.forge,
+    matched,
+    entry.data,
+    draft,
+    parent === undefined,
+  )
   const titleOf = useGroupTitles()
 
   return (
@@ -86,13 +95,19 @@ export function GroupMembership({
           draft={draft}
           onDraft={setDraft}
           membership={membership}
+          parent={parent}
         />
         {listing.isPending ? (
           <Placeholder className="h-48" />
         ) : listing.isError ? (
           <ErrorState error={listing.error} />
         ) : (
-          <ListingPanel group={entry.id} listing={listing.data} membership={membership} />
+          <ListingPanel
+            group={entry.id}
+            listing={listing.data}
+            membership={membership}
+            parent={parent}
+          />
         )}
       </div>
       <ResolvedPanel
@@ -173,12 +188,16 @@ function PatternsPanel({
   draft,
   onDraft,
   membership,
+  parent,
 }: {
   entry: ConfigEntryView<'group'>
   draft: Patterns
   onDraft: (next: Patterns) => void
   membership: Membership
+  /** The parent of a subgroup, whose members the patterns pick from. */
+  parent: string | undefined
 }) {
+  const titleOf = useGroupTitles()
   const { canGlobal } = useSession()
   const put = usePutGroup()
   const writable = canGlobal('settings:write')
@@ -196,11 +215,18 @@ function PatternsPanel({
     <Panel
       title="Patterns"
       description={
-        <>
-          Path globs on <span className="mono">{entry.data.forge}</span>. A repository is a member
-          when an include pattern matches it and no exclude pattern does; exact paths list it before
-          its first analysis.
-        </>
+        parent === undefined ? (
+          <>
+            Path globs on <span className="mono">{entry.data.forge}</span>. A repository is a member
+            when an include pattern matches it and no exclude pattern does; exact paths list it
+            before its first analysis.
+          </>
+        ) : (
+          <>
+            Path globs over the members of {titleOf(parent)}. A repository is a member when it is a
+            member of {titleOf(parent)}, an include pattern matches it and no exclude pattern does.
+          </>
+        )
       }
     >
       <div className="flex flex-col gap-4">
@@ -359,19 +385,40 @@ function ListingPanel({
   group,
   listing,
   membership,
+  parent,
 }: {
   group: string
   listing: GroupListingView
   membership: Membership
+  /** The parent of a subgroup, whose listing it reads. */
+  parent: string | undefined
 }) {
   const { canGlobal } = useSession()
+  const titleOf = useGroupTitles()
   const list = useListGroup(group)
   const latest = listing.attempts[0]
 
   return (
     <Panel
-      title="Listing on the forge"
-      description={`Patterns resolve against ${listing.forge} on a schedule. A failed listing keeps the previous list.`}
+      title={parent === undefined ? 'Listing on the forge' : 'Listed from parent'}
+      description={
+        parent === undefined ? (
+          `Patterns resolve against ${listing.forge} on a schedule. A failed listing keeps the previous list.`
+        ) : (
+          <>
+            A subgroup is never listed on the forge: its patterns resolve against the last listing
+            of{' '}
+            <Link
+              to="/repos/groups/$groupId"
+              params={{ groupId: parent }}
+              className="hover:underline"
+            >
+              {titleOf(parent)}
+            </Link>
+            .
+          </>
+        )
+      }
       actions={
         <span className="flex items-center gap-2">
           {latest ? (
@@ -379,7 +426,7 @@ function ListingPanel({
               {latest.error ? 'Failed' : 'Succeeded'}
             </Tag>
           ) : null}
-          {canGlobal('settings:write') ? (
+          {canGlobal('settings:write') && parent === undefined ? (
             <Button
               variant="secondary"
               size="sm"
@@ -413,7 +460,7 @@ function ListingPanel({
         <KeyValue
           rows={[
             {
-              label: 'Last listing',
+              label: parent === undefined ? 'Last listing' : 'Parent listed',
               value: latest ? (
                 <>
                   <span title={formatDateTime(latest.at)}>{formatRelative(latest.at)}</span>
@@ -431,6 +478,7 @@ function ListingPanel({
               value: (
                 <>
                   {membership.members + membership.excluded} matched
+                  {parent === undefined ? '' : ' in parent'}
                   <span className="text-muted">
                     · {membership.excluded} excluded · {plural(membership.members, 'member')}
                   </span>
@@ -438,7 +486,7 @@ function ListingPanel({
               ),
             },
             {
-              label: 'Next listing',
+              label: parent === undefined ? 'Next listing' : 'Parent lists next',
               value: listing.nextAt ? (
                 <span title={formatDateTime(listing.nextAt)}>{formatRelative(listing.nextAt)}</span>
               ) : (

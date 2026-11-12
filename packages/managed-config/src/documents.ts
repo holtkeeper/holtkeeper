@@ -1,6 +1,7 @@
 import { groupMatchSchema } from '@holtkeeper/access'
 import {
   everyPattern,
+  groupKeySchema,
   groupTitleSchema,
   isTimeZone,
   looksLikeCron,
@@ -10,10 +11,16 @@ import type { ConfigDocumentType, TriggerDocumentData } from '@holtkeeper/store'
 import { Cron } from 'croner'
 import { z } from 'zod'
 
-/** Ids of forges, groups and schedules: lowercase letters, digits and dashes. */
+/** Ids of forges and schedules: lowercase letters, digits and dashes. Groups use `groupIdSchema`. */
 export const configIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
+
+/**
+ * Ids of groups: a root group (`shapes`) or a subgroup of one (`shapes.round`). A subgroup's parent
+ * must exist and share its forge; the effective config checks that.
+ */
+export const groupIdSchema = groupKeySchema
 
 const parsesAsCron = (expression: string) => {
   try {

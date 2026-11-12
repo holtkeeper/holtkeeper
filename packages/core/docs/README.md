@@ -58,6 +58,22 @@ A group may have a `title` (trimmed, 1–60 characters) that people see instead 
 
 Group-scope analyzers of a schedule or `onTag` run only for single-group entries: an intersection has no group of its own to report on.
 
+### Subgroups
+
+A group key is a root group (`shapes`) or a subgroup one level below it (`shapes.round`): lowercase letters, digits and dashes with at most one dot (`groupKeySchema`, `GROUP_KEY_PATTERN` of `@holtkeeper/access`). The parent comes from the key; there is no stored parent field, so a key's meaning never changes and cycles cannot exist. Moving a subgroup to another parent means creating a new key.
+
+- A subgroup's parent must be configured (`parent group "shapes" is not configured`, reported at `groups.<key>`) and its `forge` must equal the parent's (`forge must match parent "shapes"`).
+- A repository is in `shapes.round` when the subgroup's own include/exclude match it **and** it is a member of `shapes`. A subgroup is never wider than its parent, so every `groups: ['shapes']` grant, setting, note and trigger keeps covering its members.
+- Sibling subgroups may overlap.
+- `rootGroups(config)` lists the keys that are not subgroups and `subgroupsOf(config, key)` the subgroups of one group, both in config order. `groupPathLabel(groups, key)` shows a group with its ancestors' titles: `Shapes › Round (shapes.round)`; `groupLabel` uses it for subgroups.
+
+```text
+shapes: { title: 'Shapes', forge: 'work', include: ['shapes/*'], exclude: ['shapes/legacy-*'] }
+'shapes.round': { title: 'Round', forge: 'work', include: ['shapes/circle-*'] }
+// shapes/circle-a     → ['shapes.round', 'shapes']
+// shapes/legacy-circle → [] (not in the parent, so not in the subgroup)
+```
+
 ### Secrets
 
 `env('NAME')` stores a reference to an environment variable. It is read when the value is used, not when the config loads, so a config validates without secrets.
@@ -67,11 +83,12 @@ Group-scope analyzers of a schedule or `onTag` run only for single-group entries
 `loadConfig(file, { warn? })` imports the module and validates it with `parseConfigFile(value, { warn? })`; both throw `ConfigError` with every problem listed by path (for example the same AI provider package added twice). `parseConfig(value)` validates an effective config and also reports:
 
 - unknown forge or group references, including groups inside intersections;
+- subgroup keys deeper than one level, subgroups without their parent and subgroups on another forge than the parent;
 - schedules defined twice and invalid cron, intervals, time zones or windows.
 
 ## Resolution
 
 `resolveRepo(config, { forge, path })` answers "what applies to this repository":
 
-- `groups` — groups whose forge and globs match;
+- `groups` — groups whose forge and globs match (for a subgroup, also its parent's), each subgroup listed directly before its parent, so the list always holds every group's full lineage;
 - `traits` — merged traits from matching `repos` entries.

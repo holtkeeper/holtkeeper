@@ -440,4 +440,48 @@ describe('config routes', () => {
     })
     expect(defaultWebhookTargets(config, 'work')).toEqual([{ group: 'games' }])
   })
+
+  test('defaultWebhookTargets skips subgroups', () => {
+    const config = parseConfig({
+      forges: {
+        work: { kind: 'gitlab', url: 'https://work.test', create: () => ({}) as GitForge },
+      },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'] },
+        'shapes.round': { forge: 'work', include: ['shapes/circle', 'shapes/oval-*'] },
+      },
+    })
+    expect(defaultWebhookTargets(config, 'work')).toEqual([{ group: 'shapes' }])
+  })
+
+  test('subgroups: key format, parent in the listing, deleting the parent first is refused', async () => {
+    await putForge()
+    const shapes = { forge: 'cloud', include: ['shapes/*'] }
+    expect((await call('PUT', '/config/groups/shapes.round', shapes)).status).toBe(400)
+    expect((await call('PUT', '/config/groups/shapes', shapes)).status).toBe(200)
+    expect((await call('PUT', '/config/groups/shapes.round.small', shapes)).status).toBe(400)
+    expect((await call('PUT', '/config/groups/Shapes.round', shapes)).status).toBe(400)
+    const round = await call('PUT', '/config/groups/shapes.round', {
+      forge: 'cloud',
+      include: ['shapes/circle'],
+    })
+    expect(round.status).toBe(200)
+    expect(await round.json()).toMatchObject({ id: 'shapes.round', data: { parent: 'shapes' } })
+    await call('PUT', '/config/groups/shapes.flat', { forge: 'cloud', include: ['shapes/square'] })
+
+    const groups = (await (await call('GET', '/config/groups')).json()) as ConfigEntryList<'group'>
+    expect(groups.entries.map((e) => [e.id, e.data.parent])).toEqual([
+      ['shapes', undefined],
+      ['shapes.flat', 'shapes'],
+      ['shapes.round', 'shapes'],
+    ])
+
+    const refused = await call('DELETE', '/config/groups/shapes')
+    expect(refused.status).toBe(409)
+    expect(await refused.text()).toContain('delete subgroups first: shapes.flat, shapes.round')
+    expect(source.current().groups.shapes).toBeDefined()
+    expect((await call('DELETE', '/config/groups/shapes.round')).status).toBe(204)
+    expect((await call('DELETE', '/config/groups/shapes.flat')).status).toBe(204)
+    expect((await call('DELETE', '/config/groups/shapes')).status).toBe(204)
+  })
 })

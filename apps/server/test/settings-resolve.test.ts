@@ -64,10 +64,10 @@ beforeEach(() => {
   store = memoryStore()
 })
 
-const setup = (auth: AuthProvider = noAuth()) => {
+const setup = (auth: AuthProvider = noAuth(), groupsConfig = config) => {
   const vault = aesVault('v'.repeat(32))
   return createApp({
-    config,
+    config: groupsConfig,
     auth,
     store,
     vault,
@@ -216,6 +216,37 @@ describe('GET /api/settings/resolve', () => {
     expect(body.rows.find((row) => row.key === 'audit.fix')?.source.layer).toBe('default')
     expect((await setup().request('/api/settings/resolve?group=nope')).status).toBe(404)
     expect((await setup().request('/api/settings/resolve')).status).toBe(400)
+  })
+
+  test('a subgroup focus inherits its parent and its own entries win', async () => {
+    const nested = parseConfig({
+      forges: { work: { kind: 'fake', url: 'https://forge.test', create: () => ({}) as never } },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'] },
+        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      },
+    })
+    await put('all', 'acme.widget', { all: true }, { size: 1 })
+    await put('parent', 'acme.widget', { groups: ['shapes'] }, { size: 2 })
+    await put('parent-only', 'audit.fix', { groups: ['shapes'] }, true)
+    const focus = async () =>
+      (await (
+        await setup(noAuth(), nested).request('/api/settings/resolve?group=shapes.round')
+      ).json()) as ResolvedSettings
+    const inherited = await focus()
+    expect(inherited.groups).toEqual(['shapes.round', 'shapes'])
+    expect(inherited.rows.find((row) => row.key === 'acme.widget')).toMatchObject({
+      value: { size: 2 },
+      source: { layer: 'group', groups: ['shapes'] },
+    })
+    expect(inherited.rows.find((row) => row.key === 'audit.fix')?.value).toBe(true)
+
+    await put('sub', 'acme.widget', { groups: ['shapes.round'] }, { size: 3 })
+    expect((await focus()).rows.find((row) => row.key === 'acme.widget')).toMatchObject({
+      value: { size: 3 },
+      source: { layer: 'group', groups: ['shapes.round'] },
+      replaces: { layer: 'group', value: { size: 2 } },
+    })
   })
 
   test('needs settings:read on the repository or the group', async () => {

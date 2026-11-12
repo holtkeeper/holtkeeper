@@ -1,4 +1,11 @@
-import { type RepoTarget, type Scope, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
+import {
+  type RepoTarget,
+  type Scope,
+  groupLineage,
+  groupNames,
+  scopeCoversRepo,
+  scopeSpecificity,
+} from '@holtkeeper/access'
 import {
   type AiUsageStore,
   type AuditStore,
@@ -119,18 +126,35 @@ export const withDefaultBudget = (budgets: readonly ScopedBudget[]): ScopedBudge
 
 /**
  * The budgets that apply to a repository: the most specific one covering it (newest among equally
- * specific ones), plus the newest global (`all`) budget when that is a different one.
+ * specific ones), the most specific covering budget on its parent groups when the winner names
+ * only subgroups (so a subgroup budget never lifts its repositories out of the parent's cap), and
+ * the newest global (`all`) budget, each at most once.
  */
 export function applicableBudgets(
   budgets: readonly ScopedBudget[],
   repo: RepoTarget,
 ): ScopedBudget[] {
   const newest = (a: ScopedBudget, b: ScopedBudget) => b.updatedAt.localeCompare(a.updatedAt)
-  const specific = budgets
+  const ranked = budgets
     .filter((b) => scopeCoversRepo(b.scope, repo))
-    .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope) || newest(a, b))[0]
+    .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope) || newest(a, b))
+  const specific = ranked[0]
+  const ancestors = new Set(
+    specific && !specific.scope.repos?.length
+      ? groupNames(specific.scope.groups ?? []).flatMap((group) => groupLineage(group).slice(1))
+      : [],
+  )
+  const parent = ancestors.size
+    ? ranked.find(
+        (b) =>
+          b !== specific &&
+          !b.scope.all &&
+          !b.scope.repos?.length &&
+          groupNames(b.scope.groups ?? []).every((group) => ancestors.has(group)),
+      )
+    : undefined
   const global = budgets.filter((b) => b.scope.all).toSorted(newest)[0]
-  return [specific, global].filter(
+  return [specific, parent, global].filter(
     (b, index, all): b is ScopedBudget => b !== undefined && all.indexOf(b) === index,
   )
 }

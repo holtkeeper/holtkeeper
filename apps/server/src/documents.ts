@@ -1,4 +1,9 @@
-import { type RepoTarget, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
+import {
+  type RepoTarget,
+  groupLineage,
+  scopeCoversRepo,
+  scopeSpecificity,
+} from '@holtkeeper/access'
 import { confluenceFromCredential } from '@holtkeeper/confluence'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialService } from '@holtkeeper/credentials'
@@ -20,11 +25,14 @@ interface DocumentDeps {
   credentials: Pick<CredentialService, 'reveal'>
 }
 
-/** Group analyses use `{ forge, path: <group> }`; such a target belongs to that group. */
+/**
+ * Group analyses use `{ forge, path: <group> }`; such a target belongs to that group and, for a
+ * subgroup, to its parent.
+ */
 function targetOf(config: HoltkeeperConfig, repo: RepoRef): RepoTarget {
   const target = repoTarget(config, repo)
   return repo.path in config.groups
-    ? { ...target, groups: [...new Set([...target.groups, repo.path])] }
+    ? { ...target, groups: [...new Set([...target.groups, ...groupLineage(repo.path)])] }
     : target
 }
 

@@ -125,6 +125,8 @@ export interface ServerDefaultsOptions {
   now: () => Date
   /** Provider label for `onRun`; default the provider kind. */
   provider?: string
+  /** Names group keys in Guide block titles; default the raw key. */
+  groupTitle?: (key: string) => string
   origin?: AgentRunOrigin
   /** Runs `go list`/`go doc` for `docs.package`; the job's runner when there is one. */
   runner?: CommandRunner
@@ -190,7 +192,10 @@ export function withServerDefaults(
     ...(options.autoAccept && { autoAccept: options.autoAccept }),
   })
   const budgetTokens = tools.knowledgeTokens ?? DEFAULT_KNOWLEDGE_TOKENS
-  const resolveGuide = createGuideResolver({ store })
+  const resolveGuide = createGuideResolver({
+    store,
+    ...(options.groupTitle && { groupTitle: options.groupTitle }),
+  })
   const providerKind = 'provider' in agent ? agent.provider : agent.name
   const provider = options.provider ?? providerKind
   const modelOf = (task: AgentTask) => ('modelFor' in agent ? agent.modelFor(task.tier) : '')
@@ -467,7 +472,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
   const tierNotes = new Set<string>()
   const apiCatalog = createApiCatalog({ analyses: store.analyses })
   const usageIndex = createUsageIndex({ analyses: store.analyses })
-  const resolveGuide = createGuideResolver({ store })
+  const resolveGuide = createGuideResolver({ store, groupTitle: groupLabeler(config) })
   const testIds = testIdsReader({ store })
   const configuredTarget = (value: string) => {
     const separator = value.indexOf(':')
@@ -598,6 +603,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       store,
       now,
       provider,
+      groupTitle: groupLabeler(config),
       origin,
       onRun,
       ...(budgets && { budgets }),

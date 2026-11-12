@@ -174,7 +174,7 @@ Sign-in is a replaceable `AuthProvider`; permissions are the same everywhere:
 3. `passwordAuth()` — root behind a password.
 4. `usersAuth()` — real users with passkeys only (setup and recovery through one-time links) or OIDC, with scoped grants: e.g. admins of `games/**` who can invite people only within that scope.
 
-Credentials (forge accounts, API keys) and settings (models, keys, review rules, audit policy) are scoped to everything, groups or repository patterns; the most specific setting wins. GitLab tokens rotate automatically before they expire.
+Credentials (forge accounts, API keys) and settings (models, keys, review rules, audit policy) are scoped to everything, groups, subgroups or repository patterns; the most specific setting wins. The scope chain, broad to narrow: everything → team (group, `shapes`) → subteam (subgroup, `shapes.round`, one level, its members always within the team) → path glob → repository. A team's grants, settings and knowledge keep covering its subgroups; a subgroup's own entries win over the team's. GitLab tokens rotate automatically before they expire.
 
 ## Milestones
 

@@ -1,4 +1,4 @@
-import type { RepoRef } from '@holtkeeper/api'
+import { type RepoRef, leafGroups } from '@holtkeeper/api'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { Copy, FolderGit2 } from 'lucide-react'
 
@@ -79,7 +79,7 @@ function Heading({
             <>
               <span className="text-dim">·</span>
               <span className="text-muted">Groups</span>
-              {groups.map((group) => (
+              {leafGroups(groups).map((group) => (
                 <Link
                   key={group}
                   to="/repos/groups/$groupId"
@@ -87,7 +87,7 @@ function Heading({
                   className="no-underline"
                 >
                   <Tag>
-                    <GroupName group={group} />
+                    <GroupName group={group} path />
                   </Tag>
                 </Link>
               ))}

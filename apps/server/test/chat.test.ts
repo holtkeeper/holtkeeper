@@ -46,6 +46,7 @@ const person = (user: string, groups: string, name: string, email: string) => ({
 const asAdmin = person('jane', 'admin', 'Jane Quill', 'jane.quill@example.test')
 const asMember = person('omar', 'games', 'Omar Vale', 'omar.vale@example.test')
 const asOutsider = person('lena', 'puzzles', 'Lena Frost', 'lena.frost@example.test')
+const asCards = person('tess', 'cards', 'Tess Lake', 'tess.lake@example.test')
 const asNobody = person('ivo', 'none', 'Ivo Penn', 'ivo.penn@example.test')
 const asCoder = person('rhea', 'coders', 'Rhea Moss', 'rhea.moss@example.test')
 const asMixed = person('nia', 'mixed', 'Nia Bell', 'nia.bell@example.test')
@@ -54,6 +55,7 @@ const chatConfig = parseConfig({
   forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fake.forge } },
   groups: {
     games: { forge: 'work', include: ['g/**'] },
+    'games.cards': { forge: 'work', include: ['g/cards/**'] },
     puzzles: { forge: 'work', include: ['p/**'] },
   },
 })
@@ -104,6 +106,7 @@ beforeEach(async () => {
         ],
         games: [{ scope: { groups: ['games'] }, actions: ['repos:read', 'releases:read'] }],
         puzzles: [{ scope: { groups: ['puzzles'] }, actions: ['repos:read'] }],
+        cards: [{ scope: { groups: ['games.cards'] }, actions: ['repos:read'] }],
         none: [{ scope: { all: true }, actions: ['audit:read'] }],
         coders: [{ scope: { groups: ['games'] }, actions: ['repos:read', 'analyses:read'] }],
         mixed: [
@@ -472,6 +475,33 @@ describe('team chat threads', () => {
     ])
   })
 
+  test('subgroup threads open for parent grants, carry the lineage and reach only its repos', async () => {
+    const cards = await createThread(
+      { title: 'Cards', group: 'games.cards', autoReply: true },
+      asMember,
+    )
+    expect(cards.groups).toEqual(['games.cards', 'games'])
+    expect((await call('GET', `/chat/threads/${cards.id}`, asMember)).status).toBe(200)
+    expect((await call('GET', `/chat/threads/${cards.id}`, asCards)).status).toBe(200)
+    expect((await call('GET', `/chat/threads/${cards.id}`, asOutsider)).status).toBe(404)
+    const games = await createThread({ title: 'Games', group: 'games' })
+    expect((await call('GET', `/chat/threads/${games.id}`, asCards)).status).toBe(404)
+    await post(cards.id, 'Hello?', asMember)
+    expect(calls.at(-1)?.target).toEqual({
+      forge: 'chat',
+      path: 'group/games.cards',
+      groups: ['games.cards', 'games'],
+    })
+    expect(
+      (
+        await call('POST', `/chat/threads/${cards.id}/messages`, asAdmin, {
+          body: '/release',
+          repo: 'work:g/app',
+        })
+      ).status,
+    ).toBe(400)
+  })
+
   test('the model sees participant labels, never names, emails or user ids', async () => {
     await store.users.putUser({
       id: 'header:omar',
@@ -787,8 +817,8 @@ describe('team chat threads', () => {
 
     const list = async (headers: Record<string, string>) =>
       json<ChatThreadList>(await call('GET', '/chat/threads', headers))
-    expect((await list(asAdmin)).groups).toEqual(['games', 'puzzles'])
-    expect((await list(asMember)).groups).toEqual(['games'])
+    expect((await list(asAdmin)).groups).toEqual(['games', 'games.cards', 'puzzles'])
+    expect((await list(asMember)).groups).toEqual(['games', 'games.cards'])
 
     const thread = await createThread({ title: 'Arcade', repo: 'work:g/app' })
     expect(thread.groups).toEqual(['games'])

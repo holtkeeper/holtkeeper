@@ -1,4 +1,4 @@
-import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
+import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import {
   type ForgeReaderFor,
@@ -104,7 +104,7 @@ export async function queueNewRepoJobs(
 }
 
 /**
- * Every repository of the config's groups, listed on their forges now, for running
+ * Every repository of the config's root groups (subgroups only narrow them), listed on their forges now, for running
  * `jobs.onNewRepo` on repositories Holtkeeper already knows. A group that cannot be listed is
  * reported in `failed` and left out.
  */
@@ -114,7 +114,7 @@ export async function knownRepos(
   const found = new Map<string, RepoRef>()
   const failed: string[] = []
   const list = groupRepositories(config)
-  for (const group of Object.keys(config.groups)) {
+  for (const group of rootGroups(config)) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one group after another keeps rate limits
       for (const repo of await list(group)) found.set(`${repo.forge}:${repo.path}`, repo)

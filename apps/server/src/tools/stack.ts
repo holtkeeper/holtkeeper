@@ -9,7 +9,7 @@ import { repoKey } from '../context.ts'
 export interface StackToolsContext {
   /** The newest stack view of every group, already limited to the caller's catalog reach. */
   views: () => Promise<StackGroupView[]>
-  /** The teams (config groups) of a repository, named on every row. */
+  /** The teams of a repository (innermost config groups), named on every row. */
   ownerOf: (repo: RepoRef) => string[]
   /** Direct dependencies of a repository at their resolved versions, for `repo_stack`. */
   dependencies?: (repo: RepoRef) => Promise<{ ecosystem: string; name: string; version: string }[]>

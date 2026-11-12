@@ -1,7 +1,8 @@
 import type { GroupMatch, RepoRef, Scope } from '@holtkeeper/api'
+import { parentGroup } from '@holtkeeper/api'
 
-import { type GroupTitleOf, groupMatchTitle, keyAsTitle } from './group-titles.ts'
-import { repoKey, validateGroupId } from './repo.ts'
+import { type GroupTitleOf, groupMatchTitle, keyAsTitle, validateGroupKey } from './group-titles.ts'
+import { repoKey } from './repo.ts'
 
 /** Whether the scope covers nothing: not `all` and no groups or repository patterns. */
 export const isEmptyScope = (scope: Scope): boolean =>
@@ -21,7 +22,7 @@ export function parseGroupMatch(text: string): GroupMatch {
 export const validateGroupMatch = (text: string): string | undefined =>
   text
     .split('+')
-    .map(validateGroupId)
+    .map(validateGroupKey)
     .find((error) => error !== undefined)
 
 /**
@@ -76,6 +77,10 @@ export function scopeOrder(scope: Scope): number {
 
 /** What a repository or group page edits settings and knowledge for. */
 export type ScopeFocus = { kind: 'repo'; repo: RepoRef } | { kind: 'group'; group: string }
+
+/** The parent group of a subgroup focus; `undefined` for a root group or a repository. */
+export const focusParent = (focus: ScopeFocus): string | undefined =>
+  focus.kind === 'group' ? parentGroup(focus.group) : undefined
 
 /** The scope a new entry made on a focus page starts with. */
 export const scopeOfFocus = (focus: ScopeFocus): Scope =>

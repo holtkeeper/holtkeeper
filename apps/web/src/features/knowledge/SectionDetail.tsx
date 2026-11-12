@@ -6,6 +6,7 @@ import type {
   PersonView,
   RepoRef,
 } from '@holtkeeper/api'
+import { parentGroup } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ExternalLink, GitCompare, History, Pencil, RefreshCw, RotateCcw } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
@@ -21,6 +22,7 @@ import {
 } from '../../api/queries.ts'
 import { formatUsd } from '../../lib/ai-usage.ts'
 import { formatDateTime, formatRelative, plural, shortId, shortSha } from '../../lib/format.ts'
+import { groupPathTitle } from '../../lib/group-titles.ts'
 import {
   type Space,
   guideSections,
@@ -247,6 +249,9 @@ function RepoLayers(props: SectionProps & { repo: RepoRef }) {
 
 function ScopeLayers(props: SectionProps) {
   const { space, section } = props
+  const titleOf = useGroupTitles()
+  const parent = space.kind === 'group' ? parentGroup(space.group) : undefined
+  const after = parent === undefined ? 2 : 3
   return (
     <>
       {space.kind !== 'all' ? (
@@ -259,11 +264,32 @@ function ScopeLayers(props: SectionProps) {
         <OwnRules
           {...props}
           n={1}
-          kind={space.kind === 'family' ? 'family' : space.kind === 'group' ? 'group' : 'all'}
+          kind={
+            space.kind === 'family'
+              ? 'family'
+              : space.kind === 'group'
+                ? parent === undefined
+                  ? 'group'
+                  : 'subgroup'
+                : 'all'
+          }
         />
-        {space.kind !== 'all' ? (
+        {parent !== undefined ? (
           <LayerRow
             n={2}
+            letter={layerKinds.group.letter}
+            kind={layerKinds.group.label}
+            title={`Team ${groupPathTitle(titleOf, parent)}`}
+            aside={<SpaceLink scope={`group:${parent}`} section={section.section} />}
+          >
+            <span className="text-xs text-muted">
+              The parent team&apos;s rules come after this subgroup&apos;s rules.
+            </span>
+          </LayerRow>
+        ) : null}
+        {space.kind !== 'all' ? (
+          <LayerRow
+            n={after}
             letter={layerKinds.all.letter}
             kind={layerKinds.all.label}
             title="All repositories"
@@ -276,7 +302,7 @@ function ScopeLayers(props: SectionProps) {
         ) : null}
         {section.learnings.length ? (
           <LayerRow
-            n={space.kind !== 'all' ? 3 : 2}
+            n={space.kind !== 'all' ? after + 1 : 2}
             letter={layerKinds.learnings.letter}
             kind={layerKinds.learnings.label}
             title="Learned rules"
@@ -346,7 +372,7 @@ function OwnRules({
   aside,
 }: SectionProps & {
   n: number | undefined
-  kind: 'repo' | 'family' | 'group' | 'all'
+  kind: 'repo' | 'family' | 'subgroup' | 'group' | 'all'
   aside?: ReactNode
 }) {
   const titleOf = useGroupTitles()
@@ -358,7 +384,7 @@ function OwnRules({
       : space.kind === 'all'
         ? 'All repositories'
         : space.kind === 'group'
-          ? `Team ${titleOf(space.group)}`
+          ? `Team ${groupPathTitle(titleOf, space.group)}`
           : 'This family'
 
   const put = () =>

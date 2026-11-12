@@ -49,7 +49,7 @@ export interface CatalogToolsContext {
   canReadAnalyses: RepoFilter
   /** Repositories whose audits the caller may read. */
   canReadAudits: RepoFilter
-  /** The teams (config groups) of a repository, named on results; without it no team is named. */
+  /** The teams of a repository (innermost config groups), named on results; without it no team is named. */
   ownerOf?: (repo: RepoRef) => string[]
   /** Latest registry versions, for how far behind a repository is. */
   latest?: Pick<LatestVersions, 'all'>

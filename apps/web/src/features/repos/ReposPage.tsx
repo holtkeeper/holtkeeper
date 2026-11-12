@@ -1,4 +1,4 @@
-import type { RepoSummary } from '@holtkeeper/api'
+import { type RepoSummary, leafGroups } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, FolderGit2, History, Plus } from 'lucide-react'
 import { useState } from 'react'
@@ -274,7 +274,7 @@ function RepoName({ summary }: { summary: RepoSummary }) {
         </Link>
         <div className="mt-0.5 flex flex-wrap items-center gap-1">
           <span className="mono text-[11px] text-dim">{repo.forge}</span>
-          {groups.map((group) => (
+          {leafGroups(groups).map((group) => (
             <Link
               key={group}
               to="/repos/groups/$groupId"
@@ -282,7 +282,7 @@ function RepoName({ summary }: { summary: RepoSummary }) {
               className="no-underline"
             >
               <Tag className="hover:underline">
-                <GroupName group={group} />
+                <GroupName group={group} path />
               </Tag>
             </Link>
           ))}

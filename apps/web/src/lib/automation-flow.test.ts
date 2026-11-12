@@ -145,6 +145,30 @@ describe('automation lanes', () => {
     })
   })
 
+  test('subgroup rules sit in the root group lane, tagged with the subgroup', () => {
+    const lanes = automationLanes(
+      input({
+        groups: ['toys', 'toys.blocks', 'games'],
+        titleOf: (key) => (key === 'toys.blocks' ? 'Blocks' : key),
+        triggers: [trigger('tag', { on: 'tag', analyzers: ['shapes'], groups: ['toys.blocks'] })],
+        settings: [
+          setting('p1', 'mergeRequests.policies', { groups: ['toys.blocks'] }, [
+            { id: 'bots', name: 'Bots', when: { event: ['open'] }, actions: [] },
+          ]),
+        ],
+      }),
+    )
+    expect(lanes.map((found) => found.id)).toEqual([ALL_LANE, 'games', 'toys'])
+    const toys = lane(lanes, 'toys')
+    expect(toys.nodes.find((node) => node.id === 'rule:trigger:tag')?.data).toMatchObject({
+      chips: ['subgroup Blocks'],
+    })
+    expect(toys.nodes.find((node) => node.id === 'rule:policy:p1:bots')?.data).toMatchObject({
+      chips: ['on open', 'subgroup Blocks'],
+    })
+    expect(jobLanes(['toys.blocks', 'toys'])).toEqual([ALL_LANE, 'toys'])
+  })
+
   test('policies project their events, condition chips and actions, scoped like their entry', () => {
     const lanes = automationLanes(
       input({

@@ -3,6 +3,8 @@ import {
   type Principal,
   type RepoTarget,
   can,
+  leafGroups,
+  outerGroups,
   scopeCoversRepo,
 } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, mountToolsets } from '@holtkeeper/agent-tools'
@@ -126,7 +128,7 @@ export const storedStackTools = (
       groupsOf: access.groupsOf,
     }),
   ownerOf: (repo) => {
-    const groups = access.groupsOf(repo)
+    const groups = leafGroups(access.groupsOf(repo))
     return access.groupLabel ? groups.map(access.groupLabel) : groups
   },
   dependencies: async (repo) => (access.canRead(repo) ? repoDependencies(analyses, repo) : []),
@@ -176,7 +178,7 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     : (other) => policy === 'snippets' || sameTeam(other)
   const groupsOf = (other: RepoRef) => targetOf(other).groups
   const label = options.groupLabel ?? ((group: string) => group)
-  const ownerOf = (other: RepoRef) => groupsOf(other).map(label)
+  const ownerOf = (other: RepoRef) => leafGroups(groupsOf(other)).map(label)
   const canReadAnalyses: RepoFilter = (other) =>
     requester
       ? can(requester, 'analyses:read', { kind: 'repo', repo: targetOf(other) })
@@ -192,7 +194,8 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
         (!requester || can(requester, 'knowledge:read', { kind: 'scope', scope })),
       canReadShared: (scope) =>
         requester ? canReadShared(requester, scope, policy) : policy !== 'off',
-      ownerOf: (scope) => scopeOwner(scope, groupsOf).map(label),
+      ownerOf: (scope) =>
+        outerGroups(scopeOwner(scope, (other) => leafGroups(groupsOf(other)))).map(label),
       groupLabel: label,
       repoOf: (value) => (value === key ? repo : undefined),
       actor: 'agent',

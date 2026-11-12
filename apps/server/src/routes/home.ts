@@ -2,6 +2,7 @@ import { type Action, type Principal, type Scope, can } from '@holtkeeper/access
 import { broadestBudget, budgetKey, budgetStatuses } from '@holtkeeper/ai-usage'
 import type { HomeSpend, HomeView } from '@holtkeeper/api'
 import { summarizeRun } from '@holtkeeper/api'
+import { rootGroups } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import { staticPrefix } from '@holtkeeper/jobs'
 import type { AuditEvent } from '@holtkeeper/store'
@@ -172,7 +173,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
   for (const key of audits.keys()) repos.add(key)
   for (const card of cards) repos.add(keyOf(card.repo))
   for (const head of analyses) repos.add(keyOf(head.repo))
-  for (const group of Object.values(config.groups))
+  for (const group of rootGroups(config).flatMap((key) => config.groups[key] ?? []))
     for (const path of group.include) {
       if (staticPrefix(path) !== path) continue
       const ref = { forge: group.forge, path }

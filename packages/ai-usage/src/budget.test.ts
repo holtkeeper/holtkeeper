@@ -162,6 +162,15 @@ describe('budget resolution', () => {
     expect(applicableBudgets(budgets.slice(1), { forge: 'w', path: 'x', groups: [] })).toEqual([])
   })
 
+  test('a subgroup budget does not lift its repositories out of the parent cap', () => {
+    const budgets = parseBudgets([
+      entry('shapes', { groups: ['shapes'] }, { weeklyUsd: 50 }),
+      entry('round', { groups: ['shapes.round'] }, { weeklyUsd: 500 }),
+    ])
+    const circle = { forge: 'work', path: 'shapes/circle', groups: ['shapes.round', 'shapes'] }
+    expect(applicableBudgets(budgets, circle).map((b) => b.id)).toEqual(['round', 'shapes'])
+  })
+
   test('the newest of equally specific budgets wins', () => {
     const budgets = parseBudgets([
       entry('old', { groups: ['games'] }, { weeklyUsd: 1 }, '2026-01-01T00:00:00Z'),
@@ -226,6 +235,25 @@ describe('budgetGuard', () => {
       'ai.budget_exceeded global',
       'ai.budget_exceeded global',
     ])
+  })
+
+  test('a run in a subgroup is still blocked by the parent budget', async () => {
+    const circle = { forge: 'work', path: 'shapes/circle', groups: ['shapes.round', 'shapes'] }
+    const { guard } = await setup(
+      [
+        entry('shapes', { groups: ['shapes'] }, { weeklyUsd: 50 }),
+        entry('round', { groups: ['shapes.round'] }, { weeklyUsd: 500 }),
+      ],
+      [
+        spend('2026-10-27T00:00:00.000Z', 49, {
+          repo: { forge: 'work', path: 'shapes/circle' },
+          groups: circle.groups,
+        }),
+      ],
+    )
+    const decision = await guard.check({ repo: circle, taskKind: 'review', estimateUsd: 2 })
+    expect(decision.allowed).toBeFalse()
+    expect(decision.exceeded.map((status) => status.budgetId)).toEqual(['shapes'])
   })
 
   test('the estimate defaults to the mean cost of this week’s runs of the task kind', async () => {

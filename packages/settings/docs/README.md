@@ -51,9 +51,11 @@ Built in: `llm.provider` (global; the id or name of an AI provider credential, s
 
 1. exact repository paths (`games/app-x`)
 2. path globs (`games/app-*`)
-3. group intersections (`[['frontend', 'storefront']]`), more groups first
+3. subgroups (`shapes.round`) and group intersections (`[['frontend', 'storefront']]`), more groups first; a subgroup counts as its parent plus itself, so it ranks like a two-group intersection
 4. groups (`games`)
 5. everything
+
+A subgroup entry therefore beats its parent's entry, and the parent's beats an entry for everything; a repository in two sibling subgroups gets the newer of their entries.
 
 Ties go to the most recently updated entry; retired keys never resolve. The ranking is `scopeSpecificity` of [@holtkeeper/access](../../access/docs/README.md), shared with merge request policies, knowledge and AI budgets. `resolveSettings(entries, repo)` resolves every key at once. `settingCascade(entries, key, repo)` lists every covering entry in override order (the one that applies first, then the ones it overrides from narrow to broad) and `settingCascades(entries, repo)` does that for every key with a covering entry; the API exposes both as `GET /api/settings/resolve?repo=forge:path` (`settings` with the winners, `cascade` with the full lists).
 

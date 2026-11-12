@@ -1,4 +1,4 @@
-import type { RepoTarget } from '@holtkeeper/access'
+import { type RepoTarget, groupLineage } from '@holtkeeper/access'
 import type { GuideScopeKey, GuideSectionName } from '@holtkeeper/store'
 
 export type {
@@ -75,13 +75,15 @@ export const repoKey = (repo: { forge: string; path: string }) => `${repo.forge}
 
 /**
  * The scope keys whose sections apply to `repo`, most specific first: the repository, its family,
- * its groups in config order, then `all`.
+ * its groups deepest first (subgroups before their parents, config order among equals), then
+ * `all`.
  */
 export function scopesFor(repo: RepoTarget, family?: string): GuideScopeKey[] {
+  const groups = repo.groups.toSorted((a, b) => groupLineage(b).length - groupLineage(a).length)
   return [
     guideScopeKey({ kind: 'repo', forge: repo.forge, path: repo.path }),
     ...(family ? [guideScopeKey({ kind: 'family', family })] : []),
-    ...repo.groups.map((group) => guideScopeKey({ kind: 'group', group })),
+    ...groups.map((group) => guideScopeKey({ kind: 'group', group })),
     'all',
   ]
 }

@@ -45,8 +45,9 @@ export function chainTaskOf(section: GuideSectionName): GuideTask {
 
 /**
  * The layers of a resolved Guide in the order the agent reads them (the resolver's block order:
- * repository files, repository rules, family, groups, all, learnings, policies, generated text,
- * notes), numbered from 1; blocks the budget left empty and never had text are dropped.
+ * repository files, repository rules, family, subgroups, parent groups, all, learnings, policies,
+ * generated text, notes), numbered from 1; blocks the budget left empty and never had text are
+ * dropped.
  */
 export function chainLayers(resolved: Pick<ResolvedGuide, 'blocks'>): GuideChainLayer[] {
   return resolved.blocks

@@ -10,7 +10,7 @@ import type {
   ReleaseVersionDeploy,
   ReleaseVersionView,
 } from '@holtkeeper/api'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import { type HoltkeeperConfig, rootGroups } from '@holtkeeper/core'
 import type { ForgeEvent, GitForge, RepoRef } from '@holtkeeper/forge'
 import { type Issue, issuesByKey } from '@holtkeeper/issues'
 import { groupRepositories } from '@holtkeeper/jobs'
@@ -759,7 +759,7 @@ function createReleaseService(deps: ServerDeps) {
   const repositories = async (group?: string) => {
     const resolve = groupRepositories(config)
     const found = new Map<string, RepoRef>()
-    for (const name of group ? [group] : Object.keys(config.groups)) {
+    for (const name of group ? [group] : rootGroups(config)) {
       try {
         // oxlint-disable-next-line no-await-in-loop -- groups one after another keep forge limits
         for (const member of await resolve(name)) found.set(repoKeyOf(member), member)

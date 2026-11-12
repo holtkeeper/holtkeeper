@@ -32,10 +32,11 @@ export type GuideResolver = (request: GuideRequest) => Promise<ResolvedGuide>
  * The single Guide resolver review, thread replies, agent tasks, release notes and MCP use: reads
  * the repository's family, the sections of its scopes, its policies from settings and accepted
  * knowledge, then runs `resolveGuide`. For a repository with no tests by design (`repo.tests`) the
- * `testing` sections are left out.
+ * `testing` sections are left out. `groupTitle` names group keys in block titles.
  */
 export function createGuideResolver(deps: {
   store: Pick<Store, 'guides' | 'families' | 'knowledge' | 'settings'>
+  groupTitle?: (key: string) => string
 }): GuideResolver {
   const { store } = deps
   return async (request) => {
@@ -71,6 +72,7 @@ export function createGuideResolver(deps: {
         },
       }),
       ...(request.caps && { caps: request.caps }),
+      ...(deps.groupTitle && { groupTitle: deps.groupTitle }),
     })
   }
 }

@@ -1,4 +1,4 @@
-import type { RepoTarget } from '@holtkeeper/access'
+import { type RepoTarget, isSubgroup } from '@holtkeeper/access'
 import { selectForTask } from '@holtkeeper/knowledge'
 import type {
   GuideScopeKey,
@@ -69,12 +69,16 @@ export interface ResolveGuideInput {
   policies?: readonly GuidePolicy[]
   notes?: GuideNotes
   caps?: Partial<GuideCaps>
+  /** Names a group key in titles, e.g. `Shapes › Round (shapes.round)`. Default: the key. */
+  groupTitle?: (key: string) => string
 }
 
+/** Where a block comes from; `subgroup` is a group of the repository nested in another one. */
 export type GuideLayer =
   | 'repo-file'
   | 'repo'
   | 'family'
+  | 'subgroup'
   | 'group'
   | 'all'
   | 'learnings'
@@ -154,17 +158,18 @@ const sectionBodies = (
 /**
  * The Guide of a repository for one task, as one deterministic Markdown block (the same inputs
  * give the same text, so it can sit in a cached prompt prefix). Blocks, strongest first: the
- * repository's own rules files, panel team rules of the repository, its family, its groups and
- * `all`, accepted learnings, policies as plain facts, generated sections under
- * `GENERATED_HEADER`, then knowledge notes from what budget is left.
+ * repository's own rules files, panel team rules of the repository, its family, its subgroups,
+ * its parent groups and `all`, accepted learnings, policies as plain facts, generated sections
+ * under `GENERATED_HEADER`, then knowledge notes from what budget is left. Group titles go through
+ * `groupTitle`.
  *
  * Budgets (`GUIDE_CAPS`): human text gets `human` characters; over it `all` is cut first, then
- * groups (the last one first), then the family, learnings and policies. Repository-level text
- * (rules files and repository rules) is never cut to make room; when it alone is over `human`, or
- * over `total` (then its end is cut), a warning says so. Generated text gets at most `generated`
- * and what human text leaves of `total`; notes get the rest. Generated text nobody accepted is
- * included only when no human rules apply to the selected sections and the repository has no
- * rules files.
+ * parent groups (the last one first), then subgroups, then the family, learnings and policies.
+ * Repository-level text (rules files and repository rules) is never cut to make room; when it
+ * alone is over `human`, or over `total` (then its end is cut), a warning says so. Generated text
+ * gets at most `generated` and what human text leaves of `total`; notes get the rest. Generated
+ * text nobody accepted is included only when no human rules apply to the selected sections and
+ * the repository has no rules files.
  */
 export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
   const caps = { ...GUIDE_CAPS, ...input.caps }
@@ -191,7 +196,12 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
         source: `Family ${input.family?.name ?? scope.slice('family:'.length)}`,
       }
     const group = scope.slice('group:'.length)
-    return { layer: 'group', title: `Team rules for team ${group}`, source: `Team ${group}` }
+    const label = input.groupTitle?.(group) ?? group
+    return {
+      layer: isSubgroup(group) ? 'subgroup' : 'group',
+      title: `Team rules for team ${label}`,
+      source: `Team ${label}`,
+    }
   }
   const ruleBlocks: Candidate[] = scopes.flatMap((scope) => {
     const body = sectionBodies(rows, scope, sections, (row) => row.rules)
@@ -245,6 +255,7 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
         ]
       : []),
     ...ruleBlocks.filter((block) => block.layer === 'family'),
+    ...ruleBlocks.filter((block) => block.layer === 'subgroup'),
     ...ruleBlocks.filter((block) => block.layer === 'group'),
     ...ruleBlocks.filter((block) => block.layer === 'all'),
   ]
@@ -391,7 +402,16 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
 }
 
 /** Prompt order of human blocks: precedence, strongest first. */
-const order: GuideLayer[] = ['repo-file', 'repo', 'family', 'group', 'all', 'learnings', 'policies']
+const order: GuideLayer[] = [
+  'repo-file',
+  'repo',
+  'family',
+  'subgroup',
+  'group',
+  'all',
+  'learnings',
+  'policies',
+]
 
 function cutBlock(candidate: Candidate, room: number): string {
   const head = `## ${candidate.title}\n\n`

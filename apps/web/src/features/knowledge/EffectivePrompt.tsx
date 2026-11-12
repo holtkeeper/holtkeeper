@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { useChatMutations, useGuidePreview } from '../../api/queries.ts'
 import { formatCount as number } from '../../lib/format.ts'
-import { budgetSegments, guideTasks, tokensOf } from '../../lib/guide.ts'
+import { budgetSegments, guideTasks, layerKinds, tokensOf } from '../../lib/guide.ts'
 import { parseRepoKey, repoKey } from '../../lib/repo.ts'
 import {
   Button,
@@ -58,7 +58,7 @@ function Blocks({ preview }: { preview: GuidePreview }) {
           key={index}
           className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-sm"
         >
-          <Tag mono>{block.layer}</Tag>
+          <Tag>{layerKinds[block.layer].label}</Tag>
           <span className="min-w-0 flex-1 truncate" title={block.title}>
             {block.source}
           </span>

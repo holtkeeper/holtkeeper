@@ -15,7 +15,7 @@ export interface WhoUsesContext {
   usages: UsageIndex
   /** Repositories in the caller's catalog reach. */
   canRead: RepoFilter
-  /** The teams (config groups) of a repository. */
+  /** The teams of a repository (innermost config groups). */
   ownerOf: (repo: RepoRef) => string[]
   latest?: Pick<LatestVersions, 'all'>
   /** Stack tools, for subjects that name a runtime, image or tool. */

@@ -69,6 +69,22 @@ describe('selectForTask', () => {
     expect(result.omitted).toEqual([])
   })
 
+  test('a subgroup entry ranks above its parent group and below path globs', () => {
+    const nested = repo('games/app', ['games.arcade', 'games'])
+    const result = selectForTask({
+      entries: [
+        entry({ id: 'parent', scope: { groups: ['games'] }, title: 'Parent rule' }),
+        entry({ id: 'sibling', scope: { groups: ['games.board'] }, title: 'Sibling rule' }),
+        entry({ id: 'sub', scope: { groups: ['games.arcade'] }, title: 'Sub rule' }),
+        entry({ id: 'glob', scope: { repos: ['games/**'] }, title: 'Glob rule' }),
+        entry({ id: 'global', title: 'Global rule' }),
+      ],
+      task: { kind: 'review', repo: nested },
+      budgetTokens: 10_000,
+    })
+    expect(result.selected.map((s) => s.entry.id)).toEqual(['glob', 'sub', 'parent', 'global'])
+  })
+
   test('includes migrations only for overlapping packages and drops superseded entries', () => {
     const replaced = entry({ id: 'old', title: 'Old refs advice' })
     const replacement = entry({ id: 'new', title: 'New refs advice', supersedes: 'old' })

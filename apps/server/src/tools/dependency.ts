@@ -35,7 +35,7 @@ export interface DependencyContext {
   canReadAudits: RepoFilter
   knowledge: KnowledgeToolsContext
   libraries?: Pick<LibraryStore, 'getLibrary' | 'listVersions'>
-  /** The teams (config groups) of a repository, named on every user. */
+  /** The teams of a repository (innermost config groups), named on every user. */
   ownerOf?: (repo: RepoRef) => string[]
   /** Latest registry versions, the source of "behind". */
   latest?: Pick<LatestVersions, 'all'>

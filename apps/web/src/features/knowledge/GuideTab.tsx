@@ -2,7 +2,7 @@ import type { Family, GuideSectionName, RepoRef, RepoSummary } from '@holtkeeper
 import { Link } from '@tanstack/react-router'
 import { ChevronRight } from 'lucide-react'
 
-import { useGuide, useGuideChain } from '../../api/queries.ts'
+import { useGroupTitles, useGuide, useGuideChain } from '../../api/queries.ts'
 import { formatDateTime, formatRelative } from '../../lib/format.ts'
 import {
   type Space,
@@ -49,6 +49,7 @@ export function GuideTab({
   const guide = useGuide(scope)
   const repo: RepoRef | undefined = space.kind === 'repo' ? space.repo : undefined
   const chain = useGuideChain(repo)
+  const titleOf = useGroupTitles()
   const members =
     space.kind === 'family' ? (families.find((f) => f.id === space.family)?.members ?? []) : []
 
@@ -65,7 +66,7 @@ export function GuideTab({
   const noTests = repo
     ? repos?.find((summary) => repoKey(summary.repo) === repoKey(repo))?.noTests
     : undefined
-  const trail = repos ? spaceTrail(space, repos, families) : []
+  const trail = repos ? spaceTrail(space, repos, families, titleOf) : []
   const here = trail.at(-1)
   const parents = trail.slice(0, -1)
 

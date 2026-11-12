@@ -10,7 +10,9 @@ import {
   inView,
   parseScopeView,
   resolveScopeView,
+  scopeLabel,
   scopeList,
+  scopeSuffix,
   viewGroup,
   viewGroups,
 } from './home-scope.ts'
@@ -169,5 +171,47 @@ describe('foldOtherTeams', () => {
     const folded = foldOtherTeams(owned, [['colors', 'paint']], (entry) => entry.groups)
     expect(folded.mine.map((entry) => entry.id)).toEqual(['blue', 'everyone'])
     expect(folded.teams).toEqual(['shapes'])
+  })
+})
+
+const studioTitle = (key: string) => (key === 'shapes' ? 'Shape studio' : key)
+
+describe('subgroups', () => {
+  const nested = [
+    item('disc', 'shapes.round', 'shapes'),
+    item('tile', 'shapes.flat', 'shapes'),
+    item('cube', 'shapes'),
+    item('red', 'colors'),
+  ]
+
+  test('a parent home group holds its subgroups; a subgroup only its own', () => {
+    expect(names(scopeList(nested, 'mine', ['shapes']).shown)).toEqual(['disc', 'tile', 'cube'])
+    expect(names(scopeList(nested, 'mine', ['shapes.round']).shown)).toEqual(['disc'])
+    expect(names(scopeList(nested, groupView('shapes.flat'), []).shown)).toEqual(['tile'])
+  })
+
+  test('the parent of a subgroup does not count as one more team', () => {
+    expect(scopeList(nested, 'mine', ['colors']).others).toEqual({ items: 3, teams: 3 })
+    expect(foldOtherTeams(nested, ['shapes.round'], groupsOf).teams).toEqual([
+      'colors',
+      'shapes',
+      'shapes.flat',
+    ])
+  })
+
+  test('counts list subgroups right after their parent', () => {
+    expect(groupCounts([['shapes-old'], ['shapes.round', 'shapes'], ['colors']])).toEqual([
+      { group: 'colors', count: 1 },
+      { group: 'shapes', count: 1 },
+      { group: 'shapes.round', count: 1 },
+      { group: 'shapes-old', count: 1 },
+    ])
+  })
+
+  test('names a subgroup position with its parent', () => {
+    expect(scopeLabel(groupView('shapes.round'), studioTitle)).toBe('Shape studio › shapes.round')
+    expect(scopeSuffix(groupView('shapes.round'), studioTitle)).toBe(
+      ' in Shape studio › shapes.round',
+    )
   })
 })

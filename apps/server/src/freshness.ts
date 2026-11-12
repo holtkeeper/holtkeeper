@@ -214,8 +214,8 @@ async function evaluate(
     options.targets ??
     [
       ...(await listedRepos(kv, config)).map((repo) => ({ repo })),
-      ...Object.entries(config.groups).map(([group, definition]) => ({
-        repo: { forge: definition.forge, path: group },
+      ...Object.keys(config.groups).map((group) => ({
+        repo: { forge: config.groups[group]?.forge ?? '', path: group },
         group,
       })),
     ].filter((target) => target.repo.forge in config.forges)

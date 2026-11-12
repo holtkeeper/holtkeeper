@@ -1,4 +1,9 @@
-import type { LicensesOverview, LicensesRepoRow, RepoRef } from '@holtkeeper/api'
+import {
+  type LicensesOverview,
+  type LicensesRepoRow,
+  type RepoRef,
+  leafGroups,
+} from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { ChevronRight, Scale, X } from 'lucide-react'
 import { useState } from 'react'
@@ -284,9 +289,9 @@ const repoColumns: readonly FleetColumn<LicensesRepoRow>[] = [
     header: 'Group',
     cell: (row) => (
       <span className="flex flex-wrap gap-1">
-        {row.groups.map((group) => (
+        {leafGroups(row.groups).map((group) => (
           <Tag key={group}>
-            <GroupName group={group} />
+            <GroupName group={group} path />
           </Tag>
         ))}
       </span>

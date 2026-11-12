@@ -1,4 +1,10 @@
-import type { GroupDocumentData, GroupMatch } from '@holtkeeper/api'
+import {
+  GROUP_KEY_PATTERN,
+  type GroupDocumentData,
+  type GroupMatch,
+  parentGroup,
+  rootGroup,
+} from '@holtkeeper/api'
 
 /** What people see for a group key: its display title, or the key itself. */
 export type GroupTitleOf = (key: string) => string
@@ -21,6 +27,35 @@ export const byGroupTitle =
   (titleOf: GroupTitleOf) =>
   (a: string, b: string): number =>
     titleOf(a).localeCompare(titleOf(b)) || a.localeCompare(b)
+
+/** A group with its parent in front for a subgroup: `Shape studio › Round`; a root group's title. */
+export function groupPathTitle(titleOf: GroupTitleOf, key: string): string {
+  const parent = parentGroup(key)
+  return parent === undefined
+    ? titleOf(key)
+    : `${groupPathTitle(titleOf, parent)} › ${titleOf(key)}`
+}
+
+/**
+ * Orders group keys as a tree: root groups by title, each followed by its subgroups by title. A
+ * subgroup whose parent is not in the list still sorts where its parent would.
+ */
+export const byGroupTree = (titleOf: GroupTitleOf) => {
+  const byTitle = byGroupTitle(titleOf)
+  return (a: string, b: string): number => {
+    const roots = byTitle(rootGroup(a), rootGroup(b))
+    if (roots) return roots
+    const aSub = parentGroup(a) !== undefined
+    const bSub = parentGroup(b) !== undefined
+    return aSub === bSub ? byTitle(a, b) : aSub ? 1 : -1
+  }
+}
+
+/** Checks a group key: `team` or a subgroup `team.sub`, lowercase letters, digits and dashes. */
+export const validateGroupKey = (key: string): string | undefined =>
+  GROUP_KEY_PATTERN.test(key.trim())
+    ? undefined
+    : 'Lowercase letters, digits and dashes, with one optional dot for a subgroup (team.sub)'
 
 /** Whether a group matches a filter typed by people, by its title or its key. */
 export function groupMatchesQuery(key: string, titleOf: GroupTitleOf, query: string): boolean {

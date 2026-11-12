@@ -41,6 +41,7 @@ const config = parseConfig({
   groups: {
     games: { forge: 'work', include: ['games/*'], exclude: ['games/legacy-*'] },
     everything: { forge: 'work', include: ['games/**', 'tools/*'] },
+    'games.top': { forge: 'work', include: ['games/a', 'games/legacy-b', 'tools/x'] },
     picked: {
       forge: 'work',
       include: ['games/deep/c', 'games/old', 'tools/*'],
@@ -75,6 +76,13 @@ describe('repos', () => {
     const resolve = groupRepositories(config)
     expect((await resolve('picked')).map((r) => r.path)).toEqual(['games/deep/c'])
     expect(listed).toEqual(['tools'])
+  })
+
+  test('groupRepositories lists a subgroup from its parent', async () => {
+    listed.length = 0
+    const resolve = groupRepositories(config)
+    expect((await resolve('games.top')).map((r) => r.path)).toEqual(['games/a'])
+    expect(listed).toEqual(['games'])
   })
 
   test('matchesRepoGlob checks forge and path', () => {

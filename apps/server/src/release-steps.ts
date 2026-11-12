@@ -8,7 +8,7 @@ import type { KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { appendAudit } from './audit.ts'
-import { type ServerDeps, repoTarget, ForbiddenToolError } from './context.ts'
+import { type ServerDeps, ForbiddenToolError, groupLabeler, repoTarget } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
 import type { ReleaseStepInput, ReleaseToolsAccess } from './tools/releases.ts'
 import { canSee } from './visibility.ts'
@@ -234,7 +234,7 @@ export function releaseToolsAccess(
 ): ReleaseToolsAccess {
   const { config, store } = deps
   const releases = releaseServiceFor(deps)
-  const resolveGuide = createGuideResolver({ store })
+  const resolveGuide = createGuideResolver({ store, groupTitle: groupLabeler(config) })
   const kv = store.kv ?? memoryKv()
   const { principal } = options
 

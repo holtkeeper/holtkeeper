@@ -1147,7 +1147,12 @@ export interface ForgeDocumentData {
   sshKey?: ForgeSshKey
 }
 
-/** A group of repositories, as `groups.<id>` of the effective config. */
+/**
+ * A group of repositories, as `groups.<id>` of the effective config. The id is a root group
+ * (`shapes`) or a subgroup (`shapes.round`, see `GROUP_KEY_PATTERN` in `@holtkeeper/access`): a
+ * subgroup's parent is the part before the dot, its forge equals the parent's and its members are
+ * the parent's members its own patterns match.
+ */
 export interface GroupDocumentData {
   /** Display name shown instead of the id; the id stays the identity in grants, scopes and guides. */
   title?: string

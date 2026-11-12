@@ -28,6 +28,7 @@ const config = parseConfig({
   groups: {
     web: { forge: 'work', include: ['acme/web-*'] },
     pay: { forge: 'work', include: ['acme/pay-*'] },
+    'web.docs': { forge: 'work', include: ['acme/web-docs*'], title: 'Docs' },
   },
 })
 
@@ -368,6 +369,21 @@ describe('GET /api/inbox', () => {
       'release:work:acme/pay-api',
       'task:g-pay',
     ])
+  })
+
+  test('a note on a subgroup names it under its parent; one beside its parent names the parent', async () => {
+    const note = (await store.knowledge.get('n-web'))!
+    await store.knowledge.put({ ...note, id: 'n-docs', scope: { groups: ['web.docs'] } })
+    await store.knowledge.put({ ...note, id: 'n-wide', scope: { groups: ['web', 'web.docs'] } })
+    await store.knowledge.put({ ...note, id: 'n-both', scope: { groups: [['web.docs', 'pay']] } })
+    const items = [...(await feedOf('admin')).mine, ...(await feedOf('admin')).teams]
+    expect(items.find((item) => item.id === 'note:n-docs')).toMatchObject({
+      scope: 'Team web › Docs (web.docs)',
+    })
+    expect(items.find((item) => item.id === 'note:n-wide')).toMatchObject({ scope: 'Team web' })
+    expect(items.find((item) => item.id === 'note:n-both')).toMatchObject({
+      scope: 'Team web › Docs (web.docs) + pay',
+    })
   })
 
   test('rejected generated text and dismissed releases leave the Inbox', async () => {

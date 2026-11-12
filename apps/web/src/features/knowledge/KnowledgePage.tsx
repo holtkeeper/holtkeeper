@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearch } from '@tanstack/react-router'
 import { Plus, SquareTerminal } from 'lucide-react'
 import { useState } from 'react'
 
-import { useFamilies, useKnowledgeCounts, useRepos } from '../../api/queries.ts'
+import { useFamilies, useGroupTitles, useKnowledgeCounts, useRepos } from '../../api/queries.ts'
 import {
   type KnowledgeTab,
   type Space,
@@ -45,6 +45,7 @@ export function KnowledgePage() {
   const repos = useRepos(can('repos:read'))
   const families = useFamilies()
   const counts = useKnowledgeCounts()
+  const titleOf = useGroupTitles()
   const [prompt, setPrompt] = useState(false)
   const [creating, setCreating] = useState(false)
 
@@ -75,7 +76,7 @@ export function KnowledgePage() {
 
   return (
     <Page
-      crumbs={spaceTrail(space, repoList, familyList).map((step) => ({
+      crumbs={spaceTrail(space, repoList, familyList, titleOf).map((step) => ({
         label: step.label,
         link: { to: tabPaths[tab], search: { space: spaceKey(step.space) } },
       }))}

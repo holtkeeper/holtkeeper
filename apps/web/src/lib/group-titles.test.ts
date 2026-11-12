@@ -2,10 +2,13 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   byGroupTitle,
+  byGroupTree,
+  groupPathTitle,
   groupMatchTitle,
   groupMatchesQuery,
   groupTitleOf,
   keyAsTitle,
+  validateGroupKey,
   validateGroupTitle,
   withGroupTitle,
 } from './group-titles.ts'
@@ -44,5 +47,38 @@ describe('group titles', () => {
     expect(withGroupTitle({ ...data, title: 'Old' }, ' ')).toEqual(data)
     expect(validateGroupTitle('x'.repeat(60))).toBeUndefined()
     expect(validateGroupTitle('x'.repeat(61))).toBe('At most 60 characters')
+  })
+
+  test('names a subgroup with its parent', () => {
+    const titles = groupTitleOf({ shapes: 'Shape studio', 'shapes.round': 'Round' })
+    expect(groupPathTitle(titles, 'shapes.round')).toBe('Shape studio › Round')
+    expect(groupPathTitle(titles, 'shapes.flat')).toBe('Shape studio › shapes.flat')
+    expect(groupPathTitle(titles, 'shapes')).toBe('Shape studio')
+  })
+
+  test('sorts subgroups right after their parent, siblings by title', () => {
+    const titles = groupTitleOf({
+      shapes: 'Shape studio',
+      'shapes.round': 'Arcs',
+      'shapes.flat': 'Planes',
+      colors: 'Color lab',
+    })
+    expect(
+      ['shapes.flat', 'shapes-old', 'shapes', 'colors', 'shapes.round', 'colors.warm'].toSorted(
+        byGroupTree(titles),
+      ),
+    ).toEqual(['colors', 'colors.warm', 'shapes', 'shapes.round', 'shapes.flat', 'shapes-old'])
+    expect(['sounds.loud', 'colors'].toSorted(byGroupTree(keyAsTitle))).toEqual([
+      'colors',
+      'sounds.loud',
+    ])
+  })
+
+  test('checks group keys: one optional subgroup level', () => {
+    expect(validateGroupKey('shapes')).toBeUndefined()
+    expect(validateGroupKey('shapes.round-2')).toBeUndefined()
+    expect(validateGroupKey('shapes.round.small')).toBeDefined()
+    expect(validateGroupKey('Shapes')).toBeDefined()
+    expect(validateGroupKey('shapes.')).toBeDefined()
   })
 })

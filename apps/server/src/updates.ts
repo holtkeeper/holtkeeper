@@ -1,6 +1,7 @@
 import type { RepoTarget } from '@holtkeeper/access'
+import { parentGroup } from '@holtkeeper/access'
 import type { RepoUpdatesSummary } from '@holtkeeper/api'
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import { groupRepositories, staticPrefix } from '@holtkeeper/jobs'
 import { type Limiter, resolveLimitPolicy } from '@holtkeeper/limits'
@@ -42,14 +43,18 @@ const exactIncludes = (group: HoltkeeperConfig['groups'][string]): RepoRef[] =>
     .map((path) => ({ forge: group.forge, path }))
 
 /**
- * Repositories the poller last listed for the config's groups (none without `kv`), plus exact
- * include paths; read from the store only, so it never calls a forge.
+ * Repositories the poller last listed for the config's root groups (none without `kv`), plus their
+ * exact include paths; read from the store only, so it never calls a forge. Subgroups add nothing:
+ * their members are members of the parent.
  */
 export async function listedRepos(
   kv: KvStore | undefined,
   config: HoltkeeperConfig,
 ): Promise<RepoRef[]> {
-  const groups = Object.entries(config.groups)
+  const groups = rootGroups(config).flatMap((name) => {
+    const group = config.groups[name]
+    return group ? [[name, group] as const] : []
+  })
   const listings = kv ? await Promise.all(groups.map(([name]) => kv.get(groupKey(name)))) : []
   const found = new Map<string, RepoRef>()
   for (const listing of listings)
@@ -227,15 +232,44 @@ function createPoller(options: PollerOptions) {
   const spend = createSpendWindow()
   const busy = new Set<string>()
 
-  const readListing = async (group: string): Promise<GroupListing | undefined> => {
+  const readStored = async (group: string): Promise<GroupListing | undefined> => {
     const value = await kv.get(groupKey(group))
     return isGroupListing(value) ? value : undefined
   }
 
-  /** Lists a group's repositories on its forge now and records the attempt. */
+  /**
+   * A subgroup's listing, read from its parent's stored one: `matched` holds every member of the
+   * parent (the candidates its patterns pick from), `repos` the ones `resolveRepo` puts in it.
+   */
+  const subgroupListing = async (
+    group: string,
+    parent: string,
+  ): Promise<GroupListing | undefined> => {
+    const definition = config.groups[group]
+    const stored = await readStored(parent)
+    if (!definition || !stored) return undefined
+    return {
+      repos: stored.repos.filter((repo) => resolveRepo(config, repo).groups.includes(group)),
+      matched: stored.repos,
+      ...(stored.listedAt && { listedAt: stored.listedAt }),
+      attempts: stored.attempts,
+    }
+  }
+
+  const readListing = async (group: string): Promise<GroupListing | undefined> => {
+    const parent = parentGroup(group)
+    return parent === undefined ? readStored(group) : subgroupListing(group, parent)
+  }
+
+  /**
+   * Lists a group's repositories on its forge now and records the attempt. A subgroup is never
+   * listed: it gets the view of its parent's stored listing.
+   */
   const listGroup = async (group: string, trigger: AttemptTrigger): Promise<GroupListing> => {
+    if (parentGroup(group) !== undefined)
+      return (await readListing(group)) ?? { repos: [], matched: [], attempts: [] }
     const started = options.now()
-    const previous = await readListing(group)
+    const previous = await readStored(group)
     const attempt = (result: { repos?: number; error?: string }): ListingAttempt => ({
       at: started.toISOString(),
       trigger,
@@ -257,9 +291,9 @@ function createPoller(options: PollerOptions) {
       )
       if (options.onNewRepos) {
         const known = new Set<string>()
-        for (const name of Object.keys(config.groups)) {
+        for (const name of rootGroups(config)) {
           // oxlint-disable-next-line no-await-in-loop -- one store read per group
-          const stored = name === group ? previous : await readListing(name)
+          const stored = name === group ? previous : await readStored(name)
           for (const repo of stored?.repos ?? []) known.add(repoId(repo))
         }
         added = repos.filter((repo) => !known.has(repoId(repo)))
@@ -290,16 +324,18 @@ function createPoller(options: PollerOptions) {
   }
 
   /**
-   * Repositories of every group, listed again once the last attempt is older than 30 minutes, plus
-   * exact repositories the `polling` setting names. A group that never listed falls back to its
-   * exact include paths.
+   * Repositories of every root group, listed again once the last attempt is older than 30 minutes,
+   * plus exact repositories the `polling` setting names. A group that never listed falls back to
+   * its exact include paths.
    */
   const knownRepos = async (): Promise<RepoRef[]> => {
     const now = options.now().getTime()
     const found = new Map<string, RepoRef>()
-    for (const [name, group] of Object.entries(config.groups)) {
+    for (const name of rootGroups(config)) {
+      const group = config.groups[name]
+      if (!group) continue
       // oxlint-disable-next-line no-await-in-loop -- groups are listed one after another
-      const stored = await readListing(name)
+      const stored = await readStored(name)
       const lastAt = stored?.attempts[0]?.at
       const listing =
         stored && lastAt && now - Date.parse(lastAt) < REPO_LIST_TTL_MS
@@ -502,7 +538,7 @@ function createPoller(options: PollerOptions) {
       const current = await status(repo)
       return pollOne(repo, current.config, current.key, 'manual')
     },
-    /** The stored listing of a group. */
+    /** The stored listing of a group; a subgroup's is narrowed from its parent's. */
     listing: readListing,
     /** When the next scheduled listing of a group is due; absent before its first listing. */
     nextListingAt: (listing: GroupListing | undefined) => {

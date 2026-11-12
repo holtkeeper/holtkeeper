@@ -1,3 +1,4 @@
+import { leafGroups } from '@holtkeeper/access'
 import {
   type RegistryTool,
   type RegistryToolset,
@@ -424,7 +425,7 @@ const cellText = (cells: RepoSummary['cells']) =>
 function fleetLine(summary: RepoSummary, label: GroupLabel): string {
   const parts = [
     keyOf(summary.repo),
-    `groups ${summary.groups.map(label).join(', ')}`,
+    `groups ${leafGroups(summary.groups).map(label).join(', ')}`,
     healthText[summary.health],
     ...cellText(summary.cells),
     ...(summary.freshness
@@ -442,7 +443,13 @@ function fleetTool(fleet: NonNullable<OpsToolsAccess['fleet']>, label: GroupLabe
     description:
       'Every repository you may see in the configured groups, worst first, with the same health the Repos page shows: overall state (failing, with warnings, not analysed, healthy) and the cells you may read (security, dependencies, coverage, bundles, jobs, CI, licenses, release; each a value, a detail and a tone), how many records are current, when it was last analysed and how it learns about changes. Repositories never analysed are listed too. Filter by group, state or a path fragment. Read-only.',
     input: z.object({
-      group: z.string().min(1).optional().describe('Only members of this group (its key)'),
+      group: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'Only members of this group or subgroup (its key; a group includes its subgroups)',
+        ),
       health: z.enum(healthStatuses).optional().describe('Only repositories in this state'),
       query: z.string().min(1).optional().describe('Only paths containing this text'),
       limit: z

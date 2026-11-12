@@ -290,9 +290,9 @@ const candidate = (id: string, overrides: Partial<LearningCandidate> = {}): Lear
 })
 
 let clock = 0
-const setup = (auth: AuthProvider = noAuth()) =>
+const setup = (auth: AuthProvider = noAuth(), appConfig = config) =>
   createApp({
-    config,
+    config: appConfig,
     auth,
     store,
     vault,
@@ -412,6 +412,38 @@ describe('routes', () => {
     expect((await send(app, 'POST', '/api/learnings/c3/accept', {})).status).toBe(400)
     expect((await send(app, 'POST', '/api/learnings/c2/accept', {})).status).toBe(200)
     expect((await store.guides.get('group:shop', 'review'))?.learnings).toHaveLength(1)
+  })
+
+  test("a group suggestion lands in the repository's subgroup; the parent stays choosable", async () => {
+    const nested = parseConfig({
+      forges: config.forges,
+      groups: {
+        toys: { forge: 'work', include: ['toys/*'] },
+        'toys.flying': { forge: 'work', include: ['toys/kite'] },
+      },
+    })
+    await store.learnings.put(
+      candidate('c3', { key: 'k3', rule: 'Keep kites light.', suggestedScope: 'group' }),
+    )
+    await store.learnings.put(
+      candidate('c4', { key: 'k4', rule: 'Name every toy.', suggestedScope: 'group' }),
+    )
+    const app = setup(noAuth(), nested)
+    const list = (await (await send(app, 'GET', '/api/learnings')).json()) as LearningList
+    expect(list.candidates.find((c) => c.id === 'c3')?.scopes).toEqual([
+      'repo:work:toys/kite',
+      'group:toys.flying',
+      'group:toys',
+      'all',
+    ])
+    expect(await (await send(app, 'POST', '/api/learnings/c3/accept', {})).json()).toMatchObject({
+      acceptedScope: 'group:toys.flying',
+    })
+    expect(
+      await (await send(app, 'POST', '/api/learnings/c4/accept', { scope: 'group:toys' })).json(),
+    ).toMatchObject({ acceptedScope: 'group:toys' })
+    expect((await store.guides.get('group:toys.flying', 'review'))?.learnings).toHaveLength(1)
+    expect((await store.guides.get('group:toys', 'review'))?.learnings).toHaveLength(1)
   })
 
   test('rows carry how the candidate came about and a confidence from its sources', async () => {

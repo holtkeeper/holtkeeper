@@ -278,6 +278,94 @@ describe('resolveGuide', () => {
   })
 })
 
+describe('subgroups', () => {
+  const nested = { forge: 'work', path: 'shapes/disc', groups: ['shapes.round', 'shapes'] }
+  const titles: Record<string, string> = {
+    shapes: 'Shapes (shapes)',
+    'shapes.round': 'Shapes › Round (shapes.round)',
+  }
+  const groupTitle = (key: string) => titles[key] ?? key
+
+  test('the subgroup sits between the family and its parent group, with labelled titles', () => {
+    const resolved = resolveGuide(
+      input({
+        repo: nested,
+        task: 'chat',
+        family: { id: 'f1', name: 'Discs' },
+        groupTitle,
+        sections: [
+          row({ scope: 'all', rules: 'ALL rule.' }),
+          row({ scope: 'group:shapes', rules: 'PARENT rule.' }),
+          row({ scope: 'group:shapes.round', rules: 'SUB rule.' }),
+          row({ scope: 'group:shapes.flat', rules: 'SIBLING rule.' }),
+          row({ scope: 'family:f1', rules: 'FAMILY rule.' }),
+          row({ scope: 'repo:work:shapes/disc', rules: 'REPO rule.' }),
+        ],
+      }),
+    )
+    expect(resolved.text).not.toContain('SIBLING')
+    const order = positions(resolved.text, [
+      'REPO rule',
+      'FAMILY rule',
+      'SUB rule',
+      'PARENT rule',
+      'ALL rule',
+    ])
+    expect(order.every((at) => at >= 0)).toBe(true)
+    expect(order).toEqual(order.toSorted((a, b) => a - b))
+    expect(resolved.blocks.map((block) => [block.layer, block.scope, block.source])).toEqual([
+      ['repo', 'repo:work:shapes/disc', 'This repository'],
+      ['family', 'family:f1', 'Family Discs'],
+      ['subgroup', 'group:shapes.round', 'Team Shapes › Round (shapes.round)'],
+      ['group', 'group:shapes', 'Team Shapes (shapes)'],
+      ['all', 'all', 'All repositories'],
+    ])
+    expect(resolved.text).toContain('## Team rules for team Shapes › Round (shapes.round)')
+    expect(resolved.text).toContain('## Team rules for team Shapes (shapes)')
+  })
+
+  test('without a labeler titles name the key', () => {
+    const resolved = resolveGuide(
+      input({
+        repo: nested,
+        task: 'chat',
+        sections: [row({ scope: 'group:shapes.round', rules: 'SUB rule.' })],
+      }),
+    )
+    expect(resolved.text).toContain('## Team rules for team shapes.round')
+  })
+
+  test('over the human budget cuts all, then the parent, then the subgroup, then the family', () => {
+    const sections = [
+      row({ scope: 'repo:work:shapes/disc', rules: 'R'.repeat(400) }),
+      row({ scope: 'family:f1', rules: 'F'.repeat(400) }),
+      row({ scope: 'group:shapes.round', rules: 'S'.repeat(400) }),
+      row({ scope: 'group:shapes', rules: 'P'.repeat(400) }),
+      row({ scope: 'all', rules: 'A'.repeat(400) }),
+    ]
+    const resolveWith = (human: number) =>
+      resolveGuide(
+        input({
+          repo: nested,
+          task: 'chat',
+          family: { id: 'f1', name: 'Discs' },
+          caps: { total: 4000, human, generated: 500 },
+          sections,
+        }),
+      )
+    const kept = (human: number) =>
+      resolveWith(human)
+        .blocks.filter((block) => block.chars > 0 && !block.cut)
+        .map((block) => block.layer)
+    const full = resolveWith(4000).budget.humanUsed
+    expect(kept(4000)).toEqual(['repo', 'family', 'subgroup', 'group', 'all'])
+    expect(kept(full - 300)).toEqual(['repo', 'family', 'subgroup', 'group'])
+    expect(kept(full - 750)).toEqual(['repo', 'family', 'subgroup'])
+    expect(kept(full - 1200)).toEqual(['repo', 'family'])
+    expect(kept(full - 1650)).toEqual(['repo'])
+  })
+})
+
 describe('repository files and block texts', () => {
   test('rules files form one repo-file layer first, and block texts add up to the prompt', () => {
     const resolved = resolveGuide(

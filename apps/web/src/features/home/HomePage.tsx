@@ -1,12 +1,13 @@
-import type {
-  HomeAttentionItem,
-  HomeAttentionKind,
-  HomeChange,
-  HomeChangeKind,
-  HomeSpend,
-  PersonView,
-  RepoHealthCellKey,
-  RepoRef,
+import {
+  type HomeAttentionItem,
+  type HomeAttentionKind,
+  type HomeChange,
+  type HomeChangeKind,
+  type HomeSpend,
+  type PersonView,
+  type RepoHealthCellKey,
+  type RepoRef,
+  leafGroups,
 } from '@holtkeeper/api'
 import { Link, type LinkProps, useNavigate } from '@tanstack/react-router'
 import {
@@ -42,6 +43,7 @@ import {
 } from '../../api/queries.ts'
 import { automaticLimit, budgetBar, budgetTone, formatUsd } from '../../lib/ai-usage.ts'
 import { formatRelative, plural } from '../../lib/format.ts'
+import { groupPathTitle } from '../../lib/group-titles.ts'
 import { type ScopeView, scopeLabel } from '../../lib/home-scope.ts'
 import {
   type AttentionGrouping,
@@ -466,7 +468,11 @@ function WorstRepos({
                     {summary.repo.path}
                   </LinkButton>
                 </Td>
-                <Td className="text-muted">{summary.groups.map(titleOf).join(', ') || '—'}</Td>
+                <Td className="text-muted">
+                  {leafGroups(summary.groups)
+                    .map((group) => groupPathTitle(titleOf, group))
+                    .join(', ') || '—'}
+                </Td>
                 <Td>
                   <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                     <Dot tone={healthTones[summary.health]} />

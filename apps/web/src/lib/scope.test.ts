@@ -38,6 +38,7 @@ describe('scopes', () => {
     expect(validateGroupMatch('frontend + catalog')).toBeUndefined()
     expect(validateGroupMatch('frontend +')).toBeDefined()
     expect(validateGroupMatch('Frontend')).toBeDefined()
+    expect(validateGroupMatch('shapes.round + tools')).toBeUndefined()
   })
 
   test('normalize', () => {

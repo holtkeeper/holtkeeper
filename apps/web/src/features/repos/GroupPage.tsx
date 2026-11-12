@@ -1,25 +1,30 @@
-import type { RepoSummary } from '@holtkeeper/api'
+import { type ConfigEntryView, type RepoSummary, parentGroup } from '@holtkeeper/api'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { FolderGit2 } from 'lucide-react'
+import { FolderGit2, MoveRight } from 'lucide-react'
 import { useState } from 'react'
 
 import { useGroupListing, useGroups, useGroupTitles, useRepos } from '../../api/queries.ts'
-import { formatRelative } from '../../lib/format.ts'
+import { formatRelative, plural } from '../../lib/format.ts'
 import { repoKey, repoSplat } from '../../lib/repo.ts'
 import {
   type FleetSortKey,
   countHealth,
   fleetSortValue,
   groupMembership,
+  groupRows,
   healthLegend,
   pickGroupTab,
+  siblingOverlaps,
   worstFirst,
 } from '../../lib/repos.ts'
 import { parseStackTab } from '../../lib/stack.ts'
 import { type SortState, sortRows } from '../../lib/table-sort.ts'
 import {
+  Button,
+  type Crumb,
   EmptyState,
   ErrorState,
+  type FleetColumn,
   FleetTable,
   Notice,
   Page,
@@ -35,10 +40,12 @@ import { StackView } from '../stack/StackPage.tsx'
 import { GroupMembership } from './GroupListing.tsx'
 import { repoColumns } from './ReposPage.tsx'
 import { ScopeGuide } from './ScopeGuide.tsx'
+import { MoveToSubgroupDialog, SubgroupsTab } from './Subgroups.tsx'
 
 /**
- * One group: its repositories as a fleet table, its stack, its Guide, the settings made for it and
- * its membership (patterns, forge listing and what they resolve to).
+ * One group: its repositories as a fleet table, its subgroups (for a root group), its stack, its
+ * Guide, the settings made for it and its membership (patterns, forge listing and what they
+ * resolve to). A subgroup's crumbs lead through its parent.
  */
 export function GroupPage() {
   const { can, canGlobal } = useSession()
@@ -53,14 +60,28 @@ export function GroupPage() {
   const all = repos.data?.repos ?? []
   const members = all.filter((r) => r.groups.includes(groupId))
   const allGroups = [...new Set(all.flatMap((r) => r.groups))].toSorted()
-  const { tabs, tab } = pickGroupTab(can, search.tab, canGlobal)
+  const { tabs, tab } = pickGroupTab(can, search.tab, canGlobal, groupId)
+  const parent = parentGroup(groupId)
+  const root = parent ?? groupId
+  const tree = groupRows(all, config.data?.entries ?? []).find((row) => row.id === root)
+  const subgroupIds = (config.data?.entries ?? [])
+    .filter((entry) => parentGroup(entry.id) === root)
+    .map((entry) => entry.id)
+    .toSorted()
+  const overlaps = parent === undefined ? siblingOverlaps(members, groupId) : new Map()
   const forge = definition?.data.forge ?? listing.data?.forge ?? members[0]?.repo.forge
   const title = definition?.data.title ?? titleOf(groupId)
   const subtitle = [title !== groupId ? groupId : undefined, forge].filter(Boolean).join(' · ')
   const counts = countHealth(members)
   const membership =
     definition && listing.data && forge
-      ? groupMembership(forge, listing.data.matched ?? [], definition.data)
+      ? groupMembership(
+          forge,
+          listing.data.matched ?? [],
+          definition.data,
+          definition.data,
+          parent === undefined,
+        )
       : undefined
   const strip: StripCell[] = [
     ...(definition
@@ -77,7 +98,7 @@ export function GroupPage() {
           {
             prefix: 'Resolves to',
             value: membership.members + membership.excluded,
-            label: 'on the forge',
+            label: parent === undefined ? 'on the forge' : 'in parent',
           },
         ]
       : []),
@@ -105,9 +126,22 @@ export function GroupPage() {
       : []),
   ]
 
+  const crumbs: Crumb[] = [
+    { label: 'Groups', link: { to: '/repos/groups' } },
+    ...(parent === undefined
+      ? []
+      : [
+          {
+            label: titleOf(parent),
+            link: { to: '/repos/groups/$groupId', params: { groupId: parent } },
+          } satisfies Crumb,
+        ]),
+    { label: title },
+  ]
+
   return (
     <Page
-      crumbs={[{ label: 'Groups', link: { to: '/repos/groups' } }, { label: title }]}
+      crumbs={crumbs}
       title={title}
       description={subtitle ? <span className="mono">{subtitle}</span> : undefined}
       tabs={false}
@@ -125,6 +159,10 @@ export function GroupPage() {
                 id === 'repos' && members.length ? (
                   <>
                     {label} <span className="tabular text-dim">{members.length}</span>
+                  </>
+                ) : id === 'subgroups' && tree?.subgroups.length ? (
+                  <>
+                    {label} <span className="tabular text-dim">{tree.subgroups.length}</span>
                   </>
                 ) : (
                   label
@@ -144,8 +182,48 @@ export function GroupPage() {
         ) : repos.isError ? (
           <ErrorState error={repos.error} />
         ) : (
-          <GroupRepositories members={members} />
+          <>
+            {overlaps.size ? (
+              <Notice
+                tone="warning"
+                title={`${plural(overlaps.size, 'repository', 'repositories')} in two subgroups or more`}
+              >
+                <span className="block">
+                  Their subgroup settings tie and the newest entry wins.
+                </span>
+                <ul className="mt-1 flex flex-col gap-0.5">
+                  {[...overlaps.entries()].slice(0, OVERLAPS_SHOWN).map(([key, subs]) => (
+                    <li key={key}>
+                      <span className="mono">{key.slice(key.indexOf(':') + 1)}</span>{' '}
+                      <span className="text-muted">{subs.map(titleOf).join(', ')}</span>
+                    </li>
+                  ))}
+                  {overlaps.size > OVERLAPS_SHOWN ? (
+                    <li className="text-muted">+{overlaps.size - OVERLAPS_SHOWN} more</li>
+                  ) : null}
+                </ul>
+              </Notice>
+            ) : null}
+            <GroupRepositories
+              members={members}
+              {...(canGlobal('settings:write') && config.data && subgroupIds.length
+                ? {
+                    move: {
+                      entries: config.data.entries,
+                      subgroups: subgroupIds,
+                      leaving: (summary: RepoSummary) =>
+                        parent === undefined
+                          ? summary.groups.filter((group) => subgroupIds.includes(group))
+                          : [groupId],
+                    },
+                  }
+                : {})}
+            />
+          </>
         )
+      ) : null}
+      {tab === 'subgroups' ? (
+        <SubgroupsTab row={tree} definition={definition} members={members} />
       ) : null}
       {tab === 'stack' ? (
         <StackView
@@ -189,29 +267,79 @@ function GroupSettingsTab({ group, groups }: { group: string; groups: readonly s
   return <ResolvedSettings focus={{ kind: 'group', group }} groups={groups} />
 }
 
-function GroupRepositories({ members }: { members: readonly RepoSummary[] }) {
+const OVERLAPS_SHOWN = 5
+
+function GroupRepositories({
+  members,
+  move,
+}: {
+  members: readonly RepoSummary[]
+  /** Offers "Move to subgroup" on each member. */
+  move?: {
+    entries: readonly ConfigEntryView<'group'>[]
+    /** Subgroups of the root group. */
+    subgroups: readonly string[]
+    /** The subgroups a member leaves when it moves. */
+    leaving: (summary: RepoSummary) => string[]
+  }
+}) {
   const navigate = useNavigate()
   const [sort, setSort] = useState<SortState<FleetSortKey>>(null)
+  const [moving, setMoving] = useState<RepoSummary>()
   const rows = sortRows(worstFirst(members), sort, fleetSortValue)
+  const columns: readonly FleetColumn<RepoSummary, FleetSortKey>[] = move
+    ? [
+        ...repoColumns,
+        {
+          id: 'move',
+          header: <span className="sr-only">Move to subgroup</span>,
+          align: 'right',
+          cell: (summary) =>
+            move.subgroups.some((id) => !move.leaving(summary).includes(id)) ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                isIconOnly
+                aria-label={`Move ${summary.repo.path} to subgroup`}
+                onPress={() => setMoving(summary)}
+              >
+                <MoveRight className="size-3.5" />
+              </Button>
+            ) : null,
+        },
+      ]
+    : repoColumns
+  const leaving = moving && move ? move.leaving(moving) : []
   return (
-    <FleetTable<RepoSummary, FleetSortKey>
-      label="Group repositories"
-      rows={rows}
-      rowKey={(summary) => repoKey(summary.repo)}
-      columns={repoColumns}
-      sort={sort}
-      onSort={setSort}
-      legend={healthLegend}
-      onOpen={(summary) =>
-        void navigate({ to: '/repos/$', params: { _splat: repoSplat(summary.repo) } })
-      }
-      empty={
-        <EmptyState
-          icon={<FolderGit2 />}
-          title="No repositories you can see"
-          description="Members show up once the forge listing finds them or an exact path names them."
+    <>
+      <FleetTable<RepoSummary, FleetSortKey>
+        label="Group repositories"
+        rows={rows}
+        rowKey={(summary) => repoKey(summary.repo)}
+        columns={columns}
+        sort={sort}
+        onSort={setSort}
+        legend={healthLegend}
+        onOpen={(summary) =>
+          void navigate({ to: '/repos/$', params: { _splat: repoSplat(summary.repo) } })
+        }
+        empty={
+          <EmptyState
+            icon={<FolderGit2 />}
+            title="No repositories you can see"
+            description="Members show up once the forge listing finds them or an exact path names them."
+          />
+        }
+      />
+      {moving && move ? (
+        <MoveToSubgroupDialog
+          repo={moving}
+          from={leaving}
+          targets={move.subgroups.filter((id) => !leaving.includes(id))}
+          entries={move.entries}
+          onClose={() => setMoving(undefined)}
         />
-      }
-    />
+      ) : null}
+    </>
   )
 }

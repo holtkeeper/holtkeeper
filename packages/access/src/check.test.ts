@@ -54,13 +54,21 @@ describe('scopeSpecificity', () => {
       { all: true },
       { groups: ['frontend'] },
       { groups: [['frontend', 'storefront']] },
-      { groups: ['frontend', ['frontend', 'admin-panel', 'catalog']] },
+      { groups: [['frontend', 'admin-panel', 'catalog']] },
       { repos: ['shop/*'] },
       { repos: ['work:shop/web'] },
     ].map(scopeSpecificity)
     expect(ranks).toEqual(ranks.toSorted((a, b) => a - b))
     expect(new Set(ranks).size).toBe(ranks.length)
     expect(scopeSpecificity({ groups: [['frontend', 'frontend']] })).toBe(1)
+  })
+
+  test('ranks a subgroup like an intersection with its parent', () => {
+    expect(scopeSpecificity({ groups: ['shapes'] })).toBe(1)
+    expect(scopeSpecificity({ groups: ['shapes.round'] })).toBe(1.5)
+    expect(scopeSpecificity({ groups: [['shapes', 'shapes.round']] })).toBe(1.5)
+    expect(scopeSpecificity({ groups: [['shapes.round', 'tools']] })).toBe(2 - 1 / 3)
+    expect(scopeSpecificity({ groups: ['shapes', 'shapes.round'] })).toBe(1)
   })
 })
 
@@ -80,6 +88,13 @@ describe('scopeWithin', () => {
       ),
     ).toBe(true)
     expect(scopeWithin({ groups: ['frontend'] }, { groups: [['frontend']] })).toBe(true)
+  })
+
+  test('puts a subgroup within its parent, not the reverse', () => {
+    expect(scopeWithin({ groups: ['shapes.round'] }, { groups: ['shapes'] })).toBe(true)
+    expect(scopeWithin({ groups: [['shapes.round', 'tools']] }, { groups: ['shapes'] })).toBe(true)
+    expect(scopeWithin({ groups: ['shapes'] }, { groups: ['shapes.round'] })).toBe(false)
+    expect(scopeWithin({ groups: ['shapes.flat'] }, { groups: ['shapes.round'] })).toBe(false)
   })
 
   test('rejects wider or unprovable scopes', () => {
@@ -168,6 +183,8 @@ describe('catalog:read', () => {
   })
 })
 
+const adminOf = (group: string): Grant[] => [{ scope: { groups: [group] }, actions: ['*'] }]
+
 describe('delegation', () => {
   const gamesAdmin = principal([{ scope: { repos: ['games/**'] }, actions: ['*'] }])
   const reader = principal([{ scope: { all: true }, actions: ['audits:read'] }])
@@ -186,5 +203,14 @@ describe('delegation', () => {
       canDelegate(reader, [{ scope: { repos: ['games/**'] }, actions: ['audits:read'] }]),
     ).toBe(false)
     expect(grantsWithin([{ scope: { all: true }, actions: ['*'] }], reader.grants)).toBe(false)
+  })
+
+  test('lets a group admin delegate its subgroups only', () => {
+    const shapesAdmin = principal([{ scope: { groups: ['shapes'] }, actions: ['*'] }])
+    const roundAdmin = principal([{ scope: { groups: ['shapes.round'] }, actions: ['*'] }])
+    expect(canDelegate(shapesAdmin, adminOf('shapes.round'))).toBe(true)
+    expect(canDelegate(roundAdmin, adminOf('shapes.round'))).toBe(true)
+    expect(canDelegate(roundAdmin, adminOf('shapes'))).toBe(false)
+    expect(canDelegate(roundAdmin, adminOf('shapes.flat'))).toBe(false)
   })
 })

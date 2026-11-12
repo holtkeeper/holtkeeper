@@ -5,11 +5,14 @@ import type { ForgeDefinition } from '@holtkeeper/forge'
 import {
   ConfigError,
   groupLabel,
+  groupPathLabel,
   groupTitle,
   loadConfig,
   looksLikeCron,
   parseConfig,
   parseConfigFile,
+  rootGroups,
+  subgroupsOf,
 } from './config.ts'
 import { resolveRepo } from './resolve.ts'
 
@@ -73,6 +76,31 @@ describe('parseConfig', () => {
     expect(
       errorOf({ ...base, jobs: { onTag: { analyzers: ['x'], groups: [['games', 'gone']] } } }),
     ).toContain('unknown group "gone"')
+  })
+
+  test('accepts subgroups one level deep under a configured parent', () => {
+    const round = { forge: 'work', include: ['games/round-*'] }
+    const config = parseConfig({ ...base, groups: { ...base.groups, 'games.round': round } })
+    expect(rootGroups(config)).toEqual(['games', 'tools'])
+    expect(subgroupsOf(config, 'games')).toEqual(['games.round'])
+    expect(subgroupsOf(config, 'tools')).toEqual([])
+    expect(errorOf({ ...base, groups: { ...base.groups, 'games.round.small': round } })).toContain(
+      'groups["games.round.small"]',
+    )
+    expect(errorOf({ ...base, groups: { ...base.groups, Games: round } })).toContain('groups.Games')
+  })
+
+  test('rejects a subgroup without its parent or on another forge', () => {
+    const round = { forge: 'work', include: ['shapes/round-*'] }
+    expect(errorOf({ ...base, groups: { ...base.groups, 'shapes.round': round } })).toContain(
+      'parent group "shapes" is not configured',
+    )
+    expect(
+      errorOf({
+        forges: { work: forge, other: forge },
+        groups: { ...base.groups, 'games.round': { ...round, forge: 'other' } },
+      }),
+    ).toContain('forge must match parent "games"')
   })
 
   test('accepts AI provider plugins once each', () => {
@@ -286,5 +314,18 @@ describe('group titles', () => {
     expect(groupLabel(groups, 'tools')).toBe('tools')
     expect(groupLabel(groups, 'same')).toBe('same')
     expect(groupLabel(groups, 'gone')).toBe('gone')
+  })
+
+  test('groupPathLabel shows a subgroup under its parent', () => {
+    const titled = {
+      shapes: { title: 'Shapes' },
+      'shapes.round': { title: 'Round' },
+      'shapes.flat': {},
+    }
+    expect(groupPathLabel(titled, 'shapes.round')).toBe('Shapes › Round (shapes.round)')
+    expect(groupPathLabel(titled, 'shapes.flat')).toBe('Shapes › shapes.flat (shapes.flat)')
+    expect(groupPathLabel(titled, 'shapes')).toBe('Shapes (shapes)')
+    expect(groupPathLabel({}, 'tools')).toBe('tools')
+    expect(groupLabel(titled, 'shapes.round')).toBe('Shapes › Round (shapes.round)')
   })
 })

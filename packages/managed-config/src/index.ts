@@ -3,6 +3,7 @@ export {
   documentDataSchemas,
   forgeDataSchema,
   groupDataSchema,
+  groupIdSchema,
   repoTraitsDataSchema,
   scheduleDataSchema,
   triggerDataSchema,

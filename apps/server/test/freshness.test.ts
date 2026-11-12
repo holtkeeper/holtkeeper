@@ -334,6 +334,26 @@ describe('freshness sweeper', () => {
     expect(result.queued.map((job) => [job.repo.path, job.group])).toEqual([['tools', 'tools']])
   })
 
+  test('subgroups get group analyses of their own', async () => {
+    const nested = parseConfig({
+      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fakeForge } },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'] },
+        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      },
+      jobs: {},
+    })
+    const fleet = [analyzer('fleet', { on: 'time', cadence: '1d' }, { scope: 'group' })]
+    const result = await sweepFreshness(
+      { config: nested, store, analyzers: fleet, now: () => clock },
+      { timezone: 'UTC' },
+    )
+    expect(result.queued.map((job) => `${job.repo.path} ${job.group}`).toSorted()).toEqual([
+      'shapes shapes',
+      'shapes.round shapes.round',
+    ])
+  })
+
   test('the last sweep is summed per team for the readable targets', async () => {
     const empty = await freshnessSummary(deps(), () => true)
     expect(empty).toEqual({ sweepMinutes: 5, teams: [] })

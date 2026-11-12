@@ -66,7 +66,7 @@ import { createApp } from './app.ts'
 import { assetsPolicyFor } from './assets.ts'
 import { verifyAuditChainIfDue } from './audit-verify.ts'
 import { startAuditRetention } from './audit.ts'
-import { type ServerDeps, forgeFor, repoTarget } from './context.ts'
+import { type ServerDeps, forgeFor, groupLabeler, repoTarget } from './context.ts'
 import { startDatabaseSnapshots } from './database.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
@@ -286,7 +286,10 @@ export async function startServer(
     onError: (error) => log(`cache: ${error instanceof Error ? error.message : String(error)}`),
   })
   // The review analyzer needs server state: the Guide and the knowledge base.
-  const resolveGuide = createGuideResolver({ store: server.store })
+  const resolveGuide = createGuideResolver({
+    store: server.store,
+    groupTitle: groupLabeler(config),
+  })
   const testsOf = repoTestsFor(server.store, () => config)
   const testsExpected = testsExpectedFor(server.store, () => config)
   const review = createReviewAnalyzer({

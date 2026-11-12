@@ -2,6 +2,7 @@ import {
   type RepoTarget,
   type Scope,
   can,
+  groupLineage,
   groupsMatch,
   scopeCoversRepo,
   scopeSchema,
@@ -305,7 +306,7 @@ export function settingRoutes(deps: ServerDeps) {
       const definition = config.groups[group]
       if (!definition) throw new HTTPException(404, { message: `group ${group} is not configured` })
       authorize(c, 'settings:read', { kind: 'scope', scope: { groups: [group] } })
-      const target: RepoTarget = { forge: definition.forge, path: '', groups: [group] }
+      const target: RepoTarget = { forge: definition.forge, path: '', groups: groupLineage(group) }
       const originals = new Map(entries.map((entry) => [entry.id, entry]))
       const covering = entries.flatMap((entry) => {
         if (!entry.scope.all && !groupsMatch(entry.scope.groups ?? [], target.groups)) return []

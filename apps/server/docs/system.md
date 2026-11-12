@@ -28,3 +28,13 @@ A leader duty (`periodicDuty('storage snapshot', …)` in `startServer`) measure
 ## `periodicDuty`
 
 `periodicDuty(name, task, { intervalMs, log })` from `src/leader.ts` turns a task into a `LeaderDuty`: it runs at once and every `intervalMs` while the process leads, runs never overlap, and a failure is logged as `<name>: run failed: …` without stopping the next run. The storage snapshot and the audit chain check ([Audit log](audit-log.md)) use it.
+
+## Subgroups
+
+A subgroup (`shapes.round`, see [@holtkeeper/core](../../../packages/core/docs/README.md#subgroups)) holds only repositories of its parent, so the server treats root groups as the source of membership:
+
+- **Webhooks.** `defaultWebhookTargets` skips subgroups: the parent's hooks already reach their members, and exact paths in a subgroup's include would otherwise add project hooks on top of the parent's group hook and deliver every event twice.
+- **Listing.** Polling lists root groups only (`listedRepos`, the poller's known repositories and the new-repository check). `GET /api/repos/updates/groups/<subgroup>` answers the parent's stored listing narrowed to the subgroup (`parent` set, `matched` = every parent member, the candidates its patterns pick from; `attempts` only with `settings:read` on the parent) without calling the forge; `POST …/list` on a subgroup lists the parent and needs `settings:write` on the parent too.
+- **Defaults.** Freshness gives group-scope analyzers a target per group, subgroups included, so a subgroup's Stack tab fills on its own. Schedules without `groups`, release overviews and analysis backfills without a group, and the exact include paths on Home use root groups, so nothing runs or counts twice.
+- **Panel config.** `PUT /api/config/groups/<id>` takes `groupIdSchema` ids (one optional dot); the group listing sets `parent` on subgroups. `DELETE` of a group that still has subgroups answers 409 naming them (`delete subgroups first: …`).
+- **Access and titles.** A group analysis target `{ path: <subgroup> }` belongs to the subgroup and its parent (`groupLineage`). `reachableGroups` (the titles in `GET /api/me`) holds the groups named in the principal's grants with their subgroups, the innermost groups of every repository it can list, and the parents of all of them; a grant on one subgroup never reveals its siblings. `GET /api/settings/resolve?group=<subgroup>` resolves for the subgroup and its parent, so parent entries show as inherited and the subgroup's own entries win.

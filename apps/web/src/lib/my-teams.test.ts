@@ -34,6 +34,20 @@ describe('my teams', () => {
     ])
   })
 
+  test('lists subgroups after their parent, each a home group on its own', () => {
+    const nested = [
+      { repo: { forge: 'work', path: 'acme/disc' }, groups: ['shapes.round', 'shapes'] },
+      { repo: { forge: 'work', path: 'acme/beep' }, groups: ['sounds'] },
+      { repo: { forge: 'work', path: 'acme/cube' }, groups: ['shapes'] },
+    ]
+    const rows = teamRows(nested, ['shapes.round'], (key) => (key === 'sounds' ? 'Audio' : key))
+    expect(rows.map((row) => [row.group, row.parent, row.repos, row.inMyTeams])).toEqual([
+      ['sounds', undefined, 1, false],
+      ['shapes', undefined, 2, false],
+      ['shapes.round', 'shapes', 1, true],
+    ])
+  })
+
   test('toggling a group keeps combinations', () => {
     const home = ['web', ['payments', 'shared']]
     expect(toggleHomeGroup(home, 'shared', true)).toEqual(['web', ['payments', 'shared'], 'shared'])

@@ -1,4 +1,4 @@
-import type { RepoTarget } from '@holtkeeper/access'
+import { type RepoTarget, groupLineage } from '@holtkeeper/access'
 import type {
   AuditRunSummary,
   HomeAttentionAction,
@@ -94,7 +94,7 @@ const repoRef = (sources: Pick<HomeSources, 'groupsOf'>, repo: string): HomeRepo
 
 const jobRepo = (sources: Pick<HomeSources, 'groupsOf'>, job: Job): HomeRepoRef =>
   job.group !== undefined
-    ? { repo: keyOf(job.repo), groups: [job.group] }
+    ? { repo: keyOf(job.repo), groups: groupLineage(job.group) }
     : repoRef(sources, keyOf(job.repo))
 
 const endedAt = (job: Job) => job.finishedAt ?? job.createdAt

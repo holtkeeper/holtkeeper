@@ -4,7 +4,7 @@ Part of the web app's Knowledge docs. Both are tabs of the Knowledge page (`/kno
 
 ## Notes
 
-`NotesTable` reads `GET /api/knowledge` (with `?repo=` in a repository space, where the server keeps entries covering it) and narrows to the space with `notesOfSpace`: a team lists entries naming the group, also inside an intersection; a family lists entries naming one of its members; a repository lists what covers it, marking entries that only reach it through a broader scope as **Inherited** (`isInherited`).
+`NotesTable` reads `GET /api/knowledge` (with `?repo=` in a repository space, where the server keeps entries covering it) and narrows to the space with `notesOfSpace`: a team lists entries naming the group, also inside an intersection (a subgroup lists entries naming the subgroup itself; its parent's entries show on the parent); a family lists entries naming one of its members; a repository lists what covers it, marking entries that only reach it through a broader scope as **Inherited** (`isInherited`).
 
 It is one card: a toolbar, a summary strip, the table and a footer.
 
@@ -24,11 +24,11 @@ Tabs of the sheet:
 
 ## Learnings
 
-`LearningsTable` reads `GET /api/learnings` (with `?repo=` in a repository space) and keeps the candidates of the repositories the space covers (`learningsInSpace`). Each row carries `sourceKind` (`review-reply`, `merged`, `mcp`) and a deterministic `confidence` from 1 to 5 computed by the server from the sources alone.
+`LearningsTable` reads `GET /api/learnings` (with `?repo=` in a repository space) and keeps the candidates of the repositories the space covers (`learningsInSpace`; a team covers its subgroups' repositories too). Each row carries `sourceKind` (`review-reply`, `merged`, `mcp`) and a deterministic `confidence` from 1 to 5 computed by the server from the sources alone.
 
 - **Toolbar.** Source tabs **All**, **Review reply**, **Merged** and **Over MCP** with counts of proposed candidates (`sourceCounts`); **Section** and **Confidence** filters (Low is 1–2, Medium 3, High 4–5: `confidenceLabel`); **Sort** by evidence (replies plus a direct proposal, `evidenceOf`), confidence or newest (`filterLearnings`); **Accept N selected** when the caller may decide some row.
 - **Strip.** Candidates waiting for a person (linking _also in Inbox_ to `/inbox?kind=learning`) and where they came from, plus the selection.
-- **Table.** Proposed candidates only: a checkbox (only candidates the caller may decide, `selectableIds`), the rule with its repository and, for a direct proposal, who proposed it and why; the Guide section; evidence; source kind with the first merge request linked and `+N` more; confidence as five bars with the level in words (`confidenceAria` for screen readers); **Promote to**, a scope picker over the scopes the caller may edit, starting at the one `suggestedScope` points at (`suggestedScopeOf`); and Accept, Edit (rule and section in place) and Reject. In _All_, candidates of other teams' repositories fold into an **Other teams** row.
+- **Table.** Proposed candidates only: a checkbox (only candidates the caller may decide, `selectableIds`), the rule with its repository and, for a direct proposal, who proposed it and why; the Guide section; evidence; source kind with the first merge request linked and `+N` more; confidence as five bars with the level in words (`confidenceAria` for screen readers); **Promote to**, a scope picker over the scopes the caller may edit, starting at the one `suggestedScope` points at (`suggestedScopeOf`; `group` means the repository's nearest group, a subgroup before its parent, since the server lists scopes deepest first); and Accept, Edit (rule and section in place) and Reject. In _All_, candidates of other teams' repositories fold into an **Other teams** row.
 
 **Accept N selected** sends `POST /api/learnings/accept` once per chosen scope with the ids picked for it. The server checks rights per candidate and per target scope, accepts one after another and writes one `learning.accept` audit event per accepted candidate. Afterwards only the failed candidates stay selected (`selectionAfter`), each with the server's reason under its rule, and a toast counts what was accepted.
 

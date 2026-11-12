@@ -1,5 +1,5 @@
 import { Modal } from '@heroui/react'
-import type { Action } from '@holtkeeper/api'
+import { type Action, leafGroups } from '@holtkeeper/api'
 import { Link, type NavigateOptions, useNavigate } from '@tanstack/react-router'
 import {
   BookOpen,
@@ -222,9 +222,9 @@ function RepoPreview({
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <Tag tone={tagTones[repo.tone]}>{toneLabels[repo.tone]}</Tag>
-        {repo.groups.map((group) => (
+        {leafGroups(repo.groups).map((group) => (
           <Tag key={group}>
-            <GroupName group={group} />
+            <GroupName group={group} path />
           </Tag>
         ))}
         <span className="mono text-xs text-muted">{repo.forge}</span>

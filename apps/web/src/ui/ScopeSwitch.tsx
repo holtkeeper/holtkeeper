@@ -1,9 +1,10 @@
 import { ListBox, Popover } from '@heroui/react'
+import { parentGroup } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ChevronDown, Users } from 'lucide-react'
 
 import { useGroupNames, useGroupTitles, usePreferences } from '../api/queries.ts'
-import { type GroupTitleOf, byGroupTitle } from '../lib/group-titles.ts'
+import { type GroupTitleOf, byGroupTree, groupPathTitle } from '../lib/group-titles.ts'
 import {
   type GroupCount,
   type ScopeCounts,
@@ -35,7 +36,12 @@ function GroupPicker({
     <Popover>
       <Button variant="secondary" className="min-w-32 max-w-56 justify-between">
         <span className="truncate">
-          Group: {chosen === undefined ? 'Any' : <b className="font-medium">{titleOf(chosen)}</b>}
+          Group:{' '}
+          {chosen === undefined ? (
+            'Any'
+          ) : (
+            <b className="font-medium">{groupPathTitle(titleOf, chosen)}</b>
+          )}
         </span>
         <ChevronDown aria-hidden className="size-3.5 shrink-0" />
       </Button>
@@ -53,8 +59,14 @@ function GroupPicker({
               className="max-h-72 overflow-auto"
             >
               {groups.map(({ group, count }) => (
-                <ListBox.Item key={group} id={group} textValue={`${titleOf(group)} ${group}`}>
-                  <span className="min-w-0 flex-1 truncate">
+                <ListBox.Item
+                  key={group}
+                  id={group}
+                  textValue={`${groupPathTitle(titleOf, group)} ${group}`}
+                >
+                  <span
+                    className={`min-w-0 flex-1 truncate ${parentGroup(group) === undefined ? '' : 'ps-4'}`}
+                  >
                     {titleOf(group)}
                     {titleOf(group) === group ? null : (
                       <span className="mono ms-1.5 text-[11px] text-dim">{group}</span>
@@ -81,7 +93,7 @@ function GroupPicker({
 
 /**
  * The groups the scope picker lists: every group the viewer can see (the groups `resolveScopeView`
- * accepts) ordered by title, each with its count from `counts` (0 when it has none there), plus
+ * accepts) as a tree, root groups by title with their subgroups right after them, each with its count from `counts` (0 when it has none there), plus
  * the chosen group while repositories load.
  */
 function pickerGroups(
@@ -92,7 +104,7 @@ function pickerGroups(
 ): { group: string; count?: number }[] {
   const listed = (
     chosen === undefined || names.includes(chosen) ? names : [...names, chosen]
-  ).toSorted(byGroupTitle(titleOf))
+  ).toSorted(byGroupTree(titleOf))
   const byGroup = new Map(counts?.groups.map(({ group, count }) => [group, count]))
   return listed.map((group) => (counts ? { group, count: byGroup.get(group) ?? 0 } : { group }))
 }
@@ -113,8 +125,8 @@ export function ChooseTeamsLink() {
 
 /**
  * The scope switch of list pages: *My teams* and *All I can see* with their item counts, then a
- * "Group: Any" picker listing every group the viewer can see (with counts when `counts` has
- * them). Picking a group selects neither segment. With `teamsLink` (the default) it ends with
+ * "Group: Any" picker listing every group the viewer can see, subgroups indented under their
+ * parent (with counts when `counts` has them). Picking a group selects neither segment. With `teamsLink` (the default) it ends with
  * `ChooseTeamsLink`; toolbars that place that link themselves pass `false`.
  */
 export function ScopeSwitch({

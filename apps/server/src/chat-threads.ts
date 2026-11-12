@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
+import { type Principal, type RepoTarget, can, groupLineage } from '@holtkeeper/access'
 import { type Agent, BudgetExceededError, type Toolset } from '@holtkeeper/agent'
 import { ToolError, defineTool } from '@holtkeeper/agent-tools'
 import { BudgetDeniedError } from '@holtkeeper/ai-usage'
@@ -102,13 +102,17 @@ export function canReadRepo(config: HoltkeeperConfig, principal: Principal, repo
 export const bodyRefs = (config: HoltkeeperConfig, body: string) =>
   textRefs(body, (forge) => config.forges[forge] !== undefined)
 
-/** The target the agent of a thread works for (see `ChatAgentFor`). */
+/**
+ * The target the agent of a thread works for (see `ChatAgentFor`); a group thread's stand-in is in
+ * the group and, for a subgroup, its parent.
+ */
 export function agentTarget(
   config: HoltkeeperConfig,
   thread: Pick<ChatThread, 'repo' | 'group'>,
 ): RepoTarget {
   if (thread.repo) return repoTarget(config, parseKey(thread.repo))
-  if (thread.group) return { forge: 'chat', path: `group/${thread.group}`, groups: [thread.group] }
+  if (thread.group)
+    return { forge: 'chat', path: `group/${thread.group}`, groups: groupLineage(thread.group) }
   return { forge: 'chat', path: 'team', groups: [] }
 }
 

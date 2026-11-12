@@ -1,11 +1,13 @@
-import type {
-  Action,
-  GroupDocumentData,
-  HealthTone,
-  RepoHealthCellKey,
-  RepoHealthStatus,
-  RepoRef,
-  RepoSummary,
+import {
+  type Action,
+  type GroupDocumentData,
+  type HealthTone,
+  type RepoHealthCellKey,
+  type RepoHealthStatus,
+  type RepoRef,
+  type RepoSummary,
+  groupLineage,
+  parentGroup,
 } from '@holtkeeper/api'
 
 import type { DotTone } from '../ui/Legend.tsx'
@@ -15,7 +17,7 @@ import { groupMatchesQuery, keyAsTitle, type GroupTitleOf } from './group-titles
 import { healthLabels, healthOrder, repoHealth } from './home.ts'
 import { type PageTab, hubSearch, pickTab, visibleTabs } from './repo-page.ts'
 import type { RepoHubSearch, RepoHubTab } from './repo.ts'
-import { repoKey, repoSplat } from './repo.ts'
+import { repoKey, repoSplat, withRepos } from './repo.ts'
 import { sheetCommand } from './sheet.ts'
 import type { SortState, SortValue } from './table-sort.ts'
 
@@ -322,39 +324,100 @@ export function fleetKeyCommand(
 /** One row of the group list: a group with its patterns (when readable) and its visible members. */
 export interface GroupRow {
   id: string
+  /** The parent group of a subgroup row. */
+  parent?: string
+  /** Subgroup rows of a root group, sorted by id; empty for a subgroup. */
+  subgroups: GroupRow[]
   forge?: string
   include?: string[]
   exclude?: string[]
   members: RepoSummary[]
   counts: Record<RepoHealthStatus, number>
-  /** `[id]`, so the group list splits by home groups like any fleet list. */
+  /** The group and its parent, so the group list splits by home groups like any fleet list. */
   groups: string[]
 }
 
 /**
- * Every group the viewer can see: those in the panel config (when it may read it) and those its
- * visible repositories are in, sorted by id, each with its members and their states.
+ * Every group the viewer can see as a tree: those in the panel config (when it may read it) and
+ * those its visible repositories are in, each with its members and their states. Root groups come
+ * sorted by id, each holding its subgroups; a subgroup whose parent is unknown stands as a root.
  */
 export function groupRows(
   repos: readonly RepoSummary[],
   config: readonly { id: string; data: GroupDocumentData }[] = [],
 ): GroupRow[] {
   const ids = [...new Set([...config.map((entry) => entry.id), ...repos.flatMap((r) => r.groups)])]
-  return ids.toSorted().map((id) => {
-    const entry = config.find((candidate) => candidate.id === id)
-    const members = repos.filter((repo) => repo.groups.includes(id))
-    return {
-      id,
-      ...(entry
-        ? { forge: entry.data.forge, include: entry.data.include, exclude: entry.data.exclude }
-        : members[0]
-          ? { forge: members[0].repo.forge }
-          : {}),
-      members,
-      counts: countHealth(members),
-      groups: [id],
-    }
-  })
+  const rows = new Map(
+    ids.toSorted().map((id): [string, GroupRow] => {
+      const entry = config.find((candidate) => candidate.id === id)
+      const members = repos.filter((repo) => repo.groups.includes(id))
+      const parent = parentGroup(id)
+      return [
+        id,
+        {
+          id,
+          ...(parent !== undefined && { parent }),
+          subgroups: [],
+          ...(entry
+            ? { forge: entry.data.forge, include: entry.data.include, exclude: entry.data.exclude }
+            : members[0]
+              ? { forge: members[0].repo.forge }
+              : {}),
+          members,
+          counts: countHealth(members),
+          groups: groupLineage(id),
+        },
+      ]
+    }),
+  )
+  const roots: GroupRow[] = []
+  for (const row of rows.values()) {
+    const parent = row.parent === undefined ? undefined : rows.get(row.parent)
+    if (parent) parent.subgroups.push(row)
+    else roots.push(row)
+  }
+  return roots
+}
+
+/**
+ * The group tree as list rows: each root, then its subgroups when it is in `open`. With `matches`
+ * (a filter people typed), a root stays when it or a subgroup matches, and its matching subgroups
+ * show whether it is open or not. `order` sorts the roots and each root's subgroups.
+ */
+export function groupTreeRows(
+  tree: readonly GroupRow[],
+  open: ReadonlySet<string>,
+  matches?: (row: GroupRow) => boolean,
+  order: (rows: readonly GroupRow[]) => GroupRow[] = (rows) => [...rows],
+): GroupRow[] {
+  const rows: GroupRow[] = []
+  for (const root of order(tree)) {
+    const subgroups = matches
+      ? root.subgroups.filter(matches)
+      : open.has(root.id)
+        ? root.subgroups
+        : []
+    if (matches && !matches(root) && !subgroups.length) continue
+    rows.push(root)
+    rows.push(...order(subgroups))
+  }
+  return rows
+}
+
+/**
+ * Members of `parent` that sit in more than one of its subgroups, by `forge:path`, with those
+ * subgroups sorted. Sibling subgroups may overlap; the group page warns about these.
+ */
+export function siblingOverlaps(
+  members: readonly RepoSummary[],
+  parent: string,
+): Map<string, string[]> {
+  const overlaps = new Map<string, string[]>()
+  for (const member of members) {
+    const siblings = member.groups.filter((group) => parentGroup(group) === parent).toSorted()
+    if (siblings.length > 1) overlaps.set(repoKey(member.repo), siblings)
+  }
+  return overlaps
 }
 
 /** What a group list row says about its members' states, worst first, zero states left out. */
@@ -369,11 +432,12 @@ export const groupHealthText = (counts: Record<RepoHealthStatus, number>): strin
 /** The group page's tabs in display order; also its `tab` search parameter. */
 const groupPageTabs = [
   { id: 'repos', label: 'Repositories' },
+  { id: 'subgroups', label: 'Subgroups', root: true },
   { id: 'stack', label: 'Stack & conventions', requires: ['analyses:read'] },
   { id: 'knowledge', label: 'Knowledge', requires: ['knowledge:read'] },
   { id: 'settings', label: 'Settings', requires: ['settings:read'] },
   { id: 'membership', label: 'Membership', requires: ['settings:read'], global: true },
-] as const satisfies readonly (PageTab<string> & { global?: true })[]
+] as const satisfies readonly (PageTab<string> & { global?: true; root?: true })[]
 
 /** Id of a group page tab. */
 type GroupPageTab = (typeof groupPageTabs)[number]['id']
@@ -381,15 +445,17 @@ type GroupPageTab = (typeof groupPageTabs)[number]['id']
 /**
  * The group tabs the viewer may see, and the requested one when visible, else the first. A tab
  * marked `global` (Membership, which reads the group patterns) needs its action on every
- * repository (`canGlobal`), the others anywhere (`can`).
+ * repository (`canGlobal`), the others anywhere (`can`). Subgroups is a root group's tab only.
  */
 export function pickGroupTab(
   can: (action: Action) => boolean,
   requested: string | undefined,
   canGlobal: (action: Action) => boolean = can,
+  group?: string,
 ): { tabs: (typeof groupPageTabs)[number][]; tab: GroupPageTab } {
+  const subgroup = group !== undefined && parentGroup(group) !== undefined
   const tabs = visibleTabs<(typeof groupPageTabs)[number]>(groupPageTabs, can).filter(
-    (tab) => !('global' in tab) || tab.requires.some(canGlobal),
+    (tab) => (!('global' in tab) || tab.requires.some(canGlobal)) && !('root' in tab && subgroup),
   )
   return { tabs, tab: pickTab(tabs, requested) ?? 'repos' }
 }
@@ -440,6 +506,22 @@ export function globMatcher(pattern: string): (path: string) => boolean {
   return (path) => regex.test(path)
 }
 
+/**
+ * The paths of `paths` that an exclude pattern of `group` still keeps out once `withRepos` adds
+ * them, each with the pattern: `withRepos` lifts only exact-path excludes, never globs.
+ */
+export function excludedByPattern(
+  group: GroupDocumentData | undefined,
+  forge: string,
+  paths: readonly string[],
+): { path: string; pattern: string }[] {
+  const { exclude } = withRepos(group, forge, paths)
+  return paths.flatMap((path) => {
+    const pattern = exclude.find((candidate) => globMatcher(candidate)(path))
+    return pattern === undefined ? [] : [{ path, pattern }]
+  })
+}
+
 const matchesAny = (patterns: readonly string[], path: string) =>
   patterns.some((pattern) => globMatcher(pattern)(path))
 
@@ -482,18 +564,23 @@ const stateOrder: Record<MembershipState, number> = { joins: 0, leaves: 1, membe
  * patterns matched in the last listing, before excludes) plus exact include paths, which list a
  * repository before any listing. Compared with `saved`, a member only under the draft `joins` and
  * one only under the saved patterns `leaves`. Unsaved patterns are previewed on the last listing,
- * so repositories the forge never listed cannot appear.
+ * so repositories the forge never listed cannot appear. Without `exactPaths` (a subgroup, whose
+ * `matched` are its parent's members) only `matched` counts, so an exact path outside the parent
+ * matches nothing.
  */
 export function groupMembership(
   forge: string,
   matched: readonly RepoRef[],
   saved: Pick<GroupDocumentData, 'include' | 'exclude'>,
   draft: Pick<GroupDocumentData, 'include' | 'exclude'> = saved,
+  exactPaths = true,
 ): Membership {
   const paths = new Map<string, RepoRef>()
   for (const repo of matched) if (repo.forge === forge) paths.set(repo.path, repo)
-  for (const pattern of [...saved.include, ...draft.include])
-    if (isExactPattern(pattern) && !paths.has(pattern)) paths.set(pattern, { forge, path: pattern })
+  if (exactPaths)
+    for (const pattern of [...saved.include, ...draft.include])
+      if (isExactPattern(pattern) && !paths.has(pattern))
+        paths.set(pattern, { forge, path: pattern })
   const counts: PatternCounts = {
     include: Object.fromEntries(draft.include.map((p) => [p, { members: 0, excluded: 0 }])),
     exclude: Object.fromEntries(draft.exclude.map((p) => [p, 0])),

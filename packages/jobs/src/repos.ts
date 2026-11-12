@@ -1,4 +1,5 @@
-import type { HoltkeeperConfig } from '@holtkeeper/core'
+import { parentGroup, rootGroup } from '@holtkeeper/access'
+import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 
 /** Repositories of one config group, as the scheduler sees them. */
@@ -20,12 +21,17 @@ const matches = (patterns: string[], path: string) =>
  * Lists a group's repositories from its forge: every include glob's static prefix is listed with
  * `GitForge.listRepositories`, then filtered by the include and exclude globs; an include without
  * wildcards is one repository, read with `GitForge.getRepository`. Archived repositories are
- * skipped. Throws for unknown groups.
+ * skipped. A subgroup is never listed itself: its root group is, and the members `resolveRepo`
+ * puts in the subgroup are kept. Throws for unknown groups.
  */
 export function groupRepositories(config: HoltkeeperConfig): ResolveRepos {
-  return async (name) => {
+  const list: ResolveRepos = async (name) => {
     const group = config.groups[name]
     if (!group) throw new Error(`unknown group "${name}"`)
+    if (parentGroup(name) !== undefined) {
+      const members = await list(rootGroup(name))
+      return members.filter((repo) => resolveRepo(config, repo).groups.includes(name))
+    }
     const definition = config.forges[group.forge]
     if (!definition) throw new Error(`unknown forge "${group.forge}"`)
     const forge = definition.create()
@@ -48,6 +54,7 @@ export function groupRepositories(config: HoltkeeperConfig): ResolveRepos {
     }
     return [...found.values()].toSorted((a, b) => a.path.localeCompare(b.path))
   }
+  return list
 }
 
 /** Whether `repo` matches a `forge:path` glob such as `work:games/*`. */

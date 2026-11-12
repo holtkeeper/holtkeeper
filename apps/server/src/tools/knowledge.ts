@@ -29,7 +29,7 @@ export interface KnowledgeToolsContext {
   canReadScope: (scope: Scope) => boolean
   /** Whether the caller may read accepted `shared` entries of `scope` (cross-team reach); default never. */
   canReadShared?: (scope: Scope) => boolean
-  /** The teams (config groups) an entry of `scope` belongs to, named on shared entries of other teams. */
+  /** The teams an entry of `scope` belongs to (innermost config groups), named on shared entries of other teams. */
   ownerOf?: (scope: Scope) => string[]
   /** `forge:path` with its groups when the caller may read that repository's knowledge. */
   repoOf: (repo: string) => RepoTarget | undefined

@@ -25,6 +25,7 @@ import {
   type ResolvedFilter,
   type ResolvedSection,
   layerCounts,
+  parentGroupCount,
   orgRowMatches,
   orgRows,
   resolvedSections,
@@ -33,7 +34,7 @@ import {
   sourceLabel,
 } from '../../lib/resolved-settings.ts'
 import { editorFor, previewValue } from '../../lib/schema.ts'
-import { type ScopeFocus, isSharedScope, scopeOfFocus } from '../../lib/scope.ts'
+import { type ScopeFocus, focusParent, isSharedScope, scopeOfFocus } from '../../lib/scope.ts'
 import {
   type SettingsSectionId,
   definitionsOf,
@@ -169,6 +170,8 @@ export function ResolvedSettings({
     }))
     .filter((s) => s.rows.length > 0)
   const counts = layerCounts(resolved.data.rows)
+  const inherited =
+    focusParent(focus) === undefined ? undefined : parentGroupCount(resolved.data.rows, focus)
   const filterCounts: Record<ResolvedFilter, number> = {
     all: resolved.data.rows.length,
     here: resolved.data.rows.filter((row) => setHere(row, focus)).length,
@@ -443,6 +446,15 @@ export function ResolvedSettings({
               <span className="mono text-dim">{counts.org}</span>
             </li>
             <li aria-hidden>→</li>
+            {inherited !== undefined ? (
+              <>
+                <li className="inline-flex items-center gap-1.5">
+                  <SourceChip layer="group">Parent group</SourceChip>
+                  <span className="mono text-dim">{inherited}</span>
+                </li>
+                <li aria-hidden>→</li>
+              </>
+            ) : null}
             <li className="inline-flex items-center gap-1.5">
               <SourceChip layer="group" here={focus.kind === 'group'}>
                 {focus.kind === 'group'
@@ -451,7 +463,7 @@ export function ResolvedSettings({
                     ? `Group ${groupNames}`
                     : 'Groups'}
               </SourceChip>
-              <span className="mono text-dim">{counts.group}</span>
+              <span className="mono text-dim">{counts.group - (inherited ?? 0)}</span>
             </li>
             {focus.kind === 'repo' ? (
               <>

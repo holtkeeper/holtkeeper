@@ -28,7 +28,8 @@ const validateCombination = (text: string) =>
 
 /**
  * Account › My teams: the groups the *My teams* scope shows, as a table of every group the viewer
- * can see plus group combinations. Defaults to the groups in the viewer's grants.
+ * can see (subgroups indented under their parent, each a home group on its own) plus group
+ * combinations. Defaults to the groups in the viewer's grants.
  */
 export function HomeGroups() {
   const preferences = usePreferences()
@@ -46,7 +47,7 @@ export function HomeGroups() {
   if (repos.isError) return <ErrorState error={repos.error} />
 
   const home = preferences.data.homeGroups
-  const rows = teamRows(repos.data.repos, home)
+  const rows = teamRows(repos.data.repos, home, titleOf)
   const combinations = homeCombinations(home)
   const counts = scopeList(repos.data.repos, 'mine', home).counts
 
@@ -88,8 +89,11 @@ export function HomeGroups() {
                     onChange={(on) => update(toggleHomeGroup(home, row.group, on))}
                   />
                 </Td>
-                <Td className="font-medium">
+                <Td className={row.parent === undefined ? 'font-medium' : 'ps-8'}>
                   <GroupName group={row.group} />
+                  {row.parent === undefined ? null : (
+                    <span className="ms-1.5 text-[11px] text-dim">in {titleOf(row.parent)}</span>
+                  )}
                 </Td>
                 <Td align="right" className="tabular">
                   {row.repos}

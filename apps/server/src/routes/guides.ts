@@ -65,6 +65,7 @@ import {
   type ServerDeps,
   authorize,
   forgeFor,
+  groupLabeler,
   parseRepo,
   principalOf,
   readBody,
@@ -271,7 +272,7 @@ const auditEdit = (
 export function guideRoutes(deps: ServerDeps) {
   const { store, config, now, analyzers } = deps
   const app = new Hono<Env>()
-  const resolve = createGuideResolver({ store })
+  const resolve = createGuideResolver({ store, groupTitle: groupLabeler(config) })
   const usages = createUsageIndex({ analyses: store.analyses })
 
   const targetOf = (key: string): RepoTarget | undefined => {

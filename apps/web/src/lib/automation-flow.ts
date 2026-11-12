@@ -1,11 +1,13 @@
-import type {
-  ConfigEntryView,
-  GroupMatch,
-  Job,
-  JobAnalyzerView,
-  Scope,
-  SettingView,
-  TriggerDocumentData,
+import {
+  type ConfigEntryView,
+  type GroupMatch,
+  type Job,
+  type JobAnalyzerView,
+  type Scope,
+  type SettingView,
+  type TriggerDocumentData,
+  isSubgroup,
+  rootGroup,
 } from '@holtkeeper/api'
 
 import { describeCadence, describeWindows, mergeRequestActions } from './automation.ts'
@@ -160,7 +162,11 @@ export function laneFreshness(
 
 const memberGroups = (matches: readonly GroupMatch[] | undefined): string[] =>
   matches?.length
-    ? [...new Set(matches.flatMap((match) => (typeof match === 'string' ? [match] : match)))]
+    ? [
+        ...new Set(
+          matches.flatMap((match) => (typeof match === 'string' ? [match] : match)).map(rootGroup),
+        ),
+      ]
     : [ALL_LANE]
 
 const scopeLanes = (scope: Scope): string[] =>
@@ -172,9 +178,16 @@ const intersectionChips = (
   matches: readonly GroupMatch[] | undefined,
   titleOf: GroupTitleOf,
 ): string[] =>
-  (matches ?? [])
-    .filter((match) => typeof match !== 'string')
-    .map((m) => `only ${groupMatchTitle(m, titleOf)}`)
+  (matches ?? []).flatMap((match) =>
+    typeof match !== 'string'
+      ? [`only ${groupMatchTitle(match, titleOf)}`]
+      : subgroupChips([match], titleOf),
+  )
+
+const subgroupChips = (matches: readonly GroupMatch[] | undefined, titleOf: GroupTitleOf) =>
+  (matches ?? []).flatMap((match) =>
+    typeof match === 'string' && isSubgroup(match) ? [`subgroup ${titleOf(match)}`] : [],
+  )
 
 /** The title a trigger has on the canvas. */
 function triggerTitle(trigger: TriggerDocumentData): string {
@@ -246,7 +259,7 @@ interface ActionSpec {
 /** A rule as the canvas and the list see it: its node data, lanes and actions. */
 export interface AutomationRule extends RuleData {
   id: string
-  /** `all`, or the groups it sits in. */
+  /** `all`, or the root groups it sits in. */
   lanes: string[]
   actions: ActionSpec[]
 }
@@ -285,8 +298,9 @@ const sizes = {
 
 /**
  * The stored rules (triggers, merge request policies and schedules) with the lanes they sit in and
- * the actions they take, in that order. A rule limited to groups sits in each member group's
- * lane; one without groups, or limited to repositories only, in the every-repository lane.
+ * the actions they take, in that order. A rule limited to groups sits in the lane of each member
+ * group's root group, tagged with the subgroups it names; one without groups, or limited to
+ * repositories only, in the every-repository lane.
  */
 export function automationRules(input: AutomationInput): AutomationRule[] {
   const titleOf = input.titleOf ?? keyAsTitle
@@ -348,7 +362,9 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
     const repoChip =
       !entry.scope.all && !entry.scope.groups?.length && entry.scope.repos?.length
         ? [`only ${joined(entry.scope.repos)}`]
-        : []
+        : entry.scope.all
+          ? []
+          : subgroupChips(entry.scope.groups, titleOf)
     for (const policy of normalizePolicies(entry.value)) {
       const kinds = [
         ...new Set(
@@ -417,7 +433,7 @@ export function automationRules(input: AutomationInput): AutomationRule[] {
 
 /**
  * Lanes of the automation canvas, projected from the stored documents (nothing here is stored):
- * one for every repository, then one per config group. Each lane links event nodes to the rules
+ * one for every repository, then one per root config group (subgroups share their parent's). Each lane links event nodes to the rules
  * (triggers, merge request policies, schedules, freshness and the release assistant) that react
  * to them, and rules to the actions they take, placed as `automationRules` says. Freshness has a
  * rule in every lane, with that lane's override. Disabled rules draw dashed.
@@ -427,7 +443,7 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
   const fresh = input.analyzers.filter((analyzer) => analyzer.refresh !== undefined)
   const lanes: { id: string; group?: string; label: string }[] = [
     { id: ALL_LANE, label: 'All repositories' },
-    ...[...new Set(input.groups)]
+    ...[...new Set(input.groups.map(rootGroup))]
       .toSorted(byGroupTitle(input.titleOf ?? keyAsTitle))
       .map((group) => ({ id: group, group, label: (input.titleOf ?? keyAsTitle)(group) })),
   ]
@@ -611,8 +627,11 @@ export const laneRuleCounts = (lanes: readonly AutomationLane[]): Record<string,
     lanes.map((lane) => [lane.id, lane.nodes.filter((node) => node.kind === 'rule').length]),
   )
 
-/** Lanes a job's path can show in: every repository, then the job's config groups. */
-export const jobLanes = (groups: readonly string[]): string[] => [ALL_LANE, ...groups]
+/** Lanes a job's path can show in: every repository, then the root groups of the job's groups. */
+export const jobLanes = (groups: readonly string[]): string[] => [
+  ALL_LANE,
+  ...new Set(groups.map(rootGroup)),
+]
 
 /** A highlighted path: node ids and edge keys (`from->to`). */
 export interface WhyPath {

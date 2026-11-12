@@ -5,7 +5,7 @@ import type {
   RepoRef,
   RepoSummary,
 } from '@holtkeeper/api'
-import { Boxes, ChevronDown, ChevronRight, Globe, Pencil, Plus, Users } from 'lucide-react'
+import { Boxes, ChevronDown, ChevronRight, Globe, Layers, Pencil, Plus, Users } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -35,10 +35,18 @@ import { FamilyDialog, similarityText } from './FamilyDialog.tsx'
 
 const itemClass = (current: boolean, depth: number) =>
   `flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] transition-colors ${
-    depth === 0 ? 'pl-2' : depth === 1 ? 'pl-6' : 'pl-10'
+    depth < 0
+      ? 'pl-0'
+      : depth === 0
+        ? 'pl-2'
+        : depth === 1
+          ? 'pl-6'
+          : depth === 2
+            ? 'pl-10'
+            : 'pl-14'
   } ${current ? 'bg-raise text-foreground shadow-[0_0_0_1px_var(--line-strong)]' : 'text-muted hover:bg-raise hover:text-foreground'}`
 
-/** How many families and repositories a team lists before "N more". */
+/** How many subgroups, families and repositories a team lists before "N more". */
 const TEAM_LIMIT = 5
 
 /** Guide sections and notes of a space as a quiet number, learnings waiting as a warning badge. */
@@ -71,8 +79,8 @@ const toggled = (previous: ReadonlySet<string>, key: string): ReadonlySet<string
 }
 
 /**
- * The Knowledge spaces: All, then teams with their families and repositories, each with its
- * Knowledge counts. Long teams fold behind "N more"; under *My teams* other teams fold into one
+ * The Knowledge spaces: All, then teams with their subgroups, families and repositories, each
+ * with its Knowledge counts; a repository shows under its deepest group. Long teams fold behind "N more"; under *My teams* other teams fold into one
  * collapsed row. Family suggestions wait below for a person to confirm or dismiss them.
  */
 
@@ -162,12 +170,13 @@ export function SpacesSidebar({
     )
   }
 
-  const teamItem = (team: TeamNode) => {
+  const teamItem = (team: TeamNode, depth = 0) => {
     const space: Space = { kind: 'group', group: team.group }
     const open = !collapsed.has(team.group)
     const children = [
-      ...team.families.map((node) => familyItem(node, 1, team.group)),
-      ...team.repos.map((repo) => repoItem(repo, 1)),
+      ...team.subgroups.map((sub) => teamItem(sub, depth + 1)),
+      ...team.families.map((node) => familyItem(node, depth + 1, team.group)),
+      ...team.repos.map((repo) => repoItem(repo, depth + 1)),
     ]
     const { shown, more } = foldList(children, TEAM_LIMIT, expanded.has(team.group))
     return (
@@ -184,11 +193,15 @@ export function SpacesSidebar({
           </button>
           <button
             type="button"
-            className={itemClass(current === spaceKey(space), 0)}
+            className={itemClass(current === spaceKey(space), depth ? -1 : 0)}
             aria-current={current === spaceKey(space) ? 'true' : undefined}
             onClick={() => onSelect(space)}
           >
-            <Users className="size-3.5 shrink-0" />
+            {depth ? (
+              <Layers className="size-3.5 shrink-0" />
+            ) : (
+              <Users className="size-3.5 shrink-0" />
+            )}
             <span className="truncate">
               <GroupName group={team.group} />
             </span>
@@ -202,7 +215,7 @@ export function SpacesSidebar({
               <li>
                 <button
                   type="button"
-                  className="h-6 pl-6 text-left text-xs text-dim hover:text-foreground"
+                  className={`h-6 text-left text-xs text-dim hover:text-foreground ${depth ? 'pl-10' : 'pl-6'}`}
                   onClick={() => expand(team.group)}
                 >
                   {more} more
@@ -232,7 +245,7 @@ export function SpacesSidebar({
 
       {noTeams ? <NoTeamsState /> : null}
       <ul className="flex flex-col gap-0.5">
-        {tree.teams.map(teamItem)}
+        {tree.teams.map((team) => teamItem(team))}
         {tree.others.length ? (
           <li>
             <button
@@ -253,7 +266,7 @@ export function SpacesSidebar({
                 {plural(tree.otherRepos, 'repository', 'repositories')}
               </span>
             </button>
-            {othersOpen ? <ul>{tree.others.map(teamItem)}</ul> : null}
+            {othersOpen ? <ul>{tree.others.map((team) => teamItem(team))}</ul> : null}
           </li>
         ) : null}
         {tree.ungrouped.families.length || tree.ungrouped.repos.length ? (

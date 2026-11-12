@@ -504,6 +504,26 @@ describe('internal agents', () => {
     expect(closed.canRead({ forge: 'work', path: 'shapes/square' })).toBe(true)
   })
 
+  test('owners name a repository by its innermost groups and a scope by its outermost', () => {
+    const titles: Record<string, string> = { shapes: 'Shapes', 'shapes.round': 'Shapes › Round' }
+    const context = agentCatalogContext({
+      ...base(),
+      policy: 'metadata',
+      targetOf: (other) => ({
+        ...other,
+        groups: other.path === 'shapes/circle' ? ['shapes.round', 'shapes'] : ['colors'],
+      }),
+      groupLabel: (key) => titles[key] ?? key,
+    })
+    expect(context.ownerOf?.({ forge: 'work', path: 'shapes/circle' })).toEqual(['Shapes › Round'])
+    expect(context.ownerOf?.(colors)).toEqual(['colors'])
+    expect(context.knowledge.ownerOf?.({ groups: ['shapes', 'shapes.round'] })).toEqual(['Shapes'])
+    expect(context.knowledge.ownerOf?.({ groups: ['shapes.round'] })).toEqual(['Shapes › Round'])
+    expect(context.knowledge.ownerOf?.({ repos: ['work:shapes/circle'] })).toEqual([
+      'Shapes › Round',
+    ])
+  })
+
   test('chat follows the asker: their reach under the policy', () => {
     const asker = principal([{ scope: { groups: ['shapes'] }, actions: ['ai:read'] }])
     const chat = agentCatalogContext({ ...base(), policy: 'snippets', requester: asker })

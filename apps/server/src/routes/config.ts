@@ -1,3 +1,4 @@
+import { parentGroup } from '@holtkeeper/access'
 import type {
   ConfigEntryDetail,
   ConfigEntryList,
@@ -14,7 +15,7 @@ import type {
   RepoAccessStatus,
   SchedulePreview,
 } from '@holtkeeper/api'
-import { ConfigError, type HoltkeeperConfig } from '@holtkeeper/core'
+import { ConfigError, type HoltkeeperConfig, subgroupsOf } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
 import {
@@ -30,6 +31,7 @@ import {
   configIdSchema,
   forgeDataSchema,
   groupDataSchema,
+  groupIdSchema,
   repoTraitsDataSchema,
   scheduleDataSchema,
   triggerDataSchema,
@@ -115,11 +117,14 @@ const triggersOf = (config: HoltkeeperConfig): [string, TriggerDocumentData][] =
   return list.map((data) => [triggerId(data), data])
 }
 
-/** Hook targets on the forge for a forge's groups: group paths for globs, projects for exact paths. */
+/**
+ * Hook targets on the forge for a forge's root groups: group paths for globs, projects for exact
+ * paths. Subgroups add none: their members are the parent's, which the parent's hooks already reach.
+ */
 export function defaultWebhookTargets(config: HoltkeeperConfig, forgeId: string): WebhookTarget[] {
   const targets = new Map<string, WebhookTarget>()
-  for (const group of Object.values(config.groups)) {
-    if (group.forge !== forgeId) continue
+  for (const [key, group] of Object.entries(config.groups)) {
+    if (group.forge !== forgeId || parentGroup(key) !== undefined) continue
     for (const pattern of group.include) {
       const prefix = staticPrefix(pattern)
       if (!prefix) continue
@@ -269,7 +274,10 @@ export function configRoutes(deps: ServerDeps) {
           })
         })
       case 'group':
-        return Object.entries(config.groups).map(([id, group]) => entry(id, group))
+        return Object.entries(config.groups).map(([id, group]) => {
+          const parent = parentGroup(id)
+          return entry(id, { ...group, ...(parent !== undefined && { parent }) })
+        })
       case 'repoTraits':
         return Object.entries(config.repos).map(([pattern, repo]) => {
           const doc = docs.find((d) => d.type === 'repoTraits' && d.data.pattern === pattern)
@@ -345,7 +353,13 @@ export function configRoutes(deps: ServerDeps) {
     const principal = authorize(c, 'settings:write', GLOBAL)
     const type = typeOf(c.req.param('collection'))
     const id = c.req.param('id')
-    if (type !== 'repoTraits' && type !== 'trigger' && !configIdSchema.safeParse(id).success)
+    if (type === 'group') {
+      if (!groupIdSchema.safeParse(id).success)
+        throw new HTTPException(400, {
+          message:
+            'id: use lowercase letters, digits and dashes, with one optional dot for a subgroup (team.sub)',
+        })
+    } else if (type !== 'repoTraits' && type !== 'trigger' && !configIdSchema.safeParse(id).success)
       throw new HTTPException(400, { message: 'id: use lowercase letters, digits and dashes' })
     const { store } = managed()
     const meta = { id, updatedAt: deps.now().toISOString(), updatedBy: principal.id }
@@ -403,6 +417,11 @@ export function configRoutes(deps: ServerDeps) {
     const { source, store } = managed()
     const doc = await store.get(type, id)
     if (!doc) throw new HTTPException(404, { message: `no panel ${type} ${id}` })
+    const subgroups = type === 'group' ? subgroupsOf(source.effective().config, id) : []
+    if (subgroups.length)
+      throw new HTTPException(409, {
+        message: `group ${id} has subgroups; delete subgroups first: ${subgroups.join(', ')}`,
+      })
     try {
       await source.preview({ remove: { type, id } })
     } catch (error) {

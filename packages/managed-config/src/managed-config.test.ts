@@ -5,6 +5,7 @@ import type { GitForge } from '@holtkeeper/forge'
 import type { AnyConfigDocument, ConfigDocumentInput } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
+import { groupIdSchema } from './documents.ts'
 import { effectiveConfig, type ForgeFactory } from './effective.ts'
 import { generateWebhookSecret } from './secret.ts'
 import { createConfigSource, liveConfig } from './source.ts'
@@ -134,6 +135,33 @@ describe('effectiveConfig', () => {
     expect(() => effectiveConfig(file, broken, { forgeFactories: {} })).toThrow(
       'unknown forge "nowhere"',
     )
+  })
+
+  test('group ids allow one subgroup level and need the parent', () => {
+    expect(groupIdSchema.safeParse('shapes').success).toBe(true)
+    expect(groupIdSchema.safeParse('shapes.round').success).toBe(true)
+    expect(groupIdSchema.safeParse('shapes.round.small').success).toBe(false)
+    const orphan = [
+      ...documents,
+      doc({
+        type: 'group',
+        id: 'shapes.round',
+        data: { forge: 'cloud', include: ['studio/*'], exclude: [] },
+      }),
+    ]
+    expect(() => effectiveConfig(file, orphan, { forgeFactories: { gitlab: factory } })).toThrow(
+      'parent group "shapes" is not configured',
+    )
+    const nested = [
+      ...documents,
+      doc({
+        type: 'group',
+        id: 'games.round',
+        data: { forge: 'cloud', include: ['studio/round-*'], exclude: [] },
+      }),
+    ]
+    const { config } = effectiveConfig(file, nested, { forgeFactories: { gitlab: factory } })
+    expect(Object.keys(config.groups)).toContain('games.round')
   })
 
   test('forges without token or adapter fail only when used', () => {

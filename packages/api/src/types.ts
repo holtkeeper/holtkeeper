@@ -145,8 +145,8 @@ export interface MeResponse {
   /**
    * Display titles of the titled config groups the principal may know about, by group key: every
    * group with global `settings:read`, otherwise the groups its grants name and the groups of the
-   * repositories it may list; empty when signed out. Show the title wherever a group is shown to
-   * people; the key stays the identity.
+   * repositories it may list, with their subgroups and the parents of subgroups; empty when signed
+   * out. Show the title wherever a group is shown to people; the key stays the identity.
    */
   groupTitles: Record<string, string>
 }
@@ -577,7 +577,7 @@ export interface ChatThreadView {
   repo?: string
   /** Config group it is about. */
   group?: string
-  /** Config groups of its repository, or its group; empty for team-wide threads. */
+  /** Config groups of its repository, or its group with the parent of a subgroup; empty for team-wide threads. */
   groups: string[]
   createdBy: string
   createdAt: string
@@ -1017,7 +1017,10 @@ export interface ResolvedSettingRow {
 export interface ResolvedSettings {
   repo?: RepoRef
   group?: string
-  /** Config groups of the repository; `[group]` for a group focus. */
+  /**
+   * Config groups of the repository; for a group focus the group and, for a subgroup, its parent,
+   * so the parent's entries show as inherited.
+   */
   groups: string[]
   settings: Record<string, SettingView>
   /**
@@ -2954,6 +2957,7 @@ export type GuideChainLayerKind =
   | 'repo-file'
   | 'repo'
   | 'family'
+  | 'subgroup'
   | 'group'
   | 'all'
   | 'learnings'
@@ -3682,10 +3686,19 @@ export interface ForgeSshKeyView {
   hostKeysPinned: boolean
 }
 
+/**
+ * A config group as the panel lists it. Its id is a root group (`shapes`) or a subgroup
+ * (`shapes.round`) whose members are the parent's members its own patterns match.
+ */
+export interface GroupConfigView extends GroupDocumentData {
+  /** The parent group of a subgroup; absent for a root group. */
+  parent?: string
+}
+
 /** The data each config collection holds. */
 export interface ConfigViewData {
   forge: ForgeConfigView
-  group: GroupDocumentData
+  group: GroupConfigView
   repoTraits: RepoTraitsDocumentData
   schedule: ScheduleDocumentData
   trigger: TriggerDocumentData
@@ -4028,6 +4041,13 @@ export interface ListingAttemptView {
 export interface GroupListingView {
   group: string
   forge: string
+  /**
+   * The parent of a subgroup. A subgroup is never listed from the forge: `repos`, `matched`,
+   * `listedAt` and `attempts` come from the parent's listing, `matched` holding every member of the
+   * parent (what the subgroup's patterns pick from), `attempts` only for callers who may read the
+   * parent's settings.
+   */
+  parent?: string
   /** Members from the last successful listing; kept when a later one fails. */
   repos: RepoRef[]
   /**

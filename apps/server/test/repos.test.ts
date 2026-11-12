@@ -120,6 +120,46 @@ describe('GET /api/me', () => {
     expect(await titles('admin')).toEqual({ shapes: 'Shape Studio', colors: 'Palette' })
   })
 
+  test('reaches the subgroups of a granted group and the parent of a granted subgroup', async () => {
+    const nested = parseConfig({
+      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => ({}) as never } },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'], title: 'Shape Studio' },
+        'shapes.round': { forge: 'work', include: ['shapes/circle'], title: 'Round' },
+        'shapes.flat': { forge: 'work', include: ['shapes/square'], title: 'Flat' },
+        colors: { forge: 'work', include: ['colors/*'], title: 'Palette' },
+      },
+    })
+    const roles = headerAuth({
+      roles: {
+        team: [{ scope: { groups: ['shapes'] }, actions: ['knowledge:read'] }],
+        sub: [{ scope: { groups: ['shapes.round'] }, actions: ['knowledge:read'] }],
+        member: [{ scope: { groups: ['shapes.round'] }, actions: ['repos:read'] }],
+      },
+    })
+    const vault = aesVault('v'.repeat(32))
+    const nestedApp = createApp({
+      config: nested,
+      auth: roles,
+      store,
+      vault,
+      credentials: createCredentialService({ credentials: store.credentials, vault }),
+      settings: builtinSettings,
+      analyses: [],
+      now: () => NOW,
+    })
+    const reach = async (role: string) =>
+      ((await (await nestedApp.request('/api/me', { headers: as(role) })).json()) as MeResponse)
+        .groupTitles
+    expect(await reach('team')).toEqual({
+      shapes: 'Shape Studio',
+      'shapes.round': 'Round',
+      'shapes.flat': 'Flat',
+    })
+    expect(await reach('sub')).toEqual({ shapes: 'Shape Studio', 'shapes.round': 'Round' })
+    expect(await reach('member')).toEqual({ shapes: 'Shape Studio', 'shapes.round': 'Round' })
+  })
+
   test('limits titles to the groups a team viewer can reach', async () => {
     expect(await titles('viewer')).toEqual({ shapes: 'Shape Studio' })
     expect(await titles('nobody')).toEqual({})

@@ -1,4 +1,9 @@
-import type { PersonView, RepoOverview as Overview, RepoRef } from '@holtkeeper/api'
+import {
+  type PersonView,
+  type RepoOverview as Overview,
+  type RepoRef,
+  leafGroups,
+} from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ArrowRight, ChevronRight } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -228,7 +233,7 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
             label: 'Groups',
             value: overview.groups.length ? (
               <span className="flex flex-wrap gap-1">
-                {overview.groups.map((group) => (
+                {leafGroups(overview.groups).map((group) => (
                   <Link
                     key={group}
                     to="/repos/groups/$groupId"
@@ -236,7 +241,7 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
                     className="no-underline"
                   >
                     <Tag>
-                      <GroupName group={group} />
+                      <GroupName group={group} path />
                     </Tag>
                   </Link>
                 ))}

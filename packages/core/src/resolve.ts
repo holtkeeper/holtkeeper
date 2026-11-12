@@ -1,3 +1,4 @@
+import { parentGroup } from '@holtkeeper/access'
 import type { RepoRef } from '@holtkeeper/forge'
 
 import type { HoltkeeperConfig } from './config.ts'
@@ -7,6 +8,11 @@ export type Traits = Record<string, string | number | boolean>
 
 export interface ResolvedRepo {
   repo: RepoRef
+  /**
+   * Every group the repository is in, each subgroup listed directly before its parent. A
+   * repository is in a subgroup only when it is also in the parent, so the list always holds the
+   * full lineage of each group.
+   */
   groups: string[]
   traits: Traits
 }
@@ -16,14 +22,28 @@ const matchesAny = (patterns: string[], path: string) => patterns.some((p) => ma
 
 /** What applies to a repository: the groups it belongs to and its merged traits. */
 export function resolveRepo(config: HoltkeeperConfig, repo: RepoRef): ResolvedRepo {
-  const groups = Object.entries(config.groups)
-    .filter(
-      ([, group]) =>
-        group.forge === repo.forge &&
-        matchesAny(group.include, repo.path) &&
-        !matchesAny(group.exclude, repo.path),
-    )
-    .map(([name]) => name)
+  const matched = new Set(
+    Object.entries(config.groups)
+      .filter(
+        ([, group]) =>
+          group.forge === repo.forge &&
+          matchesAny(group.include, repo.path) &&
+          !matchesAny(group.exclude, repo.path),
+      )
+      .map(([name]) => name),
+  )
+  const member = (name: string): boolean => {
+    const parent = parentGroup(name)
+    return matched.has(name) && (parent === undefined || member(parent))
+  }
+  const groups: string[] = []
+  for (const name of Object.keys(config.groups)) {
+    if (!member(name) || parentGroup(name) !== undefined) continue
+    for (const sub of Object.keys(config.groups)) {
+      if (parentGroup(sub) === name && member(sub)) groups.push(sub)
+    }
+    groups.push(name)
+  }
 
   const traits: Traits = {}
   for (const [pattern, entry] of Object.entries(config.repos)) {

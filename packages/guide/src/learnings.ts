@@ -115,7 +115,7 @@ export const LEARNING_SYSTEM = [
   'Answer with rule "" unless the reply states a convention, a deliberate design decision or something reviews should not flag, beyond this one change. Thanks, agreeing to fix, questions and one-off explanations give "".',
   `The rule is one imperative English sentence of at most ${LEARNING_RULE_MAX} characters about the code. Never name or mention a person, a username or an @handle.`,
   'section: review for what reviews should or should not flag (most rules); general, testing, testids, assets, commits or releases when the rule is about that.',
-  'scope: repo when it is about this repository; family when it fits every similar repository of the same kind; group when it is a team-wide practice. Prefer repo when unsure.',
+  'scope: repo when it is about this repository; family when it fits every similar repository of the same kind; group when it is a practice of the team or subteam that owns the repository. Prefer repo when unsure.',
   'When the reply only restates one of the known rules, return that rule exactly as written.',
 ].join('\n')
 

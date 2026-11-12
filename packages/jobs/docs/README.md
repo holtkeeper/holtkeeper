@@ -26,7 +26,7 @@ jobs: {
       name: 'nightly',
       cron: '0 3 * * *', // croner syntax, evaluated in the process's time zone
       analyzers: ['depgraph', 'quality'],
-      groups: ['games'], // default: every group
+      groups: ['games'], // default: every root group
       repos: ['work:games/*'], // optional forge:path globs
       options: { depgraph: { depth: 2 } }, // per analyzer kind
     },
@@ -85,7 +85,9 @@ The scheduler re-reads `config.jobs.schedules` on every tick (so a live config f
 - repo-scope analyzers: one job per repository of the schedule's groups that matches `repos`; an intersection entry (`['frontend', 'storefront']`) lists the repositories of its first group and keeps those in all of them; an analyzer with `appliesTo` gets jobs only for the repositories it applies to, checked through the forge on every run (file reads are shared between the schedule's analyzers, a failing check counts as applying, skipped repositories are logged), so repositories that start or stop using what it works on join or leave without config changes. `SchedulerOptions.skip(analyzer, repo)` (also `JobEngineOptions.skip` and `planSchedule`'s `skip`) leaves a repository out of one analyzer's jobs before `appliesTo` is checked, logged as left out by settings; the server uses it for coverage on repositories with no tests by design. `forgeFor` replaces the forge clients these checks read through;
 - group-scope analyzers: one job per single-group entry, with `repo = { forge, path: <group> }` and `group` set.
 
-Jobs already queued or running for the same analyzer, repository and ref are skipped (`enqueueUnique`). `resolveRepos` defaults to `groupRepositories(config)`: it lists each include glob's static prefix with `GitForge.listRepositories`, reads includes without wildcards (exact repository paths) with `GitForge.getRepository` instead of listing them as namespaces, filters by the group's include/exclude globs and skips archived repositories. `run(name, { actor? })` enqueues one schedule now (also a disabled one), recording `actor` on the jobs; `tick()` is exposed for tests. Every job a schedule queues carries its `schedule` name, so `scheduleRuns(jobs, limit)` can group a schedule's jobs into runs (jobs queued together share `createdAt`), newest first, with counts per status, analyzers, who started it by hand, first start, last end once nothing is pending, and up to five failures.
+A schedule without `groups` covers every root group (`rootGroups`), so a subgroup never gets a second group-scope run of the same analyzer; a subgroup named in `groups` gets its own. The server's freshness sweep, unlike schedules, targets every group, subgroups included, with group-scope analyzers.
+
+Jobs already queued or running for the same analyzer, repository and ref are skipped (`enqueueUnique`). `resolveRepos` defaults to `groupRepositories(config)`: it lists each include glob's static prefix with `GitForge.listRepositories`, reads includes without wildcards (exact repository paths) with `GitForge.getRepository` instead of listing them as namespaces, filters by the group's include/exclude globs and skips archived repositories. A subgroup is never listed itself: its root group is, and the members `resolveRepo` puts in the subgroup are kept. `run(name, { actor? })` enqueues one schedule now (also a disabled one), recording `actor` on the jobs; `tick()` is exposed for tests. Every job a schedule queues carries its `schedule` name, so `scheduleRuns(jobs, limit)` can group a schedule's jobs into runs (jobs queued together share `createdAt`), newest first, with counts per status, analyzers, who started it by hand, first start, last end once nothing is pending, and up to five failures.
 
 ## Freshness
 

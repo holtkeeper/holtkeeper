@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  moveToSubgroup,
   parsePastedPaths,
   parseRepoHubSearch,
   parseRepoKey,
@@ -11,6 +12,7 @@ import {
   repoName,
   repoSplat,
   splitRepoPath,
+  subgroupDraft,
   suggestRepos,
   validateGroupId,
   validateRepoPath,
@@ -79,6 +81,61 @@ test('withRepos adds paths once and lifts their exclusion', () => {
   expect(withRepos({ ...group, title: 'Game studio' }, 'work', ['games/app']).title).toBe(
     'Game studio',
   )
+})
+
+describe('subgroups', () => {
+  const forge = 'gitlab.acme.dev'
+  const groups = [
+    { id: 'shapes', data: { forge, include: ['acme/*'], exclude: [] } },
+    {
+      id: 'shapes.round',
+      data: { title: 'Round', forge, include: ['acme/disc', 'acme/ring'], exclude: [] },
+    },
+    { id: 'shapes.flat', data: { forge, include: ['acme/t*'], exclude: ['acme/ring'] } },
+    { id: 'shapes.solo', data: { forge, include: ['acme/cube'], exclude: [] } },
+  ]
+
+  test('moving into a subgroup includes the path and lifts its exclusion', () => {
+    expect(moveToSubgroup(groups, 'acme/ring', undefined, 'shapes.flat')).toEqual([
+      { id: 'shapes.flat', data: { forge, include: ['acme/t*', 'acme/ring'], exclude: [] } },
+    ])
+  })
+
+  test('the source drops an exact path or excludes a path its globs match', () => {
+    expect(moveToSubgroup(groups, 'acme/ring', 'shapes.round', 'shapes.flat')[1]).toEqual({
+      id: 'shapes.round',
+      data: { title: 'Round', forge, include: ['acme/disc'], exclude: [] },
+    })
+    expect(moveToSubgroup(groups, 'acme/tile', ['shapes.flat'], 'shapes.round')[1]).toEqual({
+      id: 'shapes.flat',
+      data: { forge, include: ['acme/t*'], exclude: ['acme/ring', 'acme/tile'] },
+    })
+  })
+
+  test('a source left without include patterns excludes the path instead', () => {
+    expect(moveToSubgroup(groups, 'acme/cube', 'shapes.solo', 'shapes.round')[1]).toEqual({
+      id: 'shapes.solo',
+      data: { forge, include: ['acme/cube'], exclude: ['acme/cube'] },
+    })
+  })
+
+  test('unknown groups and the target itself are skipped', () => {
+    expect(
+      moveToSubgroup(groups, 'acme/disc', ['shapes.round', 'shapes.gone'], 'shapes.round'),
+    ).toHaveLength(1)
+    expect(moveToSubgroup(groups, 'acme/disc', undefined, 'shapes.gone')).toEqual([])
+  })
+
+  test('a new subgroup takes the parent forge and its key under the parent', () => {
+    const parent = groups[0] ?? { id: '', data: { forge, include: [], exclude: [] } }
+    expect(
+      subgroupDraft(parent, ' edge ', '  Edges ', ['acme/disc', ' acme/e* ', 'acme/disc']),
+    ).toEqual({
+      id: 'shapes.edge',
+      data: { title: 'Edges', forge, include: ['acme/disc', 'acme/e*'], exclude: [] },
+    })
+    expect(subgroupDraft(parent, 'edge', ' ', []).data).toEqual({ forge, include: [], exclude: [] })
+  })
 })
 
 describe('parsePastedPaths', () => {

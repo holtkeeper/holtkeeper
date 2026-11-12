@@ -215,6 +215,17 @@ describe('Needs attention rules', () => {
     expect(group[0]?.action.type).toBe('open')
   })
 
+  test('a subgroup analysis failure belongs to the subgroup and its parent', () => {
+    const items = failureItems(
+      sources({
+        failedJobs: [job({ path: 'shapes.round', group: 'shapes.round', errorSignature: 'sig-d' })],
+      }),
+    )
+    expect(items[0]?.repos).toEqual([
+      { repo: 'work:shapes.round', groups: ['shapes.round', 'shapes'] },
+    ])
+  })
+
   test('failures without a signature group per analyzer and repository', () => {
     const items = failureItems(
       sources({

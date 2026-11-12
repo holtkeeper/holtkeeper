@@ -4,9 +4,9 @@ import type {
   Family,
   GroupMatch,
   GuideChainLayer,
-  GuideChainLayerKind,
   GuideChainView,
   GuideGenerated,
+  GuideLayer,
   GuideScopeKey,
   GuideSection,
   GuideSectionName,
@@ -18,9 +18,10 @@ import type {
   RepoSummary,
   Scope,
 } from '@holtkeeper/api'
+import { groupLineage, isSubgroup, parentGroup } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
-import { type GroupTitleOf, keyAsTitle } from './group-titles.ts'
+import { type GroupTitleOf, groupPathTitle, keyAsTitle } from './group-titles.ts'
 import { type ScopeCounts, type ScopeView, groupCounts, viewGroup } from './home-scope.ts'
 import { parseRepoKey, repoKey } from './repo.ts'
 import { namesFocus } from './scope.ts'
@@ -124,7 +125,10 @@ export function parseSpace(key: string | undefined): Space | undefined {
   return repo ? { kind: 'repo', repo } : undefined
 }
 
-/** A scope key in words: `All repositories`, `Team games`, the family's name, a repository path. */
+/**
+ * A scope key in words: `All repositories`, `Team games`, `Team Games › Board` for a subgroup, the
+ * family's name, a repository path.
+ */
 export function scopeLabel(
   key: GuideScopeKey,
   families: readonly Family[],
@@ -133,7 +137,7 @@ export function scopeLabel(
   const space = parseSpace(key)
   if (!space) return key
   if (space.kind === 'all') return 'All repositories'
-  if (space.kind === 'group') return `Team ${titleOf(space.group)}`
+  if (space.kind === 'group') return `Team ${groupPathTitle(titleOf, space.group)}`
   if (space.kind === 'family')
     return families.find((f) => f.id === space.family)?.name ?? 'Unknown family'
   return space.repo.path
@@ -145,17 +149,26 @@ export interface FamilyNode {
   repos: RepoRef[]
 }
 
-/** A team (config group) with its families and the repositories in no family. */
+/**
+ * A team (config group) with its subgroups, its families and the repositories in no family. A
+ * repository sits under the deepest group holding it: a team lists only members in none of its
+ * subgroups.
+ */
 export interface TeamNode {
   group: string
+  subgroups: TeamNode[]
   families: FamilyNode[]
   repos: RepoRef[]
 }
 
 /** The spaces sidebar below *All*: teams in scope, repositories in no group, and folding counts. */
 export interface SpaceTree {
+  /** Root groups; a team the view keeps only for some of its subgroups lists just those. */
   teams: TeamNode[]
-  /** Teams the view folds into the collapsed *Other teams* row. */
+  /**
+   * Teams the view folds into the collapsed *Other teams* row, including the rest of a team shown
+   * only for some of its subgroups.
+   */
   others: TeamNode[]
   /** Repositories of the folded teams that no shown team holds. */
   otherRepos: number
@@ -188,11 +201,15 @@ function nest(repos: readonly RepoRef[], families: readonly Family[]) {
 }
 
 /**
- * Teams → families → repositories for the spaces sidebar. A repository in several groups shows
- * under each; a family shows under every team holding a member, listing the members of that team.
- * *My teams* keeps the viewer's home teams (a team named in a `frontend + storefront` home entry
- * counts) and folds the rest, nothing without home groups; a group position keeps that one team
- * and folds nothing. Every count of the switch counts repositories.
+ * Teams → subgroups → families → repositories for the spaces sidebar. The top level is root
+ * groups; a repository shows under its deepest group in each team (under both of two sibling
+ * subgroups holding it), and a family shows under every node holding a member, listing that
+ * node's members. *My teams* keeps the viewer's home teams (a team named in a
+ * `frontend + storefront` home entry counts) and folds the other root groups, nothing without
+ * home groups; a group position keeps that one team and folds nothing. A home group or position
+ * on a subgroup keeps its parent team limited to that subgroup; under *My teams* the rest of that
+ * team (its other subgroups and direct members) folds into *Other teams*. Every count of the switch counts
+ * repositories.
  */
 export function buildSpaceTree(
   repos: readonly RepoSummary[],
@@ -200,21 +217,44 @@ export function buildSpaceTree(
   view: ScopeView,
   homeGroups: readonly GroupMatch[],
 ): SpaceTree {
-  const groups = [...new Set(repos.flatMap((r) => r.groups))].toSorted()
+  const lineages = new Map(repos.map((r) => [r, new Set(r.groups.flatMap(groupLineage))]))
+  const groupsOf = (r: RepoSummary) => lineages.get(r) ?? new Set<string>()
+  const groups = [...new Set(repos.flatMap((r) => [...groupsOf(r)]))].toSorted()
+  const roots = groups.filter((group) => !isSubgroup(group))
   const home = groups.filter((group) => isHomeTeam(homeGroups, group))
   const picked = viewGroup(view)
-  const shown =
-    view === 'mine' ? home : picked === undefined ? groups : groups.filter((g) => g === picked)
-  const node = (group: string): TeamNode => ({
-    group,
-    ...nest(
-      repos.filter((r) => r.groups.includes(group)).map((r) => r.repo),
-      families,
-    ),
-  })
-  const teams = shown.map(node)
-  const others =
-    view === 'mine' && homeGroups.length ? groups.filter((g) => !shown.includes(g)).map(node) : []
+  const selected =
+    view === 'mine' ? home : picked === undefined ? roots : groups.filter((g) => g === picked)
+  const node = (
+    group: string,
+    keep: (sub: string) => boolean = () => true,
+    withDirect = true,
+  ): TeamNode => {
+    const members = repos.filter((r) => groupsOf(r).has(group))
+    const subgroups = groups.filter((g) => parentGroup(g) === group)
+    const direct = withDirect
+      ? members.filter((r) => !subgroups.some((sub) => groupsOf(r).has(sub))).map((r) => r.repo)
+      : []
+    return {
+      group,
+      subgroups: subgroups.filter(keep).map((sub) => node(sub)),
+      ...nest(direct, families),
+    }
+  }
+  const teamOf = (root: string): TeamNode | undefined => {
+    if (selected.includes(root)) return node(root)
+    const subs = selected.filter((g) => parentGroup(g) === root)
+    return subs.length ? node(root, (sub) => subs.includes(sub), false) : undefined
+  }
+  const teams = roots.flatMap((root) => teamOf(root) ?? [])
+  const shownRoots = new Set(teams.map((team) => team.group))
+  const restOf = (root: string): TeamNode[] => {
+    if (!shownRoots.has(root)) return [node(root)]
+    if (selected.includes(root)) return []
+    const rest = node(root, (sub) => !selected.includes(sub))
+    return rest.subgroups.length || rest.families.length || rest.repos.length ? [rest] : []
+  }
+  const others = view === 'mine' && homeGroups.length ? roots.flatMap(restOf) : []
   const ungrouped =
     view !== 'all'
       ? { families: [], repos: [] }
@@ -223,7 +263,7 @@ export function buildSpaceTree(
           families,
         )
   const otherRepos = repos.filter(
-    (r) => r.groups.length > 0 && !r.groups.some((group) => shown.includes(group)),
+    (r) => r.groups.length > 0 && !selected.some((group) => groupsOf(r).has(group)),
   ).length
   return {
     teams,
@@ -231,7 +271,7 @@ export function buildSpaceTree(
     otherRepos,
     ungrouped,
     counts: {
-      mine: repos.filter((r) => r.groups.some((group) => home.includes(group))).length,
+      mine: repos.filter((r) => home.some((group) => groupsOf(r).has(group))).length,
       all: repos.length,
       groups: groupCounts(repos.map((r) => r.groups)),
     },
@@ -314,23 +354,24 @@ export function budgetSegments(
 export const tokensOf = (chars: number): number => Math.round(chars / 4)
 
 /** The letter and name of a chain layer kind, as the Guide's legend shows them. */
-export const layerKinds: Readonly<Record<GuideChainLayerKind, { letter: string; label: string }>> =
-  {
-    'repo-file': { letter: 'D', label: 'Repository files' },
-    repo: { letter: 'R', label: 'Repository' },
-    family: { letter: 'F', label: 'Family' },
-    group: { letter: 'G', label: 'Group' },
-    all: { letter: 'O', label: 'All repositories' },
-    learnings: { letter: 'L', label: 'Learned' },
-    policies: { letter: 'P', label: 'Policies' },
-    generated: { letter: 'A', label: 'Generated' },
-    notes: { letter: 'N', label: 'Notes' },
-  }
+export const layerKinds: Readonly<Record<GuideLayer, { letter: string; label: string }>> = {
+  'repo-file': { letter: 'D', label: 'Repository files' },
+  repo: { letter: 'R', label: 'Repository' },
+  family: { letter: 'F', label: 'Family' },
+  subgroup: { letter: 'S', label: 'Subgroup' },
+  group: { letter: 'G', label: 'Group' },
+  all: { letter: 'O', label: 'All repositories' },
+  learnings: { letter: 'L', label: 'Learned' },
+  policies: { letter: 'P', label: 'Policies' },
+  generated: { letter: 'A', label: 'Generated' },
+  notes: { letter: 'N', label: 'Notes' },
+}
 
 /** The kinds the sections table shows a column of letters for, broadest first. */
-export const tableLayerKinds: readonly GuideChainLayerKind[] = [
+export const tableLayerKinds: readonly GuideLayer[] = [
   'all',
   'group',
+  'subgroup',
   'family',
   'repo',
   'learnings',
@@ -342,7 +383,7 @@ interface SectionRow {
   section: GuideSectionName
   label: string
   /** Kinds of `tableLayerKinds` that give the section text. */
-  layers: ReadonlySet<GuideChainLayerKind>
+  layers: ReadonlySet<GuideLayer>
   /** Non-empty lines of this space's own rules. */
   rules: number
   version: number
@@ -350,11 +391,13 @@ interface SectionRow {
   status: 'proposal' | 'set' | 'inherited' | 'empty'
 }
 
-const ownKind = (scope: GuideScopeKey): GuideChainLayerKind =>
+const ownKind = (scope: GuideScopeKey): GuideLayer =>
   scope === 'all'
     ? 'all'
     : scope.startsWith('group:')
-      ? 'group'
+      ? isSubgroup(scope.slice('group:'.length))
+        ? 'subgroup'
+        : 'group'
       : scope.startsWith('family:')
         ? 'family'
         : 'repo'
@@ -372,7 +415,7 @@ export function sectionRows(
     const own = sections.find((s) => s.section === meta.id)
     if (!own) return []
     const fromChain = chain?.sections.find((s) => s.section === meta.id)?.layers
-    const layers = new Set<GuideChainLayerKind>(
+    const layers = new Set<GuideLayer>(
       fromChain
         ? fromChain.map((layer) => layer.kind)
         : [
@@ -428,8 +471,12 @@ interface SpaceCrumb {
   space: Space
 }
 
-const teamCrumb = (group: string | undefined): SpaceCrumb[] =>
-  group ? [{ label: group, space: { kind: 'group', group } }] : []
+const teamCrumb = (group: string | undefined, titleOf: GroupTitleOf): SpaceCrumb[] =>
+  group
+    ? groupLineage(group)
+        .toReversed()
+        .map((key) => ({ label: titleOf(key), space: { kind: 'group', group: key } }))
+    : []
 
 const familyCrumb = (family: Family): SpaceCrumb => ({
   label: family.name,
@@ -437,29 +484,31 @@ const familyCrumb = (family: Family): SpaceCrumb => ({
 })
 
 /**
- * The trail of spaces from *All* to `space`: All, the team, the family, the repository. A
- * repository's team is its first group; a family's team is the first group of its first member
- * the viewer sees.
+ * The trail of spaces from *All* to `space`: All, the team, its subgroup, the family, the
+ * repository. A repository's team is its first group (the deepest, as the server orders them); a
+ * family's team is the first group of its first member the viewer sees. Groups are labelled by
+ * `titleOf` (default their keys).
  */
 export function spaceTrail(
   space: Space,
   repos: readonly RepoSummary[],
   families: readonly Family[],
+  titleOf: GroupTitleOf = keyAsTitle,
 ): SpaceCrumb[] {
   const all: SpaceCrumb = { label: 'All repositories', space: { kind: 'all' } }
   const groupsOf = (key: string) => repos.find((r) => repoKey(r.repo) === key)?.groups ?? []
   if (space.kind === 'all') return [all]
-  if (space.kind === 'group') return [all, ...teamCrumb(space.group)]
+  if (space.kind === 'group') return [all, ...teamCrumb(space.group, titleOf)]
   if (space.kind === 'family') {
     const family = families.find((f) => f.id === space.family)
     const group = family?.members.map(groupsOf).find((groups) => groups.length)?.[0]
-    return [all, ...teamCrumb(group), ...(family ? [familyCrumb(family)] : [])]
+    return [all, ...teamCrumb(group, titleOf), ...(family ? [familyCrumb(family)] : [])]
   }
   const key = repoKey(space.repo)
   const family = families.find((f) => f.members.includes(key))
   return [
     all,
-    ...teamCrumb(groupsOf(key)[0]),
+    ...teamCrumb(groupsOf(key)[0], titleOf),
     ...(family ? [familyCrumb(family)] : []),
     { label: space.repo.path, space },
   ]

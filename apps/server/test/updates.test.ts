@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { GroupListingView, RepoUpdatesView } from '@holtkeeper/api'
+import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -69,6 +70,8 @@ const mr = (patch: Partial<MergeRequestRecord> = {}): MergeRequestRecord => ({
   headSha: HEAD,
   ...patch,
 })
+
+const as = (role: string) => ({ 'x-forwarded-user': role, 'x-forwarded-groups': role })
 
 const deps = (): ServerDeps => {
   const vault = aesVault('v'.repeat(32))
@@ -295,5 +298,93 @@ describe('polling', () => {
       { forge: 'work', path: 'games/a' },
       { forge: 'work', path: 'games/old' },
     ])
+  })
+
+  test('a subgroup shows its parent listing narrowed and never lists the forge itself', async () => {
+    const listings: string[] = []
+    const listingForge = {
+      ...fakeForge,
+      listRepositories: async function* (namespace: string) {
+        listings.push(namespace)
+        yield* [
+          { path: 'shapes/circle', archived: false },
+          { path: 'shapes/oval', archived: false },
+          { path: 'shapes/square', archived: false },
+        ]
+      },
+    } as unknown as GitForge
+    const nested = parseConfig({
+      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge } },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'], exclude: ['shapes/oval'] },
+        'shapes.round': { forge: 'work', include: ['shapes/circle', 'shapes/oval'] },
+      },
+    })
+    const app = createApp({ ...deps(), config: nested })
+    const empty = (await (
+      await app.request('/api/repos/updates/groups/shapes.round')
+    ).json()) as GroupListingView
+    expect(empty).toMatchObject({ parent: 'shapes', repos: [], attempts: [] })
+
+    const listed = (await (
+      await app.request('/api/repos/updates/groups/shapes.round/list', { method: 'POST' })
+    ).json()) as GroupListingView
+    expect(listings).toEqual(['shapes'])
+    expect(listed.parent).toBe('shapes')
+    expect(listed.repos).toEqual([{ forge: 'work', path: 'shapes/circle' }])
+    expect(listed.matched).toEqual([
+      { forge: 'work', path: 'shapes/circle' },
+      { forge: 'work', path: 'shapes/square' },
+    ])
+    expect(listed.attempts).toHaveLength(1)
+
+    const poller = serverPoller({ ...deps(), config: nested }, createEventDispatcher(deps()))
+    const direct = await poller?.listGroup('shapes.round')
+    expect(direct?.repos).toEqual([{ forge: 'work', path: 'shapes/circle' }])
+    expect(listings).toEqual(['shapes'])
+  })
+
+  test('a subgroup-only writer cannot list the parent and sees no parent attempts', async () => {
+    const listings: string[] = []
+    const listingForge = {
+      ...fakeForge,
+      listRepositories: async function* (namespace: string) {
+        listings.push(namespace)
+        yield* [{ path: 'shapes/circle', archived: false }]
+      },
+    } as unknown as GitForge
+    const nested = parseConfig({
+      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge } },
+      groups: {
+        shapes: { forge: 'work', include: ['shapes/*'] },
+        'shapes.round': { forge: 'work', include: ['shapes/circle'] },
+      },
+    })
+    const auth = headerAuth({
+      roles: {
+        round: [
+          { scope: { groups: ['shapes.round'] }, actions: ['settings:read', 'settings:write'] },
+        ],
+        lead: [{ scope: { groups: ['shapes'] }, actions: ['settings:read', 'settings:write'] }],
+      },
+    })
+    const app = createApp({ ...deps(), auth, config: nested })
+    const refused = await app.request('/api/repos/updates/groups/shapes.round/list', {
+      method: 'POST',
+      headers: as('round'),
+    })
+    expect(refused.status).toBe(403)
+    expect(listings).toEqual([])
+    const allowed = await app.request('/api/repos/updates/groups/shapes.round/list', {
+      method: 'POST',
+      headers: as('lead'),
+    })
+    expect(allowed.status).toBe(200)
+    expect(listings).toEqual(['shapes'])
+    const view = (await (
+      await app.request('/api/repos/updates/groups/shapes.round', { headers: as('round') })
+    ).json()) as GroupListingView
+    expect(view.repos).toEqual([{ forge: 'work', path: 'shapes/circle' }])
+    expect(view.attempts).toEqual([])
   })
 })

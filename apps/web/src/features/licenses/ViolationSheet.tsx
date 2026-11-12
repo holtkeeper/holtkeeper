@@ -1,4 +1,4 @@
-import type { LicensePolicySummary, LicenseViolation } from '@holtkeeper/api'
+import { type LicensePolicySummary, type LicenseViolation, leafGroups } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { Copy, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
@@ -59,9 +59,9 @@ function Repositories({ violation }: { violation: LicenseViolation }) {
               </Td>
               <Td>
                 <span className="flex flex-wrap gap-1">
-                  {entry.groups.map((group) => (
+                  {leafGroups(entry.groups).map((group) => (
                     <Tag key={group}>
-                      <GroupName group={group} />
+                      <GroupName group={group} path />
                     </Tag>
                   ))}
                 </span>
