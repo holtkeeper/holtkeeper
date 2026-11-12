@@ -66,6 +66,17 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow-x: auto;
+}
+
+.hk-screen-body > .hk-btn,
+.hk-stack > .hk-btn,
+.hk-sheet > .hk-btn {
+  align-self: flex-start;
+}
+
+.hk-screen-body > .hk-btn {
+  margin: 0 0.75rem 0.75rem;
 }
 
 .hk-screen-body > .hk-pad {
@@ -223,6 +234,7 @@
 
 .hk-btn {
   display: inline-flex;
+  flex: none;
   gap: 0.35rem;
   align-items: center;
   justify-content: center;
@@ -284,6 +296,8 @@
 
 .hk-seg {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--hk-line);
@@ -291,7 +305,7 @@
   background: var(--hk-raise);
 }
 
-.hk-seg span {
+.hk-seg > span {
   display: inline-flex;
   gap: 0.35rem;
   align-items: center;
@@ -301,9 +315,10 @@
   color: var(--hk-mut);
   font-size: 0.75rem;
   font-weight: 500;
+  white-space: nowrap;
 }
 
-.hk-seg span.on {
+.hk-seg > span.on {
   background: var(--hk-panel);
   box-shadow: 0 0 0 1px var(--hk-line2);
   color: var(--hk-fg);
@@ -317,7 +332,7 @@
   border-bottom: 1px solid var(--hk-line);
 }
 
-.hk-tabs-ui span {
+.hk-tabs-ui > span {
   display: inline-flex;
   gap: 0.35rem;
   align-items: center;
@@ -330,7 +345,7 @@
   white-space: nowrap;
 }
 
-.hk-tabs-ui span.on {
+.hk-tabs-ui > span.on {
   border-bottom-color: var(--hk-fg);
   color: var(--hk-fg);
 }
@@ -883,6 +898,7 @@
 
 .sl-markdown-content .hk-slack-text ul {
   padding-left: 1.1rem;
+  list-style: disc;
 }
 
 .sl-markdown-content .hk-slack-text li + li {

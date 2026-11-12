@@ -13,7 +13,7 @@ interface Props {
 const { channel, topic, channels, workspace = 'Acme' } = Astro.props
 ---
 
-<figure class="hk-ui-root hk-slack" aria-label={`Slack: #${channel}`}>
+<figure class="hk-ui-root hk-slack not-content" aria-label={`Slack: #${channel}`}>
   <div class="hk-slack-top" aria-hidden="true"><span>Search {workspace}</span></div>
   <div class:list={['hk-slack-main', { 'no-side': !channels }]}>
     {

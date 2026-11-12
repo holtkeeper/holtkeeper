@@ -11,7 +11,7 @@ const { file, stat, lines } = Astro.props
 const kind = { '+': 'add', '-': 'del', ' ': undefined } as const
 ---
 
-<div class="hk-diff">
+<div class="hk-ui-root hk-diff not-content">
   {
     file && (
       <div class="hk-diff-file">

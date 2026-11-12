@@ -13,7 +13,7 @@ const { author = 'Holtkeeper', severity, where } = Astro.props
 const tone = { critical: 'bad', major: 'warn', minor: undefined, info: 'info' } as const
 ---
 
-<div class="hk-comment">
+<div class="hk-ui-root hk-comment not-content">
   <div class="hk-comment-who">
     {author === 'Holtkeeper' && <img src={botAvatar} alt="" width="20" height="20" />}
     <b>{author}</b>
