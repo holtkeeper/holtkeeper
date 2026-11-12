@@ -23,7 +23,7 @@ import {
   reviewCheckNames,
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
-import { commentBody, summaryNote, threadNote } from './format.ts'
+import { commentBody, isSummaryNote, summaryNote, threadNote } from './format.ts'
 import {
   type Guideline,
   type PathInstruction,
@@ -52,6 +52,12 @@ export interface ReviewOptions {
   minSeverity: ReviewSeverity
   includeChecks: boolean | ReviewCheckName[]
   approve: 'never' | 'when-clean'
+  /**
+   * Which of our unresolved summary threads to resolve after posting: `when-clean` (default) all
+   * of them when the verdict is `looks-good`, `always` all of them after every posted review,
+   * `never` none.
+   */
+  resolveSummary?: 'when-clean' | 'always' | 'never'
   /** `deep` reviews on the `deep` model tier (Opus) instead of `main` (Sonnet). Default `standard`. */
   depth?: 'standard' | 'deep'
   ignore: string[]
@@ -466,6 +472,50 @@ const post: ReviewSteps['post'] = async (run, loaded, data) => {
   }
 }
 
+/**
+ * Ids of unresolved summary threads (`summaryNote` bodies outside the diff) started by `owner`.
+ * Finding threads and notes of other accounts are never among them.
+ */
+export function summaryThreads(discussions: readonly Discussion[], owner: string): string[] {
+  const own = owner.toLowerCase()
+  return discussions.flatMap((discussion) => {
+    const first = discussion.notes.find((note) => !note.system)
+    if (discussion.position || !discussion.resolvable || discussion.resolved || !first) return []
+    if (!isSummaryNote(first.body) || first.author.toLowerCase() !== own) return []
+    return [discussion.id]
+  })
+}
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+async function resolveSummaries(run: ReviewRun, loaded: LoadedReview, data: ReviewData) {
+  const policy = run.options.resolveSummary ?? 'when-clean'
+  if (!run.forge.resolveDiscussion || policy === 'never') return
+  if (policy === 'when-clean' && data.verdict !== 'looks-good') return
+  const owner =
+    (await run.forge.getCurrentUser?.().catch(() => undefined))?.username ?? run.botUsername
+  if (!owner) {
+    run.log?.('resolving summary threads skipped: the forge account is unknown')
+    return
+  }
+  let ids: string[]
+  try {
+    ids = summaryThreads(await run.forge.listDiscussions(run.repo.path, loaded.mr.id), owner)
+  } catch (error) {
+    run.log?.(`listing summary threads failed: ${errorText(error)}`)
+    return
+  }
+  for (const id of ids) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop
+      await run.forge.resolveDiscussion(run.repo.path, loaded.mr.id, id, true)
+      run.log?.(`resolved summary thread ${id}`)
+    } catch (error) {
+      run.log?.(`resolving summary thread ${id} failed: ${errorText(error)}`)
+    }
+  }
+}
+
 /** The default steps. */
 export const defaultSteps: ReviewSteps = {
   load,
@@ -550,7 +600,7 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
       last.skipped.some((s) => s.reason === 'too-large')
     )
       return data
-    return steps.post(run, loaded, data)
+    return postAndResolve(steps, run, loaded, data)
   }
 
   const files = filesOf(scope)
@@ -665,7 +715,18 @@ async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
     checks: found.checks,
     ...(usage.turns > 0 || usage.costUsd !== undefined ? { usage } : {}),
   }
-  return steps.post(run, loaded, data)
+  return postAndResolve(steps, run, loaded, data)
+}
+
+async function postAndResolve(
+  steps: ReviewSteps,
+  run: ReviewRun,
+  loaded: LoadedReview,
+  data: ReviewData,
+) {
+  const posted = await steps.post(run, loaded, data)
+  await resolveSummaries(run, loaded, posted)
+  return posted
 }
 
 async function applyThreadActions(run: ReviewRun, loaded: LoadedReview, threads: ThreadAction[]) {

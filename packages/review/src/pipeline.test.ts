@@ -9,13 +9,15 @@ import type { QualityCheck } from '@holtkeeper/quality'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { HEAD, addedFile, fakeAgent, fakeForge } from '../test/fakes.ts'
-import { findingMarker } from './dedupe.ts'
+import { findingMarker, openThreads } from './dedupe.ts'
+import { summaryMarker } from './format.ts'
 import type { MediaReviewer } from './media.ts'
 import {
   type ReviewOptions,
   type ReviewRun,
   requireReviewForge,
   reviewMergeRequest,
+  summaryThreads,
 } from './pipeline.ts'
 import type { AgentReview, ReviewData } from './schema.ts'
 import { DEFAULT_IGNORE } from './scope.ts'
@@ -648,5 +650,168 @@ describe('reviewMergeRequest', () => {
 
   test('requireReviewForge names missing methods', () => {
     expect(() => requireReviewForge({ kind: 'x' } as never)).toThrow('getMergeRequest')
+  })
+})
+
+const summaryThread = (id: string, author: string, extra: Partial<Discussion> = {}) => ({
+  id,
+  resolvable: true,
+  resolved: false,
+  notes: [
+    {
+      id,
+      author,
+      body: `### Holtkeeper review: Needs changes\n\nOlder run.\n\n${summaryMarker('o'.repeat(40))}`,
+      createdAt: '',
+      system: false,
+    },
+  ],
+  ...extra,
+})
+const earlier = (): Discussion[] => [
+  summaryThread('old-summary', 'holtkeeper'),
+  summaryThread('done-summary', 'holtkeeper', { resolved: true }),
+  summaryThread('quoted-summary', 'jane'),
+  summaryThread('inline-summary', 'holtkeeper', {
+    position: { path: 'src/price.ts', line: 2, side: 'new', headSha: HEAD },
+  }),
+  {
+    id: 'finding',
+    resolvable: true,
+    resolved: false,
+    notes: [
+      {
+        id: 'finding',
+        author: 'holtkeeper',
+        body: `Widget leaks.\n\n${findingMarker('f-1')}`,
+        createdAt: '',
+        system: false,
+      },
+    ],
+    position: { path: 'src/price.ts', line: 2, side: 'new', headSha: HEAD },
+  },
+]
+
+const setup = (
+  verdict?: AgentReview['verdict'],
+  resolveSummary?: ReviewOptions['resolveSummary'],
+) => {
+  const fake = fakeForge({ files, discussions: earlier(), summaryAuthor: 'holtkeeper' })
+  const lines: string[] = []
+  const run = runOf({
+    forge: requireReviewForge(fake.forge),
+    botUsername: 'holtkeeper',
+    log: (line) => lines.push(line),
+    ...(verdict ? { agent: fakeAgent({ review: [review([], verdict)] }).agent } : {}),
+    ...(resolveSummary ? { options: { ...options, resolveSummary } } : {}),
+  })
+  return { ...fake, run, lines }
+}
+
+describe('summary threads', () => {
+  test('a clean run resolves its own summary and earlier ones of our account', async () => {
+    const { run, resolved, submissions } = setup('looks-good')
+    const data = await reviewMergeRequest(run)
+    expect(data.verdict).toBe('looks-good')
+    expect(submissions).toHaveLength(1)
+    expect(resolved).toEqual(['old-summary', 'summary-1'])
+  })
+
+  test('summary threads are not finding threads', () => {
+    expect(openThreads(earlier(), 'holtkeeper').map((t) => t.discussionId)).toEqual([
+      'inline-summary',
+      'finding',
+    ])
+    expect(summaryThreads(earlier(), 'holtkeeper')).toEqual(['old-summary'])
+    expect(summaryThreads(earlier(), 'jane')).toEqual(['quoted-summary'])
+  })
+
+  test('a needs-changes run resolves nothing', async () => {
+    const { run, resolved } = setup('needs-changes')
+    expect((await reviewMergeRequest(run)).verdict).toBe('needs-changes')
+    expect(resolved).toEqual([])
+  })
+
+  test('never resolves nothing, always resolves after needs-changes too', async () => {
+    const never = setup('looks-good', 'never')
+    await reviewMergeRequest(never.run)
+    expect(never.resolved).toEqual([])
+
+    const always = setup('needs-changes', 'always')
+    await reviewMergeRequest(always.run)
+    expect(always.resolved).toEqual(['old-summary', 'summary-1'])
+  })
+
+  test('a forge without resolveDiscussion skips quietly', async () => {
+    const { forge, submissions } = fakeForge({ files, discussions: earlier() })
+    const listed: number[] = []
+    const bare = {
+      ...forge,
+      resolveDiscussion: undefined,
+      listDiscussions: async () => {
+        listed.push(1)
+        return earlier()
+      },
+    }
+    const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(bare) }))
+    expect(data.verdict).toBe('looks-good')
+    expect(submissions).toHaveLength(1)
+    expect(listed).toEqual([1])
+  })
+
+  test('a failing resolve does not fail the review', async () => {
+    const { run, lines } = setup()
+    const failing = {
+      ...run.forge,
+      resolveDiscussion: async (_repo: string, _id: number, discussionId: string) => {
+        if (discussionId === 'old-summary') throw new Error('comments are off')
+      },
+    }
+    const data = await reviewMergeRequest({ ...run, forge: failing })
+    expect(data.verdict).toBe('looks-good')
+    expect(lines).toContain('resolving summary thread old-summary failed: comments are off')
+    expect(lines).toContain('resolved summary thread summary-1')
+  })
+
+  test('without any known account nothing is resolved', async () => {
+    const { forge, resolved } = fakeForge({
+      files,
+      discussions: earlier(),
+      summaryAuthor: 'holtkeeper',
+    })
+    const lines: string[] = []
+    await reviewMergeRequest(
+      runOf({ forge: requireReviewForge(forge), log: (line) => lines.push(line) }),
+    )
+    expect(resolved).toEqual([])
+    expect(lines).toContain('resolving summary threads skipped: the forge account is unknown')
+  })
+
+  test('the token account wins over a stale bot username', async () => {
+    const { forge, resolved } = fakeForge({
+      files,
+      discussions: earlier(),
+      summaryAuthor: 'holtkeeper',
+    })
+    const withUser = {
+      ...forge,
+      getCurrentUser: async () => ({ username: 'holtkeeper', name: 'H' }),
+    }
+    await reviewMergeRequest(runOf({ forge: requireReviewForge(withUser), botUsername: 'jane' }))
+    expect(resolved).toEqual(['old-summary', 'summary-1'])
+  })
+
+  test('without a bot username the token account decides what is ours', async () => {
+    const { forge, resolved } = fakeForge({
+      files,
+      discussions: earlier(),
+      summaryAuthor: 'holtkeeper',
+    })
+    const withUser = {
+      ...forge,
+      getCurrentUser: async () => ({ username: 'HoltKeeper', name: 'H' }),
+    }
+    await reviewMergeRequest(runOf({ forge: requireReviewForge(withUser) }))
+    expect(resolved).toEqual(['old-summary', 'summary-1'])
   })
 })

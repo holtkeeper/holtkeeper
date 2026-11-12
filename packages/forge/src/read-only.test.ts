@@ -15,6 +15,7 @@ function fakeForge() {
     listPipelineJobs: async () => [{ id: 1, name: 'deploy', manual: true }],
     commit: record('commit'),
     commentOnMergeRequest: record('commentOnMergeRequest'),
+    resolveDiscussion: record('resolveDiscussion'),
     registerSshKey: async () => {
       calls.push('registerSshKey')
       return { id: '1' }
@@ -43,6 +44,9 @@ describe('readOnlyForge', () => {
     const error = await guarded.commentOnMergeRequest('libs/ui', 1, 'hi').catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ReadOnlyRepositoryError)
     expect(error).toMatchObject({ repo: 'libs/ui', operation: 'commentOnMergeRequest' })
+    expect(await failure(guarded.resolveDiscussion?.('libs/ui', 1, 'd1', true))).toBeInstanceOf(
+      ReadOnlyRepositoryError,
+    )
     expect(calls).toEqual([])
   })
 

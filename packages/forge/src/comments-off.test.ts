@@ -18,6 +18,8 @@ function fakeForge() {
     readFile: async () => 'content',
     commentOnMergeRequest: record('commentOnMergeRequest'),
     replyToDiscussion: record('replyToDiscussion'),
+    resolveDiscussion: record('resolveDiscussion'),
+    listDiscussions: async () => [],
     updateMergeRequest: async () => {
       calls.push('updateMergeRequest')
       return { id: 1 }
@@ -38,6 +40,10 @@ describe('commentsOffForge', () => {
     expect(
       await guarded.replyToDiscussion?.('quiet/app', 1, 'd1', 'hi').catch((e: unknown) => e),
     ).toBeInstanceOf(MergeRequestCommentsOffError)
+    expect(
+      await guarded.resolveDiscussion?.('quiet/app', 1, 'd1', true).catch((e: unknown) => e),
+    ).toBeInstanceOf(MergeRequestCommentsOffError)
+    expect(await guarded.listDiscussions?.('quiet/app', 1)).toEqual([])
     expect(calls).toEqual([])
   })
 

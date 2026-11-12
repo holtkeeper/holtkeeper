@@ -47,6 +47,7 @@ export const reviewOptionsSchema = z.object({
   minSeverity: z.enum(severities).default('minor'),
   includeChecks: z.union([flag, list(z.enum(reviewCheckNames))]).default(['testids']),
   approve: z.enum(['never', 'when-clean']).default('never'),
+  resolveSummary: z.enum(['when-clean', 'always', 'never']).default('when-clean'),
   depth: z.enum(['standard', 'deep']).default('standard'),
   ignore: list(z.string().min(1)).default([...DEFAULT_IGNORE]),
   maxDiffLines: z.coerce.number().int().positive().default(3000),

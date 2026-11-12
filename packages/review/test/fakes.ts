@@ -31,6 +31,8 @@ interface FakeForgeState {
   contents?: Record<string, string>
   bytes?: Record<string, Uint8Array>
   reject?: (comment: ReviewSubmission['comments'][number]) => string | undefined
+  /** Posted summaries become resolvable threads of this account, as on GitLab. */
+  summaryAuthor?: string
 }
 
 /** A forge that records what the review posts. */
@@ -56,6 +58,26 @@ export function fakeForge(state: FakeForgeState) {
     readFileBytes: async (_repo: string, file: string) => state.bytes?.[file],
     submitReview: async (_repo: string, _id: number, review: ReviewSubmission) => {
       submissions.push(review)
+      if (state.summaryAuthor && review.summary) {
+        const id = `summary-${submissions.length}`
+        state.discussions = [
+          ...state.discussions,
+          {
+            id,
+            resolvable: true,
+            resolved: false,
+            notes: [
+              {
+                id,
+                author: state.summaryAuthor,
+                body: review.summary,
+                createdAt: '',
+                system: false,
+              },
+            ],
+          },
+        ]
+      }
       const failed = review.comments.flatMap((comment) => {
         const error = state.reject?.(comment)
         return error ? [{ comment, error }] : []
@@ -67,6 +89,9 @@ export function fakeForge(state: FakeForgeState) {
     },
     resolveDiscussion: async (_repo: string, _id: number, discussionId: string) => {
       resolved.push(discussionId)
+      state.discussions = state.discussions.map((discussion) =>
+        discussion.id === discussionId ? { ...discussion, resolved: true } : discussion,
+      )
     },
     commentOnMergeRequest: async (_repo: string, _id: number, body: string) => {
       notes.push(body)

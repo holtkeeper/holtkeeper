@@ -56,6 +56,13 @@ export function commentFinding(
 /** The marker of the summary note; carries the reviewed head. */
 export const summaryMarker = (head: string) => `<!-- ${MARKER_PREFIX} summary head=${head} -->`
 
+const SUMMARY_HEADING = '### Holtkeeper review:'
+
+/** Whether `body` is a summary note `summaryNote` wrote: its heading first and its marker. */
+export const isSummaryNote = (body: string) =>
+  body.trimStart().startsWith(SUMMARY_HEADING) &&
+  body.includes(`<!-- ${MARKER_PREFIX} summary head=`)
+
 const cell = (text: string) => text.replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim()
 
 /** The walkthrough as a Markdown table: files of each logical change and what changed. */
@@ -108,7 +115,7 @@ export function summaryNote(
       ? `Reviewed the changes from \`${data.previousHead?.slice(0, 8)}\` to \`${data.head.slice(0, 8)}\``
       : `Reviewed \`${data.head.slice(0, 8)}\``
   const lines = [
-    `### Holtkeeper review: ${verdict}`,
+    `${SUMMARY_HEADING} ${verdict}`,
     data.summary.trim(),
     `${scope}: ${data.stats.files} file(s), ${data.stats.changedLines} changed line(s).${data.effort ? ` Review effort: ${data.effort}/5.` : ''}`,
   ]
