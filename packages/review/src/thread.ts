@@ -6,7 +6,7 @@ import type { Agent, Toolset } from '@holtkeeper/agent'
 import type { Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
-import { runTracked } from './agent.ts'
+import { KEEP_ENGLISH, runTracked } from './agent.ts'
 import { markerOf } from './dedupe.ts'
 import { replyBody } from './format.ts'
 import type { ReviewUsage } from './schema.ts'
@@ -142,9 +142,7 @@ export async function replyToThread(options: ReplyToThreadOptions): Promise<Thre
         '- `concede` when the author is right; say so plainly and set resolve to true.',
         '- `update` when a different fix fits better: give `suggestion` with new-side `line` (and `startLine`) and the full replacement of exactly those lines.',
         'Be short and concrete. Never be defensive.',
-        options.language
-          ? `Write in ${options.language}.`
-          : 'Write in the language of the latest reply.',
+        `${options.language ? `Write in ${options.language}.` : 'Write in the language of the latest reply.'} ${KEEP_ENGLISH}`,
       ].join('\n'),
       prompt: [
         position ? `Thread on ${position.path}:${position.line}.` : 'General thread.',

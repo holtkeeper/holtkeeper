@@ -90,6 +90,13 @@ describe('reviewSystemPrompt', () => {
     expect(prompt).toContain('At most 15 comments')
     expect(prompt).toContain('Comment only on lines marked `+`')
   })
+
+  test('writes prose in the configured language and keeps code and terms in English', () => {
+    const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)], { language: 'German' }))
+    expect(prompt).toContain('the summary and the walkthrough in German')
+    expect(prompt).toContain('code comments inside them')
+    expect(prompt).toContain('in English, whatever the prose language')
+  })
 })
 
 describe('splitReviewFiles', () => {

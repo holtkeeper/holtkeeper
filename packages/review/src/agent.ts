@@ -68,11 +68,17 @@ const severityGuide = (tests: boolean) =>
     '- info: optional remarks; use sparingly.',
   ].join('\n')
 
+/** Prompt rule: whatever the prose language, code and technical terms stay in English. */
+export const KEEP_ENGLISH =
+  'Keep code, identifiers, file paths, suggestion replacements and code comments inside them, commit messages and established technical terms (API, hook, race condition, retry, ...) in English, whatever the prose language.'
+
 /** The system prompt: role, rules for lines and suggestions, severities, language. */
 export function reviewSystemPrompt(input: ReviewPromptInput): string {
-  const language = input.language
-    ? `Write titles, bodies and the summary in ${input.language}.`
-    : 'Write titles, bodies and the summary in the language of the merge request description (English when it has none).'
+  const language = `${
+    input.language
+      ? `Write titles, bodies, the summary and the walkthrough in ${input.language}.`
+      : 'Write titles, bodies, the summary and the walkthrough in the language of the merge request description (English when it has none).'
+  } ${KEEP_ENGLISH}`
   const tests = input.tests !== false
   const requestedTests = !tests && (input.requests ?? []).some((r) => r.category === 'tests')
   const listed =
@@ -424,9 +430,7 @@ export async function recheckThreads(options: {
       system: [
         'You check whether earlier code review comments were addressed. For each thread answer `fixed` when the problem is gone from the current code, `still-relevant` when it remains, `unclear` when you cannot tell. Read the files when the excerpt is not enough.',
         'note: one short sentence for the author explaining your answer.',
-        options.language
-          ? `Write notes in ${options.language}.`
-          : 'Write notes in the language of the comment.',
+        `${options.language ? `Write notes in ${options.language}.` : 'Write notes in the language of the comment.'} ${KEEP_ENGLISH}`,
       ].join('\n'),
       prompt: items.join('\n\n'),
       capabilities: ['read', 'search'],

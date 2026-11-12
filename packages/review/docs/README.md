@@ -27,25 +27,25 @@ Every note carries a hidden marker (`<!-- holtkeeper:review id=<finding> -->`); 
 
 `createReviewAnalyzer(deps)` / `reviewAnalyzer` — kind and analysis `review`, scope `repo`, needs checkout, forge, history and an optional agent. Without an agent only deterministic findings are posted and threads are not re-checked.
 
-| Option            | Default                                  | Meaning                                                                                                                              |
-| ----------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `mergeRequest`    | required                                 | MR number (iid)                                                                                                                      |
-| `mode`            | `auto`                                   | `auto`: incremental when a previous review exists and its head is an ancestor                                                        |
-| `maxComments`     | 15                                       | inline comments per run                                                                                                              |
-| `minSeverity`     | `minor`                                  | `info`, `minor`, `major`, `critical`                                                                                                 |
-| `includeChecks`   | `['testids']`                            | `true`, `false` or a list of `secrets`, `testids` (or `secrets,testids`); `testids` skips itself when the catalog is empty           |
-| `approve`         | `never`                                  | `when-clean` approves clean reviews                                                                                                  |
-| `resolveSummary`  | `when-clean`                             | `when-clean` resolves our summary threads after a `looks-good` run, `always` after every run, `never` leaves them open               |
-| `depth`           | `standard`                               | `deep` reviews on the `deep` model tier (Opus) instead of `main` (Sonnet)                                                            |
-| `ignore`          | lockfiles, generated, snapshots, dist, … | path globs (`DEFAULT_IGNORE`); globs without `/` also match base names                                                               |
-| `maxDiffLines`    | 3000                                     | skip bigger diffs (added + removed lines in scope)                                                                                   |
-| `language`        | the MR description's language            | language of comments                                                                                                                 |
-| `instructions`    | —                                        | extra rules for this run, appended after the Guide                                                                                   |
-| `media`           | `true`                                   | review images with the `MediaReviewer`                                                                                               |
-| `replyTo`         | —                                        | discussion id: answer that thread instead of reviewing                                                                               |
-| `releaseBranches` | `DEFAULT_RELEASE_BRANCHES`               | `source:target` branch globs of merge requests not reviewed (`develop:main`, `release/*:main`, `main:develop`, …); `[]` reviews them |
-| `reviewOwn`       | `false`                                  | review merge requests authored by `botUsername`                                                                                      |
-| `force`           | `false`                                  | review even what `releaseBranches` and `reviewOwn` skip (`/holtkeeper review force=true`)                                            |
+| Option            | Default                                  | Meaning                                                                                                                                     |
+| ----------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mergeRequest`    | required                                 | MR number (iid)                                                                                                                             |
+| `mode`            | `auto`                                   | `auto`: incremental when a previous review exists and its head is an ancestor                                                               |
+| `maxComments`     | 15                                       | inline comments per run                                                                                                                     |
+| `minSeverity`     | `minor`                                  | `info`, `minor`, `major`, `critical`                                                                                                        |
+| `includeChecks`   | `['testids']`                            | `true`, `false` or a list of `secrets`, `testids` (or `secrets,testids`); `testids` skips itself when the catalog is empty                  |
+| `approve`         | `never`                                  | `when-clean` approves clean reviews                                                                                                         |
+| `resolveSummary`  | `when-clean`                             | `when-clean` resolves our summary threads after a `looks-good` run, `always` after every run, `never` leaves them open                      |
+| `depth`           | `standard`                               | `deep` reviews on the `deep` model tier (Opus) instead of `main` (Sonnet)                                                                   |
+| `ignore`          | lockfiles, generated, snapshots, dist, … | path globs (`DEFAULT_IGNORE`); globs without `/` also match base names                                                                      |
+| `maxDiffLines`    | 3000                                     | skip bigger diffs (added + removed lines in scope)                                                                                          |
+| `language`        | the MR description's language            | language of comments, the summary, the walkthrough and thread replies; code, suggestions, code comments and technical terms stay in English |
+| `instructions`    | —                                        | extra rules for this run, appended after the Guide                                                                                          |
+| `media`           | `true`                                   | review images with the `MediaReviewer`                                                                                                      |
+| `replyTo`         | —                                        | discussion id: answer that thread instead of reviewing                                                                                      |
+| `releaseBranches` | `DEFAULT_RELEASE_BRANCHES`               | `source:target` branch globs of merge requests not reviewed (`develop:main`, `release/*:main`, `main:develop`, …); `[]` reviews them        |
+| `reviewOwn`       | `false`                                  | review merge requests authored by `botUsername`                                                                                             |
+| `force`           | `false`                                  | review even what `releaseBranches` and `reviewOwn` skip (`/holtkeeper review force=true`)                                                   |
 
 **Not reviewed by default.** Before any checkout, a merge request between `releaseBranches` (release candidates like `develop → main`, back-merges like `main → develop`: their code was reviewed on the way into the integration branch) or authored by `botUsername` (Holtkeeper's own update, propagation and test merge requests; compared case-insensitively, so it needs the forge's bot username set in the panel) is stored as `mode: 'skipped'` with the reason and nothing is posted. `force` overrides both; thread replies (`replyTo`) are never skipped. Set the options per repository or group through the `analyzers.review` setting.
 
