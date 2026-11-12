@@ -241,6 +241,7 @@ const rail: RailIconName[] = ['home', 'repos', 'chat', 'supply', 'quality', 'rel
     const slides = [...tour.querySelectorAll<HTMLElement>('.l-slide')]
     const dots = [...tour.querySelectorAll<HTMLElement>('.l-dots i')]
     const caption = tour.querySelector<HTMLElement>('[data-tour-caption]')
+    const strip = tour.querySelector<HTMLElement>('.l-tour-tabs')
     const captions = JSON.parse(tour.querySelector('[data-tour-captions]')?.textContent ?? '[]') as string[]
     let current = 0
     let paused = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -254,8 +255,13 @@ const rail: RailIconName[] = ['home', 'repos', 'chat', 'supply', 'quality', 'rel
       })
       dots.forEach((dot, i) => dot.classList.toggle('on', i === current))
       if (caption) caption.textContent = captions[current] ?? ''
-      tabs[current]?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-      if (focus) tabs[current]?.focus()
+      const tab = tabs[current]
+      if (strip && tab) {
+        const left = tab.offsetLeft - strip.offsetLeft
+        if (left < strip.scrollLeft || left + tab.offsetWidth > strip.scrollLeft + strip.clientWidth)
+          strip.scrollTo({ left: left - (strip.clientWidth - tab.offsetWidth) / 2, behavior: 'smooth' })
+      }
+      if (focus) tab?.focus({ preventScroll: true })
     }
 
     const pick = (next: number, focus = false) => {
