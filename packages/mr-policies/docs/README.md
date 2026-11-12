@@ -18,6 +18,7 @@ const result = await evaluatePolicies({
   bots, // optional: usernames/globs of bot users for `author.bot`
   registry, // optional: action providers, the built-ins by default
   fetch, // optional: used by the webhook action
+  commentsOff, // optional: skip actions that post on the merge request
 })
 // → { matched: { policyId, reasons[] }[], unmatched: { policyId, reason }[],
 //     outcomes: ActionOutcome[], skipAnalyzers: '*' | string[], enqueue: { analyzer, options? }[] }
@@ -26,6 +27,7 @@ const result = await evaluatePolicies({
 - **Order** — enabled policies whose `scope` (and `within`, the settings entry scope) cover the repository, most specific scope first (exact path > path glob > group > everything), list order among equals. A matching policy with `stop: true` ends evaluation.
 - **Actions** run in list order. Every action yields an `ActionOutcome` `{ policyId, action, status, detail, data? }` — `done`, `dry-run`, `skipped`, `deferred`, `unsupported`, `failed` or `intent` — with a human-readable `detail` for the audit log. Errors never escape: a throwing condition makes the policy unmatched (`error: ...`), a throwing action becomes `failed`.
 - **Idempotency** — `approve`, `merge` and `comment` (by default) happen once per head commit: the key `mr-policy:<forge>:<repo>!<id>@<sha>:<policy>:<action JSON>` is stored in `PolicyMemory` after a `done` outcome, and a later run with the same key is `skipped`. `deferred`, `failed` and dry-run outcomes are not remembered, so a later event (e.g. the pipeline turning green) retries them. The server should back `PolicyMemory` (`seen(key)`, `remember(key)`) with the store; `createMemory(limit)` is an in-memory LRU.
+- **Comments off** — with `commentsOff` (the server sets it from `mergeRequests.comments`), actions whose provider `posts` (`comment`, `label`) are `skipped` with `merge request comments are off` before they run, and `approve` drops its `summary` so it is a bare approval. Other actions run as usual.
 - **Intents** — `skipAnalyzers` is the union over matched policies (`*` wins). `enqueue` collects `enqueue` actions, deduplicated; it is not filtered by `skipAnalyzers`.
 - **Lazy facts** — the head sha (event, else `getMergeRequest`, else diff refs), the diff (`getMergeRequestDiff`) and the latest pipeline for the head sha (`listPipelines`, highest id) are loaded once per evaluation and only when a condition or action needs them.
 
@@ -70,7 +72,7 @@ Globs use `Bun.Glob`: `*` does not cross `/`, so write `**/*.md` for Markdown an
 
 ## Actions
 
-Each action is an `ActionProvider` `{ type, schema, run(action, context) → ActionResult, onceKey? }` in an `ActionRegistry`; `defineAction` wraps a provider typed by its zod schema (options are parsed before `run`, invalid ones fail the action). A new action is one file plus `createRegistry([...builtinActions, myAction])`. Providers must honour `context.dryRun`; `context.perform(detail, effect)` handles dry runs and errors.
+Each action is an `ActionProvider` `{ type, schema, run(action, context) → ActionResult, onceKey?, posts? }` (`posts`: it writes on the merge request itself, so `commentsOff` skips it; `context.commentsOff` tells others) in an `ActionRegistry`; `defineAction` wraps a provider typed by its zod schema (options are parsed before `run`, invalid ones fail the action). A new action is one file plus `createRegistry([...builtinActions, myAction])`. Providers must honour `context.dryRun`; `context.perform(detail, effect)` handles dry runs and errors.
 
 | Type              | Options                                                                    | Notes                                                                                                                                          |
 | ----------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |

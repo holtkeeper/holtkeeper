@@ -39,7 +39,7 @@ export type FieldNode =
   | { kind: 'credential'; of: string }
   | { kind: 'credentials'; of: string }
   | { kind: 'tags'; item: FieldNode }
-  | { kind: 'multi'; options: string[] }
+  | { kind: 'multi'; options: string[]; labels?: Record<string, string> }
   | { kind: 'list'; item: JsonSchema }
   | { kind: 'object'; properties: Property[] }
   | { kind: 'record'; value: JsonSchema; key: StringRules }
@@ -199,7 +199,12 @@ export function describeField(schema: unknown, root: unknown): FieldNode {
   if (resolved.type === 'array') {
     const item = resolve(resolved.items, root)
     const itemNode = describeField(item, root)
-    if (itemNode.kind === 'enum') return { kind: 'multi', options: itemNode.options }
+    if (itemNode.kind === 'enum')
+      return {
+        kind: 'multi',
+        options: itemNode.options,
+        ...(itemNode.labels ? { labels: itemNode.labels } : {}),
+      }
     if (itemNode.kind === 'credential') return { kind: 'credentials', of: itemNode.of }
     if (itemNode.kind === 'string' || itemNode.kind === 'number') {
       return { kind: 'tags', item: itemNode }

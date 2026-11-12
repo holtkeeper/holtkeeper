@@ -229,4 +229,40 @@ describe('merge request policies in webhooks', () => {
       ignored: 'no policies apply',
     })
   })
+
+  test('policy intents leave out analyzers repo.analyzers turns off', async () => {
+    const off = (kinds: string[]) =>
+      store.settings.put({
+        id: 'off',
+        key: 'repo.analyzers',
+        scope: { groups: ['games'] },
+        value: { off: kinds },
+        secret: false,
+        updatedAt: '2026-10-01T00:00:00.000Z',
+      })
+    await off(['port', 'quality'])
+    await hook('Merge Request Hook', mergeRequestHook('open'))
+    expect(await jobs()).toEqual([])
+
+    await store.settings.put({
+      id: 'p1',
+      key: 'mergeRequests.policies',
+      scope: { all: true },
+      value: [
+        {
+          id: 'ports',
+          name: 'Ports',
+          when: { event: ['update'] },
+          actions: [{ type: 'enqueue', analyzer: 'port', options: { targets: 'web' } }],
+        },
+      ],
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    await hook('Pipeline Hook', pipelineHook('success'))
+    expect(await jobs()).toEqual([])
+    await off([])
+    await hook('Pipeline Hook', pipelineHook('success'))
+    expect(await jobs()).toEqual(['port {"targets":"web","mergeRequest":7}'])
+  })
 })

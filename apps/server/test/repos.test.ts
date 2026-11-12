@@ -267,6 +267,21 @@ describe('GET /api/repos', () => {
     })
     expect((await list('auditor'))[0]?.latestAudit?.finishedAt).toBe(hoursAgo(5))
     expect((await list('analyst'))[0]?.latestAudit).toBeUndefined()
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['shapes/circle'] },
+      value: { off: ['audit'] },
+      secret: false,
+      updatedAt: hoursAgo(1),
+    })
+    const [circle] = await list('auditor')
+    expect(circle?.latestAudit).toBeUndefined()
+    expect(circle?.cells.security).toEqual({
+      value: 'Off',
+      sub: 'turned off for this repository',
+      tone: 'none',
+    })
   })
 
   test('callers without any grant on a repository do not see it', async () => {

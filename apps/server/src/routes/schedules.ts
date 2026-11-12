@@ -13,6 +13,7 @@ import { HTTPException } from 'hono/http-exception'
 
 import { appendAudit, auditActorOf } from '../audit.ts'
 import { type Env, type ServerDeps, authorize } from '../context.ts'
+import { automaticSkip } from '../jobs.ts'
 import { knownRepos, queueNewRepoJobs } from '../new-repos.ts'
 
 const GLOBAL = { kind: 'global' } as const
@@ -64,6 +65,7 @@ export function scheduleRoutes(deps: ServerDeps) {
         config,
         analyzers: deps.analyzers ?? [],
         resolveRepos: groupRepositories(config),
+        skip: automaticSkip(store, config),
       })
       const { enqueued, skipped } = await enqueueUnique(
         store.jobs,

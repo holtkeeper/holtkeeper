@@ -423,4 +423,38 @@ describe('note events', () => {
     ).toContain('not on a merge request')
     expect(await jobs()).toEqual([])
   })
+
+  test('analyzers repo.analyzers turns off are not queued by events or thread replies', async () => {
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { groups: ['games'] },
+      value: { off: ['review'], reason: 'Values only' },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    await hook('Merge Request Hook', mergeRequestEvent({ action: 'open' }))
+    expect(await jobs()).toEqual([])
+    discussions = [
+      {
+        id: 'disc-1',
+        resolvable: true,
+        resolved: false,
+        notes: [
+          {
+            id: 1,
+            author: 'holtkeeper',
+            body: 'Bug <!-- holtkeeper:review id=x -->',
+            createdAt: '',
+            system: false,
+          },
+          { id: 2, author: 'jane', body: 'Why?', createdAt: '', system: false },
+        ],
+      },
+    ]
+    expect(
+      await ignored(await hook('Note Hook', noteEvent('Why?', { type: 'DiffNote' }))),
+    ).toContain('turned off')
+    expect(await jobs()).toEqual([])
+  })
 })

@@ -35,7 +35,7 @@ import { webPaths } from '@holtkeeper/web-paths'
 
 import { type ServerDeps, groupLabeler, parseRepo, repoTarget } from './context.ts'
 import { withLiveTarget } from './learnings.ts'
-import { releaseCan, releaseServiceFor } from './releases.ts'
+import { awaitsAcceptance, releaseCan, releaseServiceFor } from './releases.ts'
 import { canReadAiScope } from './routes/ai.ts'
 import { peopleOf } from './routes/avatars.ts'
 import { homeGroupsOf } from './routes/preferences.ts'
@@ -280,24 +280,18 @@ export function awaitingVersionTitle(card: ReleaseBoardRow): string {
   return card.acceptance ? `Accepted, waiting for ${version}` : `Ready to create ${version}`
 }
 
-/** What a release card waits for, in a sentence. */
-function releaseTitle(card: ReleaseCard): string {
-  const failed = card.deploy?.environments.find((env) => env.status === 'failed')
-  if (failed && card.deploy) return `Deploy of ${card.deploy.tag} to ${failed.name} failed`
-  if (card.stage === 'awaiting-version') return awaitingVersionTitle(card)
-  if (card.stage === 'proposed') return 'Release proposed, waiting for acceptance'
-  if (card.stage === 'candidate')
-    return `${plural(card.unreleased, 'unreleased commit')}${card.unreleasedCapped ? '+' : ''} ready to propose`
-  const ready = card.deploy?.environments.find((env) => env.status === 'ready')
-  if (ready && card.deploy) return `${card.deploy.tag} is ready to deploy to ${ready.name}`
-  return 'Release waits for a decision'
-}
+/**
+ * Whether a release card is an Inbox decision: it awaits an acceptance (`awaitsAcceptance`), names
+ * a head to decide on and nobody dismissed it. Whether the caller may decide it is checked apart.
+ */
+export const releaseAwaitsDecision = (card: ReleaseCard): card is ReleaseCard & { head: string } =>
+  !card.dismissed && card.head !== undefined && awaitsAcceptance(card)
 
 /**
  * The Inbox items `principal` may decide, from shared sources: task groups whose every proposed
  * task it may run, proposed notes and learnings it may read and accept (`knowledge:read` and
- * `knowledge:write`), generated Guide text of repositories it may read and edit, releases it may run
- * (`releases:run`) and allowlist entries expiring within `ALLOWLIST_NOTICE_DAYS` (or expired) whose
+ * `knowledge:write`), generated Guide text of repositories it may read and edit, releases that
+ * await an acceptance it may run (`releases:run`, see `releaseAwaitsDecision`) and allowlist entries expiring within `ALLOWLIST_NOTICE_DAYS` (or expired) whose
  * setting it may read and write (`settings:read` and `settings:write`), and budgets at or over their
  * `warnPercent` this week whose scope it may read AI usage in and change settings of (`ai:read`
  * and `settings:write`).
@@ -445,7 +439,7 @@ function inboxItems(
   }
 
   for (const card of sources.releases) {
-    if (!card.needsAction || card.dismissed || card.head === undefined) continue
+    if (!releaseAwaitsDecision(card)) continue
     const key = keyOf(card.repo)
     if (!onRepo('releases:read', key)) continue
     const allowed = releaseCan(config, principal, card)
@@ -455,7 +449,7 @@ function inboxItems(
       item: {
         id: `release:${key}`,
         kind: 'release',
-        title: releaseTitle(card),
+        title: awaitingVersionTitle(card),
         scope: card.repo.path,
         repos: [repo],
         href: webPaths.releaseTimeline(key),

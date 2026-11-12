@@ -41,6 +41,18 @@ export function resolvedSections<R extends ResolvedSettingRow>(
   return [...sections.values()]
 }
 
+/**
+ * A value in words for keys whose raw JSON reads poorly, `undefined` for every other key:
+ * `repo.freeze` reads "Read-only: <reason>" or, for a lift, "Writable here: <reason>", with its end.
+ */
+export function settingValueText(key: string, value: unknown): string | undefined {
+  if (key !== 'repo.freeze' || typeof value !== 'object' || value === null) return undefined
+  const reason: unknown = Reflect.get(value, 'reason')
+  const until: unknown = Reflect.get(value, 'until')
+  const label = Reflect.get(value, 'frozen') === false ? 'Writable here' : 'Read-only'
+  return `${label}${typeof reason === 'string' ? `: ${reason}` : ''}${typeof until === 'string' ? ` · until ${until}` : ''}`
+}
+
 /** Whether the winning entry names the focus itself rather than covering it from a broader scope. */
 export const setHere = (row: ResolvedSettingRow, focus: ScopeFocus): boolean =>
   row.entry !== undefined && namesFocus(row.entry.scope, focus)

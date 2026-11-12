@@ -54,6 +54,7 @@ import {
 } from '../dependencies.ts'
 import type { FleetCache } from '../fleet-cache.ts'
 import { fleetLibraryUses } from '../libraries.ts'
+import { analyzerOffFilter } from '../repo-analyzers.ts'
 import type { LibraryIndex } from '../tools/libraries.ts'
 import { type CatalogReach, canReadShared, canSee, scopeOwner } from '../visibility.ts'
 
@@ -132,8 +133,11 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     return { scope, canRead, fleet, libraries: groupUses(fleet.uses), latest, latestOf }
   }
 
-  const canReadAudits = (principal: Principal) => (repo: RepoRef) =>
-    canSee(principal, 'audits:read', repoTarget(config, repo))
+  const canReadAudits = async (principal: Principal) => {
+    const off = await analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'audit')
+    return (repo: RepoRef) =>
+      canSee(principal, 'audits:read', repoTarget(config, repo)) && !off(repo)
+  }
   const canReadAnalyses = (principal: Principal) => (repo: RepoRef) =>
     canSee(principal, 'analyses:read', repoTarget(config, repo))
 
@@ -149,7 +153,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     const repos = new Map<string, RepoRef>()
     for (const { repo } of [...tableHeads, ...usageRecords]) repos.set(repoKey(repo), repo)
     for (const origin of catalogRecords.repos) repos.set(origin, parseKey(origin))
-    const audits = canReadAudits(principal)
+    const audits = await canReadAudits(principal)
     const analyses = canReadAnalyses(principal)
     const visibility: string[] = []
     for (const [origin, repo] of repos) {
@@ -190,7 +194,9 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     ])
     const licenses = licenseStates(licenseHeads, canReadAnalyses(principal))
     const renovate = renovateStates(renovateHeads, canReadAnalyses(principal))
-    const advisories = advisoriesByLibrary(auditHeadFindings(auditHeads, canReadAudits(principal)))
+    const advisories = advisoriesByLibrary(
+      auditHeadFindings(auditHeads, await canReadAudits(principal)),
+    )
 
     const counts = new Map<string, number>()
     for (const users of libraries.values())
@@ -371,7 +377,9 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
           ...(version.deprecated ? { deprecated: version.deprecated } : {}),
         })),
       advisories:
-        advisoriesByLibrary(auditHeadFindings(auditHeads, canReadAudits(principal))).get(key) ?? [],
+        advisoriesByLibrary(auditHeadFindings(auditHeads, await canReadAudits(principal))).get(
+          key,
+        ) ?? [],
       licenses: licensesOf(sightings.libraries.get(key) ?? []),
       bundles,
       decisions,

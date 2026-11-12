@@ -31,7 +31,7 @@ import { credentialRoutes } from './routes/credentials.ts'
 import { databaseRoutes } from './routes/database.ts'
 import { egressRoutes } from './routes/egress.ts'
 import { guideRoutes } from './routes/guides.ts'
-import { homeRoutes } from './routes/home.ts'
+import { homeRoutes, invalidateHome } from './routes/home.ts'
 import { inboxRoutes } from './routes/inbox.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
@@ -94,7 +94,9 @@ export function createApp(deps: ServerDeps) {
   const inbox = inboxServiceFor(deps)
   app.use('/api/*', async (c, next) => {
     await next()
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.res.status < 400) inbox.invalidate()
+    if (c.req.method === 'GET' || c.req.method === 'HEAD' || c.res.status >= 400) return
+    inbox.invalidate()
+    invalidateHome(deps)
   })
 
   app.all(`/auth/${deps.auth.name}/*`, async (c) => {

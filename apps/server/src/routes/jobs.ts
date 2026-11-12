@@ -35,6 +35,7 @@ import {
 } from '../context.ts'
 import { type CostReader, analyzerHealth, jobCosts, jobStats, waitHints } from '../job-stats.ts'
 import { explainJob } from '../job-why.ts'
+import { commentsOffFor, isReviewAnalyzer } from '../mr-comments.ts'
 import { readTranscript } from '../transcripts.ts'
 import { canSee } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
@@ -401,6 +402,13 @@ export function jobRoutes(deps: ServerDeps) {
     })
     const parsed = analyzer.options.safeParse(input.options ?? {})
     if (!parsed.success) throw new HTTPException(400, { message: z.prettifyError(parsed.error) })
+    if (
+      isReviewAnalyzer(config, analyzer.kind) &&
+      (await commentsOffFor(store, config, target.repo)) !== undefined
+    )
+      throw new HTTPException(409, {
+        message: `merge request reviews are off in ${target.repo.path} (mergeRequests.comments)`,
+      })
 
     const now = deps.now().toISOString()
     const job = await store.jobs.enqueue({

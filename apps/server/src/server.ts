@@ -79,6 +79,7 @@ import {
   type AgentFor,
   type AnyAnalyzer,
   analyzerSettings,
+  repoAnalyzersDefinition,
   executionSettings,
   startJobs,
 } from './jobs.ts'
@@ -451,6 +452,7 @@ export async function startServer(
       freshnessSetting,
       freshnessSweepSetting,
       ...analyzerSettings(analyzers),
+      repoAnalyzersDefinition(analyzers),
       ...executionSettings(),
       ...(options.settings ?? []),
     ],

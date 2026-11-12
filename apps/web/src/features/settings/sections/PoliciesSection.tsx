@@ -12,6 +12,7 @@ import { messageOf } from '../../../api/client.ts'
 import { useGroupNames, useGroupTitles, useRepos, useSettings } from '../../../api/queries.ts'
 import { useCheckCommitConventions, useSavePolicyDraft } from '../../../api/settings-analyzers.ts'
 import { canInGroup } from '../../../lib/access.ts'
+import { analyzerOptions, analyzersOffValue, readAnalyzersOff } from '../../../lib/analyzers-off.ts'
 import { isoDay } from '../../../lib/format.ts'
 import {
   type AllowlistRow,
@@ -55,6 +56,8 @@ import { ValueEditor } from '../ValueEditor.tsx'
 
 const LICENSES = 'analyzers.licenses'
 const TESTS = 'repo.tests'
+const ANALYZERS_OFF = 'repo.analyzers'
+const MR_COMMENTS = 'mergeRequests.comments'
 const ALLOWLIST = 'audit.allowlist'
 const ALLOWLIST_RULES = 'audit.allowlistPolicy'
 const KNOWLEDGE = 'knowledge.autoAccept'
@@ -765,6 +768,72 @@ function RepoTestsPolicy({ bound }: { bound: Bound }) {
   )
 }
 
+function AnalyzersOffPolicy({ bound }: { bound: Bound }) {
+  const options = analyzerOptions(bound.definition.schema)
+  const read = readAnalyzersOff(bound.value)
+  const off = read.off.filter((kind) => options.some((option) => option.id === kind))
+  const { reason } = read
+  return (
+    <div
+      className={`flex flex-col gap-3 ${bound.writable ? '' : 'opacity-70'}`}
+      inert={!bound.writable}
+    >
+      <MultiToggle
+        aria-label="Analyzers that never run automatically"
+        options={options}
+        value={off}
+        onChange={(next) => bound.onChange(analyzersOffValue(next, reason))}
+      />
+      {off.length ? (
+        <TextField
+          label="Reason"
+          value={reason}
+          onChange={(next) => bound.onChange(analyzersOffValue(off, next))}
+          placeholder="Configuration values only"
+          className="max-w-md"
+        />
+      ) : null}
+      <span className="text-xs text-muted">
+        Off analyzers are never queued automatically and show as Off on repository health and the
+        overview; a manual run still goes ahead. A repository can turn them back on in the Resolver.
+      </span>
+    </div>
+  )
+}
+
+function MergeRequestCommentsPolicy({ bound }: { bound: Bound }) {
+  const value = recordOf(bound.value)
+  const enabled = value.enabled !== false
+  const reason = typeof value.reason === 'string' ? value.reason : ''
+  const write = (next: { enabled: boolean; reason: string }) =>
+    bound.onChange(
+      next.enabled || !next.reason.trim()
+        ? { enabled: next.enabled }
+        : { enabled: false, reason: next.reason },
+    )
+  return (
+    <div className="flex flex-col gap-3">
+      <Switch
+        label="Review and comment on merge requests"
+        description="Off: no AI review runs and Holtkeeper posts nothing on merge requests. Unlike Read-only, branches, merge requests Holtkeeper opens and default-branch analyses keep working. A repository can turn it back on in the Resolver."
+        isSelected={enabled}
+        isDisabled={!bound.writable}
+        onChange={(next) => write({ enabled: next, reason })}
+      />
+      {enabled ? null : (
+        <TextField
+          label="Reason"
+          value={reason}
+          onChange={(next) => write({ enabled: false, reason: next })}
+          placeholder="Team reviews by hand"
+          isDisabled={!bound.writable}
+          className="max-w-md"
+        />
+      )}
+    </div>
+  )
+}
+
 function TryTitle({ repos }: { repos: readonly string[] }) {
   const [repo, setRepo] = useState<string>()
   const [message, setMessage] = useState('')
@@ -847,6 +916,8 @@ const cards = [
   { key: 'assets.policy', title: 'Asset policy', page: { label: 'Assets', to: '/quality/assets' } },
   { key: 'commits.conventions', title: 'Commit conventions' },
   { key: TESTS, title: 'Tests', page: { label: 'Coverage', to: '/quality/coverage' } },
+  { key: ANALYZERS_OFF, title: 'Analyzers off' },
+  { key: MR_COMMENTS, title: 'Merge request reviews' },
   {
     key: 'analyzers.testids',
     title: 'Test ids',
@@ -1052,6 +1123,18 @@ function PoliciesBody({ data }: { data: SettingList }) {
               <RepoTestsPolicy key={resetKey} bound={bound} />
             </PolicyCard>
           )
+        if (card.key === ANALYZERS_OFF)
+          return (
+            <PolicyCard key={card.key} {...common}>
+              <AnalyzersOffPolicy key={resetKey} bound={bound} />
+            </PolicyCard>
+          )
+        if (card.key === MR_COMMENTS)
+          return (
+            <PolicyCard key={card.key} {...common}>
+              <MergeRequestCommentsPolicy key={resetKey} bound={bound} />
+            </PolicyCard>
+          )
         if (card.key === 'audit.fix') {
           const upgrade = definitionOf('audit.upgrade')
           const upgradeBound = upgrade ? bind(upgrade) : undefined
@@ -1101,7 +1184,9 @@ function PoliciesBody({ data }: { data: SettingList }) {
 /**
  * Settings › Policies: the rules analyzers check against (license policy, security allowlist and
  * its rules, vulnerability fixes, stack conventions, asset policy, commit conventions, whether
- * repositories have tests (`repo.tests`), test ids) and which agent knowledge needs no review
+ * repositories have tests (`repo.tests`), analyzers turned off (`repo.analyzers`), merge request
+ * reviews (`mergeRequests.comments`), test ids) and
+ * which agent knowledge needs no review
  * (`knowledge.autoAccept`, `learnings.autoAccept`, `guide.autoAccept`, one card),
  * for the organization or one group. Edits gather into one draft over several keys, saved at once
  * through `POST /api/settings/draft`; their pages keep editing the same entries.

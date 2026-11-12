@@ -17,6 +17,7 @@ const schema = z
 export const labelAction = defineAction({
   type: 'label',
   schema,
+  posts: true,
   async run(action, context) {
     const { forge, event } = context
     const blocked = notOpen(context)

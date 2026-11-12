@@ -5,13 +5,14 @@ import type { SettingEntry, Store } from '@holtkeeper/store'
 
 import { repoTarget } from './context.ts'
 
-/** Whether a `repo.freeze` entry in force forbids Holtkeeper to change a repository. */
+/** Whether the `repo.freeze` entry in force for a repository forbids Holtkeeper to change it. */
 export type ReadOnlyRepos = (repo: RepoRef) => Promise<boolean>
 
 /**
  * Reads `repo.freeze` for a repository with its groups from `config()`. The settings are read on
- * every call, so a change in the panel applies to the next write, and a freeze stops counting once
- * `now()` passes its `until`.
+ * every call, so a change in the panel applies to the next write, and an entry stops counting once
+ * `now()` passes its `until`. The most specific entry in force wins, so a lift keeps its scope
+ * writable under a broader freeze.
  */
 export function readOnlyRepos(
   store: Store,
@@ -19,11 +20,8 @@ export function readOnlyRepos(
   now: () => Date = () => new Date(),
 ): ReadOnlyRepos {
   return async (repo) =>
-    resolveRepoFreeze(
-      await store.settings.list(repoFreeze.key),
-      repoTarget(config(), repo),
-      now(),
-    ) !== undefined
+    resolveRepoFreeze(await store.settings.list(repoFreeze.key), repoTarget(config(), repo), now())
+      .frozen
 }
 
 /**

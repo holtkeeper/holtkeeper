@@ -283,13 +283,16 @@ export function updatesBadge(
   return { tone: 'none', text: 'Off' }
 }
 
-/** What the facts say about Holtkeeper's access to the repository. */
-export const accessText = (access: RepoOverview['access']): string =>
-  access.readOnly
-    ? `Read-only${access.reason ? ` · ${access.reason}` : ''}`
-    : access.writeTasks
-      ? 'Read and write · agents may open merge requests'
-      : 'Read and write · write tasks off'
+/**
+ * What the facts say about Holtkeeper's access to the repository; a lift of a broader freeze reads
+ * "Writable here" with its reason.
+ */
+export const accessText = (access: RepoOverview['access']): string => {
+  if (access.readOnly) return `Read-only${access.reason ? ` · ${access.reason}` : ''}`
+  const writes = access.writeTasks ? 'agents may open merge requests' : 'write tasks off'
+  if (!access.lifted) return `Read and write · ${writes}`
+  return `Read and write · Writable here${access.reason ? `: ${access.reason}` : ''} · ${writes}`
+}
 
 /** Freshness rows tallied for the table's legend: failed and month-old records count as `bad`. */
 export function freshnessTally(rows: readonly { freshness: Freshness }[]) {

@@ -2066,7 +2066,7 @@ export interface ReleaseCan {
 export type ReleaseCard = ReleaseBoardRow & {
   /**
    * A step is pending (candidate, proposed, awaiting a version), a deploy failed or is ready, or
-   * reading failed; false while the waiting release is dismissed.
+   * reading failed; false while the waiting release is dismissed or releases are off.
    */
   needsAction: boolean
   /**
@@ -2540,7 +2540,9 @@ export interface RepoToolchainEntry {
 export interface RepoAccessSummary {
   /** Agents and analyzers only read; nothing writes to the forge. */
   readOnly: boolean
-  /** Why it is read-only and until when, when someone said so. */
+  /** A narrower `repo.freeze` lift keeps it writable under a broader freeze that is in force. */
+  lifted?: true
+  /** Why it is read-only or lifted and until when that entry counts, when someone said so. */
   reason?: string
   until?: Timestamp
   /** Write tasks may open merge requests there (`tasks.write` and not read-only). */

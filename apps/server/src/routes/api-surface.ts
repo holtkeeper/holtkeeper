@@ -52,6 +52,7 @@ import {
 import { principalOpsAccess } from '../ops-tools.ts'
 import { releaseToolsAccess } from '../release-steps.ts'
 import { releaseServiceFor } from '../releases.ts'
+import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { taskToolsAccess } from '../tasks.ts'
 import { storedAssetTools } from '../tools/assets.ts'
 import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
@@ -571,6 +572,7 @@ export function createApiSurface(
       ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
       canReadAnalyses: analysesOf(principal),
       canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),
+      auditOff: () => analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'audit'),
       ...(client ? { client } : {}),
       ...(token ? { token } : {}),
       now: deps.now,

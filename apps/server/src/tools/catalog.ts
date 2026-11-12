@@ -49,6 +49,8 @@ export interface CatalogToolsContext {
   canReadAnalyses: RepoFilter
   /** Repositories whose audits the caller may read. */
   canReadAudits: RepoFilter
+  /** Repositories whose audit `repo.analyzers` turns off; `evaluate_dependency` leaves them out. */
+  auditOff?: () => Promise<RepoFilter>
   /** The teams of a repository (innermost config groups), named on results; without it no team is named. */
   ownerOf?: (repo: RepoRef) => string[]
   /** Latest registry versions, for how far behind a repository is. */
@@ -707,6 +709,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
               canRead,
               canReadAnalyses: context.canReadAnalyses,
               canReadAudits: context.canReadAudits,
+              ...(context.auditOff ? { auditOff: context.auditOff } : {}),
               knowledge: context.knowledge,
               ...(context.ownerOf ? { ownerOf: context.ownerOf } : {}),
               ...(context.latest ? { latest: context.latest } : {}),

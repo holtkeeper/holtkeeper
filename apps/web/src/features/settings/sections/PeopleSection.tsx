@@ -117,7 +117,7 @@ function ReadOnlyRepos() {
   return (
     <SettingsSection
       title="Read-only repositories"
-      description="Holtkeeper still analyses these, but never pushes, comments, labels or opens merge requests there."
+      description="Holtkeeper still analyses these, but never pushes, comments, labels or opens merge requests there. The most specific entry wins: one with frozen off keeps its repositories writable under a broader freeze."
     >
       {settings.isPending ? (
         <Placeholder className="h-32" />

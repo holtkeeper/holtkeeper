@@ -92,6 +92,44 @@ describe('worker admission', () => {
     await worker.stop()
   })
 
+  test('a job with a cancel reason is canceled before its analyzer runs', async () => {
+    const store = memoryStore()
+    const logs = memoryArtifactStore()
+    const ran: string[] = []
+    const worker = createWorker({
+      store,
+      analyzers: [
+        analyzer('step', async ({ repo }) => {
+          ran.push(repo.path)
+          return { data: {} }
+        }),
+      ],
+      contextFor,
+      logs,
+      logFlush: { flushLines: 1 },
+      pollMs: 5,
+      cancelReason: (job) => (job.repo.path === 'quiet' ? 'turned off' : undefined),
+    })
+    const enqueue = (path: string) =>
+      store.jobs.enqueue({
+        analyzer: 'step',
+        repo: { forge: 'work', path },
+        trigger: 'manual',
+        createdAt: new Date().toISOString(),
+      })
+    const quiet = await enqueue('quiet')
+    const loud = await enqueue('loud')
+
+    await worker.start()
+    await until(async () => (await store.jobs.get(loud.id))?.status === 'succeeded')
+    await until(async () => (await store.jobs.get(quiet.id))?.status === 'canceled')
+    expect(ran).toEqual(['loud'])
+    expect(
+      (await readJobLog(logs, quiet.id, 1, { tail: 100 })).lines.map((line) => line.text),
+    ).toContain('canceled: turned off')
+    await worker.stop()
+  })
+
   test('a freed slot goes to the job waiting longest', async () => {
     const store = memoryStore()
     const order: string[] = []

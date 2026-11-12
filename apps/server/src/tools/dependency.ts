@@ -33,6 +33,8 @@ export interface DependencyContext {
   canReadAnalyses: RepoFilter
   /** Repositories whose audits the caller may read. */
   canReadAudits: RepoFilter
+  /** Repositories whose audit `repo.analyzers` turns off; their audit runs are left out. */
+  auditOff?: () => Promise<RepoFilter>
   knowledge: KnowledgeToolsContext
   libraries?: Pick<LibraryStore, 'getLibrary' | 'listVersions'>
   /** The teams of a repository (innermost config groups), named on every user. */
@@ -142,7 +144,11 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
 }
 
 async function vulnerabilitySection(context: DependencyContext, query: Resolved) {
-  const findings = await newestAuditFindings(context.auditRuns, context.canReadAudits)
+  const off = (await context.auditOff?.()) ?? (() => false)
+  const findings = await newestAuditFindings(
+    context.auditRuns,
+    (repo) => context.canReadAudits(repo) && !off(repo),
+  )
   const advisories =
     advisoriesByLibrary(findings).get(
       libraryKeyOf({ ecosystem: query.ecosystem, name: query.package }),

@@ -276,7 +276,11 @@ export interface ReleaseBoardRow {
    * `acceptanceRequired` and `acceptance`.
    */
   blockers: string[]
-  /** The flow needs an acceptance before a version is created (`acceptance` is not `none`). */
+  /**
+   * The flow needs an acceptance before a version is created (`acceptance` is not `none` and the
+   * flow is not `external`). A server may recompute it from the settings in force when it shows a
+   * stored row.
+   */
   acceptanceRequired: boolean
   /** Why the next version is what it is, from the pending step's plan. */
   reasons: string[]

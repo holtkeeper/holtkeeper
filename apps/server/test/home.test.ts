@@ -310,13 +310,16 @@ describe('Needs attention rules', () => {
     })
   })
 
-  test('releases waiting on a person become items, idle ones do not', () => {
+  test('releases that need a person become items; states with no decision do not', () => {
     const items = releaseItems(
       sources({
         releases: [
           card('shapes/circle', {
-            stage: 'proposed',
+            stage: 'awaiting-version',
             needsAction: true,
+            unreleased: 2,
+            next: '1.3.0',
+            acceptanceRequired: true,
             waitingSince: hoursAgo(5),
           }),
           card('shapes/square', {
@@ -327,17 +330,50 @@ describe('Needs attention rules', () => {
               environments: [{ name: 'prod', status: 'failed', attempts: [], confirm: false }],
             },
           }),
+          card('shapes/oval', {
+            stage: 'awaiting-version',
+            needsAction: true,
+            unreleased: 2,
+            next: '2.0.0',
+            blockers: ['The target pipeline failed'],
+          }),
           card('colors/red', { stage: 'idle' }),
+          card('colors/blue', { stage: 'candidate', needsAction: true, ahead: 3 }),
+          card('colors/green', {
+            stage: 'awaiting-version',
+            needsAction: true,
+            unreleased: 4,
+            next: '1.1.0',
+          }),
+          card('colors/teal', {
+            stage: 'awaiting-version',
+            needsAction: true,
+            unreleased: 4,
+            next: '1.7.0',
+            acceptanceRequired: true,
+            acceptance: { sha: 'abc', by: 'u1', at: hoursAgo(1), via: 'manual' },
+          }),
+          card('colors/plum', {
+            stage: 'proposed',
+            needsAction: true,
+            acceptanceRequired: true,
+            request: { id: 8, title: 'Release', webUrl: 'https://forge.test/mr/8', draft: false },
+          }),
         ],
       }),
     )
     expect(items.map((item) => [item.title, item.severity, item.href])).toEqual([
       [
-        'Release proposed, waiting for acceptance',
+        'Changes wait for acceptance before version 1.3.0',
         'medium',
         '/releases/timeline?repo=work%3Ashapes%2Fcircle',
       ],
       ['Deploy of v1.2.0 to prod failed', 'high', '/releases/timeline?repo=work%3Ashapes%2Fsquare'],
+      [
+        'Creating version 2.0.0 is blocked: The target pipeline failed',
+        'medium',
+        '/releases/timeline?repo=work%3Ashapes%2Foval',
+      ],
     ])
     expect(items[0]?.action).toEqual({
       type: 'open',
@@ -351,8 +387,10 @@ describe('Needs attention rules', () => {
       sources({
         releases: [
           card('shapes/circle', {
-            stage: 'proposed',
+            stage: 'awaiting-version',
             needsAction: true,
+            unreleased: 2,
+            acceptanceRequired: true,
             head: 'abc123',
             can: { accept: true, run: true },
           }),
@@ -820,6 +858,60 @@ describe('GET /api/home', () => {
     })
     const home = await read(asShapes)
     expect(home.attention.map((item) => item.kind)).toEqual([])
+  })
+
+  test('an audit turned off leaves its vulnerabilities and stale records out', async () => {
+    const finding = {
+      id: 'GHSA-1',
+      aliases: [],
+      summary: 'widget overflow',
+      severity: 'critical' as const,
+      url: 'https://osv.dev/GHSA-1',
+      package: { name: 'some-lib', version: '1.0.0', ecosystem: 'npm' },
+      source: 'pnpm-lock.yaml',
+      fixedVersions: ['1.0.1'],
+    }
+    const report = {
+      scanner: 'osv-scanner',
+      findings: [finding],
+      ignored: [],
+      expired: [],
+      fixes: [],
+      resolved: [],
+      changedFiles: [],
+    }
+    await store.auditRuns.add({
+      repo: { forge: 'work', path: 'shapes/circle' },
+      trigger: 'cli',
+      startedAt: hoursAgo(3),
+      finishedAt: hoursAgo(3),
+      report,
+    })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'shapes/circle' },
+      kind: 'audit',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      data: report,
+    })
+    expect((await read(asShapes)).attention.map((item) => item.kind)).toEqual([
+      'vulnerabilities',
+      'stale-analyses',
+    ])
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['shapes/circle'] },
+      value: { off: ['audit'], reason: 'Values only' },
+      secret: false,
+      updatedAt: hoursAgo(1),
+    })
+    clock = new Date(now.getTime() + 60_000)
+    expect((await read(asShapes)).attention.map((item) => item.kind)).not.toContain(
+      'vulnerabilities',
+    )
+    expect((await read(asShapes)).attention.map((item) => item.kind)).not.toContain(
+      'stale-analyses',
+    )
   })
 
   test('spend measures this week against the default budget, by feature', async () => {

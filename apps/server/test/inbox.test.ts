@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { Scope } from '@holtkeeper/access'
-import type { InboxCount, InboxFeed, InboxItem } from '@holtkeeper/api'
+import type { InboxCount, InboxFeed, InboxItem, ReleaseOverview } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { ReleaseBoardRow } from '@holtkeeper/release'
+import { type ReleaseBoardRow, releaseSettingsDefinition } from '@holtkeeper/release'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { GuideGeneratedInput, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -84,7 +84,7 @@ const generated = (body: string): GuideGeneratedInput => ({
 
 const row = (path: string): ReleaseBoardRow => ({
   repo: { forge: 'work', path },
-  stage: 'proposed',
+  stage: 'awaiting-version',
   mode: 'merge-request',
   next: '1.2.0',
   ahead: 2,
@@ -196,6 +196,14 @@ async function seed() {
       head: `head-${path}`,
       row: row(path),
     })
+  await store.settings.put({
+    id: 'releases-all',
+    key: 'releases',
+    scope: { all: true },
+    value: { enabled: true, acceptance: 'manual' },
+    secret: false,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+  })
   for (const [id, scope] of [
     ['a-web', { groups: ['web'] }],
     ['a-pay', { groups: ['pay'] }],
@@ -226,7 +234,7 @@ beforeEach(async () => {
     store,
     vault,
     credentials: createCredentialService({ credentials: store.credentials, vault }),
-    settings: builtinSettings,
+    settings: [...builtinSettings, releaseSettingsDefinition],
     analyses: [],
     now: () => new Date(clock),
   })
@@ -285,11 +293,11 @@ describe('GET /api/inbox', () => {
     expect(releaser.mine[0]).toMatchObject({
       kind: 'release',
       repo: 'work:acme/web-shop',
-      stage: 'proposed',
+      stage: 'awaiting-version',
       next: '1.2.0',
       head: 'head-acme/web-shop',
       can: { accept: true, run: true },
-      title: 'Release proposed, waiting for acceptance',
+      title: 'Changes wait for acceptance before version 1.2.0',
     })
     const watcher = await feedOf('watcher')
     expect([...watcher.mine, ...watcher.teams]).toEqual([])
@@ -503,5 +511,116 @@ describe('GET /api/inbox/count', () => {
 
   test('needs a signed-in caller', async () => {
     expect((await call('GET', '/inbox/count', {})).status).toBe(401)
+  })
+})
+
+const putRelease = (patch: Partial<ReleaseBoardRow>, acceptanceMode?: string) =>
+  store.kv!.set('release:board:row:work:acme/web-shop', {
+    readAt: '2026-11-03T11:00:00.000Z',
+    head: 'head-acme/web-shop',
+    ...(acceptanceMode && { acceptanceMode }),
+    row: { ...row('acme/web-shop'), ...patch },
+  })
+const setAcceptance = (acceptance: string) =>
+  store.settings.put({
+    id: 'releases-all',
+    key: 'releases',
+    scope: { all: true },
+    value: { enabled: true, acceptance },
+    secret: false,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+  })
+const releaseIds = async () => {
+  clock += 31_000
+  const feed = await feedOf('releaser')
+  const count = (await (await call('GET', '/inbox/count', as('releaser'))).json()) as InboxCount
+  const found = ids([...feed.mine, ...feed.teams])
+  expect(count.total).toBe(found.length)
+  return found
+}
+
+describe('release items', () => {
+  for (const acceptance of ['none', 'manual', 'label', 'merge'])
+    for (const unreleased of [0, 3])
+      for (const accepted of [false, true]) {
+        const shows = acceptance !== 'none' && unreleased > 0 && !accepted
+        test(`acceptance ${acceptance}, ${unreleased} unreleased, ${accepted ? 'accepted' : 'not accepted'}: ${shows ? 'an item' : 'nothing'}`, async () => {
+          await setAcceptance(acceptance)
+          await putRelease({
+            stage: unreleased > 0 ? 'awaiting-version' : 'candidate',
+            unreleased,
+            ...(accepted && {
+              acceptance: {
+                sha: 'head-acme/web-shop',
+                by: 'header:lead',
+                at: '2026-11-02T08:00:00.000Z',
+                via: 'manual',
+              },
+            }),
+          })
+          expect(await releaseIds()).toEqual(shows ? ['release:work:acme/web-shop'] : [])
+        })
+      }
+
+  for (const acceptance of ['manual', 'label', 'merge'])
+    test(`acceptance ${acceptance}: an open candidate without unreleased commits is no item`, async () => {
+      await setAcceptance(acceptance)
+      await putRelease({
+        stage: 'proposed',
+        unreleased: 0,
+        request: { id: 7, title: 'Release 1.2.0', webUrl: 'https://forge.test/mr/7', draft: false },
+      })
+      expect(await releaseIds()).toEqual([])
+    })
+
+  test('a row read under another acceptance mode is no item until it is reread', async () => {
+    await setAcceptance('label')
+    await putRelease({ stage: 'awaiting-version', unreleased: 3 }, 'none')
+    expect(await releaseIds()).toEqual([])
+    await putRelease({ stage: 'awaiting-version', unreleased: 3 }, 'label')
+    expect(await releaseIds()).toEqual(['release:work:acme/web-shop'])
+  })
+
+  test('a row read under another flow mode is no item until it is reread', async () => {
+    await setAcceptance('manual')
+    await putRelease({ stage: 'awaiting-version', unreleased: 3, mode: 'trunk' }, 'manual')
+    expect(await releaseIds()).toEqual([])
+  })
+
+  test('the title names the version that waits for acceptance', async () => {
+    await putRelease({ stage: 'awaiting-version', unreleased: 3, next: '1.7.0' })
+    const feed = await feedOf('releaser')
+    expect(feed.mine[0]?.title).toBe('Changes wait for acceptance before version 1.7.0')
+  })
+
+  test('switching the setting to no acceptance drops the item at once, before the row is reread', async () => {
+    await putRelease({ stage: 'awaiting-version', unreleased: 3, next: '1.7.0' })
+    expect(await releaseIds()).toEqual(['release:work:acme/web-shop'])
+    const response = await call('PUT', '/settings', as('admin'), {
+      id: 'releases-all',
+      key: 'releases',
+      scope: { all: true },
+      value: { enabled: true, acceptance: 'none' },
+    })
+    expect(response.status).toBe(200)
+    const feed = await feedOf('releaser')
+    expect([...feed.mine, ...feed.teams]).toEqual([])
+    const count = (await (await call('GET', '/inbox/count', as('releaser'))).json()) as InboxCount
+    expect(count.total).toBe(0)
+  })
+
+  test('turning releases off drops the item too', async () => {
+    await putRelease({ stage: 'awaiting-version', unreleased: 3 })
+    await store.settings.put({
+      id: 'releases-all',
+      key: 'releases',
+      scope: { all: true },
+      value: { enabled: false, acceptance: 'manual' },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    expect(await releaseIds()).toEqual([])
+    const response = await call('GET', '/releases/overview?filter=action', as('releaser'))
+    expect(((await response.json()) as ReleaseOverview).cards).toEqual([])
   })
 })

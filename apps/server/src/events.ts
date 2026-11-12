@@ -40,7 +40,9 @@ import { type ServerDeps, repoTarget } from './context.ts'
 import { noteDefaultBranchPush } from './freshness.ts'
 import { automaticJobReady } from './jobs.ts'
 import { captureReplyLearning, harvestReactions } from './learnings.ts'
+import { commentsOffFor, isReviewAnalyzer } from './mr-comments.ts'
 import { releaseServiceFor } from './releases.ts'
+import { analyzerOffFor } from './repo-analyzers.ts'
 
 /** Every note Holtkeeper posts carries this marker. */
 const OWN_MARKER = 'holtkeeper:review'
@@ -150,13 +152,17 @@ const stub = (iid: number, state: MergeRequest['state'], headSha?: string) => ({
  * - Finished merge request pipelines for the head run policies as `update`, so deferred approvals
  *   and merges happen; only `enqueue` intents are queued.
  *
- * Tag, push and merge request jobs whose options stay invalid with the repository's
- * `analyzers.<kind>` setting (an analyzer not set up there) are
- * left out rather than queued to fail, and so is every job that would carry a ref for an analyzer
- * that reads only the default branch (`defaultBranchOnly`, e.g. `guide`). Write tasks are never
+ * Event and policy jobs of an analyzer `repo.analyzers` turns off on the repository (a thread
+ * reply then queues no `review`), and those whose options stay invalid with the repository's
+ * `analyzers.<kind>` setting (an analyzer not set up there), are left out rather than queued to
+ * fail, and so is every job that would carry a ref for an analyzer that reads only the default
+ * branch (`defaultBranchOnly`, e.g. `guide`). Write tasks are never
  * queued from events, policies or note commands; only an approved task group queues them.
  *
  * Tags, pushes, merge request changes and pipelines also go to the release assistant, in the background.
+ * Where `mergeRequests.comments` is off, `review` is never queued, policies run with `commentsOff`
+ * (their comment and label actions are skipped), and notes queue only policy intents: commands
+ * and thread replies get no answer (replies to Holtkeeper's threads are still learned from).
  * Events of repositories `deps.readOnly` marks read-only are ignored, except tags and pushes. Events by
  * the forge's bot username or carrying Holtkeeper's note marker are ignored. A job already
  * queued or running with the same ref and options is not queued again, so the same change seen
@@ -174,6 +180,11 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       if (deps.analyzers && !analyzers.has(request.analyzer)) continue
       if (request.analyzer === WRITE_TASK_KIND) continue
       if (request.ref !== undefined && analyzers.get(request.analyzer)?.defaultBranchOnly) continue
+      if (
+        isReviewAnalyzer(config, request.analyzer) &&
+        (await commentsOffFor(store, config, request.repo)) !== undefined
+      )
+        continue
       const active = await store.jobs.list({
         status: ['queued', 'running'],
         repo: request.repo,
@@ -322,6 +333,7 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
           memory,
           ...(botUser !== undefined && { botUser }),
           bots: [...(botUser ? [botUser] : []), ...DEFAULT_BOT_GLOBS],
+          commentsOff: (await commentsOffFor(store, config, repo)) !== undefined,
         })
         for (const outcome of result.outcomes)
           await audit(
@@ -497,10 +509,14 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
         const intents = withPolicies([], policy)
         const fromPolicies = intents.length
           ? await enqueue(
-              intents.map(({ analyzer, options }) => request(analyzer, options ?? {})),
+              await setUp(intents.map(({ analyzer, options }) => request(analyzer, options ?? {}))),
               trigger('webhook'),
             )
           : []
+        if (await commentsOffFor(store, config, repo))
+          return fromPolicies.length
+            ? { enqueued: fromPolicies }
+            : ignore('merge request comments are off')
 
         let queued: string[] = []
         const jobCommand = (
@@ -603,7 +619,10 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       const thread = await ourThread(forge, repo, iid, discussionId)
       if (!thread) return ignore('thread was not started by Holtkeeper')
       inBackground('learnings: capture failed', captureReplyLearning(deps, forge, event, thread))
+      if (await commentsOffFor(store, config, repo)) return ignore('merge request comments are off')
       const analyzer = config.jobs?.commands?.review?.analyzer ?? 'review'
+      if (await analyzerOffFor(store, config, repo, analyzer))
+        return ignore(`${analyzer} is turned off for this repository`)
       return { enqueued: await enqueue([request(analyzer, { replyTo: discussionId })], 'command') }
     }
 
@@ -630,12 +649,14 @@ export function createEventDispatcher(deps: ServerDeps): EventDispatcher {
       const intents = withPolicies([], policy)
       if (!intents.length) return ignore(policy ? 'policies queued nothing' : 'no policies apply')
       const enqueued = await enqueue(
-        intents.map(({ analyzer, options }) => ({
-          analyzer,
-          repo,
-          ref: sha,
-          options: { ...options, mergeRequest: iid },
-        })),
+        await setUp(
+          intents.map(({ analyzer, options }) => ({
+            analyzer,
+            repo,
+            ref: sha,
+            options: { ...options, mergeRequest: iid },
+          })),
+        ),
         trigger('webhook'),
       )
       return { enqueued }

@@ -43,7 +43,10 @@ export const approveAction = defineAction({
     const diff = await facts.diff()
     if (!diff) return { status: 'unsupported', detail: 'the forge cannot load diff refs' }
     const submitReview = forge.submitReview.bind(forge)
-    const summary = action.summary === undefined ? undefined : renderTemplate(action.summary, event)
+    const summary =
+      action.summary === undefined || context.commentsOff
+        ? undefined
+        : renderTemplate(action.summary, event)
     return context.perform(
       'approved',
       () =>

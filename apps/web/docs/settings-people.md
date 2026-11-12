@@ -33,4 +33,4 @@ Route `/settings/people`, body `features/settings/sections/PeopleSection.tsx`, e
 
 ## Read-only repositories
 
-The `repo.freeze` entries with their own editor (`SettingEntries`).
+The `repo.freeze` entries with their own editor (`SettingEntries`). The most specific entry wins: an entry with **frozen** off lifts a broader freeze for its scope, e.g. one repository of a frozen group. A new entry starts frozen with an empty reason, so the reason field and the **frozen** switch show at once; turning the switch off makes it a lift, where the reason may stay empty. Anyone with `settings:write` on a group or repository can lift a broader freeze there, one set for everything included.

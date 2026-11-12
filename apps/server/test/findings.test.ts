@@ -165,6 +165,20 @@ test('groups findings by advisory and package across the newest audits', async (
   ])
 })
 
+test('repositories whose audit is turned off leave the findings', async () => {
+  await store.settings.put({
+    id: 'off-pay',
+    key: 'repo.analyzers',
+    scope: { repos: ['acme/pay-core'] },
+    value: { off: ['audit'], reason: 'Values only' },
+    secret: false,
+    updatedAt: '2026-11-09T00:00:00.000Z',
+  })
+  const body = await findings('admin')
+  expect(body.groups.map((group) => group.advisory)).toEqual(['GHSA-2', 'GHSA-1'])
+  expect(body.severities.low).toBe(0)
+})
+
 test('first seen carries over between audits of a repository', async () => {
   const body = await findings('admin')
   const byAdvisory = new Map(body.groups.map((group) => [group.advisory, group.firstSeenAt]))
@@ -255,7 +269,12 @@ test('the table reads stored metrics only, never record data', async () => {
     grants: [{ scope: { all: true }, actions: ['*' as const] }],
   }
   const body = await readFindings(
-    { config, store: { analyses, tasks: store.tasks }, kinds, today: '2026-11-10' },
+    {
+      config,
+      store: { analyses, tasks: store.tasks, settings: store.settings },
+      kinds,
+      today: '2026-11-10',
+    },
     principal,
   )
   expect(body.groups).toHaveLength(3)

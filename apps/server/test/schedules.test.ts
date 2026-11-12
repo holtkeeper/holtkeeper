@@ -115,6 +115,22 @@ describe('schedule routes', () => {
     )
   })
 
+  test('running a schedule by hand leaves out analyzers repo.analyzers turns off', async () => {
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['work:games/a'] },
+      value: { off: ['ci-jobs'] },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    await send('/api/schedules/nightly/run', 'POST', asAdmin)
+    await settled()
+    expect((await runs()).map((entry) => entry.details)).toEqual([{ queued: 1, skipped: 0 }])
+    const jobs = await store.jobs.list({ schedule: 'nightly' })
+    expect(jobs.map((job) => job.repo.path)).toEqual(['games/b'])
+  })
+
   test('lists whole runs when a run queues more jobs than one read covers', async () => {
     for (let run = 0; run < 12; run++) {
       const createdAt = new Date(Date.UTC(2026, 9, 1 + run, 3)).toISOString()

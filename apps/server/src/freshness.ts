@@ -10,13 +10,14 @@ import {
   matchesAnyPath,
   systemTimeZone,
 } from '@holtkeeper/jobs'
-import { defineSetting, resolveSetting } from '@holtkeeper/settings'
+import { analyzerOff, defineSetting, repoAnalyzersKey, resolveSetting } from '@holtkeeper/settings'
 import type { AnalysisHead, Job, KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { type JobAnalyzerInfo, type ServerDeps, repoKey } from './context.ts'
 import { automaticJobBlocker } from './jobs.ts'
 import { forgeLimitKey } from './limits.ts'
+import { offText } from './repo-analyzers.ts'
 import { jobTarget } from './routes/jobs.ts'
 import { listedRepos } from './updates.ts'
 
@@ -233,7 +234,10 @@ async function evaluate(
     const key = `${repoKey(job.repo)}\0${job.analyzer}`
     if (!lastJobs.has(key)) lastJobs.set(key, job)
   }
-  const settings = await store.settings.list(freshnessSetting.key)
+  const [settings, switches] = await Promise.all([
+    store.settings.list(freshnessSetting.key),
+    store.settings.list(repoAnalyzersKey),
+  ])
   const forges = new Map<string, GitForge | undefined>()
   const forgeOf = (id: string) => {
     if (!forges.has(id)) forges.set(id, config.forges[id]?.create())
@@ -274,7 +278,11 @@ async function evaluate(
         ...(lastJob && { lastJob }),
         mode,
       }
-      let decision = decideFreshness(base, context)
+      const off =
+        target.group === undefined ? analyzerOff(switches, scope, analyzer.kind) : undefined
+      let decision: FreshnessDecision = off
+        ? { action: 'skip', reason: offText(off) }
+        : decideFreshness(base, context)
       const forge = forgeOf(target.repo.forge)
       if (
         decision.action !== 'skip' &&
@@ -346,9 +354,10 @@ async function notApplicable(
   options: { cachedOnly?: boolean } = {},
 ): Promise<string | undefined | typeof UNCHECKED> {
   const request = { analyzer: analyzer.kind, ...target }
-  const blocker = await automaticJobBlocker(deps.config, deps.store, analyzer, request)
-  if (blocker === 'no-tests') return 'the repository has no tests by design'
-  if (blocker === 'options')
+  const blocked = await automaticJobBlocker(deps.config, deps.store, analyzer, request)
+  if (blocked?.blocker === 'off') return offText(blocked)
+  if (blocked?.blocker === 'no-tests') return 'the repository has no tests by design'
+  if (blocked?.blocker === 'options')
     return `its options are not set up for this ${target.group === undefined ? 'repository' : 'group'}`
   if (!analyzer.appliesTo || target.group !== undefined || !forge) return undefined
   const cached = z

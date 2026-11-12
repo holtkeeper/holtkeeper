@@ -448,6 +448,27 @@ describe('dependency table', () => {
     })
   })
 
+  test('a repository whose audit is turned off adds no advisories to the table or the detail', async () => {
+    expect((await get<DependencyTable>('/api/dependencies')).totals.withAdvisories).toBe(1)
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['work:games/arcade'] },
+      value: { off: ['audit'] },
+      secret: false,
+      updatedAt: at,
+    })
+    const table = await get<DependencyTable>('/api/dependencies')
+    expect(table.libraries.find((row) => row.name === 'widget-kit')?.advisories).toEqual({
+      count: 0,
+    })
+    expect(table.totals.withAdvisories).toBe(0)
+    const detail = await get<DependencyDetail>(
+      '/api/dependencies/library?ecosystem=npm&name=widget-kit',
+    )
+    expect(detail.advisories).toEqual([])
+  })
+
   test('with the cross-team catalog off, only readable repositories count', async () => {
     await crossTeam('off')
     const table = await get<DependencyTable>('/api/dependencies', asGames)

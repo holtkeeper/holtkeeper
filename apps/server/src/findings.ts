@@ -10,6 +10,7 @@ import type {
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { AnalysisKind } from '@holtkeeper/report'
+import { analyzerOff, repoAnalyzersKey } from '@holtkeeper/settings'
 import type { AgentTask, AgentTaskStatus, Store } from '@holtkeeper/store'
 import { type Severity, compareSeverity } from '@holtkeeper/vuln'
 
@@ -25,7 +26,7 @@ const severityOrder: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown
 /** What `readFindings` reads. */
 export interface FindingsDeps {
   config: HoltkeeperConfig
-  store: Pick<Store, 'analyses' | 'tasks'>
+  store: Pick<Store, 'analyses' | 'tasks' | 'settings'>
   /** Analysis kinds by name, to fill in metrics of records stored without them. */
   // oxlint-disable-next-line typescript/no-explicit-any -- kinds differ in their data type
   kinds: ReadonlyMap<string, AnalysisKind<any, any>>
@@ -142,12 +143,13 @@ const settle = (stored: StoredGroup, tasks: readonly AgentTask[], today: string)
 
 /**
  * The findings of the newest audit (main line) of every repository `principal` may read audits of
- * (`audits:read`), narrowed by `filter`, one group per advisory and package, as
- * `GET /api/audits/findings` answers. Read from stored metrics only, never from records' data
- * (except metrics `latestHeadsWithMetrics` computes once for records stored without any). A group
- * or repository is `fixing` while an approved or running agent task upgrades that package in that
- * repository, and `allowlisted` while every finding there was hidden by an allowlist entry that has
- * not expired since. `firstSeenAt` is the record time where no first-seen time was stored.
+ * (`audits:read`) whose audit `repo.analyzers` does not turn off, narrowed by `filter`, one group
+ * per advisory and package, as `GET /api/audits/findings` answers. Read from stored metrics only,
+ * never from records' data (except metrics `latestHeadsWithMetrics` computes once for records
+ * stored without any). A group or repository is `fixing` while an approved or running agent task
+ * upgrades that package in that repository, and `allowlisted` while every finding there was hidden
+ * by an allowlist entry that has not expired since. `firstSeenAt` is the record time where no
+ * first-seen time was stored.
  */
 export async function readFindings(
   deps: FindingsDeps,
@@ -156,13 +158,18 @@ export async function readFindings(
 ): Promise<FindingsResponse> {
   const { config, store } = deps
   const wanted = filter.repos ? new Set(filter.repos) : undefined
-  const heads = (
-    await latestHeadsWithMetrics(store.analyses, deps.kinds, { kind: 'audit' })
-  ).filter(
-    (head) =>
+  const [latest, switches] = await Promise.all([
+    latestHeadsWithMetrics(store.analyses, deps.kinds, { kind: 'audit' }),
+    store.settings.list(repoAnalyzersKey),
+  ])
+  const heads = latest.filter((head) => {
+    const target = repoTarget(config, head.repo)
+    return (
       (!wanted || wanted.has(repoKey(head.repo))) &&
-      canSee(principal, 'audits:read', repoTarget(config, head.repo)),
-  )
+      canSee(principal, 'audits:read', target) &&
+      !analyzerOff(switches, target, 'audit')
+    )
+  })
   const repos = heads.map((head) => repoKey(head.repo))
   const load = async () => groupStored(config, heads)
   const [stored, tasks] = await Promise.all([

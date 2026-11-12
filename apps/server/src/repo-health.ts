@@ -19,11 +19,18 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { licensesAnalysis } from '@holtkeeper/licenses'
 import { renovateAnalysis } from '@holtkeeper/renovate'
 import { formatBytes } from '@holtkeeper/report'
-import { repoTests, resolveRepoTests, settingCascades } from '@holtkeeper/settings'
+import {
+  repoAnalyzersKey,
+  repoTests,
+  resolveRepoAnalyzers,
+  resolveRepoTests,
+  settingCascades,
+} from '@holtkeeper/settings'
 import type { AnalysisHead, Job, SettingEntry } from '@holtkeeper/store'
 
 import { latestHeadsWithMetrics } from './analyses.ts'
 import { type ServerDeps, repoKey } from './context.ts'
+import { OFF_FALLBACK } from './repo-analyzers.ts'
 import { TEST_ANALYZERS } from './repo-tests.ts'
 import { canSee } from './visibility.ts'
 
@@ -51,6 +58,16 @@ const cellActions: Record<RepoHealthCellKey, Action> = {
   ci: 'analyses:read',
   licenses: 'analyses:read',
   release: 'releases:read',
+}
+
+/** The analyzer kind each cell judges, for cells that judge one analyzer's records. */
+const cellAnalyzers: Partial<Record<RepoHealthCellKey, string>> = {
+  security: 'audit',
+  dependencies: 'renovate',
+  coverage: 'coverage',
+  bundles: 'bundle',
+  ci: 'ci-jobs',
+  licenses: 'licenses',
 }
 
 const cellOrder: RepoHealthCellKey[] = [
@@ -104,6 +121,9 @@ const cell = (value: string, sub: string, tone: HealthTone): RepoHealthCell => (
 })
 
 const noRecord = () => cell('—', 'no record', 'none')
+
+/** The neutral cell of an analyzer `repo.analyzers` turns off. */
+const offCell = (reason: string | undefined) => cell('Off', reason ?? OFF_FALLBACK, 'none')
 
 const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`
@@ -371,9 +391,12 @@ function judgedBy(settings: readonly SettingEntry[], repo: RepoTarget) {
   const coverage = cascades.get('analyzers.coverage')?.[0]
   const budgets = budgetsOf(cascades.get(BUNDLE_SETTING)?.[0])
   const { expected, reason } = resolveRepoTests(cascades.get(repoTests.key) ?? [], repo)
+  const analyzers = resolveRepoAnalyzers(cascades.get(repoAnalyzersKey) ?? [], repo)
   return {
     target: coverageTargetOf(coverage?.secret ? undefined : coverage?.value),
     tests: reason === undefined ? { expected } : { expected, reason },
+    off: new Set(analyzers.off),
+    ...(analyzers.reason !== undefined && { offReason: analyzers.reason }),
     ...(budgets && { budgets }),
   }
 }
@@ -405,7 +428,9 @@ type IndexedSources = ReturnType<typeof indexSources>
  * cells, and freshness and the last analysis time when `access` allows `analyses:read`. Thresholds
  * are this module's; the coverage target and bundle budgets come from the repository's
  * `analyzers.coverage` and `analyzers.bundle` settings, and a repository with no tests by design
- * (`repo.tests`) gets a neutral coverage cell and its test analyses are left out of freshness.
+ * (`repo.tests`) gets a neutral coverage cell and its test analyses are left out of freshness. A
+ * cell whose analyzer `repo.analyzers` turns off is a neutral `Off` with the reason, and that
+ * analyzer's records are left out of freshness.
  */
 export function repoHealth(
   indexed: IndexedSources,
@@ -433,7 +458,13 @@ export function repoHealth(
     return allowed.get(action) === true
   }
   const cells: RepoHealthCells = {}
-  for (const name of cellOrder) if (may(cellActions[name])) cells[name] = build[name]()
+  const off = (name: RepoHealthCellKey) => {
+    const kind = cellAnalyzers[name]
+    return kind !== undefined && options().off.has(kind)
+  }
+  for (const name of cellOrder)
+    if (may(cellActions[name]))
+      cells[name] = off(name) ? offCell(options().offReason) : build[name]()
   const health = healthOf(cells)
   if (!may('analyses:read')) return { health, cells }
   const list = [...heads.values()]
@@ -441,7 +472,10 @@ export function repoHealth(
     .map((head) => head.createdAt)
     .toSorted()
     .at(-1)
-  const tracked = list.filter((head) => !TEST_ANALYZERS.has(head.kind) || options().tests.expected)
+  const tracked = list.filter(
+    (head) =>
+      !options().off.has(head.kind) && (!TEST_ANALYZERS.has(head.kind) || options().tests.expected),
+  )
   return {
     health,
     cells,

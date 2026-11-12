@@ -160,6 +160,12 @@ describe('describeField', () => {
       options: ['low', 'high'],
       labels: { low: 'Quiet', high: 'Loud' },
     })
+    const levels = { type: 'array', items: level }
+    expect(describeField(levels, levels)).toEqual({
+      kind: 'multi',
+      options: ['low', 'high'],
+      labels: { low: 'Quiet', high: 'Loud' },
+    })
   })
 
   test('records of objects and number tags', () => {

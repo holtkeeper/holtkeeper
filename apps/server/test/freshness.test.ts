@@ -238,6 +238,33 @@ describe('freshness sweeper', () => {
     })
   })
 
+  test('analyzers turned off on a repository are skipped with the reason; a narrower entry turns them back on', async () => {
+    const list = [
+      analyzer('audit', { on: 'time', cadence: '1d' }),
+      analyzer('testids', { on: 'time', cadence: '1d' }),
+    ]
+    await putSetting('repo.analyzers', { off: ['audit'], reason: 'Values only' }, { all: true })
+    await putSetting('repo.analyzers', { off: [] }, { repos: ['tools/b'] })
+    await sweep(list)
+    expect(await queued()).toEqual(['audit tools/b', 'testids games/a', 'testids tools/b'])
+    const status = await freshnessStatus(deps(list), { repo: { forge: 'work', path: 'games/a' } })
+    expect(status.find((entry) => entry.analyzer === 'audit')?.decision).toEqual({
+      action: 'skip',
+      reason: 'turned off: Values only',
+    })
+  })
+
+  test('an analyzer turned off reads as skipped even while its record is fresh', async () => {
+    const list = [analyzer('audit', { on: 'time', cadence: '7d' })]
+    await record('games/a', 'audit', '2026-11-11T00:00:00.000Z')
+    await putSetting('repo.analyzers', { off: ['audit'] }, { all: true })
+    const status = await freshnessStatus(deps(list), { repo: { forge: 'work', path: 'games/a' } })
+    expect(status.find((entry) => entry.analyzer === 'audit')?.decision).toEqual({
+      action: 'skip',
+      reason: 'turned off for this repository',
+    })
+  })
+
   test('repositories whose head cannot be read back off instead of taking every slot', async () => {
     delete heads['games/a']
     await sweep()

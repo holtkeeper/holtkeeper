@@ -10,7 +10,7 @@ import {
 } from '@holtkeeper/access'
 import type { ReleaseCard, RepoList, RepoSummary } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import { resolveRepoTests } from '@holtkeeper/settings'
+import { analyzerOff, resolveRepoTests } from '@holtkeeper/settings'
 import { Hono } from 'hono'
 
 import { type Env, type ServerDeps, principalOf, repoKey, repoTarget } from '../context.ts'
@@ -63,6 +63,7 @@ export interface FleetReader {
  * `reader` holds a listing permission on, sorted by `forge:path`, with the health cells, freshness,
  * updates and newest audit run it may read; whatever it may not read is absent. Repositories
  * without any record are listed as `not-analysed`; `noTests` marks those `repo.tests` turns off.
+ * A repository whose audit `repo.analyzers` turns off has no `latestAudit`.
  */
 export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promise<RepoSummary[]> {
   const { config, store } = deps
@@ -102,7 +103,10 @@ export async function repoSummaries(deps: FleetDeps, reader: FleetReader): Promi
       (action) =>
         reader.can(action, target) && (action !== 'releases:read' || releases !== undefined),
     )
-    const run = audited.has(key) ? indexed.audits.get(key) : undefined
+    const run =
+      audited.has(key) && !analyzerOff(sources.settings, target, 'audit')
+        ? indexed.audits.get(key)
+        : undefined
     const updated = updates?.get(key)
     const tests = resolveRepoTests(sources.settings, target)
     return {

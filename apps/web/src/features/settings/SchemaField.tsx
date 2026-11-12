@@ -251,7 +251,10 @@ function SchemaField(props: FieldProps) {
           <span className="text-sm font-medium">{props.label}</span>
           <MultiToggle
             aria-label={props.label}
-            options={node.options.map((option) => ({ id: option, label: option }))}
+            options={node.options.map((option) => ({
+              id: option,
+              label: node.labels?.[option] ?? option,
+            }))}
             value={
               Array.isArray(props.value) ? props.value.filter((v) => typeof v === 'string') : []
             }

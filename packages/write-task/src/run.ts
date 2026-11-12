@@ -33,7 +33,7 @@ export class WriteTaskRefusedError extends Error {
 export interface WriteTaskPolicy {
   /** The instance-wide switch (`tasks.write`); off until an admin turns it on. */
   enabled: boolean
-  /** A `repo.freeze` entry in force covers the repository. */
+  /** `repo.freeze` freezes the repository: its most specific entry in force is not a lift. */
   readOnly: boolean
   /** Do everything but push and open the merge request. */
   dryRun?: boolean

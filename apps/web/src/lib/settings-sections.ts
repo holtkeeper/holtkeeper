@@ -19,7 +19,7 @@ export type SettingsSectionId = (typeof settingsSectionIds)[number]
 /**
  * Label, summary and the setting keys each Settings section is the home of, in display order.
  * Analyzers homes no key and Policies only the auto-accept policies (`knowledge.autoAccept`,
- * `learnings.autoAccept`, `guide.autoAccept`): otherwise they are a second way
+ * `learnings.autoAccept`, `guide.autoAccept`), `repo.analyzers` and `mergeRequests.comments`: otherwise they are a second way
  * into keys their pages own (see `sharedSectionKeys`).
  */
 export const settingsSections: Readonly<
@@ -51,7 +51,13 @@ export const settingsSections: Readonly<
     label: 'Policies',
     description:
       'License policy, the security allowlist, commit conventions, what agents may learn without review and other rules repositories are judged by',
-    keys: ['knowledge.autoAccept', 'learnings.autoAccept', 'guide.autoAccept'],
+    keys: [
+      'knowledge.autoAccept',
+      'learnings.autoAccept',
+      'guide.autoAccept',
+      'repo.analyzers',
+      'mergeRequests.comments',
+    ],
   },
   system: {
     label: 'System',

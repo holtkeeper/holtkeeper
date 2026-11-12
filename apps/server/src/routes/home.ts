@@ -5,6 +5,7 @@ import { summarizeRun } from '@holtkeeper/api'
 import { rootGroups } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import { staticPrefix } from '@holtkeeper/jobs'
+import { analyzerOff, repoAnalyzersKey } from '@holtkeeper/settings'
 import type { AuditEvent } from '@holtkeeper/store'
 import { Hono } from 'hono'
 
@@ -99,7 +100,10 @@ async function eventsOf(deps: ServerDeps, principal: Principal): Promise<AuditEv
   return [...new Map(events.map((event) => [event.id, event])).values()]
 }
 
-/** Everything Home is computed from, narrowed to what `principal` may read; no forge calls. */
+/**
+ * Everything Home is computed from, narrowed to what `principal` may read; no forge calls. Records
+ * and audit runs of analyzers `repo.analyzers` turns off on their repository are left out.
+ */
 async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSources> {
   const { store, config } = deps
   const now = deps.now()
@@ -139,6 +143,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     knowledge,
     heads,
     allowlists,
+    switches,
   ] = await Promise.all([
     store.jobs.list({ status: 'failed', ...scoped, limit: 200 }),
     store.jobs.list({ status: 'blocked', ...scoped, limit: 100 }),
@@ -149,11 +154,14 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
     store.knowledge.list({ status: 'proposed' }),
     latestHeadsWithMetrics(store.analyses, kinds),
     store.settings.list('audit.allowlist'),
+    store.settings.list(repoAnalyzersKey),
   ])
+  const off = (repo: RepoRef, kind: string) =>
+    analyzerOff(switches, repoTarget(config, repo), kind) !== undefined
 
   const audits = new Map<string, RepoAudits>()
   for (const run of runs) {
-    if (!sees('audits:read', run.repo)) continue
+    if (!sees('audits:read', run.repo) || off(run.repo, 'audit')) continue
     const key = keyOf(run.repo)
     const entry = audits.get(key)
     if (!entry) audits.set(key, { latest: summarizeRun(run) })
@@ -164,6 +172,7 @@ async function sourcesOf(deps: ServerDeps, principal: Principal): Promise<HomeSo
   const analyses = heads.filter(
     (head) =>
       known(head.kind) &&
+      !off(head.repo, head.kind) &&
       (sees('analyses:read', head.repo) ||
         (head.kind === 'audit' && sees('audits:read', head.repo))),
   )
@@ -246,13 +255,27 @@ async function markSnoozed(deps: ServerDeps, principal: Principal, view: HomeVie
   }
 }
 
+const caches = new WeakMap<ServerDeps, Map<string, { expires: number; view: HomeView }>>()
+
+const cacheOf = (deps: ServerDeps) => {
+  let cache = caches.get(deps)
+  if (!cache) {
+    cache = new Map()
+    caches.set(deps, cache)
+  }
+  return cache
+}
+
+/** Drops every cached Home answer of a server, so the next read sees a change just made. */
+export const invalidateHome = (deps: ServerDeps) => caches.get(deps)?.clear()
+
 /**
  * `GET /api/home`: Needs attention, What changed and this week's AI spend in one read from stored data, permission filtered. Answers are kept per principal and grants for 30
- * seconds; snoozes are read on every request, so a snooze shows at once.
+ * seconds or until `invalidateHome`; snoozes are read on every request, so a snooze shows at once.
  */
 export function homeRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
-  const cache = new Map<string, { expires: number; view: HomeView }>()
+  const cache = cacheOf(deps)
 
   app.get('/home', async (c) => {
     const principal = principalOf(c)

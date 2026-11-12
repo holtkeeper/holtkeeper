@@ -1,6 +1,6 @@
 import type { HoltkeeperConfig, HoltkeeperFileConfig } from '@holtkeeper/core'
 import type { CredentialService, CredentialView } from '@holtkeeper/credentials'
-import { type ForgeDefinition, readOnlyDefinition } from '@holtkeeper/forge'
+import { type ForgeDefinition, commentsOffDefinition, readOnlyDefinition } from '@holtkeeper/forge'
 import { type Limiter, resolveLimitPolicy } from '@holtkeeper/limits'
 import {
   type ConfigSource,
@@ -11,6 +11,7 @@ import type { SettingEntry, Store } from '@holtkeeper/store'
 import type { Vault } from '@holtkeeper/vault'
 
 import { globalLimits, limitedFetch } from './limits.ts'
+import { commentsOffFor } from './mr-comments.ts'
 import { type ReadOnlyRepos, readOnlyRepos } from './read-only.ts'
 
 export interface ManagedConfigOptions {
@@ -37,7 +38,8 @@ export interface ManagedConfig {
 /**
  * The server's `ConfigSource`: the file config plus the store's panel documents, panel GitLab
  * forges built with their credential's token and a `fetch` limited under the credential id. Every forge client refuses
- * changes to repositories a `repo.freeze` entry in force marks read-only.
+ * changes to repositories `repo.freeze` keeps read-only (the most specific entry in force is a freeze, not a lift), and notes on merge
+ * requests of repositories whose `mergeRequests.comments` is off.
  */
 export async function startManagedConfig(options: ManagedConfigOptions): Promise<ManagedConfig> {
   const { store, vault, credentials, limiter } = options
@@ -58,8 +60,15 @@ export async function startManagedConfig(options: ManagedConfigOptions): Promise
     if (!current) throw new Error('the config is not loaded yet')
     return current()
   })
+  const commentsOff = async (id: string, path: string) => {
+    if (!current) throw new Error('the config is not loaded yet')
+    return (await commentsOffFor(store, current(), { forge: id, path })) !== undefined
+  }
   const guarded = (id: string, definition: ForgeDefinition) =>
-    readOnlyDefinition(definition, (path) => readOnly({ forge: id, path }))
+    commentsOffDefinition(
+      readOnlyDefinition(definition, (path) => readOnly({ forge: id, path })),
+      (path) => commentsOff(id, path),
+    )
   const gitlab = gitlabForgeFactory({
     fetchFor: (doc) => {
       const id = doc.data.credentialId

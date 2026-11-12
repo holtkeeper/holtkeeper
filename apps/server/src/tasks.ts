@@ -40,6 +40,7 @@ import {
   repoTarget,
   ForbiddenToolError,
 } from './context.ts'
+import { REVIEW_ANALYZER, commentsOffFor } from './mr-comments.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 import type { TaskToolsAccess } from './tools/tasks.ts'
 import { canSeeCatalog, crossTeamPolicy } from './visibility.ts'
@@ -1359,8 +1360,12 @@ export function taskToolsAccess(
           'tasks:run',
           task.repo,
         )
+      if (await commentsOffFor(deps.store, deps.config, target))
+        throw new ToolError(
+          `Merge request reviews are off in ${task.repo} (mergeRequests.comments).`,
+        )
       const job = await deps.store.jobs.enqueue({
-        analyzer: 'review',
+        analyzer: REVIEW_ANALYZER,
         repo: target,
         options: { mergeRequest: task.mergeRequest.id, reviewOwn: true, force: true },
         trigger: 'command',

@@ -31,6 +31,7 @@ import {
   resolvedSections,
   rowMatches,
   setHere,
+  settingValueText,
   sourceLabel,
 } from '../../lib/resolved-settings.ts'
 import { editorFor, previewValue } from '../../lib/schema.ts'
@@ -183,7 +184,9 @@ export function ResolvedSettings({
   const display = (definition: SettingDefinitionView | undefined, value: unknown) =>
     (definition && editorFor(definition.schema, definition.secret).kind === 'credential'
       ? findCredential(credentials.data?.credentials ?? [], value)?.name
-      : undefined) ?? previewValue(value, false)
+      : undefined) ??
+    (definition && settingValueText(definition.key, value)) ??
+    previewValue(value, false)
 
   const replacedBy = (
     row: ResolvedSettingRow,
@@ -809,7 +812,9 @@ export function BackgroundWork() {
                       {definition?.description ?? row.key}
                     </div>
                   </Td>
-                  <Td className="mono">{previewValue(row.value, false)}</Td>
+                  <Td className="mono">
+                    {settingValueText(row.key, row.value) ?? previewValue(row.value, false)}
+                  </Td>
                   <Td>
                     <OrgSource row={row} />
                   </Td>
@@ -974,7 +979,7 @@ export function AllKeys() {
                           <div className="text-[11.5px] text-dim">{row.label}</div>
                         </Td>
                         <Td className="mono max-w-[320px] truncate">
-                          {previewValue(row.value, false)}
+                          {settingValueText(row.key, row.value) ?? previewValue(row.value, false)}
                         </Td>
                         <Td>
                           <OrgSource row={row} />

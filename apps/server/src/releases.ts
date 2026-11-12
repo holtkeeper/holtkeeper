@@ -131,6 +131,19 @@ const needsAction = (row: ReleaseBoardRow) =>
     false)
 
 /**
+ * Whether a release waits for an acceptance nobody gave: the flow asks for one, the target branch
+ * has unreleased commits and its head is not accepted. An open candidate merge request alone does
+ * not count: an acceptance names the target head, so it is possible only once the changes landed.
+ * The only release state that is a decision for a person.
+ */
+export const awaitsAcceptance = (row: ReleaseBoardRow) =>
+  row.error === undefined &&
+  row.stage !== 'external' &&
+  row.acceptanceRequired &&
+  row.acceptance === undefined &&
+  row.unreleased > 0
+
+/**
  * What `principal` may do with a repository's release, as `ReleaseCard.can`: both need exactly
  * `releases:run` on the repository and a repository that is not read-only, `accept` also changes
  * on the target branch that wait for a version, a flow that asks for an acceptance and no
@@ -146,13 +159,7 @@ export function releaseCan(
     !readOnly &&
     principal !== undefined &&
     can(principal, 'releases:run', { kind: 'repo', repo: repoTarget(config, row.repo) })
-  const waits =
-    row.error === undefined &&
-    row.stage !== 'external' &&
-    row.acceptanceRequired &&
-    row.unreleased > 0 &&
-    row.acceptance === undefined
-  return { accept: run && waits, run }
+  return { accept: run && awaitsAcceptance(row), run }
 }
 
 /** The commit a decision about the waiting release names, as `ReleaseCard.head`. */
@@ -182,10 +189,17 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 const key = (kind: string, repo: RepoRef) => `release:${kind}:${repoKeyOf(repo)}`
 
 const repoSchema = z.object({ forge: z.string(), path: z.string() })
+
+/** Whether a stored row was read under another flow mode or acceptance mode than `settings`. */
+const staleFor = (stored: BoardRead, settings: ReleaseSettings) =>
+  stored.row.error === undefined &&
+  (stored.row.mode !== settings.flow.mode ||
+    (stored.acceptanceMode !== undefined && stored.acceptanceMode !== settings.acceptance))
 const boardIndexSchema = z.object({ repos: z.array(repoSchema), readAt: z.string() })
 const storedRowSchema = z.object({
   readAt: z.string(),
   head: z.string().optional(),
+  acceptanceMode: z.string().optional(),
   row: z.custom<ReleaseBoardRow>(
     (value) =>
       typeof value === 'object' &&
@@ -197,7 +211,7 @@ const storedRowSchema = z.object({
 })
 const dismissalSchema = z.object({ sha: z.string(), by: z.string(), at: z.string() })
 type Dismissal = z.infer<typeof dismissalSchema>
-type BoardRead = { row: ReleaseBoardRow; head?: string }
+type BoardRead = { row: ReleaseBoardRow; head?: string; acceptanceMode?: string }
 const tagsSchema = z.object({
   tags: z.array(
     z.object({
@@ -732,7 +746,7 @@ function createReleaseService(deps: ServerDeps) {
       const loaded = await load(repo)
       const value = await rowOf(repo, loaded)
       const head = waitingHead(value, loaded.facts)
-      return { row: value, ...(head ? { head } : {}) }
+      return { row: value, ...(head ? { head } : {}), acceptanceMode: loaded.settings.acceptance }
     } catch (error) {
       const value: ReleaseBoardRow = {
         repo,
@@ -908,24 +922,39 @@ function createReleaseService(deps: ServerDeps) {
     stored: BoardRead,
     dismissal: Dismissal | undefined,
     readOnly: boolean,
+    settings: ReleaseSettings,
   ): ReleaseCard => {
     const dismissed = dismissal && dismissal.sha === stored.head ? dismissal : undefined
-    return {
+    const current: ReleaseBoardRow = {
       ...stored.row,
-      needsAction: !dismissed && needsAction(stored.row),
+      acceptanceRequired:
+        settings.enabled &&
+        !staleFor(stored, settings) &&
+        settings.flow.mode !== 'external' &&
+        settings.acceptance !== 'none',
+    }
+    return {
+      ...current,
+      needsAction: !dismissed && settings.enabled && needsAction(current),
       ...(stored.head ? { head: stored.head } : {}),
-      can: releaseCan(config, principal, stored.row, readOnly),
+      can: releaseCan(config, principal, current, readOnly),
       ...(dismissed ? { dismissed } : {}),
     }
   }
 
-  /** Cards of `repos` that `principal` may read, or of all when no principal is given. */
+  /**
+   * Cards of `repos` that `principal` may read, or of all when no principal is given. Whether an
+   * acceptance is required and whether a person should act follow the current `releases` setting:
+   * with releases off neither holds, and a row read under another flow mode or acceptance mode
+   * asks for no acceptance and is reread soon.
+   */
   const cardsOf = async (repos: readonly RepoRef[], principal?: Principal) => {
     const readable = repos.filter(
       (repo) =>
         !principal ||
         can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) }),
     )
+    const entries = await entriesOf(releaseSettingsKey)
     const cards = await Promise.all(
       readable.map(async (repo) => {
         const [stored, dismissal, readOnly] = await Promise.all([
@@ -933,7 +962,12 @@ function createReleaseService(deps: ServerDeps) {
           dismissalOf(repo),
           isReadOnly(repo),
         ])
-        return stored ? cardOf(principal, stored, dismissal, readOnly) : undefined
+        if (!stored) return undefined
+        const settings = releaseSettings(
+          resolveSetting(entries, releaseSettingsKey, repoTarget(config, repo))?.value,
+        )
+        if (staleFor(stored, settings)) refreshSoon(repo)
+        return cardOf(principal, stored, dismissal, readOnly, settings)
       }),
     )
     return cards.filter((card) => card !== undefined)

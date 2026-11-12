@@ -33,8 +33,10 @@ import { renovateAnalysis } from '@holtkeeper/renovate'
 import { formatBytes } from '@holtkeeper/report'
 import { type ReviewData, reviewDataSchema } from '@holtkeeper/review'
 import {
+  repoAnalyzersKey,
   repoFreeze,
   repoTests,
+  resolveRepoAnalyzers,
   resolveRepoFreeze,
   resolveRepoTests,
   settingCascades,
@@ -50,6 +52,7 @@ import type {
 import { summarizeAnalysis } from './analyses.ts'
 import { type ServerDeps, repoKey } from './context.ts'
 import { readHead } from './freshness.ts'
+import { OFF_FALLBACK } from './repo-analyzers.ts'
 import { type HealthAccess, indexSources, readHealthSources, repoHealth } from './repo-health.ts'
 import { repoDependencies, stackGroupViews } from './stack.ts'
 import { tasksWriteSettings } from './write-tasks.ts'
@@ -343,13 +346,14 @@ async function accessSummary(
     store.settings.list(repoFreeze.key),
     tasksWriteSettings(store),
   ])
-  const freeze = resolveRepoFreeze(entries, repo, now)?.freeze
-  if (!freeze) return { readOnly: false, writeTasks: write.enabled }
+  const freeze = resolveRepoFreeze(entries, repo, now)
+  const decides = freeze.frozen || freeze.lifted
   return {
-    readOnly: true,
-    reason: freeze.reason,
-    ...(freeze.until !== undefined && { until: new Date(freeze.until).toISOString() }),
-    writeTasks: false,
+    readOnly: freeze.frozen,
+    ...(freeze.lifted && { lifted: true }),
+    ...(decides && freeze.reason !== undefined && { reason: freeze.reason }),
+    ...(decides && freeze.until !== undefined && { until: new Date(freeze.until).toISOString() }),
+    writeTasks: !freeze.frozen && write.enabled,
   }
 }
 
@@ -365,6 +369,7 @@ function judgedBy(settings: readonly SettingEntry[], repo: RepoTarget) {
     target: coverageTargetOf(coverage?.secret ? undefined : coverage?.value),
     budgets: budgets.success ? budgets.data : undefined,
     tests: resolveRepoTests(cascades.get(repoTests.key) ?? [], repo),
+    analyzers: resolveRepoAnalyzers(cascades.get(repoAnalyzersKey) ?? [], repo),
   }
 }
 
@@ -461,9 +466,17 @@ function securityCard({ heads, audit, cells, now }: CardInputs): RepoOverviewCar
   })
 }
 
-function librariesCard({ heads, summaries, cells, direct, now }: CardInputs): RepoOverviewCard {
+function librariesCard({
+  heads,
+  summaries,
+  cells,
+  direct,
+  now,
+  judged,
+}: CardInputs): RepoOverviewCard {
   const graph = summaries.get('depgraph')
-  const renovate = heads.get('renovate')
+  const updatesOff = judged.analyzers.off.includes('renovate')
+  const renovate = updatesOff ? undefined : heads.get('renovate')
   const metrics = renovate ? metricsOf(renovateAnalysis, renovate) : undefined
   if (!graph && !metrics) return notAnalysed('libraries', 'supply', 'direct dependencies')
   const total = metricValue(graph, 'packages')
@@ -471,7 +484,10 @@ function librariesCard({ heads, summaries, cells, direct, now }: CardInputs): Re
   const behind = metrics ? metrics.outdated - major : 0
   const current = metrics ? Math.max(0, metrics.dependencies - metrics.outdated) : 0
   return card('libraries', 'supply', {
-    ...(fromCell(cells.dependencies) ?? { tone: 'none', status: 'Not checked for updates' }),
+    ...(fromCell(cells.dependencies) ?? {
+      tone: 'none',
+      status: updatesOff ? 'Updates off' : 'Not checked for updates',
+    }),
     value: direct === undefined ? '—' : String(direct),
     unit: total === undefined ? 'direct' : `direct · ${total.toLocaleString('en-US')} total`,
     segments: metrics
@@ -722,8 +738,37 @@ function branchesCard({ summaries }: CardInputs): RepoOverviewCard {
   })
 }
 
-/** Supply chain cards, then Quality cards; Security only with `audits:read`. */
+/** The analyzers each card describes; it is off once `repo.analyzers` turns all of them off. */
+const cardAnalyzers: Record<RepoCardKey, readonly string[]> = {
+  security: ['audit'],
+  libraries: ['depgraph', 'renovate'],
+  licenses: ['licenses'],
+  stack: ['stack'],
+  'public-api': ['api-surface'],
+  coverage: ['coverage'],
+  bundles: ['bundle'],
+  assets: ['assets'],
+  ci: ['ci-jobs'],
+  branches: ['branches'],
+}
+
+const offCard = (from: RepoOverviewCard, reason: string | undefined): RepoOverviewCard => ({
+  key: from.key,
+  section: from.section,
+  tone: 'none',
+  status: 'Off',
+  value: '—',
+  unit: from.unit,
+  lines: [reason ?? OFF_FALLBACK],
+})
+
+/**
+ * Supply chain cards, then Quality cards; Security only with `audits:read`. A card whose analyzers
+ * `repo.analyzers` turns off reads `Off` with the reason.
+ */
 function overviewCards(inputs: CardInputs): RepoOverviewCard[] {
+  const { off, reason } = inputs.judged.analyzers
+  const isOff = (key: RepoCardKey) => cardAnalyzers[key].every((kind) => off.includes(kind))
   return [
     ...(inputs.may('audits:read') ? [securityCard(inputs)] : []),
     librariesCard(inputs),
@@ -735,7 +780,7 @@ function overviewCards(inputs: CardInputs): RepoOverviewCard[] {
     assetsCard(inputs),
     ciCard(inputs),
     branchesCard(inputs),
-  ]
+  ].map((each) => (isOff(each.key) ? offCard(each, reason) : each))
 }
 
 const defaultBranchOf = (records: readonly AnalysisRecord[]) => {

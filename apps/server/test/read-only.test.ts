@@ -40,7 +40,7 @@ const credentials = () => createCredentialService({ credentials: store.credentia
 
 const freeze = (
   scope: { groups: string[] } | { repos: string[] },
-  value: { reason: string; until?: string } = { reason: 'Shared library' },
+  value: { frozen?: boolean; reason?: string; until?: string } = { reason: 'Shared library' },
 ) =>
   store.settings.put({
     id: JSON.stringify(scope),
@@ -90,6 +90,24 @@ describe('repo.freeze', () => {
     expect(await readOnly(repo('libs/open'))).toBe(true)
   })
 
+  test('a repository lift keeps only that repository of a frozen group writable', async () => {
+    await freeze({ groups: ['libs'] })
+    await freeze(
+      { repos: ['libs/open'] },
+      { frozen: false, reason: 'Reviewed library', until: '2026-11-01T00:00:00.000Z' },
+    )
+    let now = new Date('2026-10-31T00:00:00.000Z')
+    const readOnly = readOnlyRepos(
+      store,
+      () => config,
+      () => now,
+    )
+    expect(await readOnly(repo('libs/open'))).toBe(false)
+    expect(await readOnly(repo('libs/ui'))).toBe(true)
+    now = new Date('2026-11-01T00:00:00.000Z')
+    expect(await readOnly(repo('libs/open'))).toBe(true)
+  })
+
   test('forge clients of the managed config refuse writes to read-only repositories', async () => {
     await freeze({ groups: ['libs'] })
     const service = credentials()
@@ -132,7 +150,7 @@ describe('repo.freeze', () => {
     managed.stop()
   })
 
-  test('events of read-only repositories are ignored, except tags', async () => {
+  test('events of read-only repositories are ignored, except tags and lifted repositories', async () => {
     await freeze({ groups: ['libs'] })
     const deps: ServerDeps = {
       config,
@@ -164,6 +182,21 @@ describe('repo.freeze', () => {
       webhook,
     )
     expect(note).toEqual({ enqueued: [], ignored: 'the repository is read-only' })
+
+    await freeze({ repos: ['libs/open'] }, { frozen: false, reason: 'Reviewed library' })
+    const lifted = await dispatch(
+      {
+        kind: 'note',
+        repo: repo('libs/open'),
+        mergeRequest: 7,
+        mergeRequestState: 'open',
+        author: 'jane',
+        body: '/holtkeeper review',
+        inThread: false,
+      },
+      webhook,
+    )
+    expect(lifted.ignored).not.toBe('the repository is read-only')
 
     const tag = await dispatch(
       { kind: 'tag', repo: repo('libs/ui'), tag: 'v1.0.0', sha: 'a' },

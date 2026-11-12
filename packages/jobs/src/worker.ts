@@ -78,6 +78,11 @@ export interface WorkerOptions {
    * other jobs. A hook that throws admits the job. Default: every job is admitted.
    */
   admission?: (job: Job) => boolean | Promise<boolean>
+  /**
+   * Why an admitted job must not run anymore, or `undefined` when it may: the worker then cancels
+   * it before its analyzer starts and logs the reason. A hook that throws lets the job run.
+   */
+  cancelReason?: (job: Job) => string | undefined | Promise<string | undefined>
   /** Default 1 second. */
   admissionPollMs?: number
   /**
@@ -351,6 +356,14 @@ export function createWorker(options: WorkerOptions): Worker {
         timeoutMs,
       )
       log(`attempt ${job.attempts} of ${job.maxAttempts} on ${workerId}`)
+      const cancelReason = await (async () => options.cancelReason?.(job))().catch(() => undefined)
+      if (cancelReason !== undefined) {
+        log(`canceled: ${cancelReason}`)
+        await jobLog.close()
+        await store.jobs.cancel(job.id, at())
+        say(`job ${job.id} (${label}) canceled: ${cancelReason}`)
+        return store.jobs.get(job.id)
+      }
       const analyzer = analyzers.get(job.analyzer)
       if (!analyzer) throw new PermanentJobError(`unknown analyzer "${job.analyzer}"`)
       const scoped = (await options.settingOptions?.(job, analyzer)) ?? {}

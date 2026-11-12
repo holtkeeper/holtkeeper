@@ -12,6 +12,7 @@ import {
   rowMatches,
   sectionSlug,
   setHere,
+  settingValueText,
   sourceLabel,
 } from './resolved-settings.ts'
 import type { ScopeFocus } from './scope.ts'
@@ -182,4 +183,17 @@ describe('orgRows', () => {
     expect(orgRowMatches(toolchain, '', true)).toBeFalse()
     expect(orgRowMatches(polling, '', true)).toBeTrue()
   })
+})
+
+test('repo.freeze reads as read-only or writable here', () => {
+  expect(settingValueText('repo.freeze', { reason: 'Vendored kit' })).toBe(
+    'Read-only: Vendored kit',
+  )
+  expect(settingValueText('repo.freeze', { frozen: false, reason: 'Reviewed lib' })).toBe(
+    'Writable here: Reviewed lib',
+  )
+  expect(
+    settingValueText('repo.freeze', { frozen: false, until: '2026-12-01T00:00:00.000Z' }),
+  ).toBe('Writable here · until 2026-12-01T00:00:00.000Z')
+  expect(settingValueText('repo.tests', { expected: false })).toBeUndefined()
 })

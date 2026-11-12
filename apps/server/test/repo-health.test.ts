@@ -215,6 +215,24 @@ describe('repoHealth cells', () => {
     ).toEqual({ value: 'No tests', sub: 'by design', tone: 'none' })
   })
 
+  test('a cell whose analyzer is turned off is a neutral Off with the reason', () => {
+    const heads = [audit()]
+    const settings = [
+      setting('repo.analyzers', { groups: ['shapes'] }, { off: ['audit'], reason: 'Values only' }),
+    ]
+    expect(cellOf('security', { heads, settings })).toEqual({
+      value: 'Off',
+      sub: 'Values only',
+      tone: 'none',
+    })
+    expect(classify({ heads, settings }).health).not.toBe('failing')
+    expect(
+      cellOf('bundles', {
+        settings: [setting('repo.analyzers', { groups: ['shapes'] }, { off: ['bundle'] })],
+      }),
+    ).toEqual({ value: 'Off', sub: 'turned off for this repository', tone: 'none' })
+  })
+
   test('bundles sum gzip per target and check the budgets of analyzers.bundle', () => {
     const heads = [
       head('bundle', {
@@ -483,6 +501,16 @@ describe('repoHealth', () => {
       ),
     ]
     const settings = [setting('repo.tests', { groups: ['shapes'] }, { expected: false })]
+    expect(classify({ heads, settings }).freshness).toEqual({ current: 1, total: 1 })
+    expect(classify({ heads }).freshness).toEqual({ current: 1, total: 2 })
+  })
+
+  test('records of analyzers turned off are left out of freshness', () => {
+    const heads = [
+      head('audit', undefined, { createdAt: hoursAgo(30 * 24) }),
+      head('ci-jobs', { status: 'idle' }),
+    ]
+    const settings = [setting('repo.analyzers', { groups: ['shapes'] }, { off: ['audit'] })]
     expect(classify({ heads, settings }).freshness).toEqual({ current: 1, total: 1 })
     expect(classify({ heads }).freshness).toEqual({ current: 1, total: 2 })
   })

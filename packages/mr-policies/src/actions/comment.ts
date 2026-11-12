@@ -15,6 +15,7 @@ const schema = z.object({
 export const commentAction = defineAction({
   type: 'comment',
   schema,
+  posts: true,
   async onceKey(action, context) {
     if (action.once === 'never') return undefined
     if (action.once === 'mergeRequest') return mergeRequestKey(action, context)

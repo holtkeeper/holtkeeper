@@ -39,6 +39,8 @@ export interface JobEngineOptions {
   skip?: SchedulerOptions['skip']
   /** Whether a claimed job may start now; see `WorkerOptions.admission`. */
   admission?: WorkerOptions['admission']
+  /** Why a claimed job must not run anymore; see `WorkerOptions.cancelReason`. */
+  cancelReason?: WorkerOptions['cancelReason']
   /** Stores the artifacts of runs; see `WorkerOptions.persistArtifacts`. */
   persistArtifacts?: WorkerOptions['persistArtifacts']
   /** Where attempt logs are stored; see `WorkerOptions.logs`. */
@@ -100,6 +102,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
     ...(options.onFinished && { onFinished: options.onFinished }),
     ...(options.settingOptions && { settingOptions: options.settingOptions }),
     ...(options.admission && { admission: options.admission }),
+    ...(options.cancelReason && { cancelReason: options.cancelReason }),
     ...(options.persistArtifacts && { persistArtifacts: options.persistArtifacts }),
     ...(options.logs && { logs: options.logs }),
     ...(store.kv && { registry: store.kv }),

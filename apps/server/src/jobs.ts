@@ -14,13 +14,15 @@ import {
   toolchainOverrideSchema,
   toolchainSetting,
 } from '@holtkeeper/jobs'
-import { type SettingDefinition, resolveSetting } from '@holtkeeper/settings'
+import { type SettingDefinition, repoAnalyzersSetting, resolveSetting } from '@holtkeeper/settings'
 import type { AnalysisRecord, AuditTrigger, Job, Store } from '@holtkeeper/store'
 import { auditReportSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
 import { assetsPolicyFor } from './assets.ts'
+import { reviewCancelReason } from './mr-comments.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
+import { analyzerOffFor } from './repo-analyzers.ts'
 import { TEST_ANALYZERS, testsExpectedFor } from './repo-tests.ts'
 import { RUN_ONLY_ANALYZERS, jobTarget } from './routes/jobs.ts'
 
@@ -142,6 +144,18 @@ export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] 
 }
 
 /**
+ * The `repo.analyzers` definition over the repository analyzers that run automatically: every
+ * repository-scope analyzer but those in `RUN_ONLY_ANALYZERS`. Register next to `analyzerSettings`.
+ */
+export function repoAnalyzersDefinition(analyzers: AnyAnalyzer[]): SettingDefinition {
+  return repoAnalyzersSetting(
+    analyzers
+      .filter((analyzer) => analyzer.scope === 'repo' && !RUN_ONLY_ANALYZERS.has(analyzer.kind))
+      .map((analyzer) => ({ kind: analyzer.kind, label: analyzer.analysis.label })),
+  )
+}
+
+/**
  * Setting definitions for job execution: `toolchain` (section `Runtime`), the per-scope override of
  * detected tool versions, container image, network and environment. Register next to
  * `analyzerSettings`.
@@ -194,28 +208,44 @@ export async function scopedAnalyzerOptions(
 }
 
 /**
- * Why an automatically queued job should not be queued, or `undefined` when it may: `no-tests` for
- * test analyzers on a repository with no tests by design (`repo.tests`), `options` when its own
- * options merged with the `analyzers.<kind>` setting that applies to it (as the worker merges them
- * for non-manual jobs) do not validate, so triggers can leave it out instead of queuing a job
- * bound to fail.
+ * Why an automatically queued job should not be queued, or `undefined` when it may: `off` (with
+ * the entry's `reason`) for an analyzer `repo.analyzers` turns off on the repository, `no-tests`
+ * for test analyzers on a repository with no tests by design (`repo.tests`), `options` when its
+ * own options merged with the `analyzers.<kind>` setting that applies to it (as the worker merges
+ * them for non-manual jobs) do not validate, so triggers can leave it out instead of queuing a
+ * job bound to fail.
  */
 export async function automaticJobBlocker(
   config: HoltkeeperConfig,
   store: Store,
   analyzer: { options: z.ZodType },
   request: Pick<Job, 'analyzer' | 'repo'> & { group?: string; options?: Record<string, unknown> },
-): Promise<'no-tests' | 'options' | undefined> {
+): Promise<{ blocker: 'off' | 'no-tests' | 'options'; reason?: string } | undefined> {
+  const off =
+    request.group === undefined
+      ? await analyzerOffFor(store, config, request.repo, request.analyzer)
+      : undefined
+  if (off) return { blocker: 'off', ...off }
   if (
     request.group === undefined &&
     TEST_ANALYZERS.has(request.analyzer) &&
     !(await testsExpectedFor(store, () => config)(request.repo))
   )
-    return 'no-tests'
+    return { blocker: 'no-tests' }
   const scoped = (await scopedAnalyzerOptions(config, store, request)) ?? {}
   return analyzer.options.safeParse({ ...request.options, ...scoped }).success
     ? undefined
-    : 'options'
+    : { blocker: 'options' }
+}
+
+/**
+ * The `skip` a schedule uses: `true` for an analyzer `repo.analyzers` turns off on the repository
+ * and for test analyzers on a repository with no tests by design (`repo.tests`).
+ */
+export function automaticSkip(store: Store, config: HoltkeeperConfig) {
+  return async (analyzer: string, repo: RepoRef): Promise<boolean> =>
+    (await analyzerOffFor(store, config, repo, analyzer)) !== undefined ||
+    (TEST_ANALYZERS.has(analyzer) && !(await testsExpectedFor(store, () => config)(repo)))
 }
 
 /** Whether an automatically queued job may be queued: `automaticJobBlocker` finds nothing. */
@@ -284,8 +314,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),
     toolchainFor: (repo) => scopedToolchain(config, store, repo),
-    skip: async (analyzer, repo) =>
-      TEST_ANALYZERS.has(analyzer) && !(await testsExpectedFor(store, () => config)(repo)),
+    skip: automaticSkip(store, config),
     ...(options.artifacts && {
       logs: options.artifacts,
       persistArtifacts: persistArtifactsTo(options.artifacts),
@@ -294,6 +323,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
       }),
     }),
     ...(options.admission && { admission: options.admission }),
+    cancelReason: reviewCancelReason(store, config),
     ...(options.worker && { worker: options.worker }),
     async onFinished(job, record) {
       if (record) await recordAuditRun(store, job, record)

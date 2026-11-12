@@ -36,6 +36,32 @@ describe('evaluatePolicies', () => {
     expect(pushed.outcomes.map((o) => o.status)).toEqual(['done', 'done'])
   })
 
+  test('with comments off, comment and label are skipped and approval goes without a summary', async () => {
+    const { forge, calls } = fakeForge({ files: [diffFile('a')] })
+    const result = await evaluatePolicies({
+      policies: [
+        policy('p', {
+          actions: [
+            { type: 'comment', body: 'hi' },
+            { type: 'label', add: ['checked'] },
+            { type: 'approve', summary: 'Looks fine' },
+          ],
+        }),
+      ],
+      event: mrEvent({ mr: { headSha: 'sha1' } }),
+      forge,
+      memory: createMemory(),
+      commentsOff: true,
+    })
+    expect(result.outcomes.map((o) => [o.action, o.status, o.detail])).toEqual([
+      ['comment', 'skipped', 'merge request comments are off'],
+      ['label', 'skipped', 'merge request comments are off'],
+      ['approve', 'done', 'approved'],
+    ])
+    expect(calls.map((call) => call.method)).toEqual(['submitReview'])
+    expect(calls[0]?.args[2]).toMatchObject({ event: 'approve', comments: [], summary: undefined })
+  })
+
   test('deferred, failed and dry-run actions are not remembered', async () => {
     const memory = createMemory()
     const policies = [policy('p', { actions: [{ type: 'approve', requirePipeline: 'success' }] })]

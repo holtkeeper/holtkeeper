@@ -31,6 +31,8 @@ export interface ActionContext {
   botUser?: string
   /** Whether the policy's scope covers the event's repository. */
   scopeCovers: boolean
+  /** Merge request comments are off for the repository: post nothing on the merge request. */
+  commentsOff: boolean
   fetch: (input: string, init?: RequestInit) => Promise<Response>
   /**
    * Runs `effect` unless this is a dry run. Returns `done` with `detail`, `dry-run` with
@@ -50,6 +52,8 @@ export interface ActionContext {
 export interface ActionProvider {
   readonly type: string
   readonly schema: z.ZodType<PolicyAction>
+  /** Writes on the merge request itself (comments, labels); skipped while its comments are off. */
+  readonly posts?: boolean
   run(action: PolicyAction, context: ActionContext): Promise<ActionResult>
   /**
    * Key under which a successful run is remembered; a later run with the same key is skipped and
@@ -62,6 +66,7 @@ export interface ActionProvider {
 export interface TypedActionProvider<Schema extends z.ZodType<PolicyAction>> {
   type: string
   schema: Schema
+  posts?: boolean
   run: (action: z.output<Schema>, context: ActionContext) => Promise<ActionResult>
   onceKey?: (action: z.output<Schema>, context: ActionContext) => Promise<string | undefined>
 }
@@ -70,10 +75,11 @@ export interface TypedActionProvider<Schema extends z.ZodType<PolicyAction>> {
 export function defineAction<Schema extends z.ZodType<PolicyAction>>(
   provider: TypedActionProvider<Schema>,
 ): ActionProvider {
-  const { type, schema, run, onceKey } = provider
+  const { type, schema, run, onceKey, posts } = provider
   return {
     type,
     schema,
+    ...(posts && { posts }),
     async run(action, context) {
       const parsed = schema.safeParse(action)
       if (!parsed.success) {

@@ -20,7 +20,13 @@ import type {
 import { webPaths } from '@holtkeeper/web-paths'
 
 import { parseRepo } from './context.ts'
-import { allowlistNotices, allowlistTitle, awaitingVersionTitle } from './inbox.ts'
+import {
+  allowlistNotices,
+  allowlistTitle,
+  awaitingVersionTitle,
+  releaseAwaitsDecision,
+} from './inbox.ts'
+import { awaitsAcceptance } from './releases.ts'
 import { type HealthAccess, STALE_ANALYSIS_DAYS, isStale } from './repo-health.ts'
 import { failureSnoozeId } from './snoozes.ts'
 
@@ -234,31 +240,26 @@ export function allowlistItems(sources: HomeSources): HomeAttentionItem[] {
   )
 }
 
-/** What a release card waits for, as a severity and a sentence; `undefined` when nothing. */
+/**
+ * What a release card needs from a person, as a severity and a sentence: a failed read, a failed
+ * deploy, an acceptance nobody gave, a version blocked by a gate. `undefined` for states that need
+ * no decision (ready to propose, ready to create or deploy a version): the Releases page shows them.
+ */
 function releaseNeed(card: ReleaseCard): { severity: HomeSeverity; title: string } | undefined {
   if (card.error !== undefined)
     return { severity: 'medium', title: 'Reading the release state failed' }
   const failed = card.deploy?.environments.find((env) => env.status === 'failed')
   if (failed && card.deploy)
     return { severity: 'high', title: `Deploy of ${card.deploy.tag} to ${failed.name} failed` }
-  if (card.stage === 'awaiting-version')
+  if (awaitsAcceptance(card) || (card.stage === 'awaiting-version' && card.blockers.length))
     return { severity: 'medium', title: awaitingVersionTitle(card) }
-  if (card.stage === 'proposed')
-    return { severity: 'medium', title: 'Release proposed, waiting for acceptance' }
-  if (card.stage === 'candidate')
-    return {
-      severity: 'low',
-      title: `${plural(card.unreleased, 'unreleased commit')}${card.unreleasedCapped ? '+' : ''} ready to propose`,
-    }
-  const ready = card.deploy?.environments.find((env) => env.status === 'ready')
-  if (ready && card.deploy)
-    return { severity: 'low', title: `${card.deploy.tag} is ready to deploy to ${ready.name}` }
   return undefined
 }
 
 /**
- * Releases that wait on a person: a pending step, a failed or ready deploy, a failed read. A
- * release the caller may decide (`can.run` with a head to decide on) opens its Inbox item.
+ * Releases that need a person: a failed read or deploy, an acceptance nobody gave, a blocked
+ * version. One the caller may decide in the Inbox (`releaseAwaitsDecision` and `can.run`) opens
+ * its Inbox item.
  */
 export function releaseItems(sources: HomeSources): HomeAttentionItem[] {
   return sources.releases.flatMap((card): HomeAttentionItem[] => {
@@ -266,7 +267,7 @@ export function releaseItems(sources: HomeSources): HomeAttentionItem[] {
     if (!need) return []
     const repo = repoRef(sources, keyOf(card.repo))
     const id = `release:${repo.repo}`
-    const decides = card.can.run && card.head !== undefined
+    const decides = card.can.run && releaseAwaitsDecision(card)
     const href = decides
       ? webPaths.inbox({ item: id, kind: 'release' })
       : webPaths.releaseTimeline(repo.repo)

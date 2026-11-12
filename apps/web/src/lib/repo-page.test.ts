@@ -228,6 +228,12 @@ describe('header and facts', () => {
     expect(accessText({ readOnly: false, writeTasks: false })).toBe(
       'Read and write · write tasks off',
     )
+    expect(
+      accessText({ readOnly: false, lifted: true, reason: 'Reviewed lib', writeTasks: true }),
+    ).toBe('Read and write · Writable here: Reviewed lib · agents may open merge requests')
+    expect(accessText({ readOnly: false, lifted: true, writeTasks: false })).toBe(
+      'Read and write · Writable here · write tasks off',
+    )
   })
 })
 

@@ -38,6 +38,8 @@ export interface EvaluatePoliciesInput {
   bots?: string[]
   /** Used by the `webhook` action; global `fetch` when omitted. */
   fetch?: ActionContext['fetch']
+  /** Merge request comments are off for the repository: actions that `post` are skipped. */
+  commentsOff?: boolean
 }
 
 /** What the policies decided for one event. */
@@ -83,7 +85,8 @@ function mergeSkips(current: '*' | string[], next: Policy['skipAnalyzers']): '*'
  * Evaluates merge request policies for one event and runs the actions of those that match.
  * Deterministic: policies run in `orderPolicies` order, actions in list order, and a matching
  * policy with `stop` ends evaluation. Actions with a once-key (approve, merge, comment) that
- * already happened for the same head commit are skipped. The engine never enqueues jobs; it
+ * already happened for the same head commit are skipped, and so are actions that post on the merge
+ * request (comment, label) when `commentsOff` is set. The engine never enqueues jobs; it
  * returns `skipAnalyzers` and `enqueue` for the caller.
  */
 export async function evaluatePolicies(input: EvaluatePoliciesInput): Promise<PolicyEvaluation> {
@@ -141,6 +144,7 @@ export async function evaluatePolicies(input: EvaluatePoliciesInput): Promise<Po
         scopeCoversRepo(policy.scope, repo) &&
         (!policy.within || scopeCoversRepo(policy.within, repo)),
       fetch: doFetch,
+      commentsOff: input.commentsOff ?? false,
       async perform(detail, effect, data) {
         if (dryRun) return { status: 'dry-run', detail: `would be ${detail}`, data }
         try {
@@ -171,6 +175,10 @@ export async function evaluatePolicies(input: EvaluatePoliciesInput): Promise<Po
       }
       if (!provider) {
         record({ status: 'failed', detail: `unknown action ${action.type}` })
+        continue
+      }
+      if (input.commentsOff && provider.posts) {
+        record({ status: 'skipped', detail: 'merge request comments are off' })
         continue
       }
       try {

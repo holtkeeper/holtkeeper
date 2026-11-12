@@ -18,6 +18,7 @@ import type { Family, Store } from '@holtkeeper/store'
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import type { UsageIndex } from '../api-surface/usages.ts'
 import { repoKey } from '../context.ts'
+import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { repoDependencies, stackGroupViews } from '../stack.ts'
 import { canReadShared, reachOf, scopeOwner } from '../visibility.ts'
 import { type AssetToolsAccess, assetsToolset } from './assets.ts'
@@ -139,7 +140,7 @@ export interface AgentCatalogOptions {
   catalog: ApiCatalog
   usages: UsageIndex
   store: Pick<Store, 'analyses' | 'auditRuns' | 'knowledge' | 'libraries'> &
-    Partial<Pick<Store, 'audit' | 'kv'>>
+    Partial<Pick<Store, 'audit' | 'kv' | 'settings'>>
   /** The repository the task works on. */
   repo: RepoTarget
   /** A repository with its config groups. */
@@ -168,6 +169,7 @@ export interface AgentCatalogOptions {
  */
 export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsContext {
   const { store, repo, artifacts, requester, policy, targetOf } = options
+  const { settings } = store
   const key = repoKey(repo)
   const sameTeam = (other: RepoRef) =>
     repoKey(other) === key || targetOf(other).groups.some((group) => repo.groups.includes(group))
@@ -207,6 +209,7 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
     canReadAudits: (other) =>
       repoKey(other) === key &&
       (!requester || can(requester, 'audits:read', { kind: 'repo', repo: targetOf(other) })),
+    ...(settings && { auditOff: () => analyzerOffFilter({ settings }, targetOf, 'audit') }),
     ownerOf,
     ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
     stack: storedStackTools(store.analyses, {

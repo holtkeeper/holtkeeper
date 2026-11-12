@@ -258,16 +258,29 @@ Entries already stored are not changed; the limits apply the next time someone a
 })
 
 /**
- * Value of `repo.freeze`: why Holtkeeper must not change the repository and, optionally, the
- * moment the freeze ends. Without `until` it lasts until the entry is removed.
+ * Value of `repo.freeze`: whether Holtkeeper must not change the repository (`frozen`, default
+ * `true`), why, and optionally the moment the entry stops counting. A frozen entry needs a reason;
+ * on a lift (`frozen: false`, which lifts a broader freeze for its scope) an empty one is dropped.
+ * Without `until` it lasts until removed.
  */
-export const repoFreezeSchema = z.object({
-  reason: z.string().trim().min(1).max(500),
-  until: z.iso.datetime({ offset: true }).optional(),
-})
+export const repoFreezeSchema = z
+  .object({
+    frozen: z.boolean().default(true),
+    reason: z.string().trim().max(500).optional(),
+    until: z.iso.datetime({ offset: true }).optional(),
+  })
+  .refine((value) => !value.frozen || !!value.reason, {
+    message: 'a freeze needs a reason',
+    path: ['reason'],
+  })
+  .transform(({ reason, ...rest }): typeof rest & { reason?: string } =>
+    reason ? { ...rest, reason } : rest,
+  )
 
+/** A parsed `repo.freeze` value; `frozen` is always set. */
 export type RepoFreeze = z.infer<typeof repoFreezeSchema>
 
+/** Per-repository `repo.freeze` setting: the most specific entry in force wins. */
 export const repoFreeze = defineSetting({
   key: 'repo.freeze',
   label: 'Read-only',
@@ -276,15 +289,24 @@ export const repoFreeze = defineSetting({
   section: 'Repositories',
   help: `Add repositories Holtkeeper should only read: shared libraries, vendored code, repositories of other teams, a code freeze.
 
-- **reason** says why, so others know whom to ask before lifting it.
-- **until** ends the freeze at that moment; leave it empty for a freeze that lasts until the entry is removed. An entry past its end no longer counts, and a broader entry applies again.
+- **frozen** (default on): off makes the entry a lift, so its scope stays writable under a broader freeze.
+- **reason** says why, so others know whom to ask before changing it. A freeze needs one; on a lift it is recommended and shown as "Writable here: <reason>".
+- Anyone who may change settings of a group or repository can lift a broader freeze there, including one set for everything: a lift is an ordinary entry, and the most specific entry wins.
+- **until** ends the entry at that moment; leave it empty for one that lasts until the entry is removed. An entry past its end no longer counts, and the next broader entry applies again.
 - Analyses, schedules, tag-triggered jobs and links between repositories keep working.
 - Every change through the forge is refused before it is sent: comments, reviews, thread replies, labels, merges, branches, commits, tags, pipeline jobs, deploy keys and project webhooks. Jobs that try one fail with a read-only error.
 - Merge request, comment and pipeline events of the repository are ignored, so no policies, reviews or commands run for it.
 
-Set it for everything to make Holtkeeper a pure analytics tool, or for a group or repository pattern only. A narrower entry cannot lift a broader one: remove or narrow the broad entry instead.`,
+Set it for everything to make Holtkeeper a pure analytics tool, or for a group or repository pattern only. The most specific entry wins, so a repository entry with frozen off keeps one repository of a frozen group writable.`,
   default: null,
   schema: repoFreezeSchema,
+  form: z
+    .object({
+      frozen: z.boolean().default(true),
+      reason: z.string().max(500),
+      until: z.iso.datetime({ offset: true }).optional(),
+    })
+    .default({ frozen: true, reason: '' }),
 })
 
 /**
@@ -321,6 +343,98 @@ When tests are off:
 Test ids (\`analyzers.testids\`) are unaffected: end-to-end suites in other repositories read them.`,
   default: { expected: true },
   schema: repoTestsSchema,
+})
+
+/**
+ * Value of `repo.analyzers`: analyzer kinds that never run automatically on the repository and,
+ * optionally, why. The most specific entry wins, so `{ off: [] }` turns them back on underneath.
+ */
+export const repoAnalyzersSchema = z.object({
+  off: z.array(z.string().trim().min(1)).max(100).default([]),
+  reason: z.string().trim().min(1).max(500).optional(),
+})
+
+/** A parsed `repo.analyzers` value; `off` is always set, `reason` only when given. */
+export type RepoAnalyzers = z.infer<typeof repoAnalyzersSchema>
+
+/** Key of the per-repository `repo.analyzers` setting. */
+export const repoAnalyzersKey = 'repo.analyzers'
+
+/** An analyzer `repo.analyzers` may turn off: its kind and the name people see. */
+export interface SwitchableAnalyzer {
+  kind: string
+  label: string
+}
+
+/**
+ * The `repo.analyzers` definition for the analyzers a server runs: `off` accepts only their kinds,
+ * labelled for editors with `x-labels`. Register it next to the built-in settings.
+ */
+export function repoAnalyzersSetting(analyzers: readonly SwitchableAnalyzer[]) {
+  const kinds = [...new Set(analyzers.map((analyzer) => analyzer.kind))]
+  const labels = Object.fromEntries(analyzers.map((analyzer) => [analyzer.kind, analyzer.label]))
+  const [first, ...rest] = kinds
+  const kind =
+    first === undefined ? z.never() : z.enum([first, ...rest]).meta({ 'x-labels': labels })
+  return defineSetting({
+    key: repoAnalyzersKey,
+    label: 'Analyzers off',
+    description:
+      'Analyzers that never run automatically on the covered repositories, with a reason. Their results show as off instead of missing or stale.',
+    section: 'Repositories',
+    help: `Turn analyzers off for repositories they make no sense for: a vulnerability audit of a values-only repository, bundle sizes of a library without a build.
+
+- **off**: the analyzer kinds to leave out. Leave it empty in a narrower entry to turn every analyzer back on there.
+- **reason** says why; the panel shows it wherever it says "Off".
+
+Set it for everything, a group or a repository pattern. The most specific entry wins as a whole, so repeat kinds a narrower entry should keep off.
+
+For an analyzer that is off:
+- It is never queued automatically (events, triggers, schedules, freshness, new repositories) and counts as skipped in Ops › Automation; a manual run still goes ahead.
+- Repository health and the repository overview show "Off" instead of a result, and its stale records leave repository freshness.
+- An audit that is off leaves Supply › Security (findings, latest runs, the fleet figures), the advisories of Supply › Libraries and of the MCP tool \`evaluate_dependency\`, and Needs attention on Home; other analyzers leave the stale-analysis items there.`,
+    default: { off: [] },
+    schema: repoAnalyzersSchema.extend({
+      off: z.array(kind).max(100).default([]),
+    }),
+  })
+}
+
+/**
+ * Value of `mergeRequests.comments`: whether Holtkeeper reviews and comments on merge requests of
+ * the repository and, when it does not, why. The most specific entry wins.
+ */
+export const mergeRequestCommentsSchema = z.object({
+  enabled: z.boolean().default(true),
+  reason: z.string().trim().min(1).max(500).optional(),
+})
+
+/** A parsed `mergeRequests.comments` value; `enabled` is always set, `reason` only when given. */
+export type MergeRequestComments = z.infer<typeof mergeRequestCommentsSchema>
+
+/** Per-repository `mergeRequests.comments` setting: the most specific entry wins; on by default. */
+export const mergeRequestComments = defineSetting({
+  key: 'mergeRequests.comments',
+  label: 'Merge request reviews',
+  description:
+    'Whether Holtkeeper reviews and comments on merge requests. Off: no AI review runs and nothing is posted on merge requests of the covered repositories.',
+  section: 'Merge requests',
+  help: `Turn merge request reviews off for repositories whose teams do not want Holtkeeper in their merge requests.
+
+- **enabled** (default on): off stops reviews and merge request comments in the covered repositories.
+- **reason** says why, for whoever wonders where the reviews went.
+
+Set it for everything, a group or a repository pattern. The most specific entry wins, so a repository entry that is on lifts a group entry that is off.
+
+When it is off:
+- The AI review is never queued: not on merge request events, labels, policies, \`/holtkeeper\` commands, replies to review threads or task review requests.
+- Holtkeeper posts nothing on the repository's merge requests: no comments, review threads, thread replies, resolved threads, command answers, and merge request policies skip their comment and label actions.
+- Merge request policies still approve, merge, close or queue other analyzers, and analyses of the default branch keep running.
+- Merge requests Holtkeeper opens itself (tasks, propagation, renovate, release candidates) still carry their own title, description and labels.
+
+Unlike **Read-only** (\`repo.freeze\`), which refuses every change through the forge (branches, commits, merge requests, tags) and ignores merge request events, this only keeps reviews and comments off merge requests.`,
+  default: { enabled: true },
+  schema: mergeRequestCommentsSchema,
 })
 
 /** Value of `tasks.write`; every field has a default, so `{ enabled: true }` is enough. */
@@ -403,6 +517,7 @@ export const builtinSettings: SettingDefinition[] = [
   auditAllowlistPolicy,
   repoFreeze,
   repoTests,
+  mergeRequestComments,
   accessCrossTeam,
   tasksWrite,
 ]

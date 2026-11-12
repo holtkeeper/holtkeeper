@@ -234,6 +234,9 @@ const overviewOf = async (headers = asAdmin) => {
   return body as RepoOverview
 }
 
+const librariesCard = async () =>
+  (await overviewOf()).cards.find((card) => card.key === 'libraries')
+
 describe('repository hub overview', () => {
   test('health strip and cards follow the caller’s permissions', async () => {
     await metricsRecord('audit', {
@@ -333,6 +336,59 @@ describe('repository hub overview', () => {
       unit: 'lines',
       lines: ['Config only'],
     })
+  })
+
+  test('cards of analyzers turned off read Off with the reason', async () => {
+    await metricsRecord('coverage', { percent: 20, target: 60, files: 3, untested: 2 })
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { groups: ['shapes'] },
+      value: { off: ['coverage', 'depgraph'], reason: 'Values only' },
+      secret: false,
+      updatedAt: at,
+    })
+    const { cards, cells } = await overviewOf()
+    expect(cards.find((card) => card.key === 'coverage')).toEqual({
+      key: 'coverage',
+      section: 'quality',
+      tone: 'none',
+      status: 'Off',
+      value: '—',
+      unit: 'lines',
+      lines: ['Values only'],
+    })
+    expect(cards.find((card) => card.key === 'libraries')?.status).not.toBe('Off')
+    expect(cells.coverage).toEqual({ value: 'Off', sub: 'Values only', tone: 'none' })
+  })
+
+  test('the Libraries card drops update figures while renovate is off', async () => {
+    await metricsRecord('renovate', {
+      status: 'ok',
+      dependencies: 10,
+      outdated: 3,
+      major: 1,
+      security: 0,
+      minor: 1,
+      patch: 1,
+      open: 0,
+      broken: 0,
+      pending: 0,
+    })
+    expect((await librariesCard())?.lines).toContain(
+      '7 current · 2 minor or patch · 1 major behind',
+    )
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { groups: ['shapes'] },
+      value: { off: ['renovate'] },
+      secret: false,
+      updatedAt: at,
+    })
+    const off = await librariesCard()
+    expect(off?.status).toBe('Not analysed')
+    expect(off?.segments).toBeUndefined()
   })
 
   test('reviews of 30 days, this week’s work, knowledge, default branch and access', async () => {
@@ -486,6 +542,30 @@ describe('repository hub overview', () => {
       until: '2099-01-01T00:00:00.000Z',
       writeTasks: false,
     })
+    await store.settings.remove('ro')
+    await store.settings.put({
+      id: 'group-freeze',
+      key: 'repo.freeze',
+      scope: { groups: ['shapes'] },
+      value: { reason: 'Team freeze' },
+      secret: false,
+      updatedAt: at,
+    })
+    await store.settings.put({
+      id: 'lift',
+      key: 'repo.freeze',
+      scope: { repos: ['work:shapes/circle'] },
+      value: { frozen: false, reason: 'Reviewed widget kit' },
+      secret: false,
+      updatedAt: '2026-11-02T00:00:00.000Z',
+    })
+    expect((await overviewOf()).access).toMatchObject({
+      readOnly: false,
+      lifted: true,
+      reason: 'Reviewed widget kit',
+    })
+    await store.settings.remove('group-freeze')
+    expect((await overviewOf()).access).toEqual({ readOnly: false, writeTasks: false })
     expect(overview.release).toBeUndefined()
     expect(JSON.stringify(overview)).not.toContain('title')
   })
@@ -493,6 +573,14 @@ describe('repository hub overview', () => {
 
 test('the release card comes from the stored Releases snapshot and needs releases:read', async () => {
   await store.kv?.set('release:board:index', { repos: [circle], readAt: at })
+  await store.settings.put({
+    id: 'releases-on',
+    key: 'releases',
+    scope: { repos: ['work:shapes/circle'] },
+    value: { enabled: true, flow: { mode: 'trunk' } },
+    secret: false,
+    updatedAt: at,
+  })
   await store.kv?.set('release:board:row:work:shapes/circle', {
     readAt: at,
     head: 'h'.repeat(40),
