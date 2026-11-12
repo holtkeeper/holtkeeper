@@ -278,7 +278,7 @@ Badge size prop is ready: https://gitlab.acme.dev/acme/widget-kit/-/merge_reques
   </SlackWindow>
 </Screen>
 
-| Status    | Emoji in the examples         | Default emoji           | When                                                       |
+| Status    | Emoji                         | Fallback                | When                                                       |
 | --------- | ----------------------------- | ----------------------- | ---------------------------------------------------------- |
 | Reviewing | <Emoji name="hk-reviewing" /> | `:eyes:`                | A review is queued or running.                             |
 | Clean     | <Emoji name="hk-clean" />     | `:large_green_circle:`  | The latest review looks good and posted no findings.       |
@@ -322,7 +322,7 @@ Release prep, please review: https://gitlab.acme.dev/acme/admin-ui/-/merge_reque
 3. Bind channels to repositories with the `slack.reviews` setting: channel ids such as `C0123ABCD`, per scope. A group entry with no channels keeps that group quiet.
 
 :::tip
-The emoji in the examples are Holtkeeper's own status emoji. Upload them to your workspace as custom emoji and enter their names as overrides under the Slack credential in **Settings › Integrations › Slack**. Blank fields use the default emoji.
+These are Holtkeeper's own status emoji and the default. A workspace that has not uploaded them shows the standard fallback; [Slack app](/guide/settings/slack/#use-the-holtkeeper-emoji) explains how to add them.
 :::
 
 Nothing is posted when the repository has merge request reviews turned off, the channel is not bound to it, or no Slack credential is stored.

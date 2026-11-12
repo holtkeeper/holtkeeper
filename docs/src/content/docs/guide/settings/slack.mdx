@@ -41,7 +41,7 @@ Show the AI review status on every merge request link posted in your channels, a
 
 The app does two things:
 
-- **Review status.** When a message in a channel the app is in links a merge request of a connected repository, the app puts one emoji on the message and keeps it current as reviews run. For this it never posts, replies or edits: it only adds and removes its own reaction.
+- **Review status.** When a message in a channel the app is in links a merge request of a connected repository, the app puts one emoji on the message and keeps it current as reviews run. A message that links several merge requests also gets one status reply in its thread.
 - **Release announcements.** New versions of a repository get one message in the channels you choose, whatever created the tags.
 
 ## What it looks like
@@ -68,20 +68,39 @@ Token refresh rework, ready for eyes [!1822](#what-it-looks-like)
     <SlackReactions><SlackReaction emoji="hk-changes" /></SlackReactions>
 
   </SlackMessage>
+  <SlackMessage author="Mira K." time="12:10">
+
+Two more for the release: [!1830](#what-it-looks-like) and [!1831](#what-it-looks-like)
+
+    <SlackReactions><SlackReaction emoji="hk-reviewing" /></SlackReactions>
+
+  </SlackMessage>
+  <SlackMessage author="holtkeeper" time="12:10">
+    <SlackContext>Reply in thread</SlackContext>
+
+<Emoji name="hk-clean" /> Clean · [widget-kit!1830 Show week numbers in
+DatePicker](#what-it-looks-like)
+<br />
+<Emoji name="hk-reviewing" /> Reviewing · [widget-kit!1831 Pager keeps focus on page
+change](#what-it-looks-like)
+
+  </SlackMessage>
 </SlackWindow>
 
 <p class="hk-caption">
-  The reaction is the only thing the app adds. A new push queues a review, and the emoji goes back
-  to reviewing.
+  A new push queues a review, and the emoji goes back to reviewing. Messages with several merge
+  requests show the worst status as the reaction and every status in the thread reply.
 </p>
 
-| Emoji                         | Status    | When                                                       | Default emoji           |
-| ----------------------------- | --------- | ---------------------------------------------------------- | ----------------------- |
-| <Emoji name="hk-reviewing" /> | reviewing | A review of the merge request is queued or running         | `:eyes:`                |
-| <Emoji name="hk-clean" />     | clean     | The latest review says looks good and posted no findings   | `:large_green_circle:`  |
-| <Emoji name="hk-minor" />     | minor     | Looks good, with minor or info findings posted             | `:large_orange_circle:` |
-| <Emoji name="hk-changes" />   | changes   | Needs changes, or any major or critical finding            | `:red_circle:`          |
-| <Emoji name="hk-skipped" />   | skipped   | Not reviewed: the diff is too large or nothing is in scope | `:white_circle:`        |
+| Emoji                         | Status    | When                                                       | Default          | Fallback                |
+| ----------------------------- | --------- | ---------------------------------------------------------- | ---------------- | ----------------------- |
+| <Emoji name="hk-reviewing" /> | reviewing | A review of the merge request is queued or running         | `:hk-reviewing:` | `:eyes:`                |
+| <Emoji name="hk-clean" />     | clean     | The latest review says looks good and posted no findings   | `:hk-clean:`     | `:large_green_circle:`  |
+| <Emoji name="hk-minor" />     | minor     | Looks good, with minor or info findings posted             | `:hk-minor:`     | `:large_orange_circle:` |
+| <Emoji name="hk-changes" />   | changes   | Needs changes, or any major or critical finding            | `:hk-changes:`   | `:red_circle:`          |
+| <Emoji name="hk-skipped" />   | skipped   | Not reviewed: the diff is too large or nothing is in scope | `:hk-skipped:`   | `:white_circle:`        |
+
+The defaults are Holtkeeper's own emoji. A workspace that has not uploaded them gets the standard fallback instead, so the app works before anyone uploads anything.
 
 A message that links several merge requests shows the worst of them: changes, then reviewing, minor, skipped, clean. The status follows the newest review, so an incremental review that finds nothing new shows clean even while earlier findings are still open.
 
@@ -158,7 +177,7 @@ Slack checks the events URL the moment you save it, and Holtkeeper only answers 
 | `channels:history` | Read messages in public channels the app is in, to find merge request links |
 | `groups:history`   | The same in private channels                                                |
 | `reactions:write`  | Set the review status emoji                                                 |
-| `chat:write`       | Post release announcements; review status works without it                  |
+| `chat:write`       | Post status replies and release announcements; reactions work without it    |
 
 :::caution[Behind a NetworkPolicy or egress proxy]
 Holtkeeper calls `https://slack.com/api` from both web and worker pods: a review that finishes on a worker updates the emoji from there. Allow `slack.com` for both roles.
@@ -192,19 +211,23 @@ The `slack.reviews` setting maps a scope to Slack channel ids. The most specific
 
 ## Use the Holtkeeper emoji
 
-The app works with Slack's standard emoji. To use the Holtkeeper set, download it from <a href={`${slackAssetsUrl}/emoji`}>holtkeeper/.github › slack › emoji</a>, upload each file under <Ui>Customize workspace</Ui> › <Ui>Emoji</Ui> with the name below, then enter the names under the tokens. Blank fields keep the defaults; a changed emoji shows on a message the next time its status changes.
+Download the set from <a href={`${slackAssetsUrl}/emoji`}>holtkeeper/.github › slack › emoji</a> and upload each file under <Ui>Customize workspace</Ui> › <Ui>Emoji</Ui> with its own name (`hk-reviewing`, `hk-clean`, `hk-minor`, `hk-changes`, `hk-skipped`). Nothing else to set: the app uses them as soon as they exist. Until then it adds the standard fallback and remembers that the workspace lacks the custom one.
+
+All five are 128 × 128 with a transparent background. Only reviewing is animated, so a channel of finished reviews does not flicker; `hk-reviewing.png` is its still twin for workspaces that turn animation off.
+
+### Your own emoji
+
+To show different emoji, enter their names under the tokens in **Settings › Integrations › Slack**. Overrides are used as given, without a fallback, so make sure the workspace has them. Blank fields keep the defaults; a changed emoji shows on a message the next time its status changes.
 
 <Screen title="Settings › Integrations › Slack › Status emoji">
   <Fields columns={5}>
-    <Field label="Reviewing" value="hk-reviewing" mono />
-    <Field label="Clean" value="hk-clean" mono />
-    <Field label="Minor" value="hk-minor" mono />
-    <Field label="Changes" value="hk-changes" mono />
-    <Field label="Skipped" value="hk-skipped" mono />
+    <Field label="Reviewing" placeholder="hk-reviewing" mono />
+    <Field label="Clean" placeholder="hk-clean" mono />
+    <Field label="Minor" placeholder="hk-minor" mono />
+    <Field label="Changes" value="rotating_light" mono />
+    <Field label="Skipped" placeholder="hk-skipped" mono />
   </Fields>
 </Screen>
-
-All five are 128 × 128 with a transparent background. Only reviewing is animated, so a channel of finished reviews does not flicker; `hk-reviewing.png` is its still twin for workspaces that turn animation off.
 
 ## Release announcements
 
