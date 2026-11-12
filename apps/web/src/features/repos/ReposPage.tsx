@@ -48,7 +48,7 @@ import { RepoAvatar } from './RepoAvatar.tsx'
 export function ReposPage() {
   const { can, canGlobal } = useSession()
   const repos = useRepos()
-  const search = useSearch({ from: '/app/repos' })
+  const search = useSearch({ from: '/app/repos/' })
   const navigate = useNavigate()
   const setSearch = (next: ReposSearch) =>
     void navigate({ to: '/repos', search: next, replace: true })

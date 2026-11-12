@@ -191,23 +191,31 @@ const accountRoute = createRoute({
 const tabSearch = (search: Record<string, unknown>): { tab?: string } =>
   typeof search.tab === 'string' && search.tab ? { tab: search.tab } : {}
 
+const reposLayout = createRoute({ getParentRoute: () => appRoute, path: 'repos' })
+
 const reposRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: 'repos',
+  getParentRoute: () => reposLayout,
+  path: '/',
   component: ReposPage,
   validateSearch: parseReposSearch,
 })
 
 const repoRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: 'repos/$',
+  getParentRoute: () => reposLayout,
+  path: '$',
   component: RepoPage,
   validateSearch: parseRepoHubSearch,
 })
 
+const groupsRoute = createRoute({
+  getParentRoute: () => reposLayout,
+  path: 'groups',
+  component: GroupsPage,
+})
+
 const groupRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: 'repos/groups/$groupId',
+  getParentRoute: () => reposLayout,
+  path: 'groups/$groupId',
   component: GroupPage,
   validateSearch: (search: Record<string, unknown>): { tab?: string; view?: StackTab } => {
     const view = parseStackTab(search.view)
@@ -346,10 +354,7 @@ const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     page('/', HomePage),
     inboxRoute,
-    reposRoute,
-    page('repos/groups', GroupsPage),
-    groupRoute,
-    repoRoute,
+    reposLayout.addChildren([reposRoute, groupsRoute, groupRoute, repoRoute]),
     chatRoute,
     librariesRoute,
     libraryRoute,
