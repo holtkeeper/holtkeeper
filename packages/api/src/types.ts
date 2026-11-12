@@ -3007,7 +3007,10 @@ export interface GuideChainSection {
 export interface GuideChainView {
   repo: string
   sections: GuideChainSection[]
-  /** Characters used against the caps: `total` 12000, `human` 8000, `generated` 4000. */
+  /**
+   * Characters used against the caps: `total` 12000, `human` 8000, `generated` 4000, at most
+   * `repoFiles` 4800 for rules files and `rules` 4000 kept for team and learned rules.
+   */
   budget: GuideCaps & { used: number; humanUsed: number; generatedUsed: number }
   /** Problems a person should see, e.g. repository rules too long to fit. */
   warnings: string[]
@@ -3155,6 +3158,7 @@ export interface LearningList {
  */
 export type LearningSourceKind = 'review-reply' | 'mcp' | 'merged'
 
+/** A candidate as listed; it carries `targetScope` only while that is still one of its repository's scopes. */
 export interface LearningCandidateView extends LearningCandidate {
   canDecide: boolean
   /** Scope keys of the repository the caller may edit: repository, family, groups, `all`. */
@@ -3171,7 +3175,7 @@ export interface LearningCandidateView extends LearningCandidate {
 
 /**
  * `POST /api/learnings/accept` — accepts several candidates at once, each into `scope` (default:
- * the scope its `suggestedScope` points at), with the same rights as accepting one. Each accepted
+ * its `targetScope`, else the scope its `suggestedScope` points at), with the same rights as accepting one. Each accepted
  * candidate gets its own audit event; one failing never stops the rest.
  */
 export interface AcceptLearningsInput {
@@ -3188,8 +3192,8 @@ export interface AcceptLearningsResult {
 }
 
 /**
- * `POST /api/learnings/:id/accept` — accepts a candidate into a scope's learnings (default: the
- * scope its `suggestedScope` points at), optionally edited first; accepting again moves it. Needs
+ * `POST /api/learnings/:id/accept` — accepts a candidate into a scope's learnings (default: its
+ * `targetScope`, else the scope its `suggestedScope` points at), optionally edited first; accepting again moves it. Needs
  * `knowledge:write` on the repository and edit rights on the scope. Answers the candidate.
  */
 export interface AcceptLearningInput {
@@ -3198,11 +3202,16 @@ export interface AcceptLearningInput {
   section?: GuideSectionName
 }
 
-/** `PATCH /api/learnings/:id` — edits a candidate; an accepted one's Guide entry follows. */
+/**
+ * `PATCH /api/learnings/:id` — edits a candidate; an accepted one's Guide entry follows. A
+ * `targetScope` must be a `group:`, `family:` or `repo:` scope of the candidate's repository the
+ * caller may edit; a `suggestedScope` without one drops the old target.
+ */
 export interface EditLearningInput {
   rule?: string
   section?: GuideSectionName
   suggestedScope?: LearningScopeKind
+  targetScope?: GuideScopeKey
 }
 
 /**
@@ -4780,12 +4789,17 @@ export interface InboxNoteItem extends InboxItemBase {
   version: number
 }
 
-/** A learning candidate waiting for acceptance; accepting without a scope uses `suggestedScope`. */
+/**
+ * A learning candidate waiting for acceptance; accepting without a scope uses `targetScope`, else
+ * `suggestedScope`.
+ */
 export interface InboxLearningItem extends InboxItemBase {
   kind: 'learning'
   learningId: string
   section: GuideSectionName
   suggestedScope: LearningScopeKind
+  /** The exact scope the proposer named, while it is still one of the repository's scopes. */
+  targetScope?: GuideScopeKey
 }
 
 /** Generated Guide text waiting for a person to accept or reject it. */

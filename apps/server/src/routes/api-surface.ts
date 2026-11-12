@@ -14,7 +14,7 @@ import type {
 } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
 import type { RepoRef } from '@holtkeeper/forge'
-import { createGuideResolver, proposeRule } from '@holtkeeper/guide'
+import { createGuideResolver, familyOf, proposeRule, scopesFor } from '@holtkeeper/guide'
 import { latestVersions, libraryApi } from '@holtkeeper/libraries'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -39,6 +39,7 @@ import {
   repoTarget,
 } from '../context.ts'
 import { createFleetCache } from '../fleet-cache.ts'
+import { autoAcceptLearning } from '../learnings.ts'
 import {
   agentSummarize,
   githubClientFor,
@@ -259,11 +260,16 @@ export function createApiSurface(
         if (!target) return undefined
         const repo = `${target.forge}:${target.path}`
         const at = deps.now().toISOString()
+        const family = input.targetScope ? familyOf(await store.families.list(), repo) : undefined
         const outcome = await proposeRule(store, {
           repo,
           rule: input.rule,
           section: input.section,
           ...(input.scope && { suggestedScope: input.scope }),
+          ...(input.targetScope && {
+            targetScope: input.targetScope,
+            scopes: scopesFor(target, family?.id),
+          }),
           reason: input.reason,
           by: principal.id,
           at,
@@ -276,9 +282,17 @@ export function createApiSurface(
             action: 'learning.propose',
             target: { type: 'learning', id: outcome.candidate.id, repo },
             outcome: 'ok',
-            details: { section: input.section, rule: outcome.candidate.rule, through: 'mcp' },
+            details: {
+              section: input.section,
+              rule: outcome.candidate.rule,
+              ...(outcome.candidate.targetScope && { scope: outcome.candidate.targetScope }),
+              through: 'mcp',
+            },
           })
-        return outcome
+        if (outcome.status !== 'proposed' || !canSee(principal, 'knowledge:write', target))
+          return outcome
+        const accepted = await autoAcceptLearning(deps, outcome.candidate, 'mcp')
+        return accepted ? { ...outcome, candidate: accepted } : outcome
       },
     },
     testIds: {

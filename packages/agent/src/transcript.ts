@@ -24,7 +24,13 @@ export type TranscriptEntry =
       system?: string
       prompt: string
     }
-  | { type: 'assistant'; text?: string; toolCalls?: TranscriptToolCall[] }
+  | {
+      type: 'assistant'
+      text?: string
+      /** The model's reasoning summary or text, when the provider returns it. */
+      reasoning?: string
+      toolCalls?: TranscriptToolCall[]
+    }
   | {
       type: 'tool-result'
       id: string
@@ -114,6 +120,9 @@ export function sanitizeEntry(
     return {
       type: 'assistant',
       ...(entry.text !== undefined && { text: redactText(entry.text, secrets) }),
+      ...(entry.reasoning !== undefined && {
+        reasoning: clip(redactText(entry.reasoning, secrets), limit),
+      }),
       ...(entry.toolCalls && {
         toolCalls: entry.toolCalls.map((call) => ({
           ...call,

@@ -41,12 +41,14 @@ A person may reject the waiting text instead (`POST /api/guide/section/reject`).
 
 ## Analyzer
 
-`createGuideAnalyzer({ store, groupsOf, testsExpected? })` returns the `guide` analyzer (repository scope, needs a checkout; forge, agent and history optional; runs `after` `coverage` and `testids`). The server builds it with its store; the copy in `builtinAnalyzers` has none and refuses to run. Options:
+`createGuideAnalyzer({ store, groupsOf, testsExpected?, autoAccept? })` returns the `guide` analyzer (repository scope, needs a checkout; forge, agent and history optional; runs `after` `coverage` and `testids`). The server builds it with its store; the copy in `builtinAnalyzers` has none and refuses to run. Options:
 
 - `sections` — the sections to consider (default all four);
 - `prompt` — a one-off extra prompt, stored with what the run writes;
 - `force` — regenerate even when hashes are unchanged (the panel's Regenerate, `POST /api/guide/regenerate`, sets it).
 
 These options are set per run only: `guide` has no `analyzers.guide` setting and `POST /api/jobs` refuses it, so jobs come from the schedule and `/api/guide/regenerate`. A job with a `ref` fails: the Guide is generated from the default branch only. The analyzer sets `defaultBranchOnly`, so tag, push and merge request triggers and policies (whose jobs carry a ref) leave it out; the default `new-repo` trigger runs it once.
+
+`autoAccept(repo)` (the server resolves the scoped `guide.autoAccept` setting) lists sections whose new non-empty text is stored `accepted` by `AUTO_ACCEPT_ACTOR` instead of as a proposal; with an audit log on the store each is audited as `guide.accept` (actor `auto-accept`, `via: 'job'`, `details.auto`, the job id). The server's reject endpoint takes such text back: the newest earlier text a person accepted returns, else a waiting proposal, else the generated layer goes, and the inputs are remembered as rejected.
 
 Without an agent the LLM sections are skipped; without a forge `commits` is. When `testsExpected(repo)` (the server reads `repo.tests`) says the repository has no tests by design, `testing` is recorded as `skipped` with the reason `no tests by design` and no evidence, and no model call covers it. Each run is stored as a `guide` analysis record (`GuideRunData`: per section the outcome, hash, evidence ids and skip reason; the call's tier, model and cost; the extra prompt). Freshness reruns it at most weekly once the default branch moved (`refresh: { on: 'change', minInterval: '7d' }`), only when its latest record names a commit and the weekly budget for automatic work allows; it is still hash-gated.

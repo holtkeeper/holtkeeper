@@ -8,9 +8,11 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import {
   LEARNING_RULE_MAX,
   LearningConflictError,
+  LearningScopeError,
   acceptLearning,
   captureLearning,
   cleanRule,
+  defaultLearningScope,
   editLearning,
   looksLikeFeedback,
   normalizeRule,
@@ -87,6 +89,65 @@ test('cleanRule removes handles and names and caps the length', () => {
   const long = cleanRule(`Keep ${'very '.repeat(60)}short.`)
   expect(long.length).toBeLessThanOrEqual(LEARNING_RULE_MAX)
   expect(long.endsWith('…')).toBe(true)
+})
+
+describe('cleanRule keeps code and code-like tokens', () => {
+  test.each([
+    [
+      'Ship the source plus .d.ts files for every widget.',
+      'Ship the source plus .d.ts files for every widget.',
+    ],
+    ['Load secrets from .env and .mts configs.', 'Load secrets from .env and .mts configs.'],
+    [
+      'Start DOM-free tests with `// @vitest-environment node`.',
+      'Start DOM-free tests with `// @vitest-environment node`.',
+    ],
+    ['Import shapes from @scope/pkg only.', 'Import shapes from @scope/pkg only.'],
+    ['Declare fonts with @font-face in one file.', 'Declare fonts with @font-face in one file.'],
+    [
+      'Mark old helpers @deprecated before removal.',
+      'Mark old helpers @deprecated before removal.',
+    ],
+    ['Keep `@robin` in   `a  b`  untouched.', 'Keep `@robin` in `a  b` untouched.'],
+    ['ping @someone about it', 'ping about it'],
+    ['Ask @robin.', 'Ask.'],
+    ['Ask @robin.smith , then merge.', 'Ask, then merge.'],
+    ['Keep the trailing period.', 'Keep the trailing period.'],
+    ['Register routes with @app.route("/x").', 'Register routes with @app.route("/x").'],
+    ['Use @pytest.mark.parametrize(x) for cases.', 'Use @pytest.mark.parametrize(x) for cases.'],
+    ['Install @my.scope/pkg first.', 'Install @my.scope/pkg first.'],
+    ['Use @override on subclasses.', 'Use @override on subclasses.'],
+    ['Keep @jsx h at the top.', 'Keep @jsx h at the top.'],
+    ['Wrap the call  , please !', 'Wrap the call, please!'],
+  ])('%p', (input, expected) => {
+    expect(cleanRule(input)).toBe(expected)
+  })
+
+  test('fenced code stays as written while names leave the prose', () => {
+    const fence = '```ts\n// robin wrote this\nconst  widget = 1\n```'
+    expect(cleanRule(`Robin says   keep ${fence} as is.`, ['robin'])).toBe(
+      `says keep ${fence} as is.`,
+    )
+  })
+
+  test('names glued to identifiers with an underscore stay', () => {
+    expect(cleanRule('Rename robin_utils.ts and my_robin to index.', ['robin'])).toBe(
+      'Rename robin_utils.ts and my_robin to index.',
+    )
+  })
+
+  test('a cut that would end inside a code span ends before it', () => {
+    const prose = `Keep ${'widget '.repeat(25)}`
+    const rule = cleanRule(`${prose}\`some code span here\` always.`)
+    expect(rule).toBe(`${prose.trimEnd()}…`)
+    expect(rule.length).toBeLessThanOrEqual(LEARNING_RULE_MAX)
+  })
+
+  test('names inside paths and inline code stay', () => {
+    expect(cleanRule('Robin keeps `robin.config.ts` next to robin/index.ts.', ['robin'])).toBe(
+      'keeps `robin.config.ts` next to robin/index.ts.',
+    )
+  })
 })
 
 describe('captureLearning', () => {
@@ -315,5 +376,83 @@ describe('proposeRule', () => {
       (error: unknown) => error,
     )
     expect(empty instanceof Error && empty.message).toBe('the rule is empty')
+  })
+})
+
+describe('target scopes', () => {
+  const scopes = [
+    'repo:work:toys/kite',
+    'family:fliers',
+    'group:toys.flying',
+    'group:toys',
+    'all',
+  ] as const
+  const proposal = {
+    repo: 'work:toys/kite',
+    rule: 'Keep spool sizes in SpoolSize.',
+    section: 'general' as const,
+    reason: 'Every team toy repeats it.',
+    by: 'header:sam',
+    at: now().toISOString(),
+  }
+
+  test('a proposal may name an exact scope of its repository and nothing else', async () => {
+    const store = memoryStore()
+    const outcome = await proposeRule(
+      store,
+      { ...proposal, targetScope: 'group:toys', scopes },
+      () => 'p1',
+    )
+    expect(outcome.candidate).toMatchObject({ suggestedScope: 'group', targetScope: 'group:toys' })
+    for (const targetScope of ['group:sheds', 'all'] as const) {
+      const refused = await proposeRule(store, {
+        ...proposal,
+        rule: `Another rule for ${targetScope}.`,
+        targetScope,
+        scopes,
+      }).catch((error: unknown) => error)
+      expect(refused).toBeInstanceOf(LearningScopeError)
+    }
+    expect(await store.learnings.list()).toHaveLength(1)
+  })
+
+  test('accepting without a scope prefers the target over the nearest group of the kind', () => {
+    expect(defaultLearningScope({ suggestedScope: 'group' }, scopes)).toBe('group:toys.flying')
+    expect(
+      defaultLearningScope({ suggestedScope: 'group', targetScope: 'group:toys' }, scopes),
+    ).toBe('group:toys')
+    expect(
+      defaultLearningScope({ suggestedScope: 'group', targetScope: 'group:sheds' }, scopes),
+    ).toBe('group:toys.flying')
+    expect(defaultLearningScope({ suggestedScope: 'family' }, ['repo:work:toys/kite'])).toBe(
+      undefined,
+    )
+  })
+
+  test('editing a target sets its kind; a new suggested kind drops the old target', async () => {
+    const store = memoryStore()
+    const { candidate: proposed } = await proposeRule(store, proposal, () => 'p1')
+    const at = now().toISOString()
+    const targeted = await editLearning(store, proposed, {
+      targetScope: 'family:fliers',
+      by: 'header:lee',
+      at,
+    })
+    expect(targeted).toMatchObject({ suggestedScope: 'family', targetScope: 'family:fliers' })
+    const kept = await editLearning(store, targeted, { section: 'review', by: 'header:lee', at })
+    expect(kept.targetScope).toBe('family:fliers')
+    const regrouped = await editLearning(store, kept, {
+      suggestedScope: 'group',
+      by: 'header:lee',
+      at,
+    })
+    expect(regrouped.suggestedScope).toBe('group')
+    expect(regrouped).not.toHaveProperty('targetScope')
+    const refused = await editLearning(store, regrouped, {
+      targetScope: 'all',
+      by: 'header:lee',
+      at,
+    }).catch((error: unknown) => error)
+    expect(refused).toBeInstanceOf(LearningScopeError)
   })
 })

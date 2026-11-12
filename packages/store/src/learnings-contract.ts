@@ -52,6 +52,8 @@ export function learningStoreTests(store: () => Store) {
 
     await learnings.put(candidate('a', { rule: 'Edited.', status: 'rejected', updatedAt: at(9) }))
     expect(await learnings.get('a')).toMatchObject({ rule: 'Edited.', status: 'rejected' })
+    await learnings.put(candidate('d', { key: 'fourth', targetScope: 'group:games.arcade' }))
+    expect((await learnings.get('d'))?.targetScope).toBe('group:games.arcade')
     expect((await learnings.list())[0]?.id).toBe('a')
   })
 

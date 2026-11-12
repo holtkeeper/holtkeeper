@@ -37,6 +37,6 @@ A row opens `RunSheet` (J/K step through the shown rows, **Open as page**, the s
 1. **Steps**: the status, target, ref and attempt; why it ran from `GET /api/jobs/:id/why` (origin, outcome, wait reasons) with **Show on Automation** and **Runs with the same failure**; the error; the attempt strip (one segment per attempt with its status) and the picked attempt's step timeline and log tail; then the run facts: trigger, requester, worker with the execution `mode` from `JobWhy`, attempts, created, started with the claim delay (`claimDelay`), finished, duration, cost against `JobWhy.costCapUsd` (`costCapText`) and the options (`optionsSummary`, **Show** for the JSON).
 2. **Logs**: the picked attempt's log, following live lines while it runs.
 3. **Findings**: the stored result's title and headline metrics, with **Open result**.
-4. **Cost**: what the agent runs cost, a bar of the cap spent when the run carries one (`costCapShare`), and each agent run with its transcript (`JobAgentRuns`).
+4. **Cost**: what the agent runs cost, a bar of the cap spent when the run carries one (`costCapShare`), and each agent run with its transcript (`JobAgentRuns`; the model's reasoning, when the provider returns it, folds out above its text).
 
 The run page (`JobPage`) shows the same sections one after another. While it loads or when the run cannot be read it keeps the header with the Ops › Runs › short id crumbs; a 403 shows the Forbidden card naming the missing permission.

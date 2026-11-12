@@ -1,4 +1,9 @@
-import type { GuideGeneratedVersionView, GuideScopeKey, GuideSectionName } from '@holtkeeper/api'
+import {
+  AUTO_ACCEPT_ACTOR,
+  type GuideGeneratedVersionView,
+  type GuideScopeKey,
+  type GuideSectionName,
+} from '@holtkeeper/api'
 import { X } from 'lucide-react'
 import { useState } from 'react'
 
@@ -12,6 +17,7 @@ const versionLabel = (version: GuideGeneratedVersionView) =>
   [
     `v${version.version}`,
     version.current === 'generated' ? 'accepted' : version.current === 'proposal' ? 'proposed' : '',
+    version.acceptedBy === AUTO_ACCEPT_ACTOR.id ? 'auto-accepted' : '',
     version.rejected ? 'rejected' : '',
     formatRelative(version.generatedAt),
   ]

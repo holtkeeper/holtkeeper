@@ -267,6 +267,39 @@ test('new text over accepted text becomes a proposal; equal text keeps the accep
   })
 })
 
+test('sections the policy lists are stored accepted by auto-accept and audited; others stay proposed', async () => {
+  const asked: string[] = []
+  await createGuideAnalyzer({
+    store,
+    groupsOf: () => ['shapes'],
+    autoAccept: async (target) => {
+      asked.push(target.path)
+      return ['general']
+    },
+  }).run({
+    repo,
+    dir,
+    runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
+    agent: fakeAgent().agent,
+    jobId: 'job-7',
+    history: { analyses: store.analyses, auditRuns: store.auditRuns },
+    options: { force: false },
+  })
+  expect(asked).toEqual(['shapes/service'])
+  const general = await store.guides.get(repoScope, 'general')
+  expect(general?.generated).toMatchObject({ status: 'accepted', acceptedBy: 'auto-accept' })
+  expect(general?.proposal).toBeUndefined()
+  expect((await store.guides.get(repoScope, 'testing'))?.generated?.status).toBe('proposed')
+  const events = await store.audit.list({ action: 'guide.accept' })
+  expect(events.events).toMatchObject([
+    {
+      actor: { id: 'auto-accept' },
+      target: { type: 'guide', id: `${repoScope}/general`, repo: 'work:shapes/service' },
+      details: { auto: true, jobId: 'job-7' },
+    },
+  ])
+})
+
 test('every stored run gets the next version and its job, and lands in the generated history', async () => {
   await run(fakeAgent().agent, { sections: ['general'] }, { jobId: 'job-1' })
   const first = await store.guides.get(repoScope, 'general')

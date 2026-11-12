@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test'
 
 import type { GuideSection, KnowledgeEntry } from '@holtkeeper/store'
 
-import { GENERATED_HEADER, type ResolveGuideInput, cutText, resolveGuide } from './resolve.ts'
+import {
+  GENERATED_HEADER,
+  GUIDE_CAPS,
+  type ResolveGuideInput,
+  cutText,
+  resolveGuide,
+} from './resolve.ts'
 
 const repo = { forge: 'work', path: 'games/app', groups: ['games', 'web'] }
 
@@ -42,6 +48,9 @@ const input = (overrides: Partial<ResolveGuideInput> = {}): ResolveGuideInput =>
 })
 
 const positions = (text: string, needles: string[]) => needles.map((needle) => text.indexOf(needle))
+
+const ruleLines = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, i) => `- ${prefix} rule ${i}: keep widgets small.`).join('\n')
 
 describe('resolveGuide', () => {
   test('orders layers by precedence and keeps rows of other scopes out', () => {
@@ -236,22 +245,129 @@ describe('resolveGuide', () => {
     ])
   })
 
-  test('repository text over the human budget stays whole with a warning', () => {
+  test('repository rules over the human budget stay whole with a warning', () => {
     const resolved = resolveGuide(
       input({
         caps: { total: 4000, human: 1000, generated: 500 },
-        repoDocs: [{ file: 'AGENTS.md', text: 'D'.repeat(1500) }],
         sections: [
-          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(500) }),
+          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(1100) }),
           row({ scope: 'group:games', rules: 'G'.repeat(300) }),
         ],
       }),
     )
-    expect(resolved.text).toContain('D'.repeat(1500))
-    expect(resolved.text).toContain('R'.repeat(500))
+    expect(resolved.text).toContain('R'.repeat(1100))
     expect(resolved.text).not.toContain('G'.repeat(300))
-    expect(resolved.warnings[0]).toStartWith('Repository rules and rules files take')
+    expect(resolved.warnings[0]).toStartWith('Repository rules take')
     expect(resolved.warnings[0]).toContain('over the 1000-character budget')
+  })
+
+  test('a huge rules file is capped and cut with a pointer, so every team and learned rule fits', () => {
+    const resolved = resolveGuide(
+      input({
+        repoDocs: [
+          {
+            file: 'CONTRIBUTING.md',
+            text: Array.from({ length: 400 }, (_, i) => `Line ${i} about shapes.`).join('\n'),
+          },
+          { file: 'AGENTS.md', text: 'Run bun test before pushing.' },
+        ],
+        sections: [
+          row({ scope: 'repo:work:games/app', rules: ruleLines('repo', 5) }),
+          row({ scope: 'group:games', rules: ruleLines('team', 15) }),
+          row({ scope: 'all', rules: ruleLines('fleet', 5) }),
+          row({
+            scope: 'group:games',
+            section: 'review',
+            learnings: Array.from({ length: 10 }, (_, i) => ({
+              id: `l${i}`,
+              rule: `Learned rule ${i}: prefer ShapeBase.`,
+              sources: [],
+              acceptedBy: 'someone',
+              acceptedAt: '2026-11-01T10:00:00.000Z',
+            })),
+          }),
+        ],
+      }),
+    )
+    for (const rule of ['repo rule 4', 'team rule 14', 'fleet rule 4', 'Learned rule 9'])
+      expect(resolved.text).toContain(rule)
+    const files = resolved.blocks.find((block) => block.layer === 'repo-file')
+    expect(files).toMatchObject({ cut: true })
+    expect(files?.chars).toBeLessThanOrEqual(GUIDE_CAPS.repoFiles)
+    expect(files?.text).toContain('[… truncated, see CONTRIBUTING.md]')
+    expect(files?.text).toContain('### AGENTS.md\n\n[… truncated, see AGENTS.md]')
+    expect(
+      resolved.blocks.filter((block) => block.layer !== 'repo-file').every((b) => !b.cut),
+    ).toBe(true)
+    expect(resolved.warnings).toEqual([
+      expect.stringMatching(
+        /^Rules files \(CONTRIBUTING\.md · AGENTS\.md\) take \d+ characters; they may use 4800 of the 12000-character Guide/,
+      ),
+    ])
+    expect(resolved.text.length).toBeLessThanOrEqual(GUIDE_CAPS.total)
+  })
+
+  test('large repository rules do not take the room kept for learned rules', () => {
+    const resolved = resolveGuide(
+      input({
+        repoDocs: [{ file: 'AGENTS.md', text: 'line about widgets\n'.repeat(320) }],
+        sections: [
+          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(4000) }),
+          row({
+            scope: 'group:games',
+            section: 'review',
+            learnings: Array.from({ length: 10 }, (_, i) => ({
+              id: `l${i}`,
+              rule: `Learned rule ${i}: keep fooUtil pure and small.`,
+              sources: [],
+              acceptedBy: 'someone',
+              acceptedAt: '2026-11-01T10:00:00.000Z',
+            })),
+          }),
+        ],
+      }),
+    )
+    expect(resolved.text).toContain('R'.repeat(4000))
+    expect(resolved.text).toContain('Learned rule 9')
+    expect(resolved.blocks.find((block) => block.layer === 'repo-file')).toMatchObject({
+      cut: true,
+    })
+    expect(resolved.blocks.find((block) => block.layer === 'learnings')?.cut).toBeFalsy()
+    expect(resolved.budget.humanUsed).toBeLessThanOrEqual(GUIDE_CAPS.human)
+  })
+
+  test('a file after one that nearly fills the room keeps its pointer', () => {
+    const resolved = resolveGuide(
+      input({
+        repoDocs: [
+          { file: 'AGENTS.md', text: 'A'.repeat(4700) },
+          { file: 'CONTRIBUTING.md', text: 'C'.repeat(2000) },
+        ],
+      }),
+    )
+    const files = resolved.blocks.find((block) => block.layer === 'repo-file')
+    expect(files?.text).toContain('[… truncated, see CONTRIBUTING.md]')
+    expect(files?.chars).toBeLessThanOrEqual(GUIDE_CAPS.repoFiles)
+  })
+
+  test('rules files that fit stay whole next to the rules', () => {
+    const resolved = resolveGuide(
+      input({
+        caps: { total: 3000, human: 2000, generated: 500 },
+        repoDocs: [{ file: 'AGENTS.md', text: 'D'.repeat(1000) }],
+        sections: [
+          row({ scope: 'repo:work:games/app', rules: 'R'.repeat(300) }),
+          row({ scope: 'all', rules: 'A'.repeat(300) }),
+        ],
+      }),
+    )
+    expect(resolved.text).toContain('D'.repeat(1000))
+    expect(resolved.text).toContain('R'.repeat(300))
+    expect(resolved.text).toContain('A'.repeat(300))
+    expect(resolved.blocks.some((block) => block.cut)).toBe(false)
+    expect(resolved.warnings).toEqual([])
+    expect(resolved.budget.humanUsed).toBeLessThanOrEqual(2000)
+    expect(resolved.budget).toMatchObject({ repoFiles: 1200, rules: 1000 })
   })
 
   test('repository text over the total cap is cut with a warning', () => {

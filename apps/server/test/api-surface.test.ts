@@ -56,10 +56,12 @@ const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['*'] }],
     games: [{ scope: { groups: ['games'] }, actions: ['analyses:read', 'analyses:run'] }],
+    readers: [{ scope: { groups: ['games'] }, actions: ['knowledge:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
 const asGames = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'games' }
+const asReader = { 'x-forwarded-user': 'ann', 'x-forwarded-groups': 'readers' }
 
 const ui = (version: string, names: string[]): ApiPackage => ({
   name: '@acme/ui',
@@ -1073,6 +1075,143 @@ describe('rules tools', () => {
     expect(events.events.map((event) => [event.target.id, event.target.repo])).toEqual([
       [candidate?.id, 'work:games/a'],
     ])
+
+    const targeted = await callTool(
+      'propose_rule_change',
+      {
+        repo: 'work:games/a',
+        section: 'general',
+        rule: 'Preload scene audio.',
+        reason: 'Stutters on first play.',
+        scope: 'group:games',
+      },
+      asAdmin,
+    )
+    expect(targeted.content[0]?.text).toContain('into group:games.')
+    const foreign = await callTool(
+      'propose_rule_change',
+      {
+        repo: 'work:games/a',
+        section: 'general',
+        rule: 'Bake scene lights.',
+        reason: 'Slow loads.',
+        scope: 'group:elsewhere',
+      },
+      asAdmin,
+    )
+    expect(foreign.isError).toBe(true)
+    expect(
+      (await store.learnings.list())
+        .map((each) => [each.rule, each.targetScope])
+        .toSorted(([a], [b]) => String(a).localeCompare(String(b))),
+    ).toEqual([
+      ['Preload scene audio.', 'group:games'],
+      ['Unload scene textures on exit.', undefined],
+    ])
+  })
+})
+
+const autoAccept = (
+  value: unknown,
+  scope: { all: true } | { groups: string[] } | { repos: string[] } = { all: true },
+) =>
+  store.settings.put({
+    id: `learnings.autoAccept:${JSON.stringify(scope)}`,
+    key: 'learnings.autoAccept',
+    scope,
+    value,
+    secret: false,
+    updatedAt: '2026-10-01T00:00:00.000Z',
+  })
+const propose = (rule: string, scope?: string, headers = asAdmin) =>
+  callTool(
+    'propose_rule_change',
+    {
+      repo: 'work:games/a',
+      section: 'general',
+      rule,
+      reason: 'Seen twice.',
+      ...(scope && { scope }),
+    },
+    headers,
+  )
+
+describe('learnings auto-accept', () => {
+  test('stays proposed while the policy is off or leaves MCP out', async () => {
+    await autoAccept({ sources: ['review-reply'], scope: 'suggested' })
+    const result = await propose('Unload scene textures on exit.', 'group')
+    expect(result.content[0]?.text).toStartWith('Proposed ')
+    const [candidate] = await store.learnings.list()
+    expect(candidate?.status).toBe('proposed')
+    expect((await store.guides.list()).flatMap((row) => row.learnings)).toEqual([])
+    expect((await store.audit.list({ action: 'learning.accept' })).events).toEqual([])
+  })
+
+  test('accepts into the suggested scope, audited as auto-accept and still rejectable', async () => {
+    await autoAccept({ sources: ['mcp'], scope: 'suggested' })
+    const result = await propose('Unload scene textures on exit.', 'group:games')
+    expect(result.content[0]?.text).toStartWith('Accepted "Unload scene textures on exit."')
+    expect(result.content[0]?.text).toContain('into group:games')
+    const [candidate] = await store.learnings.list()
+    expect(candidate).toMatchObject({
+      status: 'accepted',
+      acceptedScope: 'group:games',
+      decidedBy: 'auto-accept',
+    })
+    const row = await store.guides.get('group:games', 'general')
+    expect(row?.learnings).toMatchObject([
+      { id: candidate?.id, rule: 'Unload scene textures on exit.', acceptedBy: 'auto-accept' },
+    ])
+    const events = await store.audit.list({ action: 'learning.accept' })
+    expect(events.events).toMatchObject([
+      {
+        actor: { id: 'auto-accept', provider: 'system' },
+        target: { type: 'learning', id: candidate?.id, repo: 'work:games/a' },
+        details: {
+          auto: true,
+          origin: 'mcp',
+          scope: 'group:games',
+          proposedBy: candidate?.proposal?.by,
+        },
+      },
+    ])
+  })
+
+  test('a proposal of someone who may only read the repository stays proposed', async () => {
+    await autoAccept({ sources: ['mcp'], scope: 'suggested' })
+    const result = await propose('Unload scene textures on exit.', 'group:games', asReader)
+    expect(result.content[0]?.text).toStartWith('Proposed ')
+    expect((await store.learnings.list())[0]?.status).toBe('proposed')
+    expect((await store.guides.list()).flatMap((row) => row.learnings)).toEqual([])
+  })
+
+  test('a repository entry never accepts into its group', async () => {
+    await autoAccept({ sources: ['mcp'], scope: 'suggested' }, { repos: ['work:games/a'] })
+    await propose('Preload scene audio.', 'group:games')
+    expect((await store.learnings.list())[0]).toMatchObject({
+      status: 'accepted',
+      acceptedScope: 'repo:work:games/a',
+    })
+    expect((await store.guides.get('group:games', 'general'))?.learnings ?? []).toEqual([])
+  })
+
+  test('the repo option keeps auto-accepted rules in the repository', async () => {
+    await autoAccept({ sources: ['mcp'], scope: 'repo' })
+    await propose('Preload scene audio.', 'group')
+    const [candidate] = await store.learnings.list()
+    expect(candidate).toMatchObject({
+      status: 'accepted',
+      acceptedScope: 'repo:work:games/a',
+      suggestedScope: 'group',
+    })
+    expect((await store.guides.get('group:games', 'general'))?.learnings ?? []).toEqual([])
+  })
+
+  test('the entry that applies to the repository decides', async () => {
+    await autoAccept({ sources: ['mcp'], scope: 'suggested' })
+    await autoAccept({ sources: [], scope: 'suggested' }, { groups: ['games'] })
+    await propose('Bake scene lights.')
+    expect((await store.learnings.list())[0]?.status).toBe('proposed')
   })
 })
 

@@ -1,4 +1,4 @@
-import type { KnowledgeKind } from '@holtkeeper/store'
+import type { GuideSectionName, KnowledgeKind } from '@holtkeeper/store'
 import { allowlistSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
@@ -136,6 +136,62 @@ export const knowledgeAutoAccept = defineSetting({
   schema: z.array(
     z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),
   ),
+})
+
+/** Where `learnings.autoAccept` comes from: rules MCP clients propose, rules learned from review replies. */
+export const learningAutoAcceptSources = ['mcp', 'review-reply'] as const
+
+export type LearningAutoAcceptSource = (typeof learningAutoAcceptSources)[number]
+
+/** Value of `learnings.autoAccept`. */
+export const learningsAutoAcceptSchema = z.object({
+  /** Origins of candidates accepted without review; empty keeps every candidate proposed. */
+  sources: z.array(z.enum(learningAutoAcceptSources)).default([]),
+  /**
+   * `suggested`: the candidate's target scope, else the scope its suggested kind points at;
+   * `repo`: always the candidate's repository.
+   */
+  scope: z.enum(['suggested', 'repo']).default('suggested'),
+})
+
+export type LearningsAutoAccept = z.output<typeof learningsAutoAcceptSchema>
+
+export const learningsAutoAccept = defineSetting({
+  key: 'learnings.autoAccept',
+  label: 'Auto-accept learnings',
+  description:
+    'Rule candidates accepted into the Guide without review, by where they come from; the rest wait in Knowledge › Learnings.',
+  section: 'Knowledge',
+  help: `Learned rules reach every agent prompt of the scope they are accepted into. By default each candidate waits for a person in Knowledge › Learnings.
+
+- **sources**: \`mcp\` accepts rules MCP clients propose with \`propose_rule_change\`, but only from people who may edit the repository's knowledge (\`knowledge:write\`); proposals of mere readers stay for review. \`review-reply\` accepts rules extracted from replies to review comments, from anyone who replies on the repository's merge requests. Empty (default) accepts nothing.
+- **scope**: \`suggested\` (default) accepts into the scope the proposer named, else the nearest group, family or the repository as suggested, but never wider than this entry's own scope: an entry on a repository or subgroup accepts a rule meant for a parent group or family into the repository. \`repo\` always accepts into the candidate's repository only.
+- The entry that applies to the candidate's repository decides. Auto-accepted rules show as accepted by *Auto-accept* and in History; reject one in Knowledge › Learnings to take it out of the Guide.`,
+  default: { sources: [], scope: 'suggested' },
+  schema: learningsAutoAcceptSchema,
+})
+
+/** Guide sections the generator writes, which `guide.autoAccept` may list. */
+export const generatedGuideSections = [
+  'general',
+  'testing',
+  'testids',
+  'commits',
+] as const satisfies readonly GuideSectionName[]
+
+export const guideAutoAccept = defineSetting({
+  key: 'guide.autoAccept',
+  label: 'Auto-accept generated Guide',
+  description:
+    'Guide sections whose generated text agents use as soon as the guide job writes it, without review.',
+  section: 'Knowledge',
+  help: `The guide job writes each section from repository signals as a proposal; agents keep the accepted text until a person accepts the new one.
+
+- Sections listed here are accepted when the job writes them, as *Auto-accept*, and audited.
+- Rejecting auto-accepted text in Knowledge › Guide puts back the text a person accepted before, or removes the generated layer, and the same inputs are not proposed again.
+- \`commits\` is built without an LLM from the repository's history and rules; \`general\` changes most of what agents read.`,
+  default: [],
+  schema: z.array(z.enum(generatedGuideSections)),
 })
 
 export const auditFix = defineSetting({
@@ -339,6 +395,8 @@ export const builtinSettings: SettingDefinition[] = [
   llmBudget,
   agentTools,
   knowledgeAutoAccept,
+  learningsAutoAccept,
+  guideAutoAccept,
   auditFix,
   auditUpgrade,
   auditAllowlist,

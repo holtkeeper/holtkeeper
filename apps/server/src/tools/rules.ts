@@ -19,6 +19,7 @@ import {
   type GuideChainLayer,
   type GuideTask,
   LEARNING_RULE_MAX,
+  LearningScopeError,
   type ResolvedGuide,
   type RuleProposalOutcome,
   chainLayers,
@@ -28,7 +29,13 @@ import {
   guideTasks,
   testIdsSettingKey,
 } from '@holtkeeper/guide'
-import type { GuideSectionName, LearningScopeKind, SettingStore, Store } from '@holtkeeper/store'
+import type {
+  GuideScopeKey,
+  GuideSectionName,
+  LearningScopeKind,
+  SettingStore,
+  Store,
+} from '@holtkeeper/store'
 import {
   type TestIdConvention,
   type TestIdOverrides,
@@ -118,7 +125,10 @@ interface GuideRulesAccess {
 
 /** Where `propose_rule_change` stores proposals, for one caller. */
 interface RuleProposalAccess {
-  /** Stores a proposal for people to review; `undefined` when the caller may not propose for `repo`. */
+  /**
+   * Stores a proposal for people to review, or accepts it when `learnings.autoAccept` allows (the
+   * candidate then comes back `accepted`); `undefined` when the caller may not propose for `repo`.
+   */
   propose(
     repo: string,
     input: {
@@ -126,6 +136,8 @@ interface RuleProposalAccess {
       rule: string
       reason: string
       scope?: LearningScopeKind
+      /** An exact scope of the repository; throws `LearningScopeError` for any other. */
+      targetScope?: GuideScopeKey
     },
   ): Promise<RuleProposalOutcome | undefined>
 }
@@ -245,12 +257,15 @@ function guideTools(access: GuideRulesAccess): RegistryTool[] {
   ]
 }
 
+const isScopeKind = (value: string): value is LearningScopeKind =>
+  value === 'repo' || value === 'family' || value === 'group'
+
 function proposalTools(access: RuleProposalAccess): RegistryTool[] {
   return [
     defineTool({
       name: 'propose_rule_change',
       description:
-        "Proposes a rule for a repository's Guide: one imperative sentence people review under Knowledge → Learnings before any agent sees it. It never changes rules directly, and a rule the repository already has a candidate for is not added again. Use it when a lasting convention is missing or wrong, not for one-off facts (propose_knowledge is for notes).",
+        "Proposes a rule for a repository's Guide: one imperative sentence people review under Knowledge → Learnings before any agent sees it, unless the team auto-accepts proposed rules. It never edits team rules, and a rule the repository already has a candidate for is not added again. Use it when a lasting convention is missing or wrong, not for one-off facts (propose_knowledge is for notes).",
       input: z.object({
         repo: z.string().min(1).describe('The repository the rule comes from, as forge:path'),
         section: z
@@ -269,9 +284,14 @@ function proposalTools(access: RuleProposalAccess): RegistryTool[] {
           .max(1000)
           .describe('Why the rule is needed, with the evidence you saw'),
         scope: z
-          .enum(['repo', 'family', 'group'])
+          .union([
+            z.enum(['repo', 'family', 'group']),
+            z.templateLiteral([z.enum(['group', 'family', 'repo']), ':', z.string().min(1)]),
+          ])
           .optional()
-          .describe('Where it should apply once accepted; default repo'),
+          .describe(
+            'Where it should apply once accepted (default repo): repo, family, group (the nearest group, a subgroup when there is one), or an exact scope of the repository such as group:<key> for a parent group, family:<id> or repo:<forge:path>',
+          ),
       }),
       readOnly: false,
       run: async ({ repo, section, rule, reason, scope }) => {
@@ -280,18 +300,22 @@ function proposalTools(access: RuleProposalAccess): RegistryTool[] {
             section,
             rule,
             reason,
-            ...(scope && { scope }),
+            ...(scope && (isScopeKind(scope) ? { scope } : { targetScope: scope })),
           })
           .catch((error: unknown) => {
+            if (error instanceof LearningScopeError)
+              throw new ToolError(`Not proposed: ${error.message}.`)
             throw error instanceof Error && error.message === 'the rule is empty'
               ? new ToolError('Not proposed: the rule is empty.')
               : error
           })
         if (!outcome) throw noRepo(repo)
         const { candidate } = outcome
+        if (outcome.status === 'proposed' && candidate.status === 'accepted')
+          return `Accepted "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\` into ${candidate.acceptedScope ?? 'its scope'} without review (learnings auto-accept is on); agents use it from now on. People can reject it in Knowledge › Learnings (${webPaths.knowledge('learnings', { space: `repo:${repo}` })}).`
         return outcome.status === 'exists'
           ? `Not added: \`${repo}\` already has this rule as a ${candidate.status} candidate: "${candidate.rule}".`
-          : `Proposed "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\`. People review it in Knowledge › Learnings (${webPaths.knowledge('learnings', { space: `repo:${repo}` })}) before agents use it.`
+          : `Proposed "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\`${candidate.targetScope ? ` into ${candidate.targetScope}` : ''}. People review it in Knowledge › Learnings (${webPaths.knowledge('learnings', { space: `repo:${repo}` })}) before agents use it.`
       },
       subject: ({ repo }) => repo,
     }),

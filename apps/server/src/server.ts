@@ -50,6 +50,8 @@ import {
   type SettingDefinition,
   builtinSettings,
   defaultSettings,
+  guideAutoAccept,
+  resolveSetting,
   seedDefaultSettings,
 } from '@holtkeeper/settings'
 import { validateSshCredentialOptions } from '@holtkeeper/ssh-keys'
@@ -339,6 +341,13 @@ export async function startServer(
     store: server.store,
     groupsOf: (repo) => repoTarget(config, repo).groups,
     testsExpected,
+    autoAccept: async (repo) => {
+      const entries = await server.store.settings.list(guideAutoAccept.key)
+      const parsed = guideAutoAccept.schema.safeParse(
+        resolveSetting(entries, guideAutoAccept.key, repoTarget(config, repo))?.value,
+      )
+      return parsed.success ? parsed.data : []
+    },
   })
   const conventionsOf = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),

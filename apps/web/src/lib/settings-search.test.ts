@@ -37,6 +37,18 @@ const definitions = [
     'Knowledge',
     'Kinds of knowledge entries agents may add without review',
   ),
+  definition(
+    'learnings.autoAccept',
+    'Auto-accept learnings',
+    'Knowledge',
+    'Rule candidates accepted into the Guide by where they come from',
+  ),
+  definition(
+    'guide.autoAccept',
+    'Auto-accept generated Guide',
+    'Knowledge',
+    'Guide sections whose generated text agents use at once',
+  ),
 ]
 
 const everything = settingsIndex(definitions, settingsSectionIds)
@@ -65,6 +77,11 @@ test('knowledge and review settings are found where they are edited, not in Syst
       params: { section: 'policies' },
       hash: 'setting-knowledge.autoAccept',
     },
+  })
+  expect(searchSettings(everything, 'auto-accept learnings')[0]).toMatchObject({
+    key: 'learnings.autoAccept',
+    where: 'Settings › Policies',
+    link: { hash: 'setting-learnings.autoAccept' },
   })
   expect(searchSettings(everything, 'without review').map((e) => e.id)).toEqual([
     'section:policies',

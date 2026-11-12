@@ -6,12 +6,14 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { familyOf, repoKey, scopesFor } from '@holtkeeper/guide'
 import { listFiles } from '@holtkeeper/quality-tests'
 import { type Metric, type Report, defineAnalysis, metric } from '@holtkeeper/report'
-import type {
-  AnalysisStore,
-  GuideScopeKey,
-  GuideSection,
-  GuideSectionName,
-  Store,
+import {
+  AUTO_ACCEPT_ACTOR,
+  type AnalysisStore,
+  type GuideGeneratedInput,
+  type GuideScopeKey,
+  type GuideSection,
+  type GuideSectionName,
+  type Store,
 } from '@holtkeeper/store'
 import { type TestIdsData, testIdsDataSchema } from '@holtkeeper/testids'
 import { z } from 'zod'
@@ -137,11 +139,14 @@ export type GuideGeneratorOptions = z.output<typeof optionsSchema>
 
 /** What the `guide` analyzer needs from the server. */
 export interface GuideAnalyzerDeps {
-  store?: Pick<Store, 'guides' | 'families' | 'kv'>
+  /** With `audit`, auto-accepted sections are audited. */
+  store?: Pick<Store, 'guides' | 'families' | 'kv'> & Partial<Pick<Store, 'audit'>>
   /** Config groups of a repository, for the team scopes whose steering and rules apply. */
   groupsOf?: (repo: RepoRef) => string[]
   /** Whether the repository is meant to have tests (`repo.tests`); without it, always. */
   testsExpected?: (repo: RepoRef) => Promise<boolean>
+  /** Sections whose new text is accepted without review (`guide.autoAccept`); without it, none. */
+  autoAccept?: (repo: RepoRef) => Promise<readonly GeneratedSection[]>
 }
 
 async function latestData<T>(
@@ -176,7 +181,8 @@ const emptyRow = (scope: GuideScopeKey, section: GuideSectionName): GuideSection
  * The `guide` analyzer: writes the generated layer of the `general`, `testing`, `testids` and
  * `commits` sections of a repository's Guide from deterministic evidence (see `generateGuide`).
  * New text is stored as a proposal a person accepts; accepted text stays what agents see until
- * then. Text from inputs a person rejected (`rememberGuideRejection`) is not proposed again.
+ * then. Sections `deps.autoAccept` lists are stored accepted by `AUTO_ACCEPT_ACTOR` instead
+ * (audited as `guide.accept` with `details.auto` when the store has an audit log). Text from inputs a person rejected (`rememberGuideRejection`) is not proposed again.
  * Steering and team rules come from every scope of the repository. Runs after `coverage` and
  * `testids` so their newest records are read. The `testing` section of a repository with no tests
  * by design (`deps.testsExpected`) is recorded as skipped without an agent call. Without
@@ -277,19 +283,57 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
         }),
       )
 
+      const autoAccepted = new Set(
+        result.sections.some((section) => section.outcome === 'proposed')
+          ? ((await deps.autoAccept?.(repo)) ?? [])
+          : [],
+      )
       for (const section of result.sections) {
         if (!section.layer) continue
         // oxlint-disable-next-line no-await-in-loop -- re-read right before each write
         const fresh = await store.guides.get(repoScope, section.section)
         const { proposal: _, ...row } = fresh ?? emptyRow(repoScope, section.section)
         const placed = placeGenerated(fresh, section.layer)
+        const auto =
+          placed.outcome === 'proposed' &&
+          autoAccepted.has(section.section) &&
+          section.layer.body.trim() !== ''
+        const at = new Date().toISOString()
+        const accepted: GuideGeneratedInput = {
+          ...section.layer,
+          status: 'accepted',
+          acceptedBy: AUTO_ACCEPT_ACTOR.id,
+          acceptedAt: at,
+        }
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await store.guides.put({
-          ...row,
-          generated: placed.generated,
-          ...(placed.proposal && { proposal: placed.proposal }),
-        })
-        context.log?.(`${section.section}: ${placed.outcome}`)
+        await store.guides.put(
+          auto
+            ? { ...row, generated: accepted }
+            : {
+                ...row,
+                generated: placed.generated,
+                ...(placed.proposal && { proposal: placed.proposal }),
+              },
+        )
+        if (auto)
+          // oxlint-disable-next-line no-await-in-loop -- see above
+          await store.audit
+            ?.append({
+              at,
+              actor: AUTO_ACCEPT_ACTOR,
+              via: 'job',
+              action: 'guide.accept',
+              target: { type: 'guide', id: `${repoScope}/${section.section}`, repo: repoKey(repo) },
+              outcome: 'ok',
+              details: {
+                auto: true,
+                inputHash: section.layer.inputHash,
+                model: section.layer.model,
+                ...(context.jobId && { jobId: context.jobId }),
+              },
+            })
+            .catch((error: unknown) => context.log?.(`audit: ${String(error)}`))
+        context.log?.(`${section.section}: ${auto ? 'auto-accepted' : placed.outcome}`)
       }
 
       const sections: GuideRunData['sections'] = [

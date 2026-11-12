@@ -133,7 +133,7 @@ Both are optional parts of `Store`; servers without them use the file config onl
 
 What the chain does and does not prove: anyone who edits the database without also recomputing every later hash and the stored chain head is caught. Someone with full write access who rewrites the whole chain and the head is not — export the log regularly (or record `hash` of the newest event elsewhere) to anchor it.
 
-`canonicalJson`, `auditHash`, `sealAuditEvent`, `verifyAuditEvents`, `auditVerifyRange`, `matchesAuditFilter`, `auditCursorSeq` and `AUDIT_GENESIS_HASH` are exported for implementations. `SYSTEM_ACTOR` (`{ id: 'system', name: 'Holtkeeper', provider: 'system' }`) is the actor of what Holtkeeper does on its own, such as seeding defaults.
+`canonicalJson`, `auditHash`, `sealAuditEvent`, `verifyAuditEvents`, `auditVerifyRange`, `matchesAuditFilter`, `auditCursorSeq` and `AUDIT_GENESIS_HASH` are exported for implementations. `SYSTEM_ACTOR` (`{ id: 'system', name: 'Holtkeeper', provider: 'system' }`) is the actor of what Holtkeeper does on its own, such as seeding defaults. `AUTO_ACCEPT_ACTOR` (`{ id: 'auto-accept', name: 'Auto-accept', provider: 'system' }`, also at `@holtkeeper/store/actors` for the browser) is the actor of knowledge a policy accepts without review (`learnings.autoAccept`, `guide.autoAccept`); its id is what `LearningCandidate.decidedBy` and `GuideGenerated.acceptedBy` hold then.
 
 ## External accounts
 

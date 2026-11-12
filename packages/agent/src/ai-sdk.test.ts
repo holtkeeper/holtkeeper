@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { APICallError, type LanguageModelV4GenerateResult } from '@ai-sdk/provider'
+import { createFakeRunner } from '@holtkeeper/exec/testing'
 import { MockLanguageModelV4 } from 'ai/test'
 import { z } from 'zod'
 
@@ -13,7 +14,7 @@ import {
   createAiSdkAgent,
   isSupportedProvider,
 } from './ai-sdk.ts'
-import { BudgetExceededError } from './errors.ts'
+import { BudgetExceededError, MaxTurnsError } from './errors.ts'
 import { AI_SDK_PACKAGE_NAMES } from './provider.ts'
 import { createTranscript } from './transcript.ts'
 
@@ -29,15 +30,6 @@ async function checkout() {
   await mkdir(join(dir, 'src'))
   await writeFile(join(dir, 'src', 'a.ts'), 'export const a = 1\n')
   return dir
-}
-
-async function failure(promise: Promise<unknown>): Promise<string> {
-  try {
-    await promise
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error)
-  }
-  return 'resolved'
 }
 
 const usage = {
@@ -275,14 +267,140 @@ describe('createAiSdkAgent', () => {
     expect(model.doGenerateCalls[0]?.reasoning).toBe('high')
   })
 
-  test('stops at the turn limit', async () => {
-    const { languageModel } = scripted(
+  test('at the turn limit asks once more without tools and parses that answer', async () => {
+    const { model, languageModel } = scripted(
       call('glob', { pattern: '*' }),
-      call('glob', { pattern: '*' }),
+      call('glob', { pattern: 'src/*' }),
+      say('{"score": 1}'),
     )
     const agent = createAiSdkAgent({ languageModel, tierModels: on('m'), maxTurns: 2 })
-    expect(await failure(agent.run({ dir: await checkout(), prompt: 'p' }))).toContain(
-      'error_max_turns',
+    const result = await agent.run({
+      dir: await checkout(),
+      prompt: 'p',
+      output: z.object({ score: z.number() }),
+    })
+    expect(result).toMatchObject({ output: { score: 1 }, turns: 3 })
+    const final = model.doGenerateCalls.at(-1)
+    expect(final?.toolChoice).toEqual({ type: 'none' })
+    expect(final?.tools?.length).toBe(3)
+    expect(JSON.stringify(final?.prompt.at(-1))).toContain('Stop calling tools')
+    expect(marked(final?.prompt.at(-1) ?? {})).toBeTrue()
+  })
+
+  test('an identical repeated call is not run again and three such steps end the loop', async () => {
+    const { model, languageModel } = scripted(
+      call('read_file', { path: 'src/a.ts', offset: 1 }),
+      call('read_file', { offset: 1, path: 'src/a.ts' }),
+      call('read_file', { path: 'src/a.ts', offset: 1 }),
+      call('read_file', { path: 'src/a.ts', offset: 1 }),
+      say('{"score": 2}'),
+    )
+    const transcript = createTranscript()
+    const result = await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'p',
+      output: z.object({ score: z.number() }),
+      transcript,
+    })
+    expect(result).toMatchObject({ output: { score: 2 }, turns: 5 })
+    expect(model.doGenerateCalls.length).toBe(5)
+    const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt.at(-1)))
+    expect(prompts[1]).toContain('export const a = 1')
+    expect(prompts[2]).toContain('identical call #2')
+    expect(prompts[3]).toContain('identical call #3')
+    expect(model.doGenerateCalls[4]?.toolChoice).toEqual({ type: 'none' })
+    expect(prompts[4]).toContain('you keep repeating the same calls')
+    const results = transcript.lines().filter((line) => line.type === 'tool-result')
+    expect(results.map((line) => line.isError ?? false)).toEqual([false, true, true, true])
+  })
+
+  test('a command or read after an edit runs again', async () => {
+    const { model, languageModel } = scripted(
+      call('run_command', { command: 'bun test x' }),
+      call('read_file', { path: 'src/a.ts' }),
+      call('edit_file', { path: 'src/a.ts', old_string: '1', new_string: '2' }),
+      call('run_command', { command: 'bun test x' }),
+      call('read_file', { path: 'src/a.ts' }),
+      say('done'),
+    )
+    const fake = createFakeRunner(() => ({ exitCode: 1, stdout: 'FAIL x.test.ts' }))
+    const result = await createAiSdkAgent({
+      languageModel,
+      tierModels: on('m'),
+      runner: fake.runner,
+    }).run({ dir: await checkout(), prompt: 'p', capabilities: ['read', 'edit', 'run'] })
+    expect(result.text).toBe('done')
+    expect(fake.calls.length).toBe(2)
+    const prompts = model.doGenerateCalls.map((c) => JSON.stringify(c.prompt.at(-1)))
+    expect(prompts[4]).toContain('exit code 1')
+    expect(prompts[5]).toContain('export const a = 2')
+    expect(prompts.join('')).not.toContain('identical call')
+  })
+
+  test('without an answer at the turn limit fails with MaxTurnsError carrying usage', async () => {
+    const { languageModel } = scripted(
+      call('glob', { pattern: '*' }),
+      call('glob', { pattern: 'src/*' }),
+      call('glob', { pattern: '**' }),
+    )
+    const transcript = createTranscript()
+    const agent = createAiSdkAgent({
+      languageModel,
+      tierModels: on('m'),
+      maxTurns: 2,
+      pricing: { m: { inputPerMTok: 1, outputPerMTok: 10, cacheReadPerMTok: 0.1 } },
+    })
+    const error = await agent
+      .run({ dir: await checkout(), prompt: 'p', transcript })
+      .catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(MaxTurnsError)
+    expect((error as Error).message).toContain('error_max_turns')
+    expect(error).toMatchObject({ turns: 2, usage: { inputTokens: 1600, outputTokens: 200 } })
+    expect((error as MaxTurnsError).costUsd).toBeCloseTo(0.00364, 10)
+    expect(transcript.lines().at(-1)).toMatchObject({
+      type: 'end',
+      outcome: 'error',
+      turns: 2,
+      usage: { inputTokens: 1600 },
+      costUsd: (error as MaxTurnsError).costUsd,
+    })
+  })
+
+  test('the transcript keeps reasoning and calls of unknown tools as errors', async () => {
+    const { languageModel } = scripted(
+      {
+        content: [
+          { type: 'reasoning', text: 'the answer needs a tool' },
+          { type: 'tool-call', toolCallId: 'c1', toolName: 'answer_tool', input: '{}' },
+        ],
+        finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+        usage,
+        warnings: [],
+      },
+      say('done'),
+    )
+    const transcript = createTranscript()
+    await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'p',
+      transcript,
+    })
+    const lines = transcript.lines()
+    expect(lines[1]).toMatchObject({ type: 'assistant', reasoning: 'the answer needs a tool' })
+    expect(lines[2]).toMatchObject({ type: 'tool-result', id: 'c1', isError: true })
+    expect((lines[2] as { output: string }).output).toContain('answer_tool')
+  })
+
+  test('the answer format says there is no tool for the answer', async () => {
+    const { model, languageModel } = scripted(say('{"score": 3}'))
+    await createAiSdkAgent({ languageModel, tierModels: on('m') }).run({
+      dir: await checkout(),
+      prompt: 'rate',
+      output: z.object({ score: z.number() }),
+    })
+    const [system] = model.doGenerateCalls[0]?.prompt ?? []
+    expect(typeof system?.content === 'string' ? system.content : '').toContain(
+      'there is no tool for the answer',
     )
   })
 })

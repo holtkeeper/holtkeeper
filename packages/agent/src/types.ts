@@ -71,6 +71,10 @@ export interface AgentResult<Output = unknown> {
   /** Final answer text. */
   text: string
   output?: Output
+  /**
+   * Model requests the run made. An adapter that asks for a final answer after its turn limit
+   * counts that request too, so this can exceed the limit by one.
+   */
   turns: number
   costUsd?: number
   usage?: AgentUsage

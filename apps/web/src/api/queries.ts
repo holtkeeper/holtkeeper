@@ -206,8 +206,8 @@ export function useSnoozeMutations() {
 export type InboxDecision = 'approve' | 'reject'
 
 /**
- * Optional parts of a decision: the learning scope (else `suggestedScope`), the renewal date and
- * a reason that replaces the allowlist entry's.
+ * Optional parts of a decision: the learning scope (else its `targetScope`, else where
+ * `suggestedScope` points), the renewal date and a reason that replaces the allowlist entry's.
  */
 export interface InboxDecisionOptions {
   scope?: GuideScopeKey

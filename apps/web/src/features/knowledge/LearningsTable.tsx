@@ -28,6 +28,7 @@ import {
   type ConfidenceLevel,
   type LearningSort,
   acceptedBySection,
+  isAutoAccepted,
   confidenceAria,
   confidenceLabel,
   confidenceLevels,
@@ -85,8 +86,9 @@ const sectionIds = guideSections.map((s) => s.id)
  * Learning candidates of a space as a table: rules learned from review replies or proposed over
  * MCP, with their evidence, source and a 1–5 confidence. Rows are selected and accepted together
  * (`POST /api/learnings/accept`, one request per chosen scope), or accepted, edited and rejected
- * one at a time. Accepted rules are counted per Guide section; rejected ones stay hidden until
- * asked for. `repos` are the `forge:path` keys the space covers.
+ * one at a time. Accepted rules are counted per Guide section; rejected ones and those the
+ * `learnings.autoAccept` policy accepted stay hidden until asked for, and an auto-accepted rule can
+ * be confirmed (accepted again by a person) or rejected, which takes it out of the Guide. `repos` are the `forge:path` keys the space covers.
  */
 export function LearningsTable({
   space,
@@ -110,6 +112,7 @@ export function LearningsTable({
   const [scopes, setScopes] = useState<Record<string, GuideScopeKey>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [showRejected, setShowRejected] = useState(false)
+  const [showAuto, setShowAuto] = useState(false)
   const [focused, setFocused] = useState<string>()
   const single = useLearningMutations()
 
@@ -120,6 +123,7 @@ export function LearningsTable({
   const all = learningsInSpace(learnings.data.candidates, space, repos)
   const proposed = all.filter((c) => c.status === 'proposed')
   const rejected = all.filter((c) => c.status === 'rejected')
+  const autoAccepted = all.filter(isAutoAccepted)
   const shown = filterLearnings(
     proposed,
     { ...(source ? { source } : {}), sections, confidence },
@@ -138,7 +142,10 @@ export function LearningsTable({
   const counts = sourceCounts(proposed)
   const accepted = acceptedBySection(all, sectionIds)
   const scopeOf = (candidate: LearningCandidateView) =>
-    scopes[candidate.id] ?? suggestedScopeOf(candidate)
+    scopes[candidate.id] ??
+    (candidate.acceptedScope && candidate.scopes.includes(candidate.acceptedScope)
+      ? candidate.acceptedScope
+      : suggestedScopeOf(candidate))
 
   const acceptSelected = async () => {
     const batches = new Map<GuideScopeKey | undefined, string[]>()
@@ -406,6 +413,13 @@ export function LearningsTable({
               ))}
             </div>
           ) : null}
+          {autoAccepted.length ? (
+            <div>
+              <Button variant="secondary" size="sm" onPress={() => setShowAuto((v) => !v)}>
+                {showAuto ? 'Hide' : 'Show'} {autoAccepted.length} auto-accepted
+              </Button>
+            </div>
+          ) : null}
         </section>
         <section className="flex flex-col gap-2.5 rounded-[10px] border border-line bg-sunk px-3.5 py-3">
           <div className="flex items-center gap-2">
@@ -429,6 +443,35 @@ export function LearningsTable({
           </div>
         </section>
       </div>
+      {showAuto && autoAccepted.length ? (
+        <Table label="Auto-accepted rules">
+          <thead>
+            <tr>
+              <Th>
+                <span className="sr-only">Selection</span>
+              </Th>
+              <CandidateColumns />
+            </tr>
+          </thead>
+          <tbody>
+            {autoAccepted.map((candidate) => (
+              <CandidateRow
+                key={candidate.id}
+                candidate={candidate}
+                families={families}
+                people={people}
+                selected={selected}
+                onSelect={setSelected}
+                selectable={false}
+                scope={scopeOf(candidate)}
+                onScope={(scope) =>
+                  setScopes((previous) => ({ ...previous, [candidate.id]: scope }))
+                }
+              />
+            ))}
+          </tbody>
+        </Table>
+      ) : null}
       {showRejected && rejected.length ? (
         <Table label="Rejected candidates">
           <thead>
@@ -473,7 +516,7 @@ const suggestedLabel = (
   families: readonly Family[],
   titleOf: GroupTitleOf,
 ) => {
-  const key = suggestedScopeOf(candidate)
+  const key = candidate.targetScope ?? suggestedScopeOf(candidate)
   return key ? scopeLabel(key, families, titleOf) : suggestedKinds[candidate.suggestedScope]
 }
 
@@ -610,6 +653,14 @@ function CandidateRow({
         )}
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
           <span className="mono">{candidate.repo}</span>
+          {isAutoAccepted(candidate) ? (
+            <Byline
+              verb="accepted"
+              id={candidate.decidedBy}
+              at={candidate.decidedAt}
+              people={people}
+            />
+          ) : null}
           {candidate.status === 'rejected' ? (
             <Byline
               verb="rejected"
@@ -656,22 +707,30 @@ function CandidateRow({
       </Td>
       <Td valign="top">
         {candidate.canDecide && candidate.scopes.length ? (
-          <Select
-            aria-label={`Promote to: ${scope ? scopeLabel(scope, families, titleOf) : 'choose a scope'}`}
-            className="w-44"
-            options={candidate.scopes.map((key) => ({
-              id: key,
-              label: scopeLabel(key, families, titleOf),
-            }))}
-            value={scope}
-            onChange={(key) => {
-              const next = candidate.scopes.find((k) => k === key)
-              if (next) onScope(next)
-            }}
-          />
+          <div className="flex flex-col gap-1">
+            <Select
+              aria-label={`Promote to: ${scope ? scopeLabel(scope, families, titleOf) : 'choose a scope'}`}
+              className="w-44"
+              options={candidate.scopes.map((key) => ({
+                id: key,
+                label: scopeLabel(key, families, titleOf),
+              }))}
+              value={scope}
+              onChange={(key) => {
+                const next = candidate.scopes.find((k) => k === key)
+                if (next) onScope(next)
+              }}
+            />
+            {candidate.targetScope && candidate.targetScope !== scope ? (
+              <span className="text-xs text-muted">
+                target: {scopeLabel(candidate.targetScope, families, titleOf)}
+              </span>
+            ) : null}
+          </div>
         ) : (
           <span className="text-xs text-muted">
-            suggested: {suggestedLabel(candidate, families, titleOf)}
+            {candidate.targetScope ? 'target' : 'suggested'}:{' '}
+            {suggestedLabel(candidate, families, titleOf)}
           </span>
         )}
       </Td>
@@ -695,7 +754,13 @@ function CandidateRow({
               </>
             ) : (
               <>
-                <Tooltip content="Accept into the chosen scope">
+                <Tooltip
+                  content={
+                    candidate.status === 'accepted'
+                      ? 'Confirm in the chosen scope'
+                      : 'Accept into the chosen scope'
+                  }
+                >
                   <Button
                     variant="secondary"
                     size="sm"
@@ -727,8 +792,12 @@ function CandidateRow({
                     <Pencil className="size-3.5" />
                   </Button>
                 </Tooltip>
-                {candidate.status === 'proposed' ? (
-                  <Tooltip content="Reject">
+                {candidate.status === 'proposed' || isAutoAccepted(candidate) ? (
+                  <Tooltip
+                    content={
+                      isAutoAccepted(candidate) ? 'Reject and remove from the Guide' : 'Reject'
+                    }
+                  >
                     <Button
                       variant="ghost"
                       size="sm"

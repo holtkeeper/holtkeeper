@@ -1,10 +1,11 @@
-import type {
-  AcceptLearningsResult,
-  GuideScopeKey,
-  GuideSectionName,
-  LearningCandidateView,
-  LearningSourceKind,
-  ReactionTotals,
+import {
+  AUTO_ACCEPT_ACTOR,
+  type AcceptLearningsResult,
+  type GuideScopeKey,
+  type GuideSectionName,
+  type LearningCandidateView,
+  type LearningSourceKind,
+  type ReactionTotals,
 } from '@holtkeeper/api'
 
 import { type Space, candidatesInSpace } from './guide.ts'
@@ -111,12 +112,21 @@ export const selectableIds = (
 export const selectionAfter = (result: AcceptLearningsResult): Set<string> =>
   new Set(result.failed.map((failure) => failure.id))
 
-/** The scope a candidate's suggestion points at among those the caller may pick, else the first. */
+/**
+ * The scope a candidate's proposal points at among those the caller may pick: its `targetScope`,
+ * else the first of its `suggestedScope` kind, else the first.
+ */
 export const suggestedScopeOf = (
-  candidate: Pick<LearningCandidateView, 'scopes' | 'suggestedScope'>,
+  candidate: Pick<LearningCandidateView, 'scopes' | 'suggestedScope' | 'targetScope'>,
 ): GuideScopeKey | undefined =>
+  candidate.scopes.find((key) => key === candidate.targetScope) ??
   candidate.scopes.find((key) => key.startsWith(`${candidate.suggestedScope}:`)) ??
   candidate.scopes[0]
+
+/** Accepted by the `learnings.autoAccept` policy and not confirmed by a person since. */
+export const isAutoAccepted = (
+  candidate: Pick<LearningCandidateView, 'status' | 'decidedBy'>,
+): boolean => candidate.status === 'accepted' && candidate.decidedBy === AUTO_ACCEPT_ACTOR.id
 
 /** Accepted candidates per Guide section, in the order of `sections`; empty sections left out. */
 export function acceptedBySection(

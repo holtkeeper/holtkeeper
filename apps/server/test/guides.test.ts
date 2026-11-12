@@ -374,6 +374,61 @@ describe('generated text', () => {
     expect((await reject(body, 'member')).status).toBe(409)
   })
 
+  test('rejecting auto-accepted text puts back what a person accepted before', async () => {
+    const app = setup(teams)
+    const base = { scope: 'repo:work:games/a' as const, section: 'general' as const }
+    const row = { ...base, rules: '', steering: '', learnings: [] }
+    const mine = { ...layer('- Run `make test`.', 'accepted'), acceptedBy: 'header:member' }
+    await store.guides.put({ ...row, generated: mine })
+    const auto = {
+      ...layer('- Run `make check`.', 'accepted'),
+      generatedAt: '2026-11-02T10:00:00.000Z',
+      acceptedBy: 'auto-accept',
+    }
+    await store.guides.put({ ...row, generated: auto })
+    const reject = (inputHash: string) =>
+      send(app, 'POST', '/api/guide/section/reject', { ...base, inputHash }, as('member'))
+    expect((await reject('hash:- Run `make test`.')).status).toBe(409)
+
+    const response = await reject(auto.inputHash)
+    expect(response.status).toBe(200)
+    const section = (await response.json()) as GuideSection
+    expect(section.generated).toMatchObject({
+      body: '- Run `make test`.',
+      status: 'accepted',
+      acceptedBy: 'header:member',
+    })
+    expect(await store.kv!.get('guide:rejected:repo:work:games/a:general')).toMatchObject([
+      { inputHash: auto.inputHash },
+    ])
+    const [event] = (await store.audit.list({ action: 'guide.reject', outcome: 'ok' })).events
+    expect(event?.details).toMatchObject({ autoAccepted: true })
+    expect((await reject(auto.inputHash)).status).toBe(409)
+  })
+
+  test('rejecting auto-accepted text with nothing accepted before drops the generated layer', async () => {
+    const app = setup(teams)
+    const auto = { ...layer('- Run `make check`.', 'accepted'), acceptedBy: 'auto-accept' }
+    await store.guides.put({
+      scope: 'repo:work:games/a',
+      section: 'testing',
+      rules: '',
+      steering: '',
+      learnings: [],
+      generated: auto,
+    })
+    const response = await send(
+      app,
+      'POST',
+      '/api/guide/section/reject',
+      { scope: 'repo:work:games/a', section: 'testing', inputHash: auto.inputHash },
+      as('member'),
+    )
+    expect(response.status).toBe(200)
+    expect(((await response.json()) as GuideSection).generated).toBeUndefined()
+    expect((await store.guides.get('repo:work:games/a', 'testing'))?.generated).toBeUndefined()
+  })
+
   test('a rejected first proposal no longer shows as the generated layer', async () => {
     const app = setup(teams)
     const waiting = layer('- Run `make check`.', 'proposed')

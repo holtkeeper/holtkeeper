@@ -34,6 +34,7 @@ export {
 } from './ai-usage.ts'
 export { compareConfigDocuments, isKvLease } from './config.ts'
 export { updateKv } from './kv.ts'
+export { AUTO_ACCEPT_ACTOR } from './actors.ts'
 export { ExternalAccountConflictError } from './accounts.ts'
 export {
   AUDIT_EXPORT_BATCH,

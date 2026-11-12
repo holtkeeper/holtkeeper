@@ -19,13 +19,36 @@ import {
 /** Character budgets of a resolved Guide: about 3k tokens in all. */
 export interface GuideCaps {
   total: number
-  /** For repository docs, team rules, learnings and policies. */
+  /** For repository rules files, team rules, learnings and policies. */
   human: number
   /** For generated sections; never more than what human text leaves of `total`. */
   generated: number
+  /** Most the repository's rules files may take; a longer file is cut with a pointer to it. */
+  repoFiles: number
+  /**
+   * Room of `human` kept for team rules of groups, families and `all`, learned rules and policies
+   * before rules files are placed, on top of what the repository's own team rules take, so long
+   * rules files never crowd them out.
+   */
+  rules: number
 }
 
-export const GUIDE_CAPS: GuideCaps = { total: 12_000, human: 8_000, generated: 4_000 }
+/** Share of `total` the repository's rules files may take at most (`GuideCaps.repoFiles`). */
+export const GUIDE_REPO_FILES_SHARE = 0.4
+
+/** Share of `total` kept for team rules, learned rules and policies (`GuideCaps.rules`). */
+export const GUIDE_RULES_SHARE = 1 / 3
+
+const GUIDE_TOTAL = 12_000
+
+/** The default budgets: 12 000 characters, 4 800 at most for rules files, 4 000 kept for rules. */
+export const GUIDE_CAPS: GuideCaps = {
+  total: GUIDE_TOTAL,
+  human: 8_000,
+  generated: 4_000,
+  repoFiles: Math.floor(GUIDE_TOTAL * GUIDE_REPO_FILES_SHARE),
+  rules: Math.floor(GUIDE_TOTAL * GUIDE_RULES_SHARE),
+}
 
 /** The header generated text sits under in every prompt. */
 export const GENERATED_HEADER =
@@ -119,14 +142,20 @@ export interface ResolvedGuide {
 const MARKER = '\n[...]'
 const MIN_PIECE = 200
 
-/** `text` cut to at most `max` characters at a line break, marked; whole when it fits. */
-export function cutText(text: string, max: number): string {
+/**
+ * `text` cut to at most `max` characters at a line break and ended with `marker` (`\n[...]` by
+ * default); whole when it fits, empty when not even the marker fits.
+ */
+export function cutText(text: string, max: number, marker = MARKER): string {
   if (text.length <= max) return text
-  const room = max - MARKER.length
+  const room = max - marker.length
   if (room <= 0) return ''
   const line = text.lastIndexOf('\n', room)
-  return `${text.slice(0, line > room / 2 ? line : room).trimEnd()}${MARKER}`
+  return `${text.slice(0, line > room / 2 ? line : room).trimEnd()}${marker}`
 }
+
+/** The marker that ends a rules file cut to fit the Guide. */
+export const truncatedMarker = (file: string): string => `\n[… truncated, see ${file}]`
 
 interface Candidate {
   layer: GuideLayer
@@ -163,16 +192,24 @@ const sectionBodies = (
  * under `GENERATED_HEADER`, then knowledge notes from what budget is left. Group titles go through
  * `groupTitle`.
  *
- * Budgets (`GUIDE_CAPS`): human text gets `human` characters; over it `all` is cut first, then
- * parent groups (the last one first), then subgroups, then the family, learnings and policies.
- * Repository-level text (rules files and repository rules) is never cut to make room; when it
- * alone is over `human`, or over `total` (then its end is cut), a warning says so. Generated text
- * gets at most `generated` and what human text leaves of `total`; notes get the rest. Generated
- * text nobody accepted is included only when no human rules apply to the selected sections and
- * the repository has no rules files.
+ * Budgets (`GUIDE_CAPS`): rules files take at most `repoFiles` and leave of `human` the room of
+ * the repository's team rules plus `rules` for the other team rules, learned rules and policies
+ * (as much of it as they need); a longer file is cut with `[… truncated, see <file>]`, and every
+ * file left out keeps that pointer. Repository rules come next and are never cut to make room, only
+ * past `total`. The other human blocks share what is left of `human`: over it `all` is cut first,
+ * then parent groups (the last one first), then subgroups, then the family, learnings and
+ * policies. Every cut comes with a warning. Generated text gets at most `generated` and what
+ * human text leaves of `total`; notes get the rest. Generated text nobody accepted is included
+ * only when no human rules apply to the selected sections and the repository has no rules files.
  */
 export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
-  const caps = { ...GUIDE_CAPS, ...input.caps }
+  const total = input.caps?.total ?? GUIDE_CAPS.total
+  const caps: GuideCaps = {
+    ...GUIDE_CAPS,
+    repoFiles: Math.floor(total * GUIDE_REPO_FILES_SHARE),
+    rules: Math.floor(total * GUIDE_RULES_SHARE),
+    ...input.caps,
+  }
   const sections = input.focus
     ? guideSections.filter((name) => input.focus?.includes(name))
     : sectionsForTask(input.task, input.section)
@@ -220,20 +257,16 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
       .map((policy) => `### ${guideSectionLabels[section]}\n\n${policy.text.trim()}`),
   )
 
-  const repoLevel: Candidate[] = [
-    ...(docs.length
-      ? [
-          {
-            layer: 'repo-file' as const,
-            title: 'Rules from the repository',
-            source: docs.map((doc) => doc.file).join(' · '),
-            body: docs.map((doc) => `### ${doc.file}\n\n${doc.text.trim()}`).join('\n\n'),
-          },
-        ]
-      : []),
+  const filesBlock: Candidate | undefined = docs.length
+    ? {
+        layer: 'repo-file',
+        title: 'Rules from the repository',
+        source: docs.map((doc) => doc.file).join(' · '),
+        body: docs.map((doc) => `### ${doc.file}\n\n${doc.text.trim()}`).join('\n\n'),
+      }
+    : undefined
+  const rules: Candidate[] = [
     ...ruleBlocks.filter((block) => block.layer === 'repo'),
-  ]
-  const others: Candidate[] = [
     ...(policies.length
       ? [
           {
@@ -265,30 +298,45 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
   const header = '# Repository guide\n\nRules for this repository, strongest first.\n\n'
   let humanUsed = header.length
 
-  const repoFull = repoLevel.reduce((sum, block) => sum + render(block).length, 0)
-  for (const block of repoLevel) {
-    const full = render(block).length
-    const room = caps.total - humanUsed
-    const text = full <= room ? render(block) : room >= MIN_PIECE ? cutBlock(block, room) : ''
-    placed.set(block, { text, full })
+  if (filesBlock) {
+    const full = render(filesBlock).length
+    const sizeOf = (repo: boolean) =>
+      rules
+        .filter((block) => (block.layer === 'repo') === repo)
+        .reduce((sum, block) => sum + render(block).length, 0)
+    const reserved = sizeOf(true) + Math.min(sizeOf(false), caps.rules)
+    const room = Math.max(
+      0,
+      Math.min(caps.repoFiles, caps.total - humanUsed, caps.human - humanUsed - reserved),
+    )
+    const text = full <= room ? render(filesBlock) : placeFiles(docs, room)
+    placed.set(filesBlock, { text, full })
     humanUsed += text.length
+    if (text.length < full)
+      warnings.push(
+        text
+          ? `Rules files (${filesBlock.source}) take ${full} characters; they may use ${room} of the ${caps.total}-character Guide so team and learned rules keep their room, and were cut to ${text.length} with a pointer to the file. Shorten them.`
+          : `Rules files (${filesBlock.source}) were left out: team and learned rules use the room they may take. Shorten them.`,
+      )
   }
-  if (header.length + repoFull > caps.total)
-    warnings.push(
-      `Repository rules and rules files take ${repoFull} characters, more than the ${caps.total}-character Guide budget: their end was cut. Shorten them.`,
-    )
-  else if (header.length + repoFull > caps.human)
-    warnings.push(
-      `Repository rules and rules files take ${repoFull} characters, over the ${caps.human}-character budget for human rules: other team rules get less room. Shorten them.`,
-    )
 
-  for (const block of others) {
+  for (const block of rules) {
     const full = render(block).length
-    const room = caps.human - humanUsed
+    const repo = block.layer === 'repo'
+    const room = (repo ? caps.total : caps.human) - humanUsed
     const text = full <= room ? render(block) : room >= MIN_PIECE ? cutBlock(block, room) : ''
     placed.set(block, { text, full })
     humanUsed += text.length
-    if (text.length < full && block.scope)
+    if (repo) {
+      if (text.length < full)
+        warnings.push(
+          `Repository rules take ${full} characters, more than the ${caps.total}-character Guide has left after rules files: their end was cut. Shorten them.`,
+        )
+      else if (humanUsed > caps.human)
+        warnings.push(
+          `Repository rules take ${full} characters, over the ${caps.human}-character budget for human rules with rules files: other team rules get less room. Shorten them.`,
+        )
+    } else if (text.length < full)
       warnings.push(
         text
           ? `${block.title} were cut to fit the budget (${text.length} of ${full} characters).`
@@ -363,8 +411,8 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
       ...(candidate.version !== undefined && { version: candidate.version }),
     })
   const humanSorted = [
-    ...repoLevel,
-    ...others.toSorted((a, b) => order.indexOf(a.layer) - order.indexOf(b.layer)),
+    ...(filesBlock ? [filesBlock] : []),
+    ...rules.toSorted((a, b) => order.indexOf(a.layer) - order.indexOf(b.layer)),
   ]
   for (const block of humanSorted) describe(block, placed.get(block) ?? { text: '', full: 0 })
   for (const block of generatedBlocks)
@@ -417,4 +465,33 @@ function cutBlock(candidate: Candidate, room: number): string {
   const head = `## ${candidate.title}\n\n`
   const cut = cutText(candidate.body.trim(), room - head.length - 2)
   return cut ? `${head}${cut}\n\n` : ''
+}
+
+function placeFiles(docs: readonly RepoDoc[], room: number): string {
+  const head = '## Rules from the repository\n\n'
+  const title = (doc: RepoDoc) => `### ${doc.file}\n\n`
+  const pointer = (doc: RepoDoc) => `${title(doc)}${truncatedMarker(doc.file).trim()}`
+  let left = room - head.length - 2
+  const pieces: string[] = []
+  let cut = false
+  for (const [index, doc] of docs.entries()) {
+    const sep = pieces.length ? 2 : 0
+    const piece = `${title(doc)}${doc.text.trim()}`
+    const pointers = docs.slice(index + 1).reduce((sum, next) => sum + 2 + pointer(next).length, 0)
+    if (!cut && sep + piece.length + pointers <= left) {
+      pieces.push(piece)
+      left -= sep + piece.length
+      continue
+    }
+    const bodyRoom = left - sep - title(doc).length - pointers
+    const next =
+      !cut && bodyRoom >= MIN_PIECE
+        ? `${title(doc)}${cutText(doc.text.trim(), bodyRoom, truncatedMarker(doc.file))}`
+        : pointer(doc)
+    cut = true
+    if (sep + next.length > left) continue
+    pieces.push(next)
+    left -= sep + next.length
+  }
+  return pieces.length ? `${head}${pieces.join('\n\n')}\n\n` : ''
 }

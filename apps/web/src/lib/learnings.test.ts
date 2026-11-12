@@ -9,6 +9,7 @@ import {
   evidenceOf,
   filterLearnings,
   helpfulShare,
+  isAutoAccepted,
   learningsInSpace,
   reactionSum,
   selectableIds,
@@ -138,6 +139,25 @@ describe('space and selection', () => {
       'repo:gitlab:acme/widget-kit',
     )
     expect(suggestedScopeOf(candidate('x', { scopes: [] }))).toBeUndefined()
+    expect(
+      suggestedScopeOf(
+        candidate('x', {
+          suggestedScope: 'group',
+          targetScope: 'group:web',
+          scopes: ['repo:gitlab:acme/widget-kit', 'group:web.forms', 'group:web'],
+        }),
+      ),
+    ).toBe('group:web')
+  })
+
+  test('auto-accepted means accepted by the policy and not confirmed by a person', () => {
+    expect(isAutoAccepted(candidate('x', { status: 'accepted', decidedBy: 'auto-accept' }))).toBe(
+      true,
+    )
+    expect(isAutoAccepted(candidate('x', { status: 'accepted', decidedBy: 'user-1' }))).toBe(false)
+    expect(isAutoAccepted(candidate('x', { status: 'rejected', decidedBy: 'auto-accept' }))).toBe(
+      false,
+    )
   })
 
   test('accepted rules per section', () => {

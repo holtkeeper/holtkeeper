@@ -16,6 +16,7 @@ export {
   rootGroup,
 } from '@holtkeeper/access/groups'
 export { type Role, roleOf } from '@holtkeeper/access/roles'
+export { AUTO_ACCEPT_ACTOR } from '@holtkeeper/store/actors'
 export type { AuthInfo, LoginMethod } from '@holtkeeper/auth'
 export type * from '@holtkeeper/changes'
 export type * from '@holtkeeper/report'

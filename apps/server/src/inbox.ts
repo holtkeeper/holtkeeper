@@ -18,6 +18,7 @@ import type {
   ReleaseCard,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
+import { familyOf, scopesFor } from '@holtkeeper/guide'
 import { pendingGenerated, rejectedHashes } from '@holtkeeper/guide-generator'
 import type { CrossTeamCatalog } from '@holtkeeper/settings'
 import type {
@@ -33,6 +34,7 @@ import { type AllowlistEntry, allowlistSchema, isExpired } from '@holtkeeper/vul
 import { webPaths } from '@holtkeeper/web-paths'
 
 import { type ServerDeps, groupLabeler, parseRepo, repoTarget } from './context.ts'
+import { withLiveTarget } from './learnings.ts'
 import { releaseCan, releaseServiceFor } from './releases.ts'
 import { canReadAiScope } from './routes/ai.ts'
 import { peopleOf } from './routes/avatars.ts'
@@ -191,17 +193,27 @@ async function warnedBudgets(deps: ServerDeps): Promise<InboxSources['budgets']>
 
 async function loadSources(deps: ServerDeps): Promise<InboxSources> {
   const { store } = deps
-  const [proposedTasks, notes, learnings, sections, releases, allowlists, budgets, crossTeam] =
-    await Promise.all([
-      store.tasks.list({ status: ['proposed'] }),
-      store.knowledge.list({ status: 'proposed' }),
-      store.learnings.list({ status: ['proposed'] }),
-      store.guides.list(),
-      releaseServiceFor(deps).snapshot(),
-      store.settings.list('audit.allowlist'),
-      warnedBudgets(deps),
-      crossTeamPolicy(store.settings),
-    ])
+  const [
+    proposedTasks,
+    notes,
+    proposedLearnings,
+    families,
+    sections,
+    releases,
+    allowlists,
+    budgets,
+    crossTeam,
+  ] = await Promise.all([
+    store.tasks.list({ status: ['proposed'] }),
+    store.knowledge.list({ status: 'proposed' }),
+    store.learnings.list({ status: ['proposed'] }),
+    store.families.list(),
+    store.guides.list(),
+    releaseServiceFor(deps).snapshot(),
+    store.settings.list('audit.allowlist'),
+    warnedBudgets(deps),
+    crossTeamPolicy(store.settings),
+  ])
 
   const byGroup = new Map<string, AgentTask[]>()
   for (const task of proposedTasks)
@@ -225,6 +237,13 @@ async function loadSources(deps: ServerDeps): Promise<InboxSources> {
       hashes: await rejectedHashes(store.kv, entry.section.scope, entry.section.section),
     })),
   )
+  const learnings = proposedLearnings.map((candidate) => {
+    const repo = parseRepo(candidate.repo)
+    if (!repo) return candidate
+    const family = familyOf(families, candidate.repo)?.id
+    return withLiveTarget(candidate, scopesFor(repoTarget(deps.config, repo), family))
+  })
+
   const guides = rejected
     .filter(({ pending, hashes }) => !hashes.has(pending.inputHash))
     .map(({ section, pending }) => ({ section, pending }))
@@ -395,6 +414,7 @@ function inboxItems(
         learningId: candidate.id,
         section: candidate.section,
         suggestedScope: candidate.suggestedScope,
+        ...(candidate.targetScope && { targetScope: candidate.targetScope }),
       },
       memberships: [repo.groups],
     })

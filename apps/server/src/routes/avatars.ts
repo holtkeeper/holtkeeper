@@ -1,6 +1,7 @@
 import { Avatar, Style } from '@dicebear/core'
 import type { Principal } from '@holtkeeper/access'
 import type { PersonView, MePrincipal, SetAvatarInput } from '@holtkeeper/api'
+import { AUTO_ACCEPT_ACTOR } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -57,20 +58,32 @@ export async function withAvatar(
   return { ...principal, avatarUrl: avatarUrl(user?.avatarSeed ?? principal.id) }
 }
 
-/** Names and avatars of the ids that are users; other ids (services, `system`) are absent. */
+/**
+ * Names and avatars of the ids that are users, plus `AUTO_ACCEPT_ACTOR` when asked for; other ids
+ * (services, `system`) are absent.
+ */
 export async function peopleOf(
   deps: Pick<ServerDeps, 'store'>,
   ids: Iterable<string>,
 ): Promise<Record<string, PersonView>> {
   const unique = new Set(ids)
+  const auto = unique.delete(AUTO_ACCEPT_ACTOR.id)
   const users = await Promise.all([...unique].map((id) => deps.store.users.getUser(id)))
-  return Object.fromEntries(
-    users.flatMap((user) =>
+  return Object.fromEntries([
+    ...users.flatMap((user) =>
       user
         ? [[user.id, { name: user.name, avatarUrl: avatarUrl(user.avatarSeed ?? user.id) }]]
         : [],
     ),
-  )
+    ...(auto
+      ? [
+          [
+            AUTO_ACCEPT_ACTOR.id,
+            { name: AUTO_ACCEPT_ACTOR.name, avatarUrl: avatarUrl(AUTO_ACCEPT_ACTOR.id) },
+          ],
+        ]
+      : []),
+  ])
 }
 
 const setAvatarSchema = z.object({

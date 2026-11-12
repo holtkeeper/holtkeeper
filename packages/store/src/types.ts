@@ -837,6 +837,12 @@ export interface LearningCandidate {
   key: string
   section: GuideSectionName
   suggestedScope: LearningScopeKind
+  /**
+   * The exact scope the proposer named, one of the repository's own scopes; when set, accepting
+   * without a scope goes there instead of where `suggestedScope` points (`suggestedScope` is its
+   * kind).
+   */
+  targetScope?: GuideScopeKey
   status: LearningStatus
   /** Every reply that taught the rule, oldest first; empty for a direct proposal. */
   sources: LearningSource[]

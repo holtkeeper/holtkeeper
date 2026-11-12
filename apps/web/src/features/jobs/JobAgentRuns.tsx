@@ -26,6 +26,12 @@ function TranscriptLine({ line }: { line: Line }) {
     case 'assistant':
       return (
         <div className="flex flex-col gap-1">
+          {line.reasoning ? (
+            <details>
+              <summary className="cursor-pointer text-[11px] text-muted">Reasoning</summary>
+              <p className="mt-1 text-[11px] whitespace-pre-wrap text-muted">{line.reasoning}</p>
+            </details>
+          ) : null}
           {line.text ? <p className="text-xs whitespace-pre-wrap">{line.text}</p> : null}
           {(line.toolCalls ?? []).map((call) => (
             <div key={call.id} className="flex min-w-0 items-center gap-2">

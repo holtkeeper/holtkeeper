@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { RepoTarget } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
-import { createGuideResolver, proposeRule } from '@holtkeeper/guide'
+import { createGuideResolver, proposeRule, scopesFor } from '@holtkeeper/guide'
 import { memoryStore } from '@holtkeeper/store/memory'
 import type { TestIdsData } from '@holtkeeper/testids'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -260,17 +260,23 @@ describe('rules toolset', () => {
         },
       },
       proposals: {
-        propose: async (value, input) =>
-          target(value)
+        propose: async (value, input) => {
+          const repo = target(value)
+          return repo
             ? proposeRule(store, {
                 repo: value,
                 rule: input.rule,
                 section: input.section,
+                ...(input.targetScope && {
+                  targetScope: input.targetScope,
+                  scopes: scopesFor(repo),
+                }),
                 reason: input.reason,
                 by: principal.id,
                 at: now().toISOString(),
               })
-            : undefined,
+            : undefined
+        },
       },
       testIds: {
         testIds: async (value) => {
@@ -319,6 +325,35 @@ describe('rules toolset', () => {
       { status: 'proposed', section: 'testids', proposal: { by: 'header:sam' }, sources: [] },
     ])
     expect(await store.guides.list({ sections: ['testids'] })).toEqual([])
+  })
+
+  test('propose_rule_change takes an exact scope of the repository only', async () => {
+    const { store, client } = await setup()
+    const args = {
+      repo: 'work:toys/kite',
+      section: 'general',
+      rule: 'Keep spool sizes in SpoolSize.',
+      reason: 'Every team toy repeats it.',
+    }
+    const refused = await client.callTool({
+      name: 'propose_rule_change',
+      arguments: { ...args, scope: 'group:sheds' },
+    })
+    expect(refused.isError).toBe(true)
+    expect(textOf(refused)).toBe(
+      'Not proposed: group:sheds is not a group, family or repository scope of work:toys/kite.',
+    )
+    expect(
+      textOf(
+        await client.callTool({
+          name: 'propose_rule_change',
+          arguments: { ...args, scope: 'group:toys' },
+        }),
+      ),
+    ).toContain('of `work:toys/kite` into group:toys.')
+    expect(await store.learnings.list()).toMatchObject([
+      { suggestedScope: 'group', targetScope: 'group:toys' },
+    ])
   })
 
   test('test_ids lists the learned convention, overrides and selectors under a path', async () => {

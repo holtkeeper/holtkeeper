@@ -36,6 +36,27 @@ export class BudgetExceededError extends Error {
   }
 }
 
+/**
+ * The tool loop reached its turn limit and even a final tool-less request gave no usable answer.
+ * `usage`, `costUsd` and `turns` say what the run used, so it still counts against budgets.
+ */
+export class MaxTurnsError extends Error {
+  override name = 'MaxTurnsError'
+  readonly usage: AgentUsage
+  readonly costUsd: number | undefined
+  readonly turns: number
+
+  constructor(
+    message: string,
+    details: { usage: AgentUsage; costUsd?: number; turns: number; cause?: unknown },
+  ) {
+    super(message, details.cause === undefined ? undefined : { cause: details.cause })
+    this.usage = details.usage
+    this.costUsd = details.costUsd
+    this.turns = details.turns
+  }
+}
+
 const BUDGET_CODES =
   /\b(api_key_limit_exceeded|insufficient_funds|insufficient_quota|insufficient_credits|budget_exceeded|spend_limit_exceeded|billing_hard_limit_reached)\b/
 

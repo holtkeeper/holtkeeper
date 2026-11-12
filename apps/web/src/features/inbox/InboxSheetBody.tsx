@@ -25,6 +25,7 @@ import { formatDate, formatRelative, isoDay } from '../../lib/format.ts'
 import { guideTasks, pendingGenerated, scopeLabel, sectionLabel } from '../../lib/guide.ts'
 import { lineDiff, renewalDate } from '../../lib/inbox.ts'
 import { kindLabel as knowledgeKindLabel } from '../../lib/knowledge.ts'
+import { suggestedScopeOf } from '../../lib/learnings.ts'
 import { parseRepoKey } from '../../lib/repo.ts'
 import {
   Button,
@@ -166,16 +167,24 @@ function LearningBody({ item, decide }: { item: InboxLearningItem; decide: Decid
   if (!learnings.data) return <Loading error={learnings.error} />
   if (!candidate)
     return <p className="text-sm text-muted">This rule is no longer waiting; someone decided it.</p>
-  const suggested =
-    candidate.scopes.find((key) => key.startsWith(`${item.suggestedScope}:`)) ?? candidate.scopes[0]
-  const scope = chosen ?? suggested
+  const scope = chosen ?? suggestedScopeOf(candidate)
+  const familyList = families.data?.families ?? []
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[13px]">{candidate.rule}</p>
       <KeyValue
         rows={[
           { label: 'Section', value: <Tag>{sectionLabel(item.section)}</Tag> },
-          { label: 'Suggested', value: <Tag tone="info">{item.suggestedScope}</Tag> },
+          {
+            label: candidate.targetScope ? 'Target' : 'Suggested',
+            value: (
+              <Tag tone="info">
+                {candidate.targetScope
+                  ? scopeLabel(candidate.targetScope, familyList, titleOf)
+                  : item.suggestedScope}
+              </Tag>
+            ),
+          },
           { label: 'From', value: <span className="mono text-xs">{candidate.repo}</span> },
           { label: 'Why', value: candidate.proposal?.reason },
         ]}
@@ -187,7 +196,7 @@ function LearningBody({ item, decide }: { item: InboxLearningItem; decide: Decid
             className="min-w-0 flex-1"
             options={candidate.scopes.map((key) => ({
               id: key,
-              label: scopeLabel(key, families.data?.families ?? [], titleOf),
+              label: scopeLabel(key, familyList, titleOf),
             }))}
             value={scope}
             onChange={(key) => setChosen(candidate.scopes.find((k) => k === key))}

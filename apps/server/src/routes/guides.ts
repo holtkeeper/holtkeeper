@@ -45,6 +45,7 @@ import {
 } from '@holtkeeper/guide-generator'
 import { GUIDELINE_FILES } from '@holtkeeper/review'
 import {
+  AUTO_ACCEPT_ACTOR,
   type AnalysisStore,
   type Family,
   FamilyConflictError,
@@ -267,7 +268,10 @@ const auditEdit = (
  * (for a family: on every member), editing a repository's rules `knowledge:write` on it.
  * Accepting or rejecting a repository's generated text needs `knowledge:write`; regenerating it (a
  * `guide` job) also `analyses:run`. Rejected text stays stored (`rememberGuideRejection` names it)
- * but no longer shows as waiting, and the generator does not propose it again.
+ * but no longer shows as waiting, and the generator does not propose it again. Text accepted by
+ * `AUTO_ACCEPT_ACTOR` (`guide.autoAccept`) can be rejected too: the newest earlier text a person
+ * accepted comes back (as a new version), else a waiting proposal, else the section loses its
+ * generated layer.
  */
 export function guideRoutes(deps: ServerDeps) {
   const { store, config, now, analyzers } = deps
@@ -465,13 +469,21 @@ export function guideRoutes(deps: ServerDeps) {
     const found = await store.guides.get(key, input.section)
     const previous = found && (await visible(found))
     const pending = pendingGenerated(previous)
-    if (!previous || !pending)
+    const auto =
+      previous?.generated?.acceptedBy === AUTO_ACCEPT_ACTOR.id &&
+      previous.generated.status === 'accepted'
+        ? previous.generated
+        : undefined
+    const decided = pending?.inputHash === input.inputHash ? pending : undefined
+    const revoked = !decided && auto?.inputHash === input.inputHash ? auto : undefined
+    const target = decided ?? revoked
+    if (!previous || !(pending ?? auto))
       throw new HTTPException(409, { message: 'no generated text waits for a decision' })
-    if (pending.inputHash !== input.inputHash)
+    if (!target)
       throw new HTTPException(409, { message: 'the proposal changed; reload it before rejecting' })
     const remembered = await rememberGuideRejection(kv, key, input.section, {
-      inputHash: pending.inputHash,
-      generatedAt: pending.generatedAt,
+      inputHash: target.inputHash,
+      generatedAt: target.generatedAt,
       by: principal.id,
       at: now().toISOString(),
     })
@@ -480,12 +492,30 @@ export function guideRoutes(deps: ServerDeps) {
       action: 'guide.reject',
       target: auditTarget(scope, key, input.section),
       details: {
-        inputHash: pending.inputHash,
-        generatedAt: pending.generatedAt,
-        model: pending.model,
+        inputHash: target.inputHash,
+        generatedAt: target.generatedAt,
+        model: target.model,
+        ...(revoked && { autoAccepted: true }),
       },
     })
-    return c.json<GuideSection>(withoutRejected(previous, new Set([pending.inputHash])))
+    if (!revoked)
+      return c.json<GuideSection>(withoutRejected(previous, new Set([target.inputHash])))
+    const earlier = (await store.guides.generatedHistory(key, input.section)).find(
+      (layer) =>
+        layer.version < revoked.version &&
+        layer.status === 'accepted' &&
+        layer.acceptedBy !== undefined &&
+        layer.acceptedBy !== AUTO_ACCEPT_ACTOR.id,
+    )
+    const { generated: _, proposal, ...row } = previous
+    const kept = earlier ?? proposal
+    return c.json<GuideSection>(
+      await store.guides.put({
+        ...row,
+        ...(kept && { generated: kept }),
+        ...(earlier && proposal && { proposal }),
+      }),
+    )
   })
 
   app.post('/guide/regenerate', async (c) => {

@@ -23,7 +23,10 @@ import {
   notify,
 } from '../../ui/index.ts'
 
-/** The budget bar with its legend: used of 12,000 characters, about how many tokens. */
+/**
+ * The budget bar with its legend: used of 12,000 characters, about how many tokens, and how much
+ * rules files may take.
+ */
 export function BudgetBar({ budget }: { budget: Parameters<typeof budgetSegments>[0] }) {
   const segments = budgetSegments(budget)
   return (
@@ -45,6 +48,12 @@ export function BudgetBar({ budget }: { budget: Parameters<typeof budgetSegments
           ),
         }))}
       />
+      {budget.repoFiles !== undefined ? (
+        <p className="text-xs text-dim">
+          Rules files get at most <span className="mono">{number(budget.repoFiles)}</span> chars,
+          cut with a pointer to the file, so team and learned rules always keep room.
+        </p>
+      ) : null}
     </div>
   )
 }

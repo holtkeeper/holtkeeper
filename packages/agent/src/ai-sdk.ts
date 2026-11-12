@@ -25,6 +25,7 @@ import {
   type LanguageModel,
   type LanguageModelUsage,
   type ModelMessage,
+  type StepResult,
   type SystemModelMessage,
   type ToolSet,
   generateText,
@@ -35,7 +36,7 @@ import {
 import { createOllama } from 'ollama-ai-provider-v2'
 import { z } from 'zod'
 
-import { BudgetExceededError, budgetExceededFrom } from './errors.ts'
+import { BudgetExceededError, MaxTurnsError, budgetExceededFrom } from './errors.ts'
 import {
   DEFAULT_LOCAL_TOOL_LIMITS,
   type LocalToolLimits,
@@ -240,7 +241,7 @@ function toolLoopSystemPrompt(task: AgentTask, tools: readonly string[]): string
     const schema = outputSchemaText(task.output)
     parts.push(
       [
-        'Your final message must be a single JSON value matching the format the task describes, with no prose around it.',
+        'Your final message must be a single JSON value matching the format the task describes, with no prose around it. Write the JSON as the text of your final message; there is no tool for the answer.',
         schema ? `JSON schema of the answer: ${schema}` : '',
       ]
         .filter(Boolean)
@@ -284,7 +285,29 @@ async function runTool(agentTool: AgentTool, input: unknown, ctx: ToolContext, m
   }
 }
 
+const REPEATED_CALL = 'error: identical call #'
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (isRecord(value))
+    return `{${Object.keys(value)
+      .toSorted()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(',')}}`
+  return JSON.stringify(value) ?? 'null'
+}
+
+const CHANGING_TOOLS: ReadonlySet<string> = new Set(['edit_file', 'write_file', 'run_command'])
+
+/**
+ * Tools of the loop. A call identical to an earlier one since the last `edit_file`, `write_file`
+ * or `run_command` (same tool, same arguments) is not run again: the model gets an error result
+ * telling it the answer will not change. Those three always run and forget earlier calls, since
+ * they may change what the others return.
+ */
 function toolSet(tools: Map<string, AgentTool>, ctx: ToolContext, maxChars: number): ToolSet {
+  const calls = new Map<string, number>()
   return Object.fromEntries(
     [...tools].map(([name, agentTool]) => {
       const { $schema: _, ...schema } = z.toJSONSchema(agentTool.input, {
@@ -296,42 +319,75 @@ function toolSet(tools: Map<string, AgentTool>, ctx: ToolContext, maxChars: numb
         tool({
           description: agentTool.description,
           inputSchema: jsonSchema(schema),
-          execute: (input: unknown) => runTool(agentTool, input, ctx, maxChars),
+          execute: (input: unknown) => {
+            if (CHANGING_TOOLS.has(name)) {
+              calls.clear()
+              return runTool(agentTool, input, ctx, maxChars)
+            }
+            const key = `${name}\0${stableJson(input)}`
+            const count = (calls.get(key) ?? 0) + 1
+            calls.set(key, count)
+            if (count > 1)
+              return `${REPEATED_CALL}${count} — ${name} with these arguments already returned its result above and it will not change. Use it, try something else, or give your final answer.`
+            return runTool(agentTool, input, ctx, maxChars)
+          },
         }),
       ]
     }),
   )
 }
 
-interface TranscribedStep {
-  text: string
-  toolCalls: readonly { toolCallId: string; toolName: string; input: unknown }[]
-  toolResults: readonly { toolCallId: string; toolName: string; output: unknown }[]
-}
+const REPEAT_STOP_STEPS = 3
 
-/** Writes one tool-loop step (model text, tool calls, their results) to `sink`. */
-function transcribeStep(step: TranscribedStep, sink: TranscriptSink): void {
+const repeatedOnly = (step: Pick<StepResult<ToolSet>, 'toolCalls' | 'toolResults'>) =>
+  step.toolCalls.length > 0 &&
+  step.toolResults.length === step.toolCalls.length &&
+  step.toolResults.every(
+    (result) => typeof result.output === 'string' && result.output.startsWith(REPEATED_CALL),
+  )
+
+/** Stops the loop once the last `REPEAT_STOP_STEPS` steps only repeated earlier calls. */
+const repeating = ({ steps }: { steps: StepResult<ToolSet>[] }) =>
+  steps.length >= REPEAT_STOP_STEPS && steps.slice(-REPEAT_STOP_STEPS).every(repeatedOnly)
+
+/**
+ * Writes one tool-loop step to `sink`: model reasoning and text, tool calls, their results, and
+ * calls the SDK refused (unknown tool, invalid input) as error results.
+ */
+function transcribeStep(step: StepResult<ToolSet>, sink: TranscriptSink): void {
   const toolCalls = step.toolCalls.map((call) => ({
     id: call.toolCallId,
     name: call.toolName,
     input: call.input,
   }))
-  if (step.text || toolCalls.length)
+  const reasoning = step.reasoningText?.trim()
+  if (step.text || reasoning || toolCalls.length)
     sink.write({
       type: 'assistant',
+      ...(reasoning && { reasoning }),
       ...(step.text && { text: step.text }),
       ...(toolCalls.length && { toolCalls }),
     })
-  for (const result of step.toolResults) {
-    const output =
-      typeof result.output === 'string' ? result.output : JSON.stringify(result.output ?? null)
-    sink.write({
-      type: 'tool-result',
-      id: result.toolCallId,
-      name: result.toolName,
-      output,
-      ...(output.startsWith('error: ') && { isError: true }),
-    })
+  for (const part of step.content) {
+    if (part.type === 'tool-result') {
+      const output =
+        typeof part.output === 'string' ? part.output : JSON.stringify(part.output ?? null)
+      sink.write({
+        type: 'tool-result',
+        id: part.toolCallId,
+        name: part.toolName,
+        output,
+        ...(output.startsWith('error: ') && { isError: true }),
+      })
+    } else if (part.type === 'tool-error') {
+      sink.write({
+        type: 'tool-result',
+        id: part.toolCallId,
+        name: part.toolName,
+        output: `error: ${errorText(part.error)}`,
+        isError: true,
+      })
+    }
   }
 }
 
@@ -401,7 +457,13 @@ const UNPRICED_FALLBACK = {
  * step. Structured output is parsed from the answer text, never forced through a tool. A spent
  * budget or quota fails the run with `BudgetExceededError`, and so does reaching
  * `task.maxCostUsd`: the loop stops after the step that reached it. A model `pricing` does not
- * price is costed at `UNPRICED_FALLBACK`, so caps and budgets still hold.
+ * price is costed at `UNPRICED_FALLBACK`, so caps and budgets still hold. An identical repeat of
+ * an earlier read-only tool call with no `edit_file`, `write_file` or `run_command` in between is
+ * answered with an error instead of running, and three steps of nothing but repeats end the loop
+ * early. When the loop ends on tool calls (turn limit or repeats) under the cost cap, one more
+ * request with tools disabled asks for the answer; it counts as a turn, so `turns` can reach
+ * `maxTurns + 1`. Only when that request gives no answer does the run fail, with `MaxTurnsError`
+ * carrying what it used. Steps reach `task.transcript` as they finish.
  */
 export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
   const maxChars = options.limits?.maxOutputChars ?? DEFAULT_LOCAL_TOOL_LIMITS.maxOutputChars
@@ -452,7 +514,7 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
           type: 'end',
           outcome: 'error',
           error: errorText(error),
-          ...(error instanceof BudgetExceededError && {
+          ...((error instanceof BudgetExceededError || error instanceof MaxTurnsError) && {
             ...(error.turns !== undefined && { turns: error.turns }),
             ...(error.usage && { usage: error.usage }),
             ...(error.costUsd !== undefined && { costUsd: error.costUsd }),
@@ -465,45 +527,85 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
         let messages: ModelMessage[] = [{ role: 'user', content: task.prompt }]
         let usage = emptyUsage()
         let turns = 0
+        let finishing = false
         const cap = task.maxCostUsd
         const overCap = ({ steps }: { steps: { usage: LanguageModelUsage }[] }) => {
           if (cap === undefined) return false
           const cost = costOf(steps.reduce((sum, step) => addUsage(sum, step.usage), usage))
           return cost !== undefined && cost >= cap
         }
-
-        for (let attempt = 0; attempt < 2; attempt++) {
-          // oxlint-disable-next-line no-await-in-loop -- a retry continues the same conversation
-          const result = await generateText({
+        const generate = (input: ModelMessage[]) =>
+          generateText({
             model,
             system,
-            messages,
+            messages: finishing ? mark(input) : input,
             ...(tools.size && { tools: set, toolCallConcurrency: 1 }),
-            prepareStep: ({ messages: current }) => ({ messages: mark(current) }),
-            stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap],
+            ...(finishing && tools.size && { toolChoice: 'none' as const }),
+            ...(!finishing && {
+              prepareStep: ({ messages: current }: { messages: ModelMessage[] }) => ({
+                messages: mark(current),
+              }),
+              stopWhen: [stepCountIs(Math.max(maxTurns - turns, 1)), overCap, repeating],
+            }),
             reasoning: TIERS[tier].effort,
             abortSignal: signal,
             ...(options.timeoutMs !== undefined && { timeout: options.timeoutMs }),
+            ...(sink && { onStepEnd: (step: StepResult<ToolSet>) => transcribeStep(step, sink) }),
           }).catch((error: unknown) => {
             throw budgetExceededFrom(error) ?? error
           })
+        const spent = () => costOf(usage)
+        const capped = () => {
+          const cost = spent()
+          return cap !== undefined && cost !== undefined && cost >= cap
+        }
+        const overBudget = () => {
+          const cost = spent()
+          return new BudgetExceededError(
+            `AI budget exceeded: the run spent $${cost?.toFixed(2)} of its $${cap?.toFixed(2)} cap`,
+            { usage, ...(cost !== undefined && { costUsd: cost }), turns },
+          )
+        }
+        const noAnswer = (cause?: unknown) => {
+          const cost = spent()
+          return new MaxTurnsError(
+            `ai-sdk agent failed (error_max_turns): no answer within ${maxTurns} turns${cause ? `: ${errorText(cause)}` : ''}`,
+            { usage, turns, ...(cost !== undefined && { costUsd: cost }), cause },
+          )
+        }
+        const step = async (input: ModelMessage[]) => {
+          const result = await generate(input)
           signal.throwIfAborted()
-          if (sink) for (const step of result.steps) transcribeStep(step, sink)
           turns += result.steps.length
           usage = addUsage(usage, result.totalUsage)
-          const spent = costOf(usage)
-          const capped = cap !== undefined && spent !== undefined && spent >= cap
-          const overBudget = () =>
-            new BudgetExceededError(
-              `AI budget exceeded: the run spent $${spent?.toFixed(2)} of its $${cap?.toFixed(2)} cap`,
-              { usage, ...(spent !== undefined && { costUsd: spent }), turns },
-            )
-          if (result.finishReason === 'tool-calls' && capped) throw overBudget()
+          return result
+        }
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          // oxlint-disable-next-line no-await-in-loop -- a retry continues the same conversation
+          let result = await step(messages)
           if (result.finishReason === 'tool-calls') {
-            throw new Error(
-              `ai-sdk agent failed (error_max_turns): no answer within ${maxTurns} turns`,
-            )
+            if (capped()) throw overBudget()
+            const reason = repeating(result)
+              ? 'you keep repeating the same calls'
+              : 'the turn limit is reached'
+            finishing = true
+            messages = [
+              ...messages,
+              ...result.responseMessages,
+              {
+                role: 'user',
+                content: `Stop calling tools: ${reason}. Give your final answer now from what you found${task.output ? ', as only the JSON value' : ''}.`,
+              },
+            ]
+            // oxlint-disable-next-line no-await-in-loop -- the final request follows the loop
+            result = await step(messages).catch((error: unknown) => {
+              signal.throwIfAborted()
+              throw error instanceof BudgetExceededError ? error : noAnswer(error)
+            })
+            if (result.finishReason === 'tool-calls' || !result.text.trim()) throw noAnswer()
           }
+          const cost = spent()
           const answer: AgentResult<Output> = {
             text: result.text,
             turns,
@@ -511,15 +613,16 @@ export function createAiSdkAgent(options: AiSdkAgentOptions): Agent {
             model: modelId,
             runtime: 'ai-sdk',
           }
-          if (spent !== undefined) answer.costUsd = spent
+          if (cost !== undefined) answer.costUsd = cost
           if (!task.output) return answer
           try {
             answer.output = parseAgentOutput(result.text, task.output)
             return answer
           } catch (error) {
+            if (finishing && error instanceof AgentOutputError) throw noAnswer(error)
             if (attempt > 0 || turns >= maxTurns || !(error instanceof AgentOutputError))
               throw error
-            if (capped) throw overBudget()
+            if (capped()) throw overBudget()
             messages = [
               ...messages,
               ...result.responseMessages,

@@ -14,7 +14,7 @@ import type {
 } from '@holtkeeper/store'
 import { z } from 'zod'
 
-import { guideSections } from './model.ts'
+import { guideSections, parseGuideScope } from './model.ts'
 
 /** Most characters of a learned rule. */
 export const LEARNING_RULE_MAX = 200
@@ -74,25 +74,105 @@ export function looksLikeFeedback(body: string): boolean {
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/**
- * `rule` single-spaced and at most `LEARNING_RULE_MAX` characters (cut at a word, ending with
- * `…`), with `@handles` and every name of `names` removed.
- */
-export function cleanRule(rule: string, names: readonly string[] = []): string {
-  let text = rule.replace(/(^|\s)@[\w.-]+/g, '$1')
-  for (const name of names.filter((n) => n.trim().length >= 2))
-    text = text.replace(
-      new RegExp(`(?<![\\p{L}\\p{N}])${escape(name)}(?![\\p{L}\\p{N}])`, 'giu'),
+const CODE = /(```[\s\S]*?```|`[^`\n]+`)/
+
+const NOT_PEOPLE = new Set([
+  'abstract',
+  'apply',
+  'charset',
+  'container',
+  'counter-style',
+  'default',
+  'defaultvalue',
+  'deprecated',
+  'each',
+  'eslint-disable',
+  'eslint-disable-line',
+  'eslint-disable-next-line',
+  'eslint-enable',
+  'example',
+  'extend',
+  'flow',
+  'font-face',
+  'forward',
+  'import',
+  'include',
+  'inheritdoc',
+  'internal',
+  'jest-environment',
+  'jsx',
+  'jsxfrag',
+  'jsximportsource',
+  'jsxruntime',
+  'keyframes',
+  'layer',
+  'media',
+  'mixin',
+  'namespace',
+  'override',
+  'page',
+  'param',
+  'private',
+  'property',
+  'protected',
+  'public',
+  'readonly',
+  'remarks',
+  'returns',
+  'satisfies',
+  'see',
+  'since',
+  'supports',
+  'tailwind',
+  'template',
+  'throws',
+  'todo',
+  'ts-expect-error',
+  'ts-ignore',
+  'ts-nocheck',
+  'type',
+  'typedef',
+  'use',
+  'vitest-environment',
+])
+
+const MENTION = /(^|[\s(])@([\w-]+(?:\.[\w-]+)*)(?![\w/(-]|\.[\w-])/g
+
+const cleanProse = (text: string, names: readonly string[]) => {
+  let prose = text.replace(MENTION, (match, before: string, handle: string) =>
+    NOT_PEOPLE.has(handle.toLowerCase()) ? match : before,
+  )
+  for (const name of names)
+    prose = prose.replace(
+      new RegExp(`(?<![\\p{L}\\p{N}_@./-])${escape(name)}(?![\\p{L}\\p{N}_/-]|\\.\\w)`, 'giu'),
       '',
     )
-  text = text
-    .replace(/\s+/g, ' ')
-    .replace(/\s+([.,;:!?])/g, '$1')
-    .trim()
+  return prose.replace(/\s+/g, ' ').replace(/ ([.,;:!?])(?= |$)/g, '$1')
+}
+
+/**
+ * `rule` single-spaced and at most `LEARNING_RULE_MAX` characters (cut at a word and never inside
+ * code, ending with `…`), with person `@mentions` and every name of `names` removed from its
+ * prose. Inline code spans and fenced code stay byte for byte, and so do scoped package names
+ * (`@scope/pkg`), dotted decorators (`@app.route(...)`), CSS at-rules, TSDoc/JSDoc tags, JSX and
+ * eslint pragmas and test directives (`@font-face`, `@override`, `@vitest-environment`), names
+ * glued to an identifier by `_` and tokens such as `.d.ts` or `.env`. The stored text only; `normalizeRule` gives the dedupe key.
+ */
+export function cleanRule(rule: string, names: readonly string[] = []): string {
+  const people = names.map((name) => name.trim()).filter((name) => name.length >= 2)
+  const parts = rule.split(CODE).map((part, index) => (index % 2 ? part : cleanProse(part, people)))
+  const joined = parts.join('')
+  const text = joined.trim()
   if (text.length <= LEARNING_RULE_MAX) return text
   const cut = text.slice(0, LEARNING_RULE_MAX - 1)
   const space = cut.lastIndexOf(' ')
-  return `${(space > LEARNING_RULE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+  let end = space > LEARNING_RULE_MAX / 2 ? space : cut.length
+  let at = joined.trimStart().length - joined.length
+  for (const [index, part] of parts.entries()) {
+    if (index % 2 && at < end && end < at + part.length) end = at
+    at += part.length
+  }
+  return `${text.slice(0, end).trimEnd()}…`
 }
 
 /** The claim key of one reply note: the same note is never sent to an LLM twice. */
@@ -249,6 +329,33 @@ export async function captureLearning(
   return { status: 'proposed', candidate }
 }
 
+/** The learning scope kind of a `group:`, `family:` or `repo:` key; `undefined` for others. */
+export function learningScopeKindOf(key: string): LearningScopeKind | undefined {
+  const kind = parseGuideScope(key)?.kind
+  return kind === 'all' ? undefined : kind
+}
+
+/**
+ * Where accepting a candidate without a scope puts it, among `scopes` (`scopesFor` its
+ * repository): its `targetScope` while that is one of them, else the first scope of its
+ * `suggestedScope` kind (for `group` the nearest group). `undefined` when there is none.
+ */
+export function defaultLearningScope(
+  candidate: Pick<LearningCandidate, 'suggestedScope' | 'targetScope'>,
+  scopes: readonly GuideScopeKey[],
+): GuideScopeKey | undefined {
+  if (candidate.targetScope && scopes.includes(candidate.targetScope)) return candidate.targetScope
+  return scopes.find((key) => learningScopeKindOf(key) === candidate.suggestedScope)
+}
+
+/** Thrown when a proposal names a target scope that is not one of its repository's scopes. */
+export class LearningScopeError extends Error {
+  constructor(scope: string, repo: string) {
+    super(`${scope} is not a group, family or repository scope of ${repo}`)
+    this.name = 'LearningScopeError'
+  }
+}
+
 /** A rule someone proposes directly for people to review. */
 export interface RuleProposal {
   /** `forge:path`. */
@@ -256,6 +363,10 @@ export interface RuleProposal {
   rule: string
   section: GuideSectionName
   suggestedScope?: LearningScopeKind
+  /** An exact scope to accept into by default; wins over `suggestedScope`. */
+  targetScope?: GuideScopeKey
+  /** The repository's scopes (`scopesFor`); a `targetScope` must be one of them. */
+  scopes?: readonly GuideScopeKey[]
   reason: string
   /** Principal id of the proposer. */
   by: string
@@ -270,13 +381,18 @@ export type RuleProposalOutcome =
 /**
  * Stores a directly proposed rule as a `proposed` learning candidate (no LLM, no cost): it reaches
  * prompts only once a person accepts it. A rule whose normalized text matches a candidate of the
- * repository creates nothing and returns that candidate. Throws when the rule is empty.
+ * repository creates nothing and returns that candidate. Throws when the rule is empty, and
+ * `LearningScopeError` when `targetScope` is `all` or not among `scopes`.
  */
 export async function proposeRule(
   store: Pick<Store, 'learnings'>,
   proposal: RuleProposal,
   newId: () => string = () => crypto.randomUUID(),
 ): Promise<RuleProposalOutcome> {
+  const target = proposal.targetScope
+  const targetKind = target && learningScopeKindOf(target)
+  if (target && (!targetKind || !proposal.scopes?.includes(target)))
+    throw new LearningScopeError(target, proposal.repo)
   const rule = cleanRule(proposal.rule)
   const key = normalizeRule(rule)
   if (!key) throw new Error('the rule is empty')
@@ -288,7 +404,8 @@ export async function proposeRule(
     rule,
     key,
     section: proposal.section,
-    suggestedScope: proposal.suggestedScope ?? 'repo',
+    suggestedScope: targetKind ?? proposal.suggestedScope ?? 'repo',
+    ...(target && { targetScope: target }),
     status: 'proposed',
     sources: [],
     proposal: { by: proposal.by, reason: proposal.reason.trim() },
@@ -345,11 +462,16 @@ const unplace = (store: GuideWriter, candidate: LearningCandidate) =>
     ? placeLearning(store, candidate.acceptedScope, candidate.section, undefined, candidate.id)
     : Promise.resolve()
 
-/** What a person changes on a candidate; blank fields keep their value. */
+/**
+ * What a person changes on a candidate; blank fields keep their value. A `targetScope` sets
+ * `suggestedScope` to its kind; a `suggestedScope` without one drops the old `targetScope`.
+ */
 export interface LearningEdit {
   rule?: string
   section?: GuideSectionName
   suggestedScope?: LearningScopeKind
+  /** A `group:`, `family:` or `repo:` key; the caller checks it is one of the repository's scopes. */
+  targetScope?: GuideScopeKey
 }
 
 async function edited(
@@ -364,12 +486,18 @@ async function edited(
     const other = await store.learnings.find(candidate.repo, key)
     if (other && other.id !== candidate.id) throw new LearningConflictError(other.id)
   }
+  const targetKind = edit.targetScope && learningScopeKindOf(edit.targetScope)
+  if (edit.targetScope && !targetKind)
+    throw new LearningScopeError(edit.targetScope, candidate.repo)
+  const { targetScope: previous, ...rest } = candidate
+  const target = edit.targetScope ?? (edit.suggestedScope ? undefined : previous)
   return {
-    ...candidate,
+    ...rest,
     rule,
     key,
     section: edit.section ?? candidate.section,
-    suggestedScope: edit.suggestedScope ?? candidate.suggestedScope,
+    suggestedScope: targetKind ?? edit.suggestedScope ?? candidate.suggestedScope,
+    ...(target && { targetScope: target }),
   }
 }
 
@@ -431,7 +559,7 @@ export async function rejectLearning(
 }
 
 /**
- * Edits a candidate's rule, section or suggested scope. An accepted candidate's Guide entry follows
+ * Edits a candidate's rule, section, suggested or target scope. An accepted candidate's Guide entry follows
  * the edit. Throws `LearningConflictError` when the rule is another candidate's.
  */
 export async function editLearning(

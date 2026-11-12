@@ -6,7 +6,7 @@ import type {
   PersonView,
   RepoRef,
 } from '@holtkeeper/api'
-import { parentGroup } from '@holtkeeper/api'
+import { AUTO_ACCEPT_ACTOR, parentGroup } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { ExternalLink, GitCompare, History, Pencil, RefreshCw, RotateCcw } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
@@ -589,11 +589,16 @@ function GeneratedMeta({ generated }: { generated: GuideGenerated }) {
   )
 }
 
+const autoAccepted = (generated: GuideGenerated | undefined) =>
+  generated?.status === 'accepted' && generated.acceptedBy === AUTO_ACCEPT_ACTOR.id
+    ? generated
+    : undefined
+
 function GeneratedText({ generated, label }: { generated: GuideGenerated; label: string }) {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-line bg-raise p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Tag tone={label === 'Accepted' ? 'success' : 'warning'} dot>
+        <Tag tone={label === 'Proposed' ? 'warning' : 'success'} dot>
           {label}
         </Tag>
         <GeneratedMeta generated={generated} />
@@ -619,6 +624,7 @@ function GeneratedRow({
   const [prompt, setPrompt] = useState<string | null>(null)
   const [compare, setCompare] = useState(false)
   const pending = pendingGenerated(section)
+  const auto = autoAccepted(section.generated)
   const name = section.section
   const canRegenerate = canEdit && can('analyses:run') && isGeneratedSection(name)
   const versions = [section.generated?.version ?? 0, section.proposal?.version ?? 0]
@@ -639,6 +645,16 @@ function GeneratedRow({
       { scope, section: name, inputHash: pending.inputHash },
       {
         onSuccess: () => notify.success('Proposal rejected'),
+        onError: (error) => notify.error('Not rejected', messageOf(error)),
+      },
+    )
+
+  const rejectAuto = () =>
+    auto &&
+    reject.mutate(
+      { scope, section: name, inputHash: auto.inputHash },
+      {
+        onSuccess: () => notify.success('Auto-accepted text rejected'),
         onError: (error) => notify.error('Not rejected', messageOf(error)),
       },
     )
@@ -711,11 +727,29 @@ function GeneratedRow({
       {section.generated ? (
         <GeneratedText
           generated={section.generated}
-          label={section.generated.status === 'accepted' ? 'Accepted' : 'Proposed'}
+          label={
+            auto
+              ? 'Auto-accepted'
+              : section.generated.status === 'accepted'
+                ? 'Accepted'
+                : 'Proposed'
+          }
         />
       ) : (
         <span className="text-sm text-muted">Nothing generated yet.</span>
       )}
+      {auto && canEdit ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="mr-auto text-xs text-muted">
+            Accepted without review by the guide.autoAccept policy.
+          </span>
+          <Tooltip content="Puts back the text a person accepted before; these inputs are not proposed again">
+            <Button variant="secondary" size="sm" isPending={reject.isPending} onPress={rejectAuto}>
+              Reject auto-accepted text
+            </Button>
+          </Tooltip>
+        </div>
+      ) : null}
       {pending && canEdit ? (
         <div className="flex flex-wrap justify-end gap-2">
           <LinkButton to="/inbox" search={{ kind: 'guide' }} variant="ghost" size="sm">

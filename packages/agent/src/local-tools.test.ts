@@ -59,6 +59,9 @@ describe('localTools', () => {
     const tools = toolsFor(['read', 'search', 'edit'])
     expect(await call(tools, 'read_file', { path: 'src/a.ts' })).toContain('1\texport const a = 1')
     expect(await call(tools, 'grep', { pattern: 'const b' })).toBe('src/a.ts:2: export const b = 2')
+    expect(await call(tools, 'grep', { pattern: 'const', path: 'src/a.ts' })).toBe(
+      'src/a.ts:1: export const a = 1\nsrc/a.ts:2: export const b = 2',
+    )
     await call(tools, 'edit_file', { path: 'src/a.ts', old_string: 'a = 1', new_string: 'a = 3' })
     await call(tools, 'write_file', { path: 'src/new/b.ts', content: 'export {}\n' })
     expect(await call(tools, 'glob', { pattern: '**/*.ts' })).toBe('src/a.ts\nsrc/new/b.ts')

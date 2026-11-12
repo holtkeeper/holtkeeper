@@ -326,6 +326,7 @@ interface GuideBudget {
   humanUsed: number
   generatedUsed: number
   notesUsed?: number
+  repoFiles?: number
 }
 
 /**

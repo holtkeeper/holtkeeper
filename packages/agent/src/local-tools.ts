@@ -132,13 +132,17 @@ export function localTools(
         input: z.object({
           pattern: z.string().min(1).describe('JavaScript regular expression'),
           glob: z.string().optional().describe('Files to search, default "**/*"'),
-          path: z.string().optional().describe('Directory to search from; default the root'),
+          path: z.string().optional().describe('Directory or file to search; default the root'),
           ignoreCase: z.boolean().optional(),
         }),
         async run({ pattern, glob = '**/*', path = '.', ignoreCase }, { dir, signal }) {
           const regex = new RegExp(pattern, ignoreCase ? 'i' : undefined)
           const matches: string[] = []
-          for (const file of await files(dir, resolveInside(dir, path), glob, signal)) {
+          const root = resolveInside(dir, path)
+          const searched = (await stat(root)).isFile()
+            ? [relativeTo(dir, root)]
+            : await files(dir, root, glob, signal)
+          for (const file of searched) {
             if (matches.length >= limits.maxEntries) break
             const absolute = resolveInside(dir, file)
             // oxlint-disable-next-line no-await-in-loop -- stops early once enough matches are found

@@ -22,7 +22,7 @@ import { z } from 'zod'
 import { createApp } from '../src/app.ts'
 import type { ServerDeps } from '../src/context.ts'
 import { createEventDispatcher } from '../src/events.ts'
-import { learningConfidence, learningSourceKind } from '../src/learnings.ts'
+import { autoAcceptLearning, learningConfidence, learningSourceKind } from '../src/learnings.ts'
 
 let store: Store
 let discussions: Discussion[]
@@ -209,6 +209,38 @@ describe('events', () => {
         },
       ],
     })
+  })
+
+  test('with review-reply auto-accept a new candidate goes straight into the Guide', async () => {
+    await store.settings.put({
+      id: 'auto',
+      key: 'learnings.autoAccept',
+      scope: { groups: ['toys'] },
+      value: { sources: ['review-reply'], scope: 'suggested' },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const body = 'In this repo we keep spool sizes inline on purpose.'
+    discussions = [thread([[2, 'robin', body]])]
+    const { agent } = fakeAgent([
+      { rule: 'Keep spool sizes inline.', section: 'review', scope: 'group' },
+    ])
+    const background: Promise<unknown>[] = []
+    await dispatcher(agent, background)(reply(body), webhook)
+    await Promise.all(background)
+
+    const [candidate] = await store.learnings.list()
+    expect(candidate).toMatchObject({
+      status: 'accepted',
+      acceptedScope: 'group:toys',
+      decidedBy: 'auto-accept',
+    })
+    expect((await store.guides.get('group:toys', 'review'))?.learnings).toMatchObject([
+      { rule: 'Keep spool sizes inline.', acceptedBy: 'auto-accept' },
+    ])
+    expect((await store.audit.list({ action: 'learning.accept' })).events).toMatchObject([
+      { actor: { id: 'auto-accept' }, details: { auto: true, origin: 'review-reply' } },
+    ])
   })
 
   test('a question makes no call and reads nothing more from the forge', async () => {
@@ -404,6 +436,35 @@ describe('routes', () => {
     expect((await send(app, 'POST', '/api/learnings/nope/reject')).status).toBe(404)
   })
 
+  test('an auto-accepted rule names Auto-accept and a person can still reject it', async () => {
+    const app = setup(teams)
+    await store.settings.put({
+      id: 'auto',
+      key: 'learnings.autoAccept',
+      scope: { all: true },
+      value: { sources: ['review-reply'] },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const proposed = await store.learnings.get('c1')
+    const accepted =
+      proposed && (await autoAcceptLearning({ store, config, now }, proposed, 'review-reply'))
+    expect(accepted).toMatchObject({ acceptedScope: 'repo:work:toys/kite' })
+    expect(
+      await autoAcceptLearning({ store, config, now }, candidate('c9', { key: 'k9' }), 'mcp'),
+    ).toBeUndefined()
+
+    const list = (await (
+      await send(app, 'GET', '/api/learnings?status=accepted', undefined, as('member'))
+    ).json()) as LearningList
+    expect(list.candidates.map((c) => [c.id, c.decidedBy])).toEqual([['c1', 'auto-accept']])
+    expect(list.people['auto-accept']?.name).toBe('Auto-accept')
+
+    const rejected = await send(app, 'POST', '/api/learnings/c1/reject', undefined, as('member'))
+    expect(await rejected.json()).toMatchObject({ status: 'rejected', decidedBy: 'header:member' })
+    expect((await store.guides.get('repo:work:toys/kite', 'review'))?.learnings).toEqual([])
+  })
+
   test('accepting a group suggestion without a group in the repository needs a scope', async () => {
     await store.learnings.put(
       candidate('c3', { repo: 'work:lonely/one', key: 'k3', suggestedScope: 'group' }),
@@ -444,6 +505,134 @@ describe('routes', () => {
     ).toMatchObject({ acceptedScope: 'group:toys' })
     expect((await store.guides.get('group:toys.flying', 'review'))?.learnings).toHaveLength(1)
     expect((await store.guides.get('group:toys', 'review'))?.learnings).toHaveLength(1)
+  })
+
+  test('a subgroup entry auto-accepts a rule aimed at the parent group into the repository', async () => {
+    const nested = parseConfig({
+      forges: config.forges,
+      groups: {
+        toys: { forge: 'work', include: ['toys/*'] },
+        'toys.flying': { forge: 'work', include: ['toys/kite'] },
+      },
+    })
+    await store.settings.put({
+      id: 'auto',
+      key: 'learnings.autoAccept',
+      scope: { groups: ['toys.flying'] },
+      value: { sources: ['mcp', 'review-reply'] },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const deps = { store, config: nested, now }
+    const proposed = candidate('c5', {
+      rule: 'Name every toy.',
+      key: 'name every toy',
+      sources: [],
+      proposal: { by: 'header:reader', reason: 'Seen twice.' },
+      targetScope: 'group:toys',
+    })
+    const replied = candidate('c6', {
+      rule: 'Keep kites light.',
+      key: 'keep kites light',
+      suggestedScope: 'group',
+      sources: [
+        {
+          repo: 'work:toys/kite',
+          mergeRequest: 4,
+          discussionId: 'disc-1',
+          noteId: '2',
+          author: 'robin',
+          at: '2026-11-04T09:30:00.000Z',
+          url: 'https://forge.test/toys/kite/-/merge_requests/4#note_2',
+        },
+      ],
+    })
+    await store.learnings.put(proposed)
+    await store.learnings.put(replied)
+    expect(await autoAcceptLearning(deps, proposed, 'mcp')).toMatchObject({
+      acceptedScope: 'repo:work:toys/kite',
+    })
+    expect(await store.guides.get('group:toys', 'review')).toBeUndefined()
+    expect(await autoAcceptLearning(deps, replied, 'review-reply')).toMatchObject({
+      acceptedScope: 'group:toys.flying',
+    })
+    const { events } = await store.audit.list({ action: 'learning.accept' })
+    expect(events.map((event) => event.details)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ origin: 'mcp', proposedBy: 'header:reader' }),
+        expect.objectContaining({
+          origin: 'review-reply',
+          author: 'robin',
+          mergeRequest: 4,
+          url: 'https://forge.test/toys/kite/-/merge_requests/4#note_2',
+        }),
+      ]),
+    )
+  })
+
+  test('a target scope picks the parent group over the subgroup and stays among the repository scopes', async () => {
+    const nested = parseConfig({
+      forges: config.forges,
+      groups: {
+        toys: { forge: 'work', include: ['toys/*'] },
+        'toys.flying': { forge: 'work', include: ['toys/kite'] },
+        shop: { forge: 'work', include: ['shop/*'] },
+      },
+    })
+    await store.learnings.put(
+      candidate('c3', {
+        key: 'k3',
+        rule: 'Name every toy.',
+        suggestedScope: 'group',
+        targetScope: 'group:toys',
+      }),
+    )
+    await store.learnings.put(candidate('c4', { key: 'k4', rule: 'Keep kites light.' }))
+    const app = setup(noAuth(), nested)
+    expect(await (await send(app, 'POST', '/api/learnings/c3/accept', {})).json()).toMatchObject({
+      acceptedScope: 'group:toys',
+    })
+    expect(
+      (await send(app, 'PATCH', '/api/learnings/c4', { targetScope: 'group:shop' })).status,
+    ).toBe(400)
+    expect((await send(app, 'PATCH', '/api/learnings/c4', { targetScope: 'all' })).status).toBe(400)
+    expect(
+      await (await send(app, 'PATCH', '/api/learnings/c4', { targetScope: 'group:toys' })).json(),
+    ).toMatchObject({ suggestedScope: 'group', targetScope: 'group:toys' })
+    expect(await (await send(app, 'POST', '/api/learnings/c4/accept', {})).json()).toMatchObject({
+      acceptedScope: 'group:toys',
+    })
+  })
+
+  test('setting a target scope needs edit rights on it', async () => {
+    const app = setup(teams)
+    expect(
+      (await send(app, 'PATCH', '/api/learnings/c1', { targetScope: 'group:toys' }, as('member')))
+        .status,
+    ).toBe(403)
+    expect(
+      await (
+        await send(app, 'PATCH', '/api/learnings/c1', { targetScope: 'group:toys' }, as('lead'))
+      ).json(),
+    ).toMatchObject({ targetScope: 'group:toys' })
+    const events = (await store.audit.list({ action: 'learning.update' })).events
+    expect(events.find((event) => event.outcome === 'ok')?.changes).toContainEqual({
+      field: 'target',
+      after: 'group:toys',
+    })
+  })
+
+  test('views drop a target scope the repository no longer has', async () => {
+    await store.learnings.put(candidate('c3', { key: 'k3', targetScope: 'family:gone' }))
+    const list = (await (await send(setup(), 'GET', '/api/learnings')).json()) as LearningList
+    expect(list.candidates.find((row) => row.id === 'c3')).not.toHaveProperty('targetScope')
+  })
+
+  test('a target scope of all is refused as input before any rights check', async () => {
+    const app = setup(teams)
+    expect(
+      (await send(app, 'PATCH', '/api/learnings/c1', { targetScope: 'all' }, as('member'))).status,
+    ).toBe(400)
   })
 
   test('rows carry how the candidate came about and a confidence from its sources', async () => {

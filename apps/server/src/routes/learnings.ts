@@ -8,7 +8,9 @@ import type {
 import {
   LEARNING_RULE_MAX,
   LearningConflictError,
+  LearningScopeError,
   acceptLearning,
+  defaultLearningScope,
   editLearning,
   familyOf,
   guideScopeKey,
@@ -35,7 +37,7 @@ import {
   ForbiddenException,
   repoKey,
 } from '../context.ts'
-import { learningConfidence, learningSourceKind } from '../learnings.ts'
+import { learningConfidence, learningSourceKind, withLiveTarget } from '../learnings.ts'
 import { peopleOf } from './avatars.ts'
 import { editAction, guideScopePermission } from './guides.ts'
 
@@ -47,6 +49,7 @@ const editSchema = z.object({
   rule: ruleSchema.optional(),
   section: z.enum(guideSections).optional(),
   suggestedScope: z.enum(['repo', 'family', 'group']).optional(),
+  targetScope: z.string().min(1).optional(),
 })
 
 const acceptSchema = z.object({
@@ -64,6 +67,8 @@ const decided = (candidate: LearningCandidate) => ({
   rule: candidate.rule,
   section: candidate.section,
   status: candidate.status,
+  suggested: candidate.suggestedScope,
+  ...(candidate.targetScope && { target: candidate.targetScope }),
   ...(candidate.acceptedScope && { scope: candidate.acceptedScope }),
 })
 
@@ -86,6 +91,8 @@ const saving = async (work: () => Promise<LearningCandidate>) => {
   } catch (error) {
     if (error instanceof LearningConflictError)
       throw new HTTPException(409, { message: error.message })
+    if (error instanceof LearningScopeError)
+      throw new HTTPException(400, { message: error.message })
     throw error
   }
 }
@@ -95,7 +102,9 @@ const saving = async (work: () => Promise<LearningCandidate>) => {
  * Reading needs `knowledge:read` on the candidate's repository (reaction totals without `repo`
  * need it globally); accepting, editing and rejecting
  * need `knowledge:write` on it, plus edit rights (`editAction`) on the scope the rule goes to or
- * leaves. A candidate may be accepted into any scope that applies to its repository.
+ * leaves. A candidate may be accepted into any scope that applies to its repository; without a
+ * scope it goes to its `targetScope`, else where `suggestedScope` points. `PATCH` may set a
+ * `targetScope` among the repository's scopes that the caller may edit.
  * `POST /learnings/accept` accepts several with the same checks per candidate; each accepted one
  * gets its own `learning.accept` audit event, and the request itself is audited as
  * `learnings.accept`.
@@ -175,15 +184,14 @@ export function learningRoutes(deps: ServerDeps) {
       if (!can(principal, 'knowledge:read', { kind: 'repo', repo: target })) return []
       const family = familyOf(families, candidate.repo)
       const canDecide = can(principal, 'knowledge:write', { kind: 'repo', repo: target })
+      const scopes = scopesFor(target, family?.id)
       return [
         {
-          ...candidate,
+          ...withLiveTarget(candidate, scopes),
           sourceKind: learningSourceKind(candidate),
           confidence: learningConfidence(candidate),
           canDecide,
-          scopes: canDecide
-            ? scopesFor(target, family?.id).filter((key) => scopeAllowed(principal, key, family))
-            : [],
+          scopes: canDecide ? scopes.filter((key) => scopeAllowed(principal, key, family)) : [],
         },
       ]
     })
@@ -226,7 +234,7 @@ export function learningRoutes(deps: ServerDeps) {
     const chosen = input.scope === undefined ? undefined : parseGuideScope(input.scope)
     if (input.scope !== undefined && !chosen)
       throw new HTTPException(400, { message: 'scope must be all, group:, family: or repo:' })
-    const scope = chosen ? guideScopeKey(chosen) : defaultScope(candidate, scopes, family)
+    const scope = chosen ? guideScopeKey(chosen) : defaultLearningScope(candidate, scopes)
     if (!scope)
       throw new HTTPException(400, {
         message: `the repository has no ${candidate.suggestedScope}; choose a scope`,
@@ -313,14 +321,22 @@ export function learningRoutes(deps: ServerDeps) {
   })
 
   app.patch('/learnings/:id', async (c) => {
-    const { candidate, principal } = await load(c, 'learning.update')
+    const { candidate, principal, scopes, family } = await load(c, 'learning.update')
     const input = await readBody(c, editSchema)
+    const target = input.targetScope === undefined ? undefined : parseGuideScope(input.targetScope)
+    const key = target && target.kind !== 'all' ? guideScopeKey(target) : undefined
+    if (input.targetScope !== undefined && (!key || !scopes.includes(key)))
+      throw new HTTPException(400, {
+        message: `${input.targetScope} is not a group, family or repository scope of ${candidate.repo}`,
+      })
     await ensurePlaced(principal, candidate)
+    if (key) ensureScope(principal, key, family)
     const stored = await saving(() =>
       editLearning(store, candidate, {
         ...(input.rule && { rule: input.rule }),
         ...(input.section && { section: input.section }),
         ...(input.suggestedScope && { suggestedScope: input.suggestedScope }),
+        ...(key && { targetScope: key }),
         by: principal.id,
         at: now().toISOString(),
       }),
@@ -330,16 +346,4 @@ export function learningRoutes(deps: ServerDeps) {
   })
 
   return app
-}
-
-/** The scope a candidate's `suggestedScope` points at, when the repository has one. */
-function defaultScope(
-  candidate: LearningCandidate,
-  scopes: readonly GuideScopeKey[],
-  family?: Family,
-): GuideScopeKey | undefined {
-  if (candidate.suggestedScope === 'repo') return scopes[0]
-  if (candidate.suggestedScope === 'family')
-    return family ? guideScopeKey({ kind: 'family', family: family.id }) : undefined
-  return scopes.find((key) => key.startsWith('group:'))
 }
