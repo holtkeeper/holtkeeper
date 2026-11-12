@@ -643,9 +643,11 @@ function mitmPython() {
 }
 
 const raceScript = `
-import sys, threading, time
+import sys, threading
 sys.path.insert(0, sys.argv[1])
 from cache import Cache, Spool
+
+STUCK = 20
 
 class Store:
     def __init__(self):
@@ -654,11 +656,12 @@ class Store:
         self.writes = 0
         self.flushing = threading.Event()
         self.release = threading.Event()
+        self.contended = threading.Event()
         self.body = threading.Event()
     def write_meta(self, path, meta):
         if meta["hits"] and not self.release.is_set():
             self.flushing.set()
-            self.release.wait(5)
+            assert self.release.wait(STUCK)
         self.writes += 1
         token = f"t{self.writes}"
         self.files[path] = (token, dict(meta))
@@ -671,23 +674,36 @@ class Store:
         self.reads += 1
         return self.files[path][1]
 
+class Watched:
+    def __init__(self, lock):
+        self.lock = lock
+    def __enter__(self):
+        if not self.lock.acquire(blocking=False):
+            store.contended.set()
+            self.lock.acquire()
+    def __exit__(self, *_):
+        self.lock.release()
+
 store = Store()
 cache = Cache(store, {"packages": 86400, "tools": 86400}, None, 1 << 30, 3600, [], (), "")
+cache.write_locks = [Watched(lock) for lock in cache.write_locks]
 path = "packages/example.test/widget.tgz"
 cache.index[path] = {"url": "https://example.test/widget.tgz", "kind": "packages", "size": 1, "headers": {},
     "storedAt": "2026-01-01T00:00:00Z", "lastUsedAt": "2026-01-02T00:00:00Z", "hits": 3}
 cache.dirty.add(path)
 flush = threading.Thread(target=cache.flush)
 flush.start()
-assert store.flushing.wait(5)
+assert store.flushing.wait(STUCK)
 spool = Spool(path="unused", entry=path, kind="packages", url="https://example.test/widget.tgz", headers={}, expected=None, size=2)
 commit = threading.Thread(target=cache.commit, args=(spool,))
 commit.start()
-assert store.body.wait(5)
-time.sleep(0.3)
+assert store.contended.wait(STUCK)
+assert not store.body.is_set()
 store.release.set()
-flush.join(5)
-commit.join(5)
+flush.join(STUCK)
+commit.join(STUCK)
+assert not flush.is_alive() and not commit.is_alive()
+assert store.body.is_set()
 token, stored = store.files[path]
 assert stored["hits"] == 0 and stored["size"] == 2, stored
 assert cache.index[path] == stored and cache.tokens[path] == token and path not in cache.dirty
