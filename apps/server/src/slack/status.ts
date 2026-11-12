@@ -46,8 +46,9 @@ export function reviewStatusOf(data: ReviewData): Exclude<SlackReviewStatus, 're
 }
 
 /**
- * The newest stored review of a merge request that reviewed or skipped it (thread replies are
- * left out), among the repository's newest `REVIEW_SCAN` review records.
+ * The newest stored review of a merge request that reviewed it or skipped it as too large, among
+ * the repository's newest `REVIEW_SCAN` review records; thread replies and runs that found nothing
+ * new to review (e.g. a poll after a restart) are left out.
  */
 export async function latestReview(
   analyses: Pick<AnalysisStore, 'list'>,
@@ -58,10 +59,15 @@ export async function latestReview(
   for (const record of records) {
     if (record.ref !== reviewRef(mergeRequest)) continue
     const parsed = reviewDataSchema.safeParse(record.data)
-    if (parsed.success && parsed.data.mode !== 'reply') return parsed.data
+    if (parsed.success && parsed.data.mode !== 'reply' && !nothingNew(parsed.data))
+      return parsed.data
   }
   return undefined
 }
+
+/** A run that found nothing new since the head an earlier run reviewed; it says nothing about the merge request. */
+const nothingNew = (data: ReviewData) =>
+  data.mode === 'skipped' && !data.skipped.some((file) => file.reason === 'too-large')
 
 const statusNames: Record<SlackReviewStatus, string> = {
   reviewing: 'Reviewing',

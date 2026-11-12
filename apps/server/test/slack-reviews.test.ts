@@ -448,10 +448,24 @@ describe('slack review status', () => {
     ])
   })
 
-  test('a skipped review shows the not-reviewed emoji', async () => {
-    await storeReview(review({ mode: 'skipped', verdict: 'skipped' }))
+  test('a review skipped as too large shows the not-reviewed emoji', async () => {
+    await storeReview(
+      review({
+        mode: 'skipped',
+        verdict: 'skipped',
+        skipped: [{ path: 'src/widget.ts', reason: 'too-large' }],
+      }),
+    )
     await message(link())
     expect(reactions).toEqual([`+white_circle ${BOUND}/1700000000.000100`])
+  })
+
+  test('a run with nothing new to review keeps the earlier verdict', async () => {
+    await storeReview(review())
+    await message(link())
+    await storeReview(review({ mode: 'skipped', verdict: 'skipped' }))
+    await deps.mergeRequestStatus?.reviewChanged({ repo: widget, mergeRequest: 7 })
+    expect(reactions).toEqual([`+large_green_circle ${BOUND}/1700000000.000100`])
   })
 
   test('a message linking several merge requests shows the worst status', async () => {
