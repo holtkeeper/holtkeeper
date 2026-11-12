@@ -71,6 +71,7 @@ export const stackDataSchema: z.ZodType<StackData> = z.object({
           version: z.string().optional(),
           variant: z.string().optional(),
           image: z.string().optional(),
+          minimum: z.boolean().optional(),
         }),
       ),
     }),

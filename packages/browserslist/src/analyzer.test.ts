@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import type { CommitConventions } from '@holtkeeper/commit-conventions'
 import { localRunner, runChecked } from '@holtkeeper/exec'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { GitForge } from '@holtkeeper/forge'
@@ -57,7 +58,12 @@ function fakeForge(refusals = 0) {
   return { forge, commits, created, merges }
 }
 
-const run = async (root: string, forge: GitForge, options: Record<string, unknown> = {}) => {
+const run = async (
+  root: string,
+  forge: GitForge,
+  options: Record<string, unknown> = {},
+  conventions?: CommitConventions,
+) => {
   const fake = createFakeRunner(async (command, { cwd }) => {
     if (command[0] === 'bunx') {
       await writeFile(join(cwd, 'bun.lock'), lockfile('1.0.30001700'))
@@ -78,6 +84,7 @@ const run = async (root: string, forge: GitForge, options: Record<string, unknow
   const analyzer = createBrowserslistAnalyzer({
     now: () => new Date('2026-10-31T00:00:00Z'),
     sleep: async () => {},
+    ...(conventions && { conventions: async () => conventions }),
   })
   const result = await analyzer.run({
     repo: { forge: 'work', path: 'games/app' },
@@ -94,6 +101,22 @@ const run = async (root: string, forge: GitForge, options: Record<string, unknow
   })
   return { ...result, calls: fake.calls.map((call) => call.command.slice(0, 2).join(' ')) }
 }
+
+const conventionsWith = (ticket: boolean): CommitConventions => ({
+  repo: 'acme/widgets',
+  commit: {
+    rules: {
+      conventional: true,
+      types: ['feat', 'build'],
+      ...(ticket && { ticket: { pattern: 'ABC-\\d+', required: true } }),
+    },
+    sources: { conventional: 'push-rules', types: 'setting', ticket: 'push-rules' },
+    patterns: [],
+    examples: [],
+  },
+  branch: { rules: {}, sources: {}, patterns: [], examples: [] },
+  consulted: [],
+})
 
 describe('browserslist analyzer', () => {
   test('caniuseVersions reads every version from lockfile text', () => {
@@ -138,6 +161,25 @@ describe('browserslist analyzer', () => {
     await run(root, forge, { commitMessage: 'chore: [ABC-1] caniuse-lite {version}', dirs: [] })
 
     expect(created[0]?.title).toBe('chore: [ABC-1] caniuse-lite 1.0.30001700')
+  })
+
+  test('follows the commit conventions and pushes nothing they would reject', async () => {
+    const root = await repository({ 'package.json': '{}', 'bun.lock': lockfile('1.0.30001600') })
+    const { forge, commits, created } = fakeForge()
+
+    const { data } = await run(root, forge, { dirs: [] }, conventionsWith(true))
+    expect(data.status).toBe('updated')
+    expect(data.skipped).toContain('ticket key')
+    expect(data.mergeRequest).toBeUndefined()
+    expect([commits, created]).toEqual([[], []])
+    expect(browserslistReport(data).sections[0]?.blocks[0]).toMatchObject({
+      text: expect.stringContaining('Not published'),
+    })
+
+    await run(root, forge, { dirs: [] }, conventionsWith(false))
+    expect(created[0]?.title).toBe(
+      'build(deps): update browserslist database to caniuse-lite 1.0.30001700',
+    )
   })
 
   test('sets auto-merge on the merge request, retrying while the forge refuses', async () => {

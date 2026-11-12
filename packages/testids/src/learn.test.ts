@@ -21,6 +21,12 @@ const component = (name: string, values: [string, string][]): TestIdComponent =>
   })),
 })
 
+const element = (line: number, name: string, value: string, dynamic?: boolean) => ({
+  line,
+  tag: 'div',
+  attributes: [{ name, value, ...(dynamic ? { dynamic } : {}) }],
+})
+
 const catalog = (components: TestIdComponent[]): TestIdsData => ({
   attributes: ['data-qa'],
   components,
@@ -64,6 +70,36 @@ describe('learnTestIdOptions', () => {
     expect(learned?.naming).toEqual({ separator: '', case: 'camel', prefix: 'name' })
   })
 
+  test('prefers an id attribute over more used names extending it', () => {
+    const widget: TestIdComponent = {
+      name: 'WidgetCard',
+      file: 'src/WidgetCard.tsx',
+      source: 'jsx',
+      total: 6,
+      elements: [
+        element(1, 'data-test-id', 'widget-card'),
+        element(2, 'data-test-id', 'widget-card-title'),
+        ...[3, 4, 5, 6].map((line) => element(line, 'data-test-shape-size', 'large')),
+      ],
+    }
+    const learned = learnTestIdOptions({ attributes: ['data-test'], components: [widget] })
+    expect(learned?.attribute).toBe('data-test-id')
+    expect(learned?.examples).toEqual(['widget-card', 'widget-card-title'])
+    expect(learned?.attributes).toEqual(['data-test-shape-size', 'data-test-id'])
+
+    const dynamicOnly: TestIdComponent = {
+      ...widget,
+      elements: [
+        element(1, 'data-test-id', 'shapeId', true),
+        element(2, 'data-test-shape-size', 'large'),
+        element(3, 'data-test-shape-size', 'small'),
+      ],
+    }
+    expect(
+      learnTestIdOptions({ attributes: ['data-test'], components: [dynamicOnly] })?.attribute,
+    ).toBe('data-test-id')
+  })
+
   test('learns nothing from an empty catalog', () => {
     expect(learnTestIdOptions(catalog([]))).toBeUndefined()
   })
@@ -77,11 +113,11 @@ describe('testIdConvention', () => {
   test('team overrides win field by field', () => {
     const convention = testIdConvention(
       learned,
-      testIdOverridesOf({ attributes: 'data-e2e, data-qa', exclude: ['legacy/**'] }),
+      testIdOverridesOf({ attributes: 'data-e2e, data-cy', exclude: ['legacy/**'] }),
     )
     expect(convention).toMatchObject({
       attribute: 'data-e2e',
-      attributes: ['data-e2e', 'data-qa'],
+      attributes: ['data-e2e', 'data-cy'],
       exclude: ['legacy/**'],
       naming: { separator: '_', case: 'lower', prefix: 'none' },
       examples: [],
@@ -89,6 +125,21 @@ describe('testIdConvention', () => {
     })
     expect(convention && renderTestIdConvention(convention)).toContain(
       '- New ids use `data-e2e` (set by the team).',
+    )
+  })
+
+  test('new ids use the team attribute the repository uses most', () => {
+    const convention = testIdConvention(
+      learned,
+      testIdOverridesOf({ attributes: ['data-e2e', 'data-qa'] }),
+    )
+    expect(convention).toMatchObject({
+      attribute: 'data-qa',
+      attributes: ['data-e2e', 'data-qa'],
+      examples: ['save_button'],
+    })
+    expect(convention && renderTestIdConvention(convention)).toContain(
+      '- New ids use `data-qa` (set by the team).',
     )
   })
 

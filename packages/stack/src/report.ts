@@ -194,6 +194,7 @@ function cellHint(cell: StackCell): string {
       ? `${supportLabels[status.support]}${status.eolDate ? ` (until ${status.eolDate})` : ''}`
       : undefined,
     lagLabels[status.lag],
+    cell.usage.minimum ? 'minimum version, not the one in use' : undefined,
     status.cycleLatest ? `line latest ${status.cycleLatest}` : undefined,
     cell.versions.length > 1 ? `versions: ${cell.versions.join(', ')}` : undefined,
     cell.files.join(', '),
@@ -205,8 +206,9 @@ function cellHint(cell: StackCell): string {
 function matrixCell(cell: StackCell | undefined): Cell {
   if (!cell) return null
   const text =
-    (cell.usage.version ?? cell.usage.declared) +
-    (cell.versions.length > 1 ? ` (+${cell.versions.length - 1})` : '')
+    (cell.usage.version
+      ? `${cell.usage.minimum ? '>=' : ''}${cell.usage.version}`
+      : cell.usage.declared) + (cell.versions.length > 1 ? ` (+${cell.versions.length - 1})` : '')
   return { text, tone: toneOf(cell.status), hint: cellHint(cell) }
 }
 
@@ -455,7 +457,11 @@ function componentsSection(
 
 const lineOf = (cell: StackCell) =>
   cell.status.cycle?.cycle ??
-  (cell.usage.version ? majorOf(cell.usage.version) : cell.usage.declared)
+  (cell.usage.minimum
+    ? cell.usage.declared
+    : cell.usage.version
+      ? majorOf(cell.usage.version)
+      : cell.usage.declared)
 
 const linksOf = (list: ComponentSummary[]) =>
   list.flatMap((summary) => [...summary.cells].map(([repo, cell]) => ({ summary, repo, cell })))

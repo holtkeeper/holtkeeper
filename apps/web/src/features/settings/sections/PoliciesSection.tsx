@@ -3,6 +3,7 @@ import type {
   SettingDefinitionView,
   SettingList,
   SettingView,
+  UnknownSettingKeyView,
 } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { Plus, RotateCcw, X } from 'lucide-react'
@@ -24,6 +25,7 @@ import {
   draftCount,
   draftValue,
   focusEntry,
+  focusUnknownKeys,
   listOf,
   recordOf,
   withEdit,
@@ -52,6 +54,7 @@ import {
 } from '../../../ui/index.ts'
 import { useSession } from '../../shell/session.ts'
 import { PresetPicker } from '../PresetPicker.tsx'
+import { UnknownKeys } from '../UnknownKeys.tsx'
 import { ValueEditor } from '../ValueEditor.tsx'
 
 const LICENSES = 'analyzers.licenses'
@@ -81,6 +84,7 @@ function PolicyCard({
   bound,
   focusLabel,
   page,
+  unknownKeys,
   children,
 }: {
   id: string
@@ -88,6 +92,8 @@ function PolicyCard({
   bound: Pick<Bound, 'inherited' | 'edited' | 'writable' | 'onReset'>
   focusLabel: string
   page?: { label: string; to: string }
+  /** Keys the stored entries behind the card carry but nothing reads. */
+  unknownKeys?: readonly UnknownSettingKeyView[]
   children: ReactNode
 }) {
   return (
@@ -113,6 +119,7 @@ function PolicyCard({
           ) : null}
         </span>
       </header>
+      <UnknownKeys keys={unknownKeys} />
       {children}
     </section>
   )
@@ -930,6 +937,12 @@ const cards = [
   },
 ] as const
 
+const CARD_KEYS: Readonly<Record<string, readonly string[]>> = {
+  [ALLOWLIST_RULES]: [ALLOWLIST_RULES, ALLOWLIST],
+  [KNOWLEDGE]: [KNOWLEDGE, LEARNINGS, GUIDE],
+  'audit.fix': ['audit.fix', 'audit.upgrade'],
+}
+
 function PoliciesBody({ data }: { data: SettingList }) {
   const titleOf = useGroupTitles()
   const { can, canGlobal, principal } = useSession()
@@ -1051,6 +1064,7 @@ function PoliciesBody({ data }: { data: SettingList }) {
           title: card.title,
           bound,
           focusLabel,
+          unknownKeys: focusUnknownKeys(entries, draft, CARD_KEYS[card.key] ?? [card.key], focus),
           ...('page' in card ? { page: card.page } : {}),
         }
         if (card.key === LICENSES)

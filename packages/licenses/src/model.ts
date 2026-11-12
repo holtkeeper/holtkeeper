@@ -34,7 +34,11 @@ export interface LicensedPackage {
   sources: string[]
   /** SPDX expressions as reported; empty when nothing is known. */
   licenses: string[]
-  /** Dependency groups when the lockfile records them, e.g. `dev`, `optional`. */
+  /**
+   * Dependency groups when the lockfile records them, e.g. `dev`, `optional`; `['dev']` when it
+   * records none and the repository's newest `depgraph` record reaches the package only through
+   * dev dependencies.
+   */
   groups?: string[]
   verdict: PackageVerdict
   /** Licenses responsible for a verdict other than `allowed`. */
@@ -150,6 +154,10 @@ export const defaultAllow: readonly string[] = [
 
 /** Licenses rejected when no deny list is configured: strong copyleft and source-available ones. */
 export const defaultDeny: readonly string[] = ['GPL-*', 'AGPL-*', 'SSPL-*']
+
+/** Only dev dependencies use the package: every group is `dev` or `optional` and one is `dev`. */
+export const isDevOnly = (groups: readonly string[] | undefined) =>
+  !!groups?.includes('dev') && groups.every((group) => group === 'dev' || group === 'optional')
 
 /** Problems: packages whose license is denied or not on the allow list. */
 export const isViolation = (pkg: LicensedPackage) =>

@@ -174,3 +174,25 @@ test('a build script calling a bundler makes a target without a standard config 
   expect(data.targets.map((target) => target.name)).toEqual(['app'])
   expect(calls[0]?.command).toEqual(['sh', '-c', 'npm run build'])
 })
+
+test('a run that finds nothing to measure records why and which options would fix it', async () => {
+  const root = await checkout({
+    'package.json': JSON.stringify({
+      name: 'widgets',
+      private: true,
+      workspaces: ['packages/*'],
+      scripts: { build: 'tsc -b' },
+    }),
+    'packages/core/package.json': JSON.stringify({ name: 'core', private: true }),
+  })
+  const { value, calls, lines } = context(root, { install: false })
+  const { data } = await bundleAnalyzer.run(value)
+  expect(data.targets).toEqual([])
+  const notes = data.notes ?? []
+  expect(notes[0]).toContain('the root package: `build` runs `tsc -b`')
+  expect(notes[0]).toContain('packages/core: no `build` script')
+  expect(notes[1]).toContain('the root package is private')
+  expect(notes[2]).toContain('analyzers.bundle.targets')
+  expect(lines.filter((line) => line.startsWith('bundle: No'))).toHaveLength(2)
+  expect(calls).toEqual([])
+})

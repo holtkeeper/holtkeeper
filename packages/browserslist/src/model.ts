@@ -3,7 +3,7 @@ import { z } from 'zod'
 /**
  * - `not-applicable`: no root lockfile resolves `caniuse-lite`.
  * - `up-to-date`: the update changed nothing.
- * - `updated`: the lockfile changed; `mergeRequest` holds the proposal unless `dryRun`.
+ * - `updated`: the lockfile changed; `mergeRequest` holds the proposal unless `dryRun` or `skipped`.
  * - `failed`: the update command failed; `output` says why.
  */
 export const browserslistStatusSchema = z.enum([
@@ -43,6 +43,8 @@ export const browserslistDataSchema = z.object({
     })
     .optional(),
   dryRun: z.boolean(),
+  /** Why an update was not published, e.g. the commit conventions require a ticket key. */
+  skipped: z.string().optional(),
   /** The last lines of the update command's output. */
   output: z.string(),
   startedAt: z.string(),

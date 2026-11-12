@@ -110,33 +110,84 @@ const packageManagerOf = (root: string) =>
 
 type BuildTarget = z.infer<typeof targetSchema>
 
+/** Builds to measure, and when detection finds none, why each candidate was passed over. */
+interface BuildDetection {
+  targets: BuildTarget[]
+  notes: string[]
+}
+
+const BUNDLERS = 'Vite, webpack, Rspack, Rsbuild or Rollup'
+
 /** Builds to measure: configured, the `dist`/`build` shorthand, or detected. */
-async function buildTargets(root: string, options: BundleOptions): Promise<BuildTarget[]> {
-  if (options.source === 'packages') return []
-  if (options.targets.length) return options.targets
+async function buildTargets(root: string, options: BundleOptions): Promise<BuildDetection> {
+  if (options.source === 'packages') return { targets: [], notes: [] }
+  if (options.targets.length) return { targets: options.targets, notes: [] }
   if (options.dist || options.build)
-    return [
-      {
-        name: APP_TARGET,
-        dir: '.',
-        ...(options.build ? { build: options.build } : {}),
-        ...(options.dist ? { dist: options.dist } : {}),
-      },
-    ]
+    return {
+      targets: [
+        {
+          name: APP_TARGET,
+          dir: '.',
+          ...(options.build ? { build: options.build } : {}),
+          ...(options.dist ? { dist: options.dist } : {}),
+        },
+      ],
+      notes: [],
+    }
   const found: BuildTarget[] = []
+  const skipped: string[] = []
   for (const manifest of await findPackages(root)) {
     if (!manifest.private && (manifest.dir !== '.' || manifest.version)) continue
+    const where = manifest.dir === '.' ? 'the root package' : manifest.dir
     const dir = join(root, manifest.dir)
     // oxlint-disable-next-line no-await-in-loop -- a few manifests, read one after another
     const scripts = (await readJson(join(dir, 'package.json')))['scripts']
     const build = isRecord(scripts) ? scripts['build'] : undefined
-    if (typeof build !== 'string') continue
-    if (!bundlerConfigs.some((file) => existsSync(join(dir, file))) && !bundlerCommand.test(build))
+    if (typeof build !== 'string') {
+      skipped.push(`${where}: no \`build\` script`)
       continue
+    }
+    if (
+      !bundlerConfigs.some((file) => existsSync(join(dir, file))) &&
+      !bundlerCommand.test(build)
+    ) {
+      skipped.push(`${where}: \`build\` runs \`${build}\`, which calls no ${BUNDLERS}`)
+      continue
+    }
     found.push({ name: manifest.dir === '.' ? APP_TARGET : manifest.name, dir: manifest.dir })
   }
-  return found
+  if (found.length) return { targets: found, notes: [] }
+  return {
+    targets: [],
+    notes: [
+      skipped.length
+        ? `No app build found. Packages considered (the root and private ones): ${skipped.join('; ')}.`
+        : 'No app build found: the root package is published and there are no private packages to build.',
+    ],
+  }
 }
+
+/** Packages that qualify for measuring, and why none did when the list is empty. */
+async function publishedPackages(root: string, options: BundleOptions) {
+  const all = await findPackages(root)
+  const releasable = all.filter((manifest) => !manifest.private && manifest.version)
+  const published = releasable.filter(
+    (manifest) =>
+      (!options.packages.length || matches(options.packages, manifest.name)) &&
+      !matches(options.excludePackages, manifest.name),
+  )
+  const note = published.length
+    ? undefined
+    : releasable.length
+      ? `No published package matches \`packages\`/\`excludePackages\` (${releasable.length} found: ${releasable.map((manifest) => manifest.name).join(', ')}).`
+      : all.some((manifest) => manifest.dir === '.' && manifest.private)
+        ? 'No published packages: the root package is private and no workspace package is public with a version.'
+        : 'No published packages: no package is public with a version.'
+  return { published, note }
+}
+
+const SUGGESTION =
+  "Set `analyzers.bundle.targets` to the builds to measure, e.g. `[{ name: 'app', dir: '.', build: 'npm run build', dist: 'dist' }]` (or the `build`/`dist` shorthand for one app at the root), or `source: 'packages'` with `packages` globs for a library repository."
 
 async function measureBuilds(context: Context, root: string, targets: BuildTarget[]) {
   const { options, runner, log, signal } = context
@@ -296,16 +347,12 @@ async function measuredBefore(context: Context): Promise<Set<string>> {
   return keys
 }
 
-async function measurePackages(context: Context, root: string): Promise<BundleTarget[]> {
+async function measurePackages(
+  context: Context,
+  root: string,
+  published: Awaited<ReturnType<typeof findPackages>>,
+): Promise<BundleTarget[]> {
   const { options, log, cache } = context
-  if (options.source === 'build' || options.dist || options.build) return []
-  const published = (await findPackages(root)).filter(
-    (manifest) =>
-      !manifest.private &&
-      manifest.version &&
-      (!options.packages.length || matches(options.packages, manifest.name)) &&
-      !matches(options.excludePackages, manifest.name),
-  )
   if (!published.length) return []
   const done = await measuredBefore(context)
   const client = registryClients(context)
@@ -423,9 +470,23 @@ export const bundleAnalyzer = defineAnalyzer({
   async run(context) {
     if (!context.dir) throw new Error('this analyzer needs a checkout')
     const root = context.dir
-    const builds = await measureBuilds(context, root, await buildTargets(root, context.options))
-    const packages = await measurePackages(context, root)
-    const data: BundleRecordData = { targets: [...builds, ...packages] }
+    const { options } = context
+    const detection = await buildTargets(root, options)
+    const builds = await measureBuilds(context, root, detection.targets)
+    const packageSide =
+      options.source === 'build' || options.dist || options.build
+        ? { published: [], note: undefined }
+        : await publishedPackages(root, options)
+    const packages = await measurePackages(context, root, packageSide.published)
+    const notes =
+      detection.targets.length || packageSide.published.length
+        ? []
+        : [...detection.notes, ...(packageSide.note ? [packageSide.note] : []), SUGGESTION]
+    for (const note of notes) context.log?.(`bundle: ${note}`)
+    const data: BundleRecordData = {
+      targets: [...builds, ...packages],
+      ...(notes.length ? { notes } : {}),
+    }
     return { data, ...(context.ref ? { ref: context.ref } : {}) }
   },
 })

@@ -1,11 +1,14 @@
 import { isAbsolute, join, normalize } from 'node:path'
 
 import { defineAnalyzer, jsLockfiles, lockfileHasPackage } from '@holtkeeper/analyzer'
+import type { CommitConventions } from '@holtkeeper/commit-conventions'
 import type { CommandRunner } from '@holtkeeper/exec'
+import type { RepoRef } from '@holtkeeper/forge'
 import { changedFiles, describeMergeRequest, publishChanges } from '@holtkeeper/propagate'
 import { type PackageManager, detectPackageManager, lockfileKind } from '@holtkeeper/vuln-js'
 import { z } from 'zod'
 
+import { browserslistCommit } from './commit.ts'
 import { type BrowserTargets, type BrowserslistData, targetChanges } from './model.ts'
 import { browserslistAnalysis } from './report.ts'
 
@@ -27,12 +30,11 @@ export const browserslistOptionsSchema = z.object({
   /** Per command. */
   timeoutMinutes: z.coerce.number().positive().default(15),
   branch: z.string().min(1).default('holtkeeper/browserslist'),
-  /** Commit message and merge request title; `{version}` becomes the new `caniuse-lite` version. */
-  commitMessage: z
-    .string()
-    .trim()
-    .min(1)
-    .default('chore(deps): update browserslist database to caniuse-lite {version}'),
+  /**
+   * Preferred commit message and merge request title; `{version}` becomes the new `caniuse-lite`
+   * version. Default: one built from the repository's commit conventions.
+   */
+  commitMessage: z.string().trim().min(1).optional(),
   labels: z.array(z.string()).default(['holtkeeper', 'dependencies']),
   /**
    * Have the forge merge the merge request once its checks pass: right away when nothing blocks
@@ -149,10 +151,17 @@ async function findLockfile(dir: string) {
  * writable checkout of the default branch through the repository's package manager and, when the
  * lockfile changed, opens or updates one merge request on `branch` that lists the `caniuse-lite`
  * versions and the browsers each of `dirs` gained or lost. Applies to repositories whose root
- * lockfile resolves `caniuse-lite`. `now` exists for tests.
+ * lockfile resolves `caniuse-lite`. The commit message follows the repository's `conventions`
+ * (`browserslistCommit`); when no message can, nothing is pushed and `skipped` says why. `now`
+ * and `sleep` exist for tests.
  */
 export function createBrowserslistAnalyzer(
-  settings: { now?: () => Date; sleep?: (ms: number) => Promise<void> } = {},
+  settings: {
+    now?: () => Date
+    sleep?: (ms: number) => Promise<void>
+    /** The repository's commit conventions; without them the default message is used as is. */
+    conventions?: (repo: RepoRef) => Promise<CommitConventions | undefined>
+  } = {},
 ) {
   const now = settings.now ?? (() => new Date())
   const sleep = settings.sleep ?? ((ms: number) => Bun.sleep(ms))
@@ -278,13 +287,24 @@ export function createBrowserslistAnalyzer(
         log?.(`browserslist: dry run, ${files.length} changed file(s) not published`)
         return { data, ref: tree.sha, sha: tree.sha }
       }
+      const commit = browserslistCommit({
+        version: after.at(-1) ?? '',
+        branch: options.branch,
+        conventions: await settings.conventions?.(repo).catch(() => undefined),
+        configured: options.commitMessage,
+      })
+      if ('skipped' in commit) {
+        data.skipped = commit.skipped
+        log?.(`browserslist: not published: ${commit.skipped}`)
+        return { data, ref: tree.sha, sha: tree.sha }
+      }
       const mergeRequest = await publishChanges({
         forge,
         repo: repo.path,
         dir: tree.dir,
         files,
         branch: options.branch,
-        title: options.commitMessage.replaceAll('{version}', after.at(-1) ?? '').trim(),
+        title: commit.message,
         description: browserslistDescription(data),
         labels: options.labels,
         ...(tree.publisher ? { mode: 'git' as const, git: tree.publisher } : {}),

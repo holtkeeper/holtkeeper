@@ -16,6 +16,8 @@ const INSTALL_TIMEOUT_MS = 10 * 60 * 1000
 const NETWORK_ERROR =
   /npm (?:ERR!|error) network|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|ERR_SOCKET_TIMEOUT|\b50[234]\b/
 
+const NOISE = /complete log of this run|^npm (?:ERR!|error)\s*$/
+
 /** Command that installs exactly what the lockfile pins; lifecycle scripts only when allowed. */
 export function frozenInstallCommand(manager: PackageManager, scripts: boolean): string[] {
   const commands: Record<PackageManager, string[]> = {
@@ -96,7 +98,12 @@ async function runInstall(
       ...(signal ? { signal } : {}),
     })
     if (result.exitCode === 0) return { status: 'installed', command }
-    const output = (result.stderr || result.stdout).trim().split('\n').slice(-5).join('\n')
+    const output = (result.stderr || result.stdout)
+      .trim()
+      .split('\n')
+      .filter((line) => !NOISE.test(line))
+      .slice(-5)
+      .join('\n')
     return { status: 'failed', command, error: `exit ${result.exitCode}: ${output}` }
   } catch (error) {
     signal?.throwIfAborted()

@@ -37,9 +37,47 @@ export interface ScannedPackage {
 }
 
 /**
- * Reads packages and their licenses from osv-scanner JSON. A package found in several lockfiles
- * is listed once with every source; its licenses and groups are the union. `UNKNOWN` entries are
- * dropped when the package also has a real license. Sources are relative to `dir`.
+ * The npm package behind a tarball URL, as osv-scanner names yarn.lock entries resolved from a
+ * registry it does not recognize (ecosystem `GIT`): `<registry>/<name>/-/<file>-<version>.tgz`,
+ * e.g. a GitLab package registry's `/api/v4/projects/1/packages/npm/@acme/ui/-/@acme/ui-1.2.3.tgz`.
+ * `undefined` when `name` is not such a URL.
+ */
+export function npmTarball(name: string): { name: string; version: string } | undefined {
+  let path: string
+  try {
+    const url = new URL(name)
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined
+    path = decodeURIComponent(url.pathname)
+  } catch {
+    return undefined
+  }
+  const split = path.lastIndexOf('/-/')
+  if (split < 0) return undefined
+  const segments = path.slice(0, split).split('/')
+  const last = segments.at(-1)
+  const scope = segments.at(-2)
+  if (!last) return undefined
+  const pkg = scope?.startsWith('@') ? `${scope}/${last}` : last
+  const file = path.slice(split + 3).replace(/^@[^/]+\//, '')
+  const prefix = `${last}-`
+  if (!file.startsWith(prefix) || !file.endsWith('.tgz')) return undefined
+  const version = file.slice(prefix.length, -'.tgz'.length)
+  return version ? { name: pkg, version } : undefined
+}
+
+const normalized = (pkg: { name: string; version?: string | null; ecosystem: string }) => {
+  const tarball = npmTarball(pkg.name)
+  return tarball
+    ? { ...tarball, ecosystem: 'npm' }
+    : { name: pkg.name, version: pkg.version ?? '', ecosystem: pkg.ecosystem }
+}
+
+/**
+ * Reads packages and their licenses from osv-scanner JSON. Packages osv-scanner names by an npm
+ * tarball URL (see `npmTarball`) become the npm package and version the URL points at. A package
+ * found in several lockfiles is listed once with every source; its licenses and groups are the
+ * union. `UNKNOWN` entries are dropped when the package also has a real license. Sources are
+ * relative to `dir`.
  */
 export function parseOsvLicenses(input: unknown, dir: string): ScannedPackage[] {
   const output = osvLicensesOutputSchema.parse(input)
@@ -49,8 +87,7 @@ export function parseOsvLicenses(input: unknown, dir: string): ScannedPackage[] 
       ? relative(dir, result.source.path)
       : result.source.path
     for (const entry of result.packages ?? []) {
-      const { name, ecosystem } = entry.package
-      const version = entry.package.version ?? ''
+      const { name, version, ecosystem } = normalized(entry.package)
       const key = `${ecosystem}\0${name}\0${version}`
       let pkg = packages.get(key)
       if (!pkg)

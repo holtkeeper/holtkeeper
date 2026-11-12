@@ -74,11 +74,13 @@ function locateProperties(file: string): CatalogLocation | undefined {
   }
 }
 
+const TOOL_CONFIG =
+  /(^|\/)(sonar-project|gradle|gradle-wrapper|local|application|bootstrap|log4j2?|logging|logback|simplelogger|commons-logging|jndi|jdbc|hibernate|database|db|datasource|flyway|liquibase|quartz|ehcache|junit-platform|mockito-extensions|maven-wrapper|project|build|version|config|settings|env|lombok|spotbugs|checkstyle|pmd|detekt|sentry|git|release|deploy|docker|keystore|signing|secrets|google-services|firebase)([-.][^/]*)?\.properties$/i
+
 /** Java/Kotlin resource bundles: `messages.properties`, `messages_ru.properties`. */
 export const propertiesSource = (): CatalogSource => ({
   format: 'properties',
-  matches: (file) =>
-    /\.properties$/i.test(file) && !/(^|\/)(gradle|local|application)[^/]*$/i.test(file),
+  matches: (file) => /\.properties$/i.test(file) && !TOOL_CONFIG.test(file),
   locate: locateProperties,
   parse: (text) => ({
     entries: parseEntries(text).map(({ end: _end, separator: _separator, ...entry }) => entry),

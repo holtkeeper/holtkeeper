@@ -254,6 +254,31 @@ describe('freshness sweeper', () => {
     })
   })
 
+  test('writing analyzers are skipped on frozen repositories unless they only report', async () => {
+    const options = z.object({ dryRun: z.boolean().default(false) })
+    const list = [
+      analyzer('bumper', { on: 'time', cadence: '1d' }, { exclusive: true, options }),
+      analyzer('reporter', { on: 'time', cadence: '1d' }, { exclusive: true, options }),
+      analyzer('testids', { on: 'time', cadence: '1d' }),
+    ]
+    await putSetting('repo.freeze', { reason: 'Shared library' }, { groups: ['games'] })
+    await putSetting('analyzers.reporter', { dryRun: true }, { all: true })
+    await sweep(list)
+    expect(await queued()).toEqual([
+      'bumper tools/b',
+      'reporter games/a',
+      'reporter tools/b',
+      'testids games/a',
+      'testids tools/b',
+    ])
+    const status = await freshnessStatus(deps(list), { repo: { forge: 'work', path: 'games/a' } })
+    expect(status.find((entry) => entry.analyzer === 'bumper')?.decision).toEqual({
+      action: 'skip',
+      reason:
+        'the repository is read-only for Holtkeeper (repo.freeze) and the analyzer would change it',
+    })
+  })
+
   test('an analyzer turned off reads as skipped even while its record is fresh', async () => {
     const list = [analyzer('audit', { on: 'time', cadence: '7d' })]
     await record('games/a', 'audit', '2026-11-11T00:00:00.000Z')

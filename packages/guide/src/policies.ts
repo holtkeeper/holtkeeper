@@ -56,7 +56,11 @@ export const testIdOverridesFor = (
 export function testIdPolicyFacts(overrides: TestIdOverrides): string {
   return [
     list(overrides.attributes) &&
-      `Test ids use ${list(overrides.attributes)}; new ids use \`${overrides.attributes?.[0]}\`.`,
+      `Test ids use ${list(overrides.attributes)}; new ids use ${
+        overrides.attributes?.length === 1
+          ? `\`${overrides.attributes[0]}\``
+          : `the one the repository already uses most (\`${overrides.attributes?.[0]}\` when it uses none)`
+      }.`,
     list(overrides.elements) && `Elements that need a test id: ${list(overrides.elements)}.`,
     list(overrides.exclude) && `Files that need no test ids: ${list(overrides.exclude)}.`,
   ]

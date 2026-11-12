@@ -10,6 +10,7 @@ import {
   draftCount,
   draftValue,
   focusEntry,
+  focusUnknownKeys,
   listOf,
   withEdit,
   withReset,
@@ -102,4 +103,25 @@ test('allowlist rows and the rules checked before saving', () => {
   ).toBeUndefined()
   expect(listOf({ allow: ['MIT', 3] }, 'allow')).toEqual(['MIT'])
   expect(listOf(undefined, 'allow')).toEqual([])
+})
+
+test('focusUnknownKeys lists ignored keys of the entries shown at the focus', () => {
+  const stale: SettingView[] = [
+    {
+      ...entry('w-org', 'acme.widget', { all: true }, { size: 1, color: 'red' }),
+      unknownKeys: [{ key: 'color', movedTo: 'acme.style › color' }],
+    },
+    {
+      ...entry('w-web', 'acme.widget', { groups: ['web'] }, { legacy: true }),
+      unknownKeys: [{ key: 'legacy' }],
+    },
+  ]
+  expect(focusUnknownKeys(stale, {}, ['acme.widget'], web)).toEqual([
+    { key: 'acme.widget › legacy' },
+  ])
+  expect(focusUnknownKeys(stale, {}, ['acme.widget'], { kind: 'group', group: 'pay' })).toEqual([
+    { key: 'acme.widget › color', movedTo: 'acme.style › color' },
+  ])
+  expect(focusUnknownKeys(stale, { 'acme.widget': null }, ['acme.widget'], web)).toEqual([])
+  expect(focusUnknownKeys(stale, {}, ['acme.other'], { kind: 'org' })).toEqual([])
 })

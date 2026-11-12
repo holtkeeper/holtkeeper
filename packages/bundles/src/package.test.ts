@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
-import { analyzePackage, packageEntries } from './package.ts'
+import { targetReport } from './analysis.ts'
+import { MAX_PACKAGE_ENTRIES, analyzePackage, packageEntries } from './package.ts'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 
@@ -115,4 +116,41 @@ test('packages without declared entries are measured by their modules nothing el
     ['./registry', ['registry/constants.js', 'registry/index.js']],
     ['./useTabKey', ['registry/constants.js', 'useTabKey.js']],
   ])
+})
+
+test('a package with more entrypoints than the cap says how many were measured', async () => {
+  const icons = Object.fromEntries(
+    Array.from({ length: MAX_PACKAGE_ENTRIES + 20 }, (_, index) => [
+      `icons/i${index}.js`,
+      `export const i${index} = ${index}\n`,
+    ]),
+  )
+  const target = await analyzePackage({
+    name: '@acme/icons',
+    version: '1.0.0',
+    files: files({
+      'package.json': JSON.stringify({
+        name: '@acme/icons',
+        version: '1.0.0',
+        exports: { './*': './icons/*.js' },
+      }),
+      ...icons,
+    }),
+  })
+  expect(target.data?.entrypoints).toHaveLength(MAX_PACKAGE_ENTRIES)
+  expect(target.package?.entrypointsFound).toBe(MAX_PACKAGE_ENTRIES + 20)
+  const report = targetReport({ target })
+  const overview = report.sections.find((section) => section.id === 'overview')
+  const issues = overview?.blocks.flatMap((block) => (block.type === 'issues' ? block.items : []))
+  expect(issues?.[0]?.title).toBe(
+    `@acme/icons@1.0.0: measured ${MAX_PACKAGE_ENTRIES} of ${MAX_PACKAGE_ENTRIES + 20} entrypoints`,
+  )
+  expect(report.metrics.find((metric) => metric.id === 'entrypoints')?.hint).toContain('of 120')
+
+  const small = await analyzePackage({
+    name: '@acme/one',
+    version: '1.0.0',
+    files: files({ 'package.json': '{"main":"index.js"}', 'index.js': 'export {}\n' }),
+  })
+  expect(small.package?.entrypointsFound).toBeUndefined()
 })

@@ -48,6 +48,7 @@
         "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/branches": "workspace:*",
+        "@holtkeeper/browserslist": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/chat": "workspace:*",
@@ -422,6 +423,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/commit-conventions": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",

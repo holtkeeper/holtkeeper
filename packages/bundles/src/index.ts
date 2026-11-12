@@ -57,6 +57,7 @@ export { type SourceOrigin, sourceOrigin } from './origin.ts'
 export {
   type PackageArchiveInput,
   analyzePackage,
+  MAX_PACKAGE_ENTRIES,
   packageEntries,
   packageIgnore,
   packageResolver,

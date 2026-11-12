@@ -21,7 +21,7 @@ import { z } from 'zod'
 
 import { assetsPolicyFor } from './assets.ts'
 import { reviewCancelReason } from './mr-comments.ts'
-import type { ReadOnlyRepos } from './read-only.ts'
+import { type ReadOnlyRepos, readOnlyRepos } from './read-only.ts'
 import { analyzerOffFor } from './repo-analyzers.ts'
 import { TEST_ANALYZERS, testsExpectedFor } from './repo-tests.ts'
 import { RUN_ONLY_ANALYZERS, jobTarget } from './routes/jobs.ts'
@@ -61,6 +61,28 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /** Options filled from their own setting, never from `analyzers.<kind>`, by analyzer kind. */
 const SETTING_OPTIONS: Record<string, Record<string, string>> = {
   assets: { policy: assetsPolicyKey },
+  audit: { fix: 'audit.fix', allowlist: 'audit.allowlist', upgrade: 'audit.upgrade' },
+}
+
+/** Options analyzers no longer read that live in another setting now, by analyzer kind. */
+const MOVED_OPTIONS: Record<string, Record<string, string>> = {
+  assets: {
+    ignore: `${assetsPolicyKey} › ignore`,
+    optimizeIgnore: `${assetsPolicyKey} › ignore`,
+  },
+}
+
+const movedOptions = (kind: string): Record<string, string> => ({
+  ...SETTING_OPTIONS[kind],
+  ...MOVED_OPTIONS[kind],
+})
+
+const UPGRADE_LEVELS: ReadonlySet<unknown> = new Set(['major', 'minor', 'patch'])
+
+const withoutOwnedOptions = (kind: string, value: Record<string, unknown> | undefined) => {
+  const owned = SETTING_OPTIONS[kind]
+  if (!value || !owned) return value
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !(key in owned)))
 }
 
 const withoutSettingOptions = (kind: string, schema: z.ZodType): z.ZodType => {
@@ -105,7 +127,9 @@ function optionDefaults(options: z.ZodType): Record<string, unknown> {
 /**
  * Setting definitions `analyzers.<kind>` (section `Analyzers`): per-scope partial options for each
  * analyzer but those in `RUN_ONLY_ANALYZERS`, merged over schedule options when a job runs. The
- * default is what the options schema fills in for fields nobody set.
+ * default is what the options schema fills in for fields nobody set. Options another setting owns
+ * (`assets.policy`, `audit.fix`, `audit.allowlist`, `audit.upgrade`) are left out and listed in
+ * `movedKeys` with options that moved there, so stored entries still carrying them are flagged.
  */
 export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] {
   return analyzers
@@ -120,6 +144,9 @@ export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] 
         help: `Options for the ${analyzer.kind} analyzer in repositories this entry covers. Set only what differs from the defaults: unset options keep them. The most specific entry covering a repository wins as a whole, so repeat shared options in narrower entries.`,
         schema: partialOptions(shape),
         default: optionDefaults(shape),
+        ...(Object.keys(movedOptions(analyzer.kind)).length
+          ? { movedKeys: movedOptions(analyzer.kind) }
+          : {}),
         ...(analyzer.presets?.length
           ? {
               presets: analyzer.presets.map(({ options, ...preset }) => ({
@@ -177,7 +204,11 @@ async function scopedToolchain(
   return parsed.success ? parsed.data : undefined
 }
 
-/** The `analyzers.<kind>` setting that applies to a job's repository or group. */
+/**
+ * The `analyzers.<kind>` setting that applies to a job's repository or group, without the options
+ * another setting owns: those come from that setting (`assets.policy`; `audit.fix`,
+ * `audit.allowlist` and `audit.upgrade` for audits), never from `analyzers.<kind>`.
+ */
 export async function scopedAnalyzerOptions(
   config: HoltkeeperConfig,
   store: Store,
@@ -187,7 +218,10 @@ export async function scopedAnalyzerOptions(
   const key = `analyzers.${job.analyzer}`
   const target = jobTarget(config, job)
   const entry = resolveSetting(await store.settings.list(key), key, target)
-  const scoped = entry && !entry.secret && isRecord(entry.value) ? entry.value : undefined
+  const scoped = withoutOwnedOptions(
+    job.analyzer,
+    entry && !entry.secret && isRecord(entry.value) ? entry.value : undefined,
+  )
   if (job.analyzer === 'assets' && job.group === undefined) {
     const { policy } = await assetsPolicyFor(store, target)
     return { ...scoped, policy }
@@ -198,12 +232,17 @@ export async function scopedAnalyzerOptions(
     const found = resolveSetting(await store.settings.list(settingKey), settingKey, target)
     return found && !found.secret ? found.value : undefined
   }
-  const [fix, allowlist] = await Promise.all([valueOf('audit.fix'), valueOf('audit.allowlist')])
+  const [fix, allowlist, upgrade] = await Promise.all([
+    valueOf('audit.fix'),
+    valueOf('audit.allowlist'),
+    valueOf('audit.upgrade'),
+  ])
   return {
-    ...(typeof fix === 'boolean' && { fix }),
-    ...(Array.isArray(allowlist) && { allowlist }),
     traits: resolveRepo(config, job.repo).traits,
     ...scoped,
+    ...(typeof fix === 'boolean' && { fix }),
+    ...(Array.isArray(allowlist) && { allowlist }),
+    ...(UPGRADE_LEVELS.has(upgrade) && { upgrade }),
   }
 }
 
@@ -212,15 +251,18 @@ export async function scopedAnalyzerOptions(
  * the entry's `reason`) for an analyzer `repo.analyzers` turns off on the repository, `no-tests`
  * for test analyzers on a repository with no tests by design (`repo.tests`), `options` when its
  * own options merged with the `analyzers.<kind>` setting that applies to it (as the worker merges
- * them for non-manual jobs) do not validate, so triggers can leave it out instead of queuing a
- * job bound to fail.
+ * them for non-manual jobs) do not validate, `frozen` for an `exclusive` analyzer (one that pushes
+ * or opens merge requests) on a repository `repo.freeze` makes read-only, unless those options
+ * keep it from writing (`dryRun: true` or `mode: 'report'`) or it needs `forgeAccess`, whose
+ * `readOnly` makes it stop writing by itself. Triggers can leave it out instead of
+ * queuing a job bound to fail.
  */
 export async function automaticJobBlocker(
   config: HoltkeeperConfig,
   store: Store,
-  analyzer: { options: z.ZodType },
+  analyzer: { options: z.ZodType } & WritingTraits,
   request: Pick<Job, 'analyzer' | 'repo'> & { group?: string; options?: Record<string, unknown> },
-): Promise<{ blocker: 'off' | 'no-tests' | 'options'; reason?: string } | undefined> {
+): Promise<{ blocker: 'off' | 'no-tests' | 'options' | 'frozen'; reason?: string } | undefined> {
   const off =
     request.group === undefined
       ? await analyzerOffFor(store, config, request.repo, request.analyzer)
@@ -233,19 +275,46 @@ export async function automaticJobBlocker(
   )
     return { blocker: 'no-tests' }
   const scoped = (await scopedAnalyzerOptions(config, store, request)) ?? {}
-  return analyzer.options.safeParse({ ...request.options, ...scoped }).success
-    ? undefined
-    : { blocker: 'options' }
+  const parsed = analyzer.options.safeParse({ ...request.options, ...scoped })
+  if (!parsed.success) return { blocker: 'options' }
+  if (
+    writesWhenFrozen(analyzer) &&
+    request.group === undefined &&
+    !reportOnly(parsed.data) &&
+    (await readOnlyRepos(store, () => config)(request.repo))
+  )
+    return { blocker: 'frozen' }
+  return undefined
 }
 
+type WritingTraits = Partial<Pick<AnyAnalyzer, 'exclusive'>> & { needs?: object }
+
+const writesWhenFrozen = (analyzer: WritingTraits) =>
+  analyzer.exclusive === true &&
+  !(analyzer.needs && 'forgeAccess' in analyzer.needs && analyzer.needs.forgeAccess)
+
+const reportOnly = (options: unknown) =>
+  isRecord(options) && (options.dryRun === true || options.mode === 'report')
+
 /**
- * The `skip` a schedule uses: `true` for an analyzer `repo.analyzers` turns off on the repository
- * and for test analyzers on a repository with no tests by design (`repo.tests`).
+ * The `skip` a schedule uses: `true` for an analyzer `repo.analyzers` turns off on the repository,
+ * for test analyzers on a repository with no tests by design (`repo.tests`) and for `exclusive`
+ * ones of `analyzers` on a repository `repo.freeze` makes read-only, unless the
+ * `analyzers.<kind>` setting keeps them from writing (`dryRun: true` or `mode: 'report'`) or they
+ * need `forgeAccess`, which tells them the repository is read-only.
  */
-export function automaticSkip(store: Store, config: HoltkeeperConfig) {
+export function automaticSkip(
+  store: Store,
+  config: HoltkeeperConfig,
+  analyzers: readonly (Pick<AnyAnalyzer, 'kind'> & WritingTraits)[] = [],
+) {
+  const writing = new Set(analyzers.filter(writesWhenFrozen).map((each) => each.kind))
   return async (analyzer: string, repo: RepoRef): Promise<boolean> =>
     (await analyzerOffFor(store, config, repo, analyzer)) !== undefined ||
-    (TEST_ANALYZERS.has(analyzer) && !(await testsExpectedFor(store, () => config)(repo)))
+    (TEST_ANALYZERS.has(analyzer) && !(await testsExpectedFor(store, () => config)(repo))) ||
+    (writing.has(analyzer) &&
+      !reportOnly(await scopedAnalyzerOptions(config, store, { analyzer, repo })) &&
+      (await readOnlyRepos(store, () => config)(repo)))
 }
 
 /** Whether an automatically queued job may be queued: `automaticJobBlocker` finds nothing. */
@@ -314,7 +383,7 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),
     toolchainFor: (repo) => scopedToolchain(config, store, repo),
-    skip: automaticSkip(store, config),
+    skip: automaticSkip(store, config, options.analyzers),
     ...(options.artifacts && {
       logs: options.artifacts,
       persistArtifacts: persistArtifactsTo(options.artifacts),

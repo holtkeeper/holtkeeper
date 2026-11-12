@@ -76,6 +76,14 @@ export function assessUsage(
   soonDays: number,
 ): UsageStatus {
   if (!usage.version) return { lag: 'floating', support: 'unknown' }
+  if (usage.minimum) {
+    const behind = majorsBehind(usage.version, component.latest)
+    return {
+      lag: lagOf(usage.version, component.latest),
+      support: 'unknown',
+      ...(behind !== undefined ? { majorsBehind: behind } : {}),
+    }
+  }
   const cycle = component.cycles ? matchCycle(usage.version, component.cycles) : undefined
   const behind = majorsBehind(usage.version, component.latest)
   const pinnedOlder =
@@ -164,14 +172,16 @@ export function summarizeComponent(
       usage,
       status: assessUsage(component, usage, at, soonDays),
     }))
-    const worst = assessed.toSorted(
+    const inUse = assessed.filter(({ usage }) => !usage.minimum)
+    const shown = inUse.length ? inUse : assessed
+    const worst = shown.toSorted(
       (a, b) =>
         severity(b.status) - severity(a.status) || compareNewest(a.usage.version, b.usage.version),
     )[0]
     if (!worst) continue
     cells.set(repo, {
       ...worst,
-      versions: sortVersions(usages.map((usage) => usage.version ?? usage.declared)),
+      versions: sortVersions(shown.map(({ usage }) => usage.version ?? usage.declared)),
       files: [...new Set(usages.map((usage) => usage.file))],
     })
     for (const { status } of assessed) {

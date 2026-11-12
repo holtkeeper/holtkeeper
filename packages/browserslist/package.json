@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@holtkeeper/analyzer": "workspace:*",
+    "@holtkeeper/commit-conventions": "workspace:*",
     "@holtkeeper/exec": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/propagate": "workspace:*",

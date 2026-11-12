@@ -216,6 +216,7 @@ export const auditAnalyzer = defineAnalyzer({
   options: z.object({
     fix: z.boolean().default(false),
     allowlist: allowlistSchema.default([]),
+    upgrade: z.enum(['major', 'minor', 'patch']).optional(),
     traits: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
   }),
   async run({ dir, ref, runner, options, signal }) {
@@ -223,7 +224,13 @@ export const auditAnalyzer = defineAnalyzer({
     const data = await runAudit({
       dir,
       scanner: osvScanner({ runner }),
-      fixers: options.fix ? [osvFixer({ runner }), jsFixer({ runner }), goFixer({ runner })] : [],
+      fixers: options.fix
+        ? [
+            osvFixer({ runner, ...(options.upgrade ? { upgrade: options.upgrade } : {}) }),
+            jsFixer({ runner }),
+            goFixer({ runner }),
+          ]
+        : [],
       allowlist: options.allowlist,
       traits: options.traits,
       ...(signal ? { signal } : {}),

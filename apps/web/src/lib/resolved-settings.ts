@@ -4,6 +4,7 @@ import type {
   SettingLayer,
   SettingSource,
   SettingView,
+  UnknownSettingKeyView,
 } from '@holtkeeper/api'
 
 import { keyAsTitle, type GroupTitleOf } from './group-titles.ts'
@@ -168,3 +169,18 @@ export function orgRows(
 export const orgRowMatches = (row: OrgSettingRow, query: string, changedOnly = false): boolean =>
   (!changedOnly || row.source.layer !== 'default' || row.narrower > 0) &&
   rowMatches(row, { kind: 'group', group: '' }, 'all', query)
+
+/**
+ * A warning for an entry whose value carries keys the setting no longer reads, naming where moved
+ * ones live now, e.g. "Ignored: ignore (moved to assets.policy › ignore), legacy (no longer an
+ * option)". `undefined` when there are none. The stored value is never changed.
+ */
+export function unknownKeysWarning(
+  keys: readonly UnknownSettingKeyView[] | undefined,
+): string | undefined {
+  if (!keys?.length) return undefined
+  const parts = keys.map(({ key, movedTo }) =>
+    movedTo ? `${key} (moved to ${movedTo})` : `${key} (no longer an option)`,
+  )
+  return `Ignored: ${parts.join(', ')}. Nothing reads them here; remove them from this entry.`
+}

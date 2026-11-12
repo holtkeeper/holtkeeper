@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { DepgraphData } from './analyze.ts'
 import {
   definedPackages,
+  devOnlyPackages,
   directDependencies,
   fleetLibraries,
   ownPackages,
@@ -141,6 +142,34 @@ describe('definedPackages', () => {
       { ecosystem: 'npm', name: 'app' },
       { ecosystem: 'Go', name: 'example.com/shapes' },
       { ecosystem: 'npm', name: 'widget-kit' },
+    ])
+  })
+})
+
+describe('devOnlyPackages', () => {
+  test('lists packages every workspace reaches only through dev edges', () => {
+    const result = devOnlyPackages(
+      data(
+        [
+          ws('app'),
+          pkg('react', '19.1.0'),
+          pkg('loose-envify', '1.4.0'),
+          pkg('test-runner', '2.0.0'),
+          pkg('tiny-glob', '0.2.9'),
+          pkg('orphan', '1.0.0'),
+        ],
+        [
+          { from: 'app', to: 'react@19.1.0', kind: 'prod' },
+          { from: 'react@19.1.0', to: 'loose-envify@1.4.0', kind: 'prod' },
+          { from: 'app', to: 'test-runner@2.0.0', kind: 'dev' },
+          { from: 'test-runner@2.0.0', to: 'tiny-glob@0.2.9', kind: 'prod' },
+          { from: 'test-runner@2.0.0', to: 'loose-envify@1.4.0', kind: 'prod' },
+        ],
+      ),
+    )
+    expect(result).toEqual([
+      { ecosystem: 'npm', name: 'test-runner', version: '2.0.0' },
+      { ecosystem: 'npm', name: 'tiny-glob', version: '0.2.9' },
     ])
   })
 })

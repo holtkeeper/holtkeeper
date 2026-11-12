@@ -21,8 +21,13 @@ const list = (fallback: readonly string[]) =>
 
 /** Options of the `testids` analyzer. */
 export const testIdsOptionsSchema = z.object({
-  /** Test attribute names, compared case-insensitively; each also covers names extending it with `-`. */
-  attributes: list(defaultAttributes),
+  /**
+   * Test attribute names, compared case-insensitively; each also covers names extending it with
+   * `-`. Set by the team, new ids use the one the repository uses most (the first when it uses none).
+   */
+  attributes: list(defaultAttributes).describe(
+    'Test attribute names; each also covers names extending it with `-` (`data-test` covers `data-test-id`). New ids use the one the repository uses most, or the first when it uses none of them.',
+  ),
   /** Template sources to read, by name: `jsx`, `vue`, `svelte`, `html`. */
   sources: list(Object.keys(builtinSources)),
   /** Glob patterns of files to leave out. */

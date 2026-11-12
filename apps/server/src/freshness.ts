@@ -357,6 +357,8 @@ async function notApplicable(
   const blocked = await automaticJobBlocker(deps.config, deps.store, analyzer, request)
   if (blocked?.blocker === 'off') return offText(blocked)
   if (blocked?.blocker === 'no-tests') return 'the repository has no tests by design'
+  if (blocked?.blocker === 'frozen')
+    return 'the repository is read-only for Holtkeeper (repo.freeze) and the analyzer would change it'
   if (blocked?.blocker === 'options')
     return `its options are not set up for this ${target.group === undefined ? 'repository' : 'group'}`
   if (!analyzer.appliesTo || target.group !== undefined || !forge) return undefined

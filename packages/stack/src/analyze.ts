@@ -10,6 +10,7 @@ import {
   type CiInclude,
   ciIncludes,
   dockerfileReferences,
+  expand,
   isPrerelease,
   nameVersion,
   parseImageRef,
@@ -160,12 +161,25 @@ function toolFound(
   file: string,
   via: UsageVia,
   tool: Pick<Tool, 'name' | 'version'>,
+  minimum = false,
 ): Found {
   const version = toolVersion(tool.name, tool.version)
   return {
     info: toolComponent(tool.name),
-    usage: { repo, file, via, declared: tool.version, ...(version ? { version } : {}) },
+    usage: {
+      repo,
+      file,
+      via,
+      declared: minimum ? `>=${tool.version}` : tool.version,
+      ...(version ? { version } : {}),
+      ...(minimum ? { minimum: true } : {}),
+    },
   }
+}
+
+function isGoDirective(goMod: string | undefined, version: string): boolean {
+  const toolchain = goMod === undefined ? undefined : /^toolchain\s+go(\d\S*)/m.exec(goMod)?.[1]
+  return toolchain !== version
 }
 
 function imageFound(repo: string, file: string, via: UsageVia, ref: string): Found | undefined {
@@ -263,6 +277,30 @@ async function ciVariables(
   )
 }
 
+/**
+ * An include with CI/CD and predefined variables expanded in its project, file and ref, as GitLab
+ * does before reading it; `undefined` when a variable is unknown.
+ */
+export function expandInclude(
+  include: CiInclude,
+  variables: Record<string, string>,
+): CiInclude | undefined {
+  const values =
+    include.type === 'local'
+      ? [include.file]
+      : [include.project, include.file, ...(include.ref === undefined ? [] : [include.ref])]
+  const expanded = values.map((value) => expand(value, variables))
+  if (expanded.some((value) => value.includes('$'))) return undefined
+  const [first = '', file = '', ref] = expanded
+  if (include.type === 'local') return { type: 'local', file: first.replace(/^\/+/, '') }
+  return {
+    type: 'project',
+    project: first,
+    file: file.replace(/^\/+/, ''),
+    ...(ref ? { ref } : {}),
+  }
+}
+
 const globPattern = (glob: string) =>
   new RegExp(
     `^${glob
@@ -308,13 +346,17 @@ async function scanRepo(
       scan.notes.push({ repo: path, message: `files could not be listed: ${message(error)}` })
     }
   }
-  const read = async (file: string) => {
-    try {
-      return await forge.readFile(path, file)
-    } catch (error) {
-      scan.notes.push({ repo: path, message: `${file} could not be read: ${message(error)}` })
-      return undefined
+  const reads = new Map<string, Promise<string | undefined>>()
+  const read = (file: string) => {
+    let pending = reads.get(file)
+    if (!pending) {
+      pending = forge.readFile(path, file).catch((error: unknown) => {
+        scan.notes.push({ repo: path, message: `${file} could not be read: ${message(error)}` })
+        return undefined
+      })
+      reads.set(file, pending)
     }
+    return pending
   }
   const parse = (file: string, text: string): unknown => {
     try {
@@ -352,7 +394,12 @@ async function scanRepo(
       )
       if (implied && project) continue
       const file = posix.join(project, tool.source)
-      scan.found.push(toolFound(path, file, 'version-file', tool))
+      const minimum =
+        tool.name === 'go' &&
+        posix.basename(file) === 'go.mod' &&
+        // oxlint-disable-next-line no-await-in-loop -- go.mod was read and is cached
+        isGoDirective(await read(file), tool.version)
+      scan.found.push(toolFound(path, file, 'version-file', tool, minimum))
       if (!scan.repo.files.includes(file)) scan.repo.files.push(file)
     }
     const manager = toolchain.packageManager
@@ -401,9 +448,22 @@ async function scanRepo(
       for (const value of skipped)
         scan.notes.push({ repo: path, message: `${label}: include ${value} was not read` })
       if (depth < 4)
-        for (const include of includes)
-          // oxlint-disable-next-line no-await-in-loop -- includes merge in order
-          await visitInclude(include, depth + 1)
+        for (const include of includes) {
+          const expanded = expandInclude(include, ci)
+          if (expanded) {
+            // oxlint-disable-next-line no-await-in-loop -- includes merge in order
+            await visitInclude(expanded, depth + 1)
+            continue
+          }
+          const named =
+            include.type === 'local'
+              ? include.file
+              : `${include.project}:${include.file}${include.ref ? `@${include.ref}` : ''}`
+          scan.notes.push({
+            repo: path,
+            message: `${label}: include ${named} uses variables that could not be expanded`,
+          })
+        }
       tree.push({ label, document })
     }
     const visitInclude = async (include: CiInclude, depth: number) => {

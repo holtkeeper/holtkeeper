@@ -202,3 +202,27 @@ test('the check reports missing test ids with the project convention', async () 
   })
   expect(none.skipped).toBeDefined()
 })
+
+test('the check names the id attribute, not a more used name extending it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'testids-ext-'))
+  try {
+    await mkdir(join(root, 'src'), { recursive: true })
+    await writeFile(
+      join(root, 'src/WidgetCard.tsx'),
+      `export const WidgetCard = ({ size, onOpen }) => (
+  <div data-test-id="widget-card" data-test-shape-size="large">
+    <span data-test-shape-size="small" />
+    <span data-test-shape-size="medium" />
+    <button onClick={onOpen}>Open</button>
+  </div>
+)
+`,
+    )
+    const result = await testIdsCheck().run({ dir: root, runner: undefined as never })
+    expect(result.issues).toHaveLength(1)
+    expect(result.issues?.[0]?.help).toContain('select elements by `data-test-id`')
+    expect(result.issues?.[0]?.help).toContain('suggested: `data-test-id=')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

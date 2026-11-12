@@ -50,7 +50,7 @@ export function mainEntrypoint(data: BundleData): BundleEntrypoint | undefined {
   )[0]
 }
 
-function metricsOf(data: BundleData, previous?: BundleData): Metric[] {
+function metricsOf(data: BundleData, previous?: BundleData, entrypointsHint?: string): Metric[] {
   const main = mainEntrypoint(data)
   const previousMain = previous
     ? (previous.entrypoints.find((entry) => entry.name === main?.name) ?? mainEntrypoint(previous))
@@ -75,6 +75,7 @@ function metricsOf(data: BundleData, previous?: BundleData): Metric[] {
     }),
     metric('entrypoints', 'Entrypoints', data.entrypoints.length, {
       ...was(previous?.entrypoints.length),
+      ...(entrypointsHint ? { hint: entrypointsHint } : {}),
     }),
     metric('packages', 'Packages', countPackages(data), {
       better: 'down',
@@ -163,8 +164,9 @@ function overview(
   previous: BundleData | undefined,
   comparison: BundleComparison | undefined,
   options: Required<BundleAnalysisOptions>,
+  notes: Issue[] = [],
 ): Section {
-  const issues = issuesOf(data, comparison, options)
+  const issues = [...notes, ...issuesOf(data, comparison, options)]
   const names = [
     ...new Set([
       ...data.entrypoints.map((entry) => entry.name),
@@ -481,6 +483,30 @@ const settingsOf = (options: BundleAnalysisOptions): Settings => ({
 const label = (target: Pick<BundleTarget, 'name' | 'version'>) =>
   target.version ? `${target.name}@${target.version}` : target.name
 
+const truncation = (target: BundleTarget) => {
+  const found = target.package?.entrypointsFound
+  const measured = target.data?.entrypoints.length
+  return found && measured !== undefined && found > measured
+    ? `measured ${measured} of ${found} entrypoints`
+    : undefined
+}
+
+function truncationIssues(target: BundleTarget): Issue[] {
+  const text = truncation(target)
+  return text
+    ? [
+        {
+          id: `entrypoints-truncated:${label(target)}`,
+          tone: 'warning',
+          title: `${label(target)}: ${text}`,
+          detail:
+            'A package is measured on its first entrypoints only; sizes and entrypoint counts leave the rest out.',
+          tags: ['entrypoint', 'truncated'],
+        },
+      ]
+    : []
+}
+
 /** One side of a target report: the target and the release it belongs to. */
 export interface TargetSide {
   target: BundleTarget
@@ -610,9 +636,9 @@ export function targetReport(
       ...(compareTo ? { compareTo } : {}),
     },
     generatedAt: new Date().toISOString(),
-    metrics: metricsOf(data, before),
+    metrics: metricsOf(data, before, truncation(current.target)),
     sections: [
-      overview(data, before, comparison, settings),
+      overview(data, before, comparison, settings, truncationIssues(current.target)),
       ...packageSection(current.target, before ? previous?.target : undefined),
       entrypointsSection(data, comparison),
       compositionSection(data, settings.treemapModules),
@@ -657,6 +683,7 @@ function targetsSection(
     const wasTotal = was ? totalSizes(was) : undefined
     const delta = total && wasTotal ? total.gzip - wasTotal.gzip : undefined
     const main = target.data ? mainEntrypoint(target.data) : undefined
+    issues.push(...truncationIssues(target))
     if (target.status !== 'ok')
       issues.push({
         id: `failed:${label(target)}`,
@@ -683,7 +710,7 @@ function targetsSection(
       delta: deltaCell(delta),
       initial: main?.initialSize.gzip ?? null,
       entrypoints: target.data?.entrypoints.length ?? null,
-      tags: target.status === 'ok' ? '' : 'failed',
+      tags: target.status !== 'ok' ? 'failed' : truncation(target) ? 'truncated' : '',
     }
   })
   return {
@@ -736,6 +763,7 @@ export function createBundleAnalysis(
     },
     toReport(current, previous): Report {
       const targets = bundleTargets(current.data)
+      const notes = 'targets' in current.data ? (current.data.notes ?? []) : []
       const before = previous ? bundleTargets(previous.data) : undefined
       const only = targets.length === 1 ? targets[0] : undefined
       if (only) {
@@ -763,12 +791,27 @@ export function createBundleAnalysis(
             : {
                 id: 'targets',
                 title: 'Targets',
-                blocks: [
-                  {
-                    type: 'markdown',
-                    text: 'Nothing new to measure: every published version was measured before.',
-                  },
-                ],
+                blocks: notes.length
+                  ? [
+                      {
+                        type: 'issues',
+                        items: [
+                          {
+                            id: 'nothing-found',
+                            tone: 'warning',
+                            title:
+                              'Nothing was measured: no build target and no published package found',
+                          },
+                        ],
+                      },
+                      { type: 'markdown', text: notes.map((note) => `- ${note}`).join('\n') },
+                    ]
+                  : [
+                      {
+                        type: 'markdown',
+                        text: 'Nothing new to measure: every published version was measured before.',
+                      },
+                    ],
               },
         ],
       }

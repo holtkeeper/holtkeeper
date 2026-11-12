@@ -63,6 +63,36 @@ describe('packageCatalog', () => {
     expect(catalog.find('Go', '@co/ui')).toBeUndefined()
     expect(catalog.size).toBe(1)
   })
+
+  test('finds Go modules without a version and paths inside them', () => {
+    const graph: DepGraph = {
+      nodes: [{ id: 'm', name: 'example.com/kit', ecosystem: 'Go', kind: 'workspace' }],
+      edges: [],
+    }
+    const data: DepgraphData = {
+      layers: [
+        {
+          id: 'packages',
+          source: 'test',
+          graph,
+          cycles: [],
+          duplicates: [],
+          stats: graphStats(graph),
+        },
+      ],
+      errors: [],
+    }
+    const catalog = packageCatalog([{ repo: { forge: 'work', path: 'libs/kit' }, data }])
+    const found = {
+      ecosystem: 'Go',
+      name: 'example.com/kit',
+      repo: { forge: 'work', path: 'libs/kit' },
+    }
+    expect(catalog.find('Go', 'example.com/kit')).toEqual(found)
+    expect(catalog.find('Go', 'example.com/kit/shapes/v2')).toEqual(found)
+    expect(catalog.find('Go', 'example.com/kitchen')).toBeUndefined()
+    expect(catalog.find('npm', 'example.com/kit/shapes')).toBeUndefined()
+  })
 })
 
 describe('loadPackageCatalog', () => {

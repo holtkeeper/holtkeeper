@@ -13,6 +13,7 @@ import { editorFor, previewValue } from '../../lib/schema.ts'
 import { Avatar, Button, Chip, Markdown, Panel } from '../../ui/index.ts'
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
 import { findCredential } from './CredentialPicker.tsx'
+import { UnknownKeys } from './UnknownKeys.tsx'
 
 /** One setting: its entries per scope on the left, how to set it on the right. */
 export function SettingCard({
@@ -114,6 +115,7 @@ export function SettingCard({
                       </Button>
                     </span>
                   ) : null}
+                  <UnknownKeys keys={entry.unknownKeys} className="basis-full" />
                 </motion.li>
               ))}
             </AnimatePresence>

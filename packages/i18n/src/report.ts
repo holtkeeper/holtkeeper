@@ -31,7 +31,14 @@ const prev = (value: number | undefined) => (value === undefined ? {} : { previo
 
 const toned = (m: Metric, bad: boolean): Metric => (bad ? { ...m, tone: 'bad' } : m)
 
+const NO_CATALOGS =
+  'No translation catalogs were found, so completeness was not measured and keys used in code were not checked.'
+
+const hasCatalogs = (data: I18nData) => data.bundles.length > 0
+
 function metricsOf(data: I18nData, previous?: I18nData): Metric[] {
+  if (!hasCatalogs(data))
+    return [metric('catalogs', 'Catalogs', 0, { hint: 'no translation catalogs found' })]
   return [
     metric('locales', 'Locales', data.locales.length, prev(previous?.locales.length)),
     metric('keys', 'Keys', data.keys, { ...prev(previous?.keys), hint: `in ${data.baseLocale}` }),
@@ -102,6 +109,12 @@ const changeText = (added: number, resolved: number, hasPrevious: boolean) =>
   hasPrevious ? ` ${added} new, ${resolved} resolved since the previous analysis.` : ''
 
 function completeness(data: I18nData, previous?: I18nData): Section {
+  if (!hasCatalogs(data))
+    return {
+      id: 'completeness',
+      title: 'Completeness',
+      blocks: [{ type: 'markdown', text: NO_CATALOGS }],
+    }
   const before = new Map(previous?.locales.map((l) => [l.locale, l.completeness]))
   const blocks: Block[] = []
   const external = data.layers.filter((l) => l.repo)
@@ -343,7 +356,7 @@ const at = (u: { file: string; line: number; column: number }) => `${u.file}:${u
 
 function usageSection(data: I18nData, previous?: I18nData): Section | undefined {
   const { usage } = data
-  if (usage.files === 0) return undefined
+  if (usage.files === 0 || !hasCatalogs(data)) return undefined
   const blocks: Block[] = []
   const before = new Set(previous?.usage.missingInBase.map((u) => u.key))
   const byKey = Map.groupBy(usage.missingInBase, (u) =>
@@ -531,7 +544,9 @@ export const i18nAnalysis = defineAnalysis<I18nData>({
     return {
       kind: 'i18n',
       title: 'Translations',
-      subtitle: `${data.locales.length} locales, base ${data.baseLocale}${data.formats.length ? ` · ${data.formats.join(', ')}` : ''}`,
+      subtitle: hasCatalogs(data)
+        ? `${data.locales.length} locales, base ${data.baseLocale}${data.formats.length ? ` · ${data.formats.join(', ')}` : ''}`
+        : 'No translation catalogs found',
       subject: {
         repo: current.repo,
         ...(current.ref ? { ref: current.ref } : {}),

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { commitPolicyFacts, policiesFor } from './policies.ts'
+import { commitPolicyFacts, policiesFor, testIdPolicyFacts } from './policies.ts'
 
 const repo = { forge: 'work', path: 'games/a', groups: ['games'] }
 
@@ -117,4 +117,10 @@ test('a repository with no tests by design gets a general policy line', () => {
       repo,
     ),
   ).toEqual([])
+})
+
+test('several team test id attributes leave the choice to what the repository uses', () => {
+  expect(testIdPolicyFacts({ attributes: ['data-e2e', 'data-qa'] })).toBe(
+    '- Test ids use `data-e2e`, `data-qa`; new ids use the one the repository already uses most (`data-e2e` when it uses none).',
+  )
 })

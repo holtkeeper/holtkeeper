@@ -14,6 +14,11 @@ export interface PackageInfo {
   files: number
   dependencies: string[]
   peerDependencies: string[]
+  /**
+   * Entrypoints the package declares when there were more than `MAX_PACKAGE_ENTRIES`: only the
+   * first `MAX_PACKAGE_ENTRIES` were measured. Absent when every entrypoint was measured.
+   */
+  entrypointsFound?: number
 }
 
 /**
@@ -42,6 +47,11 @@ export interface BundleTarget {
 /** Data of one `bundle` record: every target the run measured. */
 export interface BundleRecordData {
   targets: BundleTarget[]
+  /**
+   * Why the run measured nothing and which options would change that; present only on records
+   * without targets whose detection found nothing to measure.
+   */
+  notes?: string[]
 }
 
 /** Stored data of the `bundle` kind: records before targets hold one `BundleData`. */
@@ -55,6 +65,7 @@ const packageInfoSchema = z.object({
   files: z.number(),
   dependencies: z.array(z.string()),
   peerDependencies: z.array(z.string()),
+  entrypointsFound: z.number().optional(),
 })
 
 /** Validates one `BundleTarget`, e.g. read back from a cache. */
@@ -72,6 +83,7 @@ export const bundleTargetSchema: z.ZodType<BundleTarget> = z.object({
 /** Validates `BundleRecordData`. */
 export const bundleRecordSchema: z.ZodType<BundleRecordData> = z.object({
   targets: z.array(bundleTargetSchema),
+  notes: z.array(z.string()).optional(),
 })
 
 /** Validates either shape of stored `bundle` data. */

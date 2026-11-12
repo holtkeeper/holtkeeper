@@ -5,7 +5,13 @@ import { join } from 'node:path'
 
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 
-import { analyzeLicenses, evaluatePackages, projectLicenseFiles, resolvePolicy } from './analyze.ts'
+import {
+  analyzeLicenses,
+  evaluatePackages,
+  projectLicenseFiles,
+  resolvePolicy,
+  withDevFallback,
+} from './analyze.ts'
 import { licensePresets, licensesOptionsSchema } from './analyzer.ts'
 
 test('runs osv-scanner with licenses for all packages and judges them', async () => {
@@ -172,18 +178,39 @@ test('review licenses need a sign-off even when allowed; deny still wins', () =>
 })
 
 test('devDependencies: ignore leaves out packages only dev groups use', () => {
-  const dev = { ...scanned('dev-tool', ['GPL-3.0-only']), groups: ['dev'] }
-  const both = { ...scanned('shared', ['GPL-3.0-only']), groups: ['dev', 'optional'] }
-  expect(evaluatePackages([dev, both], resolvePolicy()).map((pkg) => pkg.verdict)).toEqual([
+  const packages = [
+    { ...scanned('dev-tool', ['GPL-3.0-only']), groups: ['dev'] },
+    { ...scanned('dev-extra', ['GPL-3.0-only']), groups: ['dev', 'optional'] },
+    { ...scanned('extra', ['GPL-3.0-only']), groups: ['optional'] },
+    { ...scanned('shared', ['GPL-3.0-only']), groups: ['dev', 'prod'] },
+  ]
+  expect(evaluatePackages(packages, resolvePolicy()).map((pkg) => pkg.verdict)).toEqual([
+    'denied',
+    'denied',
     'denied',
     'denied',
   ])
   const policy = resolvePolicy({ devDependencies: 'ignore' })
   expect(policy.devDependencies).toBe('ignore')
-  expect(evaluatePackages([dev, both], policy).map((pkg) => pkg.verdict)).toEqual([
+  expect(evaluatePackages(packages, policy).map((pkg) => pkg.verdict)).toEqual([
+    'ignored',
     'ignored',
     'denied',
+    'denied',
   ])
+})
+
+test('the dev fallback marks packages without groups only', () => {
+  expect(
+    withDevFallback(
+      [
+        scanned('runtime', ['MIT']),
+        scanned('test-kit', ['MIT']),
+        { ...scanned('opt', ['MIT']), groups: ['optional'] },
+      ],
+      (_ecosystem, name) => name !== 'runtime',
+    ).map((pkg) => pkg.groups),
+  ).toEqual([undefined, ['dev'], ['optional']])
 })
 
 test('exceptions accept matching packages that would not pass until they expire', () => {
@@ -245,6 +272,10 @@ test('analyze applies review, dev and exception options from the analyzer settin
                 package: { name: 'fooUtil', version: '3.1.0', ecosystem: 'npm' },
                 licenses: ['BUSL-1.1'],
               },
+              {
+                package: { name: 'test-kit', version: '2.0.0', ecosystem: 'npm' },
+                licenses: ['GPL-3.0-only'],
+              },
             ],
           },
         ],
@@ -257,12 +288,20 @@ test('analyze applies review, dev and exception options from the analyzer settin
     devDependencies: 'ignore',
     exceptions: [{ package: 'fooUtil', reason: 'Licensed by contract.', expires: '2027-01-01' }],
   })
-  const data = await analyzeLicenses({ dir, runner, policy, today: '2026-11-12' })
+  const data = await analyzeLicenses({
+    dir,
+    runner,
+    policy,
+    today: '2026-11-12',
+    devOnly: (_ecosystem, name, version) => name === 'test-kit' && version === '2.0.0',
+  })
   expect(Object.fromEntries(data.packages.map((pkg) => [pkg.name, pkg.verdict]))).toEqual({
     mpl: 'unlisted',
     'lint-kit': 'ignored',
     fooUtil: 'excepted',
+    'test-kit': 'ignored',
   })
+  expect(data.packages.find((pkg) => pkg.name === 'test-kit')?.groups).toEqual(['dev'])
   expect(data.policy).toMatchObject({
     review: ['MPL-*'],
     devDependencies: 'ignore',

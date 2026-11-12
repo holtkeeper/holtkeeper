@@ -19,7 +19,11 @@ export interface TestIdNaming {
 
 /** What the catalog shows about a repository's test ids; derived, never configured. */
 export interface LearnedTestIdOptions {
-  /** The attribute most elements carry with literal values, e.g. `data-testid`. */
+  /**
+   * The id attribute: the most used configured or well-known id name (`data-testid`,
+   * `data-test-id`, ...), preferring one with literal values; never a name extending one of them
+   * (`data-test-state`) while such a name is in use.
+   */
   attribute: string
   /** Every test attribute name in use, most used first. */
   attributes: string[]
@@ -85,6 +89,34 @@ const majority = <T>(votes: readonly T[], key: (vote: T) => string): T | undefin
   return [...counts.values()].toSorted((a, b) => b.count - a.count)[0]?.vote
 }
 
+/** Names that hold ids in common setups, lower case. */
+const ID_ATTRIBUTES = new Set([
+  'data-testid',
+  'data-test-id',
+  'data-test',
+  'data-qa',
+  'data-cy',
+  'testid',
+])
+
+/** Whether `name` is one of `configured` or a well-known id attribute, ignoring case. */
+export const isIdAttribute = (name: string, configured: readonly string[]) =>
+  ID_ATTRIBUTES.has(name.toLowerCase()) ||
+  configured.some((item) => item.toLowerCase() === name.toLowerCase())
+
+/**
+ * The attribute of `usage` that holds ids: id attributes (`isIdAttribute`) before names merely
+ * extending them, then ones with literal values, then the most used.
+ */
+export function idAttribute(
+  usage: ReturnType<typeof attributeUsage>,
+  configured: readonly string[],
+): ReturnType<typeof attributeUsage>[number] | undefined {
+  const rank = (entry: (typeof usage)[number]) =>
+    (isIdAttribute(entry.name, configured) ? 2 : 0) + (entry.values.length ? 1 : 0)
+  return usage.toSorted((a, b) => rank(b) - rank(a))[0]
+}
+
 /**
  * Learns the test id conventions of a repository from its catalog: the main attribute, every
  * attribute in use, the native tags that carry ids and how literal values are named.
@@ -92,7 +124,7 @@ const majority = <T>(votes: readonly T[], key: (vote: T) => string): T | undefin
  */
 export function learnTestIdOptions(data: TestIdsData): LearnedTestIdOptions | undefined {
   const usage = attributeUsage(data.components)
-  const main = usage.find((attribute) => attribute.values.length) ?? usage[0]
+  const main = idAttribute(usage, data.attributes)
   if (!main) return undefined
 
   const kinds = new Set<string>()
@@ -153,7 +185,7 @@ const list = (item: z.ZodString) =>
 
 /**
  * What a team set for test ids in the `analyzers.testids` setting, on top of what was learned:
- * the attributes to use (the first one for new ids), the native tags that need one and files to
+ * the attributes to use (new ids use the most used of them), the native tags that need one and files to
  * leave out.
  */
 export const testIdOverridesSchema = z.object({
@@ -178,7 +210,7 @@ export function testIdOverridesOf(value: unknown): TestIdOverrides {
 
 /** The test id rules that apply: learned options with the team's overrides on top. */
 export interface TestIdConvention {
-  /** The attribute new ids use. */
+  /** The attribute new ids use: the most used of the team's `attributes`, else the learned one. */
   attribute: string
   /** Attributes that count as a test id. */
   attributes: string[]
@@ -191,10 +223,20 @@ export interface TestIdConvention {
   overridden: (keyof TestIdOverrides)[]
 }
 
+function conventionAttribute(
+  configured: readonly string[],
+  learned: LearnedTestIdOptions | undefined,
+): string | undefined {
+  const find = (name: string | undefined) =>
+    name && configured.find((item) => item.toLowerCase() === name.toLowerCase())
+  return find(learned?.attribute) || learned?.attributes.map(find).find(Boolean) || configured[0]
+}
+
 const fallbackNaming: TestIdNaming = { separator: '-', case: 'lower', prefix: 'none' }
 
 /**
- * Merges learned options and overrides; overrides win field by field. `undefined` when nothing
+ * Merges learned options and overrides; overrides win field by field. With team `attributes`, new
+ * ids use the one the repository uses most (the first one when it uses none). `undefined` when nothing
  * was learned and the team set no attribute either.
  */
 export function testIdConvention(
@@ -202,7 +244,9 @@ export function testIdConvention(
   overrides: TestIdOverrides = {},
 ): TestIdConvention | undefined {
   const attributes = overrides.attributes ?? learned?.attributes
-  const attribute = overrides.attributes?.[0] ?? learned?.attribute
+  const attribute = overrides.attributes
+    ? conventionAttribute(overrides.attributes, learned)
+    : learned?.attribute
   if (!attributes?.length || !attribute) return undefined
   const elements = overrides.elements ?? learned?.elements
   return {

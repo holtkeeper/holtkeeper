@@ -413,3 +413,97 @@ test('expands CI images through includes, child pipelines and forge variables', 
     },
   ])
 })
+
+test('expands predefined and CI/CD variables in include project, file and ref', async () => {
+  const app = {
+    '.gitlab-ci.yml': [
+      'include:',
+      '  - project: $TEMPLATES_GROUP/templates',
+      '    ref: $TEMPLATES_REF',
+      '    file: /${CI_PROJECT_NAME}/build.yml',
+      '  - project: acme/templates',
+      '    file: $CI_COMMIT_REF_NAME.yml',
+    ].join('\n'),
+  }
+  const templates = { 'widget/build.yml': 'build:\n  image: node:22\n' }
+  const base = fakeForge({ 'acme/widget': app, 'acme/templates': templates })
+  const reads: string[] = []
+  const forge: StackForge = {
+    ...base,
+    async readFile(path, file, ref) {
+      reads.push(`${path}:${file}@${ref ?? ''}`)
+      return base.readFile(path, file, ref)
+    },
+    async listCiVariables(scope) {
+      return scope.kind === 'group'
+        ? [
+            { key: 'TEMPLATES_GROUP', value: 'acme', environmentScope: '*' },
+            { key: 'TEMPLATES_REF', value: 'v1', environmentScope: '*' },
+          ]
+        : []
+    },
+  }
+  const data = await analyzeStack({
+    group: 'acme',
+    repos: [{ forge: 'work', path: 'acme/widget' }],
+    forge,
+    now,
+  })
+  expect(reads).toContain('acme/templates:widget/build.yml@v1')
+  expect(data.repos[0]?.files).toContain('acme/templates:widget/build.yml')
+  expect(data.components.map((component) => component.id)).toEqual(['node'])
+  expect(data.notes).toEqual([
+    {
+      repo: 'acme/widget',
+      message:
+        '.gitlab-ci.yml: include acme/templates:$CI_COMMIT_REF_NAME.yml uses variables that could not be expanded',
+    },
+  ])
+})
+
+test('treats the go.mod go directive as a minimum and prefers the runtime in use', async () => {
+  const goFiles = {
+    'acme/minimum': { 'go.mod': 'module example.com/minimum\n\ngo 1.21\n' },
+    'acme/pinned': { 'go.mod': 'module example.com/pinned\n\ngo 1.21\n\ntoolchain go1.21.5\n' },
+    'acme/image': {
+      'go.mod': 'module example.com/image\n\ngo 1.21\n',
+      Dockerfile: 'FROM golang:1.23-alpine\n',
+    },
+  }
+  const sources: VersionSources = {
+    ...fakeSources(),
+    async lifecycle(product) {
+      return product === 'go'
+        ? [
+            { cycle: '1.25', eol: false, latest: '1.25.4' },
+            { cycle: '1.23', eol: '2025-08-12', latest: '1.23.12' },
+            { cycle: '1.21', eol: '2024-08-13', latest: '1.21.13' },
+          ]
+        : undefined
+    },
+  }
+  const data = await analyzeStack({
+    group: 'acme',
+    repos: Object.keys(goFiles).map((path) => ({ forge: 'work', path })),
+    forge: fakeForge(goFiles),
+    sources,
+    now,
+  })
+  const go = data.components.find((component) => component.id === 'go')
+  expect(go?.usages.map((usage) => [usage.repo, usage.declared, usage.minimum ?? false])).toEqual([
+    ['acme/minimum', '>=1.21', true],
+    ['acme/pinned', '1.21.5', false],
+    ['acme/image', '>=1.21', true],
+    ['acme/image', '1.23-alpine', false],
+  ])
+  expect(stackAnalysis.schema.parse(data)).toEqual(data)
+  const summary = summarizeStack(data).find((entry) => entry.component.id === 'go')
+  expect(summary?.eolRepos).toEqual(['acme/image', 'acme/pinned'])
+  expect(summary?.cells.get('acme/minimum')?.status).toEqual({
+    lag: 'minor',
+    support: 'unknown',
+    majorsBehind: 0,
+  })
+  expect(summary?.cells.get('acme/image')?.usage.version).toBe('1.23')
+  expect(summary?.cells.get('acme/image')?.versions).toEqual(['1.23'])
+})

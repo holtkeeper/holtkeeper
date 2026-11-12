@@ -78,3 +78,60 @@ test('a schedule over two repositories leaves out the one whose audit is off', a
   )
   expect(requests.map((request) => request.repo.path)).toEqual(['shapes/widget-core'])
 })
+
+test('schedules and triggers leave writing analyzers out of frozen repositories', async () => {
+  const store = memoryStore()
+  await store.settings.put({
+    id: 'freeze',
+    key: 'repo.freeze',
+    scope: { repos: ['acme:shapes/widget'] },
+    value: { reason: 'Shared library' },
+    secret: false,
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  })
+  const writer = { options: z.object({ mode: z.string().default('push') }), exclusive: true }
+  const blocker = (options?: Record<string, unknown>) =>
+    automaticJobBlocker(config, store, writer, {
+      analyzer: 'bumper',
+      repo: widget,
+      ...(options && { options }),
+    })
+  expect(await blocker()).toEqual({ blocker: 'frozen' })
+  expect(await blocker({ mode: 'report' })).toBeUndefined()
+  expect(
+    await automaticJobBlocker(
+      config,
+      store,
+      { ...writer, needs: { forgeAccess: true } },
+      { analyzer: 'bumper', repo: widget },
+    ),
+  ).toBeUndefined()
+  expect(
+    await automaticJobBlocker(config, store, writer, { analyzer: 'bumper', repo: core }),
+  ).toBeUndefined()
+
+  const requests = await planSchedule(
+    { name: 'nightly', analyzers: ['bumper', 'audit', 'updater'] },
+    {
+      config,
+      analyzers: [
+        { kind: 'bumper', scope: 'repo' },
+        { kind: 'audit', scope: 'repo' },
+        { kind: 'updater', scope: 'repo' },
+      ],
+      resolveRepos: async () => [widget, core],
+      skip: automaticSkip(store, config, [
+        { kind: 'bumper', exclusive: true },
+        { kind: 'audit' },
+        { kind: 'updater', exclusive: true, needs: { forgeAccess: true } },
+      ]),
+    },
+  )
+  expect(requests.map((request) => `${request.analyzer} ${request.repo.path}`)).toEqual([
+    'bumper shapes/widget-core',
+    'audit shapes/widget',
+    'audit shapes/widget-core',
+    'updater shapes/widget',
+    'updater shapes/widget-core',
+  ])
+})

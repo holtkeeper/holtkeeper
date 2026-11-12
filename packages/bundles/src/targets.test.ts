@@ -219,3 +219,19 @@ test('precompressed copies and webpack stats reports are not shipped assets', as
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('a record without targets shows why nothing was measured', () => {
+  const report = bundleAnalysis.toReport(
+    asRecord({
+      id: 'r9',
+      createdAt: '2026-05-01T00:00:00Z',
+      data: { targets: [], notes: ['No app build found.', 'Set `analyzers.bundle.targets`.'] },
+    }),
+  )
+  const [issues, list] = report.sections[0]?.blocks ?? []
+  expect(issues?.type === 'issues' ? issues.items[0]?.tone : undefined).toBe('warning')
+  expect(list).toEqual({
+    type: 'markdown',
+    text: '- No app build found.\n- Set `analyzers.bundle.targets`.',
+  })
+})

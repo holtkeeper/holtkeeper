@@ -1,4 +1,4 @@
-import type { PolicyDraftChange, Scope, SettingView } from '@holtkeeper/api'
+import type { PolicyDraftChange, Scope, SettingView, UnknownSettingKeyView } from '@holtkeeper/api'
 
 /** The scope Policies edits for: the organization or one group. */
 export type PolicyFocus = { kind: 'org' } | { kind: 'group'; group: string }
@@ -50,6 +50,29 @@ export function draftValue(
   if (own) return { value: own.value, inherited: false, edited: false }
   const org = focus.kind === 'group' ? focusEntry(entries, key, { kind: 'org' }) : undefined
   return { value: org ? org.value : fallback, inherited: true, edited: key in draft }
+}
+
+/**
+ * Keys the server flagged as ignored (`unknownKeys`) on the entries `keys` show at the focus: the
+ * focus's own entry, else (for a group) the organization's; entries the draft removes are skipped.
+ * Each key is prefixed with its setting, e.g. `assets.policy › legacy`.
+ */
+export function focusUnknownKeys(
+  entries: readonly SettingView[],
+  draft: PolicyDraft,
+  keys: readonly string[],
+  focus: PolicyFocus,
+): UnknownSettingKeyView[] {
+  return keys.flatMap((key) => {
+    if (draft[key] === null) return []
+    const entry =
+      focusEntry(entries, key, focus) ??
+      (focus.kind === 'group' ? focusEntry(entries, key, { kind: 'org' }) : undefined)
+    return (entry?.unknownKeys ?? []).map((unknown) => ({
+      ...unknown,
+      key: `${key} › ${unknown.key}`,
+    }))
+  })
 }
 
 /** The draft with `key` set to `value`; setting it back to the stored value drops the edit. */

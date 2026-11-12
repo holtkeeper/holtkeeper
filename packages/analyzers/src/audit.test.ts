@@ -77,6 +77,42 @@ test('scans the checkout with osv-scanner through the job runner', async () => {
   }
 })
 
+test('passes the largest upgrade to osv-scanner fix', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-audit-'))
+  try {
+    await Bun.write(join(dir, 'package-lock.json'), '{}')
+    const scan = {
+      results: [
+        {
+          source: { path: join(dir, 'package-lock.json'), type: 'lockfile' },
+          packages: [
+            {
+              package: { name: 'some-lib', version: '1.0.0', ecosystem: 'npm' },
+              vulnerabilities: [{ id: 'GHSA-1' }],
+            },
+          ],
+        },
+      ],
+    }
+    const { runner, calls } = createFakeRunner((command) =>
+      command[1] === 'scan' ? { stdout: JSON.stringify(scan) } : { stdout: '' },
+    )
+    await auditAnalyzer.run({
+      repo: { forge: 'work', path: 'games/a' },
+      dir,
+      runner,
+      options: auditAnalyzer.options.parse({ fix: true, upgrade: 'minor' }),
+      log: () => {},
+    })
+    const fix = calls.find((call) => call.command[1] === 'fix')?.command ?? []
+    expect(fix.slice(fix.indexOf('--upgrade-config'), fix.indexOf('--upgrade-config') + 2)).toEqual(
+      ['--upgrade-config', 'minor'],
+    )
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test('metrics count active advisories per severity', () => {
   const metrics = auditMetrics({
     ...report,

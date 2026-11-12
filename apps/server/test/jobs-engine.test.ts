@@ -184,6 +184,22 @@ describe('server jobs', () => {
       secret: false,
       updatedAt: at,
     })
+    await store.settings.put({
+      id: 'u',
+      key: 'audit.upgrade',
+      scope: { all: true },
+      value: 'minor',
+      secret: false,
+      updatedAt: at,
+    })
+    await store.settings.put({
+      id: 'o',
+      key: 'analyzers.audit',
+      scope: { all: true },
+      value: { fix: false, allowlist: [], upgrade: 'major', traits: { ssr: true } },
+      secret: false,
+      updatedAt: at,
+    })
     const report = {
       scanner: 'osv-scanner',
       findings: [],
@@ -215,7 +231,8 @@ describe('server jobs', () => {
     expect(await scopedAnalyzerOptions(config, store, job)).toEqual({
       fix: true,
       allowlist,
-      traits: { ssr: false },
+      upgrade: 'minor',
+      traits: { ssr: true },
     })
 
     const engine = await startJobs({ config, store, analyzers: [audit], now, log: () => {} })
@@ -223,7 +240,7 @@ describe('server jobs', () => {
       await Bun.sleep(10)
     await engine?.stop()
 
-    expect(seen).toMatchObject({ fix: true, traits: { ssr: false } })
+    expect(seen).toMatchObject({ fix: true, upgrade: 'minor', traits: { ssr: true } })
     const [run] = await store.auditRuns.list({})
     expect(run).toMatchObject({
       repo: { forge: 'work', path: 'games/a' },

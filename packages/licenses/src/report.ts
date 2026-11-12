@@ -2,6 +2,7 @@ import { defineAnalysis, metric } from '@holtkeeper/report'
 import type { Block, Cell, Issue, Metric, Report, Section, Tone } from '@holtkeeper/report'
 
 import {
+  isDevOnly,
   isViolation,
   licensesDataSchema,
   licenseText,
@@ -130,7 +131,7 @@ function flaggedDetails(packages: LicensedPackage[]): Record<string, FlaggedPack
   for (const pkg of packages) {
     if (!isFlagged(pkg.verdict)) continue
     const key = packageKey(pkg)
-    const dev = !!pkg.groups?.length && pkg.groups.every((group) => group === 'dev')
+    const dev = isDevOnly(pkg.groups)
     const known = found[key]
     found[key] = known
       ? {

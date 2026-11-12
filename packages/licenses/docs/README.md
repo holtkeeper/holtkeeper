@@ -4,19 +4,21 @@ The `licenses` analyzer and analysis kind: lists every third-party package of a 
 
 ## Public API
 
-- `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout` and `history` (for [internal packages](#internal-packages)). Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
+- `licensesAnalyzer` — `Analyzer<LicensesData, LicensesOptions>`, kind `licenses`, scope `repo`, needs `checkout` and `history` (for [internal packages](#internal-packages) and the [dev-only fallback](#dev-only-packages)), runs `after: ['depgraph']`. Options (`licensesOptionsSchema`; each list also accepts a comma-separated string, which is how the flags `--allow`, `--deny`, `--ignore` pass them):
   - `allow: string[]` — SPDX ids, `*` patterns or whole expressions. Default `defaultAllow`: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, Unlicense, CC0-1.0, Python-2.0, BlueOak-1.0.0, MIT-0, BSD-1-Clause, Zlib, BSL-1.0, PSF-2.0, X11, Unicode-3.0, Unicode-DFS-2016, CC-BY-3.0, CC-BY-4.0. LGPL and other weak copyleft stay off it: neither allowed nor denied, they show up as not allowed for review.
   - `deny: string[]` — same forms. Default `defaultDeny`: `GPL-*`, `AGPL-*`, `SSPL-*`.
   - `ignore: string[]` — package names (`*` allowed, e.g. `@company/*`) whose licenses are not judged.
   - `review: string[]` (`--review`) — licenses that need a sign-off even when `allow` matches them: they are judged `unlisted` (needs review). `deny` still wins. Default none.
   - `unknown: 'warn' | 'violation'` (`--unknown`) — default `warn` reports unknown licenses separately; `violation` judges them `unlisted` (not allowed), with the declared text or `UNKNOWN` as culprit.
-  - `devDependencies: 'check' | 'ignore'` (`--dev-dependencies`) — default `check`; `ignore` gives packages that only `dev` dependency groups use the verdict `ignored`.
+  - `devDependencies: 'check' | 'ignore'` (`--dev-dependencies`) — default `check`; `ignore` gives dev-only packages the verdict `ignored` (see [Dev-only packages](#dev-only-packages)).
   - `exceptions: LicenseException[]` — packages accepted although their license would not pass (see [Exceptions](#exceptions)). Default none, at most 500.
   - `requireProjectLicense: boolean` (`--require-project-license`) — default false; when true, a repository without a license file at its root gets a warning.
   - `presets` — `licensePresets`, offered by the panel for the `analyzers.licenses` setting (see [Presets](#presets)).
 - `licensesAnalysis` — the `AnalysisKind` (`schema: licensesDataSchema`, `summarize`, `toReport(current, previous)`); `licensesReport(data, { previous?, ref?, compareTo?, generatedAt? })` builds the report directly.
-- `analyzeLicenses({ dir, runner, policy?, internal?, binary?, args?, signal? }): Promise<LicensesData>` — runs osv-scanner through the `CommandRunner` and evaluates.
+- `analyzeLicenses({ dir, runner, policy?, internal?, devOnly?, binary?, args?, signal? }): Promise<LicensesData>` — runs osv-scanner through the `CommandRunner` and evaluates. `devOnly: (ecosystem, name, version) => boolean` (`DevOnlyPackages`) is the fallback for packages without dependency groups.
 - `parseOsvLicenses(output, dir): ScannedPackage[]` — osv-scanner JSON to packages.
+- `npmTarball(name)` — `{ name, version }` of an npm tarball URL (`<registry>/<name>/-/<file>-<version>.tgz`), else `undefined`.
+- `isDevOnly(groups)` — whether dependency groups make a package dev-only; `withDevFallback(packages, devOnly)` gives packages without groups `groups: ['dev']` when `devOnly` names them.
 - `analyzeLicenses` also takes `today` (`YYYY-MM-DD`, default today in UTC): exceptions that expired before it are left out of the run's policy.
 - `evaluatePackages(packages, policy, internal?)`, `resolvePolicy(options, today?)` — pure policy application; `internal: (ecosystem, name) => 'forge:path' | undefined` names the repository that defines a package. With `today`, `resolvePolicy` drops expired exceptions.
 - `licenseExceptionSchema`, `LicenseException` — one exception as the options and the stored policy carry it.
@@ -34,11 +36,17 @@ With osv-scanner 2.7, `--licenses` without a value turns on license data (no all
 
 A package found in several lockfiles becomes one entry with every source (relative to the checkout). `UNKNOWN` is dropped when the package also has a real license.
 
+osv-scanner names `yarn.lock` entries resolved from a registry it does not know (a GitLab package registry, for one) by their tarball URL with ecosystem `GIT`, e.g. `https://gitlab.example.com/api/v4/projects/123/packages/npm/@acme/some-lib/-/@acme/some-lib-1.2.3.tgz`. Any `http(s)` name of the npm tarball shape `/<name>/-/<file>-<version>.tgz` (any host, scoped or not, file with or without the scope) becomes ecosystem `npm`, that name and version before anything else happens, so internal detection, `ignore`, exceptions and merging with other lockfiles see the real package.
+
+## Dev-only packages
+
+A package is dev-only when every dependency group is `dev` or `optional` and at least one is `dev` (`['dev', 'optional']` is dev-only, `['optional']` is not). Groups come from osv-scanner's `dependency_groups`, which `yarn.lock`, `bun.lock` and some `package-lock.json` files do not carry. For packages without groups the analyzer falls back to the repository's own newest `depgraph` record: a package that record reaches only through dev edges (`devOnlyPackages` of [@holtkeeper/depgraph](../../depgraph/docs/README.md#inventory-across-repositories), same ecosystem, name and version) gets `groups: ['dev']`. The record may lag the checkout by one run; packages it does not know stay without groups and are checked. The analyzer runs `after` `depgraph` jobs of the same repository queued ahead of it. The report's dev flag on flagged packages uses the same rule.
+
 **Network:** license data comes from deps.dev; with `--offline` (through `args`) every package comes back unknown.
 
 ## Internal packages
 
-deps.dev knows only public packages, so a company's own libraries would all come back `UNKNOWN`. The analyzer reads the newest `depgraph` record of every repository in its history (`loadPackageCatalog` of [@holtkeeper/depgraph](../../depgraph/docs/README.md#internal-packages)): a package one of them defines as a versioned workspace gets the verdict `internal` with `definedIn: 'forge:path'` and is not judged. `ignore` still wins. Nothing needs configuring: once the library repositories are analyzed by `depgraph` (the default `security-weekly` schedule does), their consumers see the packages as internal. The report counts them in an `internal` metric, lists them in an **Internal packages** section and shows `internal` in the license mix.
+deps.dev knows only public packages, so a company's own libraries would all come back `UNKNOWN`. The analyzer reads the newest `depgraph` record of every repository in its history (`latestDepgraphs` and `packageCatalog` of [@holtkeeper/depgraph](../../depgraph/docs/README.md#internal-packages)): a package one of them defines as a versioned workspace, or a Go module (main modules carry no version; a path inside a defined module counts too), gets the verdict `internal` with `definedIn: 'forge:path'` and is not judged. `ignore` still wins. Nothing needs configuring: once the library repositories are analyzed by `depgraph` (the default `security-weekly` schedule does), their consumers see the packages as internal. The report counts them in an `internal` metric, lists them in an **Internal packages** section and shows `internal` in the license mix.
 
 ## Exceptions
 
@@ -78,7 +86,7 @@ interface LicensesData {
     ecosystem: string // OSV name: npm, Go, PyPI, ...
     sources: string[] // lockfiles, relative to the checkout
     licenses: string[] // SPDX expressions; empty = nothing known
-    groups?: string[] // dependency groups, e.g. dev
+    groups?: string[] // dependency groups, e.g. dev; ['dev'] from the depgraph fallback
     verdict: 'allowed' | 'unknown' | 'unlisted' | 'denied' | 'ignored' | 'internal' | 'excepted'
     culprits?: string[] // licenses responsible for a verdict other than allowed
     definedIn?: string // internal packages: forge:path of the repository that defines it
@@ -129,11 +137,11 @@ Every license gets one of four verdicts, ordered from best to worst: `allowed` >
 
 ## Metrics
 
-`licensesMetrics(data)` is the kind's `metrics`, stored with every record as `LicensesMetrics`: `packages`, `verdicts` (packages per verdict, every verdict present with zero when none has it; records stored before `excepted` existed lack it, and readers count it as zero), `violations` (denied or not allowed), `missingProjectLicense` (the policy asked for a repository license file and there is none), `licenseFile` (`present`, `missing` or `not-required` when the policy does not ask), `licenses` (third-party packages per license expression, internal ones left out, `UNKNOWN` for none), `allowedLicenses` (the expressions of allowed packages) `flagged` (sorted `ecosystem:name` keys of the `denied`, `unlisted` and `unknown` packages), `flaggedDetails` (a `FlaggedPackage` per flagged key: name, ecosystem, flagged versions, declared licenses, worst verdict, culprits and whether every flagged version is only a `dev` dependency) and `byPackage` (`PackageLicenses` per `ecosystem:name`: its license expressions over all versions, sorted, and its worst verdict; absent on older records), which the fleet Libraries table reads instead of data. Fleet views add these up across repositories, list violations from `flaggedDetails` and compare `flagged` with an older record without reading data; `compareVerdict` orders verdicts worst first (denied, unlisted, unknown, excepted, allowed, internal, ignored) for every consumer; records stored before a field existed have their metrics computed from data when read.
+`licensesMetrics(data)` is the kind's `metrics`, stored with every record as `LicensesMetrics`: `packages`, `verdicts` (packages per verdict, every verdict present with zero when none has it; records stored before `excepted` existed lack it, and readers count it as zero), `violations` (denied or not allowed), `missingProjectLicense` (the policy asked for a repository license file and there is none), `licenseFile` (`present`, `missing` or `not-required` when the policy does not ask), `licenses` (third-party packages per license expression, internal ones left out, `UNKNOWN` for none), `allowedLicenses` (the expressions of allowed packages) `flagged` (sorted `ecosystem:name` keys of the `denied`, `unlisted` and `unknown` packages), `flaggedDetails` (a `FlaggedPackage` per flagged key: name, ecosystem, flagged versions, declared licenses, worst verdict, culprits and whether every flagged version is dev-only by `isDevOnly`) and `byPackage` (`PackageLicenses` per `ecosystem:name`: its license expressions over all versions, sorted, and its worst verdict; absent on older records), which the fleet Libraries table reads instead of data. Fleet views add these up across repositories, list violations from `flaggedDetails` and compare `flagged` with an older record without reading data; `compareVerdict` orders verdicts worst first (denied, unlisted, unknown, excepted, allowed, internal, ignored) for every consumer; records stored before a field existed have their metrics computed from data when read.
 
 ## Tests
 
 - `src/spdx.test.ts` — evaluation table for the default policy (OR/AND/WITH/`+`/unknowns/invalid text) and custom policies.
-- `src/parse.test.ts` — parser on `test/osv-npm.json`, captured from osv-scanner 2.7.0 over a copy of `fixtures/npm` with one package marked `dev` (vulnerability details removed).
+- `src/parse.test.ts` — parser on `test/osv-npm.json`, captured from osv-scanner 2.7.0 over a copy of `fixtures/npm` with one package marked `dev` (vulnerability details removed); tarball URL names and their merge with registry entries.
 - `test/osv-scanner.test.ts` — `analyzeLicenses` on a temp copy of `fixtures/npm`, replaying the captured output, since the real scan needs deps.dev.
-- `src/analyze.test.ts`, `src/report.test.ts` — command line, options (review list, dev-only dependencies, exceptions and their expiry, applied end to end through `analyzeLicenses`), verdicts, metrics with deltas, new and resolved violations, sections.
+- `src/analyze.test.ts`, `src/report.test.ts` — command line, options (review list, dev-only dependencies and the depgraph fallback, exceptions and their expiry, applied end to end through `analyzeLicenses`), verdicts, metrics with deltas, new and resolved violations, sections.

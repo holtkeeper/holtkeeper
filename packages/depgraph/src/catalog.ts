@@ -3,14 +3,15 @@ import type { AnalysisRecord, AnalysisStore } from '@holtkeeper/store'
 import { newestRecords } from '@holtkeeper/store'
 
 import { type DepgraphData, depgraphDataSchema } from './analyze.ts'
-import { ownPackages } from './inventory.ts'
+import { definedPackages, ownPackages } from './inventory.ts'
 import { compareVersions } from './version.ts'
 
 /** A package one of the analyzed repositories defines, with the version in its source. */
 export interface InternalPackage {
   ecosystem: string
   name: string
-  version: string
+  /** Absent for Go modules, whose source carries no version. */
+  version?: string
   /** The repository that defines it. */
   repo: RepoRef
   /** Workspace directory inside that repository. */
@@ -26,25 +27,39 @@ export interface PackageCatalog {
 const catalogKey = (ecosystem: string, name: string) => `${ecosystem}\0${name}`
 
 /**
- * The catalog of the packages `entries` define. When several repositories define the same
- * package, the highest version wins.
+ * The catalog of the packages `entries` define: versioned workspaces and Go modules, which carry no
+ * version. When several repositories define the same package, the highest version wins. A Go name
+ * inside a defined module path (`example.com/kit/sub` under `example.com/kit`) finds that module.
  */
 export function packageCatalog(
   entries: Iterable<{ repo: RepoRef; data: DepgraphData }>,
 ): PackageCatalog {
   const packages = new Map<string, InternalPackage>()
+  const modules = new Map<string, InternalPackage>()
   for (const { repo, data } of entries) {
+    for (const own of definedPackages(data))
+      if (own.ecosystem === 'Go') {
+        const key = catalogKey(own.ecosystem, own.name)
+        if (!modules.has(key)) modules.set(key, { ...own, repo })
+      }
     for (const own of ownPackages(data)) {
       const key = catalogKey(own.ecosystem, own.name)
       const known = packages.get(key)
-      if (known && compareVersions(known.version, own.version) >= 0) continue
+      if (known?.version && compareVersions(known.version, own.version) >= 0) continue
       packages.set(key, { ...own, repo })
     }
   }
-  return {
-    find: (ecosystem, name) => packages.get(catalogKey(ecosystem, name)),
-    size: packages.size,
+  for (const [key, module] of modules) if (!packages.has(key)) packages.set(key, module)
+  const find = (ecosystem: string, name: string) => {
+    const exact = packages.get(catalogKey(ecosystem, name))
+    if (exact || ecosystem !== 'Go') return exact
+    for (let end = name.lastIndexOf('/'); end > 0; end = name.lastIndexOf('/', end - 1)) {
+      const parent = packages.get(catalogKey(ecosystem, name.slice(0, end)))
+      if (parent) return parent
+    }
+    return undefined
   }
+  return { find, size: packages.size }
 }
 
 export interface LatestDepgraphsOptions {

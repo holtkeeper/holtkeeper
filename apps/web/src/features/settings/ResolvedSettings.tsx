@@ -67,6 +67,7 @@ import { RepoUpdatesSection } from '../repos/RepoUpdates.tsx'
 import { useSession } from '../shell/session.ts'
 import { findCredential } from './CredentialPicker.tsx'
 import { EntryDialog } from './EntryDialog.tsx'
+import { UnknownKeys } from './UnknownKeys.tsx'
 import { ValueEditor } from './ValueEditor.tsx'
 
 type Editing = { definition: SettingDefinitionView; entry?: SettingView }
@@ -276,6 +277,7 @@ export function ResolvedSettings({
             <span className="mono block max-w-72 truncate text-xs">
               {display(definition, row.value)}
             </span>
+            <UnknownKeys keys={row.entry?.unknownKeys} className="mt-1 max-w-72" />
           </Td>
           <Td>
             <SourceChip layer={row.source.layer} here={own}>
@@ -978,8 +980,11 @@ export function AllKeys() {
                           <div className="mono font-medium">{row.key}</div>
                           <div className="text-[11.5px] text-dim">{row.label}</div>
                         </Td>
-                        <Td className="mono max-w-[320px] truncate">
-                          {settingValueText(row.key, row.value) ?? previewValue(row.value, false)}
+                        <Td className="max-w-[320px]">
+                          <span className="mono block truncate">
+                            {settingValueText(row.key, row.value) ?? previewValue(row.value, false)}
+                          </span>
+                          <UnknownKeys keys={row.entry?.unknownKeys} className="mt-1" />
                         </Td>
                         <Td>
                           <OrgSource row={row} />

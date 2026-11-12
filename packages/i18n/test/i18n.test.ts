@@ -253,3 +253,57 @@ describe('single repository', () => {
     expect(edit.kind === 'replace' && JSON.parse(edit.newText).welcome).toBe('')
   })
 })
+
+describe('properties detection', () => {
+  const javaRepo = { forge: 'work', path: 'svc/widget' }
+  const source = 'class Widget { String label() { return t("widget.title"); } }\n'
+
+  test('tool config files are not catalogs and the report says nothing was found', async () => {
+    const dir = await project({
+      'sonar-project.properties': 'sonar.projectKey=widget\nsonar.sources=src\n',
+      'gradle.properties': 'org.gradle.jvmargs=-Xmx2g\n',
+      'src/main/resources/application-dev.properties': 'server.port=8080\n',
+      'src/main/resources/log4j2.properties': 'rootLogger.level=info\n',
+      'src/main/resources/defaults.properties': 'timeout=30\n',
+      'src/main/java/Widget.ts': source,
+    })
+    try {
+      const result = await analyzeI18n({ repo: javaRepo, code: diskCatalogFiles(dir.dir) })
+      expect(result.bundles).toEqual([])
+      const report = i18nAnalysis.toReport(record(result, '2026-10-30T00:00:00Z'))
+      expect(report.subtitle).toBe('No translation catalogs found')
+      expect(report.metrics.map((m) => m.id)).toEqual(['catalogs'])
+      expect(report.sections.map((s) => s.id)).toEqual(['completeness'])
+      const block = report.sections[0]!.blocks[0]!
+      expect(block.type === 'markdown' && block.text).toContain(
+        'No translation catalogs were found',
+      )
+    } finally {
+      await dir.cleanup()
+    }
+  })
+
+  test('localized bundles and translation directories still count', async () => {
+    const dir = await project({
+      'src/main/resources/messages.properties': 'widget.title=Widget\n',
+      'src/main/resources/messages_de.properties': 'widget.title=Ding\n',
+      'src/main/resources/i18n/en.properties': 'shape.name=Shape\n',
+      'src/main/resources/lang/labels.properties': 'ok=OK\n',
+      'src/main/resources/settings_fr.properties': 'shape.size=Taille\n',
+      'sonar-project.properties': 'sonar.projectKey=widget\n',
+      'src/main/java/Widget.ts': source,
+    })
+    try {
+      const result = await analyzeI18n({ repo: javaRepo, code: diskCatalogFiles(dir.dir) })
+      expect(result.bundles.flatMap((b) => b.files.map((f) => f.file)).toSorted()).toEqual([
+        'src/main/resources/i18n/en.properties',
+        'src/main/resources/lang/labels.properties',
+        'src/main/resources/messages.properties',
+        'src/main/resources/messages_de.properties',
+        'src/main/resources/settings_fr.properties',
+      ])
+    } finally {
+      await dir.cleanup()
+    }
+  })
+})

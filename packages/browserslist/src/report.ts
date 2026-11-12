@@ -27,7 +27,7 @@ function metrics(data: BrowserslistData): Metric[] {
       value: status.text,
       unit: 'text',
       tone: status.tone,
-      hint: status.hint,
+      hint: data.skipped ? 'A newer database exists but was not proposed' : status.hint,
     },
     ...(data.after.length
       ? [
@@ -57,6 +57,7 @@ const autoMergeNote = {
 
 function blocks(data: BrowserslistData): Block[] {
   const result: Block[] = []
+  if (data.skipped) result.push({ type: 'markdown', text: `Not published: ${data.skipped}` })
   if (data.mergeRequest)
     result.push({
       type: 'markdown',

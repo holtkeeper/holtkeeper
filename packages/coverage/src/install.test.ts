@@ -69,12 +69,42 @@ test('a failed install is reported with the collection error', async () => {
     log: (line) => lines.push(line),
   })
   expect(run).rejects.toThrow(
-    'npm ci --ignore-scripts --no-audit --no-fund failed before: exit 1: npm ERR! code EINTEGRITY',
+    'installing dependencies failed (npm ci --ignore-scripts --no-audit --no-fund): exit 1: npm ERR! code EINTEGRITY\nso no tests could run:\nvitest --coverage: no report',
   )
   await run.catch(() => undefined)
   expect(lines).toEqual([
     'dependencies: npm ci --ignore-scripts --no-audit --no-fund failed\nexit 1: npm ERR! code EINTEGRITY',
   ])
+})
+
+test('a registry 404 heads the error, before the missing test runner', async () => {
+  await writeFile(join(dir, 'package.json'), '{}')
+  await writeFile(join(dir, 'package-lock.json'), '{}')
+  const { runner } = createFakeRunner(() => ({
+    exitCode: 1,
+    stderr: [
+      'npm error code E404',
+      'npm error 404 Not Found - GET https://registry.example.com/@acme%2fwidget-kit - Not found',
+      'npm error 404',
+      "npm error 404  '@acme/widget-kit@1.2.3' is not in this registry.",
+      'npm error A complete log of this run can be found in: /root/.npm/_logs/debug-0.log',
+    ].join('\n'),
+  }))
+  const missingRunner = {
+    name: 'vitest --coverage',
+    collect: () =>
+      Promise.reject(new Error('npm error npx canceled due to missing packages and no YES option')),
+  }
+  const error = await analyzeCoverage({ dir, runner, collectors: [missingRunner] }).catch(
+    (caught: unknown) => caught,
+  )
+  const message = error instanceof Error ? error.message : ''
+  expect(message.split('\n')[0]).toBe(
+    'installing dependencies failed (npm ci --ignore-scripts --no-audit --no-fund): exit 1: npm error code E404',
+  )
+  expect(message).toContain("'@acme/widget-kit@1.2.3' is not in this registry.")
+  expect(message).not.toContain('complete log')
+  expect(message.indexOf('E404')).toBeLessThan(message.indexOf('npx canceled'))
 })
 
 test('retries an install that failed on the network once', async () => {

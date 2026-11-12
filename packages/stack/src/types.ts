@@ -28,6 +28,11 @@ export interface StackUsage {
   variant?: string
   /** Full image reference, for image usages. */
   image?: string
+  /**
+   * The version is a lower bound, not the one in use: a go.mod `go` directive without a
+   * `toolchain`. It shows lag but never end of life, and another usage in the repository wins.
+   */
+  minimum?: boolean
 }
 
 /** One release line of a product, as endoflife.date describes it. */

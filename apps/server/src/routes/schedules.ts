@@ -65,7 +65,7 @@ export function scheduleRoutes(deps: ServerDeps) {
         config,
         analyzers: deps.analyzers ?? [],
         resolveRepos: groupRepositories(config),
-        skip: automaticSkip(store, config),
+        skip: automaticSkip(store, config, deps.analyzers),
       })
       const { enqueued, skipped } = await enqueueUnique(
         store.jobs,

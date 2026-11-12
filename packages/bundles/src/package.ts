@@ -25,7 +25,8 @@ export const packageIgnore = [
 /** Conditions of `exports` a bundler for browsers picks, most preferred first. */
 const conditions = ['browser', 'import', 'module', 'default', 'require', 'node']
 
-const MAX_ENTRIES = 100
+/** Entrypoints of one package that are measured; the rest are counted in `PackageInfo`. */
+export const MAX_PACKAGE_ENTRIES = 100
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -63,20 +64,14 @@ function existing(target: string, files: ReadonlySet<string>): string | undefine
 
 const escape = (text: string) => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
 
-/**
- * Entry files of a package by subpath: what a browser bundler resolves for each `exports`
- * subpath (conditions `browser`, `import`, `module`, `default`, `require`, `node`; never `types`),
- * then `*` patterns expanded over the archive, at most 100 in all. Without `exports`: `module`, a string
- * `browser`, `main`, else `index.js`. Subpaths whose file is missing are left out.
- */
-export function packageEntries(
+function allPackageEntries(
   manifest: Record<string, unknown>,
   files: ReadonlySet<string>,
 ): Entrypoint[] {
   const entries: Entrypoint[] = []
   const add = (name: string, target: string | undefined) => {
     const file = target ? existing(target, files) : undefined
-    if (file && entries.length < MAX_ENTRIES) entries.push({ name, initial: [file], lazy: [] })
+    if (file) entries.push({ name, initial: [file], lazy: [] })
   }
   const exports = manifest['exports']
   if (exports !== undefined && exports !== null) {
@@ -110,21 +105,41 @@ export function packageEntries(
 }
 
 /**
+ * Entry files of a package by subpath: what a browser bundler resolves for each `exports`
+ * subpath (conditions `browser`, `import`, `module`, `default`, `require`, `node`; never `types`),
+ * then `*` patterns expanded over the archive, at most `MAX_PACKAGE_ENTRIES` in all. Without
+ * `exports`: `module`, a string `browser`, `main`, else `index.js`. Subpaths whose file is missing
+ * are left out.
+ */
+export function packageEntries(
+  manifest: Record<string, unknown>,
+  files: ReadonlySet<string>,
+): Entrypoint[] {
+  return allPackageEntries(manifest, files).slice(0, MAX_PACKAGE_ENTRIES)
+}
+
+/**
  * `packageEntries`, or for packages that declare no entry and ship no `index.js` (imported by
- * deep paths such as `pkg/useThing`) every JS module no other module of the package imports.
+ * deep paths such as `pkg/useThing`) every JS module no other module of the package imports; at
+ * most `MAX_PACKAGE_ENTRIES` either way. `onFound` receives how many entrypoints there were
+ * before that cap.
  */
 export const packageResolver = (
   manifest: Record<string, unknown>,
   files: ReadonlySet<string>,
+  onFound?: (count: number) => void,
 ): EntrypointResolver => ({
   name: 'package-exports',
   async resolve(distDir) {
-    const entries = packageEntries(manifest, files)
-    if (entries.length) return entries
-    const roots = (await importGraphResolver().resolve(distDir)) ?? []
-    return roots
-      .slice(0, MAX_ENTRIES)
-      .map((entry) => ({ ...entry, name: `./${entryNameOf(entry.initial[0] ?? entry.name)}` }))
+    const declared = allPackageEntries(manifest, files)
+    const entries = declared.length
+      ? declared
+      : ((await importGraphResolver().resolve(distDir)) ?? []).map((entry) => ({
+          ...entry,
+          name: `./${entryNameOf(entry.initial[0] ?? entry.name)}`,
+        }))
+    onFound?.(entries.length)
+    return entries.slice(0, MAX_PACKAGE_ENTRIES)
   },
 })
 
@@ -168,17 +183,21 @@ export async function analyzePackage(input: PackageArchiveInput): Promise<Bundle
       await writeFile(target, data)
     }
     const files = new Set(input.files.keys())
+    let found = 0
     const data = await analyzeBundle({
       dist: dir,
       root: dir,
       ignore: packageIgnore,
-      resolver: packageResolver(fields, files),
+      resolver: packageResolver(fields, files, (count) => {
+        found = count
+      }),
     })
     const info: PackageInfo = {
       unpacked,
       files: input.files.size,
       dependencies: names(fields['dependencies']),
       peerDependencies: names(fields['peerDependencies']),
+      ...(found > MAX_PACKAGE_ENTRIES ? { entrypointsFound: found } : {}),
     }
     return { ...base, status: 'ok', data, package: info }
   } catch (error) {

@@ -3,7 +3,13 @@ import { stableId } from '@holtkeeper/quality'
 import { listFiles } from '@holtkeeper/quality-tests'
 
 import { analyzeTestIds, type FindUntaggedOptions, findUntagged } from './analyze.ts'
-import { type TestIdOverrides, learnTestIdOptions, testIdConvention } from './learn.ts'
+import {
+  type TestIdOverrides,
+  idAttribute,
+  isIdAttribute,
+  learnTestIdOptions,
+  testIdConvention,
+} from './learn.ts'
 import { attributeUsage, type TestIdComponent } from './model.ts'
 import { builtinSources } from './sources.ts'
 
@@ -20,19 +26,20 @@ export const TESTIDS_TOOL = 'testids'
 
 const EXAMPLES = 3
 
-/** The most used attribute that has static values, e.g. `data-test-id` over `data-test-state`. */
-const named = (pool: readonly TestIdComponent[]) =>
-  attributeUsage(pool).find((attribute) => attribute.values.length)
-
 function conventionOf(
   components: readonly TestIdComponent[],
+  configured: readonly string[],
   file: string,
   preferred: string | undefined,
   suggestion: string | undefined,
 ) {
   const local = components.find((component) => component.file === file)
   const used = attributeUsage(components)
-  const found = (local ? named([local]) : undefined) ?? named(components) ?? used[0]
+  const named = (pool: readonly TestIdComponent[]) => {
+    const found = idAttribute(attributeUsage(pool), configured)
+    return found && isIdAttribute(found.name, configured) && found.values.length ? found : undefined
+  }
+  const found = (local ? named([local]) : undefined) ?? idAttribute(used, configured)
   const main =
     preferred && found?.name !== preferred
       ? (used.find((item) => item.name === preferred) ?? { name: preferred, values: [] })
@@ -93,6 +100,7 @@ export function testIdsCheck(options: TestIdsCheckOptions = {}): QualityCheck {
         .map((element): QualityIssue => {
           const help = conventionOf(
             catalog.components,
+            catalog.attributes,
             element.file,
             convention?.overridden.includes('attributes') ? convention.attribute : undefined,
             element.suggestion,

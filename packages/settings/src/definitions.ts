@@ -34,6 +34,12 @@ export interface SettingDefinition<Schema extends z.ZodType = z.ZodType> {
    * value, a preset sets its own fields and keeps the others.
    */
   presets?: SettingPreset[]
+  /**
+   * Value keys (dotted paths) that moved to another setting, with where they live now, e.g.
+   * `{ ignore: 'assets.policy › ignore' }`. Stored values still carrying them are flagged by
+   * `unknownSettingKeys` with that hint; nothing migrates them.
+   */
+  movedKeys?: Record<string, string>
 }
 
 /** A named value of a setting, offered by editors as a starting point. */

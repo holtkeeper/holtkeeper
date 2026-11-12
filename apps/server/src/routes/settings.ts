@@ -18,7 +18,7 @@ import type {
   SettingView,
 } from '@holtkeeper/api'
 import { checkConventions } from '@holtkeeper/commit-conventions'
-import { isRetiredSetting, settingCascades } from '@holtkeeper/settings'
+import { isRetiredSetting, settingCascades, unknownSettingKeys } from '@holtkeeper/settings'
 import type { SettingEntry } from '@holtkeeper/store'
 import { allowlistSchema } from '@holtkeeper/vuln'
 import { Hono } from 'hono'
@@ -85,28 +85,34 @@ const checkSchema = z
 /** Keys the resolver leaves out although they are defined: release webhooks are instance-wide only. */
 const hiddenFromResolver: ReadonlySet<string> = new Set(['releases.notify'])
 
-/** Secret values never leave the server. */
-const toView = (entry: SettingEntry): SettingView => ({
-  id: entry.id,
-  key: entry.key,
-  scope: entry.scope,
-  value: entry.secret ? null : entry.value,
-  secret: entry.secret,
-  updatedAt: entry.updatedAt,
-  ...(entry.updatedBy ? { updatedBy: entry.updatedBy } : {}),
-})
-
 /**
  * Settings per scope: AI provider and budget, access, integrations, analyzer options, ... Entries
  * and definitions of retired keys are never listed and refuse new values. `PUT /settings` writes
  * one entry, `POST /settings/draft` several at once (all or nothing, one audit event); both refuse
- * `audit.allowlist` entries that break the `audit.allowlistPolicy` covering their scope.
+ * `audit.allowlist` entries that break the `audit.allowlistPolicy` covering their scope. Listed
+ * and resolved entries whose value carries keys the definition no longer knows get `unknownKeys`.
  * `POST /commit-conventions/check` checks a message or branch name as `check_commit_message` does.
  */
 export function settingRoutes(deps: ServerDeps) {
   const { store, vault, config } = deps
   const live = deps.settings.filter((definition) => !isRetiredSetting(definition.key))
   const definitions = new Map(live.map((definition) => [definition.key, definition]))
+  /** Secret values never leave the server; keys the definition no longer knows are flagged. */
+  const toView = (entry: SettingEntry): SettingView => {
+    const definition = definitions.get(entry.key)
+    const unknownKeys =
+      definition && !entry.secret ? unknownSettingKeys(definition, entry.value) : []
+    return {
+      id: entry.id,
+      key: entry.key,
+      scope: entry.scope,
+      value: entry.secret ? null : entry.value,
+      secret: entry.secret,
+      updatedAt: entry.updatedAt,
+      ...(entry.updatedBy ? { updatedBy: entry.updatedBy } : {}),
+      ...(unknownKeys.length ? { unknownKeys } : {}),
+    }
+  }
   const resolvable = live.filter(
     (definition) => !definition.secret && !hiddenFromResolver.has(definition.key),
   )

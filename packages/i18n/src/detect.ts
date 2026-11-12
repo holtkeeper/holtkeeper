@@ -138,7 +138,9 @@ const hinted = (file: string) => file.split('/').some((part) => HINT_DIRECTORIES
 /**
  * Finds catalog files by format and layout and parses them. JSON and YAML files count as
  * catalogs only under a translation directory or when at least two locales of the same bundle
- * exist, so ordinary config files are not mistaken.
+ * exist, and a `.properties` file without a locale suffix (`messages.properties`) only under a
+ * translation directory or next to a localized sibling (`messages_de.properties`), so ordinary
+ * config files are not mistaken.
  */
 export async function detectCatalogs({
   files,
@@ -160,6 +162,8 @@ export async function detectCatalogs({
   for (const group of perBundle.values()) {
     const structured = group[0]!.source.format === 'json' || group[0]!.source.format === 'yaml'
     if (!globs && structured && group.length < 2 && !hinted(group[0]!.file)) continue
+    const unlocalized = group.every((c) => c.location.locale === DEFAULT_LOCALE)
+    if (!globs && unlocalized && !hinted(group[0]!.file)) continue
     for (const { file, source, location } of group) {
       const text = await files.read(file)
       if (text === undefined) continue

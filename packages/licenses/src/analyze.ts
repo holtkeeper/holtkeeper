@@ -5,6 +5,7 @@ import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 import {
   defaultAllow,
   defaultDeny,
+  isDevOnly,
   type LicensedPackage,
   type LicenseException,
   type LicensePolicyData,
@@ -79,19 +80,37 @@ const namePattern = (pattern: string) =>
  */
 export type InternalPackages = (ecosystem: string, name: string) => string | undefined
 
-const devOnly = (pkg: ScannedPackage) =>
-  !!pkg.groups?.length && pkg.groups.every((group) => group === 'dev')
-
 const sameLicense = (declared: readonly string[], wanted: string) => {
   const text = declared.join(' AND ').toLowerCase()
   return text === wanted.trim().toLowerCase()
 }
 
 /**
- * Judges every package against the policy: `ignore` first (and dev-only packages when
- * `devDependencies` is `ignore`), then `internal`, then the licenses; a package whose licenses do
- * not pass becomes `excepted` when one of `policy.exceptions` matches its name, version and
- * declared licenses. Pure: the same packages, policy and internal packages give the same verdicts.
+ * Whether the repository reaches a package only through dev dependencies, from a source other than
+ * osv-scanner's dependency groups (the newest `depgraph` record).
+ */
+export type DevOnlyPackages = (ecosystem: string, name: string, version: string) => boolean
+
+/**
+ * Packages without dependency groups get `groups: ['dev']` when `devOnly` names them; the others
+ * are returned unchanged.
+ */
+export function withDevFallback(
+  packages: readonly ScannedPackage[],
+  devOnly: DevOnlyPackages,
+): ScannedPackage[] {
+  return packages.map((pkg) =>
+    !pkg.groups?.length && devOnly(pkg.ecosystem, pkg.name, pkg.version)
+      ? { ...pkg, groups: ['dev'] }
+      : pkg,
+  )
+}
+
+/**
+ * Judges every package against the policy: `ignore` first (and dev-only packages, see
+ * `isDevOnly`, when `devDependencies` is `ignore`), then `internal`, then the licenses; a package
+ * whose licenses do not pass becomes `excepted` when one of `policy.exceptions` matches its name,
+ * version and declared licenses. Pure: the same packages, policy and internal packages give the same verdicts.
  */
 export function evaluatePackages(
   packages: readonly ScannedPackage[],
@@ -113,7 +132,8 @@ export function evaluatePackages(
     )?.exception
   return packages.map((pkg): LicensedPackage => {
     if (ignored.some((pattern) => pattern.test(pkg.name))) return { ...pkg, verdict: 'ignored' }
-    if (policy.devDependencies === 'ignore' && devOnly(pkg)) return { ...pkg, verdict: 'ignored' }
+    if (policy.devDependencies === 'ignore' && isDevOnly(pkg.groups))
+      return { ...pkg, verdict: 'ignored' }
     const definedIn = internal?.(pkg.ecosystem, pkg.name)
     if (definedIn !== undefined) return { ...pkg, verdict: 'internal', definedIn }
     const result = evaluate(pkg.licenses)
@@ -143,6 +163,8 @@ export interface AnalyzeLicensesOptions {
   policy?: LicensePolicyOptions
   /** Packages the analyzed repositories define; they are listed but not judged. */
   internal?: InternalPackages
+  /** Dev-only packages for the ones osv-scanner reports without dependency groups. */
+  devOnly?: DevOnlyPackages
   /** Path or name of the osv-scanner binary. */
   binary?: string
   /** Extra arguments for `osv-scanner scan source`. */
@@ -178,6 +200,7 @@ export async function analyzeLicenses({
   runner,
   policy,
   internal,
+  devOnly,
   binary = 'osv-scanner',
   args = [],
   today = new Date().toISOString().slice(0, 10),
@@ -206,11 +229,12 @@ export async function analyzeLicenses({
     [0, VULNERABILITIES_FOUND],
   )
   const resolved = resolvePolicy(policy, today)
+  const scanned = parseOsvLicenses(stdout.trim() ? JSON.parse(stdout) : {}, root)
   return {
     tool: { name: 'osv-scanner', ...(version ? { version } : {}) },
     policy: resolved,
     packages: evaluatePackages(
-      parseOsvLicenses(stdout.trim() ? JSON.parse(stdout) : {}, root),
+      devOnly ? withDevFallback(scanned, devOnly) : scanned,
       resolved,
       internal,
     ),

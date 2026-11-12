@@ -99,8 +99,8 @@ async function untestedFiles(
  * dependencies when they are missing, builds workspace packages whose entry files are missing, runs the tests of every detected framework with coverage
  * (or reads `file`), leaves out tests, configs, generated and excluded files and, unless `components`, component
  * files, and adds source
- * files no test loaded as fully uncovered. Throws when no collector produced a report, naming a
- * failed install.
+ * files no test loaded as fully uncovered. Throws when no collector produced a report; after a
+ * failed install the error starts with that failure, then the collectors' errors.
  */
 export async function analyzeCoverage(options: AnalyzeCoverageOptions): Promise<CoverageData> {
   const { dir, runner, signal } = options
@@ -135,9 +135,10 @@ export async function analyzeCoverage(options: AnalyzeCoverageOptions): Promise<
   } catch (error) {
     if (install?.status !== 'failed') throw error
     const message = error instanceof Error ? error.message : String(error)
-    throw new Error(`${message}\n${install.command.join(' ')} failed before: ${install.error}`, {
-      cause: error,
-    })
+    throw new Error(
+      `installing dependencies failed (${install.command.join(' ')}): ${install.error}\nso no tests could run:\n${message}`,
+      { cause: error },
+    )
   }
   signal?.throwIfAborted()
 

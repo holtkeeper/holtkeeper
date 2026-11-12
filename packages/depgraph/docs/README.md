@@ -31,6 +31,7 @@ All pure.
 - `directDependencies(data): DirectDependency[]` — edges from workspaces to packages in the `packages` layers: `{ ecosystem, name, version, workspace, kind }`, one per workspace and library (`prod` wins over `peer`, `optional`, `dev`). Where the resolver selects one version (Go), the selected version replaces the requested one.
 - `ownPackages(data): OwnPackage[]` — versioned workspaces, i.e. packages the repository defines.
 - `definedPackages(data): { ecosystem, name }[]` — every workspace of any layer, versioned or not (Go main modules carry no version), deduplicated and sorted by name; what internal-package detection needs.
+- `devOnlyPackages(data): { ecosystem, name, version }[]` — packages of the `packages` layers that workspaces reach only through `dev` edges (every path from any workspace passes a `dev` edge; `peer` and `optional` edges count as runtime). A package that is runtime in any layer is left out, and so are packages no workspace reaches. Lockfiles without dependency groups (`yarn.lock`, `bun.lock`) still record this through their workspace edges.
 - `versionDrift(versions): 'none' | 'patch' | 'minor' | 'major'` — between the lowest and highest version; `major` when they are not semver-compatible (below 1.0 a minor bump is breaking).
 - `fleetLibraries(entries: { origin, data }[]): FleetLibrary[]` — one entry per library across repositories: `versions` in use, `latest` (highest in use, or the version in the fleet's own `source` when higher), `drift`, `usages` with their `lag` behind `latest`, and `behind` (usages with a lag). Sorted by drift, then `behind`, then usage count.
 
@@ -39,7 +40,7 @@ All pure.
 Packages the analyzed repositories define, for analyses that must tell them from third-party ones (licenses, the Dependencies API).
 
 - `latestDepgraphs(analyses, { accept? })` — the newest valid `depgraph` record of every repository from an `AnalysisStore`, by `forge:path` (`newestRecords` from [@holtkeeper/store](../../store/docs/README.md)): one record per repository, older ones only where the newest is not a valid graph; `accept` leaves out repositories by their newest record (e.g. by visibility).
-- `packageCatalog(entries: { repo, data }[]): PackageCatalog` — every versioned workspace (`ownPackages`) with the repository that defines it; when several define the same package, the highest version wins. `find(ecosystem, name)` returns `InternalPackage { ecosystem, name, version, repo, path? }`.
+- `packageCatalog(entries: { repo, data }[]): PackageCatalog` — every versioned workspace (`ownPackages`) and every Go module (`definedPackages`; Go main modules carry no version) with the repository that defines it; when several define the same package, the highest version wins. `find(ecosystem, name)` returns `InternalPackage { ecosystem, name, version?, repo, path? }`; for Go it also finds the module that contains a path (`example.com/kit/shapes` under `example.com/kit`). Version-less workspaces of other ecosystems (an npm `app`) stay out: their names are not unique outside the repository.
 - `loadPackageCatalog(analyses, options?)` — both together.
 
 ## Running sources

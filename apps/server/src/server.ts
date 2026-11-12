@@ -18,6 +18,7 @@ import {
   s3ArtifactStore,
 } from '@holtkeeper/artifacts'
 import { assetsPolicySetting } from '@holtkeeper/assets'
+import { createBrowserslistAnalyzer } from '@holtkeeper/browserslist'
 import { commitConventionsSetting } from '@holtkeeper/commit-conventions'
 import type { HoltkeeperFileConfig } from '@holtkeeper/core'
 import {
@@ -380,11 +381,15 @@ export async function startServer(
     fixes: { propose: (input) => proposePropagateFixes(taskDeps, input) },
     testsExpected,
   })
+  const browserslist = createBrowserslistAnalyzer({
+    conventions: (repo) => conventionsOf(repoTarget(config, repo)),
+  })
   const replacements: Record<string, AnyAnalyzer> = {
     review,
     propagate,
     tracker,
     guide,
+    browserslist,
     'write-task': writeTask,
   }
   const analyzers =

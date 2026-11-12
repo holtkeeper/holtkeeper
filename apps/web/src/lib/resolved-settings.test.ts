@@ -14,6 +14,7 @@ import {
   setHere,
   settingValueText,
   sourceLabel,
+  unknownKeysWarning,
 } from './resolved-settings.ts'
 import type { ScopeFocus } from './scope.ts'
 
@@ -196,4 +197,14 @@ test('repo.freeze reads as read-only or writable here', () => {
     settingValueText('repo.freeze', { frozen: false, until: '2026-12-01T00:00:00.000Z' }),
   ).toBe('Writable here · until 2026-12-01T00:00:00.000Z')
   expect(settingValueText('repo.tests', { expected: false })).toBeUndefined()
+})
+
+test('unknownKeysWarning names ignored keys and where moved ones went', () => {
+  expect(unknownKeysWarning(undefined)).toBeUndefined()
+  expect(unknownKeysWarning([])).toBeUndefined()
+  expect(
+    unknownKeysWarning([{ key: 'ignore', movedTo: 'widget.policy › ignore' }, { key: 'legacy' }]),
+  ).toBe(
+    'Ignored: ignore (moved to widget.policy › ignore), legacy (no longer an option). Nothing reads them here; remove them from this entry.',
+  )
 })

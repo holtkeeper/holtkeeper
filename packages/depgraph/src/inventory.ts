@@ -1,5 +1,5 @@
 import type { DepgraphData } from './analyze.ts'
-import type { DepEdgeKind, DepNode } from './model.ts'
+import type { DepEdge, DepEdgeKind, DepNode } from './model.ts'
 import { compareVersions } from './version.ts'
 
 /** A library a workspace depends on directly, with the version the resolver picked. */
@@ -95,6 +95,53 @@ export function definedPackages(data: DepgraphData): { ecosystem: string; name: 
           name: node.name,
         })
   return [...result.values()].toSorted((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Packages of the `packages` layers that the repository's workspaces reach only through `dev`
+ * edges: every path from a workspace to them starts with or contains a `dev` edge. Packages no
+ * workspace reaches are left out. Sorted by name, then version.
+ */
+export function devOnlyPackages(
+  data: DepgraphData,
+): { ecosystem: string; name: string; version: string }[] {
+  const result = new Map<string, { ecosystem: string; name: string; version: string }>()
+  const needed = new Set<string>()
+  for (const layer of data.layers) {
+    if (layer.id !== 'packages') continue
+    const out = new Map<string, DepEdge[]>()
+    for (const edge of layer.graph.edges) {
+      if (edge.kind === 'import') continue
+      const list = out.get(edge.from)
+      if (list) list.push(edge)
+      else out.set(edge.from, [edge])
+    }
+    const roots = layer.graph.nodes.filter((node) => node.kind === 'workspace').map((n) => n.id)
+    const reach = (follow: (edge: DepEdge) => boolean) => {
+      const seen = new Set(roots)
+      const queue = [...roots]
+      for (let id = queue.pop(); id !== undefined; id = queue.pop())
+        for (const edge of out.get(id) ?? [])
+          if (follow(edge) && !seen.has(edge.to)) {
+            seen.add(edge.to)
+            queue.push(edge.to)
+          }
+      return seen
+    }
+    const any = reach(() => true)
+    const runtime = reach((edge) => edge.kind !== 'dev')
+    for (const node of layer.graph.nodes) {
+      if (node.kind !== 'package' || node.version === undefined) continue
+      const key = `${node.ecosystem}\0${node.name}\0${node.version}`
+      if (runtime.has(node.id)) needed.add(key)
+      else if (any.has(node.id))
+        result.set(key, { ecosystem: node.ecosystem, name: node.name, version: node.version })
+    }
+  }
+  return [...result.entries()]
+    .filter(([key]) => !needed.has(key))
+    .map(([, pkg]) => pkg)
+    .toSorted((a, b) => a.name.localeCompare(b.name) || compareVersions(a.version, b.version))
 }
 
 /**

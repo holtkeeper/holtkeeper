@@ -103,7 +103,7 @@ describe('setting defaults', () => {
 
   test('analyzer defaults come from the options schema', () => {
     const audit = registered.find((definition) => definition.key === 'analyzers.audit')
-    expect(audit?.default).toEqual({ fix: false, allowlist: [], traits: {} })
+    expect(audit?.default).toEqual({ traits: {} })
   })
 
   test('definitions list their default', async () => {
@@ -167,13 +167,46 @@ describe('GET /api/settings/resolve', () => {
   })
 
   test('keeps analyzer options whole instead of merging them per field', async () => {
-    await put('all', 'analyzers.audit', { all: true }, { fix: true, allowlist: [] })
-    await put('repo', 'analyzers.audit', { repos: ['shapes/circle'] }, { fix: false })
+    await put('all', 'analyzers.audit', { all: true }, { traits: { ssr: true, tier: 1 } })
+    await put('repo', 'analyzers.audit', { repos: ['shapes/circle'] }, { traits: { ssr: false } })
     const body = (await (await resolve(setup())).json()) as ResolvedSettings
     const audit = body.rows.find((row) => row.key === 'analyzers.audit')
-    expect(audit?.value).toEqual({ fix: false })
-    expect(audit?.replaces).toMatchObject({ layer: 'org', value: { fix: true, allowlist: [] } })
+    expect(audit?.value).toEqual({ traits: { ssr: false } })
+    expect(audit?.replaces).toMatchObject({
+      layer: 'org',
+      value: { traits: { ssr: true, tier: 1 } },
+    })
     expect(audit?.overrides).toBe(1)
+  })
+
+  test('flags stored keys a setting no longer reads and says where moved ones went', async () => {
+    await put(
+      'assets',
+      'analyzers.assets',
+      { all: true },
+      { optimizeTop: 5, ignore: ['vendor/**'] },
+    )
+    await put('audit', 'analyzers.audit', { repos: ['shapes/circle'] }, { fix: true, extra: 1 })
+    await put('widget', 'acme.widget', { all: true }, { size: 1 })
+    const app = setup()
+
+    const list = (await (await app.request('/api/settings')).json()) as SettingList
+    const byId = new Map(list.settings.map((entry) => [entry.id, entry]))
+    expect(byId.get('assets')?.unknownKeys).toEqual([
+      { key: 'ignore', movedTo: 'assets.policy › ignore' },
+    ])
+    expect(byId.get('audit')?.unknownKeys).toEqual([
+      { key: 'fix', movedTo: 'audit.fix' },
+      { key: 'extra' },
+    ])
+    expect(byId.get('widget')).not.toHaveProperty('unknownKeys')
+
+    const body = (await (await resolve(app)).json()) as ResolvedSettings
+    expect(body.rows.find((row) => row.key === 'analyzers.audit')?.entry?.unknownKeys).toEqual([
+      { key: 'fix', movedTo: 'audit.fix' },
+      { key: 'extra' },
+    ])
+    expect(body.settings['analyzers.assets']?.unknownKeys).toHaveLength(1)
   })
 
   test('global settings count only entries for everything', async () => {

@@ -926,6 +926,17 @@ export interface SettingView {
   secret: boolean
   updatedAt: Timestamp
   updatedBy?: string
+  /**
+   * Keys of `value` the setting no longer knows: readers ignore them as if they were not stored.
+   * `movedTo` names where a moved option lives now. Absent when there are none.
+   */
+  unknownKeys?: UnknownSettingKeyView[]
+}
+
+/** A stored key a setting ignores; `movedTo` is set when the option moved to another setting. */
+export interface UnknownSettingKeyView {
+  key: string
+  movedTo?: string
 }
 
 /** A setting the server understands. `schema` is JSON Schema for building forms. */

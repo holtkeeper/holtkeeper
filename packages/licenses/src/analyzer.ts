@@ -1,5 +1,5 @@
 import { type AnalyzerPreset, defineAnalyzer, dependencyPaths } from '@holtkeeper/analyzer'
-import { loadPackageCatalog } from '@holtkeeper/depgraph'
+import { devOnlyPackages, latestDepgraphs, packageCatalog } from '@holtkeeper/depgraph'
 import { z } from 'zod'
 
 import { analyzeLicenses } from './analyze.ts'
@@ -40,6 +40,9 @@ export const licensesOptionsSchema = z.object({
 })
 
 export type LicensesOptions = z.output<typeof licensesOptionsSchema>
+
+const devKey = (pkg: { ecosystem: string; name: string; version: string }) =>
+  `${pkg.ecosystem}\0${pkg.name}\0${pkg.version}`
 
 /** Weak (file- or library-level) copyleft: fine to depend on unmodified in most products. */
 const weakCopyleft = ['LGPL-*', 'MPL-*', 'EPL-*', 'CDDL-*']
@@ -123,7 +126,8 @@ export const licensePresets: AnalyzerPreset<LicensesOptions>[] = [
 /**
  * The `licenses` analyzer: lists third-party packages of a checkout with their licenses through
  * osv-scanner and judges them against the allow and deny lists. Packages that analyzed
- * repositories define (their newest `depgraph` records in history) are `internal` instead.
+ * repositories define (their newest `depgraph` records in history) are `internal` instead; the
+ * repository's own newest `depgraph` record marks dev-only packages osv-scanner gives no groups.
  */
 export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
   kind: 'licenses',
@@ -131,6 +135,7 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
   scope: 'repo',
   refresh: { on: 'change', minInterval: '1d', paths: dependencyPaths },
   needs: { checkout: true, history: true },
+  after: ['depgraph'],
   options: licensesOptionsSchema,
   flags: [
     {
@@ -167,13 +172,22 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
     },
   ],
   presets: licensePresets,
-  async run({ dir, ref, runner, options, history, signal }) {
+  async run({ dir, ref, repo, runner, options, history, signal }) {
     if (!dir) throw new Error('the licenses analyzer needs a checkout')
-    const catalog = history ? await loadPackageCatalog(history.analyses) : undefined
+    const latest = history ? await latestDepgraphs(history.analyses) : undefined
+    const catalog =
+      latest &&
+      packageCatalog([...latest.values()].map(({ record, data }) => ({ repo: record.repo, data })))
+    const own = latest?.get(`${repo.forge}:${repo.path}`)
+    const devOnly = own && new Set(devOnlyPackages(own.data).map(devKey))
     const data = await analyzeLicenses({
       dir,
       runner,
       policy: options,
+      ...(devOnly && {
+        devOnly: (ecosystem: string, name: string, version: string) =>
+          devOnly.has(devKey({ ecosystem, name, version })),
+      }),
       ...(catalog && {
         internal: (ecosystem: string, name: string) => {
           const found = catalog.find(ecosystem, name)
