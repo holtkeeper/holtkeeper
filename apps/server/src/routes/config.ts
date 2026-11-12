@@ -189,6 +189,7 @@ const accountView = async (id: string, forge: GitForge): Promise<ForgeAccountVie
     name: user.name,
     ...(user.avatarUrl !== undefined && { avatarUrl: user.avatarUrl }),
     ...(user.webUrl !== undefined && { webUrl: user.webUrl }),
+    ...(user.manageUrl !== undefined && { manageUrl: user.manageUrl }),
     canSetAvatar: typeof forge.setCurrentUserAvatar === 'function',
   }
 }

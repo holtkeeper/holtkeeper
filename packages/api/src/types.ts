@@ -3877,7 +3877,8 @@ export interface RepoAccessBatch {
 
 /**
  * `GET /api/forges/:id/account` (global `settings:read`): the account behind the forge's token,
- * as the forge reports it now. The token cannot change the name or username: that takes signing
+ * as the forge reports it now. The token cannot change the name or username: for a group's service
+ * account `manageUrl` is the group page where its owners change them, otherwise it takes signing
  * in to the forge as this account. `canSetAvatar`: `PUT /api/forges/:id/account/avatar` works for this forge.
  */
 export interface ForgeAccountView {
@@ -3885,6 +3886,7 @@ export interface ForgeAccountView {
   name: string
   avatarUrl?: string
   webUrl?: string
+  manageUrl?: string
   canSetAvatar: boolean
 }
 

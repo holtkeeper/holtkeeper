@@ -20,7 +20,7 @@ export function BotAccount({ forgeId, writable }: { forgeId: string; writable: b
         Bot account not read: {messageOf(account.error)}
       </div>
     )
-  const { name, username, webUrl, canSetAvatar } = account.data
+  const { name, username, webUrl, manageUrl, canSetAvatar } = account.data
   const src = versionedAvatarUrl(account.data.avatarUrl, version)
 
   const choose = async (file: File | undefined) => {
@@ -75,8 +75,17 @@ export function BotAccount({ forgeId, writable }: { forgeId: string; writable: b
         </div>
       </div>
       <span className="text-xs text-muted">
-        The token cannot change the name or username: sign in to the forge as @{username} to change
-        them.
+        {manageUrl ? (
+          <>
+            A group service account: group owners change its name and username in the group&apos;s{' '}
+            <a href={manageUrl} target="_blank" rel="noreferrer" className="underline">
+              service account settings
+            </a>
+            .
+          </>
+        ) : (
+          <>The token cannot change the name or username: sign in to the forge as @{username}.</>
+        )}
       </span>
       {writable && canSetAvatar ? (
         <input

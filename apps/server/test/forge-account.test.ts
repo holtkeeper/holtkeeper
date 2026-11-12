@@ -28,6 +28,7 @@ const user = (): ForgeUser => ({
   name: 'Widget Bot',
   avatarUrl,
   webUrl: 'https://forge.test/widget-bot',
+  manageUrl: 'https://forge.test/groups/acme/-/settings/service_accounts',
 })
 
 const avatarForge = {

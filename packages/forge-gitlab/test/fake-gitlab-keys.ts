@@ -55,6 +55,9 @@ export class FakeGitLabKeys {
     }
   }
 
+  /** Whether `GET /user` answers as a group's service account. */
+  bot = false
+
   private route(method: string, s: string[], body: Record<string, unknown>): Response {
     if (method === 'GET' && s.length === 1 && s[0] === 'user')
       return json(200, {
@@ -65,7 +68,10 @@ export class FakeGitLabKeys {
         commit_email: 'bot-commits@example.com',
         avatar_url: 'https://gitlab.test/uploads/-/system/user/avatar/7/avatar.png',
         web_url: 'https://gitlab.test/holtkeeper-bot',
+        bot: this.bot,
       })
+    if (method === 'GET' && s.length === 1 && s[0] === 'groups')
+      return json(200, [{ full_path: 'acme' }])
     if (s[0] === 'user' && s[1] === 'keys') {
       if (method === 'GET' && s.length === 2) return json(200, [...this.userKeys.values()])
       if (method === 'POST' && s.length === 2) {

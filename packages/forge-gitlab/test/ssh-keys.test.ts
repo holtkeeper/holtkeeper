@@ -25,6 +25,14 @@ describe('current user', () => {
       webUrl: 'https://gitlab.test/holtkeeper-bot',
     })
   })
+
+  test("a group's service account links to the group's service account settings", async () => {
+    const { server, forge } = setup()
+    server.bot = true
+    expect((await forge.getCurrentUser!()).manageUrl).toBe(
+      'https://gitlab.test/groups/acme/-/settings/service_accounts',
+    )
+  })
 })
 
 describe('user SSH keys', () => {

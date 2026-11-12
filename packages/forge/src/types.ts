@@ -803,6 +803,11 @@ export interface ForgeUser {
   avatarUrl?: string
   /** The account's profile page on the forge, when the forge reports it. */
   webUrl?: string
+  /**
+   * For a service account a group owns: the group page where its owners change the account's name
+   * and username, which the account's own token cannot. Absent for ordinary users.
+   */
+  manageUrl?: string
 }
 
 /** An image for `setCurrentUserAvatar`. `filename` carries the extension forges check. */

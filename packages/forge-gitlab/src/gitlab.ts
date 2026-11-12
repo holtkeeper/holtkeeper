@@ -274,7 +274,9 @@ const currentUserSchema = z.object({
   email: z.string().nullable().optional(),
   avatar_url: z.string().nullable().optional(),
   web_url: z.string().nullable().optional(),
+  bot: z.boolean().nullable().optional(),
 })
+const topGroupSchema = z.object({ full_path: z.string() })
 const anySchema = z.unknown()
 const awardSchema = z.object({
   name: z.string(),
@@ -708,6 +710,20 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     },
 
     async getCurrentUser() {
+      const serviceAccountsPage = async () => {
+        try {
+          const [group] = await client.json('GET', 'groups', z.array(topGroupSchema), {
+            query: { top_level_only: true, min_access_level: 10, per_page: 1 },
+          })
+          return group
+            ? {
+                manageUrl: `${options.url.replace(/\/+$/, '')}/groups/${group.full_path}/-/settings/service_accounts`,
+              }
+            : {}
+        } catch {
+          return {}
+        }
+      }
       const user = await client.json('GET', 'user', currentUserSchema)
       const email = user.commit_email || user.email
       return {
@@ -716,6 +732,7 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         ...(email ? { email } : {}),
         ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
         ...(user.web_url ? { webUrl: user.web_url } : {}),
+        ...(user.bot && (await serviceAccountsPage())),
       }
     },
 
