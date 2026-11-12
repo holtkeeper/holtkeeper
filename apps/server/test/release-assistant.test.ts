@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { Principal } from '@holtkeeper/access'
 import type {
+  ReleaseDetectView,
   ReleaseGateError,
   ReleaseOverview,
   ReleaseRepoView,
@@ -27,10 +28,15 @@ const auth = headerAuth({
   roles: {
     admin: [{ scope: { all: true }, actions: ['releases:read', 'releases:run', 'settings:write'] }],
     viewer: [{ scope: { all: true }, actions: ['releases:read'] }],
+    configurer: [{ scope: { all: true }, actions: ['releases:read', 'settings:write'] }],
+    games: [{ scope: { groups: ['games'] }, actions: ['releases:read'] }],
+    toys: [{ scope: { repos: ['work:t/*'] }, actions: ['releases:read', 'releases:run'] }],
+    reposOnly: [{ scope: { all: true }, actions: ['repos:read'] }],
   },
 })
 const asAdmin = { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'admin' }
 const asViewer = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'viewer' }
+const as = (role: string) => ({ 'x-forwarded-user': `user-${role}`, 'x-forwarded-groups': role })
 
 let fake: FakeForge
 let store: Store
@@ -120,8 +126,8 @@ describe('release assistant routes', () => {
     const view = await viewOf()
     expect(view.proposal?.title).toBe('Release candidate 2026-11-01')
     expect(view.version).toBeUndefined()
-    expect(view.can).toEqual({ run: true, configure: true })
-    expect(view.detection?.mode).toBe('trunk')
+    expect(view.can).toEqual({ accept: false, run: true, configure: true })
+    expect(view).not.toHaveProperty('detection')
 
     expect((await viewOf(asViewer)).can.run).toBe(false)
     expect((await call('POST', '/releases/propose', { repo }, asViewer)).status).toBe(403)
@@ -403,6 +409,177 @@ describe('release assistant routes', () => {
     expect(audited[0]?.target).toEqual({ type: 'release', repo: 'work:g/app' })
   })
 
+  test('rows carry the pending plan: blockers, acceptance, reasons, tasks and left-out changes', async () => {
+    fake.commitTo('development', 'chore: tidy the gadgets')
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: {
+        enabled: true,
+        acceptance: 'manual',
+        changelog: { excludeTypes: ['chore'] },
+        deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }] },
+      },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    fake.addPipeline('v1.0.0', 'success', [{ name: 'deploy:preprod', status: 'success' }])
+    const [card] = (await overviewOf('?refresh=1')).cards
+    await Promise.all(background)
+    const fresh = (await overviewOf()).cards[0] ?? card
+    expect(fresh).toMatchObject({
+      stage: 'candidate',
+      next: '1.1.0',
+      blockers: [],
+      acceptanceRequired: true,
+      tasks: 2,
+      leftOut: 1,
+      environments: [{ name: 'preprod', tag: 'v1.0.0', version: '1.0.0', status: 'success' }],
+    })
+    expect(fresh?.reasons.length).toBeGreaterThan(0)
+    expect(fresh).not.toHaveProperty('detection')
+  })
+
+  test('offers accept only to callers with releases:run, on cards, the view and the timeline', async () => {
+    fake.merge('development', 'main')
+    const card = (await overviewOf('?refresh=1')).cards[0]
+    await Promise.all(background)
+    expect((await overviewOf()).cards[0]?.can).toEqual({ accept: true, run: true })
+    expect(card?.stage).toBe('awaiting-version')
+
+    const refused = async (headers: typeof asAdmin) => {
+      expect((await overviewOf('', headers)).cards[0]?.can).toEqual({ accept: false, run: false })
+      expect((await viewOf(headers)).can).toMatchObject({ accept: false, run: false })
+      const timeline = (await (
+        await call('GET', `/releases/timeline?repo=${repo}`, undefined, headers)
+      ).json()) as ReleaseTimelineView
+      expect(timeline.can).toEqual({ accept: false, run: false })
+      expect(
+        (await call('POST', '/releases/accept', { repo, note: 'looks fine' }, headers)).status,
+      ).toBe(403)
+    }
+    await refused(asViewer)
+    await refused(as('configurer'))
+    const timeline = await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}`)
+    expect(timeline.can).toEqual({ accept: true, run: true })
+
+    expect((await call('POST', '/releases/accept', { repo })).status).toBe(200)
+    expect((await viewOf()).can).toMatchObject({ accept: false, run: true })
+  })
+
+  test('offers neither accept nor run on a read-only repository', async () => {
+    fake.merge('development', 'main')
+    app = createApp({ ...deps, readOnly: async () => true })
+    await overviewOf('?refresh=1')
+    await Promise.all(background)
+    expect((await overviewOf()).cards[0]?.can).toEqual({ accept: false, run: false })
+    expect((await viewOf()).can).toMatchObject({ accept: false, run: false })
+    const timeline = await getJson<ReleaseTimelineView>(`/releases/timeline?repo=${repo}`)
+    expect(timeline.can).toEqual({ accept: false, run: false })
+    expect((await call('POST', '/releases/accept', { repo })).status).toBe(403)
+  })
+
+  test('detects the flow on demand, only for callers who may read the repository', async () => {
+    const detect = (headers: typeof asAdmin, target = repo) =>
+      call('GET', `/releases/detect?repo=${target}`, undefined, headers)
+    const response = await detect(asAdmin)
+    expect(response.status).toBe(200)
+    expect((await response.json()) as ReleaseDetectView).toMatchObject({
+      repo: { forge: 'work', path: 'g/app' },
+      detection: { mode: 'trunk' },
+      configured: false,
+    })
+    expect((await detect(as('games'))).status).toBe(200)
+    expect((await detect(as('toys'))).status).toBe(403)
+    expect((await detect(as('reposOnly'))).status).toBe(403)
+    expect((await detect(asAdmin, 'nowhere:g/app')).status).toBe(404)
+    expect((await call('GET', '/releases/detect')).status).toBe(400)
+
+    await store.settings.put({
+      id: 'releases-games',
+      key: 'releases',
+      scope: { groups: ['games'] },
+      value: { enabled: true },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    expect(((await (await detect(asAdmin)).json()) as ReleaseDetectView).configured).toBe(true)
+  })
+
+  test('the version sheet says who accepted and created a version, and how', async () => {
+    fake.merge('development', 'main')
+    expect((await call('POST', '/releases/accept', { repo, note: 'QA passed' })).status).toBe(200)
+    expect(
+      (
+        await call('PUT', '/releases/edits', {
+          repo,
+          step: 'version',
+          edits: { version: '1.2.0' },
+        })
+      ).status,
+    ).toBe(200)
+    expect((await run('/releases/version', { repo })).body).toMatchObject({ tag: 'v1.2.0' })
+
+    const detail = await getJson<ReleaseVersionDetailView>(
+      `/releases/version?repo=${repo}&tag=v1.2.0`,
+    )
+    expect(detail.provenance).toEqual({
+      accepted: {
+        actor: 'header:jane',
+        actorName: 'jane',
+        channel: 'api',
+        at: '2026-11-01T09:00:00.000Z',
+        via: 'manual',
+        note: 'QA passed',
+        sha: expect.any(String),
+      },
+      versioned: {
+        actor: 'header:jane',
+        actorName: 'jane',
+        channel: 'api',
+        at: '2026-11-01T09:00:00.000Z',
+        force: false,
+        notes: {
+          source: 'changelog',
+          edited: true,
+          markdown: '1 feature, 1 fix across 2 tickets.\n\n- gadgets',
+        },
+        url: expect.any(String),
+      },
+    })
+    expect(detail.provenance?.accepted?.sha).toBe(fake.branches.get('main'))
+    expect(detail.people).toEqual({})
+    const older = await getJson<ReleaseVersionDetailView>(
+      `/releases/version?repo=${repo}&tag=v1.0.0`,
+    )
+    expect(older.provenance).toBeUndefined()
+  })
+
+  test('records the changelog commit and an override on the version', async () => {
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: { enabled: true, acceptance: 'manual', changelogFile: true },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    fake.merge('development', 'main')
+    expect((await run('/releases/version', { repo, force: true })).body).toMatchObject({
+      tag: 'v1.1.0',
+    })
+    const detail = await getJson<ReleaseVersionDetailView>(
+      `/releases/version?repo=${repo}&tag=v1.1.0`,
+    )
+    expect(detail.provenance?.accepted).toBeUndefined()
+    expect(detail.provenance?.versioned).toMatchObject({
+      force: true,
+      notes: { source: 'changelog', edited: false },
+      changelogSha: fake.branches.get('main'),
+    })
+  })
+
   test('follows a started deploy until it fails', async () => {
     await store.settings.put({
       id: 'releases-deploy',
@@ -421,12 +598,32 @@ describe('release assistant routes', () => {
       repo,
       tag: 'v1.0.0',
       environment: 'preprod',
+      reason: 'hotfix for the dial',
     })
     expect(started.body).toMatchObject({ kind: 'deploy-started', tag: 'v1.0.0' })
     fake.jobs.get(1)![0]!.status = 'failed'
     await Promise.all(background)
     const view = await viewOf()
     expect(view.deploy?.environments[0]?.status).toBe('failed')
+    expect(view.deploy?.environments[0]?.attempts[0]).toMatchObject({
+      actor: 'header:jane',
+      actorName: 'jane',
+      reason: 'hotfix for the dial',
+    })
+    expect(view.row.environments).toEqual([
+      expect.objectContaining({ name: 'preprod', status: 'failed' }),
+    ])
+    const detail = await getJson<ReleaseVersionDetailView>(
+      `/releases/version?repo=${repo}&tag=v1.0.0`,
+    )
+    expect(detail.deploys).toEqual([
+      expect.objectContaining({
+        environment: 'preprod',
+        status: 'failed',
+        reason: 'hotfix for the dial',
+      }),
+    ])
+    expect(detail.deploy?.environments[0]?.attempts[0]?.reason).toBe('hotfix for the dial')
     expect(view.history.map((event) => [event.kind, event.environment])).toEqual([
       ['deploy-failed', 'preprod'],
       ['deploy-started', 'preprod'],
@@ -475,6 +672,36 @@ describe('release chat command', () => {
     expect(lastNote()).toContain('<sub>Changes wait for a release candidate</sub>')
     expect(lastNote()).toContain('- **Next:** `1.1.0` (minor)')
     expect(lastNote()).toContain('`/holtkeeper release propose` — Open the release candidate')
+  })
+
+  test('accepts through chat only while an acceptance waits', async () => {
+    fake.merge('development', 'main')
+    await linkJane()
+    await say('/holtkeeper release')
+    expect(lastNote()).toContain('`/holtkeeper release accept` — Accept the changes')
+    await say('/holtkeeper release accept')
+    expect(lastNote()).toContain('Accepted · g/app')
+    await say('/holtkeeper release accept')
+    expect(lastNote()).toContain('main is already accepted.')
+    await say('/holtkeeper release')
+    expect(lastNote()).not.toContain('release accept`')
+  })
+
+  test('refuses accept through chat when the flow needs no acceptance', async () => {
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: { enabled: true, acceptance: 'none' },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    fake.merge('development', 'main')
+    await linkJane()
+    await say('/holtkeeper release accept')
+    expect(lastNote()).toContain('The flow needs no acceptance')
+    await say('/holtkeeper release')
+    expect(lastNote()).not.toContain('release accept`')
   })
 
   test('asks before deploying, then follows the deploy in one note', async () => {

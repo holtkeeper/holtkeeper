@@ -3,7 +3,7 @@ import type { StackGroupView, StackUse } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
 
-import { repoKey } from './repos.ts'
+import { repoKey } from '../context.ts'
 
 /** What the `stack` tools read, limited to what one caller may see. */
 export interface StackToolsContext {

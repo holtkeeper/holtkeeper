@@ -1,15 +1,48 @@
-import type { ChatCommandView, ChatThreadView } from '@holtkeeper/api'
-import { Archive, ArchiveRestore, FolderGit2, Pencil, Users } from 'lucide-react'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ChatCommandView, ChatMessageRef, ChatThreadView } from '@holtkeeper/api'
+import { Link } from '@tanstack/react-router'
+import {
+  Archive,
+  ArchiveRestore,
+  Bell,
+  BellOff,
+  Download,
+  FolderGit2,
+  Pencil,
+  Plus,
+  Users,
+  X,
+} from 'lucide-react'
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useChatMutations, useChatPeople, useChatThread } from '../../api/queries.ts'
-import { firstUnreadId, formatCost, groupMessages, threadScope } from '../../lib/chat.ts'
+import { api } from '../../api/endpoints.ts'
+import {
+  useChatContext,
+  useChatMutations,
+  useChatPeople,
+  useChatThread,
+  useRepos,
+} from '../../api/queries.ts'
+import {
+  addableRepos,
+  firstUnreadId,
+  formatCost,
+  groupMessages,
+  threadKind,
+  threadRefs,
+  threadScope,
+  toolSummary,
+} from '../../lib/chat.ts'
+import { plural, shortId } from '../../lib/format.ts'
+import { repoKey } from '../../lib/repo.ts'
 import {
   Avatar,
   Button,
   ErrorState,
+  MoreMenu,
+  type MoreMenuItem,
   Placeholder,
+  Select,
   Switch,
   Tag,
   Tooltip,
@@ -18,6 +51,7 @@ import {
 import { useSession } from '../shell/session.ts'
 import { Composer } from './Composer.tsx'
 import { MessageGroupView } from './Messages.tsx'
+import { RefChips } from './Refs.tsx'
 
 function Title({ thread }: { thread: ChatThreadView }) {
   const { update } = useChatMutations()
@@ -66,12 +100,112 @@ function Title({ thread }: { thread: ChatThreadView }) {
   )
 }
 
-function Context({ thread, spend }: { thread: ChatThreadView; spend: number }) {
-  const { update } = useChatMutations()
+function Section({
+  title,
+  aside,
+  children,
+}: {
+  title: string
+  aside?: ReactNode
+  children: ReactNode
+}) {
   return (
-    <aside className="hidden w-60 shrink-0 flex-col gap-5 overflow-y-auto border-l border-line p-4 xl:flex">
-      <section className="flex flex-col gap-1.5">
-        <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">About</h3>
+    <section className="flex flex-col gap-2">
+      <h3 className="flex items-baseline justify-between gap-2 text-[11px] font-medium tracking-wide text-muted uppercase">
+        {title}
+        {aside ? (
+          <span className="mono text-[11px] tracking-normal normal-case">{aside}</span>
+        ) : null}
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+function ContextRepos({ thread, hidden }: { thread: ChatThreadView; hidden: number }) {
+  const { update } = useChatMutations()
+  const [adding, setAdding] = useState(false)
+  const repos = useRepos(adding)
+  const save = (contextRepos: string[]) =>
+    update.mutate(
+      { id: thread.id, contextRepos },
+      { onError: (error) => notify.error('Context not saved', messageOf(error)) },
+    )
+  const options = addableRepos(
+    (repos.data?.repos ?? []).map((entry) => repoKey(entry.repo)),
+    thread.contextRepos,
+  )
+  return (
+    <Section title="Context" aside={thread.contextRepos.length || undefined}>
+      {thread.contextRepos.length ? (
+        <ul className="flex flex-col gap-1">
+          {thread.contextRepos.map((repo) => (
+            <li key={repo} className="flex items-center gap-1.5 text-[12.5px]">
+              <FolderGit2 aria-hidden className="size-3.5 shrink-0 text-muted" />
+              <span className="mono min-w-0 flex-1 truncate">{threadScope({ repo })}</span>
+              {thread.archived ? null : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  isIconOnly
+                  aria-label={`Remove ${repo} from the context`}
+                  isDisabled={update.isPending}
+                  onPress={() => save(thread.contextRepos.filter((each) => each !== repo))}
+                >
+                  <X className="size-3" aria-hidden />
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-[12px] text-muted">No repositories attached.</p>
+      )}
+      {hidden > 0 ? (
+        <p className="text-[11px] text-dim">
+          {plural(hidden, 'more repository', 'more repositories')} you cannot read.
+        </p>
+      ) : null}
+      {thread.archived ? null : adding ? (
+        <Select
+          aria-label="Repository to add"
+          placeholder={repos.isPending ? 'Loading repositories…' : 'Pick a repository'}
+          value={undefined}
+          isDisabled={repos.isPending}
+          onChange={(repo) => {
+            setAdding(false)
+            save([...thread.contextRepos, repo])
+          }}
+          options={options.map((repo) => ({
+            id: repo,
+            label: <span className="mono">{threadScope({ repo })}</span>,
+            text: repo,
+          }))}
+        />
+      ) : (
+        <Button size="sm" variant="ghost" className="self-start" onPress={() => setAdding(true)}>
+          <Plus className="size-3.5" aria-hidden /> Add repo
+        </Button>
+      )}
+      <p className="text-[11px] text-dim">
+        Holtkeeper reads these repositories when it answers, only where the person asking may read
+        them.
+      </p>
+    </Section>
+  )
+}
+
+function Context({ thread, refs }: { thread: ChatThreadView; refs: readonly ChatMessageRef[] }) {
+  const { update } = useChatMutations()
+  const context = useChatContext(thread.id)
+  const data = context.data
+  const counts = new Map((data?.participants ?? []).map((person) => [person.id, person.messages]))
+  const mentioned = (data?.repos ?? []).filter(
+    (repo) => repo !== thread.repo && !thread.contextRepos.includes(repo),
+  )
+  return (
+    <aside className="hidden w-64 shrink-0 flex-col gap-5 overflow-y-auto border-l border-line p-4 xl:flex">
+      <Section title="Thread" aside={shortId(thread.id)}>
         <span className="flex items-center gap-1.5 text-[13px]">
           {thread.repo ? (
             <FolderGit2 className="size-3.5 text-muted" aria-hidden />
@@ -80,6 +214,10 @@ function Context({ thread, spend }: { thread: ChatThreadView; spend: number }) {
           )}
           <span className="mono truncate">{threadScope(thread)}</span>
         </span>
+        <p className="text-[12px] text-muted">
+          {threadKind(thread)} · {plural(data?.messageCount ?? thread.messageCount, 'message')}
+          {thread.muted ? ' · muted' : ''}
+        </p>
         {thread.groups.length ? (
           <div className="flex flex-wrap gap-1">
             {thread.groups.map((group) => (
@@ -87,17 +225,41 @@ function Context({ thread, spend }: { thread: ChatThreadView; spend: number }) {
             ))}
           </div>
         ) : null}
-      </section>
-      <section className="flex flex-col gap-2">
-        <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Participants</h3>
+      </Section>
+      <ContextRepos thread={thread} hidden={data?.hiddenRepoCount ?? 0} />
+      {mentioned.length ? (
+        <Section title="Mentioned" aside={mentioned.length}>
+          <RefChips refs={mentioned.map((repo) => ({ kind: 'repo' as const, repo }))} />
+        </Section>
+      ) : null}
+      <Section title="Agent">
+        <Switch
+          label="Reply to every message"
+          isSelected={thread.autoReply}
+          isDisabled={thread.archived}
+          onChange={(autoReply) => update.mutate({ id: thread.id, autoReply })}
+        />
+        <p className="text-[11px] text-dim">
+          {thread.autoReply
+            ? 'Holtkeeper answers every message here.'
+            : 'Off: Holtkeeper replies only when someone mentions @holtkeeper.'}
+          {thread.summarized ? ' Older messages reach the agent as a summary.' : ''}
+        </p>
+        {data?.tools.length ? (
+          <p className="mono text-[11px] text-muted" title="Tool calls over every reply">
+            {toolSummary(data.tools)}
+          </p>
+        ) : null}
+      </Section>
+      <Section title="Participants" aside={thread.participants.length}>
         <ul className="flex flex-col gap-1.5">
           {thread.participants.map((person) => (
             <li key={person.id} className="flex items-center gap-2 text-[13px]">
               <Avatar src={person.avatarUrl} name={person.name ?? person.label} size="xs" />
-              <span className="truncate">{person.name ?? person.label}</span>
-              <Tooltip content="All Holtkeeper knows of this person">
-                <span className="ml-auto shrink-0 text-[10px] text-dim">
-                  {person.label.replace('Participant ', '')}
+              <span className="min-w-0 flex-1 truncate">{person.name ?? person.label}</span>
+              <Tooltip content={`${person.label}: all Holtkeeper knows of this person`}>
+                <span className="mono shrink-0 text-[10px] text-dim">
+                  {counts.get(person.id) ?? 0} · {person.label.replace('Participant ', '')}
                 </span>
               </Tooltip>
             </li>
@@ -106,25 +268,56 @@ function Context({ thread, spend }: { thread: ChatThreadView; spend: number }) {
         <p className="text-[11px] text-dim">
           Holtkeeper refers to people by these labels and removes the names and emails it knows.
         </p>
-      </section>
-      <section className="flex flex-col gap-2">
-        <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Agent</h3>
-        <Switch
-          label="Reply to every message"
-          isSelected={thread.autoReply}
-          isDisabled={thread.archived}
-          onChange={(autoReply) => update.mutate({ id: thread.id, autoReply })}
-        />
-        <div className="flex items-baseline justify-between text-[12px]">
-          <span className="text-muted">Agent spend, loaded replies</span>
-          <span className="mono">{formatCost(spend)}</span>
-        </div>
-        {thread.summarized ? (
-          <p className="text-[11px] text-dim">Older messages reach the agent as a summary.</p>
-        ) : null}
-      </section>
+      </Section>
+      {refs.length ? (
+        <Section title="Cited and linked" aside={refs.length}>
+          <RefChips refs={refs} />
+        </Section>
+      ) : null}
+      {data?.costUsd !== undefined ? (
+        <Section title="Agent cost">
+          <div className="flex items-baseline justify-between text-[12px]">
+            <span className="text-muted">Thread total</span>
+            <span className="mono">{formatCost(data.costUsd)}</span>
+          </div>
+          <Link to="/ops/spend" className="text-[12px] text-muted hover:text-foreground">
+            Open AI spend
+          </Link>
+        </Section>
+      ) : null}
     </aside>
   )
+}
+
+/** Mute, Export and Archive of the open thread, in its "⋯" menu. */
+function threadMenu(
+  thread: ChatThreadView,
+  update: (input: { muted?: boolean; archived?: boolean }) => void,
+): MoreMenuItem[] {
+  return [
+    {
+      label: thread.muted ? 'Unmute thread' : 'Mute thread',
+      icon: thread.muted ? Bell : BellOff,
+      onAction: () => update({ muted: !thread.muted }),
+    },
+    {
+      label: 'Export as Markdown',
+      icon: Download,
+      onAction: () => download(api.chatExportUrl(thread.id)),
+    },
+    {
+      label: thread.archived ? 'Restore thread' : 'Archive thread',
+      icon: thread.archived ? ArchiveRestore : Archive,
+      onAction: () => update({ archived: !thread.archived }),
+    },
+  ]
+}
+
+function download(url: string) {
+  const link = document.createElement('a')
+  link.href = url
+  link.rel = 'noopener'
+  link.click()
 }
 
 /** The open thread: header, messages with day and unread lines, the composer and its context. */
@@ -150,7 +343,7 @@ export function ThreadPane({
   const list = useMemo(() => data?.messages ?? [], [data])
   const groups = useMemo(() => groupMessages(list), [list])
   const last = list.at(-1)
-  const spend = list.reduce((sum, message) => sum + (message.costUsd ?? 0), 0)
+  const refs = useMemo(() => threadRefs(list), [list])
   const myHandle = people.data?.people.find((person) => person.id === principal.id)?.handle
 
   useEffect(() => {
@@ -202,18 +395,20 @@ export function ThreadPane({
           <Title key={thread.id} thread={thread} />
           <Tag mono>{threadScope(thread)}</Tag>
           {thread.autoReply ? <Tag tone="accent">Auto reply</Tag> : null}
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() => update.mutate({ id: threadId, archived: !thread.archived })}
-          >
-            {thread.archived ? (
-              <ArchiveRestore className="size-3.5" aria-hidden />
-            ) : (
-              <Archive className="size-3.5" aria-hidden />
+          {thread.muted ? (
+            <Tag>
+              <BellOff aria-hidden className="size-3" /> Muted
+            </Tag>
+          ) : null}
+          <MoreMenu
+            aria-label="Thread actions"
+            items={threadMenu(thread, (input) =>
+              update.mutate(
+                { id: threadId, ...input },
+                { onError: (error) => notify.error('Not changed', messageOf(error)) },
+              ),
             )}
-            {thread.archived ? 'Restore' : 'Archive'}
-          </Button>
+          />
         </header>
         <div
           ref={scroller}
@@ -290,7 +485,7 @@ export function ThreadPane({
           </div>
         </div>
       </section>
-      <Context thread={thread} spend={spend} />
+      <Context thread={thread} refs={refs} />
     </div>
   )
 }

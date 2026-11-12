@@ -12,6 +12,10 @@ image:
 # HTTP port of every process (API on web, probes and /metrics on all of them).
 port: 7420
 
+# Release the panel shows (HOLTKEEPER_VERSION in every container). Empty: image.tag, then the
+# chart's appVersion.
+version: ''
+
 config:
   # Content of holtkeeper.config.ts, mounted read-only at /app/config/holtkeeper.config.ts. It holds
   # infrastructure only; forges, groups, triggers and analyzer options are set in the panel.

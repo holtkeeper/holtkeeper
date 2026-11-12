@@ -92,7 +92,7 @@ export function SlackTokensSection() {
           <div className="flex items-center gap-2">
             <Button
               type="submit"
-              variant="primary"
+              variant="secondary"
               size="sm"
               isPending={connect.isPending}
               isDisabled={!botToken.trim() || !signingSecret.trim()}

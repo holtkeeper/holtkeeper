@@ -1,4 +1,7 @@
-import type { AnalysisSummary, Block, Metric } from '@holtkeeper/api'
+import type { AnalysisSummary, Block, Metric, Report, Section } from '@holtkeeper/api'
+
+import { searchEntry, searchEnum, searchText } from './search-params.ts'
+import { formatValue } from './units.ts'
 
 /** Every block type in the report model; the compiler fails when the model gains a new one. */
 export const blockTypes = [
@@ -18,75 +21,98 @@ type MissingBlock = Exclude<Block['type'], (typeof blockTypes)[number]>
 const exhaustive: MissingBlock extends never ? true : never = true
 void exhaustive
 
-/** Sidebar pages for analysis kinds: route, kind, title, icon and the metrics their trend prefers. */
+/**
+ * Workspace pages for analysis kinds: route, the workspace and repository hub area they belong to,
+ * kind, title and the metrics their trend prefers.
+ */
 export const analysisPages = [
   {
-    to: '/bundles',
+    to: '/quality/bundles',
+    workspace: 'quality',
+    section: 'bundles',
     kind: 'bundle',
     title: 'Bundles',
-    icon: 'bundles',
-    description: 'App builds and published packages: size per entrypoint and release',
     trend: [/gzip/i, /size/i],
   },
   {
-    to: '/dependencies',
+    to: '/supply/libraries',
+    workspace: 'supply',
+    section: 'libraries',
     kind: 'depgraph',
-    title: 'Dependencies',
-    icon: 'dependencies',
-    description: 'Workspace graph, cycles and duplicates',
+    title: 'Libraries',
     trend: [/cycle/i, /duplicate/i],
   },
   {
-    to: '/coverage',
+    to: '/quality/coverage',
+    workspace: 'quality',
+    section: 'coverage',
     kind: 'coverage',
-    title: 'Test coverage',
-    icon: 'coverage',
-    description: 'Line and branch coverage per repository, package and folder',
+    title: 'Coverage',
     trend: [/line coverage/i, /without tests/i],
   },
   {
-    to: '/branches',
+    to: '/quality/branches',
+    workspace: 'quality',
+    section: 'branches',
     kind: 'branches',
     title: 'Branches',
-    icon: 'branches',
-    description: 'Merged, abandoned and stale branches to delete',
     trend: [/clean up/i, /stale/i],
   },
   {
-    to: '/ci',
+    to: '/quality/ci',
+    workspace: 'quality',
+    section: 'ci',
     kind: 'ci-jobs',
     title: 'CI',
-    icon: 'ci',
-    description: 'Pipeline time, success rate and problem jobs',
     trend: [/pipeline time/i, /success rate/i],
   },
   {
-    to: '/licenses',
+    to: '/supply/licenses',
+    workspace: 'supply',
+    section: 'licenses',
     kind: 'licenses',
     title: 'Licenses',
-    icon: 'licenses',
-    description: 'Dependency licenses, policy violations and unknowns',
     trend: [/violations/i, /unknown/i],
   },
   {
-    to: '/public-api',
+    to: '/supply/public-api',
+    workspace: 'supply',
+    section: 'public-api',
     kind: 'api-surface',
     title: 'Public API',
-    icon: 'api',
-    description: 'Exports of every package per version, diffs and the MCP endpoint for agents',
     trend: [/documented/i, /exports/i],
+  },
+  {
+    to: '/quality/assets',
+    workspace: 'quality',
+    section: 'assets',
+    kind: 'assets',
+    title: 'Assets',
+    trend: [/sav/i, /size/i],
+  },
+  {
+    to: '/quality/reviews',
+    workspace: 'quality',
+    section: 'reviews',
+    kind: 'review',
+    title: 'Reviews',
+    trend: [/finding/i],
   },
 ] as const
 
-/** Where records of the group-scoped `stack` kind belong: the Stack page. */
-export const stackRecords = { to: '/stack', kind: 'stack', title: 'Stack' } as const
+/** Where records of the group-scoped `stack` kind belong: Supply › Stack. */
+export const stackRecords = { to: '/supply/stack', kind: 'stack', title: 'Stack' } as const
 
 /**
- * Where the records of a kind without a page of their own live: a tab of the repository page,
- * `undefined` for its first tab.
+ * The repository hub tab and area that show records of `kind`: Quality or Supply chain and the
+ * kind's area there, `undefined` for kinds without one (the hub's Overview).
  */
-export const recordRepoTab = (kind: string): 'assets' | 'reviews' | undefined =>
-  kind === 'assets' ? 'assets' : kind === 'review' ? 'reviews' : undefined
+export function recordRepoTab(
+  kind: string,
+): { tab: 'quality' | 'supply'; section: string } | undefined {
+  const page = analysisPages.find((p) => p.kind === kind)
+  return page ? { tab: page.workspace, section: page.section } : undefined
+}
 
 /**
  * Metrics worth charting across records: numeric in the newest record, one per pattern in
@@ -107,67 +133,120 @@ export function trendMetrics(
   return picked.length ? picked : numeric.slice(0, 1)
 }
 
-/** The values of one metric across records, oldest first, skipping records without it. */
-export function metricSeries(
-  analyses: readonly AnalysisSummary[],
-  metricId: string,
-): { at: string; value: number }[] {
-  return analyses
-    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
-    .flatMap((analysis) => {
-      const value = analysis.metrics.find((m) => m.id === metricId)?.value
-      return typeof value === 'number' ? [{ at: analysis.createdAt, value }] : []
-    })
-}
-
-/** `metrics` with `delta` filled in from the same metric of `previous` where it is missing. */
-export function withDeltas(metrics: readonly Metric[], previous?: readonly Metric[]): Metric[] {
-  return metrics.map((metric) => {
-    if (metric.delta !== undefined || typeof metric.value !== 'number') return metric
-    const before = previous?.find((m) => m.id === metric.id)?.value
-    return typeof before === 'number' ? { ...metric, delta: metric.value - before } : metric
-  })
-}
-
-/** The newest record of one repository with what the list knows about its history. */
-export interface RepoLatest {
-  latest: AnalysisSummary
-  /** Its metrics with deltas against the repository's record before it. */
-  metrics: Metric[]
-  /** Records of the repository in the list. */
-  count: number
-  /** Values of `metricId` across the repository's records, oldest first. */
-  series: number[]
-}
-
-/**
- * One entry per repository of `analyses` (newest first, as the API lists them): the newest
- * record, deltas against the one before it and the series of `metricId` for a sparkline.
- */
-export function latestPerRepo(
-  analyses: readonly AnalysisSummary[],
-  metricId: string | undefined,
-): RepoLatest[] {
-  const byRepo = new Map<string, AnalysisSummary[]>()
-  for (const analysis of analyses) {
-    const key = `${analysis.repo.forge}:${analysis.repo.path}`
-    byRepo.set(key, [...(byRepo.get(key) ?? []), analysis])
-  }
-  return [...byRepo.values()].flatMap((records) => {
-    const ordered = records.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
-    const [latest, previous] = ordered
-    if (!latest) return []
-    return [
-      {
-        latest,
-        metrics: withDeltas(latest.metrics, previous?.metrics),
-        count: ordered.length,
-        series: metricId ? metricSeries(ordered, metricId).map((point) => point.value) : [],
-      },
-    ]
-  })
-}
-
 /** Section anchor id, safe for `id` attributes and URLs. */
 export const sectionAnchor = (id: string): string =>
   `section-${id.replace(/[^a-z0-9_-]+/gi, '-').toLowerCase()}`
+
+/**
+ * `report` split for the record page's tabs: the report without its `changes` blocks (sections
+ * left empty are dropped), the sections holding only those blocks, and the number of changes.
+ */
+export function splitChanges(report: Report): {
+  report: Report
+  changes: Section[]
+  count: number
+} {
+  const changes = report.sections.flatMap((section) => {
+    const blocks = section.blocks.filter((block) => block.type === 'changes')
+    return blocks.length ? [{ ...section, blocks }] : []
+  })
+  const sections = report.sections.flatMap((section) => {
+    const blocks = section.blocks.filter((block) => block.type !== 'changes')
+    return blocks.length ? [{ ...section, blocks }] : []
+  })
+  const count = changes
+    .flatMap((section) => section.blocks)
+    .reduce((sum, block) => sum + (block.type === 'changes' ? block.items.length : 0), 0)
+  return { report: { ...report, sections }, changes, count }
+}
+
+/** One record on the record page's version chart. */
+export interface VersionPoint {
+  id: string
+  createdAt: string
+  value?: number
+  /** `value` with its unit, `—` without one. */
+  text: string
+  /** Bar height between 0 and 1 relative to the shown records; 0 without a value. */
+  height: number
+  /** A release tag the record ran on, e.g. `v2.13.0`. */
+  tag?: string
+  /** `a` is the compare base, `b` the record shown. */
+  role?: 'a' | 'b'
+}
+
+const releaseTag = (ref: string | undefined): string | undefined => {
+  const name = ref?.replace(/^refs\/tags\//, '')
+  return name && /^v?\d+(\.\d+)+/.test(name) ? name : undefined
+}
+
+/**
+ * Records of one kind and repository as chart points, oldest first: at most `max` of them, the
+ * window placed so `pair.b` (the record shown) and, when it fits, `pair.a` are inside it. Values
+ * come from `metric`; records without it stay on the chart with no bar.
+ */
+export function versionPoints(
+  records: readonly AnalysisSummary[],
+  metric: Pick<Metric, 'id' | 'unit'>,
+  pair: { a?: string | undefined; b: string },
+  max = 24,
+): VersionPoint[] {
+  const ordered = records.toSorted((x, y) => x.createdAt.localeCompare(y.createdAt))
+  const indexOf = (id: string | undefined) => ordered.findIndex((record) => record.id === id)
+  const b = indexOf(pair.b)
+  const a = indexOf(pair.a)
+  const anchor = b < 0 ? ordered.length - 1 : b
+  const both = a >= 0 && Math.abs(a - anchor) < max
+  const low = both ? Math.min(a, anchor) : anchor
+  const high = both ? Math.max(a, anchor) : anchor
+  let end = Math.min(ordered.length, high + 3)
+  let start = Math.max(0, end - max)
+  if (low < start) {
+    start = low
+    end = Math.min(ordered.length, start + max)
+  }
+  const shown = ordered.slice(start, end)
+  const value = (record: AnalysisSummary) => {
+    const found = record.metrics.find((m) => m.id === metric.id)?.value
+    return typeof found === 'number' && Number.isFinite(found) ? found : undefined
+  }
+  const values = shown.flatMap((record) => {
+    const v = value(record)
+    return v === undefined ? [] : [v]
+  })
+  const least = Math.min(...values)
+  const most = Math.max(...values)
+  return shown.map((record) => {
+    const v = value(record)
+    const tag = releaseTag(record.ref)
+    const role = record.id === pair.b ? 'b' : record.id === pair.a ? 'a' : undefined
+    return {
+      id: record.id,
+      createdAt: record.createdAt,
+      ...(v === undefined ? {} : { value: v }),
+      text: formatValue(v, metric.unit),
+      height:
+        v === undefined ? 0 : most === least ? 0.6 : 0.15 + (0.85 * (v - least)) / (most - least),
+      ...(tag ? { tag } : {}),
+      ...(role ? { role } : {}),
+    }
+  })
+}
+
+/**
+ * Search parameters of an analysis record's page: `compare` is the record id to compare with (the
+ * A of the version chart; the record itself is B), `view` the tab (Report when absent) and
+ * `metric` the metric id the version chart plots.
+ */
+export interface AnalysisSearch {
+  compare?: string
+  view?: 'changes' | 'log'
+  metric?: string
+}
+
+/** `AnalysisSearch` from raw search values; unknown and empty values are dropped. */
+export const parseAnalysisSearch = (search: Record<string, unknown>): AnalysisSearch => ({
+  ...searchEntry('compare', searchText(search.compare)),
+  ...searchEntry('view', searchEnum(search.view, ['changes', 'log'] as const)),
+  ...searchEntry('metric', searchText(search.metric)),
+})

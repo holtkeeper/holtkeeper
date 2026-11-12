@@ -1,15 +1,16 @@
 import { type RepoTarget, type Scope, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import {
-  type AiUsageRecord,
   type AiUsageStore,
   type AuditStore,
+  type NewAiUsageRecord,
   type SettingEntry,
   type SettingStore,
   SYSTEM_ACTOR,
 } from '@holtkeeper/store'
 import { z } from 'zod'
 
-import { type PeriodRange, instanceTimeZone, projectPeriodEnd, weekRange } from './period.ts'
+import { automaticStopsAt, spendForecast } from './forecast.ts'
+import { type PeriodRange, instanceTimeZone, weekRange } from './period.ts'
 
 /** Setting key holding budgets. */
 export const budgetKey = 'llm.budget'
@@ -20,12 +21,16 @@ export const DEFAULT_WEEKLY_USD = 150
 /** Part of the weekly limit kept for interactive work when a budget does not set one. */
 export const DEFAULT_RESERVE_USD = 25
 
+/** Share of the weekly limit, in percent, at which a budget shows as close to it when it does not set one. */
+const DEFAULT_WARN_PERCENT = 80
+
 /** Value of an `llm.budget` setting. Same shape as the definition in `@holtkeeper/settings`. */
 export const budgetSchema = z.object({
   weeklyUsd: z.number().positive().default(DEFAULT_WEEKLY_USD),
   /** Capped at `weeklyUsd`: a reserve as large as the budget leaves automatic work nothing. */
   reserveUsd: z.number().min(0).default(DEFAULT_RESERVE_USD),
   action: z.enum(['block', 'warn']).default('block'),
+  warnPercent: z.number().int().min(1).max(100).default(DEFAULT_WARN_PERCENT),
 })
 
 export type Budget = z.infer<typeof budgetSchema>
@@ -86,7 +91,7 @@ export interface BudgetCheck {
 export interface BudgetGuard {
   check(run: BudgetCheck): Promise<BudgetDecision>
   /** Counts a just-recorded run in the cached spend so the cache does not lag behind. */
-  note(record: Omit<AiUsageRecord, 'id'>): void
+  note(record: NewAiUsageRecord): void
 }
 
 /** Valid `llm.budget` entries; entries whose value does not parse are skipped. */
@@ -283,7 +288,7 @@ export function budgetGuard({
   }
 }
 
-/** A budget with this week's spend, for display. */
+/** A budget with this week's spend and where the week is heading, for display. */
 export interface BudgetStatus {
   /** Setting entry id, or `DEFAULT_BUDGET_ID` for the implicit default. */
   id: string
@@ -291,18 +296,28 @@ export interface BudgetStatus {
   action: Budget['action']
   weeklyUsd: number
   reserveUsd: number
+  /** Share of `weeklyUsd`, in percent, at which the budget shows as close to its limit. */
+  warnPercent: number
   spentUsd: number
+  /** Part of `spentUsd` automatic work spent. */
+  automaticUsd: number
   /** `spentUsd / weeklyUsd * 100`. */
   percent: number
-  /** Linear projection of this week's spend to its end. */
-  projectedUsd: number
+  /** Expected spend in the budget's scope by the end of the week (`spendForecast`). */
+  forecastUsd: number
+  /**
+   * When spend is expected to reach `weeklyUsd - reserveUsd` this week at the forecast pace;
+   * absent when it is not expected to, or `spentUsd` already reached it (automatic work stopped).
+   */
+  automaticStopsAt?: string
   /** The current week, Monday 00:00 to Monday 00:00 in the instance time zone. */
   week: PeriodRange
 }
 
 /**
- * This week's state of every valid budget among `entries`, at `now`; the default budget stands in
- * for a missing global one when `includeDefault` is set.
+ * This week's state of every valid budget among `entries`, at `now`, with the forecast over each
+ * budget's scope; the default budget stands in for a missing global one when `includeDefault` is
+ * set.
  */
 export async function budgetStatuses(
   entries: readonly SettingEntry[],
@@ -313,22 +328,37 @@ export async function budgetStatuses(
     includeDefault = false,
   }: { timeZone?: string; includeDefault?: boolean } = {},
 ): Promise<BudgetStatus[]> {
-  const week = weekRange(now, timeZone)
   const parsed = parseBudgets(entries)
   return Promise.all(
     (includeDefault ? withDefaultBudget(parsed) : parsed).map(async ({ id, scope, budget }) => {
-      const { costUsd: spentUsd } = await spendOf(usage, week, { scope })
+      const forecast = await spendForecast(usage, now, { filter: { scopes: [scope] }, timeZone })
+      const stopsAt = automaticStopsAt(budget, forecast, now)
       return {
         id,
         scope,
         action: budget.action,
         weeklyUsd: budget.weeklyUsd,
         reserveUsd: budget.reserveUsd,
-        spentUsd,
-        percent: (spentUsd / budget.weeklyUsd) * 100,
-        projectedUsd: projectPeriodEnd(spentUsd, week, now),
-        week,
+        warnPercent: budget.warnPercent,
+        spentUsd: forecast.spentUsd,
+        automaticUsd: forecast.automaticUsd,
+        percent: (forecast.spentUsd / budget.weeklyUsd) * 100,
+        forecastUsd: forecast.forecastUsd,
+        ...(stopsAt !== undefined && { automaticStopsAt: stopsAt }),
+        week: forecast.week,
       }
     }),
   )
+}
+
+/**
+ * The budget covering the most among `statuses`: a global one, else the least specific scope,
+ * the fullest (highest `percent`) among equals. `undefined` for an empty list.
+ */
+export function broadestBudget<T extends Pick<BudgetStatus, 'scope' | 'percent'>>(
+  statuses: readonly T[],
+): T | undefined {
+  return statuses.toSorted(
+    (a, b) => scopeSpecificity(a.scope) - scopeSpecificity(b.scope) || b.percent - a.percent,
+  )[0]
 }

@@ -1,12 +1,16 @@
 import type {
   ConfigEntryView,
+  GroupMatch,
   PutConfigInput,
   ScheduleDocumentData,
+  ScheduleRun,
   ScheduleWindows,
   TriggerDocumentData,
   Weekday,
 } from '@holtkeeper/api'
 
+import type { StatusTone } from '../ui/colors.ts'
+import { inHomeGroups } from './home-scope.ts'
 import { validateGroupId } from './repo.ts'
 import { formatGroupMatch, parseGroupMatch } from './scope.ts'
 
@@ -64,7 +68,7 @@ function isTimeZone(zone: string): boolean {
 const unitNames: Record<string, string> = { m: 'minute', h: 'hour', d: 'day' }
 
 /** `Every 15 minutes`, `Every hour`, `Every 2 days`; the input itself when it is no interval. */
-function describeEvery(every: string): string {
+export function describeEvery(every: string): string {
   const match = everyPattern.exec(every.trim())
   if (!match) return every
   const count = Number(match[1])
@@ -85,9 +89,356 @@ export function describeDays(days: readonly Weekday[]): string {
 /** How often a schedule runs, in words: its interval or its cron expression. */
 export function describeCadence(schedule: Pick<ScheduleDocumentData, 'cron' | 'every'>): string {
   if (schedule.every) return describeEvery(schedule.every)
-  if (schedule.cron) return `Cron ${schedule.cron}`
+  if (schedule.cron) return describeCron(schedule.cron)
   return 'No cadence'
 }
+
+const nicknameCrons: Record<string, string> = {
+  '@yearly': '0 0 1 1 *',
+  '@annually': '0 0 1 1 *',
+  '@monthly': '0 0 1 * *',
+  '@weekly': '0 0 * * 0',
+  '@daily': '0 0 * * *',
+  '@hourly': '0 * * * *',
+}
+
+const cronLabels = ['Minute', 'Hour', 'Day', 'Month', 'Weekday'] as const
+
+/**
+ * The fields of a cron expression with their names, for a breakdown: `Minute`, `Hour`, `Day`,
+ * `Month`, `Weekday`, with `Second` first for six fields. Nicknames such as `@daily` are expanded;
+ * `undefined` when it does not look like cron.
+ */
+export function cronFields(expression: string): { label: string; value: string }[] | undefined {
+  const trimmed = expression.trim()
+  if (!looksLikeCron(trimmed)) return undefined
+  const fields = (nicknameCrons[trimmed.toLowerCase()] ?? trimmed).split(/\s+/)
+  const labels = fields.length === 6 ? ['Second', ...cronLabels] : cronLabels
+  return fields.map((value, index) => ({ label: labels[index] ?? '', value }))
+}
+
+const cronDays: Record<string, number> = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+}
+const plural = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays']
+const short = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+const isNumber = (field: string) => /^\d+$/.test(field)
+const pad = (value: number) => String(value).padStart(2, '0')
+
+const listText = (items: readonly string[]) =>
+  items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`
+
+const weekday = (token: string) => {
+  const value = isNumber(token) ? Number(token) : cronDays[token.toLowerCase()]
+  return value === undefined || value > 7 ? undefined : value % 7
+}
+
+const stepOf = (field: string) => /^\*\/([1-9]\d*)$/.exec(field)?.[1]
+
+/** Weekday numbers (0 = Sunday) a weekday field names, or `undefined` for anything fancier. */
+function weekdaySet(field: string): number[] | undefined {
+  const days = new Set<number>()
+  for (const part of field.split(',')) {
+    const [from, to, ...rest] = part.split('-')
+    if (rest.length || from === undefined) return undefined
+    const start = weekday(from)
+    const end = to === undefined ? start : weekday(to)
+    if (start === undefined || end === undefined) return undefined
+    for (let value = start; value <= (end < start ? end + 7 : end); value += 1) days.add(value % 7)
+  }
+  return [...days].toSorted((a, b) => a - b)
+}
+
+function dayText(dom: string, month: string, dow: string): string | undefined {
+  if (month !== '*') return undefined
+  if (dom === '*' || dom === '?') {
+    if (dow === '*' || dow === '?') return 'Every day'
+    const days = weekdaySet(dow)
+    if (!days?.length) return undefined
+    if (days.length === 7) return 'Every day'
+    if (days.join() === '1,2,3,4,5') return 'Weekdays'
+    if (days.join() === '0,6') return 'Weekends'
+    if (days.length === 1) return plural[days[0] ?? 0]
+    return listText(days.map((day) => short[day] ?? ''))
+  }
+  if (isNumber(dom) && (dow === '*' || dow === '?')) return `On day ${Number(dom)} of every month`
+  return undefined
+}
+
+/**
+ * A cron expression in words, e.g. `Every day at 02:00`, `Weekdays at 01:30`,
+ * `Tue and Thu at 10:00`, `Every 6 hours` or `Every 15 minutes`; `Cron <expression>` when it is
+ * beyond these shapes. Times are in the schedule's time zone, which the text leaves out.
+ */
+export function describeCron(expression: string): string {
+  const fallback = `Cron ${expression.trim()}`
+  const fields = cronFields(expression)?.map((field) => field.value)
+  if (!fields) return fallback
+  const [minute = '', hour = '', dom = '', month = '', dow = ''] =
+    fields.length === 6 ? fields.slice(1) : fields
+  const days = dayText(dom, month, dow)
+  if (!days) return fallback
+  const everyDay = days === 'Every day'
+  if (isNumber(minute) && hour.split(',').every(isNumber)) {
+    const times = hour.split(',').map((h) => `${pad(Number(h))}:${pad(Number(minute))}`)
+    return `${days} at ${listText(times)}`
+  }
+  const repeat = (text: string) => (everyDay ? text : `${days}, ${text.toLowerCase()}`)
+  if (isNumber(minute) && (hour === '*' || stepOf(hour))) {
+    const every = hour === '*' ? 'Every hour' : `Every ${stepOf(hour)} hours`
+    return repeat(Number(minute) === 0 ? every : `${every} at :${pad(Number(minute))}`)
+  }
+  if (hour === '*' && (minute === '*' || stepOf(minute)))
+    return repeat(minute === '*' ? 'Every minute' : `Every ${stepOf(minute)} minutes`)
+  return fallback
+}
+
+/** How one schedule run went, from its job counts. */
+export type RunOutcome = 'running' | 'succeeded' | 'partial' | 'failed' | 'blocked' | 'skipped'
+
+/**
+ * The outcome of a run: `running` while a job waits or runs, `failed` when jobs failed and none
+ * succeeded, `partial` when some failed, `blocked` when the AI budget stopped some, `skipped` when
+ * it queued nothing or everything was canceled, else `succeeded`.
+ */
+export function runOutcome(run: ScheduleRun): RunOutcome {
+  if (run.queued + run.running > 0) return 'running'
+  if (run.failed > 0) return run.succeeded > 0 ? 'partial' : 'failed'
+  if (run.blocked > 0) return 'blocked'
+  if (run.jobs === 0 || run.canceled === run.jobs) return 'skipped'
+  return 'succeeded'
+}
+
+/** Words and tick tone of each run outcome. */
+export const runOutcomes: Record<RunOutcome, { label: string; tone: StatusTone | 'skipped' }> = {
+  running: { label: 'Running', tone: 'accent' },
+  succeeded: { label: 'Succeeded', tone: 'success' },
+  partial: { label: 'Partly failed', tone: 'warning' },
+  failed: { label: 'Failed', tone: 'danger' },
+  blocked: { label: 'Blocked by budget', tone: 'code' },
+  skipped: { label: 'Skipped', tone: 'skipped' },
+}
+
+const outcomeOrder: readonly RunOutcome[] = [
+  'running',
+  'succeeded',
+  'partial',
+  'failed',
+  'blocked',
+  'skipped',
+]
+
+/** Runs as ticks, oldest first, at most `count` of the newest. `runs` are newest first. */
+export const runTicks = (
+  runs: readonly ScheduleRun[],
+  count: number,
+): { at: string; outcome: RunOutcome }[] =>
+  runs
+    .slice(0, count)
+    .toReversed()
+    .map((run) => ({ at: run.at, outcome: runOutcome(run) }))
+
+/** `28 succeeded · 2 failed`: how many runs had each outcome, in outcome order. */
+export function runCounts(runs: readonly ScheduleRun[]): string {
+  const counts = new Map<RunOutcome, number>()
+  for (const run of runs) counts.set(runOutcome(run), (counts.get(runOutcome(run)) ?? 0) + 1)
+  return outcomeOrder
+    .filter((outcome) => counts.has(outcome))
+    .map((outcome) => `${counts.get(outcome)} ${runOutcomes[outcome].label.toLowerCase()}`)
+    .join(' · ')
+}
+
+/** Health states of a schedule, worst first. */
+export const scheduleStates = [
+  'failing',
+  'blocked',
+  'partial',
+  'never',
+  'healthy',
+  'paused',
+] as const
+
+/** Health state of a schedule. */
+export type ScheduleState = (typeof scheduleStates)[number]
+
+const stateLabels: Record<ScheduleState, string> = {
+  failing: 'Failing',
+  blocked: 'Blocked by budget',
+  partial: 'Partly failed',
+  never: 'No runs yet',
+  healthy: 'Healthy',
+  paused: 'Paused',
+}
+
+const stateTones: Record<ScheduleState, StatusTone> = {
+  failing: 'danger',
+  blocked: 'code',
+  partial: 'warning',
+  never: 'default',
+  healthy: 'success',
+  paused: 'default',
+}
+
+/** Label and tag tone of each health state. */
+export const scheduleStateLabel = (state: ScheduleState) => stateLabels[state]
+
+/** How a schedule is doing, from its runs. */
+export interface ScheduleHealth {
+  state: ScheduleState
+  label: string
+  tone: StatusTone
+  /** Position in a worst-first sort. */
+  rank: number
+  /** Finished runs in a row, newest first, that failed outright. */
+  failedInRow: number
+  /** The newest finished run that is not skipped; health is read from it. */
+  last?: ScheduleRun
+}
+
+/**
+ * The health of a schedule from its runs (newest first): `paused` when disabled, `never` with no
+ * finished run, else read from the newest finished, not skipped run: `failing` when it failed
+ * outright, `partial` when some jobs failed, `blocked` when the AI budget stopped some, else
+ * `healthy`. Running runs are left out until they finish.
+ */
+export function scheduleHealth(runs: readonly ScheduleRun[], enabled: boolean): ScheduleHealth {
+  const finished = runs.filter((run) => !['running', 'skipped'].includes(runOutcome(run)))
+  const last = finished[0]
+  const firstOk = finished.findIndex((run) => runOutcome(run) !== 'failed')
+  const failedInRow = firstOk < 0 ? finished.length : firstOk
+  const outcome = last ? runOutcome(last) : undefined
+  const state: ScheduleState = !enabled
+    ? 'paused'
+    : outcome === undefined
+      ? 'never'
+      : outcome === 'failed'
+        ? 'failing'
+        : outcome === 'partial'
+          ? 'partial'
+          : outcome === 'blocked'
+            ? 'blocked'
+            : 'healthy'
+  return {
+    state,
+    label: stateLabels[state],
+    tone: stateTones[state],
+    rank: scheduleStates.indexOf(state),
+    failedInRow,
+    ...(last && { last }),
+  }
+}
+
+/** Whether a health state needs someone to look: failing, partly failed or blocked by budget. */
+export const isProblem = (state: ScheduleState): boolean =>
+  state === 'failing' || state === 'partial' || state === 'blocked'
+
+/** Lane id rules covering every repository use, as `automation-flow` names it. */
+const EVERY_REPOSITORY = 'all'
+
+/**
+ * Whether a rule belongs to the viewer's teams: it covers every repository, or its groups include
+ * one of the home groups. A UI default, not a permission.
+ */
+export const inMyTeams = (lanes: readonly string[], homeGroups: readonly GroupMatch[]): boolean =>
+  lanes.includes(EVERY_REPOSITORY) || inHomeGroups(homeGroups, lanes)
+
+/** What the schedule list filters by. */
+export interface ScheduleFilter {
+  q?: string
+  /** Lane ids, e.g. `all` or a group. */
+  teams?: readonly string[]
+  states?: readonly ScheduleState[]
+  problems?: boolean
+}
+
+/** A schedule row as the list filters and sorts it. */
+interface ScheduleRowLike {
+  id: string
+  name: string
+  lanes: readonly string[]
+  analyzers: readonly string[]
+  health: ScheduleHealth
+}
+
+/**
+ * Rows matching `filter`, worst health first, then by name: the text matches name, id or an
+ * analyzer; teams and states keep rows in one of them; `problems` keeps those needing a look.
+ */
+export function filterSchedules<T extends ScheduleRowLike>(
+  rows: readonly T[],
+  filter: ScheduleFilter,
+): T[] {
+  const needle = filter.q?.trim().toLowerCase()
+  return rows
+    .filter(
+      (row) =>
+        (!needle ||
+          [row.name, row.id, ...row.analyzers].some((text) =>
+            text.toLowerCase().includes(needle),
+          )) &&
+        (!filter.teams?.length || row.lanes.some((lane) => filter.teams?.includes(lane))) &&
+        (!filter.states?.length || filter.states.includes(row.health.state)) &&
+        (!filter.problems || isProblem(row.health.state)),
+    )
+    .toSorted((a, b) => a.health.rank - b.health.rank || a.name.localeCompare(b.name))
+}
+
+/** Rule kinds the list shows as tabs. */
+const automationTabs = ['triggers', 'schedules', 'policies', 'freshness'] as const
+
+/** A tab of the Automation list. */
+export type AutomationTab = (typeof automationTabs)[number]
+
+/**
+ * Search params of Ops › Automation: `view` (list by default, or map), the list's `tab`
+ * (schedules by default), the map's team `lane`, the open `schedule` sheet or `rule` drawer (a
+ * rule node id), and `job`, whose path the map highlights.
+ */
+export interface AutomationSearch {
+  view?: 'list' | 'map'
+  tab?: Exclude<AutomationTab, 'schedules'>
+  lane?: string
+  schedule?: string
+  rule?: string
+  job?: string
+}
+
+const listTabs: readonly NonNullable<AutomationSearch['tab']>[] = [
+  'triggers',
+  'policies',
+  'freshness',
+]
+
+const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined)
+
+/** Normalised search params; defaults are left out, unknown values dropped. */
+export function parseAutomationSearch(search: Record<string, unknown>): AutomationSearch {
+  const view = search.view === 'map' ? 'map' : undefined
+  const tab = listTabs.find((id) => id === search.tab)
+  const lane = text(search.lane)
+  const schedule = text(search.schedule)
+  const rule = text(search.rule)
+  const job = text(search.job)
+  return {
+    ...(view && { view }),
+    ...(tab && { tab }),
+    ...(lane && { lane }),
+    ...(schedule && { schedule }),
+    ...(rule && { rule }),
+    ...(job && { job }),
+  }
+}
+
+/** The view a search shows: the map when asked for or when it explains a job, else the list. */
+export const automationView = (search: AutomationSearch): 'list' | 'map' =>
+  search.view ?? (search.job ? 'map' : 'list')
 
 /** Short phrases for a schedule's windows, e.g. `Weekdays 09:00–18:00`, `no weekends`. */
 export function describeWindows(windows: ScheduleWindows | undefined): string[] {

@@ -1,136 +1,313 @@
 import type {
-  ApiChange,
-  ApiSymbol,
-  PublicApiPackageDetail,
+  PublicApiFacetCount,
   PublicApiPackageSummary,
+  PublicApiSymbol,
+  PublicApiSymbolHit,
+  RepoRef,
 } from '@holtkeeper/api'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { ArrowLeft, FileText, Library, RefreshCw, Search } from 'lucide-react'
-import { useState } from 'react'
+import { GitCompare, Library, RefreshCw, Search, Users } from 'lucide-react'
+import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { api } from '../../api/endpoints.ts'
 import {
-  usePublicApiDiff,
-  usePublicApiPackage,
   usePublicApiPackages,
   usePublicApiRescan,
   usePublicApiSearch,
+  usePublicApiSymbol,
 } from '../../api/queries.ts'
-import { formatDate, formatDateTime, formatRef, formatRelative, plural } from '../../lib/format.ts'
+import { neighbours } from '../../lib/flow.ts'
+import { formatDate, formatRef, formatRelative, plural } from '../../lib/format.ts'
 import {
+  type PublicApiPane,
+  type PublicApiSearch,
+  type PublicApiTab,
+  catalogTotals,
+  changeLabels,
+  docSummary,
   documentedShare,
-  groupSymbols,
+  documentedTone,
+  filterHits,
+  hitCounts,
+  matchLabels,
+  parseDocTags,
+  parseSymbolKey,
+  publicApiTab,
+  symbolKey,
   symbolKinds,
-  versionKey,
-  versionLabel,
 } from '../../lib/public-api.ts'
-import { repoKey } from '../../lib/repo.ts'
-import { pageSettingKeys } from '../../lib/settings-tabs.ts'
+import { repoKey, repoSplat } from '../../lib/repo.ts'
+import { pageSettingKeys } from '../../lib/settings-sections.ts'
 import { useDebounced } from '../../lib/use-debounced.ts'
 import {
-  Button,
-  Chip,
+  Checkbox,
+  CopyButton,
+  Count,
   EmptyState,
   ErrorState,
-  LoadMore,
+  Kbd,
+  KeyValue,
+  Legend,
+  ListFooter,
   Markdown,
+  type MoreMenuItem,
   Notice,
   Page,
-  Panel,
   Placeholder,
   SearchInput,
-  Segmented,
+  SegmentedTabs,
   Select,
-  StatCard,
+  SideSheet,
+  Strip,
   Table,
-  Tabs,
+  Tag,
   Td,
   Th,
   notify,
 } from '../../ui/index.ts'
-import { BackfillReleasesButton } from '../analyses/BackfillReleases.tsx'
-import { RunJobButton } from '../jobs/RunJobDialog.tsx'
-import { SettingsButton } from '../settings/SettingsSheet.tsx'
+import { useBackfillReleases } from '../analyses/BackfillReleases.tsx'
+import { useRunJob } from '../jobs/RunJobDialog.tsx'
+import { useConfigure } from '../settings/SettingsSheet.tsx'
 import { useSession } from '../shell/session.ts'
-import { UpgradeTab, UsedByTab } from './UsagesTabs.tsx'
 
-interface PublicApiSearch {
-  package?: string
-  version?: string
-  repo?: string
-  tab?: string
-}
+const hitLimit = 100
 
-/** Public API of every package per version and symbol search. */
+const tabCount = (value: number | undefined) =>
+  value ? <span className="tabular text-muted">{value}</span> : null
+
+const matches = ['exact', 'prefix', 'part', 'doc'] as const
+
+const kindLabel = (kind: string) =>
+  kind === 'variable' ? 'constant' : kind === 'reexport' ? 're-export' : kind
+
+/** The Public API page: the catalog of packages and symbol search with facets and a symbol sheet. */
 export function PublicApiPage() {
-  const search: PublicApiSearch = useSearch({ strict: false })
-  if (search.package)
-    return (
-      <PackageView
-        name={search.package}
-        {...(search.version ? { version: search.version } : {})}
-        {...(search.repo ? { repo: search.repo } : {})}
-        {...(search.tab ? { tab: search.tab } : {})}
-      />
-    )
-  return <CatalogView tab={search.tab === 'search' ? 'search' : 'packages'} />
-}
-
-function CatalogView({ tab }: { tab: string }) {
+  const search = useSearch({ from: '/app/supply/public-api' })
   const navigate = useNavigate()
   const { can } = useSession()
   const rescan = usePublicApiRescan()
+  const backfill = useBackfillReleases('api-surface')
+  const { configure, sheet } = useConfigure('Public API settings', pageSettingKeys['public-api'])
+  const run = useRunJob({ analyzer: 'api-surface', label: 'Analyse now' })
+  const setSearch = (next: PublicApiSearch) =>
+    void navigate({ to: '/supply/public-api', search: next, replace: true })
+  const q = useDebounced(search.q ?? '', 300).trim()
+  const tab = publicApiTab(search)
+  const more: MoreMenuItem[] = [
+    ...(can('analyses:run')
+      ? [
+          {
+            label: 'Reread records',
+            icon: RefreshCw,
+            isDisabled: rescan.isPending,
+            onAction: () =>
+              rescan.mutate(undefined, {
+                onSuccess: () => notify.success('Records reread'),
+                onError: (error) => notify.error('Not reread', messageOf(error)),
+              }),
+          },
+        ]
+      : []),
+    ...(backfill.item ? [backfill.item] : []),
+  ]
   return (
     <Page
-      title="Public API"
-      icon="api"
-      description="What every package exports, per released version"
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          {can('analyses:run') ? (
-            <Button
-              variant="tertiary"
-              isPending={rescan.isPending}
-              onPress={() =>
-                rescan.mutate(undefined, {
-                  onError: (error) => notify.error('Not reread', messageOf(error)),
-                })
-              }
-            >
-              <RefreshCw className="size-3.5" />
-              Reread records
-            </Button>
-          ) : null}
-          <BackfillReleasesButton analyzer="api-surface" />
-          <RunJobButton analyzer="api-surface" label="Run now" variant="secondary" />
-          <SettingsButton title="Public API settings" keys={pageSettingKeys['public-api']} />
-        </div>
-      }
+      crumbs={[{ label: 'Public API' }]}
+      description="What every package exports, its doc comments and how each export changed between versions"
+      search={{
+        value: search.q ?? '',
+        onChange: (text) => {
+          const { q: _q, symbol: _symbol, pane: _pane, ...rest } = search
+          setSearch(text ? { ...rest, q: text } : rest)
+        },
+        'aria-label': tab === 'search' ? 'Search exports' : 'Filter packages',
+        placeholder:
+          tab === 'search' ? 'Name or words from its docs, e.g. createWidget' : 'Package name',
+      }}
+      {...(configure ? { configure } : {})}
+      more={more}
+      primary={run.action}
     >
-      <Tabs
-        aria-label="Public API views"
-        selected={tab}
-        onSelect={(next) => void navigate({ to: '/public-api', search: { tab: next } })}
-        items={[
-          { id: 'packages', label: 'Packages', content: <PackagesTab /> },
-          { id: 'search', label: 'Search', content: <SearchTab /> },
+      <ViewTabs
+        tab={tab}
+        search={{ ...search, q }}
+        onTab={(next: PublicApiTab) => {
+          const { symbol: _symbol, pane: _pane, ...rest } = search
+          setSearch({ ...rest, tab: next })
+        }}
+      />
+      {tab === 'search' ? (
+        <SymbolSearch search={search} q={q} setSearch={setSearch} />
+      ) : (
+        <Catalog search={{ ...search, q }} />
+      )}
+      {backfill.dialog}
+      {sheet}
+      {run.dialog}
+    </Page>
+  )
+}
+
+function ViewTabs({
+  tab,
+  search,
+  onTab,
+}: {
+  tab: PublicApiTab
+  search: PublicApiSearch
+  onTab: (tab: PublicApiTab) => void
+}) {
+  const packages = usePublicApiPackages()
+  const hits = usePublicApiSearch(searchQuery(search), hitLimit)
+  return (
+    <SegmentedTabs
+      aria-label="Public API views"
+      selected={tab}
+      onSelect={(id) => onTab(id === 'search' ? 'search' : 'packages')}
+      className="self-start"
+      items={[
+        {
+          id: 'packages',
+          label: (
+            <span className="inline-flex items-center gap-1.5">
+              Packages {tabCount(packages.data?.packages.length)}
+            </span>
+          ),
+          icon: Library,
+        },
+        {
+          id: 'search',
+          label: (
+            <span className="inline-flex items-center gap-1.5">
+              Symbol search{' '}
+              {search.q
+                ? tabCount(hits.data ? hits.data.hits.length + hits.data.more : undefined)
+                : null}
+            </span>
+          ),
+          icon: Search,
+        },
+      ]}
+    />
+  )
+}
+
+const searchQuery = (search: PublicApiSearch) => ({
+  q: search.q ?? '',
+  ...(search.package ? { package: search.package } : {}),
+  ...(search.repo ? { repo: search.repo } : {}),
+  ...(search.subpath ? { subpath: search.subpath } : {}),
+  ...(search.kind ? { kind: search.kind } : {}),
+  ...(search.match ? { match: search.match } : {}),
+})
+
+const documentedLegend = [
+  { tone: 'success', label: '80% or more' },
+  { tone: 'warning', label: '40 to 79%' },
+  { tone: 'danger', label: 'under 40%' },
+] as const
+
+function Catalog({
+  search,
+  repo,
+}: {
+  search: Pick<PublicApiSearch, 'q' | 'repo' | 'package'>
+  repo?: string
+}) {
+  const packages = usePublicApiPackages(search.q || undefined)
+  if (packages.isPending) return <Placeholder className="h-96" />
+  if (packages.isError) return <ErrorState error={packages.error} />
+  const narrowTo = repo ?? search.repo
+  const list = packages.data.packages.filter(
+    (pkg) =>
+      (!narrowTo || repoKey(pkg.repo) === narrowTo) &&
+      (!search.package || pkg.name === search.package),
+  )
+  const totals = catalogTotals(list)
+  return (
+    <section className="rounded-xl border border-line bg-panel">
+      <div className="flex flex-col gap-0.5 px-3.5 pt-3 pb-2">
+        <h2 className="text-[13px] font-semibold">Packages</h2>
+        <p className="text-xs text-muted">
+          Newest record of each package
+          {packages.data.indexedAt
+            ? `; all records reread ${formatRelative(packages.data.indexedAt)}`
+            : ''}
+        </p>
+      </div>
+      <Strip
+        label="Catalog summary"
+        cells={[
+          {
+            value: totals.packages,
+            label: `${totals.packages === 1 ? 'package' : 'packages'} in ${plural(totals.repos, 'repository', 'repositories')}`,
+          },
+          { value: totals.exports.toLocaleString('en-US'), label: 'exports' },
+          ...(totals.documented !== undefined
+            ? [
+                {
+                  value: `${totals.documented}%`,
+                  label: 'documented',
+                  tone: documentedTone(totals.documented),
+                },
+              ]
+            : []),
+          {
+            value: totals.versions,
+            label: 'versions on record',
+            caption: '· releases plus default branches',
+          },
         ]}
       />
-    </Page>
+      <Legend items={documentedLegend} label="Documented share" className="px-3.5 py-2" />
+      {list.length ? (
+        <Table label="Packages">
+          <thead>
+            <tr>
+              <Th>Package</Th>
+              <Th>Version</Th>
+              <Th>Repository</Th>
+              <Th align="right">Exports</Th>
+              <Th>Documented</Th>
+              <Th align="right">Versions</Th>
+              <Th>Analysed</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((pkg) => (
+              <PackageRow key={`${repoKey(pkg.repo)} ${pkg.name}`} pkg={pkg} />
+            ))}
+          </tbody>
+        </Table>
+      ) : (
+        <EmptyState
+          icon={<Library />}
+          title={search.q || narrowTo ? 'No package matches' : 'No package indexed yet'}
+          description={
+            search.q || narrowTo
+              ? 'Try part of the name, or clear the repository.'
+              : 'Run the api-surface analyzer on a repository, or analyse past releases to fill in the version history.'
+          }
+        />
+      )}
+    </section>
   )
 }
 
 function DocumentedBar({ documented, exports }: { documented: number; exports: number }) {
   const share = documentedShare(documented, exports)
-  if (share === undefined) return <span className="text-muted">—</span>
-  const color = share >= 80 ? 'var(--success)' : share >= 40 ? 'var(--warning)' : 'var(--danger)'
+  if (share === undefined) return <span className="text-dim">—</span>
+  const tone = documentedTone(share)
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-default">
+    <span className="inline-flex items-center gap-2" title={`${share}% of exports documented`}>
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-raise">
         <span
           className="block h-full rounded-full"
-          style={{ width: `${share}%`, background: color }}
+          style={{
+            width: `${share}%`,
+            background:
+              tone === 'success' ? 'var(--ok)' : tone === 'warning' ? 'var(--warn)' : 'var(--bad)',
+          }}
         />
       </span>
       <span className="tabular w-9 text-right">{share}%</span>
@@ -138,127 +315,40 @@ function DocumentedBar({ documented, exports }: { documented: number; exports: n
   )
 }
 
-function PackagesTab() {
-  const [query, setQuery] = useState('')
-  const debounced = useDebounced(query, 300)
-  const packages = usePublicApiPackages(debounced.trim() || undefined)
-
-  if (packages.isPending) return <Placeholder className="h-96" />
-  if (packages.isError) return <ErrorState error={packages.error} />
-  const list = packages.data.packages
-  const exports = list.reduce((sum, pkg) => sum + pkg.exports, 0)
-  const documented = list.reduce((sum, pkg) => sum + pkg.documented, 0)
-  const versions = list.reduce((sum, pkg) => sum + pkg.versions, 0)
-  const repos = new Set(list.map((pkg) => repoKey(pkg.repo))).size
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          label="Packages"
-          value={list.length}
-          hint={`in ${plural(repos, 'repository', 'repositories')}`}
-          icon={<Library />}
-        />
-        <StatCard label="Exports" value={exports} hint="functions, classes, types, constants" />
-        <StatCard
-          label="Documented"
-          value={documentedShare(documented, exports) ?? 0}
-          hint="% of exports with a doc comment"
-          accent="var(--success)"
-        />
-        <StatCard
-          label="Versions on record"
-          value={versions}
-          hint="releases plus default branches"
-        />
-      </div>
-      <Panel
-        title="Packages"
-        description={
-          packages.data.indexedAt
-            ? `Newest record of each package; all records reread ${formatRelative(packages.data.indexedAt)}.`
-            : 'Newest record of each package.'
-        }
-        actions={
-          <SearchInput
-            aria-label="Filter packages"
-            placeholder="Name, description or repository"
-            value={query}
-            onChange={setQuery}
-            className="w-72"
-          />
-        }
-      >
-        {list.length ? (
-          <Table label="Packages">
-            <thead>
-              <tr>
-                <Th>Package</Th>
-                <Th>Version</Th>
-                <Th>Repository</Th>
-                <Th align="right">Exports</Th>
-                <Th>Documented</Th>
-                <Th align="right">Versions</Th>
-                <Th>Analyzed</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((pkg) => (
-                <PackageRow key={`${repoKey(pkg.repo)} ${pkg.name}`} pkg={pkg} />
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <EmptyState
-            icon={<Library />}
-            title={query ? 'No package matches' : 'No package indexed yet'}
-            description={
-              query
-                ? 'Try part of the name or the repository path.'
-                : 'Run the api-surface analyzer on a repository, or analyze past releases to fill in the version history.'
-            }
-          />
-        )}
-      </Panel>
-    </div>
-  )
-}
-
 function PackageRow({ pkg }: { pkg: PublicApiPackageSummary }) {
   return (
-    <tr className="hover:bg-default/40">
-      <Td>
-        <Link
-          to="/public-api"
-          search={{ package: pkg.name, repo: repoKey(pkg.repo) }}
-          className="font-mono text-[13px] font-medium hover:underline"
-        >
-          {pkg.name}
-        </Link>
-        {pkg.private ? (
-          <Chip className="ml-2" size="sm">
-            private
-          </Chip>
-        ) : null}
-        {pkg.removed ? (
-          <span title={`Not on the default branch since ${formatDate(pkg.removed.at)}`}>
-            <Chip className="ml-2" size="sm" tone="danger">
-              removed
-            </Chip>
-          </span>
-        ) : null}
+    <tr>
+      <Td className="max-w-[22rem]">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Link
+            to="/supply/libraries/$ecosystem/$"
+            params={{ ecosystem: 'npm', _splat: pkg.name }}
+            search={{ tab: 'api', repo: repoKey(pkg.repo) }}
+            className="mono font-medium hover:underline"
+          >
+            {pkg.name}
+          </Link>
+          {pkg.private ? <Tag>private</Tag> : null}
+          {pkg.removed ? (
+            <Tag
+              tone="danger"
+              title={`Not on the default branch since ${formatDate(pkg.removed.at)}`}
+            >
+              Removed
+            </Tag>
+          ) : null}
+        </div>
         {pkg.description ? (
-          <div className="mt-0.5 max-w-md truncate text-xs text-muted">{pkg.description}</div>
+          <div className="mt-0.5 truncate text-xs text-muted">{pkg.description}</div>
         ) : null}
       </Td>
-      <Td className="tabular">{pkg.version ?? '—'}</Td>
+      <Td className="mono">{pkg.version ?? '—'}</Td>
       <Td>
-        <span className="text-muted">{repoKey(pkg.repo)}</span>
-        {pkg.dir !== '.' ? <span className="ml-1 text-xs text-muted">/{pkg.dir}</span> : null}
+        <span className="mono">{pkg.repo.path}</span>
+        {pkg.dir !== '.' ? <span className="mono ml-1 text-xs text-dim">/{pkg.dir}</span> : null}
       </Td>
       <Td align="right" className="tabular">
-        {pkg.exports}
+        {pkg.exports.toLocaleString('en-US')}
       </Td>
       <Td>
         <DocumentedBar documented={pkg.documented} exports={pkg.exports} />
@@ -267,560 +357,655 @@ function PackageRow({ pkg }: { pkg: PublicApiPackageSummary }) {
         {pkg.versions}
       </Td>
       <Td className="whitespace-nowrap text-muted">
-        {pkg.ref ? (
-          <span className="mr-1 font-mono text-xs" title={pkg.ref}>
-            {formatRef(pkg.ref)}
-          </span>
-        ) : null}
-        {formatRelative(pkg.analyzedAt)}
+        <span className="mono text-xs" title={pkg.ref ?? 'default branch'}>
+          {pkg.ref ? formatRef(pkg.ref) : 'branch'}
+        </span>{' '}
+        · {formatRelative(pkg.analyzedAt)}
       </Td>
     </tr>
   )
 }
 
-function Signature({ code }: { code: string }) {
+function Facet({
+  title,
+  options,
+  value,
+  onChange,
+  label = (option) => option,
+  hidden,
+}: {
+  title: string
+  options: readonly PublicApiFacetCount[]
+  value: string | undefined
+  onChange: (value: string | undefined) => void
+  label?: (value: string) => ReactNode
+  /** Quiet line under the options, e.g. how many packages have no match. */
+  hidden?: ReactNode
+}) {
+  if (!options.length) return null
   return (
-    <pre className="overflow-x-auto rounded-xl border border-border bg-default px-3 py-2 font-mono text-[12.5px] leading-relaxed">
-      {code}
-    </pre>
+    <fieldset className="flex flex-col gap-0.5">
+      <legend className="mb-1 text-[11.5px] font-medium text-muted">{title}</legend>
+      {options.map((option) => {
+        const on = value === option.value
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onChange(on ? undefined : option.value)}
+            className={`flex items-center gap-2 rounded-md px-2 py-1 text-left text-[12.5px] hover:bg-raise ${on ? 'bg-raise text-foreground shadow-[inset_0_0_0_1px_var(--color-line-strong)]' : 'text-muted'}`}
+          >
+            <span className="min-w-0 flex-1 truncate">{label(option.value)}</span>
+            <span className="tabular text-[11px]">{option.count}</span>
+          </button>
+        )
+      })}
+      {hidden ? <span className="px-2 pt-0.5 text-[11px] text-dim">{hidden}</span> : null}
+    </fieldset>
   )
 }
 
-function SymbolCard({ symbol, importFrom }: { symbol: ApiSymbol; importFrom: string }) {
+function SymbolSearch({
+  search,
+  q,
+  setSearch,
+  repo,
+}: {
+  search: PublicApiSearch
+  /** The search text once typing settles; `search.q` follows every key. */
+  q: string
+  setSearch: (next: PublicApiSearch) => void
+  /** Narrows everything to one repository, as the repository hub does. */
+  repo?: string
+}) {
+  const query = searchQuery({ ...search, q, ...(repo ? { repo } : {}) })
+  const results = usePublicApiSearch(query, hitLimit)
+  const packages = usePublicApiPackages()
+  if (!query.q)
+    return (
+      <EmptyState
+        icon={<Search />}
+        title="Search the catalog"
+        description="Type a function, class or type name, or words from its doc comment. Exact names come first, then prefixes, parts of names and doc text."
+      />
+    )
+  if (results.isPending) return <Placeholder className="h-96" />
+  if (results.isError) return <ErrorState error={results.error} />
+  const { facets } = results.data
+  const counts = hitCounts(results.data.hits)
+  const hits = filterHits(
+    results.data.hits,
+    {
+      ...(search.deprecated ? { deprecated: true } : {}),
+      ...(search.removed ? { removed: true } : {}),
+      ...(search.ref ? { ref: search.ref } : {}),
+    },
+    search.sort,
+  )
+  const set = (patch: Partial<PublicApiSearch>) => {
+    const { symbol: _symbol, pane: _pane, ...rest } = search
+    setSearch({ ...rest, ...patch })
+  }
+  const keys = hits.map(symbolKey)
+  const step = neighbours(keys, search.symbol)
+  const openHit = (key: string | undefined) => {
+    if (!key) return
+    const { pane, ...rest } = search
+    setSearch({ ...rest, symbol: key, ...(pane ? { pane } : {}) })
+  }
+  const openedHit = step.index >= 0 ? hits[step.index] : undefined
+  const withoutMatch = Math.max(0, (packages.data?.packages.length ?? 0) - facets.packages.length)
+  const matchFacet = matches.flatMap((value) => {
+    const found = facets.matches?.find((entry) => entry.value === value)
+    return found ? [found] : []
+  })
   return (
-    <div
-      id={`symbol-${symbol.name}`}
-      className="flex flex-col gap-2 border-b border-border py-4 last:border-b-0"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm font-semibold">{symbol.name}</span>
-        <Chip size="sm">{symbol.kind}</Chip>
-        {symbol.deprecated !== undefined ? (
-          <Chip tone="warning" size="sm">
-            deprecated
-          </Chip>
-        ) : null}
-        <span className="ml-auto font-mono text-xs text-muted">
-          {symbol.file}:{symbol.line}
-        </span>
-      </div>
-      {symbol.deprecated ? (
-        <div className="text-sm text-warning">Deprecated: {symbol.deprecated}</div>
-      ) : null}
-      {symbol.doc ? <Markdown className="text-sm" text={symbol.doc} /> : null}
-      <Signature code={symbol.signature} />
-      {symbol.kind !== 'reexport' ? (
-        <div className="font-mono text-xs text-muted">
-          import {symbol.name === 'default' ? 'value' : `{ ${symbol.name} }`} from '{importFrom}'
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+      <aside aria-label="Narrow the search" className="flex shrink-0 flex-col gap-4 lg:w-56">
+        {repo ? null : (
+          <Facet
+            title="Package"
+            options={facets.packages}
+            value={search.package}
+            onChange={(value) => set({ package: value })}
+            label={(value) => <span className="mono">{value}</span>}
+            {...(withoutMatch
+              ? { hidden: `${plural(withoutMatch, 'package')} without a match` }
+              : {})}
+          />
+        )}
+        <Facet
+          title="Entry point"
+          options={facets.subpaths ?? []}
+          value={search.subpath}
+          onChange={(value) => set({ subpath: value })}
+          label={(value) => (
+            <span className="mono">{value === '.' ? '.' : value.replace(/^\./, '')}</span>
+          )}
+        />
+        <Facet
+          title="Kind"
+          options={facets.kinds}
+          value={search.kind}
+          onChange={(value) =>
+            set({ kind: symbolKinds.find((entry) => entry.kind === value)?.kind })
+          }
+          label={kindLabel}
+        />
+        <Facet
+          title="Version"
+          options={[
+            { value: 'release', count: counts.release },
+            { value: 'head', count: counts.head },
+          ].filter((entry) => entry.count > 0)}
+          value={search.ref}
+          onChange={(value) =>
+            set({ ref: value === 'release' || value === 'head' ? value : undefined })
+          }
+          label={(value) => (value === 'release' ? 'Newest release' : 'Default branch')}
+        />
+        <div className="flex flex-col gap-1.5">
+          <Checkbox
+            label={
+              <span className="text-[12.5px]">
+                Include deprecated <span className="tabular text-dim">{counts.deprecated}</span>
+              </span>
+            }
+            isSelected={search.deprecated === true}
+            onChange={(on) => set({ deprecated: on ? true : undefined })}
+          />
+          <Checkbox
+            label={
+              <span className="text-[12.5px]">
+                Include removed packages <span className="tabular text-dim">{counts.removed}</span>
+              </span>
+            }
+            isSelected={search.removed === true}
+            onChange={(on) => set({ removed: on ? true : undefined })}
+          />
         </div>
-      ) : null}
+        <Facet
+          title="Match"
+          options={matchFacet}
+          value={search.match}
+          onChange={(value) => set({ match: matches.find((entry) => entry === value) })}
+          label={(value) => matchLabels[matches.find((entry) => entry === value) ?? 'doc']}
+        />
+      </aside>
+      <section className="min-w-0 flex-1 rounded-xl border border-line bg-panel">
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2.5 text-xs text-muted">
+          <span>
+            <b className="font-semibold text-foreground">{hits.length}</b>{' '}
+            {hits.length === 1 ? 'export matches' : 'exports match'} in{' '}
+            {plural(new Set(hits.map((hit) => hit.package)).size, 'package')}
+          </span>
+          <span>· exact names first, then prefixes, parts of names and doc text</span>
+          <span className="flex-1" />
+          <Select
+            aria-label="Sort"
+            className="w-40"
+            value={search.sort ?? 'match'}
+            onChange={(value) =>
+              set({ sort: value === 'name' || value === 'package' ? value : undefined })
+            }
+            options={[
+              { id: 'match', label: 'Best match' },
+              { id: 'name', label: 'Name' },
+              { id: 'package', label: 'Package' },
+            ]}
+          />
+        </div>
+        {hits.length ? (
+          <Table label="Matching exports">
+            <thead>
+              <tr>
+                <Th>Symbol</Th>
+                <Th>Kind</Th>
+                <Th>Package</Th>
+                <Th>Version</Th>
+                <Th>Signature</Th>
+                <Th>Doc</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {hits.map((hit) => (
+                <HitRow
+                  key={`${repoKey(hit.repo)} ${symbolKey(hit)}`}
+                  hit={hit}
+                  selected={search.symbol === symbolKey(hit)}
+                  onOpen={() => openHit(symbolKey(hit))}
+                />
+              ))}
+            </tbody>
+          </Table>
+        ) : (
+          <EmptyState
+            title="Nothing exported matches"
+            description="Try a shorter part of the name, or include deprecated symbols and removed packages."
+          />
+        )}
+        <ListFooter
+          shown={hits.length}
+          total={hits.length + results.data.more}
+          noun="matches"
+          {...(results.data.more
+            ? { caption: '· narrow the query or a facet to see the rest' }
+            : {})}
+          hints={
+            <>
+              Navigate <Kbd>J</Kbd> <Kbd>K</Kbd> in the sheet
+            </>
+          }
+          className="border-t border-line"
+        />
+      </section>
+      <SymbolSheet
+        symbolKey={search.symbol}
+        hit={openedHit}
+        repo={openedHit ? repoKey(openedHit.repo) : (repo ?? search.repo)}
+        version={search.version}
+        pane={search.pane ?? 'declaration'}
+        onPane={(pane) => setSearch({ ...search, pane })}
+        index={step.index}
+        total={hits.length}
+        onClose={() => {
+          const { symbol: _symbol, pane: _pane, ...rest } = search
+          setSearch(rest)
+        }}
+        {...(step.previous ? { onPrevious: () => openHit(step.previous) } : {})}
+        {...(step.next ? { onNext: () => openHit(step.next) } : {})}
+      />
     </div>
   )
 }
 
-const symbolPage = 150
-
-const packageTabs = ['api', 'changes', 'used-by', 'upgrade']
-
-function PackageView({
-  name,
-  version,
-  repo,
-  tab: requested,
+function HitRow({
+  hit,
+  selected,
+  onOpen,
 }: {
-  name: string
-  version?: string
-  repo?: string
-  tab?: string
+  hit: PublicApiSymbolHit
+  selected: boolean
+  onOpen: () => void
+}) {
+  const signature = hit.symbol.signature.split('\n')[0] ?? ''
+  return (
+    <tr
+      className={`hover:bg-raise ${selected ? '[&>td]:bg-raise [&>td:first-child]:shadow-[inset_2px_0_var(--fg)]' : ''}`}
+    >
+      <Td>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpen}
+            aria-pressed={selected}
+            className="mono font-medium hover:underline"
+          >
+            {hit.symbol.name}
+          </button>
+          <Tag tone={hit.match === 'exact' ? 'accent' : 'default'}>{matchLabels[hit.match]}</Tag>
+          {hit.deprecated ? <Tag tone="warning">Deprecated</Tag> : null}
+          {hit.removed ? <Tag tone="danger">Removed</Tag> : null}
+        </div>
+      </Td>
+      <Td className="text-muted">{kindLabel(hit.symbol.kind)}</Td>
+      <Td>
+        <span className="mono">{hit.package}</span>
+        {hit.subpath !== '.' ? (
+          <span className="mono ml-1 text-dim">{hit.subpath.replace(/^\./, '')}</span>
+        ) : null}
+      </Td>
+      <Td className="mono">{hit.version ?? (hit.ref ? formatRef(hit.ref) : 'branch')}</Td>
+      <Td className="mono max-w-[22rem] truncate text-xs text-muted">
+        <span title={signature}>{signature}</span>
+      </Td>
+      <Td className="max-w-[20rem] truncate text-xs text-muted">{docSummary(hit.symbol.doc)}</Td>
+    </tr>
+  )
+}
+
+const libraryLink = (pkg: string, search: { tab: string; export?: string; repo?: string }) =>
+  ({
+    to: '/supply/libraries/$ecosystem/$',
+    params: { ecosystem: 'npm', _splat: pkg },
+    search,
+  }) as const
+
+/** One exported symbol: its declaration with the doc comment's tags, where it lives, and its history. */
+function SymbolSheet({
+  symbolKey: key,
+  hit,
+  repo,
+  version,
+  pane,
+  onPane,
+  index,
+  total,
+  onClose,
+  onPrevious,
+  onNext,
+}: {
+  symbolKey: string | undefined
+  hit: PublicApiSymbolHit | undefined
+  repo: string | undefined
+  version: string | undefined
+  pane: PublicApiPane
+  onPane: (pane: PublicApiPane) => void
+  index: number
+  total: number
+  onClose: () => void
+  onPrevious?: () => void
+  onNext?: () => void
 }) {
   const navigate = useNavigate()
-  const detail = usePublicApiPackage({
-    name,
-    ...(version ? { version } : {}),
-    ...(repo ? { repo } : {}),
-  })
-  const tab = requested && packageTabs.includes(requested) ? requested : 'api'
-
-  const go = (next: { version?: string; repo?: string; tab?: string }, replace = false) => {
-    const nextTab = next.tab ?? tab
-    void navigate({
-      to: '/public-api',
-      search: {
-        package: name,
-        ...(next.version ? { version: next.version } : {}),
-        ...((next.repo ?? repo) ? { repo: next.repo ?? repo } : {}),
-        ...(nextTab !== 'api' ? { tab: nextTab } : {}),
-      },
-      replace,
-    })
-  }
-
+  const parsed = parseSymbolKey(key)
+  const detail = usePublicApiSymbol(
+    parsed
+      ? {
+          package: parsed.package,
+          name: parsed.name,
+          subpath: parsed.subpath,
+          ...(repo ? { repo } : {}),
+          ...(version ? { version } : {}),
+          limit: 20,
+        }
+      : undefined,
+  )
   const data = detail.data
+  const kind = data?.symbol.kind ?? hit?.symbol.kind
+  const changes = data?.history.changes ?? []
   return (
-    <Page
-      title={<span className="font-mono">{name}</span>}
-      eyebrow={
-        <Link
-          to="/public-api"
-          search={{}}
-          className="inline-flex items-center gap-1 hover:underline"
-        >
-          <ArrowLeft className="size-3.5" />
-          Public API
-        </Link>
-      }
-      icon="api"
-      description={data?.package.description ?? (data ? repoKey(data.repo) : undefined)}
-      actions={
-        data ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Select
-              aria-label="Version"
-              className="w-56"
-              value={versionKey(
-                data.versions.find((v) => v.analysisId === data.analysisId) ?? data.versions[0]!,
-              )}
-              onChange={(value) => go({ version: value, repo: repoKey(data.repo) })}
-              options={data.versions.map((v) => ({
-                id: versionKey(v),
-                label: versionLabel(v),
-                text: versionLabel(v),
-              }))}
-            />
-            <a
-              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm hover:bg-default"
-              href={api.publicApiMarkdownUrl({
-                name,
-                version: data.versions.find((v) => v.analysisId === data.analysisId)?.head
-                  ? 'head'
-                  : (data.package.version ?? data.ref ?? 'latest'),
-                repo: repoKey(data.repo),
-              })}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <FileText className="size-3.5" />
-              Markdown
-            </a>
-          </div>
-        ) : null
-      }
+    <SideSheet
+      open={parsed !== undefined}
+      onClose={onClose}
+      id={kind ? kindLabel(kind) : undefined}
+      title={<span className="mono">{parsed?.name ?? ''}</span>}
+      {...(index >= 0 ? { index, total } : {})}
+      {...(onPrevious ? { onPrevious } : {})}
+      {...(onNext ? { onNext } : {})}
+      {...(parsed
+        ? {
+            quietActions: [
+              {
+                label: 'Find usages',
+                icon: Users,
+                onPress: () =>
+                  void navigate(
+                    libraryLink(parsed.package, {
+                      tab: 'used-by',
+                      export: parsed.name,
+                      ...(repo ? { repo } : {}),
+                    }),
+                  ),
+              },
+              {
+                label: 'Compare versions',
+                icon: GitCompare,
+                onPress: () =>
+                  void navigate(
+                    libraryLink(parsed.package, { tab: 'changes', ...(repo ? { repo } : {}) }),
+                  ),
+              },
+            ] as const,
+          }
+        : {})}
+      tabs={{
+        'aria-label': 'Symbol views',
+        selected: pane,
+        onSelect: (id) => onPane(id === 'history' ? 'history' : 'declaration'),
+        items: [
+          { id: 'declaration', label: 'Declaration' },
+          {
+            id: 'history',
+            label: 'History',
+            ...(changes.length ? { badge: <Count>{changes.length}</Count> } : {}),
+          },
+        ],
+      }}
     >
       {detail.isPending ? (
-        <Placeholder className="h-96" />
+        <Placeholder className="h-64" />
       ) : detail.isError ? (
         <ErrorState error={detail.error} />
       ) : data ? (
-        <>
-          {data.removed ? (
-            <Notice tone="danger" title="Removed from the repository">
-              {repoKey(data.repo)} has not had this package on its default branch since{' '}
-              {formatDate(data.removed.at)}; avoid it in new code.
-              {data.removed.renamedTo ? ` Probably renamed to ${data.removed.renamedTo}.` : ''}
-              {data.removed.movedTo
-                ? ` Still in ${data.removed.movedTo.map((other) => repoKey(other)).join(', ')}.`
-                : ''}
-            </Notice>
-          ) : null}
-          <PackageFacts data={data} onRepo={(next) => go({ repo: next })} />
-          <Tabs
-            aria-label="Package views"
-            selected={tab}
-            onSelect={(next) => go({ ...(version ? { version } : {}), tab: next }, true)}
-            items={[
-              { id: 'api', label: 'API', content: <ApiTab data={data} /> },
+        pane === 'history' ? (
+          <SymbolHistory data={data} />
+        ) : (
+          <Declaration data={data} />
+        )
+      ) : null}
+    </SideSheet>
+  )
+}
+
+function Declaration({ data }: { data: PublicApiSymbol }) {
+  const { symbol } = data
+  const tags = parseDocTags(symbol.doc)
+  const deprecated = symbol.deprecated ?? tags.deprecated
+  const importLine =
+    symbol.kind === 'reexport'
+      ? undefined
+      : `import ${symbol.name === 'default' ? 'value' : `{ ${symbol.name} }`} from '${data.importPath}'`
+  const examples = tags.examples.map((code) =>
+    code.startsWith('```') ? code : `\`\`\`ts\n${code}\n\`\`\``,
+  )
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="mono text-xs text-muted">
+        {data.package} {data.version ?? ''} · {symbol.file}:{symbol.line}
+      </p>
+      {data.removed ? (
+        <Notice tone="danger" title="Removed from the repository">
+          {repoKey(data.repo)} has not had this package on its default branch since{' '}
+          {formatDate(data.removed.at)}; avoid it in new code.
+          {data.removed.renamedTo ? ` Probably renamed to ${data.removed.renamedTo}.` : ''}
+        </Notice>
+      ) : null}
+      {deprecated !== undefined ? (
+        <Notice tone="warning" title="Deprecated">
+          {deprecated ? <Markdown text={deprecated} /> : null}
+        </Notice>
+      ) : null}
+      {importLine ? (
+        <div className="flex items-center gap-2">
+          <code className="mono min-w-0 flex-1 truncate rounded-md border border-line bg-raise px-2 py-1 text-xs">
+            {importLine}
+          </code>
+          <CopyButton text={() => importLine} variant="ghost">
+            Copy import
+          </CopyButton>
+        </div>
+      ) : null}
+      <section className="flex flex-col gap-2">
+        <h3 className="text-[11.5px] font-medium text-muted">
+          Full declaration · <span className="mono">{data.version ?? 'branch'}</span>
+        </h3>
+        <pre className="mono overflow-x-auto rounded-lg border border-line bg-raise px-3 py-2 text-[12px] leading-relaxed">
+          {symbol.signature}
+        </pre>
+      </section>
+      {symbol.doc ? (
+        <section className="flex flex-col gap-2.5">
+          <h3 className="text-[11.5px] font-medium text-muted">Doc comment</h3>
+          {tags.summary ? <Markdown text={tags.summary} className="text-[12.5px]" /> : null}
+          <KeyValue
+            rows={[
+              ...tags.typeParams.map((param) => ({
+                label: <span className="mono">{`<${param.name}>`}</span>,
+                value: <Markdown text={param.text || '—'} className="text-[12.5px]" />,
+              })),
+              ...tags.params.map((param) => ({
+                label: <span className="mono">{param.name}</span>,
+                value: <Markdown text={param.text || '—'} className="text-[12.5px]" />,
+              })),
               {
-                id: 'changes',
-                label: 'Changes',
-                content: <ChangesTab data={data} />,
+                label: 'Returns',
+                value: tags.returns ? (
+                  <Markdown text={tags.returns} className="text-[12.5px]" />
+                ) : undefined,
               },
-              { id: 'used-by', label: 'Used by', content: <UsedByTab data={data} /> },
-              { id: 'upgrade', label: 'Upgrade', content: <UpgradeTab data={data} /> },
+              ...tags.throws.map((text) => ({
+                label: 'Throws',
+                value: <Markdown text={text} className="text-[12.5px]" />,
+              })),
+              {
+                label: 'Since',
+                value: tags.since ? <span className="mono">{tags.since}</span> : undefined,
+              },
+              ...tags.see.map((text) => ({
+                label: 'See',
+                value: <Markdown text={text} className="text-[12.5px]" />,
+              })),
+              ...tags.other.map((entry) => ({
+                label: entry.tag,
+                value: <Markdown text={entry.text || '—'} className="text-[12.5px]" />,
+              })),
             ]}
           />
-        </>
-      ) : null}
-    </Page>
-  )
-}
-
-function PackageFacts({
-  data,
-  onRepo,
-}: {
-  data: PublicApiPackageDetail
-  onRepo: (repo: string) => void
-}) {
-  const exports = data.package.entries.reduce(
-    (sum, entry) => sum + entry.symbols.filter((s) => s.kind !== 'reexport').length,
-    0,
-  )
-  const documented = data.package.entries.reduce(
-    (sum, entry) => sum + entry.symbols.filter((s) => s.kind !== 'reexport' && s.doc).length,
-    0,
-  )
-  return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted">
-      <span>
-        <span className="text-foreground">{data.package.version ?? 'no version'}</span>
-        {data.ref ? (
-          <span className="ml-1 font-mono text-xs" title={data.ref}>
-            ({formatRef(data.ref)})
-          </span>
-        ) : (
-          ' · default branch'
-        )}
-      </span>
-      <span>
-        <Link to="/repos/view" search={{ repo: repoKey(data.repo) }} className="hover:underline">
-          {repoKey(data.repo)}
-        </Link>
-        {data.package.dir !== '.' ? (
-          <span className="ml-1 font-mono text-xs">/{data.package.dir}</span>
-        ) : null}
-      </span>
-      <span>{plural(exports, 'export')}</span>
-      <span className="inline-flex items-center gap-2">
-        documented <DocumentedBar documented={documented} exports={exports} />
-      </span>
-      <span>analyzed {formatDateTime(data.analyzedAt)}</span>
-      {data.alsoIn.length ? (
-        <span className="inline-flex items-center gap-2">
-          also in
-          {data.alsoIn.map((other) => (
-            <Button
-              key={repoKey(other)}
-              size="sm"
-              variant="ghost"
-              onPress={() => onRepo(repoKey(other))}
-            >
-              {repoKey(other)}
-            </Button>
+          {examples.map((code, position) => (
+            <div key={position} className="flex flex-col gap-1">
+              <span className="text-[11.5px] font-medium text-muted">Example</span>
+              <Markdown text={code} className="text-[12.5px]" />
+            </div>
           ))}
-        </span>
-      ) : null}
-    </div>
-  )
-}
-
-function ApiTab({ data }: { data: PublicApiPackageDetail }) {
-  const entries = data.package.entries
-  const [subpath, setSubpath] = useState(entries[0]?.subpath ?? '.')
-  const [query, setQuery] = useState('')
-  const [limit, setLimit] = useState(symbolPage)
-  const entry = entries.find((item) => item.subpath === subpath) ?? entries[0]
-  if (!entry) return <EmptyState title="No entry point" />
-  const importFrom =
-    entry.subpath === '.'
-      ? data.package.name
-      : `${data.package.name}/${entry.subpath.replace(/^\.\//, '')}`
-  const groups = groupSymbols(entry.symbols, query)
-  let shown = 0
-  return (
-    <Panel
-      title={<span className="font-mono">{importFrom}</span>}
-      description={`${plural(entry.symbols.length, 'export')}${entry.file ? ` from ${entry.file}` : ''}${entry.truncated ? `, ${entry.truncated} more not recorded` : ''}`}
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          {entries.length > 1 ? (
-            <Select
-              aria-label="Entry point"
-              className="w-56"
-              value={entry.subpath}
-              onChange={(value) => {
-                setSubpath(value)
-                setLimit(symbolPage)
-              }}
-              options={entries.map((item) => ({
-                id: item.subpath,
-                label: `${item.subpath} (${item.symbols.length})`,
-                text: item.subpath,
-              }))}
-            />
-          ) : null}
-          <SearchInput
-            aria-label="Filter exports"
-            placeholder="Name or doc text"
-            value={query}
-            onChange={setQuery}
-            className="w-64"
-          />
-        </div>
-      }
-    >
-      {groups.length ? (
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-wrap gap-2">
-            {groups.map((group) => (
-              <a
-                key={group.kind}
-                href={`#kind-${group.kind}`}
-                className="text-sm text-muted hover:text-foreground"
-              >
-                {group.label} <span className="tabular">{group.symbols.length}</span>
-              </a>
-            ))}
-          </div>
-          {groups.map((group) => {
-            const visible = group.symbols.slice(0, Math.max(0, limit - shown))
-            shown += visible.length
-            if (!visible.length) return null
-            return (
-              <section key={group.kind} id={`kind-${group.kind}`}>
-                <h2 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
-                  {group.label}
-                </h2>
-                {visible.map((symbol) => (
-                  <SymbolCard key={symbol.name} symbol={symbol} importFrom={importFrom} />
-                ))}
-              </section>
-            )
-          })}
-          {groups.reduce((sum, group) => sum + group.symbols.length, 0) > limit ? (
-            <LoadMore onLoad={() => setLimit(limit + symbolPage)}>Show more</LoadMore>
-          ) : null}
-        </div>
+        </section>
       ) : (
-        <EmptyState
-          icon={<Search />}
-          title="Nothing matches"
-          description="Try another part of the name."
-        />
+        <p className="text-[12.5px] text-muted">No doc comment.</p>
       )}
-    </Panel>
-  )
-}
-
-const changeTone = {
-  removed: 'danger',
-  changed: 'warning',
-  deprecated: 'warning',
-  added: 'success',
-} as const
-
-function ChangeRow({ change, pkg }: { change: ApiChange; pkg: string }) {
-  const from = change.subpath === '.' ? pkg : `${pkg}/${change.subpath.replace(/^\.\//, '')}`
-  return (
-    <div className="flex flex-col gap-2 border-b border-border py-3 last:border-b-0">
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip tone={changeTone[change.change]} size="sm">
-          {change.change}
-        </Chip>
-        <span className="font-mono text-sm font-medium">{change.name}</span>
-        <Chip size="sm">{change.kind}</Chip>
-        <span className="font-mono text-xs text-muted">{from}</span>
-      </div>
-      {change.change === 'changed' && change.before && change.after ? (
-        <div className="grid gap-2 lg:grid-cols-2">
-          <div>
-            <div className="mb-1 text-xs text-muted">Before</div>
-            <Signature code={change.before} />
-          </div>
-          <div>
-            <div className="mb-1 text-xs text-muted">After</div>
-            <Signature code={change.after} />
-          </div>
-        </div>
-      ) : change.after || change.before ? (
-        <Signature code={change.after ?? change.before ?? ''} />
-      ) : null}
+      <section className="flex flex-col gap-2.5 border-t border-line pt-3.5">
+        <h3 className="text-[11.5px] font-medium text-muted">Where</h3>
+        <KeyValue
+          rows={[
+            {
+              label: 'Entry point',
+              value: (
+                <>
+                  <span className="mono">{data.subpath}</span>
+                  {data.alsoIn.length ? (
+                    <span className="text-muted">
+                      also in <span className="mono">{data.alsoIn.join(', ')}</span>
+                    </span>
+                  ) : null}
+                </>
+              ),
+            },
+            {
+              label: 'Repository',
+              value: <RepoName repo={data.repo} />,
+            },
+            {
+              label: 'Version',
+              value: (
+                <span className="mono">
+                  {data.version ?? '—'} · {data.ref ? formatRef(data.ref) : 'default branch'}
+                </span>
+              ),
+            },
+            { label: 'Analysed', value: formatRelative(data.analyzedAt) },
+          ]}
+        />
+      </section>
     </div>
   )
 }
 
-function ChangesTab({ data }: { data: PublicApiPackageDetail }) {
-  const current = data.versions.find((v) => v.analysisId === data.analysisId)
-  const older = data.versions.filter(
-    (v) => !v.head && v.analysisId !== data.analysisId && v.analyzedAt <= data.analyzedAt,
+function RepoName({ repo }: { repo: RepoRef }) {
+  return (
+    <Link
+      to="/repos/$"
+      params={{ _splat: repoSplat(repo) }}
+      search={{ tab: 'supply', section: 'public-api' }}
+      className="mono hover:underline"
+    >
+      {repo.path}
+    </Link>
   )
-  const [from, setFrom] = useState<string | undefined>(undefined)
-  const fromKey = from ?? (older[0] ? versionKey(older[0]) : undefined)
-  const diff = usePublicApiDiff(
-    {
-      name: data.package.name,
-      to: current ? versionKey(current) : 'latest',
-      repo: repoKey(data.repo),
-      ...(fromKey ? { from: fromKey } : {}),
-    },
-    fromKey !== undefined,
-  )
-  const [kind, setKind] = useState<'all' | ApiChange['change']>('all')
+}
 
-  if (!fromKey)
+function SymbolHistory({ data }: { data: PublicApiSymbol }) {
+  const { changes, versions, capped } = data.history
+  if (!changes.length)
     return (
       <EmptyState
-        title="No earlier version on record"
-        description="Analyze past releases with the public API snapshot to compare versions."
-        action={<BackfillReleasesButton analyzer="api-surface" repo={data.repo} />}
+        title="No change on record"
+        description={`The declaration is the same in all ${plural(versions, 'recorded version')}. Analyse past releases to look further back.`}
       />
     )
-  const result = diff.data
-  const changes =
-    result?.diff.changes.filter((change) => kind === 'all' || change.change === kind) ?? []
   return (
-    <Panel
-      title={
-        result
-          ? `${result.from.version} → ${current ? versionLabel(current) : result.to.version}`
-          : 'Changes'
-      }
-      description={
-        result
-          ? `${result.diff.removed} removed, ${result.diff.changed} changed, ${result.diff.deprecated} deprecated, ${result.diff.added} added; calls for a ${result.diff.required} release${result.diff.bumped ? `, the version got a ${result.diff.bumped} bump` : ''}.`
-          : undefined
-      }
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            aria-label="Compare with"
-            className="w-56"
-            value={fromKey}
-            onChange={setFrom}
-            options={older.map((v) => ({
-              id: versionKey(v),
-              label: `from ${versionLabel(v)}`,
-              text: versionLabel(v),
-            }))}
-          />
-          <Segmented
-            aria-label="Change kind"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { id: 'all', label: 'All' },
-              { id: 'removed', label: 'Removed' },
-              { id: 'changed', label: 'Changed' },
-              { id: 'added', label: 'Added' },
-            ]}
-          />
-        </div>
-      }
-    >
-      {diff.isPending ? (
-        <Placeholder className="h-48" />
-      ) : diff.isError ? (
-        <ErrorState error={diff.error} />
-      ) : result ? (
-        <div className="flex flex-col gap-3">
-          {result.diff.semverWarning ? (
-            <Notice tone="danger" title="Semver">
-              {result.diff.semverWarning}.
-            </Notice>
-          ) : null}
-          {changes.length ? (
-            <div>
-              {changes.map((change) => (
-                <ChangeRow
-                  key={`${change.change} ${change.subpath} ${change.name}`}
-                  change={change}
-                  pkg={data.package.name}
-                />
-              ))}
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-muted">
+        Versions where it changed · {plural(versions, 'version')} compared
+        {capped ? ', older ones left out' : ''}
+      </p>
+      <ol className="flex flex-col gap-3">
+        {changes.map((change) => (
+          <li
+            key={`${change.version} ${change.change}`}
+            className="flex flex-col gap-1.5 border-b border-line pb-3 last:border-b-0"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mono font-medium">{change.version}</span>
+              <Tag tone={changeLabels[change.change].tone} dot>
+                {changeLabels[change.change].label}
+              </Tag>
+              {change.ref &&
+              change.ref !== change.version &&
+              change.ref !== `v${change.version}` ? (
+                <span className="mono text-xs text-dim">{formatRef(change.ref)}</span>
+              ) : null}
+              <span className="ml-auto text-xs text-muted">{formatDate(change.analyzedAt)}</span>
             </div>
-          ) : (
-            <EmptyState
-              title="No changes"
-              description="No export of this kind changed between these versions."
-            />
-          )}
-        </div>
-      ) : null}
-    </Panel>
+            {change.before || change.after ? (
+              <pre className="mono overflow-x-auto rounded-lg border border-line bg-raise px-3 py-2 text-[12px] leading-relaxed">
+                {change.before
+                  ? change.before.split('\n').map((line, at) => (
+                      <span key={`b${at}`} className="block text-[var(--bad)]">
+                        - {line}
+                      </span>
+                    ))
+                  : null}
+                {change.after
+                  ? change.after.split('\n').map((line, at) => (
+                      <span
+                        key={`a${at}`}
+                        className={`block ${change.before ? 'text-[var(--ok)]' : ''}`}
+                      >
+                        {change.before ? '+ ' : ''}
+                        {line}
+                      </span>
+                    ))
+                  : null}
+              </pre>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </div>
   )
 }
 
-function SearchTab() {
-  const [query, setQuery] = useState('')
-  const [kind, setKind] = useState('*')
-  const debounced = useDebounced(query, 300)
-  const results = usePublicApiSearch({ q: debounced, ...(kind !== '*' ? { kind } : {}) })
+/**
+ * The public API one repository publishes, for its hub: its packages, each linking to its
+ * library page, and symbol search narrowed to the repository with the same symbol sheet.
+ */
+export function RepoPublicApi({ repo }: { repo: RepoRef }) {
+  const [search, setSearch] = useState<PublicApiSearch>({})
+  const q = useDebounced(search.q ?? '', 300).trim()
+  const key = repoKey(repo)
   return (
-    <Panel
-      title="Find an export"
-      description="Exact names first, then prefixes, parts of names and words in doc comments; newest version of each package."
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            aria-label="Kind"
-            className="w-40"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { id: '*', label: 'Any kind' },
-              ...symbolKinds.map((k) => ({ id: k.kind, label: k.label })),
-            ]}
-          />
-          <SearchInput
-            aria-label="Search exports"
-            placeholder="e.g. createClient"
-            value={query}
-            onChange={setQuery}
-            className="w-72"
-          />
-        </div>
-      }
-    >
-      {!debounced.trim() ? (
-        <EmptyState
-          icon={<Search />}
-          title="Search the catalog"
-          description="Type a function, class or type name, or words from its docs."
+    <div className="flex flex-col gap-4">
+      <Catalog search={{}} repo={key} />
+      <section className="flex flex-col gap-3">
+        <SearchInput
+          aria-label="Search this repository's exports"
+          placeholder="Search exports of this repository"
+          value={search.q ?? ''}
+          onChange={(text) => setSearch(text ? { q: text } : {})}
+          className="w-80"
         />
-      ) : results.isPending ? (
-        <Placeholder className="h-48" />
-      ) : results.isError ? (
-        <ErrorState error={results.error} />
-      ) : results.data.hits.length ? (
-        <div>
-          {results.data.hits.map((hit) => (
-            <div
-              key={`${repoKey(hit.repo)} ${hit.importPath} ${hit.symbol.name}`}
-              className="flex flex-col gap-2 border-b border-border py-3 last:border-b-0"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  to="/public-api"
-                  search={{ package: hit.package, repo: repoKey(hit.repo) }}
-                  hash={`symbol-${hit.symbol.name}`}
-                  className="font-mono text-sm font-semibold hover:underline"
-                >
-                  {hit.symbol.name}
-                </Link>
-                <Chip size="sm">{hit.symbol.kind}</Chip>
-                {hit.symbol.deprecated !== undefined ? (
-                  <Chip tone="warning" size="sm">
-                    deprecated
-                  </Chip>
-                ) : null}
-                <span className="font-mono text-xs text-muted">
-                  {hit.importPath}
-                  {hit.version ? `@${hit.version}` : ''}
-                </span>
-              </div>
-              {hit.symbol.doc ? (
-                <div className="text-sm text-muted">{hit.symbol.doc.split('\n\n')[0]}</div>
-              ) : null}
-              <Signature
-                code={
-                  hit.symbol.signature.length > 800
-                    ? `${hit.symbol.signature.slice(0, 800)}\n…`
-                    : hit.symbol.signature
-                }
-              />
-            </div>
-          ))}
-          {results.data.more ? (
-            <p className="pt-3 text-sm text-muted">
-              …and {results.data.more} more; narrow the query or the kind.
-            </p>
-          ) : null}
-        </div>
-      ) : (
-        <EmptyState
-          title="Nothing exported matches"
-          description="Try a shorter part of the name."
-        />
-      )}
-    </Panel>
+        {q ? <SymbolSearch search={search} q={q} setSearch={setSearch} repo={key} /> : null}
+      </section>
+    </div>
   )
 }

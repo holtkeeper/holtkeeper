@@ -1,6 +1,7 @@
 import { weekRange } from '@holtkeeper/ai-usage'
 import type { WriteTasksStatus } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
+import { liveWorkers } from '@holtkeeper/jobs'
 import {
   type TasksWrite,
   resolveGlobalSetting,
@@ -21,7 +22,7 @@ export async function tasksWriteSettings(store: Pick<Store, 'settings'>): Promis
 
 /**
  * What a write task may do when it starts on a worker: the `tasks.write` switch, the
- * repository's `repo.readOnly` setting, the config's `dryRun`, whether commands run sandboxed and
+ * repository's `repo.freeze` setting, the config's `dryRun`, whether commands run sandboxed and
  * whether this week's spend reached `weeklyUsd`, read anew for every task.
  */
 export function writeTaskPolicy(deps: {
@@ -61,28 +62,34 @@ export async function weeklyWriteSpend(deps: {
 
 /**
  * How the write worker pool is doing, from write task jobs: how many wait and run, since when the
- * oldest waits, when a worker last started one and which workers run them now.
+ * oldest waits, when a worker last started one, which workers run them now and how many workers
+ * of any pool the registry holds alive at `now` (absent without a KV store).
  */
 export async function writePoolStatus(
-  store: Pick<Store, 'jobs'>,
+  store: Pick<Store, 'jobs' | 'kv'>,
+  now: Date,
 ): Promise<WriteTasksStatus['pool']> {
-  const [queued, running, recent] = await Promise.all([
+  const [queued, running, recent, live] = await Promise.all([
     store.jobs.list({ analyzer: WRITE_TASK_KIND, status: 'queued', limit: 500 }),
     store.jobs.list({ analyzer: WRITE_TASK_KIND, status: 'running', limit: 500 }),
     store.jobs.list({ analyzer: WRITE_TASK_KIND, limit: 50 }),
+    store.kv ? liveWorkers(store.kv, now) : undefined,
   ])
   const oldest = queued.map((job) => job.createdAt).toSorted()[0]
   const lastStarted = recent
     .flatMap((job) => (job.startedAt ? [job.startedAt] : []))
     .toSorted()
     .at(-1)
+  const workers = [
+    ...new Set(running.flatMap((job) => (job.workerId ? [job.workerId] : []))),
+  ].toSorted()
   return {
     queued: queued.length,
     running: running.length,
     ...(oldest && { oldestQueuedAt: oldest }),
     ...(lastStarted && { lastStartedAt: lastStarted }),
-    workers: [
-      ...new Set(running.flatMap((job) => (job.workerId ? [job.workerId] : []))),
-    ].toSorted(),
+    busyWorkers: workers.length,
+    ...(live && { totalWorkers: live.length }),
+    workers,
   }
 }

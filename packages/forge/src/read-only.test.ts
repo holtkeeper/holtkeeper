@@ -12,6 +12,7 @@ function fakeForge() {
   const forge = {
     kind: 'fake',
     readFile: async () => 'content',
+    listPipelineJobs: async () => [{ id: 1, name: 'deploy', manual: true }],
     commit: record('commit'),
     commentOnMergeRequest: record('commentOnMergeRequest'),
     registerSshKey: async () => {
@@ -49,6 +50,7 @@ describe('readOnlyForge', () => {
     const { forge, calls } = fakeForge()
     const guarded = readOnlyForge(forge, async (repo) => lockedLibs(repo))
     expect(await guarded.readFile('libs/ui', 'package.json')).toBe('content')
+    expect(await guarded.listPipelineJobs?.('libs/ui')).toMatchObject([{ name: 'deploy' }])
     await guarded.commentOnMergeRequest('games/app', 1, 'hi')
     expect(calls).toEqual(['commentOnMergeRequest'])
     expect(guarded.kind).toBe('fake')

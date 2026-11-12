@@ -159,6 +159,56 @@ describe('worker', () => {
     expect((await store.analyses.get(now?.analysisId ?? ''))?.createdAt).toBe(clock.toISOString())
   })
 
+  test('stores the metrics of the kind with the options and the previous record', async () => {
+    const widgets: AnyAnalyzer['analysis'] = {
+      kind: 'widgets',
+      label: 'Widgets',
+      schema: z.object({ count: z.number() }),
+      summarize: () => [],
+      toReport: () => {
+        throw new Error('not used')
+      },
+      metrics: (
+        data: { count: number },
+        { options, previous }: { options?: unknown; previous?: { count: number } },
+      ) => ({
+        count: data.count,
+        limit: z.object({ limit: z.number() }).parse(options).limit,
+        ...(previous ? { delta: data.count - previous.count } : {}),
+      }),
+    }
+    let count = 3
+    const counter = analyzer('counter', async () => ({ data: { count } }), { analysis: widgets })
+    const broken = analyzer('broken', async () => ({ data: { count: 'many' } }), {
+      analysis: { ...widgets, kind: 'broken' },
+    })
+    const worker = createWorker({
+      store,
+      analyzers: [counter, broken],
+      contextFor,
+      now: () => clock,
+    })
+    await enqueue('counter', { options: { limit: 4 } })
+    const first = await worker.runNext()
+    expect((await store.analyses.get(first?.analysisId ?? ''))?.metrics).toEqual({
+      count: 3,
+      limit: 4,
+    })
+    count = 5
+    clock = new Date(clock.getTime() + 60_000)
+    await enqueue('counter')
+    const second = await worker.runNext()
+    expect((await store.analyses.get(second?.analysisId ?? ''))?.metrics).toEqual({
+      count: 5,
+      limit: 1,
+      delta: 2,
+    })
+    await enqueue('broken')
+    const unread = await worker.runNext()
+    expect(unread?.status).toBe('succeeded')
+    expect(await store.analyses.get(unread?.analysisId ?? '')).not.toHaveProperty('metrics')
+  })
+
   test('keeps only the newest records of analyzers that ask for it', async () => {
     const snapshot = analyzer('snapshot', async () => ({ data: {} }), { keepRecords: 2 })
     const worker = createWorker({ store, analyzers: [snapshot], contextFor, now: () => clock })

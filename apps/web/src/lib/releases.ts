@@ -1,81 +1,21 @@
 import type {
-  DeployStatus,
   GateResult,
   Issue,
   IssueCategory,
   PersonView,
-  PipelineState,
-  ReleaseBoardRow,
   ReleaseBump,
   ReleaseEdits,
   ReleaseEntry,
   ReleasePlan,
-  ReleaseStage,
-  ReleaseVersionDeploy,
 } from '@holtkeeper/api'
 
 import type { StatusTone } from '../ui/colors.ts'
-import type { Tick } from '../ui/TickStrip.tsx'
-
-const stageLabels: Record<ReleaseStage, string> = {
-  'awaiting-version': 'Ready to tag',
-  proposed: 'Release MR open',
-  candidate: 'Ready to propose',
-  released: 'Released',
-  idle: 'Nothing to release',
-  external: 'Released elsewhere',
-}
-
-export const stageTones: Record<ReleaseStage, StatusTone> = {
-  'awaiting-version': 'warning',
-  proposed: 'accent',
-  candidate: 'accent',
-  released: 'success',
-  idle: 'default',
-  external: 'default',
-}
 
 /** Tone of a tracker issue by where it stands. */
 export const issueTones: Record<IssueCategory, StatusTone> = {
   todo: 'default',
   doing: 'info',
   done: 'success',
-}
-
-/** Card order: what needs a person first. */
-const stageOrder: readonly ReleaseStage[] = [
-  'awaiting-version',
-  'proposed',
-  'candidate',
-  'released',
-  'idle',
-  'external',
-]
-
-export const deployLabels: Record<DeployStatus, string> = {
-  'no-pipeline': 'No pipeline',
-  missing: 'No job',
-  waiting: 'Waiting',
-  ready: 'Ready',
-  pending: 'Pending',
-  running: 'Running',
-  success: 'Deployed',
-  failed: 'Failed',
-  canceled: 'Canceled',
-  skipped: 'Skipped',
-}
-
-export const deployTones: Record<DeployStatus, StatusTone> = {
-  'no-pipeline': 'default',
-  missing: 'default',
-  waiting: 'default',
-  ready: 'accent',
-  pending: 'info',
-  running: 'info',
-  success: 'success',
-  failed: 'danger',
-  canceled: 'warning',
-  skipped: 'default',
 }
 
 export const bumpTones: Record<ReleaseBump, StatusTone> = {
@@ -237,104 +177,23 @@ export function bumpChoices(current: string | undefined): Partial<Record<Release
   }
 }
 
-/** Gates that fail, split into the ones a person may override and the ones nobody may. */
+/**
+ * Gates that fail: `hard` ones nobody may override, `soft` failing `block` gates a person may
+ * override, and `warn` ones that never stop a step.
+ */
 export function failingGates(gates: readonly GateResult[]) {
   const failing = gates.filter((gate) => !gate.ok)
   const hard = failing.filter((gate) => gate.id === 'empty' || gate.id === 'tag-exists')
-  return { failing, hard, soft: failing.filter((gate) => !hard.includes(gate)) }
+  return {
+    hard,
+    soft: failing.filter((gate) => gate.severity === 'block' && !hard.includes(gate)),
+    warn: failing.filter((gate) => gate.severity === 'warn'),
+  }
 }
 
 /** "12 commits", "300+ commits". */
 export const countLabel = (count: number, capped: boolean, word = 'commit') =>
   `${count}${capped ? '+' : ''} ${word}${count === 1 && !capped ? '' : 's'}`
-
-/** Cards that need a person first, then by stage (see `stageOrder`), then by path. */
-export const sortCards = <T extends ReleaseBoardRow & { needsAction?: boolean }>(
-  cards: readonly T[],
-): T[] =>
-  cards.toSorted(
-    (a, b) =>
-      Number(b.needsAction ?? false) - Number(a.needsAction ?? false) ||
-      stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage) ||
-      a.repo.path.localeCompare(b.repo.path),
-  )
-
-/** Where a repository stands in plain words, e.g. "Deploying to prod" or "Ready to tag". */
-export function stageText(row: ReleaseBoardRow): string {
-  if (row.error) return 'Could not read the forge'
-  const environments = row.deploy?.environments ?? []
-  const running = environments.find((env) => env.status === 'running' || env.status === 'pending')
-  if (running) return `Deploying to ${running.name}`
-  const failed = environments.find((env) => env.status === 'failed')
-  if (failed) return `Deploy to ${failed.name} failed`
-  if (row.stage === 'awaiting-version' && row.acceptance === undefined && row.mode !== 'trunk')
-    return 'Waiting for acceptance'
-  return stageLabels[row.stage]
-}
-
-/** The one step a person would take next on a card, or `undefined` when nothing waits. */
-export function nextStep(row: ReleaseBoardRow): string | undefined {
-  const environments = row.deploy?.environments ?? []
-  const failed = environments.find((env) => env.status === 'failed')
-  if (failed) return `Retry ${failed.name}`
-  if (row.stage === 'awaiting-version') return row.next ? `Create ${row.next}` : 'Create version'
-  if (row.stage === 'proposed') return row.request ? `Review !${row.request.id}` : 'Review'
-  if (row.stage === 'candidate') return 'Open release MR'
-  const ready = environments.find((env) => env.status === 'ready')
-  return ready ? `Deploy to ${ready.name}` : undefined
-}
-
-const pipelineTones: Record<PipelineState['status'], Tick['tone']> = {
-  pending: 'info',
-  running: 'info',
-  success: 'success',
-  failed: 'danger',
-  canceled: 'warning',
-  skipped: 'skipped',
-  manual: 'skipped',
-}
-
-/**
- * Ticks of a card's deploy strip, oldest step first: the source and target branch pipelines,
- * then the latest version's deploy per environment. Empty when the snapshot has none of them.
- */
-export function cardTicks(row: ReleaseBoardRow): Tick[] {
-  const ticks: Tick[] = []
-  const branch = (name: string | undefined, pipeline: PipelineState | undefined) => {
-    if (pipeline)
-      ticks.push({ tone: pipelineTones[pipeline.status], label: `${name}: ${pipeline.status}` })
-  }
-  if (row.mode === 'merge-request') branch(row.source, row.pipelines.source)
-  branch(row.target, row.pipelines.target)
-  for (const env of row.deploy?.environments ?? []) {
-    const tone = deployTones[env.status]
-    ticks.push({
-      tone: env.status === 'missing' || env.status === 'no-pipeline' ? 'skipped' : tone,
-      label: `${row.deploy?.tag} on ${env.name}: ${deployLabels[env.status]}`,
-    })
-  }
-  return ticks
-}
-
-const recordedTones: Record<ReleaseVersionDeploy['status'], Tick['tone']> = {
-  started: 'info',
-  succeeded: 'success',
-  failed: 'danger',
-}
-
-/** One tick per environment a version was deployed to, in the order of `environments`. */
-export function versionTicks(
-  deploys: readonly ReleaseVersionDeploy[],
-  environments: readonly string[],
-): Tick[] {
-  const names = [...new Set([...environments, ...deploys.map((deploy) => deploy.environment)])]
-  return names.map((name) => {
-    const deploy = deploys.find((candidate) => candidate.environment === name)
-    return deploy
-      ? { tone: recordedTones[deploy.status], label: `${name}: ${deploy.status}` }
-      : { tone: 'skipped', label: `${name}: not deployed` }
-  })
-}
 
 const channelLabels: Readonly<Record<string, string>> = {
   ui: 'in the panel',

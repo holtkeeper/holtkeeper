@@ -3,15 +3,35 @@ import { describe, expect, test } from 'bun:test'
 import type { AgentTaskGroupView, AgentTaskView, Scope, WriteTasksStatus } from '@holtkeeper/api'
 
 import {
-  matchesTaskFilter,
-  taskCancellable,
+  type TaskListFilter,
+  diffstatShares,
+  endedSummary,
+  formatDiffstat,
+  groupCiSummary,
+  groupDiffstat,
+  groupSpendCap,
+  matchesTaskList,
+  needsApprovalCount,
+  parseTaskSheetTab,
   parseTasksSearch,
+  patchFiles,
+  taskApprovalBadge,
+  taskCancellable,
+  taskFilterOptions,
   taskGroupCap,
   taskGroupFlow,
+  taskGroupTeams,
+  taskProgressCaption,
+  taskSectionCaption,
+  taskSectionOf,
+  taskSections,
   taskSegments,
   taskSourceLabel,
   taskStatusTone,
+  taskViewCounts,
   writePoolState,
+  writeTasksEntry,
+  writeWorkersText,
   writeTasksSwitch,
 } from './tasks.ts'
 
@@ -30,6 +50,7 @@ const task = (id: string, repo: string, patch: Partial<AgentTaskView> = {}): Age
   createdAt: at,
   updatedAt: at,
   branch: 'holtkeeper/g1-upgrade-some-lib',
+  ci: 'none',
   can: { retry: false, cancel: true },
   ...patch,
 })
@@ -50,15 +71,13 @@ const group = (tasks: AgentTaskView[], patch: Partial<AgentTaskGroupView> = {}) 
     tasks,
     costUsd: 0,
     hasPatch: false,
-    can: { approve: false, cancel: true },
+    can: { approve: false, cancel: true, retry: false, reject: false },
     ...patch,
   }) satisfies AgentTaskGroupView
 
-const of = (status: AgentTaskGroupView['status']) => ({ status })
-
 const pool = (patch: Partial<WriteTasksStatus['pool']> = {}) => ({
   enabled: true,
-  pool: { queued: 0, running: 0, ...patch },
+  pool: { queued: 0, running: 0, busyWorkers: 0, ...patch },
 })
 
 const entry = (id: string, scope: Scope, value: unknown) => ({
@@ -134,18 +153,8 @@ describe('status mapping', () => {
   test('every status has a tone, failures read as danger', () => {
     expect(taskStatusTone.failed).toBe('danger')
     expect(taskStatusTone['mr-open']).toBe('success')
-    expect(taskStatusTone.running).toBe('accent')
-  })
-
-  test('filters split work in progress, open merge requests and ended groups', () => {
-    expect(matchesTaskFilter(of('proposed'), 'active')).toBe(true)
-    expect(matchesTaskFilter(of('running'), 'active')).toBe(true)
-    expect(matchesTaskFilter(of('mr-open'), 'active')).toBe(false)
-    expect(matchesTaskFilter(of('mr-open'), 'mr-open')).toBe(true)
-    expect(matchesTaskFilter(of('failed'), 'ended')).toBe(true)
-    expect(matchesTaskFilter(of('done'), 'ended')).toBe(true)
-    expect(matchesTaskFilter(of('queued'), 'ended')).toBe(false)
-    expect(matchesTaskFilter(of('queued'), 'all')).toBe(true)
+    expect(taskStatusTone.running).toBe('info')
+    expect(taskStatusTone.proposed).toBe('warning')
     expect(taskCancellable('running')).toBe(true)
     expect(taskCancellable('mr-open')).toBe(false)
   })
@@ -185,6 +194,12 @@ test('the spend cap splits the group cap like the server, to the cent', () => {
   expect(taskGroupCap({ perRepoUsd: 1.5, perGroupUsd: 5 }, 0)).toEqual({ perRepo: 0, total: 0 })
 })
 
+test('the write pool counts busy workers against the live ones when the server knows them', () => {
+  expect(writeWorkersText({ busyWorkers: 1, totalWorkers: 3 })).toBe('1 / 3')
+  expect(writeWorkersText({ busyWorkers: 0, totalWorkers: 0 })).toBe('0 / 0')
+  expect(writeWorkersText({ busyWorkers: 2 })).toBe('2 busy')
+})
+
 test('the write pool is stalled when a task waits long and nothing runs', () => {
   const now = new Date('2026-11-11T10:10:00.000Z')
   expect(writePoolState({ ...pool(), enabled: false }, now)).toBe('off')
@@ -196,14 +211,18 @@ test('the write pool is stalled when a task waits long and nothing runs', () => 
   )
 })
 
-test('search keeps a task only with its group and drops unknown filters', () => {
-  expect(parseTasksSearch({ group: 'g1', task: 't1', filter: 'active' })).toEqual({
+test('search keeps a task and a tab only with their group and drops unknown values', () => {
+  expect(parseTasksSearch({ group: 'g1', task: 't1', tab: 'diff', view: 'ended' })).toEqual({
     group: 'g1',
     task: 't1',
-    filter: 'active',
+    tab: 'diff',
+    view: 'ended',
   })
-  expect(parseTasksSearch({ task: 't1', filter: 'all' })).toEqual({})
-  expect(parseTasksSearch({ filter: 'nope', group: '' })).toEqual({})
+  expect(parseTasksSearch({ task: 't1', tab: 'flow', view: 'open' })).toEqual({})
+  expect(parseTasksSearch({ group: 'g1', tab: 'plan', view: 'nope' })).toEqual({ group: 'g1' })
+  expect(parseTasksSearch({ view: 'all', group: '' })).toEqual({ view: 'all' })
+  expect(parseTaskSheetTab('runs')).toBe('runs')
+  expect(parseTaskSheetTab('nope')).toBe('plan')
 })
 
 test('the kill switch flips only enabled on the global entry and keeps its caps', () => {
@@ -221,9 +240,251 @@ test('the kill switch flips only enabled on the global entry and keeps its caps'
     scope: { all: true },
     value: { perRepoUsd: 1, enabled: true },
   })
+  expect(
+    writeTasksEntry([entry('s1', { groups: ['shop'] }, {}), entry('s2', { all: true }, {})])?.id,
+  ).toBe('s2')
   expect(writeTasksSwitch([], false)).toEqual({
     key: 'tasks.write',
     scope: { all: true },
     value: { enabled: false },
+  })
+})
+
+const mr = (id: number) => ({ id, url: `https://forge.test/mr/${id}`, draft: true })
+
+const sample = () => [
+  group([task('a1', 'work:acme/a', { status: 'proposed' })], { id: 'ga', status: 'proposed' }),
+  group([task('b1', 'work:acme/b', { status: 'running' })], { id: 'gb', status: 'running' }),
+  group([task('c1', 'work:acme/c', { status: 'approved' })], { id: 'gc', status: 'approved' }),
+  group([task('d1', 'work:acme/d', { status: 'mr-open', mergeRequest: mr(1) })], {
+    id: 'gd',
+    status: 'mr-open',
+  }),
+  group(
+    [
+      task('e1', 'work:acme/e', { status: 'mr-open', mergeRequest: mr(2) }),
+      task('e2', 'work:acme/f', { status: 'failed' }),
+    ],
+    { id: 'ge', status: 'mr-open' },
+  ),
+  group([task('f1', 'work:acme/g', { status: 'failed' })], { id: 'gf', status: 'failed' }),
+  group([task('g1', 'work:acme/h', { status: 'done' })], { id: 'gg', status: 'done' }),
+  group([task('h1', 'work:acme/i', { status: 'cancelled' })], { id: 'gh', status: 'cancelled' }),
+]
+
+describe('sections', () => {
+  test('groups land in the section that says what they need next', () => {
+    expect(sample().map((each) => [each.id, taskSectionOf(each)])).toEqual([
+      ['ga', 'approval'],
+      ['gb', 'running'],
+      ['gc', 'running'],
+      ['gd', 'opened'],
+      ['ge', 'failed'],
+      ['gf', 'failed'],
+      ['gg', 'ended'],
+      ['gh', 'ended'],
+    ])
+  })
+
+  test('views pick open, ended or every section, in order and without empty ones', () => {
+    const ids = (view: 'open' | 'ended' | 'all') =>
+      taskSections(sample(), view).map((section) => [
+        section.id,
+        section.groups.map((each) => each.id),
+      ])
+    expect(ids('open')).toEqual([
+      ['approval', ['ga']],
+      ['running', ['gb', 'gc']],
+      ['opened', ['gd']],
+      ['failed', ['ge', 'gf']],
+    ])
+    expect(ids('ended')).toEqual([['ended', ['gg', 'gh']]])
+    expect(ids('all').map(([id]) => id)).toEqual([
+      'approval',
+      'running',
+      'opened',
+      'failed',
+      'ended',
+    ])
+    expect(taskSections([], 'all')).toEqual([])
+    expect(taskViewCounts(sample())).toEqual({ open: 6, ended: 2, all: 8 })
+    expect(endedSummary(sample())).toBe('1 done, 1 cancelled')
+  })
+
+  test('the badge counts groups waiting for approval and caps at 99+', () => {
+    expect(needsApprovalCount(sample())).toBe(1)
+    expect(taskApprovalBadge(undefined)).toBe('')
+    expect(taskApprovalBadge(0)).toBe('')
+    expect(taskApprovalBadge(3)).toBe('3')
+    expect(taskApprovalBadge(120)).toBe('99+')
+  })
+
+  test('section captions count workers, queue and drafts', () => {
+    const groups = [
+      group([
+        task('t1', 'work:acme/a', { status: 'running' }),
+        task('t2', 'work:acme/b', { status: 'queued' }),
+        task('t3', 'work:acme/c', { status: 'approved' }),
+      ]),
+    ]
+    expect(taskSectionCaption('running', groups)).toBe('1 repository on workers · 2 queued')
+    expect(
+      taskSectionCaption('opened', [
+        group([task('t1', 'work:acme/a', { status: 'mr-open', mergeRequest: mr(1) })]),
+      ]),
+    ).toBe('waiting for review on the forge · 1 draft merge request')
+    expect(taskSectionCaption('approval', [])).toBe('nothing runs until someone approves')
+  })
+
+  test('the progress caption counts what matters', () => {
+    expect(taskProgressCaption([{ status: 'proposed' }, { status: 'proposed' }])).toBe('0 of 2')
+    expect(taskProgressCaption([{ status: 'mr-open' }, { status: 'done' }])).toBe('2 of 2')
+    expect(
+      taskProgressCaption([{ status: 'mr-open' }, { status: 'running' }, { status: 'queued' }]),
+    ).toBe('1 MR · 1 running · 1 queued')
+    expect(taskProgressCaption([{ status: 'failed' }, { status: 'approved' }])).toBe(
+      '1 queued · 1 failed',
+    )
+  })
+})
+
+describe('CI column', () => {
+  test('shows the most pressing CI and how many merge requests share it', () => {
+    expect(groupCiSummary([task('t1', 'work:acme/a')])).toBeUndefined()
+    expect(
+      groupCiSummary([
+        task('t1', 'work:acme/a', { mergeRequest: mr(1), ci: 'success' }),
+        task('t2', 'work:acme/b', { mergeRequest: mr(2), ci: 'success' }),
+      ]),
+    ).toEqual({ ci: 'success', label: 'Passed' })
+    expect(
+      groupCiSummary([
+        task('t1', 'work:acme/a', { mergeRequest: mr(1), ci: 'success' }),
+        task('t2', 'work:acme/b', { mergeRequest: mr(2), ci: 'failed' }),
+        task('t3', 'work:acme/c', { mergeRequest: mr(3), ci: 'running' }),
+        task('t4', 'work:acme/d', { ci: 'none' }),
+      ]),
+    ).toEqual({ ci: 'failed', label: 'Failed · 1 of 3' })
+    expect(
+      groupCiSummary([task('t1', 'work:acme/a', { mergeRequest: mr(1), ci: 'none' })]),
+    ).toEqual({ ci: 'none', label: 'No pipeline' })
+  })
+})
+
+describe('diffstat', () => {
+  test('sums what the tasks know', () => {
+    expect(groupDiffstat([task('t1', 'work:acme/a')])).toBeUndefined()
+    const stat = groupDiffstat([
+      task('t1', 'work:acme/a', {
+        diffstat: { files: 3, additions: 20, deletions: 4, source: 'merge-request' },
+      }),
+      task('t2', 'work:acme/b', {
+        diffstat: { files: 1, additions: 2, deletions: 6, source: 'patch' },
+      }),
+      task('t3', 'work:acme/c'),
+    ])
+    expect(stat).toEqual({ files: 4, additions: 22, deletions: 10, repos: 2 })
+    expect(formatDiffstat(stat!)).toBe('4 files · +22 −10')
+    expect(formatDiffstat({ files: 1, additions: 1, deletions: 0 })).toBe('1 file · +1 −0')
+  })
+
+  test('bar shares scale to the largest row', () => {
+    expect(diffstatShares({ additions: 30, deletions: 10 }, 80)).toEqual({
+      add: 0.375,
+      del: 0.125,
+      rest: 0.5,
+    })
+    expect(diffstatShares({ additions: 6, deletions: 2 }, 4)).toEqual({
+      add: 0.75,
+      del: 0.25,
+      rest: 0,
+    })
+    expect(diffstatShares({ additions: 0, deletions: 0 }, 0)).toEqual({ add: 0, del: 0, rest: 1 })
+  })
+
+  test('files of a patch count added and removed lines, not headers', () => {
+    const patch = [
+      'diff --git a/src/widget.ts b/src/widget.ts',
+      'index 111..222 100644',
+      '--- a/src/widget.ts',
+      '+++ b/src/widget.ts',
+      '@@ -1,3 +1,3 @@',
+      ' keep',
+      '-old',
+      '+new',
+      '+more',
+      'diff --git a/old.txt b/old.txt',
+      'deleted file mode 100644',
+      '--- a/old.txt',
+      '+++ /dev/null',
+      '@@ -1,2 +0,0 @@',
+      '-one',
+      '-two',
+      '\\ No newline at end of file',
+    ].join('\n')
+    expect(patchFiles(patch)).toEqual([
+      { path: 'src/widget.ts', additions: 2, deletions: 1 },
+      { path: 'old.txt', additions: 0, deletions: 2 },
+    ])
+    expect(patchFiles('')).toEqual([])
+  })
+})
+
+test('the spend cap of a group prefers the tasks own caps', () => {
+  const caps = { perRepoUsd: 2, perGroupUsd: 12 }
+  expect(groupSpendCap({ tasks: [{ budgetUsd: 1.5 }, { budgetUsd: 2 }] }, caps)).toBe(3.5)
+  expect(groupSpendCap({ tasks: [{ budgetUsd: 1.5 }, {}] }, caps)).toBe(4)
+  expect(groupSpendCap({ tasks: [{}] }, undefined)).toBeUndefined()
+})
+
+describe('filters', () => {
+  const groups = [
+    group([task('a1', 'work:acme/widget-kit', { mergeRequest: mr(231) })], {
+      id: 'aaaabbbb-1',
+      title: 'Rename widget props',
+      kind: 'chat',
+      source: { type: 'chat', threadId: 'th' },
+      proposedBy: 'user:teo',
+    }),
+    group([task('b1', 'work:acme/ledger-api')], { id: 'ccccdddd-2', proposedBy: 'user:ana' }),
+  ]
+  const none: TaskListFilter = { query: '', kinds: [], sources: [], repos: [], proposers: [] }
+
+  const ids = (filter: Partial<typeof none>) =>
+    groups.filter((each) => matchesTaskList(each, { ...none, ...filter })).map((each) => each.id)
+
+  test('match by text, kind, source, repository and proposer', () => {
+    expect(ids({})).toEqual(['aaaabbbb-1', 'ccccdddd-2'])
+    expect(ids({ query: 'WIDGET' })).toEqual(['aaaabbbb-1'])
+    expect(ids({ query: '!231' })).toEqual(['aaaabbbb-1'])
+    expect(ids({ query: 'ccccdd' })).toEqual(['ccccdddd-2'])
+    expect(ids({ kinds: ['upgrade'] })).toEqual(['ccccdddd-2'])
+    expect(ids({ sources: ['chat'] })).toEqual(['aaaabbbb-1'])
+    expect(ids({ repos: ['work:acme/ledger-api'] })).toEqual(['ccccdddd-2'])
+    expect(ids({ proposers: ['user:teo', 'user:ana'] })).toEqual(['aaaabbbb-1', 'ccccdddd-2'])
+  })
+
+  test('options come from the groups, labelled and sorted', () => {
+    const options = taskFilterOptions(groups, { 'user:teo': { name: 'Teo R.' } })
+    expect(options.kinds).toEqual([
+      { id: 'chat', label: 'Chat request' },
+      { id: 'upgrade', label: 'Upgrade' },
+    ])
+    expect(options.sources.map((each) => each.label)).toEqual(['Chat', 'Dependency upgrade'])
+    expect(options.proposers).toEqual([
+      { id: 'user:teo', label: 'Teo R.' },
+      { id: 'user:ana', label: 'user:ana' },
+    ])
+  })
+
+  test('teams of a group are the groups of its repositories', () => {
+    const map = new Map([
+      ['work:acme/a', ['web']],
+      ['work:acme/b', ['web', 'payments']],
+    ])
+    expect(taskGroupTeams({ repos: ['work:acme/a', 'work:acme/b', 'work:acme/z'] }, map)).toEqual([
+      'web',
+      'payments',
+    ])
   })
 })

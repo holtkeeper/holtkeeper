@@ -107,6 +107,32 @@ describe('schedule routes', () => {
       queued: 2,
       analyzers: ['ci-jobs'],
     })
+    const next = body.schedules[0]?.next ?? []
+    expect(next).toHaveLength(5)
+    expect(next.toSorted()).toEqual(next)
+    expect(next.every((at) => at > '2026-10-30T12:00:00.000Z' && at.endsWith(':00:00.000Z'))).toBe(
+      true,
+    )
+  })
+
+  test('lists whole runs when a run queues more jobs than one read covers', async () => {
+    for (let run = 0; run < 12; run++) {
+      const createdAt = new Date(Date.UTC(2026, 9, 1 + run, 3)).toISOString()
+      for (let index = 0; index < 60; index++)
+        await store.jobs.enqueue({
+          analyzer: 'ci-jobs',
+          repo: { forge: 'work', path: `games/r${index}` },
+          trigger: 'schedule',
+          schedule: 'nightly',
+          createdAt,
+        })
+    }
+    const list = await send('/api/schedules/runs?limit=12', 'GET', asReader)
+    const body = (await list.json()) as ScheduleRunList
+    const listed = body.schedules[0]?.runs ?? []
+    expect(listed).toHaveLength(12)
+    expect(listed.every((run) => run.jobs === 60 && run.queued === 60)).toBe(true)
+    expect(listed[0]?.at).toBe('2026-10-12T03:00:00.000Z')
   })
 
   test('answers before the forge does and logs a failed run', async () => {

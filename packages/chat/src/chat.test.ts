@@ -4,7 +4,7 @@ import { rootPrincipal } from '@holtkeeper/access'
 import type { GitForge } from '@holtkeeper/forge'
 import { z } from 'zod'
 
-import { type Card, formCommand, textCard } from './card.ts'
+import { type Card, formCommand, taskCard, taskSteps, textCard } from './card.ts'
 import {
   type ChatAuthorization,
   type ChatMessage,
@@ -104,7 +104,7 @@ describe('cards', () => {
       {
         title: 'Release games/app-x',
         tone: 'good',
-        url: 'https://holt.example/releases/work/games/app-x',
+        url: 'https://holt.example/releases/timeline?repo=work%3Agames%2Fapp-x',
         blocks: [
           { type: 'text', text: 'Ping @lead, mail a@b.example' },
           { type: 'fields', fields: [{ label: 'Next', value: '1.3.0' }] },
@@ -150,7 +150,7 @@ describe('cards', () => {
         'Reply with:\n- `/hk release deploy prod --yes` — Deploy ⚠️',
         '**Deploy** — reply with `/hk release deploy environment=<environment>`\n- `environment` — Environment: `qa`',
         '<sub>dry run</sub>',
-        '[Open in Holtkeeper](https://holt.example/releases/work/games/app-x)',
+        '[Open in Holtkeeper](https://holt.example/releases/timeline?repo=work%3Agames%2Fapp-x)',
       ].join('\n\n'),
     )
     expect(muteMentions('`@code` @here')).toBe('`@code` @​here')
@@ -297,5 +297,57 @@ describe('merge request surface', () => {
     await surface.post(mergeRequestThread(repo, 3, 'd2'), textCard('a', 'b'))
     expect(calls).toEqual(['comment', 'reply'])
     expect(posted.id).toBeUndefined()
+  })
+})
+
+describe('task cards', () => {
+  const mr = { id: 12, url: 'https://forge.test/acme/widget-kit/-/merge_requests/12', draft: true }
+
+  test('steps follow each repository task as it moves on', () => {
+    expect(
+      taskSteps([
+        { repo: 'work:acme/widget-kit', status: 'mr-open', mergeRequest: mr },
+        { repo: 'work:acme/storefront', status: 'running' },
+        { repo: 'work:acme/ledger-api', status: 'failed', error: 'checks failed' },
+        { repo: 'work:acme/notify-svc', status: 'proposed' },
+        { repo: 'work:acme/search-svc', status: 'cancelled' },
+      ]),
+    ).toEqual([
+      {
+        label: 'work:acme/widget-kit',
+        status: 'active',
+        detail: 'Draft merge request open',
+        url: mr.url,
+        urlLabel: '!12',
+      },
+      { label: 'work:acme/storefront', status: 'running', detail: 'Agent at work' },
+      { label: 'work:acme/ledger-api', status: 'failed', detail: 'checks failed' },
+      { label: 'work:acme/notify-svc', status: 'waiting', detail: 'Waiting for approval' },
+      { label: 'work:acme/search-svc', status: 'skipped', detail: 'Cancelled' },
+    ])
+  })
+
+  test('cards carry steps, title and tone of the status, and render them as markdown', () => {
+    const steps = taskSteps([{ repo: 'work:acme/widget-kit', status: 'queued' }])
+    const card = taskCard(['work:acme/widget-kit'], 'Bump some-lib.', {
+      status: 'queued',
+      groupId: 'g1',
+      steps,
+    })
+    expect(card).toMatchObject({ title: 'Change queued', tone: 'info' })
+    expect(card.blocks).toEqual([
+      {
+        type: 'task',
+        repos: ['work:acme/widget-kit'],
+        summary: 'Bump some-lib.',
+        status: 'queued',
+        groupId: 'g1',
+        steps,
+      },
+    ])
+    expect(taskCard(['work:acme/widget-kit'], 'x', { steps: [] }).blocks[0]).not.toHaveProperty(
+      'steps',
+    )
+    expect(renderMarkdown(card)).toContain('`work:acme/widget-kit` — Queued on a write worker')
   })
 })

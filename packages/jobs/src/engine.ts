@@ -93,6 +93,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
     ...(options.admission && { admission: options.admission }),
     ...(options.persistArtifacts && { persistArtifacts: options.persistArtifacts }),
     ...(options.logs && { logs: options.logs }),
+    ...(store.kv && { registry: store.kv }),
     ...options.worker,
     ...shared,
   })

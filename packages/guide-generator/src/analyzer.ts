@@ -24,6 +24,7 @@ import {
   placeGenerated,
 } from './generate.ts'
 import { type GeneratedSection, generatedSections } from './prompt.ts'
+import { rejectedHashes } from './rejections.ts'
 
 /** What a `guide` run did, stored as its analysis data. */
 export interface GuideRunData {
@@ -136,7 +137,7 @@ export type GuideGeneratorOptions = z.output<typeof optionsSchema>
 
 /** What the `guide` analyzer needs from the server. */
 export interface GuideAnalyzerDeps {
-  store?: Pick<Store, 'guides' | 'families'>
+  store?: Pick<Store, 'guides' | 'families' | 'kv'>
   /** Config groups of a repository, for the team scopes whose steering and rules apply. */
   groupsOf?: (repo: RepoRef) => string[]
 }
@@ -173,9 +174,10 @@ const emptyRow = (scope: GuideScopeKey, section: GuideSectionName): GuideSection
  * The `guide` analyzer: writes the generated layer of the `general`, `testing`, `testids` and
  * `commits` sections of a repository's Guide from deterministic evidence (see `generateGuide`).
  * New text is stored as a proposal a person accepts; accepted text stays what agents see until
- * then. Steering and team rules come from every scope of the repository. Runs after `coverage`
- * and `testids` so their newest records are read. Without `deps.store` (outside the server) it
- * cannot run.
+ * then. Text from inputs a person rejected (`rememberGuideRejection`) is not proposed again.
+ * Steering and team rules come from every scope of the repository. Runs after `coverage` and
+ * `testids` so their newest records are read. Without `deps.store` (outside the server) it cannot
+ * run.
  */
 export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
   return defineAnalyzer({
@@ -216,6 +218,8 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
             steering: joined(scoped, 'steering'),
             rules: joined(scoped, 'rules'),
             ...(scoped[0] && { stored: scoped[0] }),
+            // oxlint-disable-next-line no-await-in-loop -- sections are collected one by one
+            rejected: await rejectedHashes(store.kv, repoScope, section),
           }
           if (section === 'general')
             // oxlint-disable-next-line no-await-in-loop -- sections are collected one by one
@@ -260,6 +264,7 @@ export function createGuideAnalyzer(deps: GuideAnalyzerDeps = {}) {
           ...(options.prompt && { prompt: options.prompt }),
           force: options.force,
           ...(sha && { sha }),
+          ...(context.jobId && { jobId: context.jobId }),
           now: () => new Date(),
           ...(context.signal && { signal: context.signal }),
           ...(context.log && { log: context.log }),

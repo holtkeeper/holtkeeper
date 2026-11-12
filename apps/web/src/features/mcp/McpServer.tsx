@@ -1,7 +1,6 @@
-import type { McpUsageOverview } from '@holtkeeper/api'
-import { Bot, KeyRound, Plus, Trash2, Wrench } from 'lucide-react'
-import { useDeferredValue, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import type { McpTokenView } from '@holtkeeper/api'
+import { KeyRound, Trash2, Wrench } from 'lucide-react'
+import { type ReactNode, useDeferredValue, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import {
@@ -12,118 +11,165 @@ import {
   useRevokeMcpToken,
 } from '../../api/queries.ts'
 import { formatDate, formatRelative } from '../../lib/format.ts'
-import { type McpTool, groupTools, mcpSetup, tokenLifetimes, toolParams } from '../../lib/mcp.ts'
+import {
+  type TokenStatus,
+  tokenStatus,
+  tokenStatusCounts,
+  tokenStatusLabels,
+} from '../../lib/mcp-tokens.ts'
+import {
+  type McpClient,
+  type McpTool,
+  groupTools,
+  mcpClients,
+  mcpSetup,
+  tokenLifetimes,
+  toolParams,
+} from '../../lib/mcp.ts'
 import {
   Button,
   Chip,
   ConfirmDialog,
+  CopyButton,
   CopyField,
   Dialog,
   EmptyState,
   ErrorState,
   Notice,
-  Panel,
   Placeholder,
   SearchInput,
   Segmented,
-  StatCard,
+  SegmentedTabs,
+  Strip,
   Switch,
   Table,
-  SegmentedTabs,
   Td,
   Tag,
   TextField,
   Th,
   notify,
 } from '../../ui/index.ts'
-import { SettingsSection } from '../settings/SettingsSection.tsx'
-
-type McpView = 'connect' | 'tools' | 'usage'
-
-const views: readonly { id: McpView; label: string }[] = [
-  { id: 'connect', label: 'Connect' },
-  { id: 'tools', label: 'Tools' },
-  { id: 'usage', label: 'Usage' },
-]
 
 /** Where the endpoint lives as the server sees it, falling back to this origin. */
-const useEndpoint = () => useMcpUsage(30).data?.endpoint ?? `${window.location.origin}/mcp`
-
-/** The MCP endpoint for agents: connecting a client, personal tokens, the tools and their use. */
-export function McpServer() {
-  const [view, setView] = useState<McpView>('connect')
-  return (
-    <SettingsSection
-      title="MCP server"
-      description="Give AI agents read-only access to your packages and the libraries you use"
-      actions={
-        <SegmentedTabs
-          aria-label="MCP views"
-          items={views}
-          selected={view}
-          onSelect={(id) => setView(views.find((v) => v.id === id)?.id ?? 'connect')}
-        />
-      }
-    >
-      {view === 'connect' ? <ConnectTab /> : null}
-      {view === 'tools' ? <ToolsTab /> : null}
-      {view === 'usage' ? <UsageTab /> : null}
-    </SettingsSection>
-  )
-}
-
-function Code({ code }: { code: string }) {
-  return (
-    <pre className="overflow-x-auto rounded-xl border border-border bg-default px-3 py-2 font-mono text-[12.5px] leading-relaxed">
-      {code}
-    </pre>
-  )
-}
+const useEndpoint = () => useMcpUsage(7).data?.endpoint ?? `${window.location.origin}/mcp`
 
 const steps = [
   [
     'Create a token',
-    'One per machine or agent, so you can revoke it alone. It acts as you, read-only.',
+    'One per machine or agent. Read-only unless you allow release steps or tasks.',
   ],
-  [
-    'Add the server to your client',
-    'Claude Code, Cursor or any client that speaks Streamable HTTP.',
-  ],
+  ['Add the server to your client', 'Claude Code, Cursor or any Streamable HTTP client.'],
   [
     'Ask about your code',
     'Agents look up exports, usages and upgrade impact of your packages, and version-exact docs, changes and issues of third-party libraries.',
   ],
 ] as const
 
-function ConnectTab() {
+/**
+ * Account › Connect agents: one flow from the three steps to the viewer's MCP tokens with their
+ * status, the client setup per client and the reference of the tools the endpoint offers them.
+ * `creating` opens the New token dialog, which the Account header's primary action drives.
+ */
+export function McpServer({
+  creating = false,
+  onCreating = () => {},
+}: {
+  creating?: boolean
+  onCreating?: (open: boolean) => void
+}) {
   const endpoint = useEndpoint()
   return (
-    <div className="flex flex-col gap-4">
-      <ol className="grid gap-3 sm:grid-cols-3">
+    <div className="flex flex-col gap-5">
+      <div className="flex justify-end">
+        <a href="#tool-reference" className="text-xs text-muted hover:text-foreground">
+          Tool reference
+        </a>
+      </div>
+      <ol className="-mx-4 grid border-y border-line sm:grid-cols-3">
         {steps.map(([title, text], index) => (
           <li
             key={title}
-            className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3"
+            className="flex gap-3 border-line px-4 py-3 not-first:border-t sm:not-first:border-t-0 sm:not-first:border-l"
           >
-            <span className="tabular flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground">
+            <span className="mono flex size-5 shrink-0 items-center justify-center rounded-full border border-line-strong text-[11px] text-muted">
               {index + 1}
             </span>
-            <span className="flex flex-col gap-0.5 text-sm">
+            <span className="flex flex-col gap-0.5 text-[12.5px]">
               <span className="font-medium">{title}</span>
               <span className="text-muted">{text}</span>
             </span>
           </li>
         ))}
       </ol>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <TokensPanel endpoint={endpoint} />
-        <ConnectPanel endpoint={endpoint} />
-      </div>
+      <TokensPanel endpoint={endpoint} open={creating} onOpen={onCreating} />
+      <ConnectPanel endpoint={endpoint} />
+      <ToolReference />
     </div>
   )
 }
 
-function ToolsTab() {
+function Block({
+  id,
+  title,
+  description,
+  actions,
+  children,
+}: {
+  id?: string
+  title: string
+  description?: string
+  actions?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <section
+      {...(id && { id })}
+      aria-label={title}
+      className="flex flex-col rounded-[10px] border border-line"
+    >
+      <header className="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2.5">
+        <h3 className="text-[13px] font-semibold">{title}</h3>
+        {description ? <span className="text-xs text-muted">{description}</span> : null}
+        {actions ? <div className="ms-auto flex items-center gap-2">{actions}</div> : null}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+function ConnectPanel({ endpoint }: { endpoint: string }) {
+  const [client, setClient] = useState<McpClient>('claude-code')
+  const setup = mcpSetup(endpoint)
+  const code = setup[mcpClients.find((each) => each.id === client)!.field]
+  return (
+    <Block title="Client setup" description="Streamable HTTP, stateless, read by default">
+      <div className="flex flex-col gap-3 px-3.5 py-3 text-[12.5px]">
+        <CopyField label="MCP endpoint" value={endpoint} />
+        <div className="flex flex-wrap items-center gap-2">
+          <SegmentedTabs
+            aria-label="Client"
+            items={mcpClients}
+            selected={client}
+            onSelect={(id) => setClient(mcpClients.find((each) => each.id === id)?.id ?? client)}
+          />
+          <span className="ms-auto">
+            <CopyButton text={() => code}>Copy</CopyButton>
+          </span>
+        </div>
+        <pre className="mono overflow-x-auto rounded-[7px] border border-line bg-raise px-3 py-2 text-[12px] leading-relaxed">
+          {`# Replace <token> with one of your tokens\n${code}`}
+        </pre>
+        <p className="text-xs text-muted">
+          The same token reads <code>/api/api-surface/*</code> and <code>/api/dependencies*</code>{' '}
+          with the same <code>Authorization</code> header. Paste it into one client only; create
+          another token for each machine.
+        </p>
+      </div>
+    </Block>
+  )
+}
+
+function ToolReference() {
   const tools = useMcpTools()
   const [query, setQuery] = useState('')
   const needle = useDeferredValue(query).trim().toLowerCase()
@@ -131,39 +177,57 @@ function ToolsTab() {
     !needle ||
     tool.name.toLowerCase().includes(needle) ||
     (tool.description ?? '').toLowerCase().includes(needle)
-  if (tools.isPending) return <Placeholder className="h-96" />
-  if (tools.isError) return <ErrorState error={tools.error} />
-  const groups = groupTools(tools.data.filter(matches))
+  const groups = tools.data ? groupTools(tools.data.filter(matches)) : []
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted">
-          {tools.data.length} tools, answering only about repositories you can read; all of them
-          only read, except that agents can propose knowledge entries for review. Agents pick them
-          on their own; name a package, symbol or error and they call the right ones.
-        </p>
+    <Block
+      id="tool-reference"
+      title="Tool reference"
+      {...(tools.data && { description: `${tools.data.length} tools you get` })}
+      actions={
         <SearchInput
           aria-label="Filter tools"
           placeholder="Tool name or description"
           value={query}
           onChange={setQuery}
-          className="w-72"
+          className="w-64"
         />
+      }
+    >
+      <div className="flex flex-col gap-4 px-3.5 py-3">
+        {tools.isPending ? (
+          <Placeholder className="h-64" />
+        ) : tools.isError ? (
+          <ErrorState error={tools.error} />
+        ) : (
+          <>
+            <p className="text-xs text-muted">
+              They answer only about repositories you can read and only read, except that agents can
+              propose knowledge entries for review. Agents pick them on their own; name a package,
+              symbol or error and they call the right ones.
+            </p>
+            {groups.length ? (
+              groups.map((group) => (
+                <section key={group.id} aria-label={group.label} className="flex flex-col gap-2">
+                  <h4 className="text-[12.5px] font-semibold">
+                    {group.label}
+                    {group.description ? (
+                      <span className="ms-2 font-normal text-muted">{group.description}</span>
+                    ) : null}
+                  </h4>
+                  <div className="flex flex-col">
+                    {group.tools.map((tool) => (
+                      <ToolCard key={tool.name} tool={tool} />
+                    ))}
+                  </div>
+                </section>
+              ))
+            ) : (
+              <EmptyState icon={<Wrench />} title="No tool matches" />
+            )}
+          </>
+        )}
       </div>
-      {groups.length ? (
-        groups.map((group) => (
-          <Panel key={group.id} title={group.label} description={group.description}>
-            <div className="flex flex-col">
-              {group.tools.map((tool) => (
-                <ToolCard key={tool.name} tool={tool} />
-              ))}
-            </div>
-          </Panel>
-        ))
-      ) : (
-        <EmptyState icon={<Wrench />} title="No tool matches" />
-      )}
-    </div>
+    </Block>
   )
 }
 
@@ -172,10 +236,10 @@ function ToolCard({ tool }: { tool: McpTool }) {
   return (
     <div
       id={`tool-${tool.name}`}
-      className="flex flex-col gap-2 border-b border-border py-4 first:pt-0 last:border-b-0 last:pb-0"
+      className="flex flex-col gap-2 border-b border-line py-3 first:pt-0 last:border-b-0 last:pb-0"
     >
-      <span className="font-mono text-sm font-semibold">{tool.name}</span>
-      {tool.description ? <p className="text-sm text-muted">{tool.description}</p> : null}
+      <span className="mono text-[12.5px] font-semibold">{tool.name}</span>
+      {tool.description ? <p className="text-[12.5px] text-muted">{tool.description}</p> : null}
       {params.length ? (
         <Table label={`Arguments of ${tool.name}`}>
           <thead>
@@ -209,74 +273,18 @@ function ToolCard({ tool }: { tool: McpTool }) {
   )
 }
 
-const usageRanges = [
-  { id: '7', label: '7 days' },
-  { id: '30', label: '30 days' },
-  { id: '90', label: '90 days' },
-] as const
-
-function UsageTab() {
-  const [range, setRange] = useState<(typeof usageRanges)[number]['id']>('30')
-  const usage = useMcpUsage(Number(range))
-  return (
-    <Panel
-      title="Usage"
-      description="Tool calls agents made through the MCP endpoint."
-      actions={
-        <Segmented aria-label="Range" value={range} onChange={setRange} options={usageRanges} />
-      }
-    >
-      {usage.isPending ? (
-        <Placeholder className="h-72" />
-      ) : usage.isError ? (
-        <ErrorState error={usage.error} />
-      ) : (
-        <UsageView usage={usage.data} />
-      )}
-    </Panel>
-  )
-}
-
-function ConnectPanel({ endpoint }: { endpoint: string }) {
-  const setup = mcpSetup(endpoint)
-  return (
-    <Panel
-      title={
-        <span className="inline-flex items-center gap-2">
-          <Bot className="size-4" />
-          Connect an agent
-        </span>
-      }
-      description="Streamable HTTP, stateless, read-only. Replace <token> with one of your tokens."
-    >
-      <div className="flex flex-col gap-3 text-sm">
-        <CopyField label="MCP endpoint" value={endpoint} />
-        <div>
-          <div className="mb-1 text-muted">Claude Code</div>
-          <CopyField label="Claude Code command" value={setup.claudeCode} />
-        </div>
-        <div>
-          <div className="mb-1 text-muted">Other clients (.mcp.json, Cursor, …)</div>
-          <Code code={setup.json} />
-        </div>
-        <div>
-          <div className="mb-1 text-muted">Check a token from the shell</div>
-          <CopyField label="curl command" value={setup.curl} />
-        </div>
-        <p className="text-xs text-muted">
-          The same token also reads the catalog over HTTP: <code>GET /api/api-surface/*</code> and{' '}
-          <code>GET /api/dependencies*</code> with the same <code>Authorization</code> header.
-        </p>
-      </div>
-    </Panel>
-  )
-}
-
-function TokensPanel({ endpoint }: { endpoint: string }) {
+function TokensPanel({
+  endpoint,
+  open,
+  onOpen: setOpen,
+}: {
+  endpoint: string
+  open: boolean
+  onOpen: (open: boolean) => void
+}) {
   const tokens = useMcpTokens()
   const create = useCreateMcpToken()
   const revoke = useRevokeMcpToken()
-  const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [lifetime, setLifetime] = useState<(typeof tokenLifetimes)[number]['id']>('90')
   const [release, setRelease] = useState(false)
@@ -314,74 +322,21 @@ function TokensPanel({ endpoint }: { endpoint: string }) {
     )
 
   return (
-    <Panel
-      title={
-        <span className="inline-flex items-center gap-2">
-          <KeyRound className="size-4" />
-          Your tokens
-        </span>
-      }
-      description="Personal access tokens for the MCP endpoint and the catalog API."
-      actions={
-        tokens.data?.available ? (
-          <Button size="sm" variant="secondary" onPress={() => setOpen(true)}>
-            <Plus className="size-3.5" />
-            New token
-          </Button>
-        ) : null
-      }
-    >
+    <Block title="Your tokens" description="For the MCP endpoint and the catalog API">
       {tokens.isPending ? (
-        <Placeholder className="h-32" />
+        <Placeholder className="m-3.5 h-32" />
       ) : tokens.isError ? (
-        <ErrorState error={tokens.error} />
+        <div className="p-3.5">
+          <ErrorState error={tokens.error} />
+        </div>
       ) : !tokens.data.available ? (
-        <Notice title="Tokens are unavailable">
-          The store keeps no key-value state; signed-in requests still reach the endpoint.
-        </Notice>
+        <div className="p-3.5">
+          <Notice title="Tokens are unavailable">
+            The store keeps no key-value state; signed-in requests still reach the endpoint.
+          </Notice>
+        </div>
       ) : tokens.data.tokens.length ? (
-        <Table label="MCP tokens">
-          <thead>
-            <tr>
-              <Th>Name</Th>
-              <Th>Token</Th>
-              <Th>Expires</Th>
-              <Th>Last used</Th>
-              <Th />
-            </tr>
-          </thead>
-          <tbody>
-            {tokens.data.tokens.map((token) => (
-              <tr key={token.id}>
-                <Td>
-                  <span className="inline-flex items-center gap-2">
-                    {token.name}
-                    {token.scopes?.includes('release') && <Tag tone="warning">release</Tag>}
-                    {token.scopes?.includes('tasks') && <Tag tone="warning">tasks</Tag>}
-                  </span>
-                </Td>
-                <Td className="font-mono text-xs text-muted">{token.prefix}…</Td>
-                <Td className="text-muted">
-                  {token.expiresAt ? formatDate(token.expiresAt) : 'never'}
-                </Td>
-                <Td className="text-muted">
-                  {token.lastUsedAt ? formatRelative(token.lastUsedAt) : 'never'}
-                </Td>
-                <Td align="right">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    isIconOnly
-                    aria-label={`Revoke ${token.name}`}
-                    onPress={() => setRevoking(token.id)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <TokenTable tokens={tokens.data.tokens} onRevoke={setRevoking} />
       ) : (
         <EmptyState
           icon={<KeyRound />}
@@ -472,190 +427,113 @@ function TokensPanel({ endpoint }: { endpoint: string }) {
       >
         Agents using it lose access right away.
       </ConfirmDialog>
-    </Panel>
+    </Block>
   )
 }
 
-const dayLabel = (day: string) =>
-  new Date(`${day}T00:00:00Z`).toLocaleDateString('en', {
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  })
+const statusOrder: readonly TokenStatus[] = ['active', 'expiring', 'expired', 'unused']
 
-function UsageView({ usage }: { usage: McpUsageOverview }) {
-  const points = usage.days.map((day) => ({ ...day, ok: day.calls - day.errors }))
+function TokenTable({
+  tokens,
+  onRevoke,
+}: {
+  tokens: readonly McpTokenView[]
+  onRevoke: (id: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const needle = query.trim().toLowerCase()
+  const now = new Date()
+  const counts = tokenStatusCounts(tokens, now)
+  const shown = tokens.filter(
+    (token) =>
+      !needle ||
+      token.name.toLowerCase().includes(needle) ||
+      token.prefix.toLowerCase().includes(needle),
+  )
   return (
-    <div className="flex flex-col gap-5">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Tool calls" value={usage.totals.calls} />
-        <StatCard
-          label="Failed"
-          value={usage.totals.errors}
-          accent={usage.totals.errors ? 'var(--danger)' : undefined}
-        />
-        <StatCard label="People" value={usage.totals.people} />
-        <StatCard label="Packages asked about" value={usage.packages.length} />
-      </div>
-      <div
-        className="h-56 w-full"
-        role="img"
-        aria-label={`MCP calls over ${usage.days.length} days, ${usage.totals.calls} in total`}
-      >
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-            <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
-            <XAxis
-              dataKey="date"
-              tickFormatter={dayLabel}
-              tickLine={false}
-              axisLine={false}
-              minTickGap={32}
-              tick={{ fill: 'var(--chart-axis)', fontSize: 12 }}
-            />
-            <YAxis
-              allowDecimals={false}
-              tickLine={false}
-              axisLine={false}
-              width={48}
-              tick={{ fill: 'var(--chart-axis)', fontSize: 12 }}
-            />
-            <Tooltip
-              cursor={{ fill: 'var(--chart-grid)' }}
-              content={({ active, label }) => {
-                const point = points.find((p) => p.date === label)
-                if (!active || !point) return null
-                return (
-                  <div className="min-w-32 rounded-xl border border-border bg-overlay p-3 text-xs shadow-overlay">
-                    <div className="mb-2 font-medium">{dayLabel(point.date)}</div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted">Calls</span>
-                      <span className="tabular">{point.calls}</span>
-                    </div>
-                    <div className="flex justify-between gap-4">
-                      <span className="text-muted">Failed</span>
-                      <span className="tabular">{point.errors}</span>
-                    </div>
-                  </div>
-                )
-              }}
-            />
-            <Bar dataKey="ok" stackId="calls" fill="var(--accent)" radius={[0, 0, 0, 0]} />
-            <Bar dataKey="errors" stackId="calls" fill="var(--danger)" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <RankList
-          title="Tools"
-          rows={usage.tools.map((t) => ({
-            key: t.tool,
-            label: t.tool,
-            calls: t.calls,
-            note: t.errors ? `${t.errors} failed` : undefined,
+    <div className="flex flex-col">
+      <div className="flex flex-wrap items-center">
+        <Strip
+          label="Token status"
+          className="flex-1 border-b-0"
+          cells={statusOrder.map((status) => ({
+            value: counts[status],
+            label: tokenStatusLabels[status].label.toLowerCase(),
+            tone:
+              tokenStatusLabels[status].tone === 'default'
+                ? 'none'
+                : tokenStatusLabels[status].tone,
           }))}
         />
-        <RankList
-          title="Packages"
-          rows={usage.packages.map((p) => ({ key: p.name, label: p.name, calls: p.calls }))}
-        />
-        <RankList
-          title="People and clients"
-          rows={[
-            ...usage.people.map((p) => ({ key: `p:${p.id}`, label: p.name, calls: p.calls })),
-            ...usage.clients.map((c) => ({
-              key: `c:${c.client}`,
-              label: c.client,
-              calls: c.calls,
-              note: 'client',
-            })),
-          ]}
+        <SearchInput
+          aria-label="Filter tokens"
+          placeholder="Filter tokens"
+          value={query}
+          onChange={setQuery}
+          className="me-3.5 w-56"
         />
       </div>
-      <div>
-        <h3 className="mb-2 text-sm font-semibold">Recent calls</h3>
-        {usage.recent.length ? (
-          <Table label="Recent MCP calls">
-            <thead>
-              <tr>
-                <Th>When</Th>
-                <Th>Tool</Th>
-                <Th>About</Th>
-                <Th>Who</Th>
-                <Th>Client</Th>
-                <Th align="right">Time</Th>
+      <Table label="MCP tokens">
+        <thead>
+          <tr>
+            <Th>Name</Th>
+            <Th>Status</Th>
+            <Th>Allows</Th>
+            <Th>Token</Th>
+            <Th>Expires</Th>
+            <Th>Last used</Th>
+            <Th>
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((token) => {
+            const status = tokenStatusLabels[tokenStatus(token, now)]
+            return (
+              <tr key={token.id}>
+                <Td className="font-medium">{token.name}</Td>
+                <Td>
+                  <Tag tone={status.tone} dot>
+                    {status.label}
+                  </Tag>
+                </Td>
+                <Td>
+                  <span className="flex flex-wrap gap-1">
+                    <Tag>Read</Tag>
+                    {token.scopes?.includes('release') ? (
+                      <Tag tone="warning">Release steps</Tag>
+                    ) : null}
+                    {token.scopes?.includes('tasks') ? <Tag tone="warning">Run tasks</Tag> : null}
+                  </span>
+                </Td>
+                <Td className="mono text-xs text-muted">{token.prefix}…</Td>
+                <Td className="text-muted">
+                  {token.expiresAt ? formatDate(token.expiresAt) : 'never'}
+                </Td>
+                <Td className="text-muted">
+                  {token.lastUsedAt ? formatRelative(token.lastUsedAt) : 'never'}
+                </Td>
+                <Td align="right">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    isIconOnly
+                    aria-label={`Revoke ${token.name}`}
+                    onPress={() => onRevoke(token.id)}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                </Td>
               </tr>
-            </thead>
-            <tbody>
-              {usage.recent.map((call, index) => (
-                <tr key={`${call.at} ${index}`}>
-                  <Td className="whitespace-nowrap text-muted">{formatRelative(call.at)}</Td>
-                  <Td>
-                    <span className="font-mono text-xs">{call.tool}</span>
-                    {call.ok ? null : (
-                      <Chip className="ml-2" tone="danger" size="sm">
-                        failed
-                      </Chip>
-                    )}
-                  </Td>
-                  <Td className="font-mono text-xs">{call.subject ?? '—'}</Td>
-                  <Td>
-                    {usage.people.find((p) => p.id === call.principal)?.name ?? call.principal}
-                  </Td>
-                  <Td className="text-xs text-muted">{call.client ?? '—'}</Td>
-                  <Td align="right" className="tabular text-muted">
-                    {call.durationMs} ms
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        ) : (
-          <EmptyState
-            icon={<Bot />}
-            title="No calls yet"
-            description="Connect an agent with a token; its calls show up here."
-          />
-        )}
-      </div>
-    </div>
-  )
-}
-
-function RankList({
-  title,
-  rows,
-}: {
-  title: string
-  rows: { key: string; label: string; calls: number; note?: string | undefined }[]
-}) {
-  const max = Math.max(1, ...rows.map((row) => row.calls))
-  return (
-    <div className="rounded-2xl border border-border p-4">
-      <h3 className="mb-3 text-sm font-semibold">{title}</h3>
-      {rows.length ? (
-        <ul className="flex flex-col gap-2">
-          {rows.slice(0, 8).map((row) => (
-            <li key={row.key} className="flex flex-col gap-1">
-              <div className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="truncate font-mono text-xs">{row.label}</span>
-                <span className="tabular shrink-0 text-muted">
-                  {row.calls}
-                  {row.note ? <span className="ml-1 text-xs">· {row.note}</span> : null}
-                </span>
-              </div>
-              <span className="h-1 overflow-hidden rounded-full bg-default">
-                <span
-                  className="block h-full rounded-full bg-accent"
-                  style={{ width: `${(row.calls / max) * 100}%` }}
-                />
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted">Nothing yet.</p>
-      )}
+            )
+          })}
+        </tbody>
+      </Table>
+      <p className="border-t border-line px-3.5 py-2.5 text-xs text-muted">
+        {tokens.length} {tokens.length === 1 ? 'token' : 'tokens'} · a revoked token stops working
+        at once
+      </p>
     </div>
   )
 }

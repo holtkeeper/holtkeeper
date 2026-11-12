@@ -11,7 +11,7 @@ import { type ServerDeps, repoTarget } from './context.ts'
  * when it cannot be opened, so release pages and tools fall back to plain ticket keys.
  */
 export const issueTrackerFor =
-  ({ config, store, vault }: Pick<ServerDeps, 'config' | 'store' | 'vault'>) =>
+  ({ config, store, credentials }: Pick<ServerDeps, 'config' | 'store' | 'credentials'>) =>
   async (repo: RepoRef): Promise<IssueTracker | undefined> => {
     const target = repoTarget(config, repo)
     const credential = (await store.credentials.list())
@@ -19,7 +19,7 @@ export const issueTrackerFor =
       .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope))[0]
     if (!credential) return undefined
     try {
-      const tracker = jiraFromCredential(credential, await vault.open(credential.secret))
+      const tracker = jiraFromCredential(credential, await credentials.reveal(credential.id))
       return store.kv
         ? cachedTracker(tracker, store.kv, {
             namespace: `${credential.id}:${credential.updatedAt}`,

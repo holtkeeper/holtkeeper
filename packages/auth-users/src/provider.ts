@@ -15,6 +15,8 @@ import {
   inviteUser,
   issueRecovery,
   listUsers,
+  resendInvite,
+  summarizeUsers,
   removePasskey,
   updateSchema,
   updateUser,
@@ -43,6 +45,7 @@ import {
   verifyLogin,
   verifyRegistration,
 } from './passkeys.ts'
+import { touchLastSeen } from './people.ts'
 import { type Route, createRouter } from './router.ts'
 import { principalOf, sessionUser, startSession } from './sessions.ts'
 import { type ExternalAccountList, type UserList, toUserView } from './views.ts'
@@ -81,6 +84,7 @@ function buildContext(options: UsersAuthOptions, deps: UsersAuthDeps): Context {
 
   return {
     store: options.store,
+    ...(options.kv && { kv: options.kv }),
     origin,
     rpID: url.hostname,
     rpName: options.rpName ?? 'Holtkeeper',
@@ -122,7 +126,7 @@ function buildContext(options: UsersAuthOptions, deps: UsersAuthDeps): Context {
   }
 }
 
-function routes(ctx: Context): Route<Principal | undefined>[] {
+function routes(ctx: Context, signInMethods: string[]): Route<Principal | undefined>[] {
   return [
     {
       method: 'POST',
@@ -200,7 +204,7 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
       method: 'GET',
       pattern: '/me',
       handler: async (_request, _params, principal) =>
-        json(await toUserView(ctx.store, await selfUser(ctx, principal))),
+        json(await toUserView(ctx, await selfUser(ctx, principal))),
     },
     {
       method: 'POST',
@@ -216,7 +220,7 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
       async handler(request, _params, principal) {
         const user = await selfUser(ctx, principal)
         await addPasskey(ctx, request, user, await readBody(request, registerBody))
-        return withCookies(json(await toUserView(ctx.store, user), { status: 201 }), [
+        return withCookies(json(await toUserView(ctx, user), { status: 201 }), [
           ctx.challenges.clear(),
         ])
       },
@@ -227,7 +231,7 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
       async handler(request, { passkeyId = '' }, principal) {
         const user = await selfUser(ctx, principal)
         await renamePasskey(ctx, user, passkeyId, await readBody(request, renamePasskeySchema))
-        return json(await toUserView(ctx.store, user))
+        return json(await toUserView(ctx, user))
       },
     },
     {
@@ -261,6 +265,18 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
         const caller = signedIn(principal)
         return json(await updateUser(ctx, caller, id, await readBody(request, updateSchema)))
       },
+    },
+    {
+      method: 'GET',
+      pattern: '/admin/summary',
+      handler: async (_request, _params, principal) =>
+        json(await summarizeUsers(ctx, signedIn(principal), signInMethods)),
+    },
+    {
+      method: 'POST',
+      pattern: '/admin/users/:id/invite',
+      handler: async (_request, { id = '' }, principal) =>
+        json(await resendInvite(ctx, signedIn(principal), id), { status: 201 }),
     },
     {
       method: 'POST',
@@ -307,13 +323,17 @@ function routes(ctx: Context): Route<Principal | undefined>[] {
 /** `usersAuth` with injectable WebAuthn and OIDC implementations. */
 export function createUsersAuth(options: UsersAuthOptions, deps: UsersAuthDeps = {}): AuthProvider {
   const ctx = buildContext(options, deps)
-  const router = createRouter(routes(ctx))
+  const router = createRouter(
+    routes(ctx, ['passkeys', ...(options.oidc ?? []).map((provider) => provider.id)]),
+  )
 
   return {
     name: 'users',
     async authenticate(request) {
       const user = await sessionUser(ctx, request)
-      return user && principalOf(user)
+      if (!user) return undefined
+      await touchLastSeen(ctx, user)
+      return principalOf(user)
     },
     async handle(request, path, principal) {
       const sentFrom = request.headers.get('origin')

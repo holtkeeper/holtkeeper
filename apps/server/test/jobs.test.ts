@@ -5,10 +5,12 @@ import type {
   AgentTranscriptView,
   Job,
   JobAnalyzerList,
+  JobCountView,
   JobFailureList,
   JobList,
   JobLog,
   JobRunList,
+  JobStats,
   JobTargetList,
   JobWhy,
 } from '@holtkeeper/api'
@@ -18,7 +20,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import { createJobLog } from '@holtkeeper/jobs'
+import { createJobLog, touchWorker } from '@holtkeeper/jobs'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -359,7 +361,13 @@ describe('job routes', () => {
     expect(why).toMatchObject({
       origin: 'Schedule nightly queued it',
       wait: { reasons: [{ kind: 'same-analyzer', analyzer: 'changelog' }], ahead: 0 },
+      mode: 'host',
       people: {},
+    })
+    expect(why.costCapUsd).toBeUndefined()
+    const listed = (await (await app.request('/api/jobs')).json()) as JobList
+    expect(listed.waitHints).toEqual({
+      [waiting.id]: { reasons: [{ kind: 'same-analyzer', analyzer: 'changelog' }], ahead: 0 },
     })
     const ran = (await (await app.request(`/api/jobs/${running.id}/why`)).json()) as JobWhy
     expect(ran.origin).toBe('A person queued it by hand')
@@ -386,6 +394,217 @@ describe('job routes', () => {
       await setup(games).request('/api/jobs?limit=1', { headers: asGames })
     ).json()) as JobList
     expect(list.jobs.map((job) => job.repo.path)).toEqual(['games/a'])
+  })
+
+  test('searches jobs by repository, id, analyzer and its label within what the caller sees', async () => {
+    const labelled: JobAnalyzerInfo[] = [
+      { ...analyzers[0]!, analysis: { label: 'Release notes' } },
+      analyzers[1]!,
+    ]
+    const widget = await enqueueChangelog('games/widget-kit')
+    const other = await enqueueChangelog('tools/widget-cli')
+    const fleet = await store.jobs.enqueue({
+      analyzer: 'fleet',
+      repo: { forge: 'work', path: 'games' },
+      group: 'games',
+      trigger: 'schedule',
+      createdAt: '2026-10-30T11:00:00.000Z',
+    })
+    const ids = async (q: string, auth: AuthProvider = noAuth(), headers = {}) => {
+      const response = await setup(auth, config, labelled).request(
+        `/api/jobs?q=${encodeURIComponent(q)}`,
+        { headers },
+      )
+      return ((await response.json()) as JobList).jobs.map((job) => job.id)
+    }
+
+    expect((await ids('WIDGET')).toSorted()).toEqual([widget.id, other.id].toSorted())
+    expect(await ids('widget', games, asGames)).toEqual([widget.id])
+    expect(await ids(other.id.slice(0, 8))).toEqual([other.id])
+    expect(await ids('release')).toEqual(expect.arrayContaining([widget.id, other.id]))
+    expect(await ids('release')).not.toContain(fleet.id)
+    expect(await ids('flee')).toEqual([fleet.id])
+    expect((await ids('   ')).length).toBe(3)
+    const counted = await setup(games, config, labelled).request('/api/jobs/count?q=widget', {
+      headers: asGames,
+    })
+    expect(((await counted.json()) as JobCountView).total).toBe(1)
+    expect((await setup().request(`/api/jobs?q=${'x'.repeat(201)}`)).status).toBe(400)
+  })
+
+  test('counts jobs by status within what the caller may read', async () => {
+    const done = await enqueueChangelog('games/a')
+    await store.jobs.claim('w1', '2026-10-30T10:00:00.000Z')
+    await store.jobs.complete(done.id, { at: '2026-10-30T10:01:00.000Z', analysisId: 'a-1' })
+    await failJob('tools/x', 20, 'boom')
+    await enqueueChangelog('games/b')
+    await store.jobs.enqueue({
+      analyzer: 'fleet',
+      repo: { forge: 'work', path: 'tools' },
+      group: 'tools',
+      trigger: 'schedule',
+      createdAt: '2026-10-30T11:00:00.000Z',
+    })
+    const count = async (path: string, headers: Record<string, string> = {}) => {
+      const response = await setup(games).request(path, { headers })
+      return { status: response.status, body: (await response.json()) as JobCountView }
+    }
+
+    const all = await setup().request('/api/jobs/count')
+    expect(((await all.json()) as JobCountView).byStatus).toEqual({
+      queued: 2,
+      running: 0,
+      succeeded: 1,
+      failed: 1,
+      blocked: 0,
+      canceled: 0,
+    })
+    const narrow = await count('/api/jobs/count', asGames)
+    expect(narrow.body).toEqual({
+      total: 2,
+      byStatus: { queued: 1, running: 0, succeeded: 1, failed: 0, blocked: 0, canceled: 0 },
+    })
+    expect((await count('/api/jobs/count?repos=work:tools/x', asGames)).body.total).toBe(0)
+    expect((await count('/api/jobs/count?status=queued', asGames)).body.total).toBe(1)
+    expect((await count('/api/jobs/count?since=2026-10-30T10:30:00Z', asGames)).body.total).toBe(0)
+    expect((await count('/api/jobs/count?since=soon', asGames)).status).toBe(400)
+    expect((await setup(games).request('/api/jobs/count')).status).toBe(401)
+  })
+
+  test('queue stats cover only what the caller may read; workers only for global readers', async () => {
+    const agentAnalyzers: JobAnalyzerInfo[] = [
+      ...analyzers,
+      {
+        kind: 'review',
+        scope: 'repo',
+        options: z.object({ budgetUsd: z.number().optional() }),
+        needs: { agent: 'required' },
+      },
+    ]
+    await failJob('games/b', 30, 'boom')
+    await failJob('tools/x', 31, 'boom')
+    const running = await store.jobs.enqueue({
+      analyzer: 'review',
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'manual',
+      options: { budgetUsd: 0.5 },
+      createdAt: '2026-10-30T11:00:00.000Z',
+    })
+    await store.jobs.claim('worker-a', '2026-10-30T11:00:30.000Z')
+    const hidden = await store.jobs.enqueue({
+      analyzer: 'review',
+      repo: { forge: 'work', path: 'tools/x' },
+      trigger: 'manual',
+      createdAt: '2026-10-30T11:01:00.000Z',
+    })
+    await store.jobs.claim('worker-a', '2026-10-30T11:03:00.000Z')
+    await store.jobs.enqueue({
+      analyzer: 'review',
+      repo: { forge: 'work', path: 'games/a' },
+      trigger: 'manual',
+      createdAt: '2026-10-30T11:05:00.000Z',
+    })
+    await enqueueChangelog('games/b')
+    await enqueueChangelog('tools/y')
+    const costs = [
+      [running.id, 'games/a', 0.25],
+      [hidden.id, 'tools/x', 4],
+    ] as const
+    await Promise.all(
+      costs.map(([jobId, path, costUsd]) =>
+        store.aiUsage.append({
+          at: '2026-10-30T11:30:00.000Z',
+          repo: { forge: 'work', path },
+          groups: [path.split('/')[0]!],
+          taskKind: 'review',
+          actor: 'system',
+          provider: 'anthropic',
+          model: 'claude-sonnet',
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd,
+          costSource: 'computed',
+          durationMs: 1,
+          turns: 1,
+          outcome: 'ok',
+          jobId,
+        }),
+      ),
+    )
+    await touchWorker(store.kv!, 'worker-a', new Date('2026-10-30T11:59:30.000Z'))
+    await touchWorker(store.kv!, 'worker-gone', new Date('2026-10-30T11:00:00.000Z'))
+
+    const stats = async (auth: AuthProvider, headers: Record<string, string> = {}, query = '') =>
+      (await (
+        await setup(auth, config, agentAnalyzers).request(`/api/jobs/stats${query}`, { headers })
+      ).json()) as JobStats
+
+    const gamesAi = headerAuth({
+      roles: {
+        games: [
+          { scope: { groups: ['games'] }, actions: ['analyses:read', 'analyses:run', 'ai:read'] },
+        ],
+      },
+    })
+    expect((await stats(games, asGames)).running).toEqual({ jobs: 1 })
+    const narrow = await stats(gamesAi, asGames)
+    expect(narrow).toMatchObject({
+      windowHours: 24,
+      queue: { queued: 2, running: 1, failed: 1, blocked: 0 },
+      claimLatency: { samples: 2, p50Ms: 0, p95Ms: 30_000 },
+      waits: {
+        sampled: 2,
+        reasons: [
+          { kind: 'capacity', count: 1 },
+          { kind: 'same-analyzer', count: 1 },
+        ],
+      },
+      running: { jobs: 1, costUsd: 0.25 },
+    })
+    expect(narrow.workers).toBeUndefined()
+    expect(JSON.stringify(narrow)).not.toContain('night window')
+
+    const everything = await stats(noAuth())
+    expect(everything.queue).toEqual({ queued: 3, running: 2, failed: 2, blocked: 0 })
+    expect(everything.running).toEqual({ jobs: 2, costUsd: 4.25 })
+    expect(everything.workers).toEqual([
+      { id: 'worker-a', lastSeen: '2026-10-30T11:59:30.000Z', running: 2 },
+    ])
+    expect((await stats(noAuth(), {}, '?repos=work:tools/y')).queue.queued).toBe(1)
+    expect((await stats(games, asGames, '?repos=work:tools/y')).queue.queued).toBe(0)
+
+    const listed = (await (
+      await setup(gamesAi, config, agentAnalyzers).request('/api/jobs', { headers: asGames })
+    ).json()) as JobList
+    expect(listed.costs).toEqual({ [running.id]: 0.25 })
+    const withoutAi = (await (
+      await setup(games, config, agentAnalyzers).request('/api/jobs', { headers: asGames })
+    ).json()) as JobList
+    expect(withoutAi.costs).toEqual({})
+    const why = (await (
+      await setup(noAuth(), config, agentAnalyzers).request(`/api/jobs/${running.id}/why`)
+    ).json()) as JobWhy
+    expect(why.costCapUsd).toBe(0.5)
+  })
+
+  test('lists the jobs that produced an analysis, only when the caller may read them', async () => {
+    const mine = await enqueueChangelog('games/a')
+    await store.jobs.claim('w1', '2026-10-30T10:00:00.000Z')
+    await store.jobs.complete(mine.id, { at: '2026-10-30T10:01:00.000Z', analysisId: 'a-1' })
+    const theirs = await enqueueChangelog('tools/x')
+    await store.jobs.claim('w1', '2026-10-30T10:02:00.000Z')
+    await store.jobs.complete(theirs.id, { at: '2026-10-30T10:03:00.000Z', analysisId: 'a-2' })
+    await enqueueChangelog('games/b')
+    const list = async (path: string) =>
+      ((await (await setup(games).request(path, { headers: asGames })).json()) as JobList).jobs
+    expect((await list('/api/jobs?analysisId=a-1')).map((job) => job.id)).toEqual([mine.id])
+    expect(await list('/api/jobs?analysisId=a-2')).toEqual([])
+    const count = (await (
+      await setup(games).request('/api/jobs/count?analysisId=a-1', { headers: asGames })
+    ).json()) as JobCountView
+    expect(count.byStatus.succeeded).toBe(1)
   })
 
   test('checks analyses permissions on the repository', async () => {

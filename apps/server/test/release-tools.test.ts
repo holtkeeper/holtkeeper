@@ -150,12 +150,42 @@ describe('releases toolset over MCP', () => {
   })
 
   test('release_status shows the next version, its reason and the allowed steps', async () => {
-    const { call } = await connect(reader)
+    const { call } = await connect(releaser)
     const { text } = await call('release_status', { repo })
-    expect(text).toContain('Merged changes wait for a version.')
+    expect(text).toContain('Waiting for acceptance.')
     expect(text).toContain('- Latest: `v1.0.0`')
     expect(text).toContain('- Next: `1.1.0` (minor)')
     expect(text).toContain('Accept the changes (action accept)')
+    expect(text).toContain('Create v1.1.0 (action version)')
+  })
+
+  test('release_status lists blockers and the version on each environment', async () => {
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: {
+        enabled: true,
+        acceptance: 'manual',
+        flow: { mode: 'trunk' },
+        deploy: { environments: [{ name: 'preprod', job: 'deploy:preprod' }, { name: 'prod' }] },
+      },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    fake.addPipeline('main', 'failed', [])
+    fake.addPipeline('v1.0.0', 'success', [{ name: 'deploy:preprod', status: 'success' }])
+    const { call } = await connect(reader)
+    const { text } = await call('release_status', { repo })
+    expect(text).toContain('- Blockers: main pipeline is failed')
+    expect(text.split('main pipeline is failed')).toHaveLength(2)
+    expect(text).toContain('- Environments: preprod v1.0.0 (success), prod nothing yet (missing)')
+  })
+
+  test('release_status offers Accept only to callers with releases:run', async () => {
+    const { call } = await connect(reader)
+    const { text } = await call('release_status', { repo })
+    expect(text).not.toContain('action accept')
     expect(text).toContain('Create v1.1.0 (action version)')
   })
 
@@ -283,6 +313,31 @@ describe('release_step', () => {
         details: expect.objectContaining({ reason: 'missing releases:run' }),
       }),
     ])
+  })
+
+  test('accepts only while an acceptance waits', async () => {
+    const { call } = await connect(releaser, true)
+    const preview = await call('release_step', { repo, action: 'accept' })
+    const token = /confirm: "([\w-]+)"/u.exec(preview.text)?.[1]
+    await call('release_step', { repo, action: 'accept', confirm: token })
+    const again = await call('release_step', { repo, action: 'accept' })
+    expect(again.text).toContain('Blocked: main is already accepted.')
+    expect(again.text).not.toContain('confirm:')
+    const accepted = (await call('release_status', { repo })).text
+    expect(accepted).toContain('Merged changes wait for a version.')
+    expect(accepted).not.toContain('action accept')
+
+    await store.settings.put({
+      id: 'releases',
+      key: 'releases',
+      scope: { all: true },
+      value: { enabled: true, acceptance: 'none', flow: { mode: 'trunk' } },
+      secret: false,
+      updatedAt: '2026-10-02T00:00:00.000Z',
+    })
+    const none = await call('release_step', { repo, action: 'accept' })
+    expect(none.text).toContain('Blocked: The flow needs no acceptance')
+    expect((await call('release_status', { repo })).text).not.toContain('action accept')
   })
 
   test('runs a token once when two calls redeem it at the same time', async () => {

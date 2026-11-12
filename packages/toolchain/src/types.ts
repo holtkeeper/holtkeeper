@@ -57,5 +57,6 @@ export const toolchainSetting = {
 - Pin a tool version only when detection picks the wrong one, e.g. a monorepo with several Node versions.
 - **image** replaces the job container; **network** limits what jobs may reach.
 - **env** adds environment variables; store secrets in Credentials, not here.`,
+  default: {},
   schema: toolchainOverrideSchema,
 }

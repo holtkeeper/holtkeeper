@@ -1,12 +1,18 @@
-import type { Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
+import type { Action, Grant, GroupMatch, Principal, Role, Scope } from '@holtkeeper/access'
 import type { TranscriptLine } from '@holtkeeper/agent'
 import type { ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
-import type { AssetsPolicy, AssetsSummary } from '@holtkeeper/assets'
+import type {
+  AssetKind,
+  AssetProblem,
+  AssetRow,
+  AssetsPolicy,
+  AssetsSummary,
+} from '@holtkeeper/assets'
 import type { AuthInfo } from '@holtkeeper/auth'
-import type { BundlePoint, BundleSeries } from '@holtkeeper/bundles'
+import type { BudgetVerdict, BundlePoint, BundleSeries, TargetSource } from '@holtkeeper/bundles'
 import type { Conflict, FileDiff } from '@holtkeeper/changes'
 import type { Card } from '@holtkeeper/chat'
-import type { CiJobsData, CiProblem, CiProblemKind } from '@holtkeeper/ci-jobs'
+import type { CiJobsData, CiProblem, CiProblemKind, CiStatus } from '@holtkeeper/ci-jobs'
 import type {
   ChangedFilesCoverage,
   CoverageFileChange,
@@ -27,7 +33,9 @@ import type {
   ReleaseEvent,
   ReleaseLink,
   ReleasePlan,
+  ReleaseProvenance,
   ReleaseSettings,
+  ReleaseStage,
   ReleaseVersion,
   ReleaseVersionDetail,
   VersionTag,
@@ -35,6 +43,8 @@ import type {
 import type { Metric, Report } from '@holtkeeper/report'
 import type {
   AgentTask,
+  AgentTaskCi,
+  AgentTaskDiffstat,
   AgentTaskGroup,
   AgentTaskKind,
   AgentTaskSource,
@@ -46,7 +56,9 @@ import type {
   AuditEvent,
   AuditRun,
   AuditTrigger,
+  ChatMessageRef,
   Family,
+  GuideGenerated,
   GuideRevision,
   GuideScopeKey,
   GuideSection,
@@ -63,6 +75,8 @@ import type {
   Job as StoredJob,
   JobAttempt,
   JobFailureGroup,
+  JobStatus,
+  JobTrigger,
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
@@ -93,11 +107,20 @@ import type {
   UpgradeImpact,
   UsedExport,
 } from '@holtkeeper/usages'
-import type { Severity } from '@holtkeeper/vuln'
+import type { AllowlistEntry, Severity } from '@holtkeeper/vuln'
 
 /** Error body of every non-2xx JSON response. */
 export interface ApiError {
   error: string
+}
+
+/**
+ * Body of every 403 from `/api` and the MCP tools: the action the request needed and, for a
+ * repository, the repo key exactly as the client sent it. It never names groups or grants and
+ * reads the same whether that repository exists or the caller may not see it.
+ */
+export interface ForbiddenError extends ApiError {
+  missing: { action: Action; target?: string }
 }
 
 /** The caller with the URL of their generated avatar. */
@@ -115,6 +138,10 @@ export interface MeResponse {
    * (Dependencies, Public API, Stack).
    */
   crossTeam: CrossTeamLevel
+  /** The running release, `HOLTKEEPER_VERSION` (a version or commit); absent when unknown. */
+  version?: string
+  /** The instance's own address (`server.publicUrl`), when configured. */
+  publicUrl?: string
 }
 
 /** Levels of the `access.crossTeam` setting. */
@@ -128,7 +155,7 @@ export interface SetAvatarInput {
 /** `GET /api/me/preferences`: the signed-in principal's own UI preferences. */
 export interface UserPreferences {
   /**
-   * Groups the *My team* scope shows. A UI default, never a permission: the groups in the
+   * Groups the *My teams* scope shows. A UI default, never a permission: the groups in the
    * principal's grants until it picks its own.
    */
   homeGroups: GroupMatch[]
@@ -237,18 +264,271 @@ export interface AuditRunDetail {
 /** `POST /api/audit-runs` — ingests a report produced elsewhere (CLI, CI). */
 export type IngestAuditRun = Omit<AuditRun, 'id' | 'actor'>
 
-/** One repository Holtkeeper knows about, with its latest audit. */
+/**
+ * Where a finding stands in one repository: `open`, `fixing` while an agent task that fixes it is
+ * not finished, or `allowlisted` by an entry that has not expired.
+ */
+export type FindingStatus = 'open' | 'fixing' | 'allowlisted'
+
+/** One repository whose newest audit reports a finding group. */
+export interface FindingRepo {
+  /** `forge:path`. */
+  repo: string
+  /** Config groups of the repository, for folding other teams. */
+  groups: string[]
+  /** Affected versions installed there. */
+  versions: string[]
+  /** Lockfiles or manifests they were found in. */
+  sources: string[]
+  status: FindingStatus
+  /** The agent task fixing it; set exactly when `status` is `fixing`. */
+  taskId?: string
+}
+
+/** One advisory affecting one package, across the repositories the caller may read audits of. */
+export interface FindingGroup {
+  /** Primary advisory id, e.g. `GHSA-xxxx-xxxx-xxxx`. */
+  advisory: string
+  /** Other ids of the advisory, such as CVE numbers. */
+  aliases: string[]
+  summary?: string
+  url?: string
+  package: string
+  /** OSV ecosystem name: `npm`, `Go`, `PyPI`, ... */
+  ecosystem: string
+  severity: Severity
+  /** Versions that fix it, lowest first; empty when there is no fix. */
+  fixedIn: string[]
+  /** Never empty. */
+  repos: FindingRepo[]
+  /**
+   * `open` when some repository has it open, otherwise `fixing` when some repository has a fix
+   * task running, otherwise `allowlisted`.
+   */
+  status: FindingStatus
+  /** A task fixing it; set exactly when `status` is `fixing`. */
+  taskId?: string
+  /**
+   * When an audit of any of these repositories first reported it; the record time where no first
+   * sighting was stored.
+   */
+  firstSeenAt: Timestamp
+}
+
+/**
+ * `GET /api/audits/findings` — the findings of the newest audit of every repository the caller may
+ * read audits of (`audits:read`), one group per advisory and package. Read from stored metrics.
+ */
+export interface FindingsResponse {
+  /** Worst severity first, then most repositories, then advisory id. */
+  groups: FindingGroup[]
+  /** Groups per severity, every status included. */
+  severities: SeverityCounts
+}
+
+/**
+ * A package's verdict under its repository's license policy: `unlisted` needs review (not on the
+ * allow list), `unknown` has no recognizable license, `internal` is defined by an analyzed
+ * repository, `ignored` is left out by the policy.
+ */
+export type LicenseVerdictName =
+  | 'allowed'
+  | 'unknown'
+  | 'unlisted'
+  | 'denied'
+  | 'ignored'
+  | 'internal'
+  | 'excepted'
+
+/** Changes of one count since the week-old comparison point. */
+export interface LicenseDelta {
+  /** Packages that newly reached the verdict. */
+  added: number
+  /** Packages that left it. */
+  resolved: number
+}
+
+/** One package whose license a policy denies or wants reviewed, across readable repositories. */
+export interface LicenseViolation {
+  package: string
+  /** OSV ecosystem name. */
+  ecosystem: string
+  versions: string[]
+  /** License expressions as declared; empty when none is known. */
+  licenses: string[]
+  /** The worst verdict any of its repositories gives it. */
+  verdict: 'denied' | 'unlisted' | 'unknown'
+  /** Licenses or policy patterns responsible for the verdict. */
+  culprits: string[]
+  /** Only dev dependency groups use it, in every repository. */
+  dev: boolean
+  repos: { repo: string; groups: string[] }[]
+}
+
+/** One repository's newest license scan, counted per verdict. */
+export interface LicensesRepoRow {
+  /** `forge:path`. */
+  repo: string
+  groups: string[]
+  analysisId: string
+  createdAt: Timestamp
+  /** Third-party packages, internal ones left out. */
+  packages: number
+  verdicts: Record<LicenseVerdictName, number>
+  /** `missing` only when the policy requires a license file and the repository has none. */
+  licenseFile: 'present' | 'missing' | 'not-required'
+}
+
+/** A package the license policy accepts although its license would not pass. */
+export interface LicenseExceptionView {
+  /** Package name; `*` wildcards allowed. */
+  package: string
+  version?: string
+  /** The declared license expression it accepts; absent: any. */
+  license?: string
+  reason: string
+  approvedBy?: string
+  /** Last day it applies, `YYYY-MM-DD`. */
+  expires?: string
+}
+
+/**
+ * The parts of the organization's license policy beyond allow, deny and ignore.
+ */
+export interface LicensePolicyRules {
+  /** Licenses that need a sign-off even when allowed. */
+  review: string[]
+  /** `ignore`: packages only dev dependency groups use are not judged. */
+  devDependencies: 'check' | 'ignore'
+  exceptions: LicenseExceptionView[]
+}
+
+/** The license policy that applies to the caller's repositories when no narrower entry does. */
+export interface LicensePolicySummary extends LicensePolicyRules {
+  /** Label of the preset the options match, when they match one. */
+  preset?: string
+  allow: string[]
+  deny: string[]
+  ignore: string[]
+  unknown: 'warn' | 'violation'
+  requireProjectLicense: boolean
+  /** Settings entries narrower than the organization's that override it for some repositories. */
+  overrides: number
+  updatedAt?: Timestamp
+  updatedBy?: string
+}
+
+/**
+ * `GET /api/licenses` — the newest license scan of every repository the caller may read analyses
+ * of: totals, license mix, violations, a row per repository, the policy and changes over the past
+ * week. Read from stored metrics.
+ */
+export interface LicensesOverview {
+  kpi: {
+    /** Third-party packages added up over repositories: one used by two repositories counts twice. */
+    packages: number
+    repos: number
+    denied: number
+    /** Packages needing review: `unlisted`. */
+    review: number
+    unknown: number
+    /** Distinct license expressions. */
+    licenses: number
+    /** Of those, the ones the policy allows. */
+    allowedLicenses: number
+    /** Internal packages added up over repositories. */
+    internal: number
+    /** Repositories whose policy requires a license file they lack. */
+    missingLicenseFile: number
+  }
+  /** Packages per license expression, added up over repositories, most first; `UNKNOWN` for none. */
+  mix: { license: string; packages: number }[]
+  /** Denied first, then unlisted, then unknown; then most repositories. */
+  violations: LicenseViolation[]
+  repos: LicensesRepoRow[]
+  /** Only for callers who may read the organization's `analyzers.licenses` entry (`settings:read`). */
+  policy?: LicensePolicySummary
+  /** Against each repository's newest scan at least a week old; absent when there is none. */
+  deltas?: {
+    since: Timestamp
+    denied: LicenseDelta
+    review: LicenseDelta
+    unknown: LicenseDelta
+  }
+}
+
+/** Tone of a health cell: `none` when there is nothing to judge (no record, not set up). */
+export type HealthTone = 'ok' | 'warn' | 'bad' | 'info' | 'none'
+
+/** One health cell: a short value (`72%`, `1 high`), a detail line (may be empty) and its tone. */
+export interface RepoHealthCell {
+  value: string
+  sub: string
+  tone: HealthTone
+}
+
+/**
+ * The health cells of a repository. Each one needs a permission on the repository: `security`
+ * `audits:read`, `release` `releases:read`, every other one `analyses:read`.
+ */
+export type RepoHealthCellKey =
+  | 'security'
+  | 'dependencies'
+  | 'coverage'
+  | 'bundles'
+  | 'jobs'
+  | 'ci'
+  | 'licenses'
+  | 'release'
+
+/** The cells a caller may read; cells it may not read are absent, never empty. */
+export type RepoHealthCells = Partial<Record<RepoHealthCellKey, RepoHealthCell>>
+
+/**
+ * Overall state over the cells the caller may read: `failing` when one is `bad`, `warnings` when
+ * one is `warn`, `not-analysed` when none has anything to judge, `healthy` otherwise.
+ */
+export type RepoHealthStatus = 'healthy' | 'warnings' | 'failing' | 'not-analysed'
+
+/** How many of a repository's newest records (one per kind) are recent enough to count as current. */
+export interface RepoFreshness {
+  current: number
+  total: number
+}
+
+/** How a repository learns about forge changes, in short. */
+export interface RepoUpdatesSummary {
+  /** `webhook`: deliveries arrived lately; `polling`: polled on its interval; `off`: neither. */
+  via: 'webhook' | 'polling' | 'off'
+  /** Polling interval in effect, when polled. */
+  intervalMs?: number
+  lastPolledAt?: Timestamp
+  /** Error of the last poll, when it failed. */
+  lastError?: string
+}
+
+/** One repository Holtkeeper knows about, with its health. */
 export interface RepoSummary {
   repo: RepoRef
   groups: string[]
   /** Set when the caller holds `settings:write` on this repository. */
   configurable?: true
+  health: RepoHealthStatus
+  cells: RepoHealthCells
+  /** Absent without `analyses:read`. */
+  freshness?: RepoFreshness
+  /** When the newest record was stored; absent without records or without `analyses:read`. */
+  lastAnalysedAt?: Timestamp
+  /** Absent without `settings:read` on this repository (or a scope covering it). */
+  updates?: RepoUpdatesSummary
+  /** The newest audit run, when the caller holds `audits:read`. */
   latestAudit?: AuditRunSummary
-  /** The newest record of each analysis kind, when the caller may read analyses. */
-  latestAnalyses?: AnalysisSummary[]
 }
 
-/** `GET /api/repos` */
+/**
+ * `GET /api/repos`: every member of the configured groups as the last stored listings name them
+ * (plus exact include paths), that the caller may read, sorted by `forge:path`.
+ */
 export interface RepoList {
   repos: RepoSummary[]
 }
@@ -299,6 +579,15 @@ export interface ChatThreadView {
   participants: ChatParticipantView[]
   /** Whether older messages are summarized for the agent. */
   summarized: boolean
+  /** Messages in the thread, every author counted. */
+  messageCount: number
+  /**
+   * Repositories (`forge:path`) attached as context that the caller may read, in the thread's
+   * order; the others are left out without a trace.
+   */
+  contextRepos: string[]
+  /** The caller muted the thread: it never counts toward their unread badge. Per person. */
+  muted: boolean
 }
 
 /** One tool the agent used for a reply and how often. */
@@ -326,6 +615,11 @@ export interface ChatMessageView {
   /** Transcript of the agent run that wrote the reply; read it at `GET /api/chat/messages/:id/transcript`. */
   transcriptRef?: string
   mentions: string[]
+  /**
+   * What the message refers to, as stored with it (never parsed from the body), minus refs whose
+   * `repo` the caller may not read; empty when nothing.
+   */
+  refs: ChatMessageRef[]
   createdAt: string
   /** When a card was last changed in place, e.g. a deploy that moved on. */
   updatedAt?: string
@@ -338,12 +632,17 @@ export interface ChatCommandView {
   usage?: string
 }
 
-/** `GET /api/chat/threads?archived=` — threads the caller can see, newest activity first, and the commands. */
+/**
+ * `GET /api/chat/threads?archived=&q=` — threads the caller can see, newest activity first, and
+ * the commands. `q` keeps threads whose title contains it, ignoring case.
+ */
 export interface ChatThreadList {
   threads: ChatThreadView[]
   commands: ChatCommandView[]
   /** Config groups the caller may start a group thread in. */
   groups: string[]
+  /** Archived threads the caller can see that match `q`; counted whatever `archived` asked for. */
+  archivedCount: number
 }
 
 /** Someone the composer can mention: an enabled account of the `users` provider that can see the thread. */
@@ -360,19 +659,55 @@ export interface ChatPeopleView {
   people: ChatPersonView[]
 }
 
-/** `POST /api/chat/threads` — a new thread, optionally about one repository or group. */
+/**
+ * `POST /api/chat/threads` — a new thread, optionally about one repository or group, with
+ * repositories (`forge:path`) attached as context; each must be readable by the caller (403).
+ */
 export interface ChatThreadInput {
   title: string
   repo?: string
   group?: string
   autoReply?: boolean
+  contextRepos?: string[]
 }
 
-/** `PATCH /api/chat/threads/:id` */
+/**
+ * `PATCH /api/chat/threads/:id`. `contextRepos` replaces the repositories the caller can read and
+ * keeps those they cannot see, so nobody drops context they never saw; each given repository must
+ * be readable by the caller (403). `muted` applies to the caller only.
+ */
 export interface ChatThreadPatchInput {
   title?: string
   archived?: boolean
   autoReply?: boolean
+  contextRepos?: string[]
+  muted?: boolean
+}
+
+/** One human author in a thread's context column, with how many messages they wrote. */
+export interface ChatContextParticipantView extends ChatParticipantView {
+  messages: number
+}
+
+/**
+ * `GET /api/chat/threads/:id/context` — totals over the whole thread for its context column.
+ * Answers 404 for threads the caller cannot see.
+ */
+export interface ChatThreadContextView {
+  messageCount: number
+  /** Sum of the messages' AI cost; present only when the caller holds `ai:read`. */
+  costUsd?: number
+  /**
+   * Repositories the thread is about that the caller may read: its context repositories first,
+   * then those its messages refer to, in order of first mention.
+   */
+  repos: string[]
+  /** Repositories of the thread the caller may not read; only their number is told. */
+  hiddenRepoCount: number
+  /** Calls per tool over every agent reply, most calls first. */
+  tools: ChatToolUseView[]
+  /** Human authors in order of their first message. */
+  participants: ChatContextParticipantView[]
 }
 
 /**
@@ -454,8 +789,23 @@ export interface CredentialView {
   options?: Record<string, unknown>
   /** What the last `POST /api/credentials/:id/test` found the provider can do. */
   capabilities?: CredentialCapabilities
+  /** What refers to the credential: forges, settings, trackers, webhooks. Absent when unknown. */
+  usedBy?: CredentialUseView[]
+  /** When something last used the secret (recorded at most once a minute). */
+  lastUsedAt?: Timestamp
   createdAt: Timestamp
   updatedAt: Timestamp
+}
+
+/** One thing that refers to a credential, e.g. a panel forge or the `llm.provider` setting. */
+export interface CredentialUseView {
+  /** `forge`, `setting`, `tracker`, `webhook`, ... */
+  kind: string
+  /** The forge id, setting key, tracker id, ... */
+  id: string
+  label: string
+  /** Web UI path that opens it, built with `webPaths`. */
+  href?: string
 }
 
 /** One model an AI provider offers; prices in USD per million tokens. */
@@ -569,6 +919,8 @@ export interface SettingDefinitionView {
   /** Only one value for every repository: entries must be scoped `{ all: true }`. */
   global?: boolean
   schema: unknown
+  /** What applies where no entry covers a repository; `null` when nothing applies until set. */
+  default: unknown
   /** Markdown guidance for editors: what the setting changes and recommended values. */
   help?: string
   /** Ready-made values; applied to an object value, a preset sets its fields and keeps the others. */
@@ -599,9 +951,54 @@ export interface PutSettingInput {
   value: unknown
 }
 
-/** `GET /api/settings/resolve?repo=forge:path` — the winning entry per key and what it overrides. */
+/**
+ * Layers a resolved value comes from, broad to narrow, a narrower one winning: the definition's
+ * `default`, an entry scoped `{ all: true }` (`org`), an entry reaching the focus through its
+ * groups (`group`), an entry naming the repository by path or path glob (`repo`).
+ */
+export type SettingLayer = 'default' | 'org' | 'group' | 'repo'
+
+/** Where a resolved value comes from. */
+export interface SettingSource {
+  layer: SettingLayer
+  /** For `group`: the focus's groups the entry's scope matched on, e.g. `['payments']`. */
+  groups?: string[]
+  /** The entry; absent for `default`. */
+  entry?: SettingView
+}
+
+/**
+ * One key of the resolver: the single source that applies to the focus as a whole and the one it
+ * replaces. `analyzers.<kind>` is one row per analyzer whose entry applies whole; values are not
+ * merged field by field.
+ */
+export interface ResolvedSettingRow {
+  key: string
+  /** The definition's label. */
+  label: string
+  /** The definition's category (`SettingDefinitionView.section`), for grouping rows. */
+  section: string
+  /** The winning entry's value, or the definition's `default` without an entry. */
+  value: unknown
+  /** The winner. */
+  source: SettingSource
+  /** The next broader source the winner replaces with its value; absent when the default applies. */
+  replaces?: SettingSource & { value: unknown }
+  /** The entry that applies as a whole (`source.entry`); absent when the default applies. */
+  entry?: SettingView
+  /** Broader covering entries `entry` overrides. */
+  overrides: number
+}
+
+/**
+ * `GET /api/settings/resolve?repo=forge:path` or `?group=<id>` — the winning entry per key and what
+ * it overrides, for one repository or for a repository of the group that no narrower entry names.
+ * Exactly one of `repo` and `group` is set, echoing the focus.
+ */
 export interface ResolvedSettings {
-  repo: RepoRef
+  repo?: RepoRef
+  group?: string
+  /** Config groups of the repository; `[group]` for a group focus. */
   groups: string[]
   settings: Record<string, SettingView>
   /**
@@ -609,6 +1006,11 @@ export interface ResolvedSettings {
    * overrides from narrow to broad.
    */
   cascade: Record<string, SettingView[]>
+  /**
+   * One row per setting the server defines, in definition order: only keys that exist, retired and
+   * secret keys left out. `global` keys only ever show the `org` or `default` source.
+   */
+  rows: ResolvedSettingRow[]
 }
 
 /** One repository on the CI overview, from its newest `ci-jobs` record. */
@@ -630,7 +1032,28 @@ export interface CiRepoCard {
   weeks: (number | null)[]
   /** Jobs on the problem list. */
   problems: number
+  /** Config groups of the repository, for the scope switch. */
+  groups: string[]
+  /** Worst state of the repository's CI in the record's window. */
+  status: CiStatus
+  /** Jobs that passed only on retry in the window. */
+  flakyJobs: number
+  /** Median queue time of job attempts, seconds; absent when no attempt reported one. */
+  queueMedian?: number
+  /**
+   * Whether releases require a passing pipeline, and on which branch. Present only for callers
+   * with `releases:read` on the repository and only while releases are on for it.
+   */
+  releaseGate?: CiReleaseGate
 }
+
+/** The release gate a CI card mentions: `pipeline` is on when a failed or canceled pipeline on `branch` blocks release steps. */
+export interface CiReleaseGate {
+  pipeline: boolean
+  branch: string
+}
+
+export type { CiStatus }
 
 /** `GET /api/ci` — repositories the caller may read with CI runs in the last 30 days. */
 export interface CiOverview {
@@ -650,6 +1073,74 @@ export interface CiRepoView {
   problems: CiProblem[]
   /** Problems of every job that has one, by job name. */
   flags: Record<string, CiProblemKind[]>
+}
+
+/** Final attempts of a job (or of every job) by how they ended. */
+export interface CiJobOutcomes {
+  success: number
+  failed: number
+  canceled: number
+}
+
+/** One job of one repository on the CI jobs table. Durations are seconds. */
+export interface CiJobRow {
+  name: string
+  stage: string
+  /** Attempts, retried ones included. */
+  runs: number
+  outcomes: CiJobOutcomes
+  /** Median and p90 of successful attempts. */
+  median?: number
+  p90?: number
+  /** Percent change of the recent median against the earlier part of the window. */
+  change?: number
+  /** Percent of final attempts, allowed failures left out, that failed. */
+  failureRate?: number
+  /** Pipelines where an attempt failed and a retry passed. */
+  flaky: number
+  allowFailure: boolean
+  /** Problems the problem list sees in the job; empty when it has none. */
+  problems: CiProblemKind[]
+  last?: { at: Timestamp; status: string; href: string }
+}
+
+/**
+ * `GET /api/ci/jobs?repo=` — the jobs of one repository the caller may read, over a bounded time
+ * range. `jobs` holds at most a fixed number of rows; `total` counts every job of the range, so
+ * `total > jobs.length` means rows were left out.
+ */
+export interface CiJobsView {
+  repo: RepoRef
+  /** The range the rows describe: attempts created at or after `from` and before `to`. */
+  range: { from: Timestamp; to: Timestamp }
+  /** Branch the rows describe; every ref when absent. */
+  ref?: string
+  jobs: CiJobRow[]
+  total: number
+  /** Sums over every job of the range, not only the rows returned. */
+  outcomes: CiJobOutcomes
+}
+
+/** How `GET /api/ci/jobs/fleet` ranks jobs: slowest median, highest failure rate, most slowed down. */
+export type CiFleetJobSort = 'slowest' | 'unreliable' | 'slower'
+
+/** One job of the fleet jobs table, with the repository it runs in. */
+export interface CiFleetJobRow extends CiJobRow {
+  repo: RepoRef
+}
+
+/**
+ * `GET /api/ci/jobs/fleet?sort=&limit=` — jobs of the newest `ci-jobs` record of every repository
+ * the caller may read, ranked by `sort`; at most a fixed number of rows. `total` counts every job
+ * the ranking considered; `slower` keeps only jobs whose median grew, `unreliable` only jobs that
+ * failed or passed on retry.
+ */
+export interface CiFleetJobsView {
+  sort: CiFleetJobSort
+  jobs: CiFleetJobRow[]
+  total: number
+  /** Repositories whose records were read. */
+  repos: number
 }
 
 /** Line and branch coverage of one coverage record, percent. */
@@ -675,7 +1166,12 @@ export interface CoverageRepoCard {
   totals: CoverageTotals
   /** Points of line coverage gained since the previous record; absent without one. */
   change?: number
-  /** Coverage of the files that changed since the previous record; absent without one. */
+  /**
+   * Line coverage the repository should reach, from the `analyzers.coverage` entry that applies to
+   * it; set only by `/coverage` and only when that entry sets `target`.
+   */
+  target?: number
+  /** Coverage of the files that changed since the previous record; set only by `/coverage/repo`. */
   changed?: ChangedFilesCoverage
   /** Recent records, oldest first, the newest included. */
   trend: CoverageTrendPoint[]
@@ -697,6 +1193,8 @@ export interface RepoCoverageView {
   groups: CoverageGroup[]
   worst: FileCoverageData[]
   changes: CoverageFileChange[]
+  /** The job that produced the card's record; absent for uploads, pruned jobs or without access. */
+  job?: AnalysisJobSummary
 }
 
 /** Total bytes and policy violations of one assets record. */
@@ -737,6 +1235,75 @@ export interface RepoAssetsView {
   summary?: AssetsSummary
 }
 
+/** Headline numbers of one repository's newest assets record, from its stored metrics. */
+export interface AssetsRepoSummary {
+  repo: RepoRef
+  /** Config groups of the repository, for the scope switch. */
+  groups: string[]
+  analysisId: string
+  createdAt: Timestamp
+  files: number
+  bytes: number
+  /** Bytes per kind; only kinds that have files. */
+  kinds: Partial<Record<AssetKind, number>>
+  errors: number
+  warnings: number
+  /** Exceeded budgets over every file or a kind. */
+  budgets: number
+  /** Bytes every suggestion together would save. */
+  savings: number
+  duplicateBytes: number
+  /** `bytes` minus the previous record's; absent without one. */
+  delta?: number
+  /** File rows the stored metrics left out, so neither filters nor `total` see them. */
+  moreRows: number
+}
+
+/** One file on the fleet Assets table: a row of its repository's newest assets record. */
+export interface AssetsOverviewRow extends AssetRow {
+  repo: RepoRef
+  analysisId: string
+}
+
+/** Which files the Assets table lists: those that break the policy, those with a saving, or both. */
+export type AssetsStatusFilter = 'policy' | 'saving' | 'any'
+
+/** How the Assets table orders files; every order breaks ties by repository and path. */
+export type AssetsSort = 'severity' | 'saving' | 'size'
+
+/**
+ * Query of `GET /api/assets`. Filters combine; an absent filter matches everything. `cursor` is
+ * the `nextCursor` of the previous page under the same filters and sort.
+ */
+export interface AssetsQuery {
+  /** Config group name. */
+  group?: string
+  /** `forge:path`. */
+  repo?: string
+  status?: AssetsStatusFilter
+  kind?: AssetKind
+  /** Only files with a problem of this rule (a policy rule, `duplicate` or `saving`). */
+  problem?: AssetProblem['rule']
+  format?: string
+  sort?: AssetsSort
+  cursor?: string
+  /** Rows per page; the server caps it. */
+  limit?: number
+}
+
+/**
+ * `GET /api/assets` — the files to act on across the repositories the caller may read, one page
+ * at a time. `repos` summarizes every readable repository that matches `group` and `repo`,
+ * whatever the other filters; `items` is one page of matching files in the requested order;
+ * `total` counts every matching file; `nextCursor` is present exactly when more pages follow.
+ */
+export interface AssetsOverview {
+  repos: AssetsRepoSummary[]
+  items: AssetsOverviewRow[]
+  total: number
+  nextCursor?: string
+}
+
 /** Compact view of an analysis record for lists. */
 export interface AnalysisSummary {
   id: string
@@ -771,6 +1338,20 @@ export interface AnalysisDetail {
   analysis: AnalysisSummary
   previous?: AnalysisSummary
   report: Report
+  /** The job that produced the record; absent for uploads and once the job is pruned. */
+  job?: AnalysisJobSummary
+}
+
+/** The job behind an analysis record, as the record page shows it. */
+export interface AnalysisJobSummary {
+  id: string
+  status: JobStatus
+  trigger: JobTrigger
+  analyzer: string
+  createdAt: Timestamp
+  finishedAt?: Timestamp
+  /** Error of the latest failed attempt. */
+  error?: string
 }
 
 /** What a stack component is: a language runtime, package manager, service image, base system, other image or tool. */
@@ -811,7 +1392,22 @@ export interface StackTool {
   latest?: string
   /** Newest release of a supported LTS line, for products that have them. */
   latestLts?: string
+  /** Release lines of the product as the lifecycle source lists them; absent when none is known. */
+  cycles?: StackCycle[]
   uses: StackUse[]
+}
+
+/** One release line of a stack component's lifecycle, as recorded when the analysis ran. */
+export interface StackCycle {
+  /** Release line, e.g. `22`, `1.23`, `24.04`. */
+  cycle: string
+  releaseDate?: string
+  /** End of life: a date, `true` when ended without a known date, `false` when none is planned. */
+  eol: string | boolean
+  /** Long-term support: `true`, or the date the line entered it. */
+  lts?: string | boolean
+  /** Newest release of the line. */
+  latest?: string
 }
 
 export type StackConventionMode = 'exact' | 'json-subset' | 'yaml-subset' | 'lines-present'
@@ -942,6 +1538,25 @@ export interface DependencyTable {
   }
 }
 
+/** One library of `GET /api/dependencies/search`. */
+export interface DependencySearchHit {
+  ecosystem: LibraryEcosystem
+  name: string
+  internal: boolean
+  latest?: string
+  /** Readable repositories using it. */
+  usedBy: number
+}
+
+/**
+ * `GET /api/dependencies/search?q=&limit=` — libraries the readable repositories use whose name
+ * contains `q` (case-insensitive): name prefixes first, then the most used, at most `limit`
+ * (default 10, at most 50).
+ */
+export interface DependencySearchResult {
+  libraries: DependencySearchHit[]
+}
+
 /** An advisory one of the library's used versions is affected by. */
 export interface DependencyAdvisory {
   id: string
@@ -1002,7 +1617,9 @@ export interface DependencyMergeRequest {
 /**
  * `GET /api/dependencies/library?ecosystem=&name=` — the Overview and Docs tabs of one library:
  * who uses which version, advisories, licenses, bundle shares, team decisions, open update merge
- * requests, the indexed versions and the documents of the newest indexed one.
+ * requests, the indexed versions and the documents of the newest indexed one. An internal package
+ * that only the public API catalog knows is found too, with empty lists. Upgrade readiness is not
+ * part of it: it loads on demand from `GET /api/dependencies/upgrade`.
  */
 export interface DependencyDetail {
   ecosystem: LibraryEcosystem
@@ -1013,7 +1630,13 @@ export interface DependencyDetail {
   description?: string
   homepage?: string
   repository?: string
-  usedBy: { repo: RepoRef; groups: string[]; versions: string[]; majorsBehind: number }[]
+  /** Empty for an internal package no readable repository depends on yet. */
+  usedBy: {
+    repo: RepoRef
+    groups: string[]
+    versions: string[]
+    majorsBehind: number
+  }[]
   versions: DependencyVersionSpread[]
   /** Versions the library index keeps, highest first. */
   indexed: {
@@ -1029,8 +1652,29 @@ export interface DependencyDetail {
   mergeRequests: DependencyMergeRequest[]
   docs: {
     version?: string
-    documents: { source: LibraryChunk['source']; path: string; chunks: number }[]
+    documents: {
+      source: LibraryChunk['source']
+      path: string
+      chunks: number
+    }[]
   }
+}
+
+/**
+ * `GET /api/dependencies/api?ecosystem=&name=` — the API tab of one library: where an internal
+ * package is defined and how much of its public API is exported and documented, per entry point.
+ */
+export interface DependencyApi {
+  ecosystem: LibraryEcosystem
+  name: string
+  /** The newest public API record defining an internal package; absent for third-party libraries. */
+  definedIn?: { repo: RepoRef; ref?: string; analysisId: string }
+  /** Version the counts describe. */
+  version?: string
+  /** Absent when no public API of the library is on record. */
+  api?: { exports: number; documented: number }
+  /** Entry point subpaths, `.` first; empty when none is on record. */
+  subpaths: string[]
 }
 
 /** One API change between the two versions of an upgrade; `added` exports are left out. */
@@ -1094,7 +1738,12 @@ export interface IngestAnalysis {
    * Binary files the data's `write-binary` edits reference by `artifact`; each `id` must be the
    * SHA-256 (hex) of the decoded content.
    */
-  artifacts?: { id: string; base64: string; contentType?: string; name?: string }[]
+  artifacts?: {
+    id: string
+    base64: string
+    contentType?: string
+    name?: string
+  }[]
 }
 
 /** A user named by an id somewhere in a response (an actor, an author, `updatedBy`). */
@@ -1113,10 +1762,33 @@ export interface UserView {
   grants: Grant[]
   disabled: boolean
   createdAt: Timestamp
+  /** Principal id of who invited the user (`cli`, `bootstrap` for accounts not made by a person). */
   createdBy?: string
-  passkeys: { id: string; label?: string; createdAt: Timestamp; lastUsedAt?: Timestamp }[]
+  /** The person behind `createdBy` when it is a user: the Account page's "Given by". */
+  creator?: PersonView
+  passkeys: {
+    id: string
+    label?: string
+    createdAt: Timestamp
+    lastUsedAt?: Timestamp
+  }[]
   identities: { provider: string; email?: string }[]
   avatarUrl: string
+  /** When the user last made a signed-in request (recorded at most once a minute). */
+  lastSeenAt?: Timestamp
+  /** The newest enrollment link while the user has never signed in. */
+  invite?: UserInviteView
+  /** The user's teams: their home groups, else the groups their grants name. */
+  teams?: string[]
+}
+
+/** An enrollment link a user has not used yet. */
+export interface UserInviteView {
+  createdAt?: Timestamp
+  expiresAt: Timestamp
+  /** The link ran out; a new one has to be sent. */
+  expired: boolean
+  createdBy?: string
 }
 
 /** `GET /auth/users/admin/users` */
@@ -1146,11 +1818,24 @@ export interface UpdateUserInput {
   disabled?: boolean
 }
 
-/** `GET /auth/users/link/:token` — what a setup or recovery link is for. */
+/** The role a link's grants read as (`roleOf` in `@holtkeeper/access`), shown before sign-in. */
+export type LinkRole = Role
+
+/**
+ * `GET /auth/users/link/:token` — what a live, unused setup or recovery link is for. `grants`
+ * gives only the number of grants and their role, never scopes, group names or who issued it.
+ */
 export interface LinkInfo {
   purpose: 'enroll' | 'recover'
   userName: string
   expiresAt: Timestamp
+  grants: { count: number; role: LinkRole }
+}
+
+/** The 410 body of a used or expired link: when it was used or when it expired, nothing else. */
+export interface LinkGone extends ApiError {
+  state: 'used' | 'expired'
+  at: Timestamp
 }
 
 /** `GET /api/jobs/:id` — a background analysis run with its attempts; the log is read apart. */
@@ -1160,14 +1845,58 @@ export type Job = StoredJob
 export type JobSummary = StoredJob
 
 /**
- * `GET /api/jobs?status=&repo=&repos=&analyzer=&trigger=&schedule=&signature=&limit=&before=` —
- * newest first, only repositories the caller may read (filtered before `limit`). `repos` is a
+ * `GET /api/jobs?status=&repo=&repos=&analyzer=&trigger=&schedule=&signature=&analysisId=&q=&limit=&before=`
+ * — newest first, only repositories the caller may read (filtered before `limit`). `repos` is a
  * comma list of `forge:path` (group jobs: `forge:<group>`); `signature` matches `errorSignature`
- * exactly. `people` resolves the jobs' actors that are users.
+ * exactly; `analysisId` keeps the jobs that wrote that analysis; `q` (at most 200 characters)
+ * keeps jobs whose id starts with it or whose repository path, group, analyzer kind or analyzer
+ * label contains it, ignoring case. `people` resolves the jobs' actors that are users.
  */
 export interface JobList {
   jobs: JobSummary[]
   people: Record<string, PersonView>
+  /**
+   * Why each queued job of `jobs` has not started (job id → `JobWait`), from the same claim rules
+   * as `GET /api/jobs/:id/why`, so a list needs no request per row. Only queued jobs have an entry.
+   */
+  waitHints: Record<string, JobWait>
+  /**
+   * What the agent runs of each job of `jobs` cost so far in USD (job id → cost), counted only for
+   * analyzers that use an agent and jobs whose target the caller may `ai:read` or `ai:admin`; jobs
+   * without a cost (or whose cost the caller may not read) have no entry.
+   */
+  costs: Record<string, number>
+}
+
+/** A wait reason kind of `JobStats.waits`, or `capacity`: nothing but a free worker slot is missing. */
+export type JobWaitKind = WaitReason['kind'] | 'capacity'
+
+/** A worker that announced itself within the registry TTL, with the jobs it runs now. */
+export interface JobWorkerView {
+  id: string
+  lastSeen: Timestamp
+  running: number
+}
+
+/**
+ * `GET /api/jobs/stats?repos=`: the queue at a glance, counted only over repositories (and groups)
+ * the caller may `analyses:read`, narrowed further to `repos` (comma list of `forge:path`) when given. `queue.queued` and `queue.running` are live; `queue.failed` and
+ * `queue.blocked` count jobs created in the last `windowHours`. `claimLatency` is the time from a
+ * job becoming due (`runAfter`) to its latest claim, over jobs started in the window (percentiles
+ * absent without samples). `waits` buckets the oldest queued jobs in claim order (at most 50,
+ * `sampled` of them) by every reason holding each back. `running.costUsd` is what the running jobs'
+ * agent runs spent so far, over those the caller may `ai:read` or `ai:admin`; absent without any AI
+ * read permission. `workers` (live workers, most recently seen first) is present only for
+ * callers with `analyses:read` over everything. MCP and chat `queue_stats` return the same numbers.
+ */
+export interface JobStats {
+  at: Timestamp
+  windowHours: number
+  queue: { queued: number; running: number; failed: number; blocked: number }
+  claimLatency: { samples: number; p50Ms?: number; p95Ms?: number }
+  waits: { sampled: number; reasons: { kind: JobWaitKind; count: number }[] }
+  running: { jobs: number; costUsd?: number }
+  workers?: JobWorkerView[]
 }
 
 export type { JobAttempt, JobFailureGroup, JobLogLine, JobStep, JobWait, WaitReason }
@@ -1196,6 +1925,10 @@ export interface JobWhy {
   actor?: string
   outcome?: string
   wait?: JobWait
+  /** Where the job's commands run (`jobs.execution.mode`): `host`, `mise` or `container`. */
+  mode: 'host' | 'mise' | 'container'
+  /** The spend cap of the job's agent runs in USD, when the job carries one (write tasks). */
+  costCapUsd?: number
   people: Record<string, PersonView>
 }
 
@@ -1240,6 +1973,17 @@ export interface JobFailureList {
 }
 
 /**
+ * `GET /api/jobs/count?status=&repos=&analyzer=&trigger=&since=`: how many jobs match, counted only
+ * over repositories (and groups) the caller may read, with the same filters as `JobList`
+ * (`analysisId`, `repo`, `schedule`, `signature` and `q` too); `since`
+ * counts jobs created at or after it. `byStatus` has every status, zero included, and sums to `total`.
+ */
+export interface JobCountView {
+  total: number
+  byStatus: Record<JobStatus, number>
+}
+
+/**
  * `POST /api/jobs` — queues an analyzer run. Repo-scope analyzers take `repo` (`forge:path`),
  * group-scope analyzers take `group`. `options` must match the analyzer's options.
  */
@@ -1268,10 +2012,36 @@ export interface AnalysisBackfillInput {
 
 export type { BundlePoint, BundleSeries }
 
+/** What a caller may do with one repository's release, as `ReleaseCard.can` explains. */
+export interface ReleaseCan {
+  accept: boolean
+  run: boolean
+}
+
 /** One repository on the Releases overview: its snapshot row plus whether a person should act. */
 export type ReleaseCard = ReleaseBoardRow & {
-  /** A step is pending (candidate, proposed, awaiting a version), a deploy failed or is ready, or reading failed. */
+  /**
+   * A step is pending (candidate, proposed, awaiting a version), a deploy failed or is ready, or
+   * reading failed; false while the waiting release is dismissed.
+   */
   needsAction: boolean
+  /**
+   * The commit a decision about the waiting release names: the source branch head while a
+   * candidate waits, else the target branch head. Absent when nothing waits or reading failed.
+   */
+  head?: string
+  /**
+   * What the caller may do with this repository's release now, computed per caller: `accept` the
+   * target branch head and `run` steps and deploys both need exactly `releases:run` on the
+   * repository; `accept` is also false when nothing waits for acceptance (no unreleased changes,
+   * already accepted, a flow without acceptance, or reading failed).
+   */
+  can: ReleaseCan
+  /**
+   * Set while a person dismissed the waiting release and `head` is still the commit they
+   * dismissed; a new commit ends it. `by` is a principal id resolved in `people`.
+   */
+  dismissed?: { sha: string; by: string; at: Timestamp }
 }
 
 /**
@@ -1298,13 +2068,19 @@ export interface ReleaseVersionDeploy {
   environment: string
   status: 'started' | 'succeeded' | 'failed'
   at: string
-  /** Principal id or forge username of who started it. */
+  /** Principal id or forge username of who started it, resolved in `people` where known. */
   actor: string
+  /** Display name of `actor` when it was recorded and differs from the id. */
+  actorName?: string
+  /** Why the newest deploy was started, when it was not a plain first deploy. */
+  reason?: string
   url?: string
 }
 
 /** A past version on the timeline with its recorded deploys. */
-export type ReleaseVersionView = ReleaseVersion & { deploys: ReleaseVersionDeploy[] }
+export type ReleaseVersionView = ReleaseVersion & {
+  deploys: ReleaseVersionDeploy[]
+}
 
 /**
  * `GET /api/releases/timeline?repo=&offset=&limit=`: versions of one repository, newest first,
@@ -1317,6 +2093,8 @@ export interface ReleaseTimelineView {
   /** Releases are turned on for the repository. */
   enabled: boolean
   next?: ReleaseBoardRow
+  /** As `ReleaseCard.can`, for `next`; `accept` is false without `next`. */
+  can: ReleaseCan
   versions: ReleaseVersionView[]
   /** Versions in all; release candidates count only when the flow makes them. */
   total: number
@@ -1326,12 +2104,30 @@ export interface ReleaseTimelineView {
 
 /**
  * `GET /api/releases/version?repo=&tag=`: one version in full (entries, changelog, tasks, compare
- * link) with its recorded deploys and, when environments are configured, the live deploy state.
- * 404 when the tag is not a version.
+ * link) with its recorded deploys and, when environments are configured, the live deploy state
+ * whose attempts started through Holtkeeper carry `actor` and `reason`. `provenance` says who
+ * accepted and created the version, with the override, the source of the notes and the
+ * `CHANGELOG.md` commit; absent when Holtkeeper did not create it. 404 when the tag is not a
+ * version.
  */
 export type ReleaseVersionDetailView = ReleaseVersionDetail & {
   deploys: ReleaseVersionDeploy[]
   deploy?: DeployState
+  provenance?: ReleaseProvenance
+  /** Users among the provenance and deploy actors, by id. */
+  people: Record<string, PersonView>
+}
+
+/**
+ * `GET /api/releases/detect?repo=`: the release flow suggested from what the repository already
+ * does, read from the forge on each request and never kept in the snapshot. `configured` is true
+ * when a `releases` setting already names the repository or one of its groups. Needs
+ * `releases:read` on the repository.
+ */
+export interface ReleaseDetectView {
+  repo: RepoRef
+  detection: FlowDetection
+  configured: boolean
 }
 
 /** `GET /api/releases/repo?repo=`: everything the release page of one repository shows. */
@@ -1347,15 +2143,13 @@ export interface ReleaseRepoView {
   versions: VersionTag[]
   /** Deploy state of the latest version. */
   deploy?: DeployState
-  /** Suggested flow when no setting names this repository or its groups. */
-  detection?: FlowDetection
   history: ReleaseEvent[]
   /** Forge pages of the release: merge requests, tags, diffs, pipelines, project lists. */
   links: ReleaseLink[]
   /** Users among the history's actors and the acceptance, by id. */
   people: Record<string, PersonView>
-  /** What the caller may do here. */
-  can: { run: boolean; configure: boolean }
+  /** What the caller may do here: `accept` and `run` as `ReleaseCard.can`, `configure` needs `settings:write`. */
+  can: ReleaseCan & { configure: boolean }
   readOnly: boolean
   dryRun: boolean
   /** An AI agent is configured for this repository, so notes can be written by it. */
@@ -1399,6 +2193,17 @@ export interface ReleaseAcceptInput {
   note?: string
 }
 
+/**
+ * `POST /api/releases/dismiss`: hides the release waiting in `repo` from Inbox and Home until a new
+ * commit arrives. `sha` is the card's `head`; the server answers 409 when the head moved since.
+ * Nothing changes on the forge, and the dismissal holds for everyone. Needs `releases:run` on the
+ * repository; audited as `release.dismiss`.
+ */
+export interface ReleaseDismissInput {
+  repo: string
+  sha: string
+}
+
 /** `POST /api/releases/deploy`: starts the deploy job of one environment for a version. */
 export interface ReleaseDeployInput {
   repo: string
@@ -1406,6 +2211,8 @@ export interface ReleaseDeployInput {
   environment: string
   redeploy?: boolean
   force?: boolean
+  /** Why; kept on the deploy attempt and in the history. */
+  reason?: string
 }
 
 /** What a step did. */
@@ -1445,6 +2252,69 @@ export interface BundleTargetReportView {
   previousAnalysisId?: string
 }
 
+/** One measurement of a target on the Bundles overview. */
+export interface BundleSizePoint {
+  analysisId: string
+  createdAt: Timestamp
+  status: 'ok' | 'failed'
+  /** JS and CSS gzip bytes; absent when the measurement failed. */
+  gzip?: number
+}
+
+/** One target's row on the Bundles overview, from stored metrics only. */
+export interface BundleTargetRow {
+  name: string
+  source: TargetSource
+  /** Newest version measured, for package targets. */
+  version?: string
+  /** Status of the newest measurement. */
+  status: 'ok' | 'failed'
+  /** JS and CSS gzip bytes of the newest measurement; absent when it failed. */
+  gzip?: number
+  /** Initial gzip bytes of the largest entrypoint. */
+  initial?: number
+  /** `gzip` minus the previous measurement's; absent without one. */
+  delta?: number
+  /** Maximum gzip bytes from the current `analyzers.bundle` options; absent without a budget. */
+  budget?: number
+  /** `gzip` against `budget`; absent without either. */
+  verdict?: BudgetVerdict
+  /** `verdict === 'over'`. */
+  overBudget: boolean
+  /** Measurements of the records read, oldest first, the newest included. */
+  series: BundleSizePoint[]
+  /** The record of the newest measurement. */
+  analysisId: string
+  createdAt: Timestamp
+}
+
+/** One repository on the Bundles overview: its targets from the newest bundle records. */
+export interface BundlesRepoRow {
+  repo: RepoRef
+  /** Config groups of the repository, for the scope switch. */
+  groups: string[]
+  /** The newest record. */
+  analysisId: string
+  createdAt: Timestamp
+  ref?: string
+  /** Targets by name. */
+  targets: BundleTargetRow[]
+  /** Targets whose newest measurement failed. */
+  failed: number
+  /** Targets over budget. */
+  overBudget: number
+  /** Records read for the repository, at most a fixed small number (about 20). */
+  records: number
+}
+
+/**
+ * `GET /api/bundles` — repositories the caller may read that have a bundle record, each built from
+ * the stored metrics of its newest records; record data is never read.
+ */
+export interface BundlesOverview {
+  repos: BundlesRepoRow[]
+}
+
 /** Answer to an analysis backfill, which goes on in the background. */
 export interface AnalysisBackfillStarted {
   startedAt: string
@@ -1481,7 +2351,12 @@ export interface JobAnalyzerView {
    * on its own.
    */
   refresh?:
-    | { on: 'change'; minInterval: string; paths?: readonly string[]; heavy?: boolean }
+    | {
+        on: 'change'
+        minInterval: string
+        paths?: readonly string[]
+        heavy?: boolean
+      }
     | { on: 'time'; cadence: string; heavy?: boolean }
   schema: unknown
   presets?: SettingPresetView[]
@@ -1532,45 +2407,318 @@ export interface RepoStackView {
   conventions: Record<StackConventionStatus, number>
 }
 
+/** Overview cards of the repository hub, each opening its area of the Supply chain or Quality tab. */
+export type RepoCardKey =
+  | 'security'
+  | 'libraries'
+  | 'licenses'
+  | 'stack'
+  | 'public-api'
+  | 'coverage'
+  | 'bundles'
+  | 'assets'
+  | 'ci'
+  | 'branches'
+
+/** One part of a card's bar: `share` of the bar's width (0..1); `none` is drawn neutral. */
+export interface RepoCardSegment {
+  tone: HealthTone
+  share: number
+}
+
 /**
- * `GET /api/repos/overview?repo=` — what the repository page's Overview cards show, from stored
- * records only: the newest record of every analysis kind (reviews left out), the default-branch
- * head freshness last saw, the newest audit (with `audits:read`), the direct dependency count and
- * the stack. Needs `analyses:read`.
+ * One Overview card, formatted by the server like a health cell: `status` and its `tone` for the
+ * tag (`Not analysed` with tone `none` when there is no record), the headline `value` with its
+ * `unit`, up to two detail `lines`, and an optional bar whose segments add up to at most 1.
+ */
+export interface RepoOverviewCard {
+  key: RepoCardKey
+  section: 'supply' | 'quality'
+  tone: HealthTone
+  status: string
+  value: string
+  unit: string
+  lines: string[]
+  segments?: RepoCardSegment[]
+  /** The record the card describes; absent without one. */
+  analysisId?: string
+}
+
+/** Holtkeeper's merge request reviews of the last 30 days, summed. */
+export interface RepoReviewTotals {
+  reviews: number
+  /** Comments the forge accepted. */
+  posted: number
+  /** Threads the reviews resolved. */
+  resolved: number
+  up: number
+  down: number
+  costUsd: number
+}
+
+/** Jobs and write tasks of the repository this week (since Monday 00:00 UTC). */
+export interface RepoWorkSummary {
+  runs: number
+  failed: number
+  /** Proposed write tasks waiting for a person to approve them; only with `repos:read`. */
+  awaitingApproval?: number
+  /** AI spend of those jobs and tasks; only with `ai:read` or `ai:admin`. */
+  costUsd?: number
+}
+
+/** The repository's Guide as the Knowledge card shows it. */
+export interface RepoKnowledgeSummary {
+  /** Guide sections written for the repository itself. */
+  sections: number
+  notes: number
+  /** Learnings proposed for the repository, waiting for review. */
+  proposed: number
+  /** Broader Guide scopes it inherits from, broad to narrow, e.g. `group web`, `family storefronts`. */
+  inherits: string[]
+}
+
+/** The repository's release state from the Releases snapshot. */
+export type RepoReleaseSummary = Pick<
+  ReleaseBoardRow,
+  'stage' | 'latest' | 'next' | 'bump' | 'unreleased' | 'unreleasedCapped'
+> & {
+  /** The newest successful deploy of the latest version. */
+  deployed?: { environment: string; at: Timestamp }
+}
+
+/** One runtime or package manager the repository pins, e.g. `node` `18.20`. */
+export interface RepoToolchainEntry {
+  name: string
+  version: string
+}
+
+/** What Holtkeeper may do in the repository. */
+export interface RepoAccessSummary {
+  /** Agents and analyzers only read; nothing writes to the forge. */
+  readOnly: boolean
+  /** Why it is read-only and until when, when someone said so. */
+  reason?: string
+  until?: Timestamp
+  /** Write tasks may open merge requests there (`tasks.write` and not read-only). */
+  writeTasks: boolean
+}
+
+/**
+ * `GET /api/repos/overview?repo=` — what the repository hub's header and Overview show, from stored
+ * records only: the health strip (`health`, `cells`, the same as `GET /api/repos`), the Supply chain
+ * and Quality cards, the newest record of every analysis kind (reviews left out) for the freshness
+ * table, the default-branch head freshness last saw, and the Delivery cards' data. Needs
+ * `analyses:read`; every part behind another permission is absent without it (cells and cards
+ * included), never empty. It never carries the head commit's title.
  */
 export interface RepoOverview {
   repo: RepoRef
   groups: string[]
+  health: RepoHealthStatus
+  cells: RepoHealthCells
+  /** Supply chain cards, then Quality cards, in display order. */
+  cards: RepoOverviewCard[]
   /** The default-branch head freshness last saw; records on another sha are behind it. */
   head?: { sha: string; at: Timestamp }
+  /** Default branch as the forge last reported it. */
+  defaultBranch?: string
   analyses: AnalysisSummary[]
   audit?: AuditRunSummary
   /** Direct dependencies in the newest `depgraph` record. */
   dependencies?: { direct: number; analysisId: string; createdAt: Timestamp }
   stack?: RepoStackView
+  /** Runtimes and package managers from the newest `stack` record; empty without one. */
+  toolchain: RepoToolchainEntry[]
+  reviews30d: RepoReviewTotals
+  work: RepoWorkSummary
+  /** Absent without `knowledge:read`. */
+  knowledge?: RepoKnowledgeSummary
+  /** Absent without `releases:read` or while releases are off for the repository. */
+  release?: RepoReleaseSummary
+  access: RepoAccessSummary
 }
 
-/** One Holtkeeper review run on a merge request, for the repository page's Reviews tab. */
-export interface RepoReviewView {
+/** Posted review findings of one run per severity. */
+export interface ReviewFindingCounts {
+  info: number
+  minor: number
+  major: number
+  critical: number
+}
+
+/** One review run on the fleet Reviews table, from the record's stored metrics. */
+export interface ReviewRow {
   analysisId: string
+  repo: RepoRef
   createdAt: Timestamp
-  mergeRequest: { iid: number; title: string; webUrl: string; author: string }
+  mergeRequest: { iid: number; title: string; url: string; author?: string }
   mode: 'full' | 'incremental' | 'reply' | 'skipped'
   verdict: 'looks-good' | 'needs-changes' | 'skipped'
-  /** Comments the forge accepted. */
-  posted: number
+  /** Findings the forge accepted, in total and per severity. */
+  findings: number
+  severities: ReviewFindingCounts
   /** Threads the run resolved. */
   resolved: number
+  /** Model that ran the review; absent for records made before it was stored. */
+  model?: string
+  /** Wall time of the run; absent for records made before it was stored. */
+  durationMs?: number
+  /** Guide scopes the review read, broad to narrow; empty when unknown or none. */
+  guideScopes: string[]
   costUsd?: number
-  /** 👍/👎 last read from the forge on this run's comments. */
-  reactions: { up: number; down: number }
 }
 
-/** `GET /api/repos/reviews?repo=` — the newest 20 review runs of a repository; `analyses:read`. */
-export interface RepoReviewList {
-  reviews: RepoReviewView[]
+/**
+ * Query of `GET /api/reviews`: records created at or after `since` (default 30 days ago), newest
+ * first, optionally of one repository or config group and of one verdict.
+ */
+export interface ReviewQuery {
+  /** `forge:path`. */
+  repo?: string
+  group?: string
+  verdict?: ReviewRow['verdict']
+  since?: Timestamp
+  /** Paging: only records created before this time. */
+  before?: Timestamp
+  limit?: number
+}
+
+/**
+ * `GET /api/reviews` — review runs on repositories the caller may read, newest first. `reviews`
+ * holds at most the requested (and capped) number of rows; `nextBefore` is present exactly when
+ * older rows may follow and is the `before` of the next page.
+ */
+export interface ReviewList {
+  reviews: ReviewRow[]
   /** Sums over `reviews`. */
-  totals: { costUsd: number; posted: number; up: number; down: number }
+  totals: {
+    reviews: number
+    findings: number
+    resolved: number
+    costUsd: number
+  }
+  /**
+   * Sums over every review the same query matches in its window, not only this page; sent with
+   * the first page (no `before`) only.
+   */
+  window?: ReviewWindowTotals
+  nextBefore?: Timestamp
+}
+
+/** A Reviews window in figures, for the strip above the table. */
+export interface ReviewWindowTotals {
+  reviews: number
+  verdicts: Record<ReviewRow['verdict'], number>
+  findings: number
+  severities: ReviewFindingCounts
+  resolved: number
+  costUsd: number
+  /** The scan stopped at its cap before the window's start, so the figures are a lower bound. */
+  partial?: true
+}
+
+/**
+ * `GET /api/reviews/:id` — one review run: its row, the summary and the posted and rejected
+ * findings. 404 when the record is not a review or the caller may not read its repository.
+ */
+export interface ReviewDetail {
+  review: ReviewRow
+  summary: string
+  /** Head commit that was reviewed. */
+  head: string
+  sourceBranch: string
+  targetBranch: string
+  findings: ReviewFindingView[]
+  /** Tokens the run used, when stored. */
+  usage?: { inputTokens?: number; outputTokens?: number; turns: number }
+}
+
+/** One finding of a review run. */
+export interface ReviewFindingView {
+  id: string
+  path: string
+  line: number
+  startLine?: number
+  severity: keyof ReviewFindingCounts
+  category: string
+  title: string
+  body: string
+  /** `agent` or the quality check that found it. */
+  source: string
+  /** Whether the forge accepted it as a comment; `error` says why not. */
+  posted: boolean
+  error?: string
+  href?: string
+  suggestion?: { replacement: string; original?: string }
+}
+
+/** Why a branch is worth deleting. */
+export type BranchCleanupReason = 'merged' | 'closed' | 'stale'
+
+/** Branches worth deleting of one author in one repository's newest record. */
+export interface BranchAuthorRow {
+  /** Author of the head commit; `unknown` when the forge did not report one. */
+  author: string
+  cleanup: number
+  merged: number
+  closed: number
+  stale: number
+  /** Age in days of the author's oldest branch worth deleting. */
+  oldestDays: number
+}
+
+/** One branch worth deleting, as the Branches table lists it. */
+export interface BranchRow {
+  name: string
+  reason: BranchCleanupReason
+  committedAt: Timestamp
+  ageDays: number
+  author?: string
+  webUrl?: string
+  mergeRequest?: {
+    iid: number
+    state: 'open' | 'merged' | 'closed'
+    title: string
+    url: string
+  }
+}
+
+/** One repository on the Branches overview, from its newest `branches` record. */
+export interface BranchesRepoRow {
+  repo: RepoRef
+  /** Config groups of the repository, for the scope switch. */
+  groups: string[]
+  analysisId: string
+  createdAt: Timestamp
+  defaultBranch: string
+  staleDays: number
+  /** Branches judged besides the default branch, and of them those with an open merge request. */
+  total: number
+  open: number
+  /** Branches worth deleting, and how many for each reason. */
+  cleanup: number
+  merged: number
+  closed: number
+  stale: number
+  oldestDays?: number
+  /** Change of each count against the previous record's metrics; absent without one. */
+  delta?: {
+    total: number
+    cleanup: number
+    merged: number
+    closed: number
+    stale: number
+  }
+  /** Branches worth deleting per author, most first. */
+  authors: BranchAuthorRow[]
+  /** Branches worth deleting, oldest first, at most a fixed number; `more` counts the rest. */
+  branches: BranchRow[]
+  more: number
+}
+
+/** `GET /api/branches` — repositories the caller may read that have a `branches` record. */
+export interface BranchesOverview {
+  repos: BranchesRepoRow[]
 }
 
 /**
@@ -1651,7 +2799,13 @@ export type EgressCacheView =
       /** When the replica that answered started counting `stats`. */
       since: Timestamp
       syncedAt: Timestamp | null
-      stats: { hits: number; misses: number; stored: number; servedBytes: number; errors: number }
+      stats: {
+        hits: number
+        misses: number
+        stored: number
+        servedBytes: number
+        errors: number
+      }
       rules: EgressCacheRule[]
       total: { count: number; bytes: number }
       /** Most recently used first, at most 5000. */
@@ -1731,6 +2885,130 @@ export interface UpdateKnowledgeInput extends CreateKnowledgeInput {
   version?: number
 }
 
+/** Guide, Notes and Learnings totals of one Knowledge space. */
+export interface KnowledgeSpaceCounts {
+  /** Sections of the space with human rules or generated text. */
+  guide: number
+  /**
+   * Live notes (proposed and accepted) the space's Notes table lists: every note the caller may
+   * read for `all`, notes naming the group or any family member, and notes covering the
+   * repository, inherited ones included.
+   */
+  notes: number
+  /** Learning candidates still proposed for the space. */
+  learnings: number
+}
+
+/**
+ * `GET /api/knowledge/counts` — totals per Knowledge space, keyed by space (`all`, `group:<g>`,
+ * `family:<id>`, `repo:<forge>:<path>`, the Guide scope keys). Only spaces whose scope the caller
+ * may read are present; a space with nothing in it may be left out.
+ */
+export interface KnowledgeCounts {
+  spaces: Record<string, KnowledgeSpaceCounts>
+}
+
+/** Where a layer of the Guide chain comes from, in the order the agent reads layers. */
+export type GuideChainLayerKind =
+  | 'repo-file'
+  | 'repo'
+  | 'family'
+  | 'group'
+  | 'all'
+  | 'learnings'
+  | 'policies'
+  | 'generated'
+  | 'notes'
+
+/** One numbered layer of a section's Guide chain: the text the agent gets from one source. */
+export interface GuideChainLayer {
+  /** 1-based position in the section's chain. */
+  n: number
+  kind: GuideChainLayerKind
+  /** Guide scope of the layer; absent for repository files, policies and notes. */
+  scope?: GuideScopeKey
+  /** `REVIEW.md`, `Team games`, `Family Widgets`, `All repositories`, `Commit policy`, … */
+  source: string
+  /** The text as the agent gets it, cut when `cut` is set. */
+  text: string
+  /** Characters of `text`; 0 when the budget left nothing for the layer. */
+  chars: number
+  /** Characters the layer would take whole. */
+  fullChars: number
+  /** The budget cut the layer short or left it out. */
+  cut: boolean
+  /** For `generated`: the version shown, linking to `GET /api/guide/generated/history`. */
+  version?: number
+  /** For `generated`: proposed text nobody accepted yet. */
+  proposed?: boolean
+}
+
+/** One section of the Guide chain with its layers. */
+export interface GuideChainSection {
+  section: GuideSectionName
+  /**
+   * Layers in exactly the order the agent reads them: repository files, repository rules,
+   * family, groups (several, in config order), all repositories, learnings, policies, generated
+   * text, notes. Empty sources are left out; numbering has no gaps.
+   */
+  layers: GuideChainLayer[]
+}
+
+/**
+ * `GET /api/guide/chain?repo=&section=` — the layered Guide a task of the repository gets, per
+ * section (only `section` when given), with the shared budget. Needs `knowledge:read` on the
+ * repository. The MCP knowledge tools return the same layers in the same order.
+ */
+export interface GuideChainView {
+  repo: string
+  sections: GuideChainSection[]
+  /** Characters used against the caps: `total` 12000, `human` 8000, `generated` 4000. */
+  budget: GuideCaps & { used: number; humanUsed: number; generatedUsed: number }
+  /** Problems a person should see, e.g. repository rules too long to fit. */
+  warnings: string[]
+}
+
+/** A rules file of the repository itself, as read at its default branch head. */
+export interface GuideRepoFileView {
+  /** `REVIEW.md`, `AGENTS.md`, `.github/copilot-instructions.md`, … */
+  path: string
+  /** Blob sha; unchanged sha means unchanged text, so the server caches by it. */
+  sha: string
+  chars: number
+  text: string
+}
+
+/**
+ * `GET /api/guide/repo-files?repo=` — the rules files of the repository the Guide chain reads as
+ * its `repo-file` layer, in that order. Needs `knowledge:read` on the repository.
+ */
+export interface GuideRepoFilesView {
+  repo: string
+  /** The default branch head the files were read at, when the forge reports it. */
+  sha?: string
+  files: GuideRepoFileView[]
+}
+
+/** One stored generator run of a section. */
+export interface GuideGeneratedVersionView extends GuideGenerated {
+  /** A person rejected this text (by its `inputHash`). */
+  rejected: boolean
+  /** Where the section holds this version now: accepted (`generated`), waiting (`proposal`) or neither. */
+  current?: 'generated' | 'proposal'
+}
+
+/**
+ * `GET /api/guide/generated/history?scope=&section=` — every text the generator stored for the
+ * section, newest version first, for Compare. Needs `knowledge:read` on the scope.
+ */
+export interface GuideGeneratedHistory {
+  scope: GuideScopeKey
+  section: GuideSectionName
+  versions: GuideGeneratedVersionView[]
+  /** Names and avatars of the users who accepted versions. */
+  people: Record<string, PersonView>
+}
+
 /** One scope's Guide: every section (empty ones included) and whether the caller may edit them. */
 export interface GuideScopeView {
   scope: GuideScopeKey
@@ -1771,6 +3049,19 @@ export interface AcceptGuideSectionInput {
 }
 
 /**
+ * `POST /api/guide/section/reject`: rejects the generated text waiting for a person in one section.
+ * The rejected `inputHash` is remembered for that section: the stored version is kept but hidden
+ * from the Guide views and the Inbox, and the generator does not propose text from the same inputs again; changed inputs propose anew. Needs
+ * `knowledge:write` on the scope; 409 unless `inputHash` is still the waiting text. Audited as
+ * `guide.reject`. Answers the section.
+ */
+export interface GuideSectionRejectInput {
+  scope: GuideScopeKey
+  section: GuideSectionName
+  inputHash: string
+}
+
+/**
  * `POST /api/guide/regenerate?repo=` — queues a `guide` job that regenerates even when the evidence
  * did not change, optionally for some sections and with a one-off extra prompt stored with the
  * result. Needs `knowledge:write` and `analyses:run` on the repository. Answers the job (201).
@@ -1792,7 +3083,12 @@ export interface GuidePreview {
   sections: GuideSectionName[]
   blocks: GuideBlock[]
   warnings: string[]
-  budget: GuideCaps & { used: number; humanUsed: number; generatedUsed: number; notesUsed: number }
+  budget: GuideCaps & {
+    used: number
+    humanUsed: number
+    generatedUsed: number
+    notesUsed: number
+  }
 }
 
 /**
@@ -1807,10 +3103,43 @@ export interface LearningList {
   people: Record<string, PersonView>
 }
 
+/**
+ * How a learning candidate came about: one review reply (`review-reply`), a direct proposal of an
+ * MCP client without replies (`mcp`), or several discussions, or a proposal plus replies,
+ * folded into one rule (`merged`).
+ */
+export type LearningSourceKind = 'review-reply' | 'mcp' | 'merged'
+
 export interface LearningCandidateView extends LearningCandidate {
   canDecide: boolean
   /** Scope keys of the repository the caller may edit: repository, family, groups, `all`. */
   scopes: GuideScopeKey[]
+  sourceKind: LearningSourceKind
+  /**
+   * 1–5, from the sources alone so the same candidate always scores the same: 1, plus 1 each for
+   * at least 2 distinct discussions, at least 2 distinct authors, at least 2 distinct
+   * repositories, and at least 3 distinct authors; capped at 5. Authors are the reply authors
+   * and the proposer of a direct proposal.
+   */
+  confidence: number
+}
+
+/**
+ * `POST /api/learnings/accept` — accepts several candidates at once, each into `scope` (default:
+ * the scope its `suggestedScope` points at), with the same rights as accepting one. Each accepted
+ * candidate gets its own audit event; one failing never stops the rest.
+ */
+export interface AcceptLearningsInput {
+  ids: string[]
+  scope?: GuideScopeKey
+}
+
+/** What `POST /api/learnings/accept` did, per candidate, in the order given. */
+export interface AcceptLearningsResult {
+  /** Ids of the candidates now accepted. */
+  accepted: string[]
+  /** Candidates left as they were, with why (unknown, no rights, scope not allowed, …). */
+  failed: { id: string; error: string }[]
 }
 
 /**
@@ -1905,20 +3234,41 @@ export interface MediaVariantView {
 export interface MediaSavings {
   originalBytes: number
   /** Smallest variant of each format at the largest width generated for it. */
-  formats: { format: string; width: number; bytes: number; savingsPercent: number }[]
+  formats: {
+    format: string
+    width: number
+    bytes: number
+    savingsPercent: number
+  }[]
   bestFormat?: string
   bestSavingsPercent: number
 }
 
 /** Result of `POST /api/media/variants`. */
 export interface MediaVariantsResult {
-  original: { bytes: number; width: number; height: number; format: string; sha256: string }
+  original: {
+    bytes: number
+    width: number
+    height: number
+    format: string
+    sha256: string
+  }
   variants: MediaVariantView[]
   /** For SVG originals: the optimized file, stored as an artifact. */
-  svg?: { id: string; before: number; after: number; breakdown: Record<string, number> }
+  svg?: {
+    id: string
+    before: number
+    after: number
+    breakdown: Record<string, number>
+  }
   /** Markup per framework (`html`, `react`, ...). */
   snippets: Record<string, string>
   savings: MediaSavings
+  /**
+   * Whether each suggested `variants[].path` already exists at the requested ref; every variant
+   * path has an entry.
+   */
+  exists: Record<string, boolean>
 }
 
 /** `POST /api/media/apply` — puts generated files into the repository or a ZIP download. */
@@ -1936,7 +3286,10 @@ export interface MediaApplyInput {
   /** A text replacement that switches markup to the variants. */
   snippet?: {
     file: string
-    range: { start: { line: number; column: number }; end: { line: number; column: number } }
+    range: {
+      start: { line: number; column: number }
+      end: { line: number; column: number }
+    }
     oldText: string
     newText: string
   }
@@ -2084,13 +3437,26 @@ export interface AiUsageBuckets {
 /** `GET /api/ai/runs`: individual runs, newest first. `jobId` / `analysisId` link to their pages. */
 export interface AiRunList {
   runs: AiUsageRecord[]
+  /**
+   * Names of the people behind interactive runs (actor id → person), only for callers holding
+   * `users:read` in some grant; actors that are not users have no entry.
+   */
+  people?: Record<string, PersonView>
   /** Pass as `before` for the next page; absent on the last one. */
   next?: Timestamp
 }
 
+/** A budget week: Monday 00:00 to the next Monday 00:00 in the instance time zone. */
+export interface AiBudgetWeek {
+  from: Timestamp
+  to: Timestamp
+  /** Monday of the week, `YYYY-MM-DD`. */
+  key: string
+}
+
 /**
- * An `llm.budget` setting, or the implicit default budget, and how much of it this week used.
- * Weeks run from Monday 00:00 to Monday 00:00 in the instance time zone.
+ * An `llm.budget` setting, or the implicit default budget, how much of it this week used and
+ * where the week is heading.
  */
 export interface AiBudgetStatus {
   /** Setting entry id, or `default` for the budget that applies when no global one is set. */
@@ -2100,37 +3466,105 @@ export interface AiBudgetStatus {
   weeklyUsd: number
   /** Part of `weeklyUsd` only work a person started may spend. */
   reserveUsd: number
+  /** Share of `weeklyUsd`, in percent, at which the budget shows as close to its limit. */
+  warnPercent: number
   spentUsd: number
+  /** Part of `spentUsd` automatic work spent (runs nobody started interactively). */
+  automaticUsd: number
   /** `spentUsd / weeklyUsd * 100`. */
   percent: number
-  /** Linear projection of this week's spend to its end. */
-  projectedUsd: number
-  week: { from: Timestamp; to: Timestamp; key: string }
+  /** Expected spend in the budget's scope by the end of the week, see `AiSpendForecast`. */
+  forecastUsd: number
+  /**
+   * When spend is expected to reach `weeklyUsd - reserveUsd` this week at the forecast pace;
+   * absent when it is not expected to, or `spentUsd` already reached it (automatic work stopped).
+   */
+  automaticStopsAt?: Timestamp
+  week: AiBudgetWeek
 }
 
-/** Totals of one calendar month (UTC). */
+/**
+ * Where this budget week's spend is heading: what it spent so far plus, for the rest of the week,
+ * the mean spend of the same remaining span over the last 4 full weeks. Weeks before the first
+ * recorded usage are not counted; with no full week yet the week's pace so far is extended to its
+ * end. A forecast is never below what the week already spent.
+ */
+export interface AiSpendForecast {
+  week: AiBudgetWeek
+  /** Spend so far this week. */
+  spentUsd: number
+  /** Part of `spentUsd` automatic work spent. */
+  automaticUsd: number
+  /** Expected spend by the end of the week. */
+  forecastUsd: number
+  /** Expected automatic spend by the end of the week. */
+  automaticForecastUsd: number
+  /** Mean automatic spend of a full week over the weeks the forecast averages. */
+  automaticWeeklyMeanUsd: number
+  /** Full past weeks the forecast averages, 0 to 4; 0 when it extends this week's pace instead. */
+  weeks: number
+}
+
+/** The spans `GET /api/ai/overview` reports: this budget week, this UTC month, the last 30 days. */
+export type AiUsagePeriodKind = 'week' | 'month' | '30d'
+
+/** Totals of one span of time. */
 export interface AiUsagePeriod {
-  /** `YYYY-MM` */
+  /** `YYYY-MM-DD` (Monday) for a week, `YYYY-MM` for a month, `30d:YYYY-MM-DD` (last day) for 30 days. */
   key: string
   from: Timestamp
   to: Timestamp
   totals: AiUsageTotals
+  /** Part of `totals.costUsd` automatic work spent. */
+  automaticUsd: number
 }
 
-/** `GET /api/ai/overview`: this month at a glance, limited to what the caller may see. */
+/**
+ * `GET /api/ai/overview?period=week|month|30d&groups=`: one period at a glance, limited to what the
+ * caller may see; `groups` (comma list of config groups) narrows it further and never widens it.
+ * The default period is `week`.
+ */
 export interface AiUsageOverview {
-  month: AiUsagePeriod
-  previousMonth: AiUsagePeriod
-  /** This month, most expensive first, at most 5 each. */
+  period: AiUsagePeriodKind
+  /** From the start of the period to now. */
+  current: AiUsagePeriod
+  /**
+   * The same elapsed span of the previous period: for a week Monday 00:00 to the same weekday and
+   * time last week, for a month the same days of the previous month, for 30 days the 30 days before.
+   */
+  comparison: AiUsagePeriod
+  /** The current period, most expensive first, at most 5 each. */
   topRepos: AiUsageBucket[]
   topModels: AiUsageBucket[]
   topTaskKinds: AiUsageBucket[]
+  topAnalyzers: AiUsageBucket[]
   /** Budgets whose scope the caller may read; the default one only for readers of everything. */
   budgets: AiBudgetStatus[]
-  /** This month's cache read tokens over all input tokens (fresh, cache read and cache write); 0 without input. */
+  /** Cache read tokens over all input tokens (fresh, cache read and cache write) of `current`; 0 without input. */
   cacheHitRatio: number
-  /** This month's failed runs over runs that were not denied; 0 without runs. */
+  /** Failed runs over runs that were not denied, of `current`; 0 without runs. */
   errorRate: number
+  /**
+   * `automaticStopsAt` of the broadest budget among `budgets` (the one covering everything the
+   * caller may read, as `HomeSpend` measures); absent when automatic work is not expected to stop.
+   */
+  automaticStopsAt?: Timestamp
+  /** This budget week's forecast over everything the overview covers, whatever `period` is. */
+  forecast: AiSpendForecast
+}
+
+/**
+ * `GET /api/ai/week?week=YYYY-MM-DD&groups=`: one budget week (default: the current one) split by
+ * task kind, analyzer and provider, limited to what the caller may see. Each list is most expensive
+ * first; runs without an analyzer (chat, other work people start) share the bucket with an empty
+ * `analyzer` key.
+ */
+export interface AiWeekBreakdown {
+  week: AiBudgetWeek
+  totals: AiUsageTotals
+  byTaskKind: AiUsageBucket[]
+  byAnalyzer: AiUsageBucket[]
+  byProvider: AiUsageBucket[]
 }
 
 /** A forge as the panel shows it; the webhook secret is never included. */
@@ -2269,18 +3703,42 @@ export interface ForgeRepositoryList {
 }
 
 /**
- * `GET /api/forges/:id/repositories/access?path=team/app`: whether the forge's token can read a
- * repository before it is added. `ok`: readable and not archived. `not-found`: the path does not
- * exist or the token's account is not a member (GitLab answers 404 for both). `unauthorized`: the
- * token is invalid or expired. `forbidden`: the token lacks a scope. `archived`: Holtkeeper skips
- * archived repositories. `error`: the forge could not be asked. `account` is the token's account
- * when the forge tells it, the one to invite.
+ * Outcome of checking whether the forge's token can read a repository before it is added. `ok`:
+ * readable and not archived. `not-found`: the path does not exist or the token's account is not a
+ * member (GitLab answers 404 for both). `unauthorized`: the token is invalid or expired.
+ * `forbidden`: the token lacks a scope. `archived`: Holtkeeper skips archived repositories.
+ * `error`: the forge could not be asked.
  */
-export interface RepoAccessView {
-  status: 'ok' | 'not-found' | 'unauthorized' | 'forbidden' | 'archived' | 'error'
+export type RepoAccessStatus =
+  | 'ok'
+  | 'not-found'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'archived'
+  | 'error'
+
+/** `POST /api/forges/:id/repositories/access`: 1 to 50 paths, e.g. `team/app`; more answer 400. */
+export interface RepoAccessBatchInput {
+  paths: string[]
+}
+
+/** One checked path of a batch; `message` explains a status other than `ok`. */
+export interface RepoAccessResult {
+  /** The path as sent, trimmed. */
+  path: string
+  status: RepoAccessStatus
   message?: string
-  account?: { username: string; name: string }
   repository?: { path: string; name: string; webUrl: string }
+}
+
+/**
+ * Result of `POST /api/forges/:id/repositories/access` (global `settings:write`): one result per
+ * distinct path in the order sent (duplicates and blank paths dropped), and the forge token's
+ * account once for all of them when the forge tells it: the one to invite.
+ */
+export interface RepoAccessBatch {
+  account?: { username: string; name: string }
+  results: RepoAccessResult[]
 }
 
 /** `GET /api/schedules/:id/preview?count=10`: upcoming run times. */
@@ -2322,9 +3780,13 @@ export interface ScheduleRun {
   failures: { id: string; analyzer: string; repo: RepoRef; error?: string }[]
 }
 
-/** `GET /api/schedules/runs?limit=10`: recent runs of every schedule, newest first. */
+/**
+ * `GET /api/schedules/runs?limit=10`: recent runs of every schedule, newest first, and `next`, its
+ * next five run times in order as `nextRuns` computes them (time zone, windows and jitter applied;
+ * empty for a disabled schedule).
+ */
 export interface ScheduleRunList {
-  schedules: { id: string; runs: ScheduleRun[] }[]
+  schedules: { id: string; runs: ScheduleRun[]; next: Timestamp[] }[]
 }
 
 /**
@@ -2377,11 +3839,33 @@ export interface RepoUpdatesView {
     /** Contains the secret token; shown to callers who may change settings of the repository. */
     url?: string
     createdAt: Timestamp
+    /** Who issued the current URL: a user's name, else the principal id. */
+    createdBy?: { id: string; name: string }
     registered?: RegisteredWebhook[]
-    lastDelivery?: { at: Timestamp; event: string; enqueued: number; ignored?: string }
+    /** Deliveries of the last 24 hours and how many of them were rejected. */
+    deliveries24h: { total: number; failed: number }
+    /** The newest deliveries first, at most 50; older ones are dropped. */
+    deliveries: WebhookDeliveryView[]
   }
   /** Whether the forge can register the webhook itself. */
   canRegister: boolean
+}
+
+/**
+ * One delivery to a repository's webhook URL. `error` means it was rejected (unknown token, bad
+ * signature, unreadable body) and nothing ran; otherwise it queued `enqueued` jobs or says why it
+ * was `ignored`.
+ */
+export interface WebhookDeliveryView {
+  at: Timestamp
+  /** Forge event header, e.g. `Push Hook`. */
+  event: string
+  /** What the event was about, e.g. `push to main, 3 commits`, when the payload says. */
+  summary?: string
+  enqueued: number
+  ignored?: string
+  error?: string
+  durationMs: number
 }
 
 /** One poll of a repository: on its schedule or started by a person. */
@@ -2411,9 +3895,17 @@ export interface ListingAttemptView {
 export interface GroupListingView {
   group: string
   forge: string
-  /** From the last successful listing; kept when a later one fails. */
+  /** Members from the last successful listing; kept when a later one fails. */
   repos: RepoRef[]
+  /**
+   * Every repository an include pattern matched in that listing, before exclude patterns applied,
+   * so a page can show what each exclude pattern keeps out and preview unsaved patterns. Only for
+   * callers with global `settings:write`: excludes often keep other teams' repositories out.
+   */
+  matched?: RepoRef[]
   listedAt?: Timestamp
+  /** When the next scheduled listing is due; absent while listing is off. */
+  nextAt?: Timestamp
   /** Newest first. */
   attempts: ListingAttemptView[]
 }
@@ -2468,11 +3960,43 @@ export interface PublicApiPackageSummary {
   versions: number
   /** Set when the repository no longer has the package; the other fields describe its last record. */
   removed?: PublicApiPackageRemoval
+  /** How the package name matched `q`; set only when the list was filtered by `q`. */
+  match?: PublicApiMatch
 }
 
-/** `GET /api/api-surface/packages`. */
+/**
+ * How a name matched a query, best first: the whole name, its start, part of it, or only words of
+ * its doc comment (description for packages). Matching ignores case.
+ */
+export type PublicApiMatch = 'exact' | 'prefix' | 'part' | 'doc'
+
+/** A facet value and how many listed items carry it. */
+export interface PublicApiFacetCount {
+  value: string
+  count: number
+}
+
+/**
+ * Counts for narrowing a public API list, over the items before the facet filters apply. Each
+ * list is most first, then by value.
+ */
+export interface PublicApiFacets {
+  /** Symbol kinds (`function`, `interface`, ...). */
+  kinds: PublicApiFacetCount[]
+  /** Package names. */
+  packages: PublicApiFacetCount[]
+  /** Repositories as `forge:path`. */
+  repos: PublicApiFacetCount[]
+  /** Entry point subpaths; set by search only. */
+  subpaths?: PublicApiFacetCount[]
+  /** `PublicApiMatch` values; set by search only. */
+  matches?: PublicApiFacetCount[]
+}
+
+/** `GET /api/api-surface/packages?q=`. */
 export interface PublicApiPackageList {
   packages: PublicApiPackageSummary[]
+  facets: PublicApiFacets
   /** When the server last read every record; versions backfilled since then may be missing. */
   indexedAt?: Timestamp
 }
@@ -2521,14 +4045,63 @@ export interface PublicApiSymbolHit {
   subpath: string
   /** What code imports it from, e.g. `@acme/ui/button`. */
   importPath: string
+  /** Release the record describes; absent for a default branch run. */
+  ref?: string
+  match: PublicApiMatch
+  /** The symbol carries `@deprecated`. */
+  deprecated: boolean
+  /** Its repository no longer has the package. */
+  removed: boolean
   symbol: ApiSymbol
 }
 
-/** `GET /api/api-surface/search?q=&package=&kind=&limit=`. */
+/** `GET /api/api-surface/search?q=&package=&kind=&limit=`; hits best match first. */
 export interface PublicApiSearchResult {
   hits: PublicApiSymbolHit[]
   /** Matches beyond `limit`. */
   more: number
+  facets: PublicApiFacets
+}
+
+/** One recorded version where an exported symbol appeared, changed, was deprecated or was dropped. */
+export interface PublicApiSymbolChange {
+  version: string
+  ref?: string
+  analyzedAt: Timestamp
+  change: 'added' | 'changed' | 'deprecated' | 'removed'
+  /** Declarations before and after; absent for `added` (no before) and `removed` (no after). */
+  before?: string
+  after?: string
+}
+
+/**
+ * `GET /api/api-surface/symbol?package=&name=&subpath=&version=&repo=` — one exported symbol in
+ * full: declaration, doc comment, where it is declared, and the recorded versions where it changed.
+ */
+export interface PublicApiSymbol {
+  package: string
+  version?: string
+  repo: RepoRef
+  /** Release the record describes; absent for a default branch run. */
+  ref?: string
+  analysisId: string
+  analyzedAt: Timestamp
+  subpath: string
+  importPath: string
+  /** Declaration (`signature`), doc comment (`doc`), `deprecated` text and source location. */
+  symbol: ApiSymbol
+  /** Other subpaths of the same version exporting the same name. */
+  alsoIn: string[]
+  /** Set when the repository no longer has the package. */
+  removed?: PublicApiPackageRemoval
+  history: {
+    /** Newest first; at most a fixed number of entries. */
+    changes: PublicApiSymbolChange[]
+    /** Recorded versions compared. */
+    versions: number
+    /** Older versions were left out by the cap. */
+    capped: boolean
+  }
 }
 
 /** How one repository uses a package, from its newest `usages` record. */
@@ -2776,7 +4349,12 @@ export interface LibraryIndexRun {
   versionsAdded: number
   versionsRemoved: number
   librariesRemoved: number
-  failures: { library: string; version?: string; source: string; message: string }[]
+  failures: {
+    library: string
+    version?: string
+    source: string
+    message: string
+  }[]
   error?: string
 }
 
@@ -2834,7 +4412,11 @@ export interface GitHubTokenUsage {
   /** Requests sent without a token, by resource. */
   anonymous: Record<string, GitHubRequestCounts>
   /** One entry per UTC day of the range, oldest first; `byToken` keyed by credential id, `anonymous` for none. */
-  days: { day: string; total: GitHubRequestCounts; byToken: Record<string, number> }[]
+  days: {
+    day: string
+    total: GitHubRequestCounts
+    byToken: Record<string, number>
+  }[]
   totals: GitHubRequestCounts
   /** Live limits summed over the distinct accounts, by resource: what the pool can spend per window. */
   capacity: Record<string, GitHubLimitView>
@@ -2852,13 +4434,25 @@ export type HomeAttentionKind =
   | 'budget-blocked'
   | 'vulnerabilities'
   | 'allowlist'
+  | 'allowlist-expiring'
   | 'release'
   | 'learnings'
   | 'knowledge'
   | 'stale-analyses'
+  | 'not-analysed'
 
 /** How urgent a Needs-attention item is; the list is sorted by it, most urgent first. */
 export type HomeSeverity = 'critical' | 'high' | 'medium' | 'low'
+
+/**
+ * The one action a Needs-attention row offers. `retry` re-queues `analyzer` on every repository of
+ * the item (`POST /api/jobs`), offered only when the caller holds `analyses:run` on each of them.
+ * `review` and `renew` open the matching Inbox item; `open` goes
+ * to the page that shows the cause. `href` is set for every type but `retry`.
+ */
+export type HomeAttentionAction =
+  | { type: 'retry'; label: string; analyzer: string }
+  | { type: 'review' | 'renew' | 'open'; label: string; href: string }
 
 /** One row of Needs attention: a plain sentence, where it applies and a link to act on it. */
 export interface HomeAttentionItem {
@@ -2874,11 +4468,17 @@ export interface HomeAttentionItem {
   count: number
   /** When it started or was last seen, for the age. */
   at: string
-  /** Web UI path to act on it, query string included. */
+  /**
+   * Web UI path to act on it, query string included. Releases the caller may decide, learnings,
+   * knowledge proposals and allowlist entries open their Inbox item (`/inbox?item=<InboxItem.id>&kind=`).
+   */
   href: string
+  action: HomeAttentionAction
+  /** The caller snoozed `id` and the snooze has not run out; snoozed items stay in the list. */
+  snoozed?: boolean
 }
 
-/** Areas of What changed, each a group of History actions. */
+/** Areas of What changed, each a group of audit log actions. */
 export type HomeChangeKind =
   | 'release'
   | 'deploy'
@@ -2888,19 +4488,26 @@ export type HomeChangeKind =
   | 'repo'
   | 'credentials'
   | 'access'
+  | 'task'
 
-/** History events of one area and repository over the window, summed. */
+/**
+ * One audit log event of What changed. `text` is one deterministic sentence without the actor's
+ * name, built only from whitelisted fields (the action, the repository, release versions, tags and
+ * environments, setting keys, advisory ids), never from free text or changed values.
+ */
 export interface HomeChange {
+  /** The audit event id. */
+  id: string
   kind: HomeChangeKind
-  /** A deterministic sentence, e.g. `2 versions cut`. */
+  /** e.g. `Cut version 1.4.0 of acme/widget-kit`. */
   text: string
+  /** Web UI path of the page that shows what changed. */
+  href: string
+  at: Timestamp
+  /** Principal id of who acted, resolved in `HomeView.people`. */
+  actor: string
   /** Absent for instance-level events. */
   repo?: HomeRepoRef
-  count: number
-  /** Principal ids, most recent first. */
-  actors: string[]
-  firstAt: string
-  lastAt: string
 }
 
 /** This week's AI spend against the budget that covers everything the caller may read. */
@@ -2912,23 +4519,15 @@ export interface HomeSpend {
   weeklyUsd: number
   /** Kept for interactive work: automatic work stops at `weeklyUsd - reserveUsd`. */
   reserveUsd: number
-  projectedUsd: number
+  /** Share of `weeklyUsd`, in percent, at which the bar shows as close to the limit. */
+  warnPercent: number
+  /** Expected spend by the end of the week, as `AiBudgetStatus.forecastUsd`. */
+  forecastUsd: number
+  /** As `AiBudgetStatus.automaticStopsAt`. */
+  automaticStopsAt?: string
   action: 'block' | 'warn'
   /** Spend by task kind (`review`, `chat`, ...) over the caller's readable usage, largest first. */
   byFeature: { feature: string; costUsd: number; runs: number }[]
-}
-
-/** One status tick of a repository tile. */
-export interface HomeRepoStatus {
-  key: 'jobs' | 'vulnerabilities' | 'release' | 'analyses'
-  tone: 'ok' | 'warning' | 'danger' | 'info' | 'none'
-  label: string
-}
-
-/** A repository tile of the Home grid. */
-export interface HomeRepoTile extends HomeRepoRef {
-  /** Always in `HomeRepoStatus.key` order: jobs, vulnerabilities, release, analyses. */
-  status: HomeRepoStatus[]
 }
 
 /**
@@ -2936,8 +4535,9 @@ export interface HomeRepoTile extends HomeRepoRef {
  * filtered by the caller's permissions: job items and analyses need `analyses:read`, vulnerability
  * items `audits:read`, release items `releases:read`, learnings and knowledge proposals
  * `knowledge:write` where they would be decided, changes what History shows the caller, spend
- * `ai:read`. Scoping to the viewer's teams is left to the client: every row names its
- * repositories and their groups.
+ * `ai:read`, allowlist entries `settings:write` on their scope. Scoping to the viewer's teams is
+ * left to the client: every row names its repositories and their groups. Repository health lives
+ * in `/api/repos`, not here.
  */
 export interface HomeView {
   generatedAt: string
@@ -2947,15 +4547,197 @@ export interface HomeView {
   changesDays: number
   /** Absent without `ai:read`. */
   spend?: HomeSpend
-  repos: HomeRepoTile[]
   /** Names and avatars of the users among `changes` actors. */
   people: Record<string, PersonView>
+}
+
+/** What an Inbox item asks a person to decide. */
+export type InboxKind = 'task' | 'note' | 'learning' | 'guide' | 'release' | 'allowlist' | 'budget'
+
+/** What every Inbox item carries, whatever its kind. */
+interface InboxItemBase {
+  /** `<kind>:<source id>`, stable while the decision waits; also the id a snooze names. */
+  id: string
+  kind: InboxKind
+  title: string
+  /** Where the decision applies, as people read it: `acme/widget-kit`, `Team Web`, `All repositories`. */
+  scope: string
+  /** Repositories it concerns with their config groups; empty for items above any repository. */
+  repos: HomeRepoRef[]
+  detail?: string
+  /** Web UI path that opens the item, built with `webPaths`. */
+  href: string
+  /** When the decision started waiting. */
+  createdAt: Timestamp
+  /** Principal id of whoever proposed it, resolved in `InboxFeed.people`; absent for the system. */
+  proposedBy?: string
+  /** The caller snoozed `id` and the snooze has not run out. */
+  snoozed: boolean
+  /** When the decision lapses on its own (an allowlist entry expiring); absent when it never does. */
+  dueAt?: Timestamp
+}
+
+/** A proposed task group waiting for approval; nothing runs before a person approves it. */
+export interface InboxTaskItem extends InboxItemBase {
+  kind: 'task'
+  groupId: string
+  taskKind: AgentTaskKind
+}
+
+/** A proposed knowledge note waiting for acceptance. */
+export interface InboxNoteItem extends InboxItemBase {
+  kind: 'note'
+  entryId: string
+  /** The entry version a decision applies to. */
+  version: number
+}
+
+/** A learning candidate waiting for acceptance; accepting without a scope uses `suggestedScope`. */
+export interface InboxLearningItem extends InboxItemBase {
+  kind: 'learning'
+  learningId: string
+  section: GuideSectionName
+  suggestedScope: LearningScopeKind
+}
+
+/** Generated Guide text waiting for a person to accept or reject it. */
+export interface InboxGuideItem extends InboxItemBase {
+  kind: 'guide'
+  guideScope: GuideScopeKey
+  section: GuideSectionName
+  /** Pass to accept and to `GuideSectionRejectInput`, so a decision names the text it was made on. */
+  inputHash: string
+  generatedAt: Timestamp
+}
+
+/** A repository's release waiting for a step or for acceptance of the target branch head. */
+export interface InboxReleaseItem extends InboxItemBase {
+  kind: 'release'
+  /** `forge:path` */
+  repo: string
+  stage: ReleaseStage
+  /** Suggested next version. */
+  next?: string
+  /** The commit a dismiss names, as `ReleaseCard.head`. */
+  head: string
+  /** As `ReleaseCard.can`: Accept is offered only when `accept` is true. */
+  can: { accept: boolean; run: boolean }
+}
+
+/** An `audit.allowlist` entry that expires within 7 days or has expired. */
+export interface InboxAllowlistItem extends InboxItemBase {
+  kind: 'allowlist'
+  /** The `audit.allowlist` setting entry holding it. */
+  settingId: string
+  settingScope: Scope
+  entry: AllowlistEntry
+  /** Last day the entry applies, `YYYY-MM-DD`. */
+  expires: string
+  expired: boolean
+}
+
+/**
+ * This week's AI spend passed the `llm.budget` `warnPercent`. At most one per budget and week;
+ * nothing to approve, dismissing it only acknowledges the warning.
+ */
+export interface InboxBudgetItem extends InboxItemBase {
+  kind: 'budget'
+  /** Monday of the week, `YYYY-MM-DD`. */
+  week: string
+  spentUsd: number
+  weeklyUsd: number
+  warnPercent: number
+  /** The `llm.budget` setting entry that applies; absent when the defaults do. */
+  settingId?: string
+}
+
+/** One decision waiting in the Inbox. */
+export type InboxItem =
+  | InboxTaskItem
+  | InboxNoteItem
+  | InboxLearningItem
+  | InboxGuideItem
+  | InboxReleaseItem
+  | InboxAllowlistItem
+  | InboxBudgetItem
+
+/**
+ * `GET /api/inbox`: every decision the caller may make, oldest first in each section. `mine` holds
+ * what the caller may decide inside their home groups and `teams` what they may decide elsewhere;
+ * a caller without home groups gets everything in `mine`. An item sits in one section only.
+ * Snoozed items are included with `snoozed: true`. Decisions are not available through MCP.
+ */
+export interface InboxFeed {
+  mine: InboxItem[]
+  teams: InboxItem[]
+  /** Names and avatars of the users among `proposedBy`. */
+  people: Record<string, PersonView>
+}
+
+/**
+ * `GET /api/inbox/count`: the sizes of `InboxFeed` sections without snoozed items, read from stored
+ * data only (no forge calls); answers with an ETag. `total` is `mine + teams`.
+ */
+export interface InboxCount {
+  mine: number
+  teams: number
+  total: number
+}
+
+/**
+ * `POST /api/audits/allowlist/renew`: moves the expiry of one entry of an `audit.allowlist` setting
+ * entry. The entry is found by `advisory` (its `id`) and `package` (absent matches an entry without
+ * one); the setting value is rewritten with the new `expires`, last write wins. Needs
+ * `settings:write` on the setting's scope; audited as `allowlist.renew`. Answers the `SettingView`.
+ * The renewed entry follows `audit.allowlistPolicy`: an expiry past `maxDays` from today or a blank
+ * reason when one is required answers 400.
+ */
+export interface AllowlistRenewInput {
+  settingId: string
+  advisory: string
+  package?: string
+  /** New last day the entry applies, `YYYY-MM-DD`, not in the past. */
+  expires: string
+  /** Replaces the stored reason. */
+  reason?: string
+}
+
+/**
+ * A personal snooze: the item `id` stays visible but counts as handled until `until`. Ids are
+ * `HomeAttentionItem.id` or `InboxItem.id`; a job failure is `job-failures:<analyzer>:<signature>`,
+ * or `job-failures:<analyzer>:<repo>` when the failure has no signature.
+ */
+export interface Snooze {
+  id: string
+  until: Timestamp
+}
+
+/**
+ * `POST /api/me/snoozes`: snoozes `id` for the caller until `until` (in the future), replacing an
+ * earlier snooze of the same id. `DELETE /api/me/snoozes?id=` ends one. Snoozes are not audited.
+ */
+export type SnoozeInput = Snooze
+
+/** `GET /api/me/snoozes`: the caller's snoozes that have not run out, soonest to end first. */
+export interface SnoozeList {
+  snoozes: Snooze[]
 }
 
 /** One repository's part of a task group, as the API shows it. The patch is left out. */
 export type AgentTaskView = Omit<AgentTask, 'patch'> & {
   /** The branch the task pushes, the same in every repository of its group. */
   branch: string
+  /**
+   * CI of the task's open merge request as last read from the forge (`pending` until read);
+   * `none` for a task without an open merge request.
+   */
+  ci: AgentTaskCi
+  /**
+   * The size of the change for the Diff tab: the merge request's (`merge-request`, read from the
+   * forge whenever its head moved) or else the patch the task or its group carries (`patch`).
+   * Absent when neither is known.
+   */
+  diffstat?: AgentTaskDiffstat & { source: 'merge-request' | 'patch' }
   /**
    * What the caller may do with this task now: `retry` a failed or cancelled one (`tasks:run` on
    * its repository), `cancel` one that has not opened a merge request or ended.
@@ -2971,8 +4753,20 @@ export interface AgentTaskGroupView extends Omit<AgentTaskGroup, 'patch'> {
   costUsd: number
   /** Whether the group carries a patch for the `git apply -3` fast path. */
   hasPatch: boolean
-  /** What the caller may do with it now. */
-  can: { approve: boolean; cancel: boolean }
+  /**
+   * What the caller may do with it now: `approve` its proposed tasks, `cancel` its active tasks,
+   * `retry` its failed or cancelled tasks (`tasks:run` on each of their repositories), `reject` it
+   * while it is `proposed` (the proposer, or `tasks:run` on every target).
+   */
+  can: { approve: boolean; cancel: boolean; retry: boolean; reject: boolean }
+}
+
+/**
+ * `GET /api/task-groups/needs-approval`: how many task groups the caller sees that wait for
+ * approval (a task still `proposed`), for the Tasks tab badge. Proposed tasks never expire.
+ */
+export interface TaskApprovalCount {
+  count: number
 }
 
 /** `GET /api/task-groups`: newest first. */
@@ -2993,7 +4787,7 @@ export interface AgentTaskGroupDetail extends AgentTaskGroupView {
 
 /**
  * `GET /api/write-tasks`: the `tasks.write` switch and caps, and how the write worker pool is
- * doing, read from write task jobs (workers keep no registry). `spentUsd` needs `ai:read` or
+ * doing, read from write task jobs. `spentUsd` needs `ai:read` or
  * `settings:read` over everything; `pool.workers` needs `settings:read` over everything.
  */
 export interface WriteTasksStatus {
@@ -3011,6 +4805,13 @@ export interface WriteTasksStatus {
     oldestQueuedAt?: string
     /** When a write worker last started a task. */
     lastStartedAt?: string
+    /** How many workers run write tasks now. */
+    busyWorkers: number
+    /**
+     * Live workers in the worker registry, of every pool: the registry does not record pools, so
+     * this is an upper bound on write workers. Absent when the server has no KV store.
+     */
+    totalWorkers?: number
     /** Ids of the workers running write tasks now. */
     workers?: string[]
   }

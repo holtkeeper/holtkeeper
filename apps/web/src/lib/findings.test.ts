@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { Finding } from '@holtkeeper/api'
 
-import { facets, firstFix, groupFindings, matchesSearch, toRows } from './findings.ts'
+import { filterFindingRows, firstFix, matchesSearch, sortFindingRows, toRows } from './findings.ts'
 
 const finding = (
   id: string,
@@ -29,37 +29,25 @@ describe('toRows', () => {
   })
 })
 
-describe('groupFindings', () => {
-  test('nests language, tool, source and package in row order', () => {
-    const rows = toRows([
-      finding('a', 'go.mod', 'critical', 'golang.org/x/net', '0.1.0'),
-      finding('b', 'web/pnpm-lock.yaml', 'high'),
-      finding('c', 'web/pnpm-lock.yaml', 'low'),
-      finding('d', 'api/package-lock.json', 'medium', 'axios', '1.0.0'),
-      finding('e', 'web/pnpm-lock.yaml', 'medium', 'axios', '1.0.0'),
-    ])
-    const groups = groupFindings(rows)
-    expect(groups.map((g) => g.language)).toEqual(['Go', 'JavaScript'])
-    const js = groups[1]
-    expect(js?.count).toBe(4)
-    expect(js?.worst).toBe('high')
-    expect(js?.tools.map((t) => t.label)).toEqual(['pnpm', 'npm'])
-    const pnpm = js?.tools[0]?.sources[0]
-    expect(pnpm?.source).toBe('web/pnpm-lock.yaml')
-    expect(pnpm?.packages.map((p) => `${p.name}@${p.version}`)).toEqual([
-      'lodash@4.17.20',
-      'axios@1.0.0',
-    ])
-    expect(pnpm?.packages[0]?.rows).toHaveLength(2)
-    expect(pnpm?.packages[0]?.worst).toBe('high')
+describe('sortFindingRows and filterFindingRows', () => {
+  const rows = toRows([
+    finding('b', 'bun.lock', 'low', 'zod', '3.0.0'),
+    finding('a', 'bun.lock', 'critical', 'widget-kit', '1.0.0'),
+    finding('c', 'bun.lock', 'low', 'fooUtil', '2.0.0'),
+  ])
+
+  test('orders worst severity first, then package', () => {
+    expect(sortFindingRows(rows).map((r) => r.finding.id)).toEqual(['a', 'c', 'b'])
   })
 
-  test('returns nothing for no rows', () => {
-    expect(groupFindings([])).toEqual([])
+  test('filters by severity and text', () => {
+    expect(filterFindingRows(rows, '', ['low']).map((r) => r.finding.id)).toEqual(['b', 'c'])
+    expect(filterFindingRows(rows, 'widget').map((r) => r.finding.id)).toEqual(['a'])
+    expect(filterFindingRows(rows, 'widget', ['low'])).toEqual([])
   })
 })
 
-describe('search and facets', () => {
+describe('search', () => {
   const rows = toRows([
     finding('GHSA-1', 'bun.lock', 'high'),
     finding('X', 'go.mod', 'low', 'net', '1'),
@@ -71,10 +59,6 @@ describe('search and facets', () => {
     expect(matchesSearch(rows[0]!, 'LODASH')).toBe(true)
     expect(matchesSearch(rows[1]!, 'lodash')).toBe(false)
     expect(matchesSearch(rows[1]!, '  ')).toBe(true)
-  })
-
-  test('collects sorted facets', () => {
-    expect(facets(rows)).toEqual({ languages: ['Go', 'JavaScript'], tools: ['Bun', 'Go modules'] })
   })
 
   test('first fix', () => {

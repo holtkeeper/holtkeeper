@@ -8,7 +8,7 @@ import type {
   AiUsageRecord,
   AiUsageStore,
 } from '@holtkeeper/store'
-import { aggregateFilter, sortAiUsageBuckets } from '@holtkeeper/store'
+import { aggregateFilter, sortAiUsageBuckets, storedAiUsage } from '@holtkeeper/store'
 
 interface AiUsageRow {
   id: string
@@ -21,6 +21,8 @@ interface AiUsageRow {
   job_id: string | null
   analysis_id: string | null
   actor: string
+  interactive: number
+  subject: string | null
   provider: string
   model: string
   input_tokens: number
@@ -46,6 +48,8 @@ const toRecord = (r: AiUsageRow): AiUsageRecord => ({
   ...(r.job_id !== null && { jobId: r.job_id }),
   ...(r.analysis_id !== null && { analysisId: r.analysis_id }),
   actor: r.actor,
+  interactive: r.interactive === 1,
+  ...(r.subject !== null && { subject: r.subject }),
   provider: r.provider,
   model: r.model,
   inputTokens: r.input_tokens,
@@ -73,6 +77,7 @@ const dimensionSql: Record<AiUsageDimension, string> = {
   provider: 'r.provider',
   taskKind: 'r.task_kind',
   analyzer: `COALESCE(r.analyzer, '')`,
+  origin: `CASE WHEN r.interactive = 1 THEN 'interactive' ELSE 'automatic' END`,
 }
 
 const number = (value: string | number | null | undefined) => Number(value ?? 0)
@@ -95,6 +100,13 @@ function plainWhere(filter: AiUsageFilter): Where {
   if (filter.repo) add('r.repo_forge = ? AND r.repo_path = ?', filter.repo.forge, filter.repo.path)
   if (filter.group !== undefined)
     add('EXISTS (SELECT 1 FROM json_each(r.groups) WHERE value = ?)', filter.group)
+  if (filter.groups !== undefined)
+    add(
+      'EXISTS (SELECT 1 FROM json_each(r.groups) WHERE value IN (SELECT value FROM json_each(?)))',
+      JSON.stringify(filter.groups),
+    )
+  if (filter.actor !== undefined) add('r.actor = ?', filter.actor)
+  if (filter.origin !== undefined) add('r.interactive = ?', filter.origin === 'interactive' ? 1 : 0)
   if (filter.model !== undefined) add('r.model = ?', filter.model)
   if (filter.provider !== undefined) add('r.provider = ?', filter.provider)
   if (filter.taskKind !== undefined) add('r.task_kind = ?', filter.taskKind)
@@ -111,9 +123,10 @@ function plainWhere(filter: AiUsageFilter): Where {
 export function sqliteAiUsage(db: Database): AiUsageStore {
   const insert = db.prepare(
     `INSERT INTO ai_usage (id, at, repo_forge, repo_path, groups, task_kind, analyzer, job_id,
-       analysis_id, actor, provider, model, input_tokens, output_tokens, cache_read_tokens,
-       cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error, transcript_ref)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       analysis_id, actor, interactive, subject, provider, model, input_tokens, output_tokens,
+       cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error,
+       transcript_ref)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
 
   function where(filter: AiUsageFilter): Where {
@@ -160,6 +173,8 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
         record.jobId ?? null,
         record.analysisId ?? null,
         record.actor,
+        record.interactive ? 1 : 0,
+        record.subject ?? null,
         record.provider,
         record.model,
         record.inputTokens,
@@ -174,7 +189,7 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
         record.error ?? null,
         record.transcriptRef ?? null,
       )
-      return { ...structuredClone(record), id }
+      return storedAiUsage(record, id)
     },
     async list({ before, limit = 50, ...filter } = {}) {
       const { sql, params } = where(filter)
@@ -197,6 +212,7 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
              SUM(r.cache_read_tokens) AS cacheReadTokens, SUM(r.cache_write_tokens) AS cacheWriteTokens,
              SUM(r.cost_usd) AS costUsd, COUNT(*) AS runs,
              SUM(r.outcome = 'error') AS errors, SUM(r.outcome = 'denied-budget') AS denied,
+             SUM(r.outcome != 'denied-budget' AND r.cost_source = 'unknown') AS unknownCost,
              AVG(CASE WHEN r.outcome != 'denied-budget' THEN r.duration_ms END) AS avgDurationMs
            FROM ai_usage r ${groupBy.includes('group') ? 'LEFT JOIN json_each(r.groups) g' : ''}
            WHERE ${sql}
@@ -216,6 +232,7 @@ export function sqliteAiUsage(db: Database): AiUsageStore {
         runs: number(row.runs),
         errors: number(row.errors),
         denied: number(row.denied),
+        unknownCost: number(row.unknownCost),
         avgDurationMs: number(row.avgDurationMs),
       }))
       return sortAiUsageBuckets(buckets, groupBy)

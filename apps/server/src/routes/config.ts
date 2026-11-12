@@ -8,13 +8,21 @@ import type {
   ForgeSshKeyResult,
   ForgeWebhookInput,
   ForgeWebhookResult,
-  RepoAccessView,
+  RepoAccessBatch,
+  RepoAccessBatchInput,
+  RepoAccessResult,
+  RepoAccessStatus,
   SchedulePreview,
 } from '@holtkeeper/api'
 import { ConfigError, type HoltkeeperConfig } from '@holtkeeper/core'
 import type { CredentialView } from '@holtkeeper/credentials'
 import { localRunner } from '@holtkeeper/exec'
-import { type WebhookTarget, forgeErrorStatus, webhookEvents } from '@holtkeeper/forge'
+import {
+  type GitForge,
+  type WebhookTarget,
+  forgeErrorStatus,
+  webhookEvents,
+} from '@holtkeeper/forge'
 import { nextRuns, staticPrefix, systemTimeZone } from '@holtkeeper/jobs'
 import {
   type ConfigSource,
@@ -122,6 +130,58 @@ export function defaultWebhookTargets(config: HoltkeeperConfig, forgeId: string)
   return [...targets.values()]
 }
 
+/** Paths one `POST /forges/:id/repositories/access` may check. */
+const MAX_ACCESS_PATHS = 50
+/** Paths checked against the forge at the same time. */
+const ACCESS_CONCURRENCY = 5
+
+const accessBatchSchema = z.object({
+  paths: z.array(z.string()).min(1).max(MAX_ACCESS_PATHS),
+})
+
+const accessStatus = (status: number | undefined): RepoAccessStatus =>
+  status === 404
+    ? 'not-found'
+    : status === 401
+      ? 'unauthorized'
+      : status === 403
+        ? 'forbidden'
+        : 'error'
+
+async function checkAccess(forge: GitForge, path: string): Promise<Omit<RepoAccessResult, 'path'>> {
+  try {
+    const repository = await forge.getRepository(path)
+    return {
+      status: repository.archived ? 'archived' : 'ok',
+      repository: { path: repository.path, name: repository.name, webUrl: repository.webUrl },
+    }
+  } catch (error) {
+    return { status: accessStatus(forgeErrorStatus(error)), message: messageOf(error) }
+  }
+}
+
+const accountOf = (forge: GitForge) =>
+  forge.getCurrentUser?.().then(
+    ({ username, name }) => ({ username, name }),
+    () => undefined,
+  )
+
+async function mapLimited<T, R>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const queue = items.entries()
+  const done: { index: number; value: R }[] = []
+  const worker = async () => {
+    for (const [index, item] of queue)
+      // oxlint-disable-next-line no-await-in-loop -- each worker takes the next path in turn
+      done.push({ index, value: await run(item) })
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return done.toSorted((a, b) => a.index - b.index).map((entry) => entry.value)
+}
+
 const sameHook = (a: RegisteredWebhook, b: { scope: string; target: string }) =>
   a.scope === b.scope && a.target === b.target
 
@@ -143,7 +203,8 @@ const audit = (
  * Panel-managed configuration: CRUD for forges, groups, repo traits, schedules and triggers
  * (`/config/<collection>[/:id]`), forge webhooks and schedule previews. Reading needs global
  * `settings:read`, changing global `settings:write`; every change is audited with the document as
- * target.
+ * target. Checking repository access before adding (a batch of up to 50 paths) also needs global
+ * `settings:write` and changes nothing.
  */
 export function configRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
@@ -476,41 +537,20 @@ export function configRoutes(deps: ServerDeps) {
     })
   })
 
-  app.get('/forges/:id/repositories/access', async (c) => {
+  app.post('/forges/:id/repositories/access', async (c) => {
     authorize(c, 'settings:write', GLOBAL)
-    const path = c.req.query('path')?.trim()
-    if (!path) throw new HTTPException(400, { message: 'path is required' })
+    const input: RepoAccessBatchInput = await readBody(c, accessBatchSchema)
+    const paths = [...new Set(input.paths.map((path) => path.trim()).filter(Boolean))]
+    if (!paths.length) throw new HTTPException(400, { message: 'paths: give at least one path' })
     const forge = forgeFor(deps.config, c.req.param('id'))
-    const account = await forge.getCurrentUser?.().then(
-      ({ username, name }) => ({ username, name }),
-      () => undefined,
-    )
-    const withAccount = (answer: RepoAccessView): RepoAccessView =>
-      account ? { ...answer, account } : answer
-    try {
-      const repository = await forge.getRepository(path)
-      return c.json(
-        withAccount({
-          status: repository.archived ? 'archived' : 'ok',
-          repository: { path: repository.path, name: repository.name, webUrl: repository.webUrl },
-        }),
-      )
-    } catch (error) {
-      const status = forgeErrorStatus(error)
-      return c.json(
-        withAccount({
-          status:
-            status === 404
-              ? 'not-found'
-              : status === 401
-                ? 'unauthorized'
-                : status === 403
-                  ? 'forbidden'
-                  : 'error',
-          message: messageOf(error),
-        }),
-      )
-    }
+    const [account, results] = await Promise.all([
+      accountOf(forge),
+      mapLimited(paths, ACCESS_CONCURRENCY, async (path) => ({
+        path,
+        ...(await checkAccess(forge, path)),
+      })),
+    ])
+    return c.json<RepoAccessBatch>({ ...(account && { account }), results })
   })
 
   const panelForge = async (id: string) => {

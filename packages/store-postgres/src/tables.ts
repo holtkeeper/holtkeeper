@@ -16,6 +16,7 @@ export interface Tables {
   knowledgeFold: SQL.Query<unknown>
   guides: SQL.Query<unknown>
   guideHistory: SQL.Query<unknown>
+  guideGenerated: SQL.Query<unknown>
   families: SQL.Query<unknown>
   learnings: SQL.Query<unknown>
   learningClaims: SQL.Query<unknown>
@@ -25,6 +26,7 @@ export interface Tables {
   chatThreads: SQL.Query<unknown>
   chatMessages: SQL.Query<unknown>
   chatThreadReads: SQL.Query<unknown>
+  chatThreadMutes: SQL.Query<unknown>
   agentTasks: SQL.Query<unknown>
   agentTaskGroups: SQL.Query<unknown>
   configDocuments: SQL.Query<unknown>
@@ -58,6 +60,7 @@ export function tables(sql: SQL, schema: string): Tables {
     knowledgeFold: name('knowledge_fold'),
     guides: name('guides'),
     guideHistory: name('guide_history'),
+    guideGenerated: name('guide_generated'),
     families: name('families'),
     learnings: name('learnings'),
     learningClaims: name('learning_claims'),
@@ -67,6 +70,7 @@ export function tables(sql: SQL, schema: string): Tables {
     chatThreads: name('chat_threads'),
     chatMessages: name('chat_messages'),
     chatThreadReads: name('chat_thread_reads'),
+    chatThreadMutes: name('chat_thread_mutes'),
     agentTasks: name('agent_tasks'),
     agentTaskGroups: name('agent_task_groups'),
     configDocuments: name('config_documents'),

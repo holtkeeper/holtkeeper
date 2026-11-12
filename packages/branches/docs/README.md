@@ -8,7 +8,8 @@ The `branches` analyzer and analysis kind: lists the branches of a repository th
   - `staleDays: number` (`--stale-days`) — default 90: days without commits after which a branch is stale.
   - `ignore: string[]` (`--ignore`, comma-separated) — glob patterns of branch names never reported, e.g. `release/*`.
   - `includeProtected: boolean` (`--include-protected`) — default false: judge protected branches too.
-- `branchesAnalysis` — the `AnalysisKind` (`schema: branchesDataSchema`, `summarize`, `toReport(current, previous)`); `branchesReport(data, { previous?, ref?, compareTo? })` builds the report directly.
+- `branchesAnalysis` — the `AnalysisKind` (`schema: branchesDataSchema`, `metrics: branchesMetrics`, `summarize`, `toReport(current, previous)`); `branchesReport(data, { previous?, ref?, compareTo? })` builds the report directly.
+- `branchesMetrics(data)`, `branchesMetricsSchema`, `branchAuthors(data)`, `BRANCHES_METRICS_LIMITS` — see [Metrics](#metrics).
 - `analyzeBranches({ forge, repo, now, staleDays, ignore?, includeProtected?, log? }): Promise<BranchesData>` — reads through the forge, then classifies. Throws when the forge has no `listBranches`.
 - `classifyBranches(branches, mergeRequests, { defaultBranch, now, staleDays, ignore?, includeProtected? }): BranchesData` — the pure classification.
 
@@ -40,13 +41,13 @@ interface BranchesData {
     ageDays: number
     author?: string // head commit author
     protected?: true
-    webUrl?: string
+    webUrl?: string // http(s) only
     mergeRequest?: {
       id: number
       state: 'open' | 'merged' | 'closed'
       title: string
       author: string
-      webUrl: string
+      webUrl: string // http(s) only
     }
   }[] // merged, then closed, then stale; oldest first within each
 }
@@ -59,4 +60,10 @@ interface BranchesData {
 - **By author** — candidates per head commit author, split by reason, with the oldest age.
 - **Changes** (with a previous analysis) — branches cleaned up and new candidates since then.
 
-The web panel shows it under **Branches** (`/branches`).
+The web panel shows it in **Quality › Branches** (`/quality/branches`).
+
+## Metrics
+
+`branchesMetrics(data)` is the kind's `metrics`, stored with every record as `BranchesMetrics`: branches judged (`total`), those with an open merge request (`open`), branches to clean up (`cleanup`) and per reason (`merged`, `closed`, `stale`), `oldestDays`, the age of the oldest one to clean up, `defaultBranch`, `staleDays`, `authors` (per head commit author, as `branchAuthors(data)`: `cleanup`, `merged`, `closed`, `stale`, `oldestDays`; most first, at most 50) and `branches` (the candidates oldest first, at most 20, with their merge request's id, state, title and link; `cleanup` counts them all). `BRANCHES_METRICS_LIMITS` holds both caps.
+
+`branchesMetricsSchema` parses stored metrics; fields added after a record was stored are absent from it. The server's Quality › Branches (`GET /api/branches`) reads only these metrics: each repository's newest record and its change against the run before it.

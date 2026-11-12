@@ -22,7 +22,8 @@ function readStored(): ScopeView | undefined {
 
 /**
  * The viewer's scope switch position, remembered in this browser, and the home groups it filters
- * by. Until the viewer picks a position, *My team* when it has home groups, otherwise everything.
+ * by. Until the viewer picks a position, or when the stored one is retired, *My teams* when it
+ * has home groups, otherwise everything.
  */
 export function useScope(): {
   view: ScopeView

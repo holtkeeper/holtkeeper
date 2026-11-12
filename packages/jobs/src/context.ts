@@ -32,6 +32,8 @@ interface AgentJobInfo {
   actor?: string
   /** A person asked for the job (`isInteractiveJob`), so its agent may spend the budget reserve. */
   interactive: boolean
+  /** What the job works on: a task title, a merge request or its ref. */
+  subject?: string
   /** Runs commands the way the job does (host, mise or container). */
   runner: CommandRunner
 }
@@ -39,6 +41,14 @@ interface AgentJobInfo {
 /** Whether a person asked for the job: queued from the panel or API, or by a comment command. */
 const isInteractiveJob = (job: Pick<Job, 'trigger'>): boolean =>
   job.trigger === 'manual' || job.trigger === 'command'
+
+const subjectOf = (job: Pick<Job, 'options' | 'ref'>): string | undefined => {
+  const { title, mergeRequest, version } = job.options
+  if (typeof title === 'string' && title) return title
+  if (typeof mergeRequest === 'number') return `MR !${mergeRequest}`
+  if (typeof version === 'string' && version) return version
+  return job.ref
+}
 
 export type AgentFor = (
   repo: RepoRef,
@@ -297,11 +307,13 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
           ...(store.ciJobs ? { ciJobs: store.ciJobs } : {}),
         }
       if (analyzer.needs.agent) {
+        const subject = subjectOf(job)
         const agent = await factory.agentFor?.(job.repo, {
           jobId: job.id,
           analyzer: job.analyzer,
           ...(job.actor ? { actor: job.actor } : {}),
           interactive: isInteractiveJob(job),
+          ...(subject !== undefined && { subject }),
           // The job's runner is prepared with the checkout below; resolve it when the agent runs a command.
           runner: { run: (command, runOptions) => context.runner.run(command, runOptions) },
         })

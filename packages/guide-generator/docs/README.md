@@ -33,7 +33,11 @@ New text is stored on the repository scope's section (`placeGenerated`):
 - over accepted text it becomes `proposal`, and agents keep the accepted `generated` text until a person accepts the proposal (`POST /api/guide/section/accept`);
 - when it equals the accepted text, or is empty (the model found nothing specific), the accepted layer only takes the new hash and commit (`kept`); empty text is never accepted (409).
 
-Every layer records `inputHash`, `model`, `costUsd`, `generatedAt`, `sha` and the run's extra `prompt`. `pendingGenerated(row)` is the text waiting for acceptance; `latestGenerated(row)` the one the hash gate compares with.
+Every layer records `inputHash`, `model`, `costUsd`, `generatedAt`, `sha`, the run's extra `prompt` and the `jobId` of the run (`GenerateInput.jobId`, from the analyzer context). The generator writes layers without a `version` (`GuideGeneratedInput`): `Store.guides.put` numbers every new layer with the section's next version and appends it to the generated history (`store.guides.generatedHistory`), so each proposal of each run stays comparable later; a kept layer keeps its version. The panel compares two versions (`GET /api/guide/generated/history`). `pendingGenerated(row)` is the text waiting for acceptance; `latestGenerated(row)` the one the hash gate compares with.
+
+## Rejections
+
+A person may reject the waiting text instead (`POST /api/guide/section/reject`). `rememberGuideRejection(kv, scope, section, { inputHash, generatedAt, by, at })` stores a reference to that version in `Store.kv` (key `guide:rejected:<scope>:<section>`, the newest 50 per section); the stored section is not changed, so the version stays where it is for a later version history. `guideRejections` and `rejectedHashes` read them back. The analyzer passes the rejected hashes of each section to `generateGuide` (`SectionInput.rejected`): a section whose hash a person rejected is `skipped` with the reason `a person rejected text from these inputs`, even on a forced run; changed evidence or steering gives a new hash and proposes anew. The server hides rejected text from its Guide views and from Inbox. The resolver still reads stored sections as they are, so a rejected first proposal (`generated` with `status: proposed`) reaches agents while no human rules apply, until a newer run replaces it.
 
 ## Analyzer
 

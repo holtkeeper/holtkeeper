@@ -26,6 +26,20 @@ export function formatRelative(at: string | Date, now: Date = new Date()): strin
 export const formatRef = (ref: string): string =>
   /^[0-9a-f]{40}([0-9a-f]{24})?$/i.test(ref) ? ref.slice(0, 8) : ref
 
+/** The short form of an id (a job, task group or run id): its first 8 characters. */
+export const shortId = (id: string): string => id.slice(0, 8)
+
+/** The 8-character short form of a commit SHA. */
+export const shortSha = (sha: string): string => sha.slice(0, 8)
+
+const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `Oct 29` from a `YYYY-MM-DD` day, the same in every time zone and locale. */
+export function formatDayLabel(day: string): string {
+  const [, month, date] = day.split('-').map(Number)
+  return `${months[(month ?? 1) - 1] ?? ''} ${date ?? ''}`.trim()
+}
+
 const dateTime = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' })
 const dateOnly = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
 
@@ -71,6 +85,9 @@ export function expiryTone(
   if (new Date(at).getTime() <= now.getTime()) return 'expired'
   return days < soonDays ? 'soon' : 'ok'
 }
+
+/** A count with thousands separators, the same in every locale: `12,000`. */
+export const formatCount = (value: number): string => value.toLocaleString('en-US')
 
 /** `1 finding`, `3 findings`. */
 export const plural = (count: number, word: string, many = `${word}s`): string =>

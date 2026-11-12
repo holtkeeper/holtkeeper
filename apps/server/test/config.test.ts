@@ -5,9 +5,10 @@ import type {
   ConfigEntryList,
   ForgeRepositoryList,
   ForgeWebhookResult,
-  RepoAccessView,
+  RepoAccessBatch,
   SchedulePreview,
 } from '@holtkeeper/api'
+import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig, parseConfigFile } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -332,23 +333,93 @@ describe('config routes', () => {
     expect((await call('GET', '/forges/missing/repositories')).status).toBe(409)
   })
 
-  test('access to a repository before it is added', async () => {
+  test('access before adding: one result per distinct path in order, the account once', async () => {
     await putForge()
-    const check = async (path: string) =>
-      (await (
-        await call('GET', `/forges/cloud/repositories/access?path=${encodeURIComponent(path)}`)
-      ).json()) as RepoAccessView
-    const account = { username: 'holtkeeper-bot', name: 'Holtkeeper' }
-    expect(await check('studio/game')).toEqual({
-      status: 'ok',
-      account,
-      repository: { path: 'studio/game', name: 'game', webUrl: 'https://gitlab.com/studio/game' },
+    const response = await call('POST', '/forges/cloud/repositories/access', {
+      paths: [
+        ' studio/game ',
+        'hidden/app',
+        '',
+        'studio/game',
+        'locked/app',
+        'old/app',
+        'flaky/app',
+      ],
     })
-    expect(await check('hidden/app')).toMatchObject({ status: 'not-found', account })
-    expect(await check('locked/app')).toMatchObject({ status: 'forbidden' })
-    expect(await check('old/app')).toMatchObject({ status: 'archived' })
-    expect(await check('flaky/app')).toMatchObject({ status: 'error', message: 'socket hang up' })
-    expect((await call('GET', '/forges/cloud/repositories/access')).status).toBe(400)
+    expect(response.status).toBe(200)
+    expect((await response.json()) as RepoAccessBatch).toEqual({
+      account: { username: 'holtkeeper-bot', name: 'Holtkeeper' },
+      results: [
+        {
+          path: 'studio/game',
+          status: 'ok',
+          repository: {
+            path: 'studio/game',
+            name: 'game',
+            webUrl: 'https://gitlab.com/studio/game',
+          },
+        },
+        { path: 'hidden/app', status: 'not-found', message: '404 failed' },
+        { path: 'locked/app', status: 'forbidden', message: '403 failed' },
+        {
+          path: 'old/app',
+          status: 'archived',
+          repository: { path: 'old/app', name: 'app', webUrl: 'https://gitlab.com/old/app' },
+        },
+        { path: 'flaky/app', status: 'error', message: 'socket hang up' },
+      ],
+    })
+    const many = Array.from({ length: 51 }, (_, index) => `team/app-${index}`)
+    expect((await call('POST', '/forges/cloud/repositories/access', { paths: many })).status).toBe(
+      400,
+    )
+    expect(
+      (await call('POST', '/forges/cloud/repositories/access', { paths: many.slice(0, 50) }))
+        .status,
+    ).toBe(200)
+    expect((await call('POST', '/forges/cloud/repositories/access', { paths: [] })).status).toBe(
+      400,
+    )
+    expect((await call('POST', '/forges/cloud/repositories/access', { paths: [' '] })).status).toBe(
+      400,
+    )
+  })
+
+  test('adding repositories and editing groups need settings:write over everything', async () => {
+    await putForge()
+    const narrow = createApp({
+      config: liveConfig(source),
+      configSource: source,
+      auth: headerAuth({
+        roles: {
+          lead: [{ scope: { groups: ['games'] }, actions: ['settings:read', 'settings:write'] }],
+        },
+      }),
+      store,
+      vault,
+      credentials: createCredentialService({ credentials: store.credentials, vault }),
+      settings: builtinSettings,
+      analyses: [],
+      now: () => new Date('2026-10-30T12:00:00.000Z'),
+    })
+    const lead = (method: string, path: string, body?: unknown) =>
+      narrow.request(`/api${path}`, {
+        method,
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-user': 'lead',
+          'x-forwarded-groups': 'lead',
+        },
+        ...(body !== undefined && { body: JSON.stringify(body) }),
+      })
+    expect(
+      (await lead('POST', '/forges/cloud/repositories/access', { paths: ['studio/game'] })).status,
+    ).toBe(403)
+    expect((await lead('GET', '/forges/cloud/repositories')).status).toBe(403)
+    expect(
+      (await lead('PUT', '/config/groups/games', { forge: 'cloud', include: ['studio/*'] })).status,
+    ).toBe(403)
+    expect(source.current().groups.games).toBeUndefined()
   })
 
   test('defaultWebhookTargets', () => {

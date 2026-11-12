@@ -1,21 +1,37 @@
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
-import { repoReadOnly, resolveSetting } from '@holtkeeper/settings'
-import type { Store } from '@holtkeeper/store'
+import { repoFreeze, resolveRepoFreeze } from '@holtkeeper/settings'
+import type { SettingEntry, Store } from '@holtkeeper/store'
 
 import { repoTarget } from './context.ts'
 
-/** Whether the scoped `repo.readOnly` setting forbids Holtkeeper to change a repository. */
+/** Whether a `repo.freeze` entry in force forbids Holtkeeper to change a repository. */
 export type ReadOnlyRepos = (repo: RepoRef) => Promise<boolean>
 
 /**
- * Reads `repo.readOnly` for a repository with its groups from `config()`. The settings are read on
- * every call, so a change in the panel applies to the next write.
+ * Reads `repo.freeze` for a repository with its groups from `config()`. The settings are read on
+ * every call, so a change in the panel applies to the next write, and a freeze stops counting once
+ * `now()` passes its `until`.
  */
-export function readOnlyRepos(store: Store, config: () => HoltkeeperConfig): ReadOnlyRepos {
-  const key = repoReadOnly.key
-  return async (repo) => {
-    const entry = resolveSetting(await store.settings.list(key), key, repoTarget(config(), repo))
-    return entry?.value === true
-  }
+export function readOnlyRepos(
+  store: Store,
+  config: () => HoltkeeperConfig,
+  now: () => Date = () => new Date(),
+): ReadOnlyRepos {
+  return async (repo) =>
+    resolveRepoFreeze(
+      await store.settings.list(repoFreeze.key),
+      repoTarget(config(), repo),
+      now(),
+    ) !== undefined
+}
+
+/**
+ * Stored entries of the retired `repo.readOnly` setting that still say `true`. They no longer
+ * protect anything: each one has to be set again as `repo.freeze`.
+ */
+export async function retiredReadOnlyEntries(
+  store: Pick<Store, 'settings'>,
+): Promise<SettingEntry[]> {
+  return (await store.settings.list('repo.readOnly')).filter((entry) => entry.value === true)
 }

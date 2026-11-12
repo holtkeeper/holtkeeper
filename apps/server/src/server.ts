@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import type { Principal } from '@holtkeeper/access'
 import {
   type AiCatalog,
   aiProviderOptionsValidatorFor,
@@ -63,6 +64,7 @@ import { autoAcceptFrom, settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
 import { createApp } from './app.ts'
 import { assetsPolicyFor } from './assets.ts'
+import { verifyAuditChainIfDue } from './audit-verify.ts'
 import { startAuditRetention } from './audit.ts'
 import { type ServerDeps, forgeFor, repoTarget } from './context.ts'
 import { startDatabaseSnapshots } from './database.ts'
@@ -70,6 +72,7 @@ import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './d
 import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
 import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
+import { retiredReadOnlyCheck } from './health.ts'
 import {
   type AgentFor,
   type AnyAnalyzer,
@@ -77,6 +80,7 @@ import {
   executionSettings,
   startJobs,
 } from './jobs.ts'
+import { periodicDuty } from './leader.ts'
 import { librariesSetting, noteLibraryUses, startLibraryIndex } from './libraries.ts'
 import { limiterOptionsFor } from './limiter-state.ts'
 import { serverLimits } from './limits.ts'
@@ -87,10 +91,11 @@ import { startOperations } from './operations.ts'
 import { agentOpsAccess } from './ops-tools.ts'
 import { agentReleaseAccess } from './release-steps.ts'
 import { releaseServiceFor } from './releases.ts'
+import { guideScopesOf } from './reviews.ts'
 import { type Role, roleDuties } from './roles.ts'
 import { forgeGitKeys } from './ssh-keys.ts'
 import { startStorageReports } from './storage-reports.ts'
-import { databaseStorage } from './storage.ts'
+import { databaseStorage, recordStorageSnapshot, storageOverview } from './storage.ts'
 import {
   proposePropagateFixes,
   relatedRepos,
@@ -98,6 +103,7 @@ import {
   taskJobFinished,
   taskStarted,
 } from './tasks.ts'
+import { type SupplyToolsAccess, supplyToolsAccess } from './tools/repos.ts'
 import { commitConventionsReader } from './tools/rules.ts'
 import { serverPoller } from './updates.ts'
 import { serveWeb } from './web.ts'
@@ -254,6 +260,8 @@ export async function startServer(
     })
     if (seeded.length > 0) log(`config: seeded defaults ${seeded.join(', ')}`)
   }
+  const leftoverReadOnly = await retiredReadOnlyCheck(server.store).catch(() => undefined)
+  if (leftoverReadOnly) log(`warning: ${leftoverReadOnly.detail}`)
   const managed = await startManagedConfig({
     file: fileConfig,
     store: server.store,
@@ -308,10 +316,10 @@ export async function startServer(
         repoDocs: docs,
         ...(query && { query }),
       })
-      return resolved.text || undefined
+      return resolved.text ? { text: resolved.text, scopes: guideScopesOf(resolved) } : undefined
     },
   })
-  const documentDeps = { config, store: server.store, vault }
+  const documentDeps = { config, store: server.store, credentials }
   const documentSinks = documentSinksFor(documentDeps)
   const tracker = createTrackerAnalyzer({
     documentsFor: documentSourcesFor(documentDeps),
@@ -364,18 +372,24 @@ export async function startServer(
     onError: (error) =>
       log(`ai catalog: ${error instanceof Error ? error.message : String(error)}`),
   })
+  let supplyFor: ((principal: Principal) => SupplyToolsAccess) | undefined
   const settingsAgent = options.agentFor
     ? undefined
     : settingsAgentFor({
         config,
         store: server.store,
         vault,
+        credentials,
         rateLimiter: limiter,
         aiCatalog,
         aiProviders,
         artifacts,
         releases: (target, requester) => agentReleaseAccess(deps, target, requester),
-        ops: (target, requester) => agentOpsAccess(deps, target, requester),
+        ops: (target, requester) =>
+          agentOpsAccess(deps, target, requester, () =>
+            releaseServiceFor(deps).snapshot(requester),
+          ),
+        supply: (requester) => (supplyFor ??= supplyToolsAccess(deps))(requester),
       })
   const agentFor: AgentFor = options.agentFor ?? settingsAgent ?? (() => undefined)
   // Areas on the disks of the process that runs jobs; web processes see them through reports.
@@ -394,6 +408,7 @@ export async function startServer(
       ]
     : []
   const deps: ServerDeps = {
+    supply: (principal) => (supplyFor ??= supplyToolsAccess(deps))(principal),
     config,
     auth: server.auth,
     store: server.store,
@@ -516,6 +531,24 @@ export async function startServer(
       () => startWebhookSync(deps, log),
       () => startLibraryIndex(deps, log),
       () => startDatabaseSnapshots(server.store, { log }),
+      periodicDuty(
+        'storage snapshot',
+        async () => {
+          const { kv } = server.store
+          if (!kv) return
+          const overview = await storageOverview({
+            providers: deps.storage ?? [],
+            kv,
+            now: deps.now(),
+          })
+          await recordStorageSnapshot(kv, overview, deps.now())
+        },
+        { intervalMs: 6 * 3_600_000, log },
+      ),
+      periodicDuty('audit chain check', () => verifyAuditChainIfDue(server.store, deps.now()), {
+        intervalMs: 3_600_000,
+        log,
+      }),
       () => releaseServiceFor(deps).startBoardRefresh(),
     ],
   })

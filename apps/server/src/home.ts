@@ -1,11 +1,11 @@
+import type { RepoTarget } from '@holtkeeper/access'
 import type {
   AuditRunSummary,
+  HomeAttentionAction,
   HomeAttentionItem,
   HomeChange,
   HomeChangeKind,
   HomeRepoRef,
-  HomeRepoStatus,
-  HomeRepoTile,
   HomeSeverity,
   ReleaseCard,
 } from '@holtkeeper/api'
@@ -15,7 +15,14 @@ import type {
   Job,
   KnowledgeEntry,
   LearningCandidate,
+  SettingEntry,
 } from '@holtkeeper/store'
+import { webPaths } from '@holtkeeper/web-paths'
+
+import { parseRepo } from './context.ts'
+import { allowlistNotices, allowlistTitle, awaitingVersionTitle } from './inbox.ts'
+import { type HealthAccess, STALE_ANALYSIS_DAYS, isStale } from './repo-health.ts'
+import { failureSnoozeId } from './snoozes.ts'
 
 const HOUR_MS = 3_600_000
 const DAY_MS = 24 * HOUR_MS
@@ -23,10 +30,7 @@ const DAY_MS = 24 * HOUR_MS
 /** Failed and budget-blocked jobs count for Needs attention this long after they ended. */
 const ATTENTION_WINDOW_MS = DAY_MS
 
-/** An analysis whose newest record is older than this counts as stale. */
-const STALE_ANALYSIS_DAYS = 14
-
-/** What changed covers this many days of History. */
+/** What changed covers this many days of the audit log. */
 export const CHANGES_DAYS = 7
 
 /** The newest and the one before it of one repository's audits. */
@@ -35,10 +39,7 @@ export interface RepoAudits {
   previous?: AuditRunSummary
 }
 
-/**
- * Everything Needs attention and the repository grid are computed from, already narrowed to what
- * the caller may read.
- */
+/** Everything Needs attention is computed from, already narrowed to what the caller may read. */
 export interface HomeSources {
   now: Date
   /** `forge:path` → groups the config gives the repository. */
@@ -49,16 +50,25 @@ export interface HomeSources {
   failedJobs: readonly Job[]
   /** Budget-blocked jobs, newest first. */
   blockedJobs: readonly Job[]
-  /** Recent jobs of any status, newest first: the newest one per repository feeds its tile. */
-  recentJobs: readonly Job[]
   audits: readonly RepoAudits[]
   releases: readonly ReleaseCard[]
   /** Proposed learned rules the caller may decide. */
   learnings: readonly LearningCandidate[]
   /** Proposed knowledge entries the caller may decide. */
   knowledge: readonly KnowledgeEntry[]
-  /** The newest record head per repository and kind, of analyzers that still exist. */
+  /**
+   * The newest record head per repository and kind, of analyzers that still exist, with metrics
+   * (computed at read time for records stored without).
+   */
   analyses: readonly AnalysisHead[]
+  /** `audit.allowlist` setting entries the caller may write. */
+  allowlists: readonly SettingEntry[]
+  /** Repositories (`forge:path`) the caller may see; the ones without any record are not analysed. */
+  repos: readonly string[]
+  /** What the caller may read on a repository; everything when absent. */
+  access?: (repo: RepoTarget) => HealthAccess
+  /** Whether the caller may queue `analyzer` on the repository again; never when absent. */
+  canRetry?: (repo: string, analyzer: string) => boolean
 }
 
 const severityRank: Record<HomeSeverity, number> = { critical: 0, high: 1, medium: 2, low: 3 }
@@ -72,6 +82,10 @@ const firstLine = (text: string, max = 160) => {
   const line = text.split('\n').find((part) => part.trim()) ?? text
   return line.length > max ? `${line.slice(0, max - 1)}…` : line.trim()
 }
+
+const open = (label: string, href: string): HomeAttentionAction => ({ type: 'open', label, href })
+
+const review = (href: string): HomeAttentionAction => ({ type: 'review', label: 'Review', href })
 
 const repoRef = (sources: Pick<HomeSources, 'groupsOf'>, repo: string): HomeRepoRef => ({
   repo,
@@ -92,27 +106,36 @@ const uniqueRepos = (refs: readonly HomeRepoRef[]) => [
   ...new Map(refs.map((ref) => [ref.repo, ref])).values(),
 ]
 
-const query = (params: Record<string, string | undefined>) => {
-  const search = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) if (value) search.set(key, value)
-  const text = search.toString()
-  return text ? `?${text}` : ''
-}
-
-/** Jobs that failed in the attention window, one item per analyzer and failure signature. */
+/**
+ * Jobs that failed in the attention window, one item per analyzer and failure signature, or per
+ * analyzer and repository for failures without a signature; ids are `failureSnoozeId`s.
+ */
 export function failureItems(sources: HomeSources): HomeAttentionItem[] {
   const groups = new Map<string, Job[]>()
   for (const job of recent(sources.failedJobs, sources.now)) {
-    const cause = job.errorSignature ?? firstLine(job.error ?? 'unknown error')
-    const id = `${job.analyzer}\n${cause}`
+    const id = failureSnoozeId({
+      analyzer: job.analyzer,
+      ...(job.errorSignature !== undefined && { signature: job.errorSignature }),
+      repo: keyOf(job.repo),
+    })
     groups.set(id, [...(groups.get(id) ?? []), job])
   }
-  return [...groups.values()].map((jobs) => {
+  return [...groups.entries()].map(([id, jobs]) => {
     const last = jobs[0]!
     const repos = uniqueRepos(jobs.map((job) => jobRepo(sources, job)))
     const label = sources.analyzerLabel(last.analyzer)
+    const href = webPaths.runs({
+      status: 'failed',
+      analyzer: last.analyzer,
+      signature: last.errorSignature,
+      ...(repos.length === 1 && { repo: repos[0]!.repo }),
+    })
+    const retry =
+      sources.canRetry !== undefined &&
+      jobs.every((job) => job.group === undefined) &&
+      repos.every((repo) => sources.canRetry!(repo.repo, last.analyzer))
     return {
-      id: `job-failures:${last.analyzer}:${last.errorSignature ?? last.id}`,
+      id,
       kind: 'job-failures',
       severity: jobs.length >= 3 || repos.length > 1 ? 'high' : 'medium',
       title:
@@ -123,12 +146,10 @@ export function failureItems(sources: HomeSources): HomeAttentionItem[] {
       repos,
       count: jobs.length,
       at: endedAt(last),
-      href: `/jobs${query({
-        status: 'failed',
-        analyzer: last.analyzer,
-        signature: last.errorSignature,
-        ...(repos.length === 1 && { repo: repos[0]!.repo }),
-      })}`,
+      href,
+      action: retry
+        ? { type: 'retry', label: 'Retry', analyzer: last.analyzer }
+        : open('View runs', href),
     }
   })
 }
@@ -149,17 +170,18 @@ function blockedItems(sources: HomeSources): HomeAttentionItem[] {
     repos: uniqueRepos(jobs.map((job) => jobRepo(sources, job))),
     count: jobs.length,
     at: endedAt(jobs[0]!),
-    href: '/jobs?status=blocked',
+    href: webPaths.runs({ status: 'blocked' }),
+    action: open('View runs', webPaths.runs({ status: 'blocked' })),
   }))
 }
 
 const urgent = (summary: AuditRunSummary) => summary.severities.critical + summary.severities.high
 
-/** Critical and high vulnerabilities of each repository's latest audit, and expired allowlist entries. */
+/** Critical and high vulnerabilities of each repository's latest audit. */
 export function auditItems(sources: HomeSources): HomeAttentionItem[] {
   return sources.audits.flatMap(({ latest, previous }): HomeAttentionItem[] => {
     const repo = repoRef(sources, keyOf(latest.repo))
-    const href = `/audits/${latest.id}`
+    const href = webPaths.securityRun(latest.id)
     const items: HomeAttentionItem[] = []
     const { critical, high } = latest.severities
     if (critical + high > 0) {
@@ -181,21 +203,35 @@ export function auditItems(sources: HomeSources): HomeAttentionItem[] {
         count: critical + high,
         at: latest.finishedAt,
         href,
+        action: open('Open audit', href),
       })
     }
-    if (latest.expiredAllowlist > 0)
-      items.push({
-        id: `allowlist:${repo.repo}`,
-        kind: 'allowlist',
-        severity: 'medium',
-        title: `${plural(latest.expiredAllowlist, 'allowlist entry', 'allowlist entries')} expired`,
-        repos: [repo],
-        count: latest.expiredAllowlist,
-        at: latest.finishedAt,
-        href,
-      })
     return items
   })
+}
+
+/**
+ * `audit.allowlist` entries that expired (`allowlist`) or expire within 7 days
+ * (`allowlist-expiring`), one item per entry with the id of its Inbox item.
+ */
+export function allowlistItems(sources: HomeSources): HomeAttentionItem[] {
+  return sources.allowlists.flatMap((setting) =>
+    allowlistNotices(setting, sources.now).map((notice): HomeAttentionItem => {
+      const href = webPaths.inbox({ item: notice.id, kind: 'allowlist' })
+      return {
+        id: notice.id,
+        kind: notice.expired ? 'allowlist' : 'allowlist-expiring',
+        severity: notice.expired ? 'medium' : 'low',
+        title: allowlistTitle(notice),
+        detail: firstLine(notice.entry.reason),
+        repos: notice.repos.map((repo) => repoRef(sources, repo)),
+        count: 1,
+        at: notice.since,
+        href,
+        action: { type: 'renew', label: 'Renew', href },
+      }
+    }),
+  )
 }
 
 /** What a release card waits for, as a severity and a sentence; `undefined` when nothing. */
@@ -206,12 +242,7 @@ function releaseNeed(card: ReleaseCard): { severity: HomeSeverity; title: string
   if (failed && card.deploy)
     return { severity: 'high', title: `Deploy of ${card.deploy.tag} to ${failed.name} failed` }
   if (card.stage === 'awaiting-version')
-    return {
-      severity: 'medium',
-      title: card.next
-        ? `Accepted, waiting for version ${card.next}`
-        : 'Accepted, waiting for a version',
-    }
+    return { severity: 'medium', title: awaitingVersionTitle(card) }
   if (card.stage === 'proposed')
     return { severity: 'medium', title: 'Release proposed, waiting for acceptance' }
   if (card.stage === 'candidate')
@@ -225,45 +256,71 @@ function releaseNeed(card: ReleaseCard): { severity: HomeSeverity; title: string
   return undefined
 }
 
-/** Releases that wait on a person: a pending step, a failed or ready deploy, a failed read. */
+/**
+ * Releases that wait on a person: a pending step, a failed or ready deploy, a failed read. A
+ * release the caller may decide (`can.run` with a head to decide on) opens its Inbox item.
+ */
 export function releaseItems(sources: HomeSources): HomeAttentionItem[] {
   return sources.releases.flatMap((card): HomeAttentionItem[] => {
     const need = card.needsAction ? releaseNeed(card) : undefined
     if (!need) return []
     const repo = repoRef(sources, keyOf(card.repo))
+    const id = `release:${repo.repo}`
+    const decides = card.can.run && card.head !== undefined
+    const href = decides
+      ? webPaths.inbox({ item: id, kind: 'release' })
+      : webPaths.releaseTimeline(repo.repo)
     return [
       {
-        id: `release:${repo.repo}`,
+        id,
         kind: 'release',
         ...need,
         repos: [repo],
         count: 1,
         at: card.waitingSince ?? card.acceptance?.at ?? sources.now.toISOString(),
-        href: `/releases/${repo.repo}`,
+        href,
+        action: decides ? { type: 'review', label: 'Review', href } : open('Open release', href),
       },
     ]
   })
 }
 
-/** Proposed learned rules per repository, and proposed knowledge entries as one item. */
+const oldestOf = <T extends { id: string; createdAt: string }>(list: readonly T[]) =>
+  list.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0]!
+
+const newestUpdate = (list: readonly { updatedAt: string }[]) =>
+  list
+    .map((each) => each.updatedAt)
+    .toSorted()
+    .at(-1)!
+
+/**
+ * Proposed learned rules per repository, and proposed knowledge entries as one item; each opens
+ * the oldest of its proposals in the Inbox.
+ */
 function reviewItems(sources: HomeSources): HomeAttentionItem[] {
   const byRepo = new Map<string, LearningCandidate[]>()
   for (const candidate of sources.learnings)
     byRepo.set(candidate.repo, [...(byRepo.get(candidate.repo) ?? []), candidate])
-  const items: HomeAttentionItem[] = [...byRepo.entries()].map(([repo, candidates]) => ({
-    id: `learnings:${repo}`,
-    kind: 'learnings',
-    severity: 'low',
-    title: `${plural(candidates.length, 'learned rule')} ${candidates.length === 1 ? 'waits' : 'wait'} for review`,
-    repos: [repoRef(sources, repo)],
-    count: candidates.length,
-    at: candidates
-      .map((c) => c.updatedAt)
-      .toSorted()
-      .at(-1)!,
-    href: `/knowledge${query({ space: `repo:${repo}`, tab: 'learnings' })}`,
-  }))
-  if (sources.knowledge.length)
+  const items = [...byRepo.entries()].map(([repo, candidates]): HomeAttentionItem => {
+    const href = webPaths.inbox({
+      item: `learning:${oldestOf(candidates).id}`,
+      kind: 'learning',
+    })
+    return {
+      id: `learnings:${repo}`,
+      kind: 'learnings',
+      severity: 'low',
+      title: `${plural(candidates.length, 'learned rule')} ${candidates.length === 1 ? 'waits' : 'wait'} for review`,
+      repos: [repoRef(sources, repo)],
+      count: candidates.length,
+      at: newestUpdate(candidates),
+      href,
+      action: review(href),
+    }
+  })
+  if (sources.knowledge.length) {
+    const href = webPaths.inbox({ item: `note:${oldestOf(sources.knowledge).id}`, kind: 'note' })
     items.push({
       id: 'knowledge',
       kind: 'knowledge',
@@ -271,17 +328,18 @@ function reviewItems(sources: HomeSources): HomeAttentionItem[] {
       title: `${plural(sources.knowledge.length, 'knowledge proposal')} ${sources.knowledge.length === 1 ? 'waits' : 'wait'} for review`,
       repos: [],
       count: sources.knowledge.length,
-      at: sources.knowledge
-        .map((entry) => entry.updatedAt)
-        .toSorted()
-        .at(-1)!,
-      href: '/knowledge?tab=notes',
+      at: newestUpdate(sources.knowledge),
+      href,
+      action: review(href),
     })
+  }
   return items
 }
 
-const isStale = (head: AnalysisHead, now: Date) =>
-  now.getTime() - Date.parse(head.createdAt) > STALE_ANALYSIS_DAYS * DAY_MS
+const targetOf = (sources: Pick<HomeSources, 'groupsOf'>, repo: string): RepoTarget => ({
+  ...(parseRepo(repo) ?? { forge: '', path: repo }),
+  groups: sources.groupsOf(repo),
+})
 
 /** Repositories whose newest analysis of some kind is older than `STALE_ANALYSIS_DAYS`. */
 export function staleItems(sources: HomeSources): HomeAttentionItem[] {
@@ -289,6 +347,7 @@ export function staleItems(sources: HomeSources): HomeAttentionItem[] {
   for (const head of sources.analyses) {
     if (!isStale(head, sources.now)) continue
     const repo = keyOf(head.repo)
+    if (sources.access?.(targetOf(sources, repo))('analyses:read') === false) continue
     byRepo.set(repo, [...(byRepo.get(repo) ?? []), head])
   }
   return [...byRepo.entries()].map(([repo, heads]) => {
@@ -303,34 +362,76 @@ export function staleItems(sources: HomeSources): HomeAttentionItem[] {
       repos: [repoRef(sources, repo)],
       count: heads.length,
       at: oldest,
-      href: `/repos/view${query({ repo })}`,
+      href: webPaths.repo(repo),
+      action: open('Open repository', webPaths.repo(repo)),
     }
   })
 }
 
-/** Every Needs-attention item, most urgent first, then newest first. */
+/**
+ * Repositories the caller may see and read analyses of that have no record at all: no analysis
+ * head and no audit run.
+ */
+export function notAnalysedItems(sources: HomeSources): HomeAttentionItem[] {
+  const recorded = new Set([
+    ...sources.analyses.map((head) => keyOf(head.repo)),
+    ...sources.audits.map((audit) => keyOf(audit.latest.repo)),
+  ])
+  return [...new Set(sources.repos)]
+    .filter(
+      (repo) =>
+        !recorded.has(repo) && sources.access?.(targetOf(sources, repo))('analyses:read') !== false,
+    )
+    .toSorted()
+    .map((repo) => ({
+      id: `not-analysed:${repo}`,
+      kind: 'not-analysed',
+      severity: 'low',
+      title: 'Not analysed yet',
+      repos: [repoRef(sources, repo)],
+      count: 1,
+      at: sources.now.toISOString(),
+      href: webPaths.repo(repo),
+      action: open('Open repository', webPaths.repo(repo)),
+    }))
+}
+
+/**
+ * Every Needs-attention item, most urgent first, then newest first; not-analysed repositories have
+ * no meaningful time and come after the other low items.
+ */
 export function attentionItems(sources: HomeSources): HomeAttentionItem[] {
   return [
     ...failureItems(sources),
     ...blockedItems(sources),
     ...auditItems(sources),
+    ...allowlistItems(sources),
     ...releaseItems(sources),
     ...reviewItems(sources),
     ...staleItems(sources),
+    ...notAnalysedItems(sources),
   ].toSorted(
     (a, b) =>
       severityRank[a.severity] - severityRank[b.severity] ||
+      Number(a.kind === 'not-analysed') - Number(b.kind === 'not-analysed') ||
       b.at.localeCompare(a.at) ||
       a.id.localeCompare(b.id),
   )
 }
 
+/** What one event reads as: the sentence and the page that shows it. */
+interface ChangeLine {
+  text: string
+  href: string
+}
+
 interface ChangeRule {
   kind: HomeChangeKind
   matches: (action: string) => boolean
-  /** Action prefixes that cover every action `matches` accepts, for querying the History. */
+  /** Action prefixes that cover every action `matches` accepts, for querying the audit log. */
   prefixes: string[]
-  words: [one: string, many: string]
+  /** Reads only whitelisted fields of `event`; `path` is the repository path when there is one. */
+  line: (event: AuditEvent, path: string | undefined) => ChangeLine
 }
 
 const exactly = (...actions: string[]) => ({
@@ -338,177 +439,237 @@ const exactly = (...actions: string[]) => ({
   prefixes: actions,
 })
 
+/** A detail value when it is a short token (version, tag, environment, setting key, advisory id). */
+const token = (event: AuditEvent, name: string): string | undefined => {
+  const value = event.details?.[name]
+  return typeof value === 'string' && /^[\w.@+/:-]{1,80}$/.test(value) ? value : undefined
+}
+
+const verb = (event: AuditEvent) => event.action.slice(event.action.indexOf('.') + 1)
+
+const ofRepo = (path: string | undefined) => (path ? ` of ${path}` : '')
+
+const forRepo = (path: string | undefined) => (path ? ` for ${path}` : '')
+
+const releaseHref = (event: AuditEvent) =>
+  event.target.repo ? webPaths.releaseTimeline(event.target.repo) : webPaths.settings('audit')
+
+const guideHref = (event: AuditEvent) =>
+  webPaths.knowledge('guide', event.target.repo ? { space: `repo:${event.target.repo}` } : {})
+
+const knowledgeVerbs: Record<string, string> = {
+  create: 'Added',
+  update: 'Edited',
+  delete: 'Deleted',
+}
+
+const credentialVerbs: Record<string, string> = {
+  create: 'Added',
+  update: 'Changed',
+  delete: 'Deleted',
+  rotate: 'Rotated',
+}
+
+const guideTexts: Record<string, string> = {
+  update: 'Edited the Guide',
+  accept: 'Accepted generated Guide text',
+  restore: 'Restored a Guide version',
+}
+
+const accessTexts: Record<string, string> = {
+  invited: 'Invited a user',
+  signed_up: 'Signed up',
+  recovered: 'Recovered access with a link',
+  link_issued: 'Issued a sign-in link',
+}
+
 const changeRules: ChangeRule[] = [
-  { kind: 'release', ...exactly('release.version'), words: ['version cut', 'versions cut'] },
   {
     kind: 'release',
-    ...exactly('release.propose'),
-    words: ['release proposed', 'releases proposed'],
+    ...exactly('release.versioned'),
+    line: (event, path) => {
+      const version = token(event, 'version')
+      return {
+        text: `Cut ${version ? `version ${version}` : 'a version'}${ofRepo(path)}`,
+        href: releaseHref(event),
+      }
+    },
   },
   {
     kind: 'release',
-    ...exactly('release.accept'),
-    words: ['release accepted', 'releases accepted'],
+    ...exactly('release.proposed'),
+    line: (event, path) => ({
+      text: `Proposed a release${ofRepo(path)}`,
+      href: releaseHref(event),
+    }),
+  },
+  {
+    kind: 'release',
+    ...exactly('release.accepted'),
+    line: (event, path) => ({
+      text: `Accepted the release${ofRepo(path)}`,
+      href: releaseHref(event),
+    }),
+  },
+  {
+    kind: 'release',
+    ...exactly('release.dismiss'),
+    line: (event, path) => ({
+      text: `Dismissed the waiting release${ofRepo(path)}`,
+      href: releaseHref(event),
+    }),
   },
   {
     kind: 'deploy',
-    ...exactly('release.deploy'),
-    words: ['deploy started', 'deploys started'],
+    ...exactly('release.deploy-started'),
+    line: (event, path) => {
+      const tag = token(event, 'tag')
+      const environment = token(event, 'environment')
+      return {
+        text: `Started deploying ${tag ?? 'a release'}${ofRepo(path)}${environment ? ` to ${environment}` : ''}`,
+        href: releaseHref(event),
+      }
+    },
   },
   {
     kind: 'settings',
     ...exactly('setting.update', 'setting.delete'),
-    words: ['settings change', 'settings changes'],
+    line: (event) => {
+      const key = token(event, 'key')
+      const action = verb(event) === 'delete' ? 'Removed' : 'Changed'
+      return {
+        text: key ? `${action} the setting ${key}` : `${action} a setting`,
+        href: webPaths.settings('audit'),
+      }
+    },
+  },
+  {
+    kind: 'settings',
+    ...exactly('setting.draft'),
+    line: (event) => {
+      const saved = event.details?.saved
+      const removed = event.details?.removed
+      const count =
+        (typeof saved === 'number' ? saved : 0) + (typeof removed === 'number' ? removed : 0)
+      return {
+        text: count > 1 ? `Saved ${count} setting changes at once` : 'Saved a setting change',
+        href: webPaths.settings('policies'),
+      }
+    },
+  },
+  {
+    kind: 'settings',
+    ...exactly('allowlist.renew'),
+    line: (event) => {
+      const advisory = token(event, 'advisory')
+      return {
+        text: `Renewed the allowlist entry${advisory ? ` for ${advisory}` : ''}`,
+        href: webPaths.security(),
+      }
+    },
   },
   {
     kind: 'knowledge',
     ...exactly('knowledge.create', 'knowledge.update', 'knowledge.delete'),
-    words: ['knowledge edit', 'knowledge edits'],
+    line: (event) => ({
+      text: `${knowledgeVerbs[verb(event)]!} a knowledge note`,
+      href: webPaths.knowledge(
+        'notes',
+        verb(event) !== 'delete' && event.target.id ? { note: event.target.id } : {},
+      ),
+    }),
   },
   {
     kind: 'knowledge',
     ...exactly('learning.accept'),
-    words: ['learned rule accepted', 'learned rules accepted'],
+    line: (event, path) => ({
+      text: `Accepted a learned rule${forRepo(path)}`,
+      href: webPaths.knowledge(
+        'learnings',
+        event.target.repo ? { space: `repo:${event.target.repo}` } : {},
+      ),
+    }),
   },
   {
     kind: 'guide',
     ...exactly('guide.update', 'guide.accept', 'guide.restore'),
-    words: ['Guide edit', 'Guide edits'],
+    line: (event, path) => ({
+      text: `${guideTexts[verb(event)]!}${forRepo(path)}`,
+      href: guideHref(event),
+    }),
+  },
+  {
+    kind: 'guide',
+    ...exactly('guide.reject'),
+    line: (event, path) => ({
+      text: `Rejected generated Guide text${forRepo(path)}`,
+      href: guideHref(event),
+    }),
   },
   {
     kind: 'repo',
     ...exactly('repo.discover'),
-    words: ['new repository found', 'new repositories found'],
+    line: (event, path) => ({
+      text: path ? `Found the new repository ${path}` : 'Found a new repository',
+      href: event.target.repo ? webPaths.repo(event.target.repo) : webPaths.repos(),
+    }),
   },
   {
     kind: 'credentials',
-    matches: (action) => action.startsWith('credential.'),
-    prefixes: ['credential.'],
-    words: ['credential change', 'credential changes'],
+    ...exactly('credential.create', 'credential.update', 'credential.delete', 'credential.rotate'),
+    line: (event) => ({
+      text: `${credentialVerbs[verb(event)]!} a credential`,
+      href: webPaths.settings('integrations'),
+    }),
+  },
+  {
+    kind: 'task',
+    ...exactly('task.reject'),
+    line: (event) => ({
+      text: 'Rejected a proposed agent task',
+      href: webPaths.tasks({ group: event.target.id }),
+    }),
   },
   {
     kind: 'access',
-    matches: (action) =>
-      action.startsWith('user.') && action !== 'user.preferences' && action !== 'user.avatar',
-    prefixes: ['user.'],
-    words: ['access change', 'access changes'],
+    ...exactly('user.invited', 'user.signed_up', 'user.recovered', 'user.link_issued'),
+    line: (event) => ({ text: accessTexts[verb(event)]!, href: webPaths.settings('people') }),
   },
 ]
 
-/** The History action prefixes `summarizeChanges` may count, each queried on its own. */
+/** The audit log action prefixes `summarizeChanges` may list, each queried on its own. */
 export const changeActionPrefixes = [...new Set(changeRules.flatMap((rule) => rule.prefixes))]
 
 /**
- * History events summed per area and repository, newest first, at most `limit`: only the
- * high-signal actions (releases, deploys, settings, knowledge, the Guide, new repositories,
- * credentials, access) that succeeded. Deterministic: the same events give the same sentences.
+ * One change per audit log event, newest first, at most `limit`: only the high-signal actions
+ * (releases, deploys, settings, the allowlist, knowledge, the Guide, new repositories,
+ * credentials, access, rejected agent tasks) that succeeded. Deterministic: the same events give the same sentences.
  */
 export function summarizeChanges(
   events: readonly AuditEvent[],
   groupsOf: (repo: string) => string[],
   limit = 40,
 ): HomeChange[] {
-  const groups = new Map<string, { rule: ChangeRule; repo?: string; events: AuditEvent[] }>()
-  for (const event of events) {
-    if (event.outcome !== 'ok') continue
-    const index = changeRules.findIndex((rule) => rule.matches(event.action))
-    if (index < 0) continue
-    const repo = event.target.repo
-    const id = `${index}\n${repo ?? ''}`
-    const group = groups.get(id) ?? { rule: changeRules[index]!, events: [], ...(repo && { repo }) }
-    group.events.push(event)
-    groups.set(id, group)
-  }
-  return [...groups.values()]
-    .map(({ rule, repo, events: list }): HomeChange => {
-      const sorted = list.toSorted((a, b) => b.at.localeCompare(a.at))
-      const [one, many] = rule.words
-      return {
-        kind: rule.kind,
-        text: `${sorted.length} ${sorted.length === 1 ? one : many}`,
-        ...(repo !== undefined && { repo: { repo, groups: groupsOf(repo) } }),
-        count: sorted.length,
-        actors: [...new Set(sorted.map((event) => event.actor.id))],
-        firstAt: sorted.at(-1)!.at,
-        lastAt: sorted[0]!.at,
-      }
+  return events
+    .flatMap((event): HomeChange[] => {
+      if (event.outcome !== 'ok') return []
+      const rule = changeRules.find((each) => each.matches(event.action))
+      if (!rule) return []
+      const repo = event.target.repo
+      const parsed = repo === undefined ? undefined : parseRepo(repo)
+      const { text, href } = rule.line(event, parsed?.path)
+      return [
+        {
+          id: event.id,
+          kind: rule.kind,
+          text,
+          href,
+          at: event.at,
+          actor: event.actor.id,
+          ...(repo !== undefined && { repo: { repo, groups: groupsOf(repo) } }),
+        },
+      ]
     })
-    .toSorted((a, b) => b.lastAt.localeCompare(a.lastAt) || a.text.localeCompare(b.text))
+    .toSorted((a, b) => b.at.localeCompare(a.at) || a.id.localeCompare(b.id))
     .slice(0, limit)
-}
-
-function jobStatus(sources: HomeSources, job: Job | undefined): HomeRepoStatus {
-  if (!job) return { key: 'jobs', tone: 'none', label: 'No jobs yet' }
-  const label = sources.analyzerLabel(job.analyzer)
-  if (job.status === 'succeeded') return { key: 'jobs', tone: 'ok', label: `${label} succeeded` }
-  if (job.status === 'failed') return { key: 'jobs', tone: 'danger', label: `${label} failed` }
-  if (job.status === 'blocked')
-    return { key: 'jobs', tone: 'warning', label: `${label} stopped by the AI budget` }
-  if (job.status === 'canceled') return { key: 'jobs', tone: 'none', label: `${label} canceled` }
-  return { key: 'jobs', tone: 'info', label: `${label} ${job.status}` }
-}
-
-function auditStatus(audits: RepoAudits | undefined): HomeRepoStatus {
-  if (!audits) return { key: 'vulnerabilities', tone: 'none', label: 'Not audited' }
-  const { severities, active } = audits.latest
-  if (severities.critical)
-    return { key: 'vulnerabilities', tone: 'danger', label: `${severities.critical} critical` }
-  if (severities.high)
-    return { key: 'vulnerabilities', tone: 'warning', label: `${severities.high} high` }
-  if (active) return { key: 'vulnerabilities', tone: 'info', label: `${active} lower severity` }
-  return { key: 'vulnerabilities', tone: 'ok', label: 'No active vulnerabilities' }
-}
-
-function releaseStatus(card: ReleaseCard | undefined): HomeRepoStatus {
-  if (!card) return { key: 'release', tone: 'none', label: 'Releases off' }
-  const need = card.needsAction ? releaseNeed(card) : undefined
-  if (need)
-    return {
-      key: 'release',
-      tone: need.severity === 'high' ? 'danger' : 'warning',
-      label: need.title,
-    }
-  if (card.unreleased > 0)
-    return {
-      key: 'release',
-      tone: 'info',
-      label: `${plural(card.unreleased, 'unreleased commit')}${card.unreleasedCapped ? '+' : ''}`,
-    }
-  return { key: 'release', tone: 'ok', label: 'Up to date' }
-}
-
-function analysisStatus(heads: readonly AnalysisHead[], now: Date): HomeRepoStatus {
-  if (!heads.length) return { key: 'analyses', tone: 'none', label: 'No analyses yet' }
-  const stale = heads.filter((head) => isStale(head, now)).length
-  return stale
-    ? {
-        key: 'analyses',
-        tone: 'warning',
-        label: plural(stale, 'stale analysis', 'stale analyses'),
-      }
-    : { key: 'analyses', tone: 'ok', label: 'Analyses fresh' }
-}
-
-/**
- * One tile per repository in `repos` (sorted), with its status ticks: the newest job, the latest
- * audit, the release state and analysis freshness. Group jobs are left out.
- */
-export function repoTiles(sources: HomeSources, repos: Iterable<string>): HomeRepoTile[] {
-  const lastJob = new Map<string, Job>()
-  for (const job of sources.recentJobs)
-    if (job.group === undefined && !lastJob.has(keyOf(job.repo))) lastJob.set(keyOf(job.repo), job)
-  const audits = new Map(sources.audits.map((entry) => [keyOf(entry.latest.repo), entry]))
-  const releases = new Map(sources.releases.map((card) => [keyOf(card.repo), card]))
-  const heads = new Map<string, AnalysisHead[]>()
-  for (const head of sources.analyses)
-    heads.set(keyOf(head.repo), [...(heads.get(keyOf(head.repo)) ?? []), head])
-  return [...new Set(repos)].toSorted().map((repo) => ({
-    ...repoRef(sources, repo),
-    status: [
-      jobStatus(sources, lastJob.get(repo)),
-      auditStatus(audits.get(repo)),
-      releaseStatus(releases.get(repo)),
-      analysisStatus(heads.get(repo) ?? [], sources.now),
-    ],
-  }))
 }

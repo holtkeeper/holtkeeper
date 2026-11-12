@@ -4,7 +4,12 @@ import type { BranchRecord, GitForge, MergeRequestRecord } from '@holtkeeper/for
 
 import { analyzeBranches, classifyBranches } from './analyze.ts'
 import { branchesOptionsSchema, createBranchesAnalyzer } from './analyzer.ts'
-import { branchesReport } from './report.ts'
+import {
+  BRANCHES_METRICS_LIMITS,
+  branchesMetrics,
+  branchesMetricsSchema,
+  branchesReport,
+} from './report.ts'
 
 const now = new Date('2026-10-30T00:00:00Z')
 const daysAgo = (days: number) => new Date(now.getTime() - days * 86_400_000).toISOString()
@@ -195,4 +200,120 @@ describe('branchesReport', () => {
     expect(report.sections.map((s) => s.id)).toEqual(['cleanup'])
     expect(report.metrics[0]).toMatchObject({ value: 0 })
   })
+})
+
+const candidate = (name: string, reason: 'merged' | 'closed' | 'stale', ageDays: number) => ({
+  name,
+  reason,
+  committedAt: daysAgo(ageDays),
+  ageDays,
+})
+
+test('metrics count branches to clean up per reason and per author', () => {
+  const metrics = branchesMetrics({
+    defaultBranch: 'main',
+    staleDays: 90,
+    checkedAt: now.toISOString(),
+    total: 9,
+    open: 2,
+    candidates: [
+      { ...candidate('feat/widget', 'merged', 3), author: 'Ana' },
+      {
+        ...candidate('feat/gadget', 'merged', 40),
+        author: 'Lev',
+        webUrl: 'https://forge.test/acme/widgets/-/tree/feat/gadget',
+        mergeRequest: {
+          id: 12,
+          state: 'merged',
+          title: 'Add gadget',
+          author: 'Lev',
+          webUrl: 'https://forge.test/acme/widgets/-/merge_requests/12',
+        },
+      },
+      { ...candidate('fix/shape', 'closed', 12), author: 'Ana' },
+      candidate('spike/old', 'stale', 400),
+    ],
+  })
+  expect(metrics).toMatchObject({
+    total: 9,
+    open: 2,
+    cleanup: 4,
+    merged: 2,
+    closed: 1,
+    stale: 1,
+    oldestDays: 400,
+    defaultBranch: 'main',
+    staleDays: 90,
+  })
+  expect(metrics.authors).toEqual([
+    { author: 'Ana', cleanup: 2, merged: 1, closed: 1, stale: 0, oldestDays: 12 },
+    { author: 'Lev', cleanup: 1, merged: 1, closed: 0, stale: 0, oldestDays: 40 },
+    { author: 'unknown', cleanup: 1, merged: 0, closed: 0, stale: 1, oldestDays: 400 },
+  ])
+  expect(metrics.branches?.map((entry) => entry.name)).toEqual([
+    'spike/old',
+    'feat/gadget',
+    'fix/shape',
+    'feat/widget',
+  ])
+  expect(metrics.branches?.[1]?.mergeRequest).toEqual({
+    id: 12,
+    state: 'merged',
+    title: 'Add gadget',
+    webUrl: 'https://forge.test/acme/widgets/-/merge_requests/12',
+  })
+  expect(branchesMetricsSchema.parse(metrics)).toEqual(metrics)
+  expect(
+    branchesMetrics({
+      defaultBranch: 'main',
+      staleDays: 90,
+      checkedAt: now.toISOString(),
+      total: 0,
+      open: 0,
+      candidates: [],
+    }),
+  ).toEqual({
+    total: 0,
+    open: 0,
+    cleanup: 0,
+    merged: 0,
+    closed: 0,
+    stale: 0,
+    defaultBranch: 'main',
+    staleDays: 90,
+    authors: [],
+    branches: [],
+  })
+})
+
+test('metrics keep at most a fixed number of authors and branches', () => {
+  const candidates = Array.from({ length: 70 }, (_, index) => ({
+    ...candidate(`feat/widget-${index}`, 'stale', 100 + index),
+    author: `author-${String(index).padStart(2, '0')}`,
+  }))
+  const metrics = branchesMetrics({
+    defaultBranch: 'main',
+    staleDays: 90,
+    checkedAt: now.toISOString(),
+    total: 70,
+    open: 0,
+    candidates,
+  })
+  expect(metrics.cleanup).toBe(70)
+  expect(metrics.authors).toHaveLength(BRANCHES_METRICS_LIMITS.authors)
+  expect(metrics.branches).toHaveLength(BRANCHES_METRICS_LIMITS.branches)
+  expect(metrics.branches?.[0]?.name).toBe('feat/widget-69')
+})
+
+test('metrics stored before authors and branches existed still parse', () => {
+  const old = branchesMetricsSchema.parse({
+    total: 1,
+    open: 0,
+    cleanup: 0,
+    merged: 0,
+    closed: 0,
+    stale: 0,
+  })
+  expect(old.authors).toBeUndefined()
+  expect(old.defaultBranch).toBeUndefined()
 })

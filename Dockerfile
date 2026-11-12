@@ -46,8 +46,11 @@ RUN set -eux; \
 
 # The config lives inside /app so its `@holtkeeper/*` imports resolve from /app/node_modules.
 # Mount it read-only at /app/config/holtkeeper.config.ts; keep SQLite files and artifacts in /data.
+# HOLTKEEPER_VERSION is the release the panel shows: the tag or commit the release workflow built.
+ARG HOLTKEEPER_VERSION=
 ENV NODE_ENV=production \
     HOLTKEEPER_PORT=7420 \
+    HOLTKEEPER_VERSION=${HOLTKEEPER_VERSION} \
     HOME=/tmp
 USER 10001:10001
 WORKDIR /app

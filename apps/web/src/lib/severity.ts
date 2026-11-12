@@ -47,3 +47,13 @@ export function compareCounts(a: SeverityCounts, b: SeverityCounts): number {
   }
   return 0
 }
+
+/** Status tone of a severity for dots and tags: critical and high are bad, medium a warning. */
+export const severityTone = (severity: Severity): 'danger' | 'warning' | 'info' | 'default' =>
+  severity === 'critical' || severity === 'high'
+    ? 'danger'
+    : severity === 'medium'
+      ? 'warning'
+      : severity === 'low'
+        ? 'info'
+        : 'default'

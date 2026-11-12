@@ -1,290 +1,284 @@
-import { Dices, Fingerprint, Pencil, Plus, Trash2 } from 'lucide-react'
-import { AnimatePresence, motion } from 'motion/react'
-import { type FormEvent, useState } from 'react'
+import { Link, useParams } from '@tanstack/react-router'
+import {
+  BookText,
+  Bot,
+  Fingerprint,
+  Link2,
+  LogOut,
+  Plus,
+  ShieldCheck,
+  SlidersHorizontal,
+  UserRound,
+  UsersRound,
+} from 'lucide-react'
+import { type ComponentType, type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useAccount, useAccountPasskeys, useSetAvatar } from '../../api/queries.ts'
-import { formatDate, formatDateTime, formatRelative } from '../../lib/format.ts'
-import { isCancelled, passkeyName } from '../../lib/passkeys.ts'
+import {
+  useAccount,
+  useAccounts,
+  useAuthMutations,
+  useMcpTokens,
+  usePreferences,
+} from '../../api/queries.ts'
+import { roleLabel, visibleSettingsSections } from '../../lib/access.ts'
+import {
+  type AccountSectionId,
+  accountSections,
+  parseAccountSection,
+  visibleAccountSections,
+} from '../../lib/account-sections.ts'
+import { formatDate } from '../../lib/format.ts'
+import { tokenStatusCounts } from '../../lib/mcp-tokens.ts'
 import {
   Avatar,
   Button,
-  ConfirmDialog,
-  Dialog,
-  ErrorState,
-  Notice,
-  Page,
-  Panel,
-  Placeholder,
-  TextField,
-  Tooltip,
+  Crumbs,
+  SubNav,
+  type SubNavItem,
+  Tag,
+  buttonClass,
   notify,
 } from '../../ui/index.ts'
+import { McpServer } from '../mcp/McpServer.tsx'
+import { docsUrl } from '../shell/nav.ts'
+import { NotFound } from '../shell/NotFound.tsx'
+import { useSession } from '../shell/session.ts'
 import { ExternalAccounts } from './ExternalAccounts.tsx'
 import { HomeGroups } from './HomeGroups.tsx'
+import { MyAccess } from './MyAccess.tsx'
+import { Passkeys } from './Passkeys.tsx'
+import { Preferences } from './Preferences.tsx'
+import { Profile } from './Profile.tsx'
 
-type Editing = { mode: 'add' } | { mode: 'rename'; id: string; label: string }
+const icons: Record<AccountSectionId, ComponentType<{ className?: string }>> = {
+  profile: UserRound,
+  teams: UsersRound,
+  'sign-in': Fingerprint,
+  linked: Link2,
+  access: ShieldCheck,
+  agents: Bot,
+  preferences: SlidersHorizontal,
+}
 
-function PasskeyDialog({ editing, onClose }: { editing: Editing; onClose: () => void }) {
-  const { add, rename } = useAccountPasskeys()
-  const [label, setLabel] = useState(editing.mode === 'rename' ? editing.label : '')
-  const mutation = editing.mode === 'add' ? add : rename
-  const error = mutation.error && !isCancelled(mutation.error) ? mutation.error : null
+/** What the header's primary action hands to the section body. */
+interface BodyProps {
+  creating?: boolean
+  onCreating?: (open: boolean) => void
+}
 
-  const submit = (event?: FormEvent) => {
-    event?.preventDefault()
-    if (editing.mode === 'add') {
-      add.mutate(label, {
-        onSuccess: () => {
-          notify.success('Passkey added')
-          onClose()
-        },
-      })
-    } else if (label.trim()) {
-      rename.mutate(
-        { id: editing.id, label },
-        {
-          onSuccess: () => {
-            notify.success('Passkey renamed')
-            onClose()
-          },
-        },
-      )
-    }
-  }
+const bodies: Record<AccountSectionId, ComponentType<BodyProps>> = {
+  profile: Profile,
+  teams: HomeGroups,
+  'sign-in': Passkeys,
+  linked: ExternalAccounts,
+  access: MyAccess,
+  agents: McpServer,
+  preferences: Preferences,
+}
 
+/** What the users provider adds to the header: passkeys and single sign-on, member since. */
+interface UserFacts {
+  passkeys: number
+  identities: readonly string[]
+  createdAt: string
+}
+
+function SignOut() {
+  const { auth } = useSession()
+  const { logout } = useAuthMutations()
+  if (!auth.logoutUrl) return null
+  const url = auth.logoutUrl
   return (
-    <Dialog
-      isOpen
-      onOpenChange={(open) => !open && onClose()}
-      title={editing.mode === 'add' ? 'Add a passkey' : 'Rename passkey'}
-      description={
-        editing.mode === 'add'
-          ? 'Your browser asks which device or password manager keeps the new passkey.'
-          : undefined
-      }
-      footer={
-        <>
-          <Button variant="tertiary" onPress={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onPress={() => submit()}
-            isPending={mutation.isPending}
-            isDisabled={editing.mode === 'rename' && !label.trim()}
-          >
-            {editing.mode === 'add' ? (
-              <>
-                <Fingerprint className="size-4" />
-                Create passkey
-              </>
-            ) : (
-              'Save'
-            )}
-          </Button>
-        </>
+    <Button
+      variant="secondary"
+      size="sm"
+      isPending={logout.isPending}
+      onPress={() =>
+        logout.mutate(url, {
+          onError: (error) => notify.error('Sign-out failed', messageOf(error)),
+        })
       }
     >
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        {error ? (
-          <Notice tone="danger" title="Not saved">
-            {messageOf(error)}
-          </Notice>
-        ) : null}
-        <TextField
-          label="Name"
-          value={label}
-          onChange={setLabel}
-          autoFocus
-          placeholder="e.g. iPhone, YubiKey, 1Password"
-          {...(editing.mode === 'add'
-            ? { description: 'Helps you tell passkeys apart later. Optional.' }
-            : {})}
-        />
-      </form>
-    </Dialog>
+      <LogOut className="size-3.5" />
+      Sign out
+    </Button>
   )
 }
 
-/** The signed-in user's own account: profile, passkeys and linked external accounts. */
-export function AccountPage() {
-  const account = useAccount()
-  const { remove } = useAccountPasskeys()
-  const avatar = useSetAvatar()
-  const [editing, setEditing] = useState<Editing | null>(null)
-  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(null)
-
-  if (account.isPending) {
-    return (
-      <Page title="Your account">
-        <Placeholder className="h-28" />
-        <Placeholder className="h-48" />
-      </Page>
-    )
-  }
-  if (account.isError) {
-    return (
-      <Page title="Your account">
-        <ErrorState error={account.error} />
-      </Page>
-    )
-  }
-
-  const user = account.data
-  const only = user.passkeys.length <= 1
-
+function Header({
+  section,
+  user,
+  onNewToken,
+}: {
+  section: AccountSectionId
+  user: UserFacts | undefined
+  onNewToken: () => void
+}) {
+  const { principal } = useSession()
+  const tokens = useMcpTokens()
+  const chips: ReactNode[] = [
+    <Tag key="role" tone="accent">
+      {roleLabel(principal.grants)}
+    </Tag>,
+    ...(user
+      ? [
+          ...user.identities.map((provider) => (
+            <Tag key={`sso:${provider}`}>
+              Single sign-on · <span className="mono">{provider}</span>
+            </Tag>
+          )),
+          user.passkeys ? (
+            <Tag key="passkey">{user.passkeys === 1 ? 'Passkey' : `${user.passkeys} passkeys`}</Tag>
+          ) : null,
+        ]
+      : [
+          <Tag key="provider">
+            Signed in via <span className="mono">{principal.provider}</span>
+          </Tag>,
+        ]),
+  ]
   return (
-    <Page title="Your account" description="How you sign in to Holtkeeper">
-      <Panel>
-        <div className="flex flex-wrap items-center gap-4">
-          <Avatar key={user.avatarUrl} src={user.avatarUrl} name={user.name} size="lg" />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-lg font-semibold">{user.name}</div>
-            <div className="truncate text-sm text-muted">{user.email ?? 'No email'}</div>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              isPending={avatar.isPending}
-              onPress={() =>
-                avatar.mutate(crypto.randomUUID().slice(0, 12), {
-                  onError: (error) => notify.error('Avatar not changed', messageOf(error)),
-                })
-              }
-            >
-              <Dices className="size-3.5" />
-              New avatar
-            </Button>
-            <div className="text-xs text-muted">Member since {formatDate(user.createdAt)}</div>
+    <header className="flex flex-col gap-2.5 border-b border-line px-3.5 py-3">
+      <Crumbs
+        items={[
+          { label: 'Account', link: { to: '/account/$section', params: { section: 'profile' } } },
+          { label: accountSections[section].label },
+        ]}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Avatar
+          key={principal.avatarUrl}
+          src={principal.avatarUrl}
+          name={principal.name}
+          size="lg"
+        />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[15px] font-semibold leading-tight">{principal.name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+            {principal.email ? <span>{principal.email}</span> : null}
+            {chips}
+            {user ? <span>Member since {formatDate(user.createdAt)}</span> : null}
           </div>
         </div>
-        {user.identities.length ? (
-          <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted">
-            {user.identities.map((identity) => (
-              <span
-                key={`${identity.provider}:${identity.email ?? ''}`}
-                className="rounded-full border border-separator px-2.5 py-1"
-              >
-                Single sign-on · {identity.provider}
-                {identity.email ? ` · ${identity.email}` : ''}
-              </span>
-            ))}
-          </div>
-        ) : null}
-      </Panel>
-
-      <Panel
-        title="Passkeys"
-        description="Each passkey signs you in on its own. Keep a second one in case you lose a device."
-        actions={
-          <Button variant="secondary" size="sm" onPress={() => setEditing({ mode: 'add' })}>
+        <a href={docsUrl} target="_blank" rel="noreferrer" className={buttonClass('ghost', 'sm')}>
+          <BookText className="size-3.5" />
+          Docs
+        </a>
+        <SignOut />
+        {section === 'agents' && tokens.data?.available ? (
+          <Button variant="primary" size="sm" onPress={onNewToken}>
             <Plus className="size-3.5" />
-            Add passkey
+            New token
           </Button>
-        }
-      >
-        {only ? (
-          <Notice tone="warning" title="Only one passkey">
-            If you lose it, only an admin can let you back in with a recovery link.
-          </Notice>
         ) : null}
-        <ul className="flex flex-col divide-y divide-separator">
-          <AnimatePresence initial={false}>
-            {user.passkeys.map((passkey, index) => {
-              const name = passkeyName(passkey, index)
-              return (
-                <motion.li
-                  key={passkey.id}
-                  layout
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3"
+      </div>
+    </header>
+  )
+}
+
+function Nav({ section, passkeys }: { section: AccountSectionId; passkeys: number | undefined }) {
+  const { principal, auth } = useSession()
+  const preferences = usePreferences()
+  const accounts = useAccounts()
+  const tokens = useMcpTokens()
+  const unverified = accounts.data?.accounts.filter((a) => a.verification === 'unverified').length
+  const live = tokens.data?.available
+    ? tokens.data.tokens.length - tokenStatusCounts(tokens.data.tokens).expired
+    : undefined
+  const meta: Partial<Record<AccountSectionId, ReactNode>> = {
+    teams: preferences.data?.homeGroups.length || undefined,
+    'sign-in':
+      passkeys === undefined ? undefined : `${passkeys} passkey${passkeys === 1 ? '' : 's'}`,
+    linked: unverified ? `${unverified} to verify` : undefined,
+    access: roleLabel(principal.grants),
+    agents: live === undefined ? undefined : `${live} active`,
+  }
+  const items: SubNavItem[] = visibleAccountSections(auth.provider).map((id) => ({
+    id,
+    label: accountSections[id].label,
+    icon: icons[id],
+    link: { to: '/account/$section', params: { section: id } },
+    meta: meta[id],
+  }))
+  const [settings] = visibleSettingsSections(principal)
+  return (
+    <SubNav
+      aria-label="Account sections"
+      items={items}
+      selected={section}
+      {...(settings
+        ? {
+            footer: (
+              <>
+                <span>Admin work lives in Settings.</span>
+                <Link
+                  to="/settings/$section"
+                  params={{ section: settings }}
+                  className="text-muted hover:text-foreground"
                 >
-                  <span className="grid size-9 place-items-center rounded-xl bg-accent-soft text-accent-soft-foreground">
-                    <Fingerprint className="size-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{name}</div>
-                    <div className="text-xs text-muted">
-                      <span title={formatDateTime(passkey.createdAt)}>
-                        Added {formatRelative(passkey.createdAt)}
-                      </span>
-                      {' · '}
-                      {passkey.lastUsedAt ? (
-                        <span title={formatDateTime(passkey.lastUsedAt)}>
-                          used {formatRelative(passkey.lastUsedAt)}
-                        </span>
-                      ) : (
-                        'never used'
-                      )}
-                    </div>
-                  </div>
-                  <span className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      isIconOnly
-                      aria-label={`Rename ${name}`}
-                      onPress={() =>
-                        setEditing({ mode: 'rename', id: passkey.id, label: passkey.label ?? '' })
-                      }
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Tooltip content={only ? 'Add another passkey first' : 'Remove'}>
-                      <span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          isIconOnly
-                          aria-label={`Remove ${name}`}
-                          isDisabled={only}
-                          onPress={() => setRemoving({ id: passkey.id, name })}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </span>
-                    </Tooltip>
-                  </span>
-                </motion.li>
-              )
-            })}
-          </AnimatePresence>
-        </ul>
-      </Panel>
+                  Open Settings
+                </Link>
+              </>
+            ),
+          }
+        : {})}
+    />
+  )
+}
 
-      <HomeGroups />
-      <ExternalAccounts />
+function Layout({ section, user }: { section: AccountSectionId; user: UserFacts | undefined }) {
+  const Body = bodies[section]
+  const { label, description } = accountSections[section]
+  const [creating, setCreating] = useState(false)
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <Header section={section} user={user} onNewToken={() => setCreating(true)} />
+      <div className="flex min-w-0 flex-1 flex-col md:flex-row">
+        <Nav section={section} passkeys={user?.passkeys} />
+        <section
+          aria-labelledby="account-section"
+          className="flex min-w-0 flex-1 flex-col gap-4 p-4"
+        >
+          <div>
+            <h2 id="account-section" className="text-[14px] font-semibold">
+              {label}
+            </h2>
+            <p className="mt-0.5 text-sm text-muted">{description}</p>
+          </div>
+          <Body creating={creating} onCreating={setCreating} />
+        </section>
+      </div>
+    </div>
+  )
+}
 
-      {editing ? (
-        <PasskeyDialog
-          key={editing.mode === 'rename' ? editing.id : 'add'}
-          editing={editing}
-          onClose={() => setEditing(null)}
-        />
-      ) : null}
-      <ConfirmDialog
-        isOpen={removing !== null}
-        onOpenChange={(open) => !open && setRemoving(null)}
-        title={`Remove “${removing?.name ?? ''}”?`}
-        confirmLabel="Remove"
-        isPending={remove.isPending}
-        onConfirm={() =>
-          removing &&
-          remove.mutate(removing.id, {
-            onSuccess: () => {
-              notify.success('Passkey removed')
-              setRemoving(null)
-            },
-            onError: (error) => notify.error('Not removed', messageOf(error)),
-          })
-        }
-      >
-        You can no longer sign in with it. Remove it from the device or password manager too.
-      </ConfirmDialog>
-    </Page>
+function UsersLayout({ section }: { section: AccountSectionId }) {
+  const account = useAccount()
+  const user = account.data
+    ? {
+        passkeys: account.data.passkeys.length,
+        identities: account.data.identities.map((identity) => identity.provider),
+        createdAt: account.data.createdAt,
+      }
+    : undefined
+  return <Layout section={section} user={user} />
+}
+
+/**
+ * `/account/$section`: the signed-in principal's own account for every auth provider. A header
+ * with role, sign-in chips, Docs and Sign out, a left `SubNav` and the section: Profile, My teams,
+ * Sign-in (passkeys, `users` provider only), Linked accounts, My access, Connect agents and
+ * Preferences. Only the `users` provider triggers `/auth/users/*` requests.
+ */
+export function AccountPage() {
+  const { auth } = useSession()
+  const params = useParams({ from: '/app/account/$section' })
+  const section = parseAccountSection(params.section)
+  if (!section || !visibleAccountSections(auth.provider).includes(section)) return <NotFound />
+  return auth.provider === 'users' ? (
+    <UsersLayout section={section} />
+  ) : (
+    <Layout section={section} user={undefined} />
   )
 }

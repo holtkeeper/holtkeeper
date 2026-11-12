@@ -14,7 +14,7 @@ import { defineSetting, resolveSetting } from '@holtkeeper/settings'
 import type { AnalysisHead, Job, KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
-import type { JobAnalyzerInfo, ServerDeps } from './context.ts'
+import { type JobAnalyzerInfo, type ServerDeps, repoKey } from './context.ts'
 import { automaticJobReady } from './jobs.ts'
 import { forgeLimitKey } from './limits.ts'
 import { jobTarget } from './routes/jobs.ts'
@@ -38,6 +38,7 @@ export const freshnessSetting = defineSetting({
 
 - **mode** \`on\` (default) refreshes as the analyzers declare, \`off\` never refreshes automatically (events, schedules and runs by hand still work), \`slower\` stretches every interval and cadence by **factor** (default 3).
 - Scope it to a group to set it for one team. The most specific entry wins.`,
+  default: freshnessSchema.parse({}),
   schema: freshnessSchema,
   presets: [
     { id: 'on', label: 'On', value: { mode: 'on' } },
@@ -68,6 +69,7 @@ export const freshnessSweepSetting = defineSetting({
 - **maxAiJobsPerHour** (default 2): of those, jobs of analyzers that may call an LLM. They also stop once automatic work reached the weekly budget minus its reserve.
 - **nightWindow** (default 01:00 to 07:00, instance time zone): heavy analyzers (coverage, bundle size, assets, Renovate) run only then.
 - **headPollMinutes** (default 30): how often the default-branch head of each repository is read, one cheap request each; push webhooks report moves at once.`,
+  default: sweepSchema.parse({}),
   schema: sweepSchema,
 })
 
@@ -96,10 +98,9 @@ const summarySchema = z.object({
   ),
 })
 
-/** What the last sweep decided per analyzer and target, kept for the Automation page. */
+/** What the last sweep decided per analyzer and target, kept for Ops › Automation. */
 type SweepSummary = z.infer<typeof summarySchema>
 
-const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 const headKey = (repo: RepoRef) => `freshness:head:${repoKey(repo)}`
 const missKey = (repo: RepoRef) => `freshness:head-miss:${repoKey(repo)}`
 const appliesKey = (repo: RepoRef, kind: string) => `freshness:applies:${repoKey(repo)}:${kind}`

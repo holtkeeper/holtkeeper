@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type {
   CreateMcpTokenResult,
+  DependencyApi,
   DependencyDetail,
+  DependencySearchResult,
   DependencyTable,
   DependencyUpgrade,
   LibrarySearchResult,
@@ -191,12 +193,11 @@ const seed = async () => {
     { ...widget, latest: '3.2.0', checkedAt: at },
     { ecosystem: 'Go', name: 'example.com/shapes', latest: 'v3.0.0', checkedAt: at },
   ])
-  await store.auditRuns.add({
+  await store.analyses.add({
     repo: { forge: 'work', path: 'games/arcade' },
-    trigger: 'schedule',
-    startedAt: at,
-    finishedAt: at,
-    report: {
+    kind: 'audit',
+    createdAt: at,
+    data: {
       scanner: 'osv-scanner',
       findings: [
         {
@@ -454,6 +455,28 @@ describe('dependency table', () => {
     expect(table.libraries.map((row) => row.name)).toEqual(['widget-kit', '@games/engine'])
     expect(table.libraries[0]?.advisories).toEqual({ count: 0 })
   })
+
+  test('search matches names, prefixes first, and needs q', async () => {
+    const found = await get<DependencySearchResult>('/api/dependencies/search?q=E')
+    expect(found.libraries.map((hit) => [hit.name, hit.usedBy])).toEqual([
+      ['example.com/shapes', 1],
+      ['widget-kit', 2],
+      ['@games/engine', 1],
+    ])
+    expect(found.libraries[1]).toEqual({
+      ecosystem: 'npm',
+      name: 'widget-kit',
+      internal: false,
+      latest: '3.2.0',
+      usedBy: 2,
+    })
+    const one = await get<DependencySearchResult>('/api/dependencies/search?q=e&limit=1')
+    expect(one.libraries).toHaveLength(1)
+    await crossTeam('off')
+    const own = await get<DependencySearchResult>('/api/dependencies/search?q=shapes', asGames)
+    expect(own.libraries).toEqual([])
+    expect((await app.request('/api/dependencies/search', { headers: asAdmin })).status).toBe(400)
+  })
 })
 
 describe('dependency detail', () => {
@@ -543,6 +566,154 @@ describe('dependency detail', () => {
     expect(
       (await app.request('/api/dependencies/library?ecosystem=npm', { headers: asAdmin })).status,
     ).toBe(400)
+  })
+})
+
+const gizmo = () =>
+  store.analyses.add({
+    repo: { forge: 'work', path: 'tools/kit' },
+    kind: 'api-surface',
+    createdAt: at,
+    ref: 'v0.2.0',
+    data: {
+      packages: [
+        {
+          name: '@tools/gizmo',
+          version: '0.2.0',
+          description: 'Gizmos for tools',
+          private: false,
+          dir: '.',
+          entries: [
+            {
+              subpath: './extra',
+              symbols: [
+                {
+                  name: 'spin',
+                  kind: 'function',
+                  signature: 'function spin(): void',
+                  file: 'src/extra.ts',
+                  line: 1,
+                },
+              ],
+            },
+            {
+              subpath: '.',
+              symbols: [
+                {
+                  name: 'gizmo',
+                  kind: 'function',
+                  signature: 'function gizmo(): void',
+                  doc: 'Makes a gizmo.',
+                  file: 'src/index.ts',
+                  line: 1,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  })
+
+const status = async (path: string, headers: Record<string, string> = asAdmin) =>
+  (await app.request(path, { headers })).status
+
+describe('internal packages only the API catalog knows', () => {
+  test('the library answers with the catalog facts and no users', async () => {
+    const { id } = await gizmo()
+    const detail = await get<DependencyDetail>(
+      '/api/dependencies/library?ecosystem=npm&name=@tools/gizmo',
+    )
+    expect(detail).toMatchObject({
+      ecosystem: 'npm',
+      name: '@tools/gizmo',
+      internal: true,
+      latest: '0.2.0',
+      description: 'Gizmos for tools',
+      usedBy: [],
+      versions: [],
+      advisories: [],
+    })
+    const api = await get<DependencyApi>('/api/dependencies/api?ecosystem=npm&name=@tools/gizmo')
+    expect(api).toEqual({
+      ecosystem: 'npm',
+      name: '@tools/gizmo',
+      definedIn: { repo: { forge: 'work', path: 'tools/kit' }, ref: 'v0.2.0', analysisId: id },
+      version: '0.2.0',
+      api: { exports: 2, documented: 1 },
+      subpaths: ['.', './extra'],
+    })
+  })
+
+  test('narrow grants find them only in readable repositories', async () => {
+    await gizmo()
+    expect(await status('/api/dependencies/library?ecosystem=npm&name=@tools/gizmo', asGames)).toBe(
+      200,
+    )
+    await crossTeam('off')
+    expect(await status('/api/dependencies/library?ecosystem=npm&name=@tools/gizmo', asGames)).toBe(
+      404,
+    )
+    expect(await status('/api/dependencies/api?ecosystem=npm&name=@tools/gizmo', asGames)).toBe(404)
+    expect(await status('/api/dependencies/library?ecosystem=npm&name=@tools/gizmo')).toBe(200)
+  })
+})
+
+describe('dependency API', () => {
+  test('a third-party library from its newest indexed API, without definedIn', async () => {
+    const api = await get<DependencyApi>(
+      '/api/dependencies/api?ecosystem=npm&name=widget-kit',
+      asGames,
+    )
+    expect(api).toEqual({
+      ecosystem: 'npm',
+      name: 'widget-kit',
+      version: '3.2.0',
+      api: { exports: 1, documented: 0 },
+      subpaths: ['.'],
+    })
+  })
+
+  test('used libraries without a recorded API answer empty; unknown ones are not found', async () => {
+    expect(
+      await get<DependencyApi>('/api/dependencies/api?ecosystem=npm&name=@games/engine'),
+    ).toEqual({ ecosystem: 'npm', name: '@games/engine', subpaths: [] })
+    expect(await status('/api/dependencies/api?ecosystem=npm&name=left-pad')).toBe(404)
+    expect(await status('/api/dependencies/api?ecosystem=rust&name=x')).toBe(400)
+    await crossTeam('off')
+    expect(
+      await status('/api/dependencies/api?ecosystem=go&name=example.com/shapes', asGames),
+    ).toBe(404)
+  })
+})
+
+describe('dependency table cache', () => {
+  test('answers again without reading records until a newer record lands', async () => {
+    let reads = 0
+    const latest = store.analyses.latest.bind(store.analyses)
+    store.analyses.latest = async (query) => {
+      reads += 1
+      return latest(query)
+    }
+    const first = await get<DependencyTable>('/api/dependencies')
+    const counted = reads
+    expect(counted).toBeGreaterThan(0)
+    expect(await get<DependencyTable>('/api/dependencies')).toEqual(first)
+    expect(reads).toBe(counted)
+
+    await crossTeam('off')
+    await get<DependencyTable>('/api/dependencies', asGames)
+    expect(reads).toBeGreaterThan(counted)
+
+    await depgraph(
+      'tools/cli',
+      [go('cli', 'example.com/tools/cli'), go('s@v3.0.0', 'example.com/shapes/v3', 'v3.0.0')],
+      [{ from: 'cli', to: 's@v3.0.0', kind: 'prod' }],
+    )
+    const next = await get<DependencyTable>('/api/dependencies')
+    expect(next.libraries.find((row) => row.name === 'example.com/shapes')?.usedBy).toEqual([
+      { repo: 'work:tools/cli', versions: ['v3.0.0'] },
+    ])
   })
 })
 

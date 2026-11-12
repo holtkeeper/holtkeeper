@@ -5,7 +5,14 @@ import { memoryChat } from './chat.ts'
 import { memoryCiJobs } from './ci-jobs.ts'
 import { memoryConfig, memoryKv } from './config.ts'
 import { memoryFamilies, memoryGuides } from './guides.ts'
-import { claimDueBy, DEFAULT_MAX_ATTEMPTS, errorSignature, STALE_JOB_ERROR } from './jobs.ts'
+import {
+  claimDueBy,
+  DEFAULT_MAX_ATTEMPTS,
+  errorSignature,
+  jobCounts,
+  matchesJobSearch,
+  STALE_JOB_ERROR,
+} from './jobs.ts'
 import { memoryKnowledge } from './knowledge.ts'
 import { memoryLearnings } from './learnings.ts'
 import { memoryLibraries } from './libraries.ts'
@@ -17,7 +24,9 @@ import type {
   Identity,
   Job,
   JobAttempt,
+  JobCountQuery,
   JobFailureGroup,
+  JobStatus,
   JobStore,
   JobTarget,
   LinkToken,
@@ -29,6 +38,9 @@ import type {
 } from './types.ts'
 
 export { memoryCiJobs }
+
+const later = (a: string | undefined, b: string | undefined) =>
+  a === undefined ? b : b === undefined || a >= b ? a : b
 
 const clone = <T>(value: T): T => structuredClone(value)
 const newestFirst = <T>(items: T[], at: (item: T) => string) =>
@@ -47,13 +59,14 @@ export function memoryStore(): Store {
   const jobs = memoryJobs()
   const externalAccounts = memoryExternalAccounts()
 
-  const listAnalyses = ({ repo, kind, before, limit = 50 }: AnalysisQuery = {}) =>
+  const listAnalyses = ({ repo, kind, before, since, limit = 50 }: AnalysisQuery = {}) =>
     newestFirst(
       [...analyses.values()].filter(
         (record) =>
           (!repo || (record.repo.forge === repo.forge && record.repo.path === repo.path)) &&
           (!kind || record.kind === kind) &&
-          (!before || record.createdAt < before),
+          (!before || record.createdAt < before) &&
+          (!since || record.createdAt >= since),
       ),
       (record) => record.createdAt,
     ).slice(0, limit)
@@ -127,8 +140,16 @@ export function memoryStore(): Store {
     credentials: {
       list: async () => [...credentials.values()].map(clone),
       get: async (id) => clone(credentials.get(id)),
-      put: async (credential) => void credentials.set(credential.id, clone(credential)),
+      async put(credential) {
+        const lastUsedAt = later(credentials.get(credential.id)?.lastUsedAt, credential.lastUsedAt)
+        const { lastUsedAt: _, ...rest } = clone(credential)
+        credentials.set(credential.id, { ...rest, ...(lastUsedAt && { lastUsedAt }) })
+      },
       remove: async (id) => void credentials.delete(id),
+      async touch(id, at) {
+        const credential = credentials.get(id)
+        if (credential) credential.lastUsedAt = later(credential.lastUsedAt, at)
+      },
     },
     settings: {
       list: async (key) =>
@@ -144,7 +165,15 @@ export function memoryStore(): Store {
         clone(
           [...users.values()].find((user) => user.email?.toLowerCase() === email.toLowerCase()),
         ),
-      putUser: async (user) => void users.set(user.id, clone(user)),
+      async putUser(user) {
+        const lastSeenAt = later(users.get(user.id)?.lastSeenAt, user.lastSeenAt)
+        const { lastSeenAt: _, ...rest } = clone(user)
+        users.set(user.id, { ...rest, ...(lastSeenAt && { lastSeenAt }) })
+      },
+      async touchUser(id, at) {
+        const user = users.get(id)
+        if (user) user.lastSeenAt = later(user.lastSeenAt, at)
+      },
       async removeUser(id) {
         users.delete(id)
         for (const [key, passkey] of passkeys) if (passkey.userId === id) passkeys.delete(key)
@@ -189,6 +218,22 @@ const sameRepo = (a: { forge: string; path: string }, b: { forge: string; path: 
 
 const inRepos = (job: Job, repos: { forge: string; path: string }[] | undefined) =>
   !repos || repos.some((repo) => sameRepo(job.repo, repo))
+
+function matchesJobQuery(job: Job, query: JobCountQuery): boolean {
+  const { status, repo, analyzer, schedule, trigger, repos, analysisId } = query
+  const statuses = status === undefined ? undefined : [status].flat()
+  return (
+    (!statuses || statuses.includes(job.status)) &&
+    (!repo || sameRepo(job.repo, repo)) &&
+    inRepos(job, repos) &&
+    (!analyzer || job.analyzer === analyzer) &&
+    (!schedule || job.schedule === schedule) &&
+    (!trigger || job.trigger === trigger) &&
+    (!query.errorSignature || job.errorSignature === query.errorSignature) &&
+    (!analysisId || job.analysisId === analysisId) &&
+    matchesJobSearch(job, query.search)
+  )
+}
 
 /** Ends the job's latest attempt with `patch`, when it is still running. */
 function endAttempt(job: Job, patch: Omit<Partial<JobAttempt>, 'n' | 'startedAt'>) {
@@ -348,19 +393,9 @@ function memoryJobs(): JobStore {
     },
     get: async (id) => clone(jobs.get(id)),
     async list(query = {}) {
-      const { status, repo, analyzer, schedule, trigger, before, repos, limit = 50 } = query
-      const signature = query.errorSignature
-      const statuses = status === undefined ? undefined : [status].flat()
+      const { before, limit = 50 } = query
       const matching = [...jobs.values()].filter(
-        (job) =>
-          (!statuses || statuses.includes(job.status)) &&
-          (!repo || sameRepo(job.repo, repo)) &&
-          inRepos(job, repos) &&
-          (!analyzer || job.analyzer === analyzer) &&
-          (!schedule || job.schedule === schedule) &&
-          (!trigger || job.trigger === trigger) &&
-          (!signature || job.errorSignature === signature) &&
-          (!before || job.createdAt < before),
+        (job) => matchesJobQuery(job, query) && (!before || job.createdAt < before),
       )
       return matching
         .toSorted(
@@ -370,6 +405,13 @@ function memoryJobs(): JobStore {
         )
         .slice(0, limit)
         .map(clone)
+    },
+    async count(query = {}) {
+      const counts = new Map<JobStatus, number>()
+      for (const job of jobs.values())
+        if (matchesJobQuery(job, query) && (!query.since || job.createdAt >= query.since))
+          counts.set(job.status, (counts.get(job.status) ?? 0) + 1)
+      return jobCounts(counts)
     },
     async failures({ since, analyzer, repos, limit = 50 }) {
       const groups = new Map<string, JobFailureGroup & { members: Set<string> }>()

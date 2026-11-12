@@ -203,6 +203,7 @@ export const releaseSettingsDefinition = {
   label: 'Release flow',
   description: 'How releases are proposed, versioned and deployed.',
   section: 'Releases',
+  default: releaseSettingsSchema.parse({}),
   schema: releaseSettingsSchema,
   help,
 }
@@ -213,6 +214,7 @@ export const releaseNotifyDefinition = {
   label: 'Release notifications',
   description: 'Webhook targets for release events; sealed because URLs are credentials.',
   section: 'Releases',
+  default: { targets: [] },
   schema: releaseNotifySchema,
   secret: true,
   help: 'Each target gets the events it lists (all when none): a candidate proposed, merged, accepted, a version created, deploys started, succeeded or failed.',

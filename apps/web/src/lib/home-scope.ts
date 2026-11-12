@@ -1,14 +1,15 @@
 import type { GroupMatch } from '@holtkeeper/api'
 
-/** The three positions of the scope switch every list page shares. */
-export type ScopeView = 'mine' | 'all' | 'others'
+/** The two positions of the scope switch every list page shares. */
+export type ScopeView = 'mine' | 'all'
 
-const scopeViews: readonly ScopeView[] = ['mine', 'all', 'others']
+const scopeViews: readonly ScopeView[] = ['mine', 'all']
 
+/** A stored scope position; anything else, including retired positions, is `undefined`. */
 export const parseScopeView = (value: unknown): ScopeView | undefined =>
   scopeViews.find((view) => view === value)
 
-/** *My team* when the viewer has home groups, otherwise *All I can see*. */
+/** *My teams* when the viewer has home groups, otherwise *All I can see*. */
 export const defaultScopeView = (homeGroups: readonly GroupMatch[]): ScopeView =>
   homeGroups.length ? 'mine' : 'all'
 
@@ -22,7 +23,6 @@ export const inHomeGroups = (
 
 /** What a list shows for a scope position, plus the counts the switch and the folded line need. */
 export interface ScopedList<T> {
-  /** Items to list; empty for *Other teams*, which shows counts only. */
   shown: T[]
   counts: Record<ScopeView, number>
   /** Items outside the home groups and the groups they are in, e.g. "4 repos of 2 other teams". */
@@ -44,8 +44,8 @@ export function scopeList<T extends { groups: readonly string[] }>(
   const homeNames = new Set(homeGroups.filter((entry) => typeof entry === 'string'))
   const teams = new Set(rest.flatMap((item) => item.groups).filter((g) => !homeNames.has(g)))
   return {
-    shown: view === 'mine' ? mine : view === 'all' ? [...items] : [],
-    counts: { mine: mine.length, all: items.length, others: rest.length },
+    shown: view === 'mine' ? mine : [...items],
+    counts: { mine: mine.length, all: items.length },
     others: { items: rest.length, teams: teams.size },
   }
 }

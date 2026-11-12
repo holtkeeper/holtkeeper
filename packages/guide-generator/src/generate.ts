@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import type { Agent, ModelTier } from '@holtkeeper/agent'
-import type { GuideGenerated, GuideSection } from '@holtkeeper/store'
+import type { GuideGenerated, GuideGeneratedInput, GuideSection } from '@holtkeeper/store'
 
 import type { Evidence } from './evidence.ts'
 import {
@@ -60,8 +60,12 @@ export const pendingGenerated = (row: GuideSection | undefined): GuideGenerated 
  */
 export function placeGenerated(
   row: GuideSection | undefined,
-  layer: GuideGenerated,
-): { generated: GuideGenerated; proposal?: GuideGenerated; outcome: 'proposed' | 'kept' } {
+  layer: GuideGeneratedInput,
+): {
+  generated: GuideGeneratedInput
+  proposal?: GuideGeneratedInput
+  outcome: 'proposed' | 'kept'
+} {
   const accepted = row?.generated?.status === 'accepted' ? row.generated : undefined
   if (!accepted) return { generated: layer, outcome: 'proposed' }
   if (!layer.body.trim() || accepted.body.trim() === layer.body.trim())
@@ -88,6 +92,8 @@ export interface SectionInput {
   stored?: GuideSection
   /** For `commits`: the rendered text; the evidence is that text. */
   text?: string
+  /** Hashes of versions a person rejected; never proposed again, even when forced. */
+  rejected?: ReadonlySet<string>
 }
 
 /** How a run treated one section. */
@@ -100,8 +106,8 @@ export interface SectionResult {
   /** Why it was skipped. */
   reason?: string
   evidence: { id: string; label: string }[]
-  /** The new layer, for `proposed` and `kept`; store it with `placeGenerated`. */
-  layer?: GuideGenerated
+  /** The new layer, for `proposed` and `kept`; store it with `placeGenerated` (the store numbers it). */
+  layer?: GuideGeneratedInput
 }
 
 /** The one LLM call of a run, when there was one. */
@@ -123,6 +129,8 @@ export interface GenerateInput {
   force?: boolean
   /** Commit the evidence was read at. */
   sha?: string
+  /** The job of the run; stored with every layer it writes. */
+  jobId?: string
   now: () => Date
   signal?: AbortSignal
   log?: (line: string) => void
@@ -136,7 +144,8 @@ export interface GenerateResult {
 /**
  * Decides and writes the generated layer of each section; stores nothing itself. Sections without
  * evidence are skipped. A section whose hash equals that of its latest generated text is
- * `unchanged` and costs nothing (unless `force`). `commits` is written from its text without an
+ * `unchanged` and costs nothing (unless `force`); one whose hash a person rejected is skipped,
+ * forced or not. `commits` is written from its text without an
  * LLM. The remaining LLM sections go into one agent call: on tier `main` when `general` is among
  * them, else `fast`, with no tools and a spend cap (`CALL_CAPS`). Without an agent they are
  * skipped. A `BudgetExceededError` from the agent propagates, so the job is blocked; nothing of
@@ -151,6 +160,7 @@ export async function generateGuide(input: GenerateInput): Promise<GenerateResul
     status: 'proposed' as const,
     generatedAt: at,
     ...(input.sha !== undefined && { sha: input.sha }),
+    ...(input.jobId !== undefined && { jobId: input.jobId }),
     ...(input.prompt?.trim() && { prompt: input.prompt.trim() }),
   })
 
@@ -171,8 +181,18 @@ export async function generateGuide(input: GenerateInput): Promise<GenerateResul
       results.push({ section: section.section, outcome: 'unchanged', inputHash: hash, evidence })
       continue
     }
+    if (section.rejected?.has(hash)) {
+      results.push({
+        section: section.section,
+        outcome: 'skipped',
+        inputHash: hash,
+        reason: 'a person rejected text from these inputs',
+        evidence,
+      })
+      continue
+    }
     if (section.section === 'commits') {
-      const layer: GuideGenerated = {
+      const layer: GuideGeneratedInput = {
         ...base(hash),
         body: section.text?.trim() ?? '',
         model: DETERMINISTIC_MODEL,
@@ -237,7 +257,7 @@ export async function generateGuide(input: GenerateInput): Promise<GenerateResul
   for (const entry of llm) {
     const section = entry.input.section
     const lines = isLlmSection(section) ? (answer.output?.sections[section] ?? []) : []
-    const layer: GuideGenerated = {
+    const layer: GuideGeneratedInput = {
       ...base(entry.hash),
       body: renderBullets(lines),
       model,

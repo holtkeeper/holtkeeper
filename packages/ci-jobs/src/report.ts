@@ -2,10 +2,10 @@ import type { RepoRef } from '@holtkeeper/forge'
 import { defineAnalysis, metric } from '@holtkeeper/report'
 import type { Cell, Metric, Report, Section, Tone } from '@holtkeeper/report'
 
-import { problemJobs } from './problems.ts'
+import { jobProblems, problemJobs } from './problems.ts'
 import { ciJobsDataSchema, readCiJobs } from './schema.ts'
 import { formatDuration } from './stats.ts'
-import type { CiJobsData, CiProblemKind, JobTrend } from './types.ts'
+import type { CiJobsData, CiOutcomes, CiProblemKind, JobTrend } from './types.ts'
 
 const ms = (seconds: number | undefined) =>
   seconds === undefined ? undefined : Math.round(seconds * 1000)
@@ -69,7 +69,7 @@ function headline(data: CiJobsData, previous?: CiJobsData): Metric[] {
       unit: 'percent',
       previous: previous?.pipelines.successRate,
       better: 'up',
-      hint: `${pipelines.count} ${scope(data)}; jobs allowed to fail left out.`,
+      hint: `${pipelines.count} ${scope(data)}; canceled ones count as not passed, jobs allowed to fail are left out.`,
     }),
     measured('queue', 'Queue (median)', ms(pipelines.queue.median), {
       unit: 'ms',
@@ -243,11 +243,85 @@ export function ciJobsReport(
   }
 }
 
+/**
+ * State of a repository's CI, worst first: a job keeps failing, passes only on retry or got
+ * slower; `healthy` without such jobs; `idle` when no pipeline ran in the window.
+ */
+export type CiStatus = 'failing' | 'flaky' | 'slower' | 'healthy' | 'idle'
+
+/** Stored headline numbers of one `ci-jobs` record. Durations are seconds. */
+export interface CiJobsMetrics {
+  status: CiStatus
+  /** Branch the pipeline numbers describe; absent when they cover every ref. */
+  ref?: string
+  pipelines: number
+  /** Percent of pipelines that passed. */
+  successRate?: number
+  /** Pipelines by outcome; absent for records written before it was counted. */
+  outcomes?: CiOutcomes
+  /** Pipeline time of passing pipelines. */
+  median?: number
+  p90?: number
+  /** Percent change of the median pipeline time, last 7 days against the 7 before. */
+  change?: number
+  /** Median queue time of job attempts. */
+  queue?: number
+  /** Jobs per problem, as the problem list judges them; one job may count in several. */
+  failing: number
+  flaky: number
+  slower: number
+  /** Jobs on the problem list (`problemJobs`), at most five; absent for records written before. */
+  problems?: number
+  /**
+   * Median pipeline time per week of the window, oldest first, `null` for weeks without a passing
+   * pipeline; absent for records written before.
+   */
+  weeks?: (number | null)[]
+  lastRunAt?: string
+}
+
+/** `CiJobsMetrics` of `data`. */
+export function ciJobsMetrics(data: CiJobsData): CiJobsMetrics {
+  const problems = data.jobs.map(jobProblems)
+  const jobs = (kind: CiProblemKind) => problems.filter((list) => list.includes(kind)).length
+  const failing = jobs('failing')
+  const flaky = jobs('flaky')
+  const slower = jobs('slower')
+  const { pipelines } = data
+  return {
+    status:
+      pipelines.count === 0
+        ? 'idle'
+        : failing
+          ? 'failing'
+          : flaky
+            ? 'flaky'
+            : slower
+              ? 'slower'
+              : 'healthy',
+    ...(pipelines.ref ? { ref: pipelines.ref } : {}),
+    pipelines: pipelines.count,
+    ...(pipelines.successRate === undefined ? {} : { successRate: pipelines.successRate }),
+    ...(pipelines.outcomes ? { outcomes: pipelines.outcomes } : {}),
+    ...(pipelines.duration.median === undefined ? {} : { median: pipelines.duration.median }),
+    ...(pipelines.duration.p90 === undefined ? {} : { p90: pipelines.duration.p90 }),
+    ...(pipelines.change === undefined ? {} : { change: pipelines.change }),
+    ...(pipelines.queue.median === undefined ? {} : { queue: pipelines.queue.median }),
+    failing,
+    flaky,
+    slower,
+    problems: problemJobs(data).length,
+    weeks: data.weeks.map((week) => week.median ?? null),
+    ...(data.lastRunAt ? { lastRunAt: data.lastRunAt } : {}),
+  }
+}
+
 /** The `ci-jobs` analysis kind: pipeline time, success rate and problem jobs of a repository. */
-export const ciJobsAnalysis = defineAnalysis<CiJobsData>({
+export const ciJobsAnalysis = defineAnalysis<CiJobsData, CiJobsMetrics>({
   kind: 'ci-jobs',
   label: 'CI jobs',
   schema: ciJobsDataSchema,
+  metrics: ciJobsMetrics,
   summarize: (data) => {
     const read = readCiJobs(data)
     return read ? headline(read) : []

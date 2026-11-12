@@ -1,5 +1,7 @@
+import { recordMetrics } from '@holtkeeper/analyzer'
 import type {
   AnalysisDetail,
+  AnalysisJobSummary,
   AnalysisKindList,
   AnalysisList,
   AnalysisSummary,
@@ -9,7 +11,7 @@ import { artifactId } from '@holtkeeper/artifacts'
 import { openMergeRequest, planChanges, unifiedDiff } from '@holtkeeper/changes'
 import type { GitForge } from '@holtkeeper/forge'
 import type { AnalysisKind } from '@holtkeeper/report'
-import type { AnalysisRecord } from '@holtkeeper/store'
+import type { AnalysisRecord, Job } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -20,15 +22,29 @@ import {
   type Env,
   type ServerDeps,
   authorize,
+  authorizeRecord,
   limitParam,
   parseRepo,
   principalOf,
   readBody,
   repoTarget,
 } from '../context.ts'
+import { scopedAnalyzerOptions } from '../jobs.ts'
 import { noteLibraryUses } from '../libraries.ts'
 import { canSee } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
+import { jobTarget } from './jobs.ts'
+
+/** The fields of a job a record page or sheet shows about the job that produced a record. */
+export const jobSummary = (job: Job): AnalysisJobSummary => ({
+  id: job.id,
+  status: job.status,
+  trigger: job.trigger,
+  analyzer: job.analyzer,
+  createdAt: job.createdAt,
+  ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),
+  ...(job.error ? { error: job.error } : {}),
+})
 
 const applySchema = z.object({
   ids: z.array(z.string().min(1)).min(1),
@@ -62,6 +78,7 @@ const ingestSchema = z.object({
 /**
  * Results of every analysis kind (changelog, bundle sizes, dependency graph, ...), rendered into
  * universal reports. Routes know only the `AnalysisKind` contract; kinds come from `ServerDeps`.
+ * `GET /analyses/:id` also names the job that produced the record when the caller may read it.
  */
 export function analysisRoutes(deps: ServerDeps) {
   const { store, config } = deps
@@ -80,7 +97,7 @@ export function analysisRoutes(deps: ServerDeps) {
   const readable = async (c: AppContext, id: string) => {
     const record = await store.analyses.get(id)
     if (!record) throw new HTTPException(404, { message: 'analysis not found' })
-    authorize(c, 'analyses:read', { kind: 'repo', repo: repoTarget(config, record.repo) })
+    authorizeRecord(c, 'analyses:read', { kind: 'repo', repo: repoTarget(config, record.repo) })
     return record
   }
 
@@ -128,10 +145,14 @@ export function analysisRoutes(deps: ServerDeps) {
     if (previous && previous.kind !== record.kind) {
       throw new HTTPException(400, { message: 'can only compare analyses of the same kind' })
     }
+    const [job] = await store.jobs.list({ analysisId: record.id, limit: 1 })
     return c.json<AnalysisDetail>({
       analysis: summarize(record),
       ...(previous ? { previous: summarize(previous) } : {}),
       report: kind.toReport(record, previous),
+      ...(job && canSee(principalOf(c), 'analyses:read', jobTarget(config, job))
+        ? { job: jobSummary(job) }
+        : {}),
     })
   })
 
@@ -291,14 +312,26 @@ export function analysisRoutes(deps: ServerDeps) {
     if (wrong)
       throw new HTTPException(400, { message: `artifact ${wrong.id} does not match its content` })
 
+    const createdAt = input.createdAt ?? deps.now().toISOString()
+    const options = await scopedAnalyzerOptions(config, store, {
+      analyzer: input.kind,
+      repo: input.repo,
+    }).catch(() => undefined)
+    const metrics = await recordMetrics(
+      store.analyses,
+      kind,
+      { repo: input.repo, ...(input.ref ? { ref: input.ref } : {}), createdAt, data: parsed.data },
+      options,
+    )
     const record = await store.analyses.add({
       repo: input.repo,
       kind: input.kind,
       ...(input.ref ? { ref: input.ref } : {}),
       ...(input.sha ? { sha: input.sha } : {}),
-      createdAt: input.createdAt ?? deps.now().toISOString(),
+      createdAt,
       actor: principal.id,
       data: parsed.data,
+      ...(metrics ? { metrics } : {}),
     })
     await noteLibraryUses(store.kv, record.kind, deps.now())
     for (const artifact of decoded) {

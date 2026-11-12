@@ -8,6 +8,7 @@ import type {
 import {
   BadgeCheck,
   CircleCheck,
+  CircleDashed,
   CircleX,
   GitPullRequestArrow,
   Pencil,
@@ -21,6 +22,7 @@ import { useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { usePatchReleaseView, useReleaseActions } from '../../api/queries.ts'
 import { formatRelative } from '../../lib/format.ts'
+import { awaitsAcceptance, checklistRows, stepBlockedBy } from '../../lib/release-timeline.ts'
 import {
   actorName,
   bumpChoices,
@@ -301,90 +303,68 @@ function Notes({
   )
 }
 
-function Acceptance({ repo, view }: { repo: RepoRef; view: ReleaseRepoView }) {
+function Accepted({ repo, view }: { repo: RepoRef; view: ReleaseRepoView }) {
   const actions = useReleaseActions()
   const accepted = view.row.acceptance
-  const editable = view.can.run && !view.readOnly
-  if (view.settings.acceptance === 'none' && !accepted) return null
+  if (!accepted) return null
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      {accepted ? (
-        <>
-          <BadgeCheck className="size-3.5 text-ok" />
-          <span>
-            Accepted by <b>{actorName(view.people, accepted.by, accepted.name)}</b>{' '}
-            {[channelLabel(accepted.channel), formatRelative(accepted.at)]
-              .filter(Boolean)
-              .join(' ')}
-            {accepted.note ? `: ${accepted.note}` : ''}
-          </span>
-          {editable ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              isPending={actions.withdraw.isPending}
-              onPress={() =>
-                actions.withdraw.mutate(repo, {
-                  onError: (error) => notify.error('Not withdrawn', messageOf(error)),
-                })
-              }
-            >
-              <Undo2 className="size-3.5" />
-              Withdraw
-            </Button>
-          ) : null}
-        </>
-      ) : (
-        <>
-          <span className="text-muted">
-            Not accepted yet
-            {view.settings.acceptance === 'label'
-              ? ' · or label the merged release MR release-accepted'
-              : view.settings.acceptance === 'merge'
-                ? ' · or merge the release MR'
-                : ''}
-          </span>
-          {editable ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              isPending={actions.accept.isPending}
-              onPress={() =>
-                actions.accept.mutate(
-                  { repo: repoKey(repo) },
-                  {
-                    onSuccess: (result) => notify.success(result.detail),
-                    onError: (error) => notify.error('Not accepted', messageOf(error)),
-                  },
-                )
-              }
-            >
-              <BadgeCheck className="size-3.5" />
-              Accept
-            </Button>
-          ) : null}
-        </>
-      )}
+      <BadgeCheck className="size-3.5 text-ok" />
+      <span>
+        Accepted by <b>{actorName(view.people, accepted.by, accepted.name)}</b>{' '}
+        {[channelLabel(accepted.channel), formatRelative(accepted.at)].filter(Boolean).join(' ')}
+        {accepted.note ? `: ${accepted.note}` : ''}
+      </span>
+      {view.can.run && !view.readOnly ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          isPending={actions.withdraw.isPending}
+          onPress={() =>
+            actions.withdraw.mutate(repo, {
+              onError: (error) => notify.error('Not withdrawn', messageOf(error)),
+            })
+          }
+        >
+          <Undo2 className="size-3.5" />
+          Withdraw
+        </Button>
+      ) : null}
     </div>
   )
 }
 
-function Gates({ plan }: { plan: ReleasePlan }) {
-  const { failing } = failingGates(plan.gates)
-  if (!plan.gates.length) return null
-  if (!failing.length)
-    return (
-      <p className="flex items-center gap-1.5 text-xs text-muted">
-        <CircleCheck className="size-3.5 shrink-0 text-ok" />
-        {plan.gates.map((gate) => gate.message).join(' · ')}
-      </p>
-    )
+const acceptanceHints: Record<ReleaseRepoView['settings']['acceptance'], string> = {
+  none: '',
+  manual: 'accept here, in the API or in chat',
+  label: 'accept here or label the merged release MR release-accepted',
+  merge: 'accept here or merge the release MR',
+}
+
+function GateChecklist({ plan, view }: { plan: ReleasePlan; view: ReleaseRepoView }) {
+  const rows = checklistRows(plan, view.settings.changelogFile)
   return (
-    <ul className="flex flex-col gap-1 text-xs">
-      {failing.map((gate) => (
-        <li key={`${gate.id}-${gate.message}`} className="flex items-center gap-1.5">
-          <CircleX className="size-3.5 shrink-0 text-bad" />
-          {gate.message}
+    <ul aria-label="Gates" className="flex flex-col gap-1.5 text-xs">
+      {rows.map((row) => (
+        <li key={row.key} className="flex flex-wrap items-center gap-2">
+          {row.ok ? (
+            <CircleCheck className="size-3.5 shrink-0 text-ok" />
+          ) : row.severity === 'info' ? (
+            <CircleDashed className="size-3.5 shrink-0 text-muted" />
+          ) : (
+            <CircleX
+              className={`size-3.5 shrink-0 ${row.severity === 'block' ? 'text-bad' : 'text-warn'}`}
+            />
+          )}
+          <span>{row.text}</span>
+          {row.key.startsWith('acceptance') &&
+          !row.ok &&
+          acceptanceHints[view.settings.acceptance] ? (
+            <span className="text-muted">{acceptanceHints[view.settings.acceptance]}</span>
+          ) : null}
+          {row.detail ? <span className="text-muted">{row.detail}</span> : null}
+          <span className="flex-1" />
+          <Tag tone={row.ok ? 'default' : row.tone}>{row.severityText}</Tag>
         </li>
       ))}
     </ul>
@@ -511,12 +491,23 @@ function ConfirmStep({
 }
 
 /**
- * The unreleased version on top of the timeline: the suggested version and bump, the pending
- * changes grouped by type, their tasks, the notes, acceptance and gates, and the one button for
- * the current step behind a confirmation. With both a version and a release candidate pending,
- * a switch picks which one it shows.
+ * The unreleased version on top of the timeline: the bump row (current → suggested version, the
+ * bump and why), the pending changes grouped by type, their tasks and notes, then the gates
+ * checklist with each gate's severity and whether the changelog is ready. Accept shows only when
+ * the caller may accept (`can.accept`) and the version waits for it; the step's button, behind a
+ * confirmation, stays off while a hard gate fails or the acceptance is missing. With both a
+ * version and a release candidate pending, a switch picks which one it shows.
  */
-export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView }) {
+export function NextCard({
+  repo,
+  view,
+  compact = false,
+}: {
+  repo: RepoRef
+  view: ReleaseRepoView
+  /** One column, for a side sheet. */
+  compact?: boolean
+}) {
   const actions = useReleaseActions()
   const patchView = usePatchReleaseView()
   const plans = [
@@ -556,7 +547,8 @@ export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
       { onError: (error) => notify.error('Not saved', messageOf(error)) },
     )
   }
-  const { hard } = failingGates(plan.gates)
+  const blocked = stepBlockedBy(step, plan.gates, view.row)
+  const canAccept = view.can.accept && !view.readOnly && awaitsAcceptance(view.row)
   const tasks = planTasks(plan.entries, view.issues)
   const leftOut = entryGroups(plan.entries).leftOut.length
   const label =
@@ -569,7 +561,7 @@ export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-line-strong bg-panel p-4">
       <header className="flex flex-wrap items-center gap-3">
-        <span className="text-xs text-dim">Next</span>
+        <span className="text-xs text-dim">Next release</span>
         <div className="flex items-baseline gap-2">
           <span className="mono text-sm text-muted">{plan.current?.tag ?? 'no version'}</span>
           <span className="text-muted">→</span>
@@ -578,13 +570,20 @@ export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
         <BumpTag bump={plan.suggested.bump} />
         {editable && step === 'version' ? (
           <Button size="sm" variant="ghost" onPress={() => setChangingVersion(true)}>
-            Change
+            Change version
           </Button>
         ) : null}
+        <span className="text-xs text-muted">
+          {countLabel(plan.commitCount, plan.capped)} on{' '}
+          <span className="mono">{plan.range.toLabel}</span>
+          {step === 'version' && view.row.waitingSince
+            ? ` · waiting since ${formatRelative(view.row.waitingSince)}`
+            : ''}
+        </span>
         {plans.length > 1 ? (
           <SegmentedTabs
             aria-label="Pending step"
-            className="ml-auto"
+            className="ms-auto"
             items={plans.map((candidate) => ({
               id: candidate.step,
               label:
@@ -599,11 +598,16 @@ export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
       </header>
       {plan.suggested.reasons.length ? (
         <p className="-mt-2 text-xs text-dim">
+          Bump from commit conventions:{' '}
           {plan.suggested.reasons.map((reason) => reason.because).join(' · ')}
         </p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,340px)]">
+      <div
+        className={
+          compact ? 'grid gap-4' : 'grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,340px)]'
+        }
+      >
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center gap-2">
             <h3 className="text-xs text-dim">
@@ -624,7 +628,7 @@ export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
               <Button
                 size="sm"
                 variant="ghost"
-                className="ml-auto"
+                className="ms-auto"
                 onPress={() => setEditingEntries((on) => !on)}
               >
                 {editingEntries ? 'Done' : 'Edit entries'}
@@ -679,31 +683,54 @@ export function NextCard({ repo, view }: { repo: RepoRef; view: ReleaseRepoView 
         </div>
       </div>
 
-      <footer className="flex flex-wrap items-center gap-3 border-t border-line pt-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          {step === 'version' ? <Acceptance repo={repo} view={view} /> : null}
-          <Gates plan={plan} />
-        </div>
-        {editable ? (
-          <Button
-            variant="primary"
-            isDisabled={hard.length > 0}
-            onPress={() => setConfirming(true)}
-          >
-            {step === 'propose' ? (
-              <GitPullRequestArrow className="size-4" />
-            ) : (
-              <TagIcon className="size-4" />
-            )}
-            {label}
-          </Button>
-        ) : (
-          <span className="text-xs text-muted">
-            {view.readOnly
-              ? 'The repository is read-only for Holtkeeper.'
-              : 'Your grants do not include releases:run here.'}
+      <footer className="flex flex-col gap-3 border-t border-line pt-3">
+        <GateChecklist plan={plan} view={view} />
+        {step === 'version' ? <Accepted repo={repo} view={view} /> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 flex-1 text-xs text-muted">
+            {editable && blocked
+              ? blocked
+              : editable
+                ? step === 'propose'
+                  ? `Opening asks to confirm: a merge request from ${plan.range.toLabel} into ${plan.range.fromLabel ?? 'the target branch'}`
+                  : `Creating asks to confirm: ${view.settings.changelogFile ? 'commits the notes to CHANGELOG.md, ' : ''}tags ${plan.range.toLabel}`
+                : view.readOnly
+                  ? 'The repository is read-only for Holtkeeper.'
+                  : 'Your grants do not include releases:run here.'}
           </span>
-        )}
+          {step === 'version' && canAccept ? (
+            <Button
+              variant={blocked ? 'primary' : 'secondary'}
+              isPending={actions.accept.isPending}
+              onPress={() =>
+                actions.accept.mutate(
+                  { repo: repoKey(repo) },
+                  {
+                    onSuccess: (result) => notify.success(result.detail),
+                    onError: (error) => notify.error('Not accepted', messageOf(error)),
+                  },
+                )
+              }
+            >
+              <BadgeCheck className="size-4" />
+              Accept {plan.version ?? ''}
+            </Button>
+          ) : null}
+          {editable ? (
+            <Button
+              variant={blocked ? 'secondary' : 'primary'}
+              isDisabled={blocked !== undefined}
+              onPress={() => setConfirming(true)}
+            >
+              {step === 'propose' ? (
+                <GitPullRequestArrow className="size-4" />
+              ) : (
+                <TagIcon className="size-4" />
+              )}
+              {label}
+            </Button>
+          ) : null}
+        </div>
       </footer>
 
       {step === 'version' ? (

@@ -1,11 +1,13 @@
-import type { ApiError, MeResponse } from '@holtkeeper/api'
+import type { ApiError, ForbiddenError, MeResponse } from '@holtkeeper/api'
 import { CredentialInputError, CredentialNotFoundError } from '@holtkeeper/credentials'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
 import { auditMiddleware } from './audit.ts'
-import type { Env, ServerDeps } from './context.ts'
+import { type Env, ForbiddenException, type ServerDeps } from './context.ts'
 import { createEventDispatcher } from './events.ts'
+import { releaseVersion } from './health.ts'
+import { inboxServiceFor } from './inbox.ts'
 import { repoHooks } from './repo-hooks.ts'
 import { accountRoutes } from './routes/accounts.ts'
 import { aiCatalogRoutes } from './routes/ai-catalog.ts'
@@ -19,6 +21,7 @@ import { auditRoutes } from './routes/audits.ts'
 import { automationRoutes } from './routes/automation.ts'
 import { avatarRoutes, withAvatar } from './routes/avatars.ts'
 import { backfillRoutes } from './routes/backfill.ts'
+import { branchRoutes } from './routes/branches.ts'
 import { bundleRoutes } from './routes/bundles.ts'
 import { chatRoutes } from './routes/chat.ts'
 import { ciRoutes } from './routes/ci.ts'
@@ -29,24 +32,30 @@ import { databaseRoutes } from './routes/database.ts'
 import { egressRoutes } from './routes/egress.ts'
 import { guideRoutes } from './routes/guides.ts'
 import { homeRoutes } from './routes/home.ts'
+import { inboxRoutes } from './routes/inbox.ts'
 import { jobRoutes } from './routes/jobs.ts'
 import { knowledgeRoutes } from './routes/knowledge.ts'
 import { learningRoutes } from './routes/learnings.ts'
 import { libraryIndexRoutes } from './routes/library-index.ts'
+import { licensesRoutes } from './routes/licenses.ts'
 import { mediaRoutes } from './routes/media.ts'
 import { preferenceRoutes } from './routes/preferences.ts'
 import { releaseRoutes } from './routes/releases.ts'
 import { repoAvatarRoutes } from './routes/repo-avatars.ts'
 import { repoPageRoutes } from './routes/repo-page.ts'
+import { repoRoutes } from './routes/repos.ts'
+import { reviewRoutes } from './routes/reviews.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { settingRoutes } from './routes/settings.ts'
 import { slackSettingsRoutes } from './routes/slack-settings.ts'
+import { snoozeRoutes } from './routes/snoozes.ts'
 import { stackRoutes } from './routes/stack.ts'
 import { storageRoutes } from './routes/storage.ts'
 import { taskRoutes } from './routes/tasks.ts'
 import { trackerRoutes } from './routes/trackers.ts'
 import { updateRoutes } from './routes/updates.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
+import { supplyToolsAccess } from './tools/repos.ts'
 import { serverPoller } from './updates.ts'
 import { crossTeamPolicy } from './visibility.ts'
 
@@ -56,9 +65,11 @@ import { crossTeamPolicy } from './visibility.ts'
  */
 export function createApp(deps: ServerDeps) {
   const app = new Hono<Env>()
-  const apiSurface = createApiSurface(deps)
+  const supply = deps.supply ?? supplyToolsAccess(deps)
+  const apiSurface = createApiSurface(deps, supply)
 
   app.onError((error, c) => {
+    if (error instanceof ForbiddenException) return c.json<ForbiddenError>(error.body(), 403)
     if (error instanceof HTTPException)
       return c.json<ApiError>({ error: error.message }, error.status)
     if (error instanceof CredentialInputError)
@@ -77,7 +88,13 @@ export function createApp(deps: ServerDeps) {
     )
     await next()
   })
+  app.route('/api', snoozeRoutes(deps))
   app.use('*', auditMiddleware(deps))
+  const inbox = inboxServiceFor(deps)
+  app.use('/api/*', async (c, next) => {
+    await next()
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.res.status < 400) inbox.invalidate()
+  })
 
   app.all(`/auth/${deps.auth.name}/*`, async (c) => {
     const prefix = `/auth/${deps.auth.name}`
@@ -92,24 +109,31 @@ export function createApp(deps: ServerDeps) {
   app.all('/mcp', apiSurface.mcp)
 
   const api = new Hono<Env>()
-  api.get('/me', async (c) =>
-    c.json<MeResponse>({
+  const version = releaseVersion(deps.version)
+  api.get('/me', async (c) => {
+    const publicUrl = deps.config.server?.publicUrl?.replace(/\/+$/, '')
+    return c.json<MeResponse>({
       principal: await withAvatar(deps, c.get('principal')),
       auth: deps.auth.info(),
       crossTeam: await crossTeamPolicy(deps.store.settings),
-    }),
-  )
+      ...(version && { version }),
+      ...(publicUrl && { publicUrl }),
+    })
+  })
   api.route('/', avatarRoutes(deps))
   api.route('/', preferenceRoutes(deps))
   api.route('/', auditLogRoutes(deps))
   api.route('/', homeRoutes(deps))
+  api.route('/', inboxRoutes(deps))
   api.route('/', accountRoutes(deps))
-  api.route('/', auditRoutes(deps))
+  api.route('/', auditRoutes(deps, supply))
+  api.route('/', repoRoutes(deps))
   api.route('/', analysisRoutes(deps))
   api.route('/', ciRoutes(deps))
   api.route('/', apiSurface.routes)
   api.route('/', libraryIndexRoutes(deps))
   api.route('/', stackRoutes(deps))
+  api.route('/', licensesRoutes(supply))
   api.route('/', credentialRoutes(deps))
   api.route('/', settingRoutes(deps))
   api.route('/', jobRoutes(deps))
@@ -121,10 +145,12 @@ export function createApp(deps: ServerDeps) {
   api.route('/', bundleRoutes(deps))
   api.route('/', assetsRoutes(deps))
   api.route('/', coverageRoutes(deps))
+  api.route('/', reviewRoutes(deps))
+  api.route('/', branchRoutes(deps))
   api.route('/', repoPageRoutes(deps))
   api.route('/', backfillRoutes(deps))
-  api.route('/', knowledgeRoutes(deps))
   api.route('/', guideRoutes(deps))
+  api.route('/', knowledgeRoutes(deps))
   api.route('/', learningRoutes(deps))
   const dispatch = createEventDispatcher(deps)
   const hooks = deps.store.kv ? repoHooks(deps.store.kv, deps.vault) : undefined

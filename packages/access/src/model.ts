@@ -5,7 +5,6 @@ export const actions = [
   'repos:read',
   'audits:read',
   'audits:run',
-  'audits:allowlist',
   'analyses:read',
   'analyses:run',
   'catalog:read',

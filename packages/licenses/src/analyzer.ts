@@ -3,7 +3,7 @@ import { loadPackageCatalog } from '@holtkeeper/depgraph'
 import { z } from 'zod'
 
 import { analyzeLicenses } from './analyze.ts'
-import { defaultAllow, defaultDeny, type LicensesData } from './model.ts'
+import { defaultAllow, defaultDeny, licenseExceptionSchema, type LicensesData } from './model.ts'
 import { licensesAnalysis } from './report.ts'
 
 /** A list option that also accepts a comma-separated string, as flags pass it. */
@@ -27,8 +27,14 @@ export const licensesOptionsSchema = z.object({
   deny: list(defaultDeny),
   /** Package names (`*` wildcards allowed) to leave out of the verdict. */
   ignore: list([]),
+  /** Licenses that need a sign-off even when `allow` matches them; `deny` still wins. */
+  review: list([]),
   /** `violation` judges packages without a recognizable license not allowed instead of warning. */
   unknown: z.enum(['warn', 'violation']).default('warn'),
+  /** `ignore` leaves out packages only dev dependency groups use. */
+  devDependencies: z.enum(['check', 'ignore']).default('check'),
+  /** Packages accepted although their license would not pass; expired ones no longer apply. */
+  exceptions: z.array(licenseExceptionSchema).max(500).default([]),
   /** Warn when the repository itself carries no license file at its root. */
   requireProjectLicense: z.boolean().default(false),
 })
@@ -139,9 +145,19 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
     },
     { flag: 'ignore', option: 'ignore', description: 'comma-separated package names to skip' },
     {
+      flag: 'review',
+      option: 'review',
+      description: 'comma-separated SPDX ids or patterns that need a sign-off even when allowed',
+    },
+    {
       flag: 'unknown',
       option: 'unknown',
       description: 'warn (default) or violation for packages without a recognizable license',
+    },
+    {
+      flag: 'dev-dependencies',
+      option: 'devDependencies',
+      description: 'check (default) or ignore packages only dev dependency groups use',
     },
     {
       flag: 'require-project-license',

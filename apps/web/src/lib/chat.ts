@@ -2,13 +2,18 @@ import type {
   AgentTranscriptView,
   ChatForm,
   ChatMessageList,
+  ChatMessageRef,
   ChatMessageView,
   ChatStepStatus,
   ChatThreadView,
   GroupMatch,
 } from '@holtkeeper/api'
 
-import { type ScopeView, inHomeGroups } from './home-scope.ts'
+import { shortId } from './format.ts'
+import { type ScopeView, foldOtherTeams } from './home-scope.ts'
+import { kbId } from './knowledge.ts'
+
+const pathOf = (repo: string) => repo.slice(repo.indexOf(':') + 1)
 
 /** Values of a form being filled in, by field name. */
 export type FormValues = Record<string, string | string[] | boolean | undefined>
@@ -54,17 +59,24 @@ export function missingFields(form: ChatForm, values: FormValues): string[] {
     .map((field) => field.label)
 }
 
-const liveStatuses = new Set<ChatStepStatus>(['running', 'pending', 'waiting'])
+const liveStatuses = new Set<ChatStepStatus>(['running', 'pending'])
+const liveDeploySteps = new Set<ChatStepStatus>([...liveStatuses, 'waiting'])
 
-/** Whether a recent card still shows a step that may change, so the page should poll faster. */
+/**
+ * Whether a recent card still shows a step that may change, so the page should poll faster: a
+ * running, pending or waiting step, or a task step that is queued or running (a task waiting for
+ * approval waits on people, not on work).
+ */
 export function hasLiveCards(messages: readonly ChatMessageView[], now: Date, windowHours = 24) {
   const since = now.getTime() - windowHours * 3_600_000
   return messages.some(
     (message) =>
       Date.parse(message.updatedAt ?? message.createdAt) >= since &&
-      message.card?.blocks.some(
-        (block) =>
-          block.type === 'steps' && block.steps.some((step) => liveStatuses.has(step.status)),
+      message.card?.blocks.some((block) =>
+        block.type === 'steps'
+          ? block.steps.some((step) => liveDeploySteps.has(step.status))
+          : block.type === 'task' &&
+            (block.steps ?? []).some((step) => liveStatuses.has(step.status)),
       ),
   )
 }
@@ -250,26 +262,24 @@ export function insertMention(
 
 /** What a thread is about, for its list row and header: the repository path, the group or `Team`. */
 export const threadScope = (thread: Pick<ChatThreadView, 'repo' | 'group'>): string =>
-  thread.repo ? thread.repo.slice(thread.repo.indexOf(':') + 1) : (thread.group ?? 'Team')
+  thread.repo ? pathOf(thread.repo) : (thread.group ?? 'Team')
 
 /**
- * Threads for a scope switch position. Team-wide threads count as the viewer's own team. Unlike
- * other lists, *Other teams* lists the threads, since reading another team's thread is the point.
+ * Threads for a scope switch position. Team-wide threads count as the viewer's own teams; on
+ * *My teams* the threads of other teams fold into `others` (with the groups they are in), on *All
+ * I can see* nothing folds. Without home groups every thread is the viewer's own.
  */
 export function scopeThreads<T extends Pick<ChatThreadView, 'groups'>>(
   threads: readonly T[],
   view: ScopeView,
   homeGroups: readonly GroupMatch[],
-): { shown: T[]; counts: Record<ScopeView, number> } {
-  const mine: T[] = []
-  const rest: T[] = []
-  for (const thread of threads)
-    (thread.groups.length === 0 || inHomeGroups(homeGroups, thread.groups) ? mine : rest).push(
-      thread,
-    )
+): { shown: T[]; others: T[]; teams: string[]; counts: Record<ScopeView, number> } {
+  const folded = foldOtherTeams(threads, homeGroups, (thread) => thread.groups)
   return {
-    shown: view === 'mine' ? mine : view === 'all' ? [...threads] : rest,
-    counts: { mine: mine.length, all: threads.length, others: rest.length },
+    shown: view === 'mine' ? folded.mine : [...threads],
+    others: view === 'mine' ? folded.others : [],
+    teams: view === 'mine' ? folded.teams : [],
+    counts: { mine: folded.mine.length, all: threads.length },
   }
 }
 
@@ -317,3 +327,48 @@ export const formatCost = (usd: number): string => `$${usd.toFixed(usd < 1 ? 3 :
 /** Text of an unread badge: empty for none, `99+` past 99. */
 export const unreadBadge = (count: number): string =>
   count <= 0 ? '' : count > 99 ? '99+' : String(count)
+
+/** The unread badge of a thread row: none for threads the viewer muted. */
+export const threadBadge = (thread: Pick<ChatThreadView, 'unread' | 'muted'>): string =>
+  thread.muted ? '' : unreadBadge(thread.unread)
+
+/** One stable key per ref, so lists can drop repeats and render keys. */
+export const refKey = (ref: ChatMessageRef): string =>
+  ref.kind === 'repo'
+    ? `repo:${ref.repo}`
+    : ref.kind === 'mr'
+      ? `mr:${ref.repo}!${ref.iid}`
+      : `${ref.kind}:${ref.id}`
+
+/** How a ref reads on a chip: a repository path, `kb:<short id>`, `Task <short id>`, `path!iid`. */
+export function refLabel(ref: ChatMessageRef): string {
+  if (ref.kind === 'repo') return pathOf(ref.repo)
+  if (ref.kind === 'mr') return `${pathOf(ref.repo)}!${ref.iid}`
+  if (ref.kind === 'note') return kbId(ref.id, true)
+  return `${ref.kind === 'task' ? 'Task' : 'Run'} ${shortId(ref.id)}`
+}
+
+/**
+ * Every ref of `messages` once, in order of first mention, for the thread's "Cited and linked"
+ * list; repositories are left out (the context column lists them on their own).
+ */
+export function threadRefs(messages: readonly Pick<ChatMessageView, 'refs'>[]): ChatMessageRef[] {
+  const seen = new Set<string>()
+  const refs: ChatMessageRef[] = []
+  for (const message of messages)
+    for (const ref of message.refs) {
+      const key = refKey(ref)
+      if (ref.kind === 'repo' || seen.has(key)) continue
+      seen.add(key)
+      refs.push(ref)
+    }
+  return refs
+}
+
+/** Repositories a thread can still take as context: readable ones not attached yet, sorted. */
+export const addableRepos = (readable: readonly string[], attached: readonly string[]): string[] =>
+  readable.filter((repo) => !attached.includes(repo)).toSorted()
+
+/** What kind of thread it is, in words: about a repository, a group or the whole team. */
+export const threadKind = (thread: Pick<ChatThreadView, 'repo' | 'group'>): string =>
+  thread.repo ? 'Repository thread' : thread.group ? 'Group thread' : 'Team thread'

@@ -202,6 +202,104 @@ samp,
   font-variant-numeric: tabular-nums;
 }
 
+.shell {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 100vh;
+  padding: 8px;
+  background: var(--background);
+}
+
+.shell-rail {
+  position: sticky;
+  top: 8px;
+  display: flex;
+  flex: 0 0 60px;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  align-self: flex-start;
+  height: calc(100vh - 16px);
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.shell-rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.shell-rail-bottom {
+  margin-top: auto;
+}
+
+.shell-main {
+  display: flex;
+  flex: 999 1 560px;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  outline: none;
+}
+
+.shell-sheet {
+  position: sticky;
+  top: 8px;
+  flex: 1 1 400px;
+  align-self: flex-start;
+  min-width: 0;
+  max-width: 460px;
+  height: calc(100vh - 16px);
+}
+
+.shell-sheet:empty {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .shell-rail {
+    position: static;
+    flex: none;
+    flex-direction: row;
+    align-self: stretch;
+    height: auto;
+    padding: 0 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .shell-rail-group {
+    flex-direction: row;
+  }
+
+  .shell-rail-bottom {
+    margin: 0 0 0 auto;
+  }
+
+  .shell-main {
+    flex: 1 1 auto;
+  }
+
+  .shell-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    max-width: none;
+    height: auto;
+    padding: 8px;
+    background: var(--background);
+  }
+}
+
 @layer components {
   .button,
   .toggle-button {

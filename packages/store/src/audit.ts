@@ -4,7 +4,9 @@ import type {
   AuditEventInput,
   AuditFilter,
   AuditStore,
+  AuditSummary,
   AuditVerification,
+  Timestamp,
 } from './types.ts'
 
 const clone = <T>(value: T): T => structuredClone(value)
@@ -194,6 +196,50 @@ export async function* formatAuditEvents(
     yield format === 'csv' ? `${csvRow(event)}\n` : `${JSON.stringify(event)}\n`
 }
 
+const byCount = <T extends { key: string; count: number }>(counts: T[]): T[] =>
+  counts.toSorted((a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+
+/**
+ * An `AuditSummary` from unsorted per-dimension counts, in the order the contract promises:
+ * days oldest first, every other dimension most first and then by key.
+ */
+export function sortAuditSummary(summary: AuditSummary): AuditSummary {
+  return {
+    total: summary.total,
+    days: summary.days.toSorted((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+    actions: byCount(summary.actions),
+    actors: byCount(summary.actors),
+    repos: byCount(summary.repos),
+  }
+}
+
+const auditDay = (at: Timestamp): string => new Date(at).toISOString().slice(0, 10)
+
+const tally = (map: Map<string, number>, key: string) => map.set(key, (map.get(key) ?? 0) + 1)
+
+const countsOf = (map: Map<string, number>) => [...map].map(([key, count]) => ({ key, count }))
+
+function summarize(events: readonly AuditEvent[]): AuditSummary {
+  const days = new Map<string, number>()
+  const actions = new Map<string, number>()
+  const actors = new Map<string, { count: number; name: string }>()
+  const repos = new Map<string, number>()
+  for (const event of events) {
+    tally(days, auditDay(event.at))
+    tally(actions, event.action)
+    if (event.target.repo !== undefined) tally(repos, event.target.repo)
+    const actor = actors.get(event.actor.id)
+    actors.set(event.actor.id, { count: (actor?.count ?? 0) + 1, name: event.actor.name })
+  }
+  return sortAuditSummary({
+    total: events.length,
+    days: countsOf(days),
+    actions: countsOf(actions),
+    actors: [...actors].map(([key, { count, name }]) => ({ key, count, name })),
+    repos: countsOf(repos),
+  })
+}
+
 /** The in-memory `AuditStore`. */
 export function memoryAudit(): AuditStore {
   const events: AuditEvent[] = []
@@ -226,6 +272,7 @@ export function memoryAudit(): AuditStore {
       }
     },
     count: async (filter = {}) => matching(filter).length,
+    summary: async (filter = {}) => summarize(matching(filter)),
     repos: async () =>
       [
         ...new Set(events.flatMap((event) => (event.target.repo ? [event.target.repo] : []))),

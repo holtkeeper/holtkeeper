@@ -44,6 +44,20 @@ export const releaseEventSchema = z.object({
   environment: z.string().optional(),
   url: z.string().optional(),
   detail: z.string().optional(),
+  sha: z.string().optional(),
+  via: z.enum(['manual', 'label', 'merge']).optional(),
+  note: z.string().optional(),
+  force: z.boolean().optional(),
+  notes: z
+    .object({
+      source: z.enum(['agent', 'changelog', 'person', 'none']),
+      edited: z.boolean(),
+      markdown: z.string().optional(),
+    })
+    .optional(),
+  changelogSha: z.string().optional(),
+  jobId: z.number().optional(),
+  reason: z.string().optional(),
 })
 
 /** `value` read with `schema`, or `undefined` when it is missing or no longer fits. */

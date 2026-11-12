@@ -149,6 +149,19 @@ describe('describeField', () => {
     })
   })
 
+  test('enum option labels from x-labels', () => {
+    const level = {
+      type: 'string',
+      enum: ['low', 'high'],
+      'x-labels': { low: 'Quiet', high: 'Loud' },
+    }
+    expect(describeField(level, level)).toEqual({
+      kind: 'enum',
+      options: ['low', 'high'],
+      labels: { low: 'Quiet', high: 'Loud' },
+    })
+  })
+
   test('records of objects and number tags', () => {
     expect(describeField(limits, limits)).toMatchObject({ kind: 'record' })
     expect(

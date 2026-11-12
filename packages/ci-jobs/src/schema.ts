@@ -8,6 +8,12 @@ const spreadSchema = z.object({
   p90: z.number().optional(),
 })
 
+const outcomesSchema = z.object({
+  success: z.number(),
+  failed: z.number(),
+  canceled: z.number(),
+})
+
 /** Validates `CiJobsData`, e.g. records uploaded from elsewhere. Unknown fields are dropped. */
 export const ciJobsDataSchema: z.ZodType<CiJobsData> = z.object({
   window: z.object({ from: z.string(), to: z.string(), days: z.number() }),
@@ -30,6 +36,7 @@ export const ciJobsDataSchema: z.ZodType<CiJobsData> = z.object({
     ref: z.string().optional(),
     count: z.number(),
     successRate: z.number().optional(),
+    outcomes: outcomesSchema.optional(),
     duration: spreadSchema,
     queue: spreadSchema,
     change: z.number().optional(),
@@ -53,6 +60,7 @@ export const ciJobsDataSchema: z.ZodType<CiJobsData> = z.object({
       failureRate: z.number().optional(),
       retryRate: z.number(),
       flaky: z.number(),
+      outcomes: outcomesSchema.optional(),
       allowFailure: z.boolean(),
       duration: spreadSchema,
       recentMedian: z.number().optional(),

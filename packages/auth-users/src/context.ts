@@ -1,4 +1,4 @@
-import type { AuditStore, ExternalAccountStore, UserStore } from '@holtkeeper/store'
+import type { AuditStore, ExternalAccountStore, KvStore, UserStore } from '@holtkeeper/store'
 
 import type { SignedCookie } from './cookies.ts'
 import type { OidcClient } from './oidc-client.ts'
@@ -27,6 +27,7 @@ interface OidcFlow {
 /** Everything the flows share; built once by the provider. */
 export interface Context {
   store: UserStore
+  kv?: Pick<KvStore, 'get' | 'set'>
   origin: string
   rpID: string
   rpName: string

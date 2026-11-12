@@ -8,6 +8,7 @@ import type {
   PublicApiPackageDetail,
   PublicApiPackageList,
   PublicApiSearchResult,
+  PublicApiSymbol,
   PackageUsageView,
   PublishedPackagesView,
   RepoUsageView,
@@ -24,8 +25,9 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import type { UsagesData } from '@holtkeeper/usages'
 import { aesVault } from '@holtkeeper/vault'
 
-import { createApiCatalog } from '../src/api-surface/catalog.ts'
+import { cachedCatalog, createApiCatalog } from '../src/api-surface/catalog.ts'
 import { createApp } from '../src/app.ts'
+import { createFleetCache } from '../src/fleet-cache.ts'
 
 const workForge = {
   getRepository: async (path: string) => ({ path, defaultBranch: 'main' }),
@@ -215,6 +217,222 @@ describe('catalog routes', () => {
   })
 })
 
+const status = async (path: string, headers: Record<string, string> = asAdmin) =>
+  (await app.request(path, { headers })).status
+
+describe('catalog facets and matches', () => {
+  test('packages carry their match and facets counted before the repo and kind filters', async () => {
+    const byName = await get<PublicApiPackageList>('/api/api-surface/packages?q=ui')
+    expect(byName.packages.map((p) => [p.name, p.match])).toEqual([['@acme/ui', 'part']])
+    const byDoc = await get<PublicApiPackageList>('/api/api-surface/packages?q=buttons')
+    expect(byDoc.packages.map((p) => [p.name, p.match])).toEqual([
+      ['@acme/ui', 'doc'],
+      ['@games/engine', 'doc'],
+    ])
+    const narrowed = await get<PublicApiPackageList>(
+      '/api/api-surface/packages?repo=work:games/a&kind=function',
+    )
+    expect(narrowed.packages.map((p) => p.name)).toEqual(['@games/engine'])
+    expect(narrowed.packages[0]?.match).toBeUndefined()
+    expect(narrowed.facets).toEqual({
+      kinds: [{ value: 'function', count: 2 }],
+      packages: [
+        { value: '@acme/ui', count: 1 },
+        { value: '@games/engine', count: 1 },
+      ],
+      repos: [
+        { value: 'work:games/a', count: 1 },
+        { value: 'work:libs/ui', count: 1 },
+      ],
+    })
+    expect(
+      (await get<PublicApiPackageList>('/api/api-surface/packages?kind=class')).packages,
+    ).toEqual([])
+    expect(await status('/api/api-surface/packages?kind=widget')).toBe(400)
+  })
+
+  test('search hits carry match, ref, deprecated and removed, with facets before the filters', async () => {
+    await add(
+      'libs/ui',
+      {
+        packages: [
+          {
+            ...ui('1.2.0', ['card']),
+            entries: [
+              {
+                subpath: '.',
+                symbols: [
+                  {
+                    name: 'card',
+                    kind: 'function',
+                    signature: 'function card(): void',
+                    deprecated: 'use panel',
+                    file: 'packages/ui/src/index.ts',
+                    line: 1,
+                  },
+                ],
+              },
+              {
+                subpath: './cards',
+                symbols: [
+                  {
+                    name: 'cardList',
+                    kind: 'variable',
+                    signature: 'const cardList: string[]',
+                    file: 'packages/ui/src/cards.ts',
+                    line: 1,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      '2026-10-28T00:00:00.000Z',
+      'v1.2.0',
+    )
+    const result = await get<PublicApiSearchResult>('/api/api-surface/search?q=card')
+    expect(
+      result.hits.map((hit) => [hit.importPath, hit.symbol.name, hit.match, hit.deprecated]),
+    ).toEqual([
+      ['@acme/ui', 'card', 'exact', true],
+      ['@acme/ui/cards', 'cardList', 'prefix', false],
+    ])
+    expect(result.hits[0]).toMatchObject({ ref: 'v1.2.0', removed: false, subpath: '.' })
+    expect(result.facets.matches).toEqual([
+      { value: 'exact', count: 1 },
+      { value: 'prefix', count: 1 },
+    ])
+    expect(result.facets.subpaths).toEqual([
+      { value: '.', count: 1 },
+      { value: './cards', count: 1 },
+    ])
+    expect(result.facets.kinds).toEqual([
+      { value: 'function', count: 1 },
+      { value: 'variable', count: 1 },
+    ])
+    const prefixOnly = await get<PublicApiSearchResult>(
+      '/api/api-surface/search?q=card&match=prefix&subpath=./cards',
+    )
+    expect(prefixOnly.hits.map((hit) => hit.symbol.name)).toEqual(['cardList'])
+    expect(prefixOnly.facets.matches).toHaveLength(2)
+    expect(await status('/api/api-surface/search?q=card&match=fuzzy')).toBe(400)
+
+    const scene = await get<PublicApiSearchResult>('/api/api-surface/search?q=scene')
+    expect(scene.hits.map((hit) => [hit.package, hit.removed, hit.ref])).toEqual([
+      ['@games/engine', false, undefined],
+    ])
+    const inRepo = await get<PublicApiSearchResult>(
+      '/api/api-surface/search?q=card&repo=work:games/a',
+    )
+    expect(inRepo.hits).toEqual([])
+    expect(inRepo.facets.repos).toEqual([{ value: 'work:libs/ui', count: 2 }])
+  })
+
+  test('search marks symbols of packages their repository dropped', async () => {
+    const other = { ...ui('1.0.0', ['tab']), name: '@acme/other', dir: 'packages/other' }
+    await add('libs/ui', { packages: [other] }, '2026-10-25T00:00:00.000Z')
+    await add('libs/ui', { packages: [other] }, '2026-10-26T00:00:00.000Z')
+    const result = await get<PublicApiSearchResult>('/api/api-surface/search?q=dialog')
+    expect(result.hits.map((hit) => [hit.package, hit.removed])).toEqual([['@acme/ui', true]])
+  })
+
+  test('narrow grants see neither packages nor hits of other teams', async () => {
+    await crossTeam('off')
+    const list = await get<PublicApiPackageList>('/api/api-surface/packages', asGames)
+    expect(list.packages.map((p) => p.name)).toEqual(['@games/engine'])
+    expect(list.facets.repos).toEqual([{ value: 'work:games/a', count: 1 }])
+    const search = await get<PublicApiSearchResult>('/api/api-surface/search?q=renders', asGames)
+    expect(search.hits.map((hit) => hit.symbol.name)).toEqual(['scene'])
+    expect(search.facets.packages).toEqual([{ value: '@games/engine', count: 1 }])
+  })
+})
+
+const everything = () => true
+
+describe('symbol route', () => {
+  test('answers one symbol with the versions where it changed', async () => {
+    const card = await get<PublicApiSymbol>('/api/api-surface/symbol?package=@acme/ui&name=card')
+    expect(card).toMatchObject({
+      package: '@acme/ui',
+      version: '1.1.0',
+      ref: 'v1.1.0',
+      subpath: '.',
+      importPath: '@acme/ui',
+      alsoIn: [],
+    })
+    expect(card.symbol.signature).toBe('function card(): void')
+    expect(card.history).toEqual({
+      changes: [
+        {
+          version: '1.1.0',
+          ref: 'v1.1.0',
+          analyzedAt: '2026-10-10T00:00:00.000Z',
+          change: 'added',
+          after: 'function card(): void',
+        },
+      ],
+      versions: 3,
+      capped: false,
+    })
+
+    const link = await get<PublicApiSymbol>(
+      '/api/api-surface/symbol?package=@acme/ui&name=link&version=1.0.0',
+    )
+    expect(link.history.changes.map((change) => [change.version, change.change])).toEqual([
+      ['1.1.0', 'removed'],
+      ['1.0.0', 'added'],
+    ])
+  })
+
+  test('caps the history and rejects bad limits', async () => {
+    const capped = await get<PublicApiSymbol>(
+      '/api/api-surface/symbol?package=@acme/ui&name=button&limit=2',
+    )
+    expect(capped.history).toEqual({ changes: [], versions: 2, capped: true })
+    for (const limit of ['0', '101', 'two', '1.5'])
+      // oxlint-disable-next-line no-await-in-loop -- one request per case
+      expect(
+        await status(`/api/api-surface/symbol?package=@acme/ui&name=button&limit=${limit}`),
+      ).toBe(400)
+    expect(await status('/api/api-surface/symbol?package=@acme/ui')).toBe(400)
+  })
+
+  test('symbols and packages nobody may read are not found', async () => {
+    expect(await status('/api/api-surface/symbol?package=@acme/ui&name=missing')).toBe(404)
+    expect(await status('/api/api-surface/symbol?package=@acme/none&name=button')).toBe(404)
+    expect(await status('/api/api-surface/symbol?package=@acme/ui&name=card', asGames)).toBe(200)
+    await crossTeam('off')
+    expect(await status('/api/api-surface/symbol?package=@acme/ui&name=card', asGames)).toBe(404)
+    expect(await status('/api/api-surface/symbol?package=@games/engine&name=scene', asGames)).toBe(
+      200,
+    )
+  })
+
+  test('answers from the cache until the records the caller sees change', async () => {
+    const catalog = createApiCatalog({ analyses: store.analyses, refreshMs: 0 })
+    const cache = createFleetCache()
+    let loads = 0
+    const read = (canRead: (repo: { path: string }) => boolean) =>
+      cachedCatalog(cache, catalog, canRead, 'api-surface/symbol?name=card', async () => {
+        loads += 1
+        return catalog.symbol(canRead, { package: '@acme/ui', name: 'card', limit: 20 })
+      })
+    const first = await read(everything)
+    expect(await read(everything)).toBe(first)
+    expect(loads).toBe(1)
+    await read((repo) => repo.path === 'games/a')
+    expect(loads).toBe(2)
+    await add(
+      'libs/ui',
+      { packages: [ui('1.1.0', ['button', 'card', 'dialog', 'menu'])] },
+      '2026-10-29T00:00:00.000Z',
+    )
+    expect((await read(everything))?.analysisId).toBe(first?.analysisId)
+    expect(loads).toBe(3)
+  })
+})
+
 const rpc = (body: unknown, headers: Record<string, string>) =>
   app.request('/mcp', {
     method: 'POST',
@@ -368,6 +586,8 @@ describe('MCP endpoint', () => {
       'repo_packages',
       'evaluate_dependency',
       'who_uses',
+      'security_findings',
+      'license_overview',
       'stack_usage',
       'repo_stack',
       'search_knowledge',
@@ -386,8 +606,10 @@ describe('MCP endpoint', () => {
       'release_changes',
       'jobs',
       'job_log',
+      'queue_stats',
       'why_job',
       'analysis_status',
+      'fleet_health',
       'start_task',
       'task_status',
       'request_review',

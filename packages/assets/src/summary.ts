@@ -1,9 +1,18 @@
-import type { AssetKind, AssetsData, KindTotal, PolicyViolation } from './data.ts'
+import { z } from 'zod'
+
+import {
+  type AssetKind,
+  type AssetsData,
+  type KindTotal,
+  type PolicyViolation,
+  kindSchema,
+  policyRules,
+} from './data.ts'
 import { wasted } from './findings.ts'
 
 /** What is wrong with one file, or what would make it smaller. */
 export interface AssetProblem {
-  rule: PolicyViolation['rule'] | 'duplicate' | 'saving'
+  rule: (typeof assetProblemRules)[number]
   severity: 'error' | 'warning' | 'info'
   message: string
 }
@@ -28,6 +37,38 @@ export interface AssetRow {
     method: 'estimate' | 'measured'
   }
 }
+
+/** Every `AssetProblem['rule']`: the policy rules, `duplicate` and `saving`. */
+export const assetProblemRules = [...policyRules, 'duplicate', 'saving'] as const
+
+const severitySchema = z.enum(['error', 'warning', 'info'])
+
+/** Reads a stored `AssetRow`. */
+export const assetRowSchema = z.object({
+  path: z.string(),
+  kind: kindSchema,
+  format: z.string(),
+  bytes: z.number(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  severity: severitySchema,
+  problems: z.array(
+    z.object({
+      rule: z.enum(assetProblemRules),
+      severity: severitySchema,
+      message: z.string(),
+    }),
+  ),
+  suggestion: z
+    .object({
+      format: z.string(),
+      how: z.string(),
+      expectedBytes: z.number(),
+      saving: z.number(),
+      method: z.enum(['estimate', 'measured']),
+    })
+    .optional(),
+}) satisfies z.ZodType<AssetRow>
 
 /** A short view of one assets analysis: totals, policy state and the files to act on. */
 export interface AssetsSummary {

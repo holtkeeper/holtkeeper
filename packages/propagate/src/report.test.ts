@@ -133,7 +133,7 @@ describe('propagation report', () => {
     const b = table.rows.find((row) => JSON.stringify(row['repo']).includes('games/b'))!
     expect(b['fixTask']).toEqual({
       text: 'tabc1234',
-      href: '/tasks?group=gabc1234&task=tabc1234',
+      href: '/ops/tasks?group=gabc1234&task=tabc1234',
       tone: 'info',
     })
     expect(a['mergeRequest']).toMatchObject({
@@ -147,7 +147,7 @@ describe('propagation report', () => {
       'games/c: test fails (exit 1)',
       'games/d: clone failed',
     ])
-    expect(issues.items[0]!.href).toBe('/tasks?group=gabc1234&task=tabc1234')
+    expect(issues.items[0]!.href).toBe('/ops/tasks?group=gabc1234&task=tabc1234')
     expect(issues.items[0]!.tags).toEqual(['test', 'fix task'])
     expect(issues.items[1]!.detail).toContain('expected 2')
     expect(issues.items[1]!.href).toBe('https://git.test/games/c/-/merge_requests/4')

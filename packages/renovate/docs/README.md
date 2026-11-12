@@ -1,6 +1,6 @@
 # @holtkeeper/renovate
 
-Runs [Renovate](https://docs.renovatebot.com) inside Holtkeeper: no separate deployment, no `renovate.json` needed in repositories. The `analyzers.renovate` setting is the configuration, the job engine runs Renovate per repository, and every run is stored as a `renovate` analysis: outdated dependencies, Renovate merge requests with their pipelines, deprecated packages and the problems Renovate logged. The server reads the open merge requests of these records into the Renovate state of each library on the **Dependencies** page (`GET /api/dependencies`).
+Runs [Renovate](https://docs.renovatebot.com) inside Holtkeeper: no separate deployment, no `renovate.json` needed in repositories. The `analyzers.renovate` setting is the configuration, the job engine runs Renovate per repository, and every run is stored as a `renovate` analysis: outdated dependencies, Renovate merge requests with their pipelines, deprecated packages and the problems Renovate logged. The server reads the open merge requests of these records into the Renovate state of each library in **Supply › Libraries** (`GET /api/dependencies`).
 
 The browserslist database stays with [@holtkeeper/browserslist](../../browserslist/docs/README.md): Renovate can only refresh `caniuse-lite`, a transitive dependency, by refreshing the whole lockfile, while the browserslist analyzer updates it alone and lists the browsers the targets gained or lost.
 
@@ -53,6 +53,8 @@ As with every analyzer setting, the most specific entry covering a repository wi
 `RenovateData` (`renovateDataSchema`): `status` (`ok`, `failed`), the `mode` the run used, `readOnly`, `renovateVersion`, `startedAt`, `durationMs`, `dependencies` and `outdated` counts, `libYears`, `managers`, `updates` (`dependency`, `manager`, `file`, `current`, `next`, `type`, `vulnerability`, `pending`, `releasedAt`, `url`, `mergeRequest`), `deprecated`, `mergeRequests` (`id`, `url`, `title`, `branch`, `state`, `draft`, `pipeline`, `result`, `types`, `updates`, `mergedAt`), `problems`, `output` and `apiRequests`. `isBroken` (open with a failed pipeline or a Renovate error) and `awaitsReview` classify merge requests; `mergeRequestStatus` names them.
 
 `renovateAnalysis` renders the metrics outdated, major updates, security fixes, open and broken merge requests, libyears and API requests, with deltas against the previous run, and the sections **Available updates** (by type, then a table with versions, notes, release date and merge request), **Merge requests** (broken first) and **Dependency health** (deprecated and abandoned packages, Renovate's problems, what each manager found).
+
+`renovateMetrics(data)` is the kind's `metrics`, stored with every record as `RenovateMetrics`: `status`, `dependencies`, `outdated`, `major`, `security`, `minor` and `patch` update counts, `open` and `broken` merge requests, and `pending` (dependencies an open merge request updates, by `manager:dependency`, `broken` when one of those merge requests is broken; absent on older records), which the fleet Libraries table reads instead of data.
 
 ## Requirements and limits
 

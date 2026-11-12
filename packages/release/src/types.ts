@@ -148,10 +148,17 @@ export interface ReleaseEdits {
   updatedBy?: string
 }
 
-/** A check a step must pass; failing checks need an explicit override. */
+/**
+ * What a failing gate means: `block` refuses the step unless a person overrides it (hard gates
+ * never), `warn` is shown but never refuses, `info` only states a fact.
+ */
+export type GateSeverity = 'block' | 'warn' | 'info'
+
+/** A check a step must pass; failing `block` checks need an explicit override. */
 export interface GateResult {
-  id: 'pipeline' | 'blockers' | 'acceptance' | 'empty' | 'tag-exists' | 'order'
+  id: 'pipeline' | 'blockers' | 'acceptance' | 'empty' | 'tag-exists' | 'order' | 'changelog'
   ok: boolean
+  severity: GateSeverity
   message: string
 }
 
@@ -201,6 +208,12 @@ export interface DeployAttempt {
   startedAt?: string
   finishedAt?: string
   durationSeconds?: number
+  /** Who started this run through Holtkeeper: a principal id or forge username. */
+  actor?: string
+  /** Display name of `actor` when it differs from the id. */
+  actorName?: string
+  /** Why it was started when it was not a plain first deploy: a redeploy or an overridden order. */
+  reason?: string
 }
 
 export interface EnvironmentState {
@@ -222,11 +235,17 @@ export interface DeployState {
   environments: EnvironmentState[]
 }
 
-/** A suggested flow for a repository without its own settings. */
-export interface FlowDetection {
-  mode: 'merge-request' | 'trunk' | 'external'
-  settings: Record<string, unknown>
-  reasons: string[]
+/**
+ * What runs on one environment now: `tag` and `version` it runs (what the forge reports deployed
+ * there, else the latest version once its deploy job succeeded), the `status` of the latest
+ * version's deploy job there and when that last changed.
+ */
+export interface EnvironmentSummary {
+  name: string
+  tag?: string
+  version?: string
+  status: DeployStatus
+  at?: string
 }
 
 /** One row of the release board. */
@@ -251,8 +270,32 @@ export interface ReleaseBoardRow {
   acceptance?: Acceptance
   /** Since when the target branch waits for a version (oldest unreleased commit, else the merge). */
   waitingSince?: string
+  /**
+   * Failing `block` gates of the pending step (the version while the target branch has unreleased
+   * changes, else the release candidate), as plain sentences. Acceptance is not among them: see
+   * `acceptanceRequired` and `acceptance`.
+   */
+  blockers: string[]
+  /** The flow needs an acceptance before a version is created (`acceptance` is not `none`). */
+  acceptanceRequired: boolean
+  /** Why the next version is what it is, from the pending step's plan. */
+  reasons: string[]
+  /** Changes of the pending step's plan left out of the changelog. */
+  leftOut: number
+  /** Tracker tasks among the pending step's included changes (the length of `tickets`). */
+  tasks: number
+  /** One entry per configured environment, in the configured order. */
+  environments: EnvironmentSummary[]
   deploy?: DeployState
   error?: string
+}
+
+/** The notes a version was created with: their source, whether a person edited the plan, the Markdown. */
+export interface VersionNotes {
+  source: ReleasePlan['summary']['source']
+  edited: boolean
+  /** The written notes above the changelog; absent when there were none. */
+  markdown?: string
 }
 
 /** A recorded release event for history and notifications. */
@@ -269,4 +312,45 @@ export interface ReleaseEvent {
   environment?: string
   url?: string
   detail?: string
+  /** `accepted`: the target head accepted; `versioned`: the target head the version was cut from. */
+  sha?: string
+  /** `accepted`: how it was accepted. */
+  via?: Acceptance['via']
+  /** `accepted`: the note the person left. */
+  note?: string
+  /** `versioned`: failing gates were overridden. */
+  force?: boolean
+  /** `versioned`: where the notes came from, whether a person changed the plan and the written notes. */
+  notes?: VersionNotes
+  /** `versioned`: the commit that prepended the notes to `CHANGELOG.md`. */
+  changelogSha?: string
+  /** `deploy-started`: the job that was started. */
+  jobId?: number
+  /** `deploy-started`: why, when it was not a plain first deploy. */
+  reason?: string
+}
+
+/** Who did what to cut one version, from the recorded release events. */
+export interface ReleaseProvenance {
+  /** The acceptance the version was created on, when one was recorded. */
+  accepted?: {
+    actor: string
+    actorName?: string
+    channel?: ReleaseChannel
+    at: string
+    via?: Acceptance['via']
+    note?: string
+    sha?: string
+  }
+  /** The step that created the version, when Holtkeeper created it. */
+  versioned?: {
+    actor: string
+    actorName?: string
+    channel?: ReleaseChannel
+    at: string
+    force: boolean
+    notes?: VersionNotes
+    changelogSha?: string
+    url?: string
+  }
 }

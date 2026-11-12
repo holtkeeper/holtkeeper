@@ -68,9 +68,9 @@ describe('create', () => {
     const stored = await store.credentials.get(view.id)
     expect(stored?.secret).toStartWith('v1.')
     expect(stored?.secret).not.toContain('glpat-secret')
-    expect(await service.reveal(view.id)).toBe('glpat-secret')
     expect(await service.list()).toEqual([view])
     expect(await service.get(view.id)).toEqual(view)
+    expect(await service.reveal(view.id)).toBe('glpat-secret')
   })
 
   test('fills expiresAt from the rotator when not given', async () => {

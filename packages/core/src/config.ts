@@ -6,6 +6,7 @@ import type { AiProviderPlugin } from '@holtkeeper/agent'
 import type { AuthProvider } from '@holtkeeper/auth'
 import type { ForgeDefinition, Secret } from '@holtkeeper/forge'
 import type { Store } from '@holtkeeper/store'
+import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
 const id = z.string().regex(/^[a-z][a-z0-9-]*$/, 'use lowercase letters, digits and dashes')
@@ -403,24 +404,27 @@ const uniqueAiProviders = (
  */
 export const configFileSchema = z.object(fileShape).superRefine(uniqueAiProviders)
 
+const integrations = `Settings › Integrations, ${webPaths.settings('integrations')}`
+const automation = `Ops › Automation, ${webPaths.automation()}`
+
 /**
  * Keys an older config file may still have, with where they are edited now. `parseConfigFile`
  * warns about each one it finds and ignores it.
  */
 export const removedConfigKeys: Readonly<Record<string, string>> = {
-  forges: 'forges are added in the panel (Settings → Integrations → Forges)',
-  groups: 'groups are edited in the panel (Repositories)',
+  forges: `forges are added in the panel (${integrations})`,
+  groups: `groups are edited in the panel (Repos › Groups, ${webPaths.groups()})`,
   repos: 'repository traits are edited in the panel',
   plugins: 'plugins were removed',
-  'jobs.schedules': 'schedules are edited in the panel (Automation)',
-  'jobs.onTag': 'triggers are edited in the panel (Automation)',
-  'jobs.onPush': 'triggers are edited in the panel (Automation)',
-  'jobs.onMergeRequest': 'triggers are edited in the panel (Automation)',
-  'jobs.onNewRepo': 'triggers are edited in the panel (Automation)',
-  'jobs.onLabel': 'triggers are edited in the panel (Automation)',
-  'jobs.commands': 'commands are edited in the panel (Automation)',
+  'jobs.schedules': `schedules are edited in the panel (${automation})`,
+  'jobs.onTag': `triggers are edited in the panel (${automation})`,
+  'jobs.onPush': `triggers are edited in the panel (${automation})`,
+  'jobs.onMergeRequest': `triggers are edited in the panel (${automation})`,
+  'jobs.onNewRepo': `triggers are edited in the panel (${automation})`,
+  'jobs.onLabel': `triggers are edited in the panel (${automation})`,
+  'jobs.commands': `commands are edited in the panel (${automation})`,
   'jobs.botUsername': "the bot username is a forge's setting in the panel",
-  'jobs.webhooks': 'webhook secrets are created per panel forge (Settings → Integrations → Forges)',
+  'jobs.webhooks': `webhook secrets are created per panel forge (${integrations})`,
 }
 
 /**

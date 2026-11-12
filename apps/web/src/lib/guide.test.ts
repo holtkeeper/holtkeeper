@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { Family, GuideSection, RepoSummary } from '@holtkeeper/api'
+import type { Family, GuideChainLayer, GuideSection, RepoSummary } from '@holtkeeper/api'
 
 import {
   budgetSegments,
@@ -8,21 +8,31 @@ import {
   candidatesInSpace,
   entryNamesSpace,
   familyProblems,
+  foldList,
   isGeneratedSection,
   isSteerableSection,
   knowledgeSearch,
+  knowledgeTabOf,
+  layerBody,
+  layerSlots,
+  lineDiff,
   parseSpace,
   pendingGenerated,
   reposOfSpace,
   scopeLabel,
-  sectionIsEmpty,
+  sectionRows,
   settingScopeOfSpace,
+  spaceCounts,
   spaceKey,
+  spaceTrail,
+  tokensOf,
 } from './guide.ts'
 
 const repo = (path: string, groups: string[]): RepoSummary => ({
   repo: { forge: 'w', path },
   groups,
+  health: 'not-analysed',
+  cells: {},
 })
 
 const family = (id: string, name: string, members: string[]): Family => ({
@@ -55,12 +65,23 @@ const section = (overrides: Partial<GuideSection> = {}): GuideSection => ({
 })
 
 const generated = (status: 'proposed' | 'accepted', inputHash = 'h1') => ({
+  version: 1,
   body: '- Run `bun test`.',
   inputHash,
   model: 'model-a',
   costUsd: 0.04,
   status,
   generatedAt: '2026-11-01T00:00:00.000Z',
+})
+
+const chainLayer = (n: number, kind: GuideChainLayer['kind']): GuideChainLayer => ({
+  n,
+  kind,
+  source: kind,
+  text: `## Heading\n\n### Review\n\n- ${kind} rule`,
+  chars: 10,
+  fullChars: 10,
+  cut: false,
 })
 
 describe('spaces', () => {
@@ -77,12 +98,68 @@ describe('spaces', () => {
     expect(parseSpace(undefined)).toBeUndefined()
   })
 
-  test('search parameters keep only a valid space and tab', () => {
+  test('search parameters keep only a valid space, section and note', () => {
     expect(knowledgeSearch({ space: 'group:shapes', tab: 'notes' })).toEqual({
       space: 'group:shapes',
-      tab: 'notes',
     })
-    expect(knowledgeSearch({ space: 'nonsense', tab: 'other' })).toEqual({})
+    expect(knowledgeSearch({ space: 'nonsense' })).toEqual({})
+    expect(knowledgeSearch({ space: 'all', section: 'review', note: 'n-1' })).toEqual({
+      space: 'all',
+      section: 'review',
+      note: 'n-1',
+    })
+    expect(knowledgeSearch({ section: 'chapter', note: ' ' })).toEqual({})
+  })
+
+  test('the trail follows all, team, family and repository', () => {
+    const labels = (space: Parameters<typeof spaceTrail>[0]) =>
+      spaceTrail(space, repos, [widgets]).map((step) => step.label)
+    expect(labels({ kind: 'all' })).toEqual(['All repositories'])
+    expect(labels({ kind: 'group', group: 'tools' })).toEqual(['All repositories', 'tools'])
+    expect(labels({ kind: 'family', family: 'f1' })).toEqual([
+      'All repositories',
+      'shapes',
+      'Widget apps',
+    ])
+    expect(labels({ kind: 'repo', repo: { forge: 'w', path: 'shapes/circle' } })).toEqual([
+      'All repositories',
+      'shapes',
+      'Widget apps',
+      'shapes/circle',
+    ])
+    expect(labels({ kind: 'repo', repo: { forge: 'w', path: 'loose/one' } })).toEqual([
+      'All repositories',
+      'loose/one',
+    ])
+    expect(spaceTrail({ kind: 'family', family: 'f1' }, repos, [widgets])[2]?.space).toEqual({
+      kind: 'family',
+      family: 'f1',
+    })
+  })
+
+  test('counts of a space, zeros when the server left it out', () => {
+    const counts = { spaces: { 'group:shapes': { guide: 2, notes: 1, learnings: 3 } } }
+    expect(spaceCounts(counts, { kind: 'group', group: 'shapes' })).toEqual({
+      guide: 2,
+      notes: 1,
+      learnings: 3,
+    })
+    expect(spaceCounts(counts, { kind: 'all' })).toEqual({ guide: 0, notes: 0, learnings: 0 })
+    expect(spaceCounts(undefined, { kind: 'all' }).learnings).toBe(0)
+  })
+
+  test('long lists fold behind N more, never hiding a single item', () => {
+    const items = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
+    expect(foldList(items, 5, false)).toEqual({ shown: ['a', 'b', 'c', 'd', 'e'], more: 2 })
+    expect(foldList(items, 5, true)).toEqual({ shown: items, more: 0 })
+    expect(foldList(items.slice(0, 6), 5, false).more).toBe(0)
+  })
+
+  test('the tab comes from the path', () => {
+    expect(knowledgeTabOf('/knowledge/notes')).toBe('notes')
+    expect(knowledgeTabOf('/knowledge/learnings/')).toBe('learnings')
+    expect(knowledgeTabOf('/knowledge/guide')).toBe('guide')
+    expect(knowledgeTabOf('/knowledge')).toBe('guide')
   })
 
   test('labels name the team, the family and the repository path', () => {
@@ -104,19 +181,18 @@ describe('space tree', () => {
     expect(shapes?.repos.map((r) => r.path)).toEqual(['shapes/tools'])
     expect(tree.teams[1]?.repos.map((r) => r.path)).toEqual(['shapes/tools', 'tools/lint'])
     expect(tree.ungrouped.repos.map((r) => r.path)).toEqual(['loose/one'])
-    expect(tree.counts).toEqual({ mine: 0, all: 2, others: 2 })
+    expect(tree.counts).toEqual({ mine: 0, all: 2 })
     expect(tree.folded).toBe(0)
   })
 
-  test('My team folds other teams and repositories in no team', () => {
+  test('My teams folds other teams and repositories in no team', () => {
     const tree = buildSpaceTree(repos, [widgets], 'mine', [['shapes', 'other']])
     expect(tree.teams.map((t) => t.group)).toEqual(['shapes'])
     expect(tree.ungrouped.repos).toEqual([])
-    expect(tree.counts).toEqual({ mine: 1, all: 2, others: 1 })
+    expect(tree.counts).toEqual({ mine: 1, all: 2 })
     expect(tree.folded).toBe(1)
-    expect(buildSpaceTree(repos, [], 'others', ['shapes']).teams.map((t) => t.group)).toEqual([
-      'tools',
-    ])
+    expect(tree.others.map((t) => t.group)).toEqual(['tools'])
+    expect(tree.otherRepos).toBe(1)
   })
 
   test('family members the viewer cannot see are left out', () => {
@@ -161,30 +237,85 @@ describe('sections', () => {
     ).toBe('h2')
   })
 
-  test('empty sections and which sections are generated', () => {
-    expect(sectionIsEmpty(section())).toBe(true)
-    expect(sectionIsEmpty(section({ steering: 'Focus on the API' }))).toBe(false)
+  test('which sections are generated and steerable', () => {
     expect(isGeneratedSection('testing')).toBe(true)
     expect(isGeneratedSection('review')).toBe(false)
     expect(isSteerableSection('testing')).toBe(true)
     expect(isSteerableSection('commits')).toBe(false)
   })
 
-  test('budget segments split human, generated and note characters', () => {
+  test('budget segments split human, generated, notes and free characters of the 12k', () => {
     const segments = budgetSegments({
       total: 12_000,
-      human: 8_000,
-      generated: 4_000,
       used: 900,
       humanUsed: 500,
       generatedUsed: 300,
       notesUsed: 100,
     })
-    expect(segments.map((s) => [s.tone, s.value])).toEqual([
-      ['accent', 500],
-      ['code', 300],
-      ['info', 100],
+    expect(segments.map((s) => [s.key, s.value])).toEqual([
+      ['Human', 500],
+      ['Generated', 300],
+      ['Notes', 100],
+      ['Free', 11_100],
     ])
+    expect(
+      budgetSegments({ total: 12_000, used: 1000, humanUsed: 600, generatedUsed: 300 })[2]?.value,
+    ).toBe(100)
+    expect(tokensOf(10_664)).toBe(2666)
+  })
+
+  test('section rows take layers from the chain, else from the space, with a status', () => {
+    const sections = [
+      section({
+        section: 'general',
+        rules: '- one\n\n- two',
+        version: 3,
+        editedAt: '2026-11-01T00:00:00.000Z',
+      }),
+      section({ section: 'review' }),
+      section({ section: 'testing', generated: generated('proposed') }),
+    ]
+    const own = sectionRows(sections)
+    expect(own.map((row) => [row.section, [...row.layers], row.rules, row.status])).toEqual([
+      ['general', ['repo'], 2, 'set'],
+      ['review', [], 0, 'empty'],
+      ['testing', ['generated'], 0, 'proposal'],
+    ])
+    const chained = sectionRows(sections, {
+      sections: [{ section: 'review', layers: [chainLayer(1, 'repo-file'), chainLayer(2, 'all')] }],
+    })
+    expect(chained[1]).toMatchObject({ status: 'inherited' })
+    expect([...(chained[1]?.layers ?? [])]).toEqual(['all'])
+  })
+
+  test('layer slots keep an editable place for the repository and generated text', () => {
+    const slots = layerSlots(
+      [chainLayer(1, 'repo-file'), chainLayer(2, 'all'), chainLayer(3, 'notes')],
+      {
+        generated: true,
+      },
+    )
+    expect(
+      slots.map((slot) => ('empty' in slot ? `empty:${slot.empty}` : slot.layer.kind)),
+    ).toEqual(['repo-file', 'empty:repo', 'all', 'empty:generated', 'notes'])
+    const full = layerSlots([chainLayer(1, 'repo'), chainLayer(2, 'generated')], {
+      generated: true,
+    })
+    expect(full).toHaveLength(2)
+    expect(layerBody(chainLayer(1, 'all').text)).toBe('- all rule')
+  })
+
+  test('a line diff pairs removals before additions and keeps context', () => {
+    const hunk = lineDiff('a\nb\nc', 'a\nx\nc\nd')
+    expect(hunk.lines.map((line) => `${line.kind[0]}${line.text}`)).toEqual([
+      'ca',
+      'rb',
+      'ax',
+      'cc',
+      'ad',
+    ])
+    expect(hunk).toMatchObject({ oldLines: 3, newLines: 4 })
+    expect(lineDiff('same', 'same').lines).toEqual([{ kind: 'context', text: 'same' }])
   })
 })
 

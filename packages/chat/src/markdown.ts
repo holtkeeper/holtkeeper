@@ -95,10 +95,17 @@ const block = (part: CardBlock, prefix: string): string => {
       return [
         `**Change** (${part.status})`,
         muteMentions(part.summary),
-        ...part.repos.map((repo) => {
-          const mr = part.mergeRequests?.find((each) => each.repo === repo)
-          return mr ? `- \`${repo}\`: [!${mr.id}](${mr.url})` : `- \`${repo}\``
-        }),
+        ...(part.steps?.length
+          ? part.steps.map(
+              (step) =>
+                `- ${stepIcons[step.status]} \`${step.label}\`${
+                  step.detail ? ` — ${muteMentions(step.detail)}` : ''
+                }${step.url ? ` · [${step.urlLabel ?? 'Open'}](${step.url})` : ''}`,
+            )
+          : part.repos.map((repo) => {
+              const mr = part.mergeRequests?.find((each) => each.repo === repo)
+              return mr ? `- \`${repo}\`: [!${mr.id}](${mr.url})` : `- \`${repo}\``
+            })),
       ].join('\n')
     default:
       return ''

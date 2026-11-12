@@ -15,6 +15,7 @@ import type { AppContext, Env, ServerDeps } from '../context.ts'
 import { type EventDispatcher, type EventOutcome, createEventDispatcher } from '../events.ts'
 import type { RepoHooks } from '../repo-hooks.ts'
 import { markWebhookSeen } from '../updates.ts'
+import { recordForgeDelivery } from '../webhook-sync.ts'
 
 const projectSchema = z.object({
   path_with_namespace: z.string().min(1),
@@ -148,8 +149,10 @@ const addedLabels = (changes: z.infer<typeof mergeRequestHookSchema>['changes'])
 const configuredGitlabs = (config: HoltkeeperConfig) =>
   Object.entries(config.forges).filter(([, forge]) => forge.kind === 'gitlab')
 
-/** A GitLab delivery as a forge event, or why it carries none. */
-type Parsed = { event: ForgeEvent } | { ignored: string }
+/** A GitLab delivery as a forge event with a one-line summary, or why it carries none. */
+type Parsed = { event: ForgeEvent; summary: string } | { ignored: string }
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
 
 /**
  * Reads a GitLab webhook delivery. `forgeOf` finds the forge id by the project URL; `undefined`
@@ -176,9 +179,8 @@ async function parseGitlab(
     if (deletedSha.test(hook.after)) return { ignored: 'tag was deleted' }
     const repo = repoOf(hook.project)
     if (!repo) return noForge
-    return {
-      event: { kind: 'tag', repo, tag: hook.ref.slice('refs/tags/'.length), sha: hook.after },
-    }
+    const tag = hook.ref.slice('refs/tags/'.length)
+    return { event: { kind: 'tag', repo, tag, sha: hook.after }, summary: `tag ${tag}` }
   }
 
   if (header === 'Push Hook') {
@@ -188,11 +190,14 @@ async function parseGitlab(
     const repo = repoOf(hook.project)
     if (!repo) return noForge
     const files = pushedFiles(hook)
+    const branch = hook.ref.slice('refs/heads/'.length)
+    const commits = hook.total_commits_count ?? hook.commits?.length
     return {
+      summary: `push to ${branch}${commits === undefined ? '' : `, ${plural(commits, 'commit')}`}`,
       event: {
         kind: 'push',
         repo,
-        branch: hook.ref.slice('refs/heads/'.length),
+        branch,
         sha: hook.after,
         actor: hook.user_username ?? '',
         ...(hook.before && !deletedSha.test(hook.before) ? { before: hook.before } : {}),
@@ -209,6 +214,7 @@ async function parseGitlab(
     const mr = hook.object_attributes
     const head = mr.last_commit?.id
     return {
+      summary: `merge request !${mr.iid}${mr.action ? ` ${mr.action}` : ''}`,
       event: {
         kind: 'mergeRequest',
         repo,
@@ -244,6 +250,7 @@ async function parseGitlab(
     if (!repo) return noForge
     const head = mr.last_commit?.id
     return {
+      summary: `comment on !${mr.iid}`,
       event: {
         kind: 'note',
         repo,
@@ -269,6 +276,7 @@ async function parseGitlab(
     const repo = repoOf(hook.project)
     if (!repo) return noForge
     return {
+      summary: `pipeline ${pipeline.status} on !${iid}`,
       event: {
         kind: 'pipeline',
         repo,
@@ -298,9 +306,12 @@ export interface WebhookRoutesOptions {
  * - `POST /webhooks/<forgeId>` needs the forge's own secret (`jobs.webhooks.<forgeId>.secret`,
  *   which panel forges fill from their generated secret).
  * - `POST /webhooks/r/<token>` is one repository's webhook: the token in the URL is the secret,
- *   and deliveries about another project are refused with 403.
+ *   and deliveries about another project are refused with 400. Its last 50 deliveries are kept,
+ *   rejected ones with their error.
  *
  * Every delivery about a repository marks it as reached by webhooks, which slows its polling down.
+ * Every authenticated delivery whose forge is known records the forge's last delivery time
+ * (`lastForgeDeliveries`), handled or ignored.
  */
 export function webhookRoutes(deps: ServerDeps, options: WebhookRoutesOptions = {}) {
   const { config, store } = deps
@@ -315,12 +326,19 @@ export function webhookRoutes(deps: ServerDeps, options: WebhookRoutesOptions = 
     return (byUrl ?? (gitlabs.length === 1 ? gitlabs[0] : undefined))?.[0]
   }
 
+  const delivered = async (forge: string) => {
+    if (store.kv) await recordForgeDelivery(store.kv, forge, deps.now())
+  }
+
   const handle = async (
     c: AppContext,
     forgeOf: (webUrl: string | undefined) => string | undefined,
     check?: (repo: RepoRef) => void,
-  ): Promise<{ response: Response; repo?: RepoRef; outcome: EventOutcome }> => {
+    forge?: string,
+  ): Promise<{ response: Response; outcome: EventOutcome; summary?: string }> => {
+    if (forge !== undefined) await delivered(forge)
     const parsed = await parseGitlab(c, forgeOf)
+    if (forge === undefined && 'event' in parsed) await delivered(parsed.event.repo.forge)
     if ('ignored' in parsed) {
       const outcome = { enqueued: [], ignored: parsed.ignored }
       return { response: c.json<EventOutcome>(outcome), outcome }
@@ -331,8 +349,8 @@ export function webhookRoutes(deps: ServerDeps, options: WebhookRoutesOptions = 
     const outcome = await dispatch(parsed.event, { actor: 'webhook:gitlab', via: 'webhook' })
     return {
       response: outcome.ignored ? c.json(outcome) : c.json(outcome, 202),
-      repo,
       outcome,
+      summary: parsed.summary,
     }
   }
 
@@ -354,21 +372,37 @@ export function webhookRoutes(deps: ServerDeps, options: WebhookRoutesOptions = 
       throw new HTTPException(404, {
         message: `webhooks of ${forge.kind} forges are not supported yet`,
       })
-    const { response, outcome } = await handle(
-      c,
-      () => repo.forge,
-      (about) => {
-        if (about.path.toLowerCase() !== repo.path.toLowerCase())
-          throw new HTTPException(403, { message: 'this webhook belongs to another repository' })
-      },
-    )
-    await hooks.recordDelivery(repo, {
-      at: deps.now().toISOString(),
-      event: c.req.header('x-gitlab-event') ?? '',
-      enqueued: outcome.enqueued.length,
-      ...(outcome.ignored !== undefined && { ignored: outcome.ignored }),
-    })
-    return response
+    const started = deps.now()
+    const delivery = { at: started.toISOString(), event: c.req.header('x-gitlab-event') ?? '' }
+    const took = () => deps.now().getTime() - started.getTime()
+    try {
+      const { response, outcome, summary } = await handle(
+        c,
+        () => repo.forge,
+        (about) => {
+          if (about.path.toLowerCase() !== repo.path.toLowerCase())
+            throw new HTTPException(400, { message: 'this webhook belongs to another repository' })
+        },
+        repo.forge,
+      )
+      await hooks.recordDelivery(repo, {
+        ...delivery,
+        ...(summary !== undefined && { summary }),
+        enqueued: outcome.enqueued.length,
+        ...(outcome.ignored !== undefined && { ignored: outcome.ignored }),
+        durationMs: took(),
+      })
+      return response
+    } catch (error) {
+      if (error instanceof HTTPException && error.status < 500)
+        await hooks.recordDelivery(repo, {
+          ...delivery,
+          enqueued: 0,
+          error: error.message,
+          durationMs: took(),
+        })
+      throw error
+    }
   })
 
   app.post('/webhooks/:forge', async (c) => {
@@ -383,7 +417,7 @@ export function webhookRoutes(deps: ServerDeps, options: WebhookRoutesOptions = 
       })
     if (!sameSecret(c.req.header('x-gitlab-token') ?? '', resolveSecret(secret)))
       throw new HTTPException(401, { message: 'invalid webhook token' })
-    return (await handle(c, () => forgeId)).response
+    return (await handle(c, () => forgeId, undefined, forgeId)).response
   })
 
   return app

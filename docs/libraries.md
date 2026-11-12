@@ -34,7 +34,7 @@ Libraries your own repositories publish are left out: their API already comes fr
   - `depgraph` records (npm and Go, the resolved version of every direct dependency);
   - `usages` records (npm, exact versions of the packages the code imports).
 
-  Freshness keeps both current. On a fresh install, run them once instead of waiting: **Jobs → Run analyzer → `depgraph`** (and `usages`) for your repositories. Go modules come from `depgraph`.
+  Freshness keeps both current. On a fresh install, run them once instead of waiting: **Ops › Runs → Run analyzer → `depgraph`** (and `usages`) for your repositories. Go modules come from `depgraph`.
 
 ## Setup
 
@@ -43,7 +43,7 @@ Libraries your own repositories publish are left out: their API already comes fr
 Without a token GitHub allows 60 requests an hour, which runs out on the first few libraries, and issues lose answers and discussions (they need GraphQL). With a token the limit is 5000 an hour.
 
 1. On GitHub create a token that can read public repositories and nothing else: a fine-grained token with **Public repositories (read-only)** access, or a classic token with no scopes.
-2. In Holtkeeper open **Credentials → Add**, kind **github**, give it a name such as `github-libraries`, paste the token as the secret and save.
+2. In Holtkeeper open **Settings › Integrations → Credentials → Add**, kind **github**, give it a name such as `github-libraries`, paste the token as the secret and save.
 
 The token is only used to read public repositories. It never reaches agents or jobs.
 
@@ -51,13 +51,13 @@ The token is only used to read public repositories. It never reaches agents or j
 
 **What a run costs.** Requests are conditional: Holtkeeper keeps each answer's `ETag` and asks again with `If-None-Match`, and GitHub does not count the `304 Not Modified` it answers when nothing changed, so later runs spend requests only on what is new. When every token is used up, the run pauses until GitHub resets the limit (at most an hour), then continues where it stopped; it does not fail its sources. The first run of a few hundred libraries takes roughly 30–40 requests per library.
 
-**Watching the tokens.** **Settings → Integrations** (credentials list, global `settings:read` for the usage) shows, in the card of every `github` credential, its GitHub account, requests, how many were answered `304` from the cache and how many hit a limit, and the live `core` limit; **Usage details** opens the other limits (`search`, `graphql` for issues) and the counts per resource. A token of an account that is already in the pool is marked as a duplicate. The pool as a whole is under **Settings → System** (Library index, global `settings:read`): **GitHub API usage** sums how much of each limit is used across the distinct accounts and when it resets, waits for a reset, and requests per day by token over 7, 30 or 90 days. The Credentials cards keep only each token's own line.
+**Watching the tokens.** **Settings › Integrations** (credentials list, global `settings:read` for the usage) shows, in the card of every `github` credential, its GitHub account, requests, how many were answered `304` from the cache and how many hit a limit, and the live `core` limit; **Usage details** opens the other limits (`search`, `graphql` for issues) and the counts per resource. A token of an account that is already in the pool is marked as a duplicate. The pool as a whole is under **Settings › System** (Library index, global `settings:read`): **GitHub API usage** sums how much of each limit is used across the distinct accounts and when it resets, waits for a reset, and requests per day by token over 7, 30 or 90 days. The Credentials cards keep only each token's own line.
 
 ### 2. Nothing else to set
 
 The index is on by default and uses every credential of kind `github` it finds: once the credential from step 1 is saved, a new run starts with it (a running one is restarted with the new token). Without any token it reads GitHub anonymously and does not wait for GitHub's limit to reset; sources that hit it are retried on the next run.
 
-The **Library docs** setting (**Settings → System**) is only needed to change the defaults. Only its entry for **All repositories** counts. For example, to use just some of the tokens and skip packages you do not need:
+The **Library docs** setting (**Settings › System**) is only needed to change the defaults. Only its entry for **All repositories** counts. For example, to use just some of the tokens and skip packages you do not need:
 
 ```json
 {
@@ -84,11 +84,11 @@ Everything else has defaults:
 
 ### 3. Watch the first run
 
-The first run starts about two minutes after the server starts; the server rereads the setting every 30 seconds, so changes need no restart. Later runs come every `interval`, about ten minutes after new `depgraph` or `usages` records arrive, and on **Settings → System → Reindex now** (needs global `analyses:run`).
+The first run starts about two minutes after the server starts; the server rereads the setting every 30 seconds, so changes need no restart. Later runs come every `interval`, about ten minutes after new `depgraph` or `usages` records arrive, and on **Settings › System → Reindex now** (needs global `analyses:run`).
 
 **Keeping up with the repositories.** Nobody maintains the list of libraries: every run takes it from the newest `depgraph` and `usages` records, so packages added to a repository join the index, upgraded ones get their new versions, and dropped ones leave after `graceDays`. Freshness keeps those records current: `usages` reruns at most every 6 hours once the default branch moved past the commit its record describes (after the head stayed put for 30 minutes), and `depgraph` the same way. The index runs about ten minutes after new records arrive. Pushes reach freshness through the forge webhook at once; without one, freshness reads each default-branch head every 30 minutes.
 
-The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it in **Settings → System** (global `settings:read`): **Indexing now** shows how many libraries the running run has done of all, the ones it works on (`concurrency` at a time), the time so far with a rough estimate of the rest and, when every GitHub token is used up, until when it waits; **Coverage** shows per source (package archive, API, repository docs, release notes, issues) how many versions are indexed, have nothing to index, failed (fetched again on the next run) or are not fetched yet; **Last indexing run** shows the counts and failures of the run before. Or read the server log:
+The first run downloads every library once and takes a while: minutes for a few dozen libraries, longer for hundreds; later runs only fetch what is new. Follow it in **Settings › System** (global `settings:read`): **Indexing now** shows how many libraries the running run has done of all, the ones it works on (`concurrency` at a time), the time so far with a rough estimate of the rest and, when every GitHub token is used up, until when it waits; **Coverage** shows per source (package archive, API, repository docs, release notes, issues) how many versions are indexed, have nothing to index, failed (fetched again on the next run) or are not fetched yet; **Last indexing run** shows the counts and failures of the run before. Or read the server log:
 
 ```bash
 kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
@@ -98,11 +98,11 @@ kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
 
 ### In the web UI
 
-**Dependencies** shows every library the repositories you can read use, your team's first, with the latest version the index found, how far behind each repository is, advisories and Renovate merge requests; a library opens in a side sheet (Overview, Upgrade, Docs) that answers from the index: what changed between your version and the latest, which uses an upgrade breaks, a **Copy as prompt** button that hands the plan to a coding agent, and a search over its docs. **Settings → System** (global `settings:read`) lists everything indexed with versions, document sections, issues and sources whose last fetch failed, and the GitHub API usage.
+**Supply › Libraries** shows every library the repositories you can read use, your team's first, with the latest version the index found, how far behind each repository is, advisories and Renovate merge requests; a library opens in a side sheet (Overview, Upgrade, Docs) that answers from the index: what changed between your version and the latest, which uses an upgrade breaks, a **Copy as prompt** button that hands the plan to a coding agent, and a search over its docs. **Settings › System** (global `settings:read`) lists everything indexed with versions, document sections, issues and sources whose last fetch failed, and the GitHub API usage.
 
 ### From an agent over MCP
 
-1. Open **Settings → Access → MCP server** and create a token. It acts as you, read-only, and sees only libraries your repositories use.
+1. Open **Account › Connect agents** and create a token. It acts as you, read-only, and sees only libraries your repositories use.
 2. Add the server to your agent, e.g. Claude Code:
 
    ```bash
@@ -137,7 +137,7 @@ Review, port, propagate and other agent tasks get the same tools as `libraries.v
 
 ## Issue digests
 
-With `"digests": true`, the first time an issue thread comes up in a search it is summarized by the configured LLM into problem, symptoms, affected versions, fixed-in version and workaround, and the summary is stored, so later searches show it directly. At most three threads are summarized per search. Runs are charged to `llm.budget` under task kind `library-digest` and show up under **Settings → AI**. Over MCP they only happen when the call passes a `repo` you can read, since the repository decides which provider credential and budget apply.
+With `"digests": true`, the first time an issue thread comes up in a search it is summarized by the configured LLM into problem, symptoms, affected versions, fixed-in version and workaround, and the summary is stored, so later searches show it directly. At most three threads are summarized per search. Runs are charged to `llm.budget` under task kind `library-digest` and show up under **Ops › AI spend**. Over MCP they only happen when the call passes a `repo` you can read, since the repository decides which provider credential and budget apply.
 
 Digests run on the `fast` model tier, the newest Haiku your provider lists: a summary is a short structured extraction, so a small model does it well. There is no model setting.
 
@@ -153,7 +153,7 @@ Digests run on the `fast` model tier, the newest Haiku your provider lists: a su
 
 | Symptom                                                                           | Cause and fix                                                                                                                                                                                                              |
 | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Settings → System says indexing is off                                            | The `libraries` entry for **All repositories** has `enabled: false`, or its value does not parse (an `interval` under `1h`, for example)                                                                                   |
+| Settings › System says indexing is off                                            | The `libraries` entry for **All repositories** has `enabled: false`, or its value does not parse (an `interval` under `1h`, for example)                                                                                   |
 | The page is empty after a run                                                     | No `depgraph` or `usages` records yet: run those analyses first                                                                                                                                                            |
 | `libraries: no GitHub token could be read; reading GitHub anonymously` in the log | None of the credentials the `github` field lists exists or can be read: check their names or ids, or remove the field to use every `github` credential. A single missing one is logged as `no credential "…"` and left out |
 | Runs take long and the log shows `github: core rate limit exhausted; waiting …`   | Every token is used up; the run waits for the reset and goes on. Add a token of another account to share the load                                                                                                          |

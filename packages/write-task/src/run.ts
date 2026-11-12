@@ -33,7 +33,7 @@ export class WriteTaskRefusedError extends Error {
 export interface WriteTaskPolicy {
   /** The instance-wide switch (`tasks.write`); off until an admin turns it on. */
   enabled: boolean
-  /** The `repo.readOnly` setting covers the repository. */
+  /** A `repo.freeze` entry in force covers the repository. */
   readOnly: boolean
   /** Do everything but push and open the merge request. */
   dryRun?: boolean
@@ -137,8 +137,7 @@ export async function runWriteTask(input: RunWriteTaskInput): Promise<WriteTaskD
   const { options, policy, forge, repo } = input
   const log = input.log ?? (() => {})
   const step = input.step ?? (<T>(_name: string, run: () => Promise<T>) => run())
-  if (!policy.enabled)
-    throw new WriteTaskRefusedError('write tasks are turned off (Settings → System → Write tasks)')
+  if (!policy.enabled) throw new WriteTaskRefusedError('write tasks are turned off (Ops › Tasks)')
   if (policy.readOnly)
     throw new WriteTaskRefusedError(`${repo.forge}:${repo.path} is read-only for Holtkeeper`)
   if (policy.unsandboxed)

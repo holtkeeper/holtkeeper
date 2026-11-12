@@ -1,4 +1,4 @@
-import type { Family } from '@holtkeeper/api'
+import type { Family, FamilySuggestion } from '@holtkeeper/api'
 import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -7,7 +7,13 @@ import { useFamilyMutations } from '../../api/queries.ts'
 import { familyProblems } from '../../lib/guide.ts'
 import { Button, Dialog, Notice, TagInput, TextField, notify } from '../../ui/index.ts'
 
-/** Creates a family of similar repositories, or renames, regroups or deletes one. */
+/** A suggestion's similarity in words: the lowest pairwise share of dependencies, in percent. */
+export const similarityText = (similarity: number): string => `${Math.round(similarity * 100)}%`
+
+/**
+ * Creates a family of similar repositories, or renames, regroups or deletes one. Started from a
+ * suggestion, it shows how similar the members are and what they share.
+ */
 export function FamilyDialog({
   family,
   initial,
@@ -17,7 +23,7 @@ export function FamilyDialog({
 }: {
   family?: Family
   /** Name and members a new family starts with, e.g. from a suggestion. */
-  initial?: { name: string; members: string[] }
+  initial?: Pick<FamilySuggestion, 'name' | 'members'> & Partial<FamilySuggestion>
   /** Known repositories as `forge:path`. */
   repos: readonly string[]
   onClose: () => void
@@ -87,6 +93,21 @@ export function FamilyDialog({
         <Notice tone="danger" title="Not saved">
           {messageOf(error)}
         </Notice>
+      ) : null}
+      {initial?.similarity !== undefined ? (
+        <p className="text-xs text-muted">
+          Suggested:{' '}
+          <span className="mono text-foreground">{similarityText(initial.similarity)}</span> similar
+          dependencies
+          {initial.framework ? ` · ${initial.framework}` : ''}
+          {initial.toolchain?.length ? ` · ${initial.toolchain.join(', ')}` : ''}
+          {initial.shared?.length ? (
+            <>
+              {' · shares '}
+              <span className="mono">{initial.shared.join(', ')}</span>
+            </>
+          ) : null}
+        </p>
       ) : null}
       <TextField label="Name" value={name} onChange={setName} placeholder="e.g. Widget apps" />
       <TagInput

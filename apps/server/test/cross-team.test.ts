@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { Principal } from '@holtkeeper/access'
-import type { KnowledgeDetail, KnowledgeList } from '@holtkeeper/api'
+import type { KnowledgeDetail, KnowledgeList, RepoList, RepoOverview } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
@@ -42,10 +42,15 @@ const auth = headerAuth({
       { scope: { groups: ['shapes'] }, actions: ['analyses:read', 'knowledge:read', 'repos:read'] },
     ],
     outsider: [{ scope: { groups: ['shapes'] }, actions: ['ai:read'] }],
+    viewer: [{ scope: { groups: ['shapes'] }, actions: ['repos:read'] }],
+    analyst: [{ scope: { groups: ['shapes'] }, actions: ['analyses:read', 'settings:read'] }],
   },
 })
 const asShapes = { 'x-forwarded-user': 'bob', 'x-forwarded-groups': 'shapes' }
 const asOutsider = { 'x-forwarded-user': 'eve', 'x-forwarded-groups': 'outsider' }
+const asViewer = { 'x-forwarded-user': 'vic', 'x-forwarded-groups': 'viewer' }
+const asAnalyst = { 'x-forwarded-user': 'ana', 'x-forwarded-groups': 'analyst' }
+const asAdmin = { 'x-forwarded-user': 'ada', 'x-forwarded-groups': 'admin' }
 
 const at = '2026-11-10T00:00:00.000Z'
 
@@ -361,6 +366,115 @@ describe('knowledge routes', () => {
     })
     expect(response.status).toBe(201)
     expect(await response.json()).toMatchObject({ visibility: 'shared', subject: 'npm:widget-kit' })
+  })
+})
+
+const auditRecord = (path: string) =>
+  store.analyses.add({
+    repo: { forge: 'work', path },
+    kind: 'audit',
+    createdAt: at,
+    data: {},
+    metrics: {
+      findings: 1,
+      severities: { critical: 0, high: 1, medium: 0, low: 0, unknown: 0 },
+      ignored: 0,
+      expired: 0,
+      resolved: 0,
+    },
+  })
+
+const getJson = async (path: string, headers: Record<string, string>) => {
+  const response = await app.request(path, { headers })
+  const body: unknown = await response.json()
+  return { status: response.status, body }
+}
+
+describe('repository fields', () => {
+  beforeEach(async () => {
+    await Promise.all([
+      ...(['shapes', 'colors'] as const).map((group) =>
+        store.kv?.set(`poll-group:${group}`, {
+          repos: [{ forge: 'work', path: group === 'shapes' ? 'shapes/circle' : 'colors/red' }],
+          listedAt: at,
+          attempts: [],
+        }),
+      ),
+      auditRecord('shapes/circle'),
+      auditRecord('colors/red'),
+    ])
+  })
+
+  test('the repository list leaves out what a narrow grant may not read', async () => {
+    const reader = (await getJson('/api/repos', asShapes)).body as RepoList
+    expect(reader.repos.map((summary) => summary.repo.path)).toEqual(['shapes/circle'])
+    const [circle] = reader.repos
+    expect(Object.keys(circle?.cells ?? {}).toSorted()).toEqual(
+      ['bundles', 'ci', 'coverage', 'dependencies', 'jobs', 'licenses'].toSorted(),
+    )
+    expect(circle).not.toHaveProperty('latestAudit')
+    expect(circle).not.toHaveProperty('updates')
+    expect(circle).not.toHaveProperty('configurable')
+    expect(circle?.freshness).toEqual({ current: 2, total: 2 })
+
+    const viewer = (await getJson('/api/repos', asViewer)).body as RepoList
+    expect(viewer.repos.map((summary) => summary.repo.path)).toEqual(['shapes/circle'])
+    expect(viewer.repos[0]?.cells).toEqual({})
+    expect(viewer.repos[0]?.health).toBe('not-analysed')
+    expect(viewer.repos[0]).not.toHaveProperty('freshness')
+    expect(viewer.repos[0]).not.toHaveProperty('lastAnalysedAt')
+  })
+
+  test('the repository overview leaves out what a narrow grant may not read', async () => {
+    const own = await getJson('/api/repos/overview?repo=work:shapes/circle', asShapes)
+    expect(own.status).toBe(200)
+    const overview = own.body as RepoOverview
+    expect(overview.cells.security).toBeUndefined()
+    expect(overview.cells.release).toBeUndefined()
+    expect(overview.cards.map((card) => card.key)).not.toContain('security')
+    expect(overview).not.toHaveProperty('audit')
+    expect(overview).not.toHaveProperty('release')
+    expect(overview.knowledge).toEqual({ sections: 0, notes: 0, proposed: 0, inherits: [] })
+    expect(overview.analyses.map((record) => record.kind)).not.toContain('audit')
+    expect(overview.work).not.toHaveProperty('costUsd')
+    expect(overview.work).toHaveProperty('awaitingApproval')
+
+    const narrow = (await getJson('/api/repos/overview?repo=work:shapes/circle', asAnalyst))
+      .body as RepoOverview
+    expect(narrow.work).not.toHaveProperty('costUsd')
+    expect(narrow.work).not.toHaveProperty('awaitingApproval')
+    expect(narrow.work).toMatchObject({ runs: 0, failed: 0 })
+
+    const full = (await getJson('/api/repos/overview?repo=work:shapes/circle', asAdmin))
+      .body as RepoOverview
+    expect(full.analyses.map((record) => record.kind)).toContain('audit')
+    expect(full.work).toMatchObject({ awaitingApproval: 0, costUsd: 0 })
+
+    expect((await getJson('/api/repos/overview?repo=work:colors/red', asShapes)).status).toBe(403)
+    expect((await getJson('/api/repos/overview?repo=work:shapes/circle', asViewer)).status).toBe(
+      403,
+    )
+  })
+})
+
+describe('group listing', () => {
+  test('a group-scoped reader gets no paths the excludes keep out', async () => {
+    await store.kv?.set('poll-group:shapes', {
+      repos: [{ forge: 'work', path: 'shapes/circle' }],
+      matched: [
+        { forge: 'work', path: 'shapes/circle' },
+        { forge: 'work', path: 'shapes/kept-out' },
+      ],
+      listedAt: at,
+      attempts: [],
+    })
+    const narrow = await getJson('/api/repos/updates/groups/shapes', asAnalyst)
+    expect(narrow.status).toBe(200)
+    expect(narrow.body).not.toHaveProperty('matched')
+    expect(JSON.stringify(narrow.body)).not.toContain('shapes/kept-out')
+
+    const admin = await getJson('/api/repos/updates/groups/shapes', asAdmin)
+    expect(JSON.stringify(admin.body)).toContain('shapes/kept-out')
   })
 })
 

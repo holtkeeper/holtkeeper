@@ -60,6 +60,7 @@ export interface AnalysisRow {
   created_at: PgTimestamp
   actor: string | null
   data: unknown
+  metrics: object | null
 }
 
 export const toAnalysis = (r: AnalysisRow): AnalysisRecord => ({
@@ -71,6 +72,7 @@ export const toAnalysis = (r: AnalysisRow): AnalysisRecord => ({
   createdAt: iso(r.created_at),
   ...(r.actor !== null && { actor: r.actor }),
   data: r.data,
+  ...(r.metrics !== null && { metrics: r.metrics }),
 })
 
 export interface CredentialRow {
@@ -86,6 +88,7 @@ export interface CredentialRow {
   last_error: string | null
   options: Record<string, unknown> | null
   capabilities: StoredCredential['capabilities'] | null
+  last_used_at: PgTimestamp | null
   created_at: PgTimestamp
   updated_at: PgTimestamp
 }
@@ -93,6 +96,7 @@ export interface CredentialRow {
 export const toCredential = (r: CredentialRow): StoredCredential => {
   const expiresAt = isoOr(r.expires_at)
   const lastRotatedAt = isoOr(r.last_rotated_at)
+  const lastUsedAt = isoOr(r.last_used_at)
   return {
     id: r.id,
     name: r.name,
@@ -107,6 +111,7 @@ export const toCredential = (r: CredentialRow): StoredCredential => {
     ...(r.options !== null && { options: r.options }),
     ...(r.capabilities !== null &&
       r.capabilities !== undefined && { capabilities: r.capabilities }),
+    ...(lastUsedAt !== undefined && { lastUsedAt }),
     createdAt: iso(r.created_at),
     updatedAt: iso(r.updated_at),
   }
@@ -142,6 +147,7 @@ export interface UserRow {
   created_at: PgTimestamp
   created_by: string | null
   avatar_seed: string | null
+  last_seen_at: PgTimestamp | null
 }
 
 export const toUser = (r: UserRow): User => ({
@@ -154,6 +160,8 @@ export const toUser = (r: UserRow): User => ({
   createdAt: iso(r.created_at),
   ...(r.created_by !== null && { createdBy: r.created_by }),
   ...(r.avatar_seed !== null && r.avatar_seed !== undefined && { avatarSeed: r.avatar_seed }),
+  ...(r.last_seen_at !== null &&
+    r.last_seen_at !== undefined && { lastSeenAt: iso(r.last_seen_at) }),
 })
 
 /** Passkey and link token times are text: they are stored exactly as given. */
@@ -354,6 +362,8 @@ export interface AiUsageRow {
   job_id: string | null
   analysis_id: string | null
   actor: string
+  interactive: boolean
+  subject: string | null
   provider: string
   model: string
   input_tokens: number | string
@@ -379,6 +389,8 @@ export const toAiUsage = (r: AiUsageRow): AiUsageRecord => ({
   ...(r.job_id !== null && { jobId: r.job_id }),
   ...(r.analysis_id !== null && { analysisId: r.analysis_id }),
   actor: r.actor,
+  interactive: r.interactive,
+  ...(r.subject !== null && { subject: r.subject }),
   provider: r.provider,
   model: r.model,
   inputTokens: num(r.input_tokens),

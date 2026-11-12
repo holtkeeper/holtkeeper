@@ -6,8 +6,11 @@ import type {
   DeployState,
   DeployStatus,
   EnvironmentState,
+  EnvironmentSummary,
   PipelineState,
+  ReleaseEvent,
 } from './types.ts'
+import { versionOfTag } from './version.ts'
 
 type JobLike = Job &
   Partial<Pick<JobRun, 'retried' | 'startedAt' | 'finishedAt' | 'durationSeconds'>>
@@ -93,6 +96,70 @@ export function deployState(
     if (before && before.status !== 'success') environment.status = 'waiting'
   }
   return { tag, ...(pipeline ? { pipeline } : {}), environments }
+}
+
+/**
+ * `state` with each attempt Holtkeeper started marked with who started it and why, from the
+ * recorded `deploy-started` events of its tag (matched by job id).
+ */
+export function withDeployActors(
+  state: DeployState,
+  history: readonly ReleaseEvent[],
+): DeployState {
+  const started = new Map<number, ReleaseEvent>()
+  for (const event of history)
+    if (
+      event.kind === 'deploy-started' &&
+      event.tag === state.tag &&
+      event.jobId !== undefined &&
+      !started.has(event.jobId)
+    )
+      started.set(event.jobId, event)
+  if (started.size === 0) return state
+  return {
+    ...state,
+    environments: state.environments.map((environment) => ({
+      ...environment,
+      attempts: environment.attempts.map((attempt) => {
+        const event = started.get(attempt.jobId)
+        if (!event) return attempt
+        return {
+          ...attempt,
+          actor: event.actor,
+          ...(event.actorName ? { actorName: event.actorName } : {}),
+          ...(event.reason ? { reason: event.reason } : {}),
+        }
+      }),
+    })),
+  }
+}
+
+/**
+ * One summary per configured environment, in order: the version the forge reports deployed
+ * there, else the latest version once its deploy succeeded; the status of the latest version's
+ * deploy job there and when it last moved. Without a deploy state every environment is
+ * `no-pipeline`.
+ */
+export function environmentSummaries(
+  settings: ReleaseSettings,
+  deploy: DeployState | undefined,
+): EnvironmentSummary[] {
+  return settings.deploy.environments.map((configured) => {
+    const environment = deploy?.environments.find((env) => env.name === configured.name)
+    if (!deploy || !environment) return { name: configured.name, status: 'no-pipeline' }
+    const attempt = environment.attempts[0]
+    const tag =
+      environment.current?.ref ?? (environment.status === 'success' ? deploy.tag : undefined)
+    const version = tag ? versionOfTag(settings.version.tagFormat, tag) : undefined
+    const at = environment.current?.at ?? attempt?.finishedAt ?? attempt?.startedAt
+    return {
+      name: environment.name,
+      ...(tag ? { tag } : {}),
+      ...(version ? { version } : {}),
+      status: environment.status,
+      ...(at ? { at } : {}),
+    }
+  })
 }
 
 /** Reads the deploy state of `tag` from its newest pipeline. */

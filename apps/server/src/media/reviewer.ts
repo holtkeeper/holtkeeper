@@ -22,6 +22,7 @@ import type {
   MediaReviewer,
   MediaUsage,
 } from '@holtkeeper/review'
+import { webPaths, webUrl } from '@holtkeeper/web-paths'
 
 import { loadMedia } from './adapter.ts'
 
@@ -127,15 +128,17 @@ const frameworkOf = (path: string): SnippetFramework =>
 
 const escapeRegExp = (value: string) => value.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** Link to the repository's Assets tab with the media dialog open on a file of the merge request's head. */
+/** Link to the repository hub's Quality › Assets area with the media optimizer sheet open on a file of the merge request's head. */
 export function panelLink(publicUrl: string, input: MediaReviewInput, file: string): string {
-  const query = new URLSearchParams({
-    repo: `${input.repo.forge}:${input.repo.path}`,
-    tab: 'assets',
-    file,
-    ref: input.refs.headSha,
-  })
-  return `${publicUrl.replace(/\/+$/, '')}/repos/view?${query.toString()}`
+  return webUrl(
+    publicUrl,
+    webPaths.repo(`${input.repo.forge}:${input.repo.path}`, {
+      tab: 'quality',
+      section: 'assets',
+      file,
+      ref: input.refs.headSha,
+    }),
+  )
 }
 
 /** Lines of a text, not counting the empty string after a final newline. */

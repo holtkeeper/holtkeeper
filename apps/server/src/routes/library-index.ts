@@ -41,7 +41,7 @@ const failedSources = (library: LibraryRecord, versions: LibraryVersionRecord[])
   ].toSorted()
 
 /**
- * `/api/system/library-index`: the library index admin for Settings → System. `GET` lists what
+ * `/api/system/library-index`: the library index admin for Settings › System. `GET` lists what
  * the index holds with its last run, the run going on and source coverage (global
  * `settings:read`); `POST …/reindex` asks for a run (global `analyses:run`); `GET …/github` shows
  * use and limits of the GitHub tokens (global `settings:read`).

@@ -1,5 +1,11 @@
 import { type Principal, can } from '@holtkeeper/access'
-import type { AuditVerifyResponse, HistoryList, HistoryScope } from '@holtkeeper/api'
+import type {
+  AuditVerifyLast,
+  AuditVerifyResponse,
+  HistoryList,
+  HistoryScope,
+  HistorySummary,
+} from '@holtkeeper/api'
 import {
   type AuditFilter,
   type AuditOutcome,
@@ -9,6 +15,7 @@ import {
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
+import { lastAuditVerification } from '../audit-verify.ts'
 import { appendAudit, auditActorOf } from '../audit.ts'
 import {
   type AppContext,
@@ -19,6 +26,7 @@ import {
   parseRepo,
   principalOf,
   repoTarget,
+  ForbiddenException,
 } from '../context.ts'
 import { canSee } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
@@ -88,11 +96,12 @@ const reachable = (principal: Principal) =>
   )
 
 /**
- * The audit log as the History page reads it, plus the compliance tools. `GET /history` pages
+ * The audit log as Settings › Audit log reads it, plus the compliance tools. `GET /history` pages
  * through the events the caller may see: everything with global `audit:read`; otherwise only events
  * about repositories it can `repos:read`, never instance-level ones. `GET /history/scope` lists those
- * repositories with their groups. CSV/NDJSON export (itself audited as `audit.export`) and hash
- * chain verification need global `audit:read`.
+ * repositories with their groups. `GET /history/summary` counts the same events by day, action,
+ * actor and repository. CSV/NDJSON export (itself audited as `audit.export`), hash chain
+ * verification and the last daily check (`GET /audit/verify/last`) need global `audit:read`.
  */
 export function auditLogRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
@@ -106,19 +115,20 @@ export function auditLogRoutes(deps: ServerDeps) {
       return canSee(principal, 'repos:read', target) ? [{ repo: key, groups: target.groups }] : []
     })
 
-  app.get('/history', async (c) => {
+  /** The caller's filter, narrowed to the repositories it can read without global `audit:read`. */
+  const visibleFilter = async (c: AppContext): Promise<AuditFilter> => {
     const principal = principalOf(c)
-    if (!reachable(principal))
-      throw new HTTPException(403, { message: 'missing permission repos:read' })
+    if (!reachable(principal)) throw new ForbiddenException('repos:read')
     const { repos: requested, ...filter } = filterOf(c)
-    let repos = requested
-    if (!readAll(principal)) {
-      const visible = new Set((await visibleRepos(principal)).map((entry) => entry.repo))
-      repos = (requested ?? [...visible]).filter((repo) => visible.has(repo))
-    }
+    if (readAll(principal)) return { ...filter, ...(requested && { repos: requested }) }
+    const visible = new Set((await visibleRepos(principal)).map((entry) => entry.repo))
+    return { ...filter, repos: (requested ?? [...visible]).filter((repo) => visible.has(repo)) }
+  }
+
+  app.get('/history', async (c) => {
+    const filter = await visibleFilter(c)
     const page = await audit.list({
       ...filter,
-      ...(repos && { repos }),
       ...(c.req.query('cursor') && { cursor: c.req.query('cursor') }),
       limit: limitParam(c.req.query('limit')),
     })
@@ -131,10 +141,20 @@ export function auditLogRoutes(deps: ServerDeps) {
     })
   })
 
+  app.get('/history/summary', async (c) => {
+    const summary = await audit.summary(await visibleFilter(c))
+    return c.json<HistorySummary>({
+      ...summary,
+      people: await peopleOf(
+        deps,
+        summary.actors.map((actor) => actor.key),
+      ),
+    })
+  })
+
   app.get('/history/scope', async (c) => {
     const principal = principalOf(c)
-    if (!reachable(principal))
-      throw new HTTPException(403, { message: 'missing permission repos:read' })
+    if (!reachable(principal)) throw new ForbiddenException('repos:read')
     return c.json<HistoryScope>({
       repos: await visibleRepos(principal),
       instance: readAll(principal),
@@ -176,6 +196,11 @@ export function auditLogRoutes(deps: ServerDeps) {
         'cache-control': 'no-store',
       },
     })
+  })
+
+  app.get('/audit/verify/last', async (c) => {
+    authorize(c, 'audit:read', GLOBAL)
+    return c.json<AuditVerifyLast>(await lastAuditVerification(deps.store.kv))
   })
 
   app.get('/audit/verify', async (c) => {

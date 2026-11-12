@@ -11,7 +11,7 @@ export interface LatestVersion {
 /**
  * The one place that knows the newest published version of every third-party library in use, by
  * `<ecosystem>:<name>` (Go libraries by module path without the `/vN` suffix). Written by library
- * index runs from the registry answers they fetch anyway; read by the Dependencies page and agents.
+ * index runs from the registry answers they fetch anyway; read by Supply › Libraries and agents.
  */
 export interface LatestVersions {
   get(ref: LibraryRef): Promise<LatestVersion | undefined>

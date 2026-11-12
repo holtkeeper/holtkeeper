@@ -1,10 +1,10 @@
 import type { ChatThreadView } from '@holtkeeper/api'
-import { Archive, Bot, FolderGit2, Plus, Users } from 'lucide-react'
+import { Archive, BellOff, Bot, FolderGit2, Plus, Users } from 'lucide-react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useChatMutations, useRepos } from '../../api/queries.ts'
-import { threadScope, unreadBadge } from '../../lib/chat.ts'
+import { threadBadge, threadScope } from '../../lib/chat.ts'
 import { formatRelative } from '../../lib/format.ts'
 import type { ScopeView } from '../../lib/home-scope.ts'
 import { repoKey } from '../../lib/repo.ts'
@@ -12,8 +12,10 @@ import {
   Button,
   Dialog,
   ErrorState,
+  OtherTeams,
   Placeholder,
   ScopeSwitch,
+  SearchInput,
   Segmented,
   Select,
   Switch,
@@ -24,7 +26,8 @@ import {
 
 type ScopeKind = 'team' | 'repo' | 'group'
 
-function NewThreadDialog({
+/** Creates a chat thread; `onCreated` gets the new thread's id after the dialog closes. */
+export function NewThreadDialog({
   isOpen,
   onOpenChange,
   groups,
@@ -145,7 +148,7 @@ function ThreadRow({
   selected: boolean
   onSelect: () => void
 }) {
-  const badge = unreadBadge(thread.unread)
+  const badge = threadBadge(thread)
   return (
     <li>
       <button
@@ -167,6 +170,11 @@ function ThreadRow({
             <span className="shrink-0">{formatRelative(thread.updatedAt)}</span>
           </span>
         </span>
+        {thread.muted ? (
+          <Tooltip content="Muted: never counts as unread">
+            <BellOff aria-label="Muted" className="mt-1 size-3 shrink-0 text-dim" />
+          </Tooltip>
+        ) : null}
         {thread.replying ? (
           <Tooltip content="Holtkeeper is writing">
             <span aria-label="Holtkeeper is writing" className="mt-1.5 flex gap-0.5">
@@ -189,14 +197,24 @@ function ThreadRow({
   )
 }
 
-/** The left column of the chat: scope switch, archive toggle, new thread and the threads. */
+const threadNoun = { one: 'thread' }
+
+/**
+ * The left column of the chat: title search, scope switch, archive toggle with the archived count,
+ * new thread, the threads and other teams' threads folded under them.
+ */
 export function ThreadList({
   threads,
+  others,
+  otherTeams,
   counts,
   view,
   onView,
+  query,
+  onQuery,
   archived,
   onArchived,
+  archivedCount,
   groups,
   selected,
   onSelect,
@@ -204,11 +222,16 @@ export function ThreadList({
   error,
 }: {
   threads: readonly ChatThreadView[]
+  others: readonly ChatThreadView[]
+  otherTeams: readonly string[]
   counts: Record<ScopeView, number> | undefined
   view: ScopeView
   onView: (view: ScopeView) => void
+  query: string
+  onQuery: (query: string) => void
   archived: boolean
   onArchived: (archived: boolean) => void
+  archivedCount: number
   groups: readonly string[]
   selected: string | undefined
   onSelect: (id: string) => void
@@ -216,26 +239,36 @@ export function ThreadList({
   error: unknown
 }) {
   const [creating, setCreating] = useState(false)
+  const row = (thread: ChatThreadView) => (
+    <ThreadRow
+      key={thread.id}
+      thread={thread}
+      selected={thread.id === selected}
+      onSelect={() => onSelect(thread.id)}
+    />
+  )
+  const archiveLabel = archived ? 'Show open threads' : `Show ${archivedCount} archived threads`
   return (
     <aside className="flex max-h-72 min-h-0 w-full shrink-0 flex-col border-b border-line md:max-h-none md:w-72 md:border-r md:border-b-0">
       <div className="flex flex-col gap-2 border-b border-line p-3">
         <div className="flex items-center gap-2">
-          <h2 className="flex-1 text-[13px] font-semibold">Threads</h2>
-          <Tooltip content={archived ? 'Show open threads' : 'Show archived threads'}>
+          <h2 className="flex-1 text-[13px] font-semibold">{archived ? 'Archived' : 'Threads'}</h2>
+          <Tooltip content={archiveLabel}>
             <Button
               size="sm"
               variant={archived ? 'secondary' : 'ghost'}
-              isIconOnly
-              aria-label={archived ? 'Show open threads' : 'Show archived threads'}
+              aria-label={archiveLabel}
               onPress={() => onArchived(!archived)}
             >
               <Archive className="size-3.5" aria-hidden />
+              <span className="mono text-[11px]">{archivedCount}</span>
             </Button>
           </Tooltip>
           <Button size="sm" variant="primary" onPress={() => setCreating(true)}>
             <Plus className="size-3.5" aria-hidden /> New
           </Button>
         </div>
+        <SearchInput value={query} onChange={onQuery} aria-label="Search thread titles" />
         <ScopeSwitch value={view} onChange={onView} {...(counts && { counts })} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -243,21 +276,21 @@ export function ThreadList({
           <Placeholder className="h-32" />
         ) : error ? (
           <ErrorState error={error} />
-        ) : threads.length === 0 ? (
+        ) : threads.length === 0 && others.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs text-muted">
-            {archived ? 'No archived threads.' : 'No threads in this scope yet.'}
+            {query.trim()
+              ? 'No thread title matches.'
+              : archived
+                ? 'No archived threads.'
+                : 'No threads in this scope yet.'}
           </p>
         ) : (
-          <ul className="flex flex-col gap-0.5">
-            {threads.map((thread) => (
-              <ThreadRow
-                key={thread.id}
-                thread={thread}
-                selected={thread.id === selected}
-                onSelect={() => onSelect(thread.id)}
-              />
-            ))}
-          </ul>
+          <div className="flex flex-col gap-2">
+            {threads.length ? <ul className="flex flex-col gap-0.5">{threads.map(row)}</ul> : null}
+            <OtherTeams count={others.length} teams={otherTeams} noun={threadNoun}>
+              <ul className="flex flex-col gap-0.5">{others.map(row)}</ul>
+            </OtherTeams>
+          </div>
         )}
       </div>
       <NewThreadDialog

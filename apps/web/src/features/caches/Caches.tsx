@@ -1,7 +1,6 @@
 import type { EgressCacheEntry, EgressCacheKind, EgressCacheView } from '@holtkeeper/api'
 import { formatBytes } from '@holtkeeper/api'
 import { DatabaseZap, Package, Trash2, Wrench } from 'lucide-react'
-import { motion } from 'motion/react'
 import { useDeferredValue, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -33,12 +32,10 @@ import {
   Td,
   Th,
   Tooltip,
-  fadeItem,
   notify,
-  stagger,
 } from '../../ui/index.ts'
-import { SettingsSection } from '../settings/SettingsSection.tsx'
 import { useSession } from '../shell/session.ts'
+import { SystemPanel } from '../storage/SystemPanel.tsx'
 
 type Loaded = Extract<EgressCacheView, { backend: unknown }>
 
@@ -66,11 +63,11 @@ const deletionTitle = (deletion: Deletion) =>
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <motion.div {...fadeItem} className="rounded-2xl border border-border bg-surface p-4">
+    <div className="rounded-2xl border border-border bg-surface p-4">
       <div className="text-sm text-muted">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-tight tabular">{value}</div>
       {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}
-    </motion.div>
+    </div>
   )
 }
 
@@ -92,10 +89,7 @@ function KindPanel({
   const Icon = kindIcon[kind]
   const color = kindColor[kind]
   return (
-    <motion.li
-      {...fadeItem}
-      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4"
-    >
+    <li className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <span
@@ -151,7 +145,7 @@ function KindPanel({
           </Button>
         </div>
       ) : null}
-    </motion.li>
+    </li>
   )
 }
 
@@ -336,10 +330,11 @@ export function Caches() {
   const view = cache.data
 
   return (
-    <SettingsSection
-      title="Caches"
-      description="Package and tool downloads the egress proxy keeps for jobs"
-      actions={
+    <SystemPanel
+      id="caches"
+      title="Egress proxy cache"
+      description="Package and tool downloads jobs make through the egress proxy"
+      aside={
         writable && view && 'backend' in view && view.total.count ? (
           <Button variant="danger-soft" size="sm" onPress={() => setDeletion({ scope: 'all' })}>
             <Trash2 className="size-3.5" />
@@ -348,39 +343,41 @@ export function Caches() {
         ) : undefined
       }
     >
-      {cache.isPending ? (
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[0, 1, 2, 3].map((index) => (
-              <Placeholder key={index} className="h-24" />
-            ))}
+      <div className="flex flex-col gap-4 p-3.5">
+        {cache.isPending ? (
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {[0, 1, 2, 3].map((index) => (
+                <Placeholder key={index} className="h-24" />
+              ))}
+            </div>
+            <Placeholder className="h-64" />
           </div>
-          <Placeholder className="h-64" />
-        </div>
-      ) : cache.isError ? (
-        <ErrorState error={cache.error} />
-      ) : !view?.configured ? (
-        <EmptyState
-          icon={<DatabaseZap />}
-          title="No egress proxy configured"
-          description="Deploy the egress proxy (egressProxy.enabled in the chart) and set server.egress.proxy, so jobs download through it and this page can read its cache."
-        />
-      ) : 'error' in view ? (
-        <Notice tone="danger" title="The egress proxy did not answer">
-          {view.error}. Its cache may still work for jobs; check the proxy's logs and that
-          HOLTKEEPER_EGRESS_SECRET is the same on both sides.
-        </Notice>
-      ) : (
-        <Overview
-          view={view}
-          {...(writable
-            ? {
-                onDelete: (entry: EgressCacheEntry) => setDeletion({ scope: 'entry', entry }),
-                onClearKind: (kind: EgressCacheKind) => setDeletion({ scope: 'kind', kind }),
-              }
-            : {})}
-        />
-      )}
+        ) : cache.isError ? (
+          <ErrorState error={cache.error} />
+        ) : !view?.configured ? (
+          <EmptyState
+            icon={<DatabaseZap />}
+            title="No egress proxy configured"
+            description="Deploy the egress proxy (egressProxy.enabled in the chart) and set server.egress.proxy, so jobs download through it and this page can read its cache."
+          />
+        ) : 'error' in view ? (
+          <Notice tone="danger" title="The egress proxy did not answer">
+            {view.error}. Its cache may still work for jobs; check the proxy's logs and that
+            HOLTKEEPER_EGRESS_SECRET is the same on both sides.
+          </Notice>
+        ) : (
+          <Overview
+            view={view}
+            {...(writable
+              ? {
+                  onDelete: (entry: EgressCacheEntry) => setDeletion({ scope: 'entry', entry }),
+                  onClearKind: (kind: EgressCacheKind) => setDeletion({ scope: 'kind', kind }),
+                }
+              : {})}
+          />
+        )}
+      </div>
 
       <ConfirmDialog
         isOpen={deletion !== null}
@@ -412,7 +409,7 @@ export function Caches() {
         The next job that needs {deletion?.scope === 'entry' ? 'it' : 'them'} downloads again from
         upstream.
       </ConfirmDialog>
-    </SettingsSection>
+    </SystemPanel>
   )
 }
 
@@ -429,7 +426,7 @@ function Overview({
   const rate = hitRate(view.stats)
   return (
     <>
-      <motion.div {...stagger} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Metric
           label="Stored"
           value={formatBytes(view.total.bytes)}
@@ -454,7 +451,7 @@ function Overview({
               : `${view.stats.stored} new entries since ${formatRelative(view.since)}`
           }
         />
-      </motion.div>
+      </div>
 
       <Notice tone="warning" title="Cached downloads ignore later access changes">
         Every job behind the proxy gets a cached copy for as long as it stays in the cache, even
@@ -462,7 +459,7 @@ function Overview({
         download lost access. Clear an entry to take it out of circulation at once.
       </Notice>
 
-      <motion.ul {...stagger} className="grid gap-4 md:grid-cols-2">
+      <ul className="grid gap-4 md:grid-cols-2">
         {cacheKinds.map((kind) => (
           <KindPanel
             key={kind.id}
@@ -472,7 +469,7 @@ function Overview({
             {...(onClearKind ? { onClear: () => onClearKind(kind.id) } : {})}
           />
         ))}
-      </motion.ul>
+      </ul>
 
       <EntriesPanel view={view} {...(onDelete ? { onDelete } : {})} />
       <SetupPanel view={view} />

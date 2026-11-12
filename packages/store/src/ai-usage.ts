@@ -8,6 +8,7 @@ import type {
   AiUsageRecord,
   AiUsageStore,
   AiUsageTotals,
+  NewAiUsageRecord,
 } from './types.ts'
 
 const clone = <T>(value: T): T => structuredClone(value)
@@ -23,6 +24,7 @@ export const aiUsageDimensions: readonly AiUsageDimension[] = [
   'provider',
   'taskKind',
   'analyzer',
+  'origin',
 ]
 
 /** The Monday (UTC) starting the ISO week of a timestamp, as `YYYY-MM-DD`. */
@@ -47,6 +49,8 @@ const dimensionValue = (
       return `${record.repo.forge}:${record.repo.path}`
     case 'analyzer':
       return record.analyzer ?? ''
+    case 'origin':
+      return record.interactive ? 'interactive' : 'automatic'
     default:
       return record[dimension]
   }
@@ -54,13 +58,17 @@ const dimensionValue = (
 
 /** Whether a record passes every given field of `filter`. */
 export function matchesAiUsageFilter(record: AiUsageRecord, filter: AiUsageFilter = {}): boolean {
-  const { from, to, repo, group, model, provider, taskKind, analyzer, outcome, jobId, scopes } =
+  const { from, to, repo, group, groups, actor, origin, model, provider, taskKind, analyzer } =
     filter
+  const { outcome, jobId, scopes } = filter
   return (
     (from === undefined || record.at >= from) &&
     (to === undefined || record.at < to) &&
     (!repo || (record.repo.forge === repo.forge && record.repo.path === repo.path)) &&
     (group === undefined || record.groups.includes(group)) &&
+    (groups === undefined || groups.some((name) => record.groups.includes(name))) &&
+    (actor === undefined || record.actor === actor) &&
+    (origin === undefined || record.interactive === (origin === 'interactive')) &&
     (model === undefined || record.model === model) &&
     (provider === undefined || record.provider === provider) &&
     (taskKind === undefined || record.taskKind === taskKind) &&
@@ -82,7 +90,15 @@ export const emptyAiUsageTotals = (): AiUsageTotals => ({
   runs: 0,
   errors: 0,
   denied: 0,
+  unknownCost: 0,
   avgDurationMs: 0,
+})
+
+/** A record as stored from its new form: `interactive` is always set. */
+export const storedAiUsage = (record: NewAiUsageRecord, id: string): AiUsageRecord => ({
+  ...structuredClone(record),
+  id,
+  interactive: record.interactive ?? false,
 })
 
 /** Groups records like `AiUsageStore.aggregate` does; the reference for every implementation. */
@@ -119,6 +135,7 @@ export function aggregateAiUsage(
       if (record.outcome === 'error') bucket.errors += 1
       if (record.outcome === 'denied-budget') bucket.denied += 1
       else {
+        if (record.costSource === 'unknown') bucket.unknownCost += 1
         entry.durations += record.durationMs
         entry.timed += 1
       }
@@ -169,7 +186,7 @@ export function memoryAiUsage(): AiUsageStore {
     records.filter((record) => matchesAiUsageFilter(record, aggregateFilter(query)))
   return {
     async append(record) {
-      const stored = { ...clone(record), id: crypto.randomUUID() }
+      const stored = storedAiUsage(record, crypto.randomUUID())
       records.push(stored)
       return clone(stored)
     },

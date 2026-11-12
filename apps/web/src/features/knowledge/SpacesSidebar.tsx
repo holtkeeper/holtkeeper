@@ -1,54 +1,101 @@
-import type { Family, FamilySuggestion, RepoRef, RepoSummary } from '@holtkeeper/api'
+import type {
+  Family,
+  FamilySuggestion,
+  KnowledgeCounts,
+  RepoRef,
+  RepoSummary,
+} from '@holtkeeper/api'
 import { Boxes, ChevronDown, ChevronRight, Globe, Pencil, Plus, Users } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useFamilyMutations, useFamilySuggestions } from '../../api/queries.ts'
-import { type FamilyNode, type Space, buildSpaceTree, spaceKey } from '../../lib/guide.ts'
+import { plural } from '../../lib/format.ts'
+import {
+  type FamilyNode,
+  type Space,
+  type TeamNode,
+  buildSpaceTree,
+  foldList,
+  spaceCounts,
+  spaceKey,
+} from '../../lib/guide.ts'
 import { repoKey, repoName } from '../../lib/repo.ts'
-import { Button, ScopeSwitch, Tooltip, notify } from '../../ui/index.ts'
+import { Button, Count, ScopeSwitch, Tooltip, notify } from '../../ui/index.ts'
 import { useScope } from '../shell/scope.ts'
-import { FamilyDialog } from './FamilyDialog.tsx'
+import { FamilyDialog, similarityText } from './FamilyDialog.tsx'
 
 const itemClass = (current: boolean, depth: number) =>
   `flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md pr-2 text-left text-[12.5px] transition-colors ${
     depth === 0 ? 'pl-2' : depth === 1 ? 'pl-6' : 'pl-10'
   } ${current ? 'bg-raise text-foreground shadow-[0_0_0_1px_var(--line-strong)]' : 'text-muted hover:bg-raise hover:text-foreground'}`
 
+/** How many families and repositories a team lists before "N more". */
+const TEAM_LIMIT = 5
+
+/** Guide sections and notes of a space as a quiet number, learnings waiting as a warning badge. */
+function SpaceBadge({ counts, space }: { counts: KnowledgeCounts | undefined; space: Space }) {
+  const { guide, notes, learnings } = spaceCounts(counts, space)
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1">
+      {learnings ? (
+        <Count tone="warning" label={plural(learnings, 'learning') + ' waiting'}>
+          {learnings}
+        </Count>
+      ) : null}
+      {guide + notes ? (
+        <span
+          className="mono text-[11px] text-dim"
+          title={`${plural(guide, 'Guide section')}, ${plural(notes, 'note')}`}
+        >
+          {guide + notes}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+const toggled = (previous: ReadonlySet<string>, key: string): ReadonlySet<string> => {
+  const next = new Set(previous)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  return next
+}
+
 /**
- * The Knowledge spaces: All, then teams with their families and repositories. The scope switch
- * folds other teams; family suggestions wait below for a person to confirm or dismiss them.
+ * The Knowledge spaces: All, then teams with their families and repositories, each with its
+ * Knowledge counts. Long teams fold behind "N more"; under *My teams* other teams fold into one
+ * collapsed row. Family suggestions wait below for a person to confirm or dismiss them.
  */
 export function SpacesSidebar({
   selected,
   onSelect,
   repos,
   families,
+  counts,
   canEditFamilies,
 }: {
   selected: Space
   onSelect: (space: Space) => void
   repos: readonly RepoSummary[]
   families: readonly Family[]
+  counts: KnowledgeCounts | undefined
   canEditFamilies: boolean
 }) {
   const { view, setView, homeGroups } = useScope()
   const tree = buildSpaceTree(repos, families, view, homeGroups)
   const current = spaceKey(selected)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [othersOpen, setOthersOpen] = useState(false)
   const [editing, setEditing] = useState<{
     family?: Family
-    initial?: { name: string; members: string[] }
+    initial?: FamilySuggestion
   } | null>(null)
   const repoKeys = repos.map((r) => repoKey(r.repo))
 
-  const toggle = (group: string) =>
-    setCollapsed((previous) => {
-      const next = new Set(previous)
-      if (next.has(group)) next.delete(group)
-      else next.add(group)
-      return next
-    })
+  const toggle = (group: string) => setCollapsed((previous) => toggled(previous, group))
+  const expand = (group: string) => setExpanded((previous) => toggled(previous, group))
 
   const repoItem = (repo: RepoRef, depth: number) => {
     const space: Space = { kind: 'repo', repo }
@@ -62,6 +109,7 @@ export function SpacesSidebar({
           onClick={() => onSelect(space)}
         >
           <span className="mono truncate text-xs">{repoName(repo)}</span>
+          <SpaceBadge counts={counts} space={space} />
         </button>
       </li>
     )
@@ -81,7 +129,7 @@ export function SpacesSidebar({
           >
             <Boxes className="size-3.5 shrink-0" />
             <span className="truncate">{node.family.name}</span>
-            <span className="mono ml-auto text-[11px] text-dim">{node.family.members.length}</span>
+            <SpaceBadge counts={counts} space={space} />
           </button>
           {canEditFamilies ? (
             <Button
@@ -101,6 +149,57 @@ export function SpacesSidebar({
     )
   }
 
+  const teamItem = (team: TeamNode) => {
+    const space: Space = { kind: 'group', group: team.group }
+    const open = !collapsed.has(team.group)
+    const children = [
+      ...team.families.map((node) => familyItem(node, 1, team.group)),
+      ...team.repos.map((repo) => repoItem(repo, 1)),
+    ]
+    const { shown, more } = foldList(children, TEAM_LIMIT, expanded.has(team.group))
+    return (
+      <li key={team.group}>
+        <div className="flex items-center">
+          <button
+            type="button"
+            aria-label={`${team.group} spaces`}
+            aria-expanded={open}
+            className="grid size-6 shrink-0 place-items-center text-dim hover:text-foreground"
+            onClick={() => toggle(team.group)}
+          >
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          </button>
+          <button
+            type="button"
+            className={itemClass(current === spaceKey(space), 0)}
+            aria-current={current === spaceKey(space) ? 'true' : undefined}
+            onClick={() => onSelect(space)}
+          >
+            <Users className="size-3.5 shrink-0" />
+            <span className="truncate">{team.group}</span>
+            <SpaceBadge counts={counts} space={space} />
+          </button>
+        </div>
+        {open ? (
+          <ul>
+            {shown}
+            {more ? (
+              <li>
+                <button
+                  type="button"
+                  className="h-6 pl-6 text-left text-xs text-dim hover:text-foreground"
+                  onClick={() => expand(team.group)}
+                >
+                  {more} more
+                </button>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
+      </li>
+    )
+  }
+
   return (
     <nav aria-label="Spaces" className="flex flex-col gap-3 text-sm">
       <button
@@ -111,48 +210,36 @@ export function SpacesSidebar({
       >
         <Globe className="size-3.5" />
         All repositories
+        <SpaceBadge counts={counts} space={{ kind: 'all' }} />
       </button>
 
       <ScopeSwitch value={view} onChange={setView} counts={tree.counts} />
 
       <ul className="flex flex-col gap-0.5">
-        {tree.teams.map((team) => {
-          const space: Space = { kind: 'group', group: team.group }
-          const open = !collapsed.has(team.group)
-          return (
-            <li key={team.group}>
-              <div className="flex items-center">
-                <button
-                  type="button"
-                  aria-label={open ? `Collapse ${team.group}` : `Expand ${team.group}`}
-                  className="grid size-6 shrink-0 place-items-center text-dim hover:text-foreground"
-                  onClick={() => toggle(team.group)}
-                >
-                  {open ? (
-                    <ChevronDown className="size-3.5" />
-                  ) : (
-                    <ChevronRight className="size-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className={itemClass(current === spaceKey(space), 0)}
-                  aria-current={current === spaceKey(space) ? 'true' : undefined}
-                  onClick={() => onSelect(space)}
-                >
-                  <Users className="size-3.5 shrink-0" />
-                  <span className="truncate">{team.group}</span>
-                </button>
-              </div>
-              {open ? (
-                <ul>
-                  {team.families.map((node) => familyItem(node, 1, team.group))}
-                  {team.repos.map((repo) => repoItem(repo, 1))}
-                </ul>
-              ) : null}
-            </li>
-          )
-        })}
+        {tree.teams.map(teamItem)}
+        {tree.others.length ? (
+          <li>
+            <button
+              type="button"
+              aria-expanded={othersOpen}
+              className="flex h-7 w-full items-center gap-1.5 rounded-md px-1 text-left text-xs text-muted hover:bg-raise hover:text-foreground"
+              onClick={() => setOthersOpen((open) => !open)}
+            >
+              <ChevronRight
+                aria-hidden
+                className={`size-3.5 shrink-0 transition-transform ${othersOpen ? 'rotate-90' : ''}`}
+              />
+              <span className="font-medium text-foreground">Other teams</span>
+              <span aria-hidden className="text-dim">
+                ·
+              </span>
+              <span className="truncate">
+                {plural(tree.otherRepos, 'repository', 'repositories')}
+              </span>
+            </button>
+            {othersOpen ? <ul>{tree.others.map(teamItem)}</ul> : null}
+          </li>
+        ) : null}
         {tree.ungrouped.families.length || tree.ungrouped.repos.length ? (
           <li>
             <SidebarHeading>Not in a team</SidebarHeading>
@@ -163,15 +250,6 @@ export function SpacesSidebar({
           </li>
         ) : null}
       </ul>
-      {tree.folded ? (
-        <button
-          type="button"
-          className="px-2 text-left text-xs text-dim hover:text-foreground"
-          onClick={() => setView('all')}
-        >
-          {tree.folded} other {tree.folded === 1 ? 'team' : 'teams'} folded
-        </button>
-      ) : null}
 
       {canEditFamilies ? (
         <Suggestions onEdit={(initial) => setEditing({ initial })} onNew={() => setEditing({})} />
@@ -204,7 +282,7 @@ function Suggestions({
   onEdit,
   onNew,
 }: {
-  onEdit: (initial: { name: string; members: string[] }) => void
+  onEdit: (initial: FamilySuggestion) => void
   onNew: () => void
 }) {
   const suggestions = useFamilySuggestions()
@@ -242,8 +320,11 @@ function Suggestions({
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="truncate text-[12.5px] font-medium">{suggestion.name}</span>
-                <span className="mono text-[11px] text-muted">
-                  {Math.round(suggestion.similarity * 100)}%
+                <span
+                  className="mono text-[11px] text-muted"
+                  title="Lowest dependency similarity between any two members"
+                >
+                  {similarityText(suggestion.similarity)}
                 </span>
               </div>
               <span
@@ -258,7 +339,7 @@ function Suggestions({
                 <Button
                   variant="secondary"
                   size="sm"
-                  isPending={create.isPending}
+                  isPending={create.isPending && create.variables?.members === suggestion.members}
                   onPress={() =>
                     create.mutate(
                       { name: suggestion.name, members: suggestion.members },
@@ -271,11 +352,7 @@ function Suggestions({
                 >
                   Confirm
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onPress={() => onEdit({ name: suggestion.name, members: suggestion.members })}
-                >
+                <Button variant="ghost" size="sm" onPress={() => onEdit(suggestion)}>
                   Edit
                 </Button>
                 <Button

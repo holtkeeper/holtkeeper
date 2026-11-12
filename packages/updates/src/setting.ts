@@ -85,6 +85,7 @@ export const pollingSetting = defineSetting({
 - **interval** is a target. Repositories sharing a forge token share its polling budget (\`pollShare\` of the token's \`requestsPerMinute\` in **Credential limits**, 20% by default); when the budget cannot keep up, every repository of that token is polled less often, evenly.
 - **withWebhook** applies while webhooks reach the repository: polling then only catches lost deliveries. \`off\` stops it.
 - Prefer a webhook where you can: it is instant and costs no requests.`,
+  default: { enabled: false },
   schema: pollingSchema,
   presets: [
     {

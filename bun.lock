@@ -47,6 +47,7 @@
         "@holtkeeper/artifacts": "workspace:*",
         "@holtkeeper/assets": "workspace:*",
         "@holtkeeper/auth": "workspace:*",
+        "@holtkeeper/branches": "workspace:*",
         "@holtkeeper/bundles": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
         "@holtkeeper/chat": "workspace:*",
@@ -89,6 +90,7 @@
         "@holtkeeper/usages": "workspace:*",
         "@holtkeeper/vault": "workspace:*",
         "@holtkeeper/vuln": "workspace:*",
+        "@holtkeeper/web-paths": "workspace:*",
         "@holtkeeper/workspace": "workspace:*",
         "@holtkeeper/write-task": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
@@ -98,6 +100,7 @@
       "devDependencies": {
         "@holtkeeper/auth-header": "workspace:*",
         "@holtkeeper/auth-none": "workspace:*",
+        "@holtkeeper/auth-users": "workspace:*",
         "ai": "^7.0.157",
       },
     },
@@ -497,6 +500,7 @@
         "@holtkeeper/auth": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/store": "workspace:*",
+        "@holtkeeper/web-paths": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -750,6 +754,7 @@
         "@holtkeeper/forge": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/vuln-js": "workspace:*",
+        "@holtkeeper/web-paths": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -974,6 +979,10 @@
         "@holtkeeper/vuln": "workspace:*",
         "zod": "^4.6.7",
       },
+    },
+    "packages/web-paths": {
+      "name": "@holtkeeper/web-paths",
+      "version": "0.0.0",
     },
     "packages/workspace": {
       "name": "@holtkeeper/workspace",
@@ -1368,6 +1377,8 @@
     "@holtkeeper/waibee-ai-provider": ["@holtkeeper/waibee-ai-provider@0.1.0", "", { "dependencies": { "@ai-sdk/anthropic": "^4.0.92", "@ai-sdk/openai-compatible": "^3.0.81", "@ai-sdk/provider": "^4.0.34", "@ai-sdk/provider-utils": "^5.0.71" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-ScN/VbVS2v0Rytbp47LNVb8KUcD2ajGsU2tREiGDNvQ0mzQkQXVsnQR8tA3/DHuN3DPhTsx+ClIp51H5atoN+Q=="],
 
     "@holtkeeper/web": ["@holtkeeper/web@workspace:apps/web"],
+
+    "@holtkeeper/web-paths": ["@holtkeeper/web-paths@workspace:packages/web-paths"],
 
     "@holtkeeper/workspace": ["@holtkeeper/workspace@workspace:packages/workspace"],
 

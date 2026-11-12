@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { analyzeCoverage } from './analyze.ts'
 import type { CoverageData } from './model.ts'
-import { coverageAnalysis } from './report.ts'
+import { DEFAULT_COVERAGE_TARGET, coverageAnalysis, coverageTargetSchema } from './report.ts'
 
 /** Options of the `coverage` analyzer. */
 export const coverageOptionsSchema = z.object({
@@ -30,6 +30,8 @@ export const coverageOptionsSchema = z.object({
   installScripts: z.boolean().default(false),
   /** Build workspace packages whose entry files are missing before running the tests. */
   build: z.boolean().default(true),
+  /** Line coverage the repository should reach, in percent; stored metrics and health judge by it. */
+  target: coverageTargetSchema.default(DEFAULT_COVERAGE_TARGET),
 })
 
 export type CoverageOptions = z.output<typeof coverageOptionsSchema>

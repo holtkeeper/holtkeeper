@@ -22,3 +22,19 @@ export const sheetCommand = (event: {
 /** "3 of 41" for a zero-based `index` in a list of `total` records. */
 export const sheetPosition = (index: number, total: number): string =>
   `${(index + 1).toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`
+
+/** What a key press does in a list of decisions: a sheet command, or a decision on the open row. */
+export type DecisionCommand = SheetCommand | 'approve' | 'reject' | 'snooze'
+
+/**
+ * `sheetCommand` plus A approve, R reject and S snooze, under the same rules: nothing while
+ * typing in a field or with a modifier.
+ */
+export const decisionCommand = (
+  event: Parameters<typeof sheetCommand>[0],
+): DecisionCommand | undefined => {
+  const command = sheetCommand(event)
+  if (command || event.editable || event.altKey || event.ctrlKey || event.metaKey) return command
+  const key = event.key.toLowerCase()
+  return key === 'a' ? 'approve' : key === 'r' ? 'reject' : key === 's' ? 'snooze' : undefined
+}

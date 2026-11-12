@@ -1,12 +1,17 @@
 import type {
+  DiffHunk,
+  DiffLine,
   Family,
   GroupMatch,
+  GuideChainLayer,
+  GuideChainLayerKind,
+  GuideChainView,
   GuideGenerated,
-  GuidePreview,
   GuideScopeKey,
   GuideSection,
   GuideSectionName,
   GuideTask,
+  KnowledgeCounts,
   LearningCandidate,
   RegenerateGuideInput,
   RepoRef,
@@ -60,20 +65,32 @@ export const guideTasks: readonly { id: GuideTask; label: string }[] = [
   { id: 'agent', label: 'Agent task' },
 ]
 
-/** The tabs of a Knowledge space in display order; also the page's `tab` search parameter. */
-export const knowledgeTabs = ['guide', 'notes', 'learnings'] as const
+/** The tabs of a Knowledge space in display order; each is a path, `/knowledge/<tab>`. */
+const knowledgeTabs = ['guide', 'notes', 'learnings'] as const
 
 export type KnowledgeTab = (typeof knowledgeTabs)[number]
 
-/** The Knowledge page's search parameters: the space key and the tab, dropping unknown values. */
-export function knowledgeSearch(search: Record<string, unknown>): {
+/** The Knowledge tab a pathname shows; `guide` when the path names none. */
+export const knowledgeTabOf = (pathname: string): KnowledgeTab =>
+  knowledgeTabs.find((tab) => pathname.replace(/\/+$/, '').endsWith(`/knowledge/${tab}`)) ?? 'guide'
+
+/** What a Knowledge link opens: a space, a Guide section of it and a note by id. */
+export interface KnowledgeSearch {
   space?: string
-  tab?: KnowledgeTab
-} {
+  section?: GuideSectionName
+  note?: string
+}
+
+const isSectionName = (value: unknown): value is GuideSectionName =>
+  guideSections.some((s) => s.id === value)
+
+/** The Knowledge page's search parameters, dropping unknown and malformed values. */
+export function knowledgeSearch(search: Record<string, unknown>): KnowledgeSearch {
   const space =
     typeof search.space === 'string' && parseSpace(search.space) ? search.space : undefined
-  const tab = knowledgeTabs.find((t) => t === search.tab)
-  return { ...(space ? { space } : {}), ...(tab ? { tab } : {}) }
+  const section = isSectionName(search.section) ? search.section : undefined
+  const note = typeof search.note === 'string' && search.note.trim() ? search.note : undefined
+  return { ...(space ? { space } : {}), ...(section ? { section } : {}), ...(note ? { note } : {}) }
 }
 
 /** A Knowledge space: what the sidebar selects and the Guide, Notes and Learnings tabs show. */
@@ -124,7 +141,7 @@ export interface FamilyNode {
 }
 
 /** A team (config group) with its families and the repositories in no family. */
-interface TeamNode {
+export interface TeamNode {
   group: string
   families: FamilyNode[]
   repos: RepoRef[]
@@ -133,7 +150,11 @@ interface TeamNode {
 /** The spaces sidebar below *All*: teams in scope, repositories in no group, and folding counts. */
 export interface SpaceTree {
   teams: TeamNode[]
-  /** Repositories in no group, shown unless the view is *My team*. */
+  /** Teams the view folds into the collapsed *Other teams* row. */
+  others: TeamNode[]
+  /** Repositories of the folded teams that no shown team holds. */
+  otherRepos: number
+  /** Repositories in no group, shown unless the view is *My teams*. */
   ungrouped: { families: FamilyNode[]; repos: RepoRef[] }
   /** Teams per scope switch position. */
   counts: Record<ScopeView, number>
@@ -164,8 +185,8 @@ function nest(repos: readonly RepoRef[], families: readonly Family[]) {
 /**
  * Teams → families → repositories for the spaces sidebar. A repository in several groups shows
  * under each; a family shows under every team holding a member, listing the members of that team.
- * *My team* keeps the viewer's home teams (a team named in a `frontend + storefront` home entry
- * counts), *Other teams* the rest.
+ * *My teams* keeps the viewer's home teams (a team named in a `frontend + storefront` home entry
+ * counts).
  */
 export function buildSpaceTree(
   repos: readonly RepoSummary[],
@@ -175,19 +196,16 @@ export function buildSpaceTree(
 ): SpaceTree {
   const groups = [...new Set(repos.flatMap((r) => r.groups))].toSorted()
   const home = groups.filter((group) => isHomeTeam(homeGroups, group))
-  const shown =
-    view === 'mine'
-      ? home
-      : view === 'others'
-        ? groups.filter((group) => !home.includes(group))
-        : groups
-  const teams = shown.map((group) => ({
+  const shown = view === 'mine' ? home : groups
+  const node = (group: string): TeamNode => ({
     group,
     ...nest(
       repos.filter((r) => r.groups.includes(group)).map((r) => r.repo),
       families,
     ),
-  }))
+  })
+  const teams = shown.map(node)
+  const others = groups.filter((group) => !shown.includes(group)).map(node)
   const ungrouped =
     view === 'mine'
       ? { families: [], repos: [] }
@@ -195,11 +213,16 @@ export function buildSpaceTree(
           repos.filter((r) => r.groups.length === 0).map((r) => r.repo),
           families,
         )
+  const otherRepos = repos.filter(
+    (r) => r.groups.length > 0 && !r.groups.some((group) => shown.includes(group)),
+  ).length
   return {
     teams,
+    others,
+    otherRepos,
     ungrouped,
-    counts: { mine: home.length, all: groups.length, others: groups.length - home.length },
-    folded: groups.length - shown.length,
+    counts: { mine: home.length, all: groups.length },
+    folded: others.length,
   }
 }
 
@@ -243,23 +266,258 @@ export const candidatesInSpace = <T extends Pick<LearningCandidate, 'repo'>>(
 export const pendingGenerated = (section: GuideSection): GuideGenerated | undefined =>
   section.proposal ?? (section.generated?.status === 'proposed' ? section.generated : undefined)
 
-/** Whether a section has anything in it: rules, steering, generated text or learnings. */
-export const sectionIsEmpty = (section: GuideSection): boolean =>
-  !section.rules.trim() &&
-  !section.steering.trim() &&
-  !section.generated &&
-  !section.proposal &&
-  section.learnings.length === 0
+/** A Guide budget: the caps and what is used of them. */
+interface GuideBudget {
+  total: number
+  used: number
+  humanUsed: number
+  generatedUsed: number
+  notesUsed?: number
+}
 
-/** The preview budget as segments: human text, generated text and notes, against the total. */
+/**
+ * The 12k budget as named segments: human text, generated text, notes and what is free, summing
+ * to the total (free is never negative).
+ */
 export function budgetSegments(
-  budget: GuidePreview['budget'],
-): { value: number; tone: StatusTone; label: string }[] {
+  budget: GuideBudget,
+): { key: string; value: number; tone: StatusTone; label: string }[] {
+  const notes =
+    budget.notesUsed ?? Math.max(0, budget.used - budget.humanUsed - budget.generatedUsed)
   return [
-    { value: budget.humanUsed, tone: 'accent', label: 'human characters' },
-    { value: budget.generatedUsed, tone: 'code', label: 'generated characters' },
-    { value: budget.notesUsed, tone: 'info', label: 'note characters' },
+    { key: 'Human', value: budget.humanUsed, tone: 'accent', label: 'human characters' },
+    { key: 'Generated', value: budget.generatedUsed, tone: 'code', label: 'generated characters' },
+    { key: 'Notes', value: notes, tone: 'info', label: 'note characters' },
+    {
+      key: 'Free',
+      value: Math.max(0, budget.total - budget.humanUsed - budget.generatedUsed - notes),
+      tone: 'default',
+      label: 'free characters',
+    },
   ]
+}
+
+/** About how many tokens `chars` characters of prompt take. */
+export const tokensOf = (chars: number): number => Math.round(chars / 4)
+
+/** The letter and name of a chain layer kind, as the Guide's legend shows them. */
+export const layerKinds: Readonly<Record<GuideChainLayerKind, { letter: string; label: string }>> =
+  {
+    'repo-file': { letter: 'D', label: 'Repository files' },
+    repo: { letter: 'R', label: 'Repository' },
+    family: { letter: 'F', label: 'Family' },
+    group: { letter: 'G', label: 'Group' },
+    all: { letter: 'O', label: 'All repositories' },
+    learnings: { letter: 'L', label: 'Learned' },
+    policies: { letter: 'P', label: 'Policies' },
+    generated: { letter: 'A', label: 'Generated' },
+    notes: { letter: 'N', label: 'Notes' },
+  }
+
+/** The kinds the sections table shows a column of letters for, broadest first. */
+export const tableLayerKinds: readonly GuideChainLayerKind[] = [
+  'all',
+  'group',
+  'family',
+  'repo',
+  'learnings',
+  'generated',
+]
+
+/** One row of the Guide's sections table. */
+interface SectionRow {
+  section: GuideSectionName
+  label: string
+  /** Kinds of `tableLayerKinds` that give the section text. */
+  layers: ReadonlySet<GuideChainLayerKind>
+  /** Non-empty lines of this space's own rules. */
+  rules: number
+  version: number
+  updatedAt?: string
+  status: 'proposal' | 'set' | 'inherited' | 'empty'
+}
+
+const ownKind = (scope: GuideScopeKey): GuideChainLayerKind =>
+  scope === 'all'
+    ? 'all'
+    : scope.startsWith('group:')
+      ? 'group'
+      : scope.startsWith('family:')
+        ? 'family'
+        : 'repo'
+
+/**
+ * The sections table of a space: one row per section in `guideSections` order. Layers come from
+ * the repository's chain when there is one, else from the space's own rules and learnings; status
+ * says whether a proposal waits, the space sets rules, only other layers apply, or nothing does.
+ */
+export function sectionRows(
+  sections: readonly GuideSection[],
+  chain?: Pick<GuideChainView, 'sections'>,
+): SectionRow[] {
+  return guideSections.flatMap((meta) => {
+    const own = sections.find((s) => s.section === meta.id)
+    if (!own) return []
+    const fromChain = chain?.sections.find((s) => s.section === meta.id)?.layers
+    const layers = new Set<GuideChainLayerKind>(
+      fromChain
+        ? fromChain.map((layer) => layer.kind)
+        : [
+            ...(own.rules.trim() ? [ownKind(own.scope)] : []),
+            ...(own.learnings.length ? (['learnings'] as const) : []),
+            ...(own.generated ? (['generated'] as const) : []),
+          ],
+    )
+    const kept = new Set(tableLayerKinds.filter((kind) => layers.has(kind)))
+    const rules = own.rules.split('\n').filter((line) => line.trim()).length
+    return [
+      {
+        section: meta.id,
+        label: meta.label,
+        layers: kept,
+        rules,
+        version: own.version,
+        ...(own.editedAt ? { updatedAt: own.editedAt } : {}),
+        status: pendingGenerated(own)
+          ? 'proposal'
+          : rules > 0
+            ? 'set'
+            : layers.size > 0
+              ? 'inherited'
+              : 'empty',
+      },
+    ]
+  })
+}
+
+/** Words for a section row's status, and its tone. */
+export const sectionStatus: Readonly<
+  Record<SectionRow['status'], { label: string; tone: StatusTone }>
+> = {
+  proposal: { label: 'Proposal waiting', tone: 'warning' },
+  set: { label: 'Set here', tone: 'success' },
+  inherited: { label: 'Inherited', tone: 'default' },
+  empty: { label: 'Not set', tone: 'default' },
+}
+
+/** A layer's text without the headings the prompt puts above it. */
+export const layerBody = (text: string): string =>
+  text
+    .split('\n')
+    .filter((line) => !/^#{1,3} /.test(line))
+    .join('\n')
+    .replace(/^Generated from repository signals, lower priority;[^\n]*\n?/m, '')
+    .trim()
+
+/** One step of the space trail above the page title. */
+interface SpaceCrumb {
+  label: string
+  space: Space
+}
+
+const teamCrumb = (group: string | undefined): SpaceCrumb[] =>
+  group ? [{ label: group, space: { kind: 'group', group } }] : []
+
+const familyCrumb = (family: Family): SpaceCrumb => ({
+  label: family.name,
+  space: { kind: 'family', family: family.id },
+})
+
+/**
+ * The trail of spaces from *All* to `space`: All, the team, the family, the repository. A
+ * repository's team is its first group; a family's team is the first group of its first member
+ * the viewer sees.
+ */
+export function spaceTrail(
+  space: Space,
+  repos: readonly RepoSummary[],
+  families: readonly Family[],
+): SpaceCrumb[] {
+  const all: SpaceCrumb = { label: 'All repositories', space: { kind: 'all' } }
+  const groupsOf = (key: string) => repos.find((r) => repoKey(r.repo) === key)?.groups ?? []
+  if (space.kind === 'all') return [all]
+  if (space.kind === 'group') return [all, ...teamCrumb(space.group)]
+  if (space.kind === 'family') {
+    const family = families.find((f) => f.id === space.family)
+    const group = family?.members.map(groupsOf).find((groups) => groups.length)?.[0]
+    return [all, ...teamCrumb(group), ...(family ? [familyCrumb(family)] : [])]
+  }
+  const key = repoKey(space.repo)
+  const family = families.find((f) => f.members.includes(key))
+  return [
+    all,
+    ...teamCrumb(groupsOf(key)[0]),
+    ...(family ? [familyCrumb(family)] : []),
+    { label: space.repo.path, space },
+  ]
+}
+
+/** The Guide, Notes and Learnings totals of a space; zeros when the counts leave it out. */
+export const spaceCounts = (counts: KnowledgeCounts | undefined, space: Space) =>
+  counts?.spaces[spaceKey(space)] ?? { guide: 0, notes: 0, learnings: 0 }
+
+/** How many of `items` a folded list shows, and how many hide behind "N more". */
+export function foldList<T>(
+  items: readonly T[],
+  limit: number,
+  open: boolean,
+): { shown: readonly T[]; more: number } {
+  if (open || items.length <= limit + 1) return { shown: items, more: 0 }
+  return { shown: items.slice(0, limit), more: items.length - limit }
+}
+
+/**
+ * The display slots of a section's layers: the chain's layers in order, with an empty slot for
+ * this repository's own rules (right after the rules files) and for generated text when the
+ * section is generated and the chain has none, so both stay editable.
+ */
+export function layerSlots(
+  layers: readonly GuideChainLayer[],
+  options: { generated: boolean },
+): ({ layer: GuideChainLayer } | { empty: 'repo' | 'generated' })[] {
+  const slots: ({ layer: GuideChainLayer } | { empty: 'repo' | 'generated' })[] = layers.map(
+    (layer) => ({ layer }),
+  )
+  if (!layers.some((layer) => layer.kind === 'repo'))
+    slots.splice(layers[0]?.kind === 'repo-file' ? 1 : 0, 0, { empty: 'repo' })
+  if (options.generated && !layers.some((layer) => layer.kind === 'generated')) {
+    const notes = slots.findIndex((slot) => 'layer' in slot && slot.layer.kind === 'notes')
+    slots.splice(notes < 0 ? slots.length : notes, 0, { empty: 'generated' })
+  }
+  return slots
+}
+
+/**
+ * A line diff of two texts as one hunk (longest common subsequence), for the diff views of
+ * `lib/diff.ts`. Equal texts give only context lines.
+ */
+export function lineDiff(before: string, after: string): DiffHunk {
+  const a = before.split('\n')
+  const b = after.split('\n')
+  const table = Array.from({ length: a.length + 1 }, () =>
+    Array.from<number>({ length: b.length + 1 }).fill(0),
+  )
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      table[i]![j] =
+        a[i] === b[j] ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!)
+  const lines: DiffLine[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) {
+      lines.push({ kind: 'context', text: a[i]! })
+      i++
+      j++
+    } else if (i < a.length && (j >= b.length || table[i + 1]![j]! >= table[i]![j + 1]!)) {
+      lines.push({ kind: 'remove', text: a[i]! })
+      i++
+    } else {
+      lines.push({ kind: 'add', text: b[j]! })
+      j++
+    }
+  }
+  return { oldStart: 1, oldLines: a.length, newStart: 1, newLines: b.length, lines }
 }
 
 /** Problems that keep a family from saving: a name and at least two known repositories. */

@@ -106,10 +106,15 @@ export function formatLicense(node: LicenseNode, nested = false): string {
   return nested ? `(${text})` : text
 }
 
-/** Allowed and denied licenses: SPDX ids, ids with `*` wildcards (`GPL-*`), or whole expressions. */
+/**
+ * Allowed and denied licenses: SPDX ids, ids with `*` wildcards (`GPL-*`), or whole expressions.
+ * `review` lists licenses that stay `unlisted` (someone signs off) even when `allow` matches them;
+ * `deny` wins over both.
+ */
 export interface LicensePolicy {
   allow: readonly string[]
   deny: readonly string[]
+  review?: readonly string[]
 }
 
 interface CompiledList {
@@ -150,17 +155,20 @@ export interface Evaluation {
 export function licenseEvaluator(policy: LicensePolicy) {
   const allow = compile(policy.allow)
   const deny = compile(policy.deny)
+  const review = compile(policy.review ?? [])
 
   const evaluate = (node: LicenseNode): Evaluation => {
     const text = formatLicense(node)
     const exact = text.toLowerCase()
     if (deny.expressions.has(exact)) return { verdict: 'denied', culprits: [text] }
+    if (review.expressions.has(exact)) return { verdict: 'unlisted', culprits: [text] }
     if (allow.expressions.has(exact)) return { verdict: 'allowed', culprits: [] }
 
     if (node.type === 'unknown') return { verdict: 'unknown', culprits: [text] }
     if (node.type === 'license') {
       const ids = node.plus ? [`${node.id}+`, node.id] : [node.id]
       if (ids.some((id) => matches(deny, id))) return { verdict: 'denied', culprits: [text] }
+      if (ids.some((id) => matches(review, id))) return { verdict: 'unlisted', culprits: [text] }
       // `X+` means "X or any later version", so allowing X is enough.
       if (ids.some((id) => matches(allow, id))) return { verdict: 'allowed', culprits: [] }
       if (/^(?:DocumentRef-[^:]+:)?LicenseRef-/i.test(node.id))

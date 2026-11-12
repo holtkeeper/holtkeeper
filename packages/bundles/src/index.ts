@@ -43,6 +43,15 @@ export {
   followImports,
 } from './entrypoints.ts'
 export { findSourceMap, measure } from './measure.ts'
+export {
+  type BudgetVerdict,
+  type BundleMetrics,
+  type BundleTargetMetrics,
+  budgetFor,
+  budgetVerdict,
+  bundleBudgetsSchema,
+  judgeTarget,
+} from './metrics.ts'
 export { assetKind, normalizeAssetName, normalizeAssetNames } from './names.ts'
 export { type SourceOrigin, sourceOrigin } from './origin.ts'
 export {

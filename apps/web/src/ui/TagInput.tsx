@@ -4,7 +4,8 @@ import { type ReactNode, useId, useState } from 'react'
 
 /**
  * Editable list of short strings: type and press Enter (or comma) to add, Backspace on an empty
- * input removes the last one. `validate` returns an error message to reject a value.
+ * input removes the last one. `validate` returns an error message to reject a value. `isDisabled`
+ * shows the values without letting anyone change them.
  */
 export function TagInput({
   label,
@@ -15,6 +16,7 @@ export function TagInput({
   suggestions = [],
   description,
   hideLabel,
+  isDisabled = false,
 }: {
   label: ReactNode
   values: readonly string[]
@@ -25,6 +27,7 @@ export function TagInput({
   description?: ReactNode
   /** Keeps the label for screen readers only, for inputs labelled by their surroundings. */
   hideLabel?: boolean
+  isDisabled?: boolean
 }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string>()
@@ -61,20 +64,23 @@ export function TagInput({
               className="inline-flex items-center gap-1 rounded-lg bg-default px-2 py-0.5 font-mono text-xs"
             >
               {value}
-              <button
-                type="button"
-                aria-label={`Remove ${value}`}
-                className="rounded p-0.5 text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
-                onClick={() => onChange(values.filter((v) => v !== value))}
-              >
-                <X className="size-3" />
-              </button>
+              {isDisabled ? null : (
+                <button
+                  type="button"
+                  aria-label={`Remove ${value}`}
+                  className="rounded p-0.5 text-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-focus"
+                  onClick={() => onChange(values.filter((v) => v !== value))}
+                >
+                  <X className="size-3" />
+                </button>
+              )}
             </motion.span>
           ))}
         </AnimatePresence>
         <input
           id={id}
           value={draft}
+          disabled={isDisabled}
           list={suggestions.length ? listId : undefined}
           placeholder={values.length ? '' : placeholder}
           aria-invalid={error !== undefined}
@@ -83,7 +89,7 @@ export function TagInput({
             setDraft(event.target.value)
             setError(undefined)
           }}
-          onBlur={() => add(draft)}
+          onBlur={() => !isDisabled && add(draft)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ',') {
               event.preventDefault()

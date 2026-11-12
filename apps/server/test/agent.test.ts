@@ -382,6 +382,13 @@ describe('settingsAgentFor', () => {
     ])
   })
 
+  test('a run keeps its subject on the stored usage record', async () => {
+    await anthropic('sk')
+    const agent = await agentFor()(repo, { jobId: 'j1', subject: 'MR !12' })
+    await agent?.run({ dir: '/r', prompt: 'p', taskKind: 'review' })
+    expect((await store.aiUsage.list()).map((record) => record.subject)).toEqual(['MR !12'])
+  })
+
   test('agent.tools sets the knowledge budget; no external MCP server is mounted', async () => {
     await anthropic('sk')
     await setting('agent.tools', { context7: true, knowledgeTokens: 0 })

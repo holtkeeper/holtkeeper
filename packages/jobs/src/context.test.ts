@@ -138,6 +138,29 @@ describe('createContextFactory', () => {
     ])
   })
 
+  test('tells the agent factory what the job works on', async () => {
+    const seen: (string | undefined)[] = []
+    const factory = createContextFactory({
+      config,
+      store,
+      cacheDir: '/cache',
+      runner: createFakeRunner().runner,
+      agentFor: (_repo, info) => {
+        seen.push(info?.subject)
+        return agent
+      },
+    })
+    for (const shape of [
+      { options: { title: 'Rename the widget' } },
+      { options: { mergeRequest: 7 } },
+      { options: { version: '2.0.0' } },
+      { ref: 'trunk' },
+      {},
+    ])
+      await factory(job(shape), analyzer({ agent: 'optional' }), io)
+    expect(seen).toEqual(['Rename the widget', 'MR !7', '2.0.0', 'trunk', undefined])
+  })
+
   test('uses the job ref and passes it on', async () => {
     const prepared = await contextFor(job({ ref: 'v1.2.0' }), analyzer({ checkout: true }), io)
     expect(checkouts.at(-1)?.ref).toBe('v1.2.0')

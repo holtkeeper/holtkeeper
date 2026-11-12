@@ -1,9 +1,8 @@
 import type { Block, Tone } from '@holtkeeper/api'
 import { CircleAlert, CircleCheck, Info, OctagonAlert, TriangleAlert } from 'lucide-react'
-import { motion } from 'motion/react'
 
 import { toneColor } from '../../../lib/units.ts'
-import { EmptyState, fadeItem, stagger } from '../../../ui/index.ts'
+import { EmptyState } from '../../../ui/index.ts'
 
 const icons: Record<Tone, typeof Info> = {
   neutral: Info,
@@ -17,14 +16,13 @@ const icons: Record<Tone, typeof Info> = {
 export function IssuesBlock({ block }: { block: Extract<Block, { type: 'issues' }> }) {
   if (block.items.length === 0) return <EmptyState icon={<CircleCheck />} title="No issues" />
   return (
-    <motion.ul {...stagger} className="flex flex-col gap-2">
+    <ul className="flex flex-col gap-2">
       {block.items.map((issue) => {
         const Icon = icons[issue.tone] ?? CircleAlert
         const color = toneColor[issue.tone]
         return (
-          <motion.li
+          <li
             key={issue.id}
-            {...fadeItem}
             className="flex gap-3 rounded-xl border p-3"
             style={{
               borderColor: `color-mix(in oklab, ${color} 35%, var(--border))`,
@@ -61,9 +59,9 @@ export function IssuesBlock({ block }: { block: Extract<Block, { type: 'issues' 
                 </div>
               ) : null}
             </div>
-          </motion.li>
+          </li>
         )
       })}
-    </motion.ul>
+    </ul>
   )
 }

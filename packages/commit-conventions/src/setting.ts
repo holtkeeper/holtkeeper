@@ -82,6 +82,7 @@ export const commitConventionsSetting = {
   description:
     'Rules for commit messages and branch names that agents follow, on top of what history shows.',
   section: 'Repositories',
+  default: commitConventionsSchema.parse({}),
   schema: commitConventionsSchema,
   help,
   presets: [

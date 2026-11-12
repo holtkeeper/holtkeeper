@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import type { LicensedPackage, LicensesData } from './model.ts'
-import { licensesAnalysis, licensesReport } from './report.ts'
+import { compareVerdict, licensesAnalysis, licensesMetrics, licensesReport } from './report.ts'
 
 const pkg = (
   name: string,
@@ -173,4 +173,147 @@ test('warns about a missing repository license only when the policy requires one
   const notRequired = licensesReport({ ...data([]), project: { licenseFiles: [] } })
   expect(notRequired.metrics.map((m) => m.id)).not.toContain('project-license')
   expect(issueIds(notRequired)).toEqual([])
+})
+
+test('metrics keep every license and the worst verdict of a package over its versions', () => {
+  const scan = data([
+    pkg('widget', 'allowed', ['MIT']),
+    pkg('widget', 'denied', ['GPL-3.0-only'], { version: '2.0.0' }),
+    pkg('widget', 'allowed', ['MIT'], { version: '3.0.0' }),
+  ])
+  expect(licensesMetrics(scan).byPackage).toEqual({
+    'npm:widget': { licenses: ['GPL-3.0-only', 'MIT'], verdict: 'denied' },
+  })
+})
+
+test('flagged details merge the flagged versions of a package under its worst verdict', () => {
+  const scan = data([
+    pkg('widget', 'unknown', [], { groups: ['dev'] }),
+    pkg('widget', 'denied', ['GPL-3.0-only'], { version: '2.0.0', groups: ['dev'] }),
+    pkg('widget', 'allowed', ['MIT'], { version: '3.0.0' }),
+  ])
+  expect(licensesMetrics(scan).flaggedDetails).toEqual({
+    'npm:widget': {
+      name: 'widget',
+      ecosystem: 'npm',
+      versions: ['1.0.0', '2.0.0'],
+      licenses: ['GPL-3.0-only'],
+      verdict: 'denied',
+      culprits: ['GPL-3.0-only', 'UNKNOWN'],
+      dev: true,
+    },
+  })
+})
+
+test('compareVerdict orders verdicts worst first', () => {
+  expect(
+    (
+      ['ignored', 'allowed', 'excepted', 'unknown', 'denied', 'internal', 'unlisted'] as const
+    ).toSorted(compareVerdict),
+  ).toEqual(['denied', 'unlisted', 'unknown', 'excepted', 'allowed', 'internal', 'ignored'])
+})
+
+test('excepted packages get their own section and metric and are no violations', () => {
+  const excepted = data([
+    pkg('react', 'allowed', ['MIT']),
+    pkg('fooUtil', 'excepted', ['BUSL-1.1'], { exception: 'Licensed by contract.' }),
+  ])
+  const report = licensesReport(excepted)
+  expect(report.metrics.find((m) => m.id === 'excepted')?.value).toBe(1)
+  expect(report.metrics.find((m) => m.id === 'violations')?.value).toBe(0)
+  const section = report.sections.find((s) => s.id === 'excepted')
+  const [table] = section?.blocks ?? []
+  expect(table?.type === 'table' && table.rows).toEqual([
+    { package: 'fooUtil', version: '1.0.0', license: 'BUSL-1.1', reason: 'Licensed by contract.' },
+  ])
+  const metrics = licensesMetrics(excepted)
+  expect(metrics.verdicts.excepted).toBe(1)
+  expect(metrics.flaggedDetails).toEqual({})
+  expect(licensesAnalysis.schema.safeParse(excepted).success).toBe(true)
+})
+
+test('metrics count packages per verdict', () => {
+  expect(
+    licensesMetrics({
+      ...current,
+      policy: { ...current.policy, requireProjectLicense: true },
+      project: { licenseFiles: [] },
+    }),
+  ).toEqual({
+    packages: 5,
+    verdicts: {
+      allowed: 2,
+      unknown: 1,
+      unlisted: 1,
+      denied: 1,
+      ignored: 0,
+      internal: 0,
+      excepted: 0,
+    },
+    violations: 2,
+    missingProjectLicense: true,
+    licenseFile: 'missing',
+    licenses: { MIT: 2, 'MPL-2.0': 1, 'GPL-3.0-only': 1, UNKNOWN: 1 },
+    allowedLicenses: ['MIT'],
+    flagged: { denied: ['npm:readline'], unlisted: ['npm:mpl'], unknown: ['npm:mystery'] },
+    flaggedDetails: {
+      'npm:mpl': {
+        name: 'mpl',
+        ecosystem: 'npm',
+        versions: ['2.0.0'],
+        licenses: ['MPL-2.0'],
+        verdict: 'unlisted',
+        culprits: ['MPL-2.0'],
+        dev: false,
+      },
+      'npm:readline': {
+        name: 'readline',
+        ecosystem: 'npm',
+        versions: ['1.0.0'],
+        licenses: ['GPL-3.0-only'],
+        verdict: 'denied',
+        culprits: ['GPL-3.0-only'],
+        dev: true,
+      },
+      'npm:mystery': {
+        name: 'mystery',
+        ecosystem: 'npm',
+        versions: ['1.0.0'],
+        licenses: [],
+        verdict: 'unknown',
+        culprits: ['UNKNOWN'],
+        dev: false,
+      },
+    },
+    byPackage: {
+      'npm:react': { licenses: ['MIT'], verdict: 'allowed' },
+      'npm:lodash': { licenses: ['MIT'], verdict: 'allowed' },
+      'npm:mpl': { licenses: ['MPL-2.0'], verdict: 'unlisted' },
+      'npm:readline': { licenses: ['GPL-3.0-only'], verdict: 'denied' },
+      'npm:mystery': { licenses: [], verdict: 'unknown' },
+    },
+  })
+  expect(licensesMetrics(previous)).toMatchObject({
+    missingProjectLicense: false,
+    licenseFile: 'not-required',
+  })
+})
+
+test('metrics leave internal packages out of the license mix and say when a license file is present', () => {
+  const metrics = licensesMetrics({
+    ...data([
+      pkg('react', 'allowed', ['MIT']),
+      pkg('widget-kit', 'internal', [], { definedIn: 'work:acme/widget-kit' }),
+      pkg('left-pad', 'ignored', ['WTFPL']),
+    ]),
+    policy: { allow: ['MIT'], deny: [], ignore: ['left-pad'], requireProjectLicense: true },
+    project: { licenseFiles: ['LICENSE'] },
+  })
+  expect(metrics).toMatchObject({
+    packages: 3,
+    licenseFile: 'present',
+    licenses: { MIT: 1, WTFPL: 1 },
+    allowedLicenses: ['MIT'],
+    flagged: { denied: [], unlisted: [], unknown: [] },
+  })
 })

@@ -91,6 +91,8 @@ checksum/config: {{ include "holtkeeper.configContent" . | sha256sum }}
 {{- define "holtkeeper.env" -}}
 - name: HOLTKEEPER_PORT
   value: {{ .Values.port | quote }}
+- name: HOLTKEEPER_VERSION
+  value: {{ .Values.version | default .Values.image.tag | default .Chart.AppVersion | quote }}
 {{- with .Values.env }}
 {{ toYaml . }}
 {{- end }}

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 
 import type { SettingView } from '@holtkeeper/api'
 
-import { excludeChoices, excludeEntry, globEscape } from './exclude.ts'
+import { excludeChoices, excludeEntry, globEscape, unexcludeEntry } from './exclude.ts'
 
 const repo = { forge: 'work', path: 'games/app' }
 const entry = (scope: SettingView['scope'], value: unknown): SettingView => ({
@@ -69,4 +69,22 @@ test('starts a repository entry from a broader winning value', () => {
     excludeEntry('assets.policy', 'ignore', 'tmp/**', repo, entry({ all: true }, {}), ['vendor/**'])
       .value,
   ).toEqual({ ignore: ['vendor/**', 'tmp/**'] })
+})
+
+test('removes a pattern in place or from a copy of the broader value', () => {
+  const own = entry({ repos: ['work:games/app'] }, { target: 70, exclude: ['a/**', 'b/**'] })
+  expect(unexcludeEntry('analyzers.coverage', 'exclude', 'a/**', repo, own)).toEqual({
+    id: 'entry-1',
+    key: 'analyzers.coverage',
+    scope: { repos: ['work:games/app'] },
+    value: { target: 70, exclude: ['b/**'] },
+  })
+  const broad = entry({ all: true }, { exclude: 'x/**,y/**' })
+  expect(
+    unexcludeEntry('analyzers.coverage', 'exclude', 'x/**', repo, broad, ['x/**', 'y/**']),
+  ).toEqual({
+    key: 'analyzers.coverage',
+    scope: { repos: ['work:games/app'] },
+    value: { exclude: ['y/**'] },
+  })
 })

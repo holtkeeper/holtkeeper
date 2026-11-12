@@ -1,7 +1,8 @@
-import type { ListingAttemptView, PollAttemptView } from '@holtkeeper/api'
+import type { ListingAttemptView } from '@holtkeeper/api'
 
 import { formatDate, formatDuration, formatRelative } from '../../lib/format.ts'
-import { Chip, Table, Td, Th } from '../../ui/index.ts'
+import { Chip, Table, Tag, Td, Th } from '../../ui/index.ts'
+import type { UpdateEvent } from './updates.ts'
 
 function When({ at, now }: { at: string; now: Date }) {
   return <span title={formatDate(at)}>{formatRelative(at, now)}</span>
@@ -25,37 +26,46 @@ function Outcome({ error, children }: { error?: string | undefined; children: st
   )
 }
 
-/** Recent polls of a repository, newest first. */
-export function PollAttempts({ attempts }: { attempts: readonly PollAttemptView[] }) {
+/** Webhook deliveries and polls of a repository in one table, newest first. */
+export function UpdateEvents({ events }: { events: readonly UpdateEvent[] }) {
   const now = new Date()
-  if (attempts.length === 0) return <p className="text-sm text-muted">No polls yet.</p>
+  if (events.length === 0)
+    return <p className="text-sm text-muted">No webhook deliveries or polls yet.</p>
   return (
-    <Table label="Recent polls">
+    <Table label="Recent events">
       <thead>
         <tr>
           <Th>When</Th>
-          <Th>How</Th>
+          <Th>Via</Th>
+          <Th>Event</Th>
           <Th>Result</Th>
-          <Th align="right">Requests</Th>
           <Th align="right">Took</Th>
         </tr>
       </thead>
       <tbody>
-        {attempts.map((attempt) => (
-          <tr key={`${attempt.at}-${attempt.trigger}`}>
+        {events.map((event, index) => (
+          <tr key={`${event.at}-${event.via}-${index}`}>
             <Td>
-              <When at={attempt.at} now={now} />
+              <When at={event.at} now={now} />
             </Td>
             <Td>
-              <Trigger trigger={attempt.trigger} />
+              <Tag tone={event.via === 'webhook' ? 'info' : 'default'}>
+                {event.via === 'webhook' ? 'Webhook' : 'Poll'}
+              </Tag>
             </Td>
+            <Td className="mono">{event.event}</Td>
             <Td>
-              <Outcome error={attempt.error}>
-                {`${attempt.events ?? 0} change(s), ${attempt.enqueued ?? 0} job(s)`}
-              </Outcome>
+              {event.failed ? (
+                <span className="text-danger" title={event.result}>
+                  {event.result}
+                </span>
+              ) : (
+                event.result
+              )}
             </Td>
-            <Td align="right">{attempt.requests ?? '—'}</Td>
-            <Td align="right">{formatDuration(attempt.durationMs)}</Td>
+            <Td align="right" className="mono">
+              {formatDuration(event.durationMs)}
+            </Td>
           </tr>
         ))}
       </tbody>

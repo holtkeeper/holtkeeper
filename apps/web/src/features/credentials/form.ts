@@ -5,10 +5,11 @@ import type {
   UpdateCredentialInput,
 } from '@holtkeeper/api'
 
+import { aiCredentialKinds } from '../../lib/credential-status.ts'
 import { isEmptyScope, normalizeScope } from '../../lib/scope.ts'
 
 /** Credential kinds that are AI providers, whose models the server can list. */
-export const aiProviderKinds: readonly string[] = ['anthropic', 'anthropic-compatible', 'ai-sdk']
+export const aiProviderKinds: readonly string[] = aiCredentialKinds
 
 /** Credential kinds the UI offers; anything else is stored as `other`. */
 export const credentialKinds = [

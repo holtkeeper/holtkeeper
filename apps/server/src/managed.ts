@@ -27,7 +27,7 @@ export interface ManagedConfigOptions {
 /** A running config source plus what keeps it current. */
 export interface ManagedConfig {
   source: ConfigSource
-  /** The `repo.readOnly` setting; every forge client of `source` already refuses writes it forbids. */
+  /** The `repo.freeze` setting; every forge client of `source` already refuses writes it forbids. */
   readOnly: ReadOnlyRepos
   /** Re-reads limit settings and credentials, reconfigures the limiter, then rebuilds the config. */
   refresh(): Promise<void>
@@ -37,7 +37,7 @@ export interface ManagedConfig {
 /**
  * The server's `ConfigSource`: the file config plus the store's panel documents, panel GitLab
  * forges built with their credential's token and a `fetch` limited under the credential id. Every forge client refuses
- * changes to repositories the `repo.readOnly` setting marks read-only.
+ * changes to repositories a `repo.freeze` entry in force marks read-only.
  */
 export async function startManagedConfig(options: ManagedConfigOptions): Promise<ManagedConfig> {
   const { store, vault, credentials, limiter } = options
@@ -62,12 +62,12 @@ export async function startManagedConfig(options: ManagedConfigOptions): Promise
     readOnlyDefinition(definition, (path) => readOnly({ forge: id, path }))
   const gitlab = gitlabForgeFactory({
     fetchFor: (doc) => {
-      const view = views.get(doc.data.credentialId)
-      return limitedFetch(
-        limiter,
-        view ?? { id: doc.data.credentialId, kind: doc.data.kind },
-        entries,
-      )
+      const id = doc.data.credentialId
+      const view = views.get(id)
+      return limitedFetch(limiter, view ?? { id, kind: doc.data.kind }, entries, (input, init) => {
+        void credentials.markUsed(id)
+        return fetch(input, init)
+      })
     },
   })
 
@@ -75,7 +75,7 @@ export async function startManagedConfig(options: ManagedConfigOptions): Promise
     file: options.file,
     ...(store.config && { store: store.config }),
     forgeFactories: { gitlab: (doc, token) => guarded(doc.id, gitlab(doc, token)) },
-    revealToken: (id) => credentials.reveal(id),
+    revealToken: (id) => credentials.open(id),
     openSecret: (sealed) => vault.open(sealed),
     ...(options.log && { log: options.log }),
   })

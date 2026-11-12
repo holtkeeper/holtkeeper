@@ -31,3 +31,29 @@ export function clearedMessage(result: ClearStorageResult | undefined): string {
   ].filter((part) => part !== undefined)
   return parts.length ? parts.join(' · ') : 'Cleared'
 }
+
+const shades = [86, 66, 50, 38, 28, 20, 14, 9] as const
+
+/** Grey shade of the `index`-th storage area, from near-foreground down; meaning comes from the legend. */
+export const storageShade = (index: number): string =>
+  `color-mix(in oklab, var(--fg) ${shades[Math.min(index, shades.length - 1)]}%, transparent)`
+
+/** Share of `bytes` in `total` as a label: `60%`, `<1%` for slivers, `0%` for nothing. */
+export function shareLabel(bytes: number, total: number): string {
+  const share = shareOf(bytes, total)
+  if (share > 0 && share < 1) return '<1%'
+  return `${Math.round(share)}%`
+}
+
+/** Change of an area against a week ago: `+1.2 GB`, `−200 MB` or `0`; absent without a past value. */
+export function storageDelta(
+  bytes: number,
+  weekAgo: number | undefined,
+): { text: string; trend: 'up' | 'down' | 'flat' } | undefined {
+  if (weekAgo === undefined) return undefined
+  const change = bytes - weekAgo
+  if (change === 0) return { text: '0', trend: 'flat' }
+  return change > 0
+    ? { text: `+${formatBytes(change)}`, trend: 'up' }
+    : { text: `−${formatBytes(-change)}`, trend: 'down' }
+}

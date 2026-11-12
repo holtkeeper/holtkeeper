@@ -1,7 +1,7 @@
 import type { JobAnalyzerView, RepoRef } from '@holtkeeper/api'
 import { useNavigate } from '@tanstack/react-router'
 import { Play } from 'lucide-react'
-import { useCallback, useState } from 'react'
+import { type ReactNode, useCallback, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useGroups, useJobAnalyzers, useJobMutations, useRepos } from '../../api/queries.ts'
@@ -10,6 +10,7 @@ import { repoKey } from '../../lib/repo.ts'
 import { defaultValue } from '../../lib/schema.ts'
 import type { ButtonVariant } from '../../ui/Button.tsx'
 import { Button, Dialog, Notice, Placeholder, Select, TextField, notify } from '../../ui/index.ts'
+import type { PageAction } from '../../ui/Page.tsx'
 import { PresetPicker } from '../settings/PresetPicker.tsx'
 import { StructuredEditor } from '../settings/SchemaField.tsx'
 import { useSession } from '../shell/session.ts'
@@ -87,7 +88,7 @@ function RunJobForm({
         onSuccess: (job) => {
           notify.success('Job queued', selected.label)
           onClose()
-          void navigate({ to: '/jobs/$jobId', params: { jobId: job.id } })
+          void navigate({ to: '/ops/runs/$jobId', params: { jobId: job.id } })
         },
       },
     )
@@ -264,29 +265,26 @@ function Needs({ analyzer }: { analyzer: JobAnalyzerView }) {
 }
 
 /**
- * Opens `RunJobDialog`; renders nothing without `analyses:run`, when jobs are off or when no
- * analyzer fits the target.
+ * The header action that opens `RunJobDialog`, with the dialog to render next to it. `action` is
+ * `undefined` without `analyses:run`, while the analyzers load or when no analyzer fits the target.
  */
-export function RunJobButton({
+export function useRunJob({
   repo,
   group,
   analyzer,
   label = 'Run analyzer',
-  variant = 'primary',
-  size = 'md',
-}: Target & { label?: string; variant?: ButtonVariant; size?: 'sm' | 'md' | 'lg' }) {
+}: Target & { label?: string }): { action: PageAction | undefined; dialog: ReactNode } {
   const { can } = useSession()
   const analyzers = useJobAnalyzers()
   const [open, setOpen] = useState(false)
-  if (!can('analyses:run') || !analyzers.data) return null
-  const available = analyzersFor(analyzers.data.analyzers, { repo, group })
-  if (!available.length || (analyzer && !available.some((a) => a.kind === analyzer))) return null
-  return (
-    <>
-      <Button variant={variant} size={size} onPress={() => setOpen(true)}>
-        <Play className="size-3.5" />
-        {label}
-      </Button>
+  const available = analyzers.data ? analyzersFor(analyzers.data.analyzers, { repo, group }) : []
+  const fits =
+    can('analyses:run') &&
+    available.length > 0 &&
+    (!analyzer || available.some((a) => a.kind === analyzer))
+  return {
+    action: fits ? { label, icon: Play, onPress: () => setOpen(true) } : undefined,
+    dialog: (
       <RunJobDialog
         isOpen={open}
         onOpenChange={setOpen}
@@ -294,6 +292,29 @@ export function RunJobButton({
         group={group}
         analyzer={analyzer}
       />
+    ),
+  }
+}
+
+/**
+ * Opens `RunJobDialog`; renders nothing without `analyses:run`, when jobs are off or when no
+ * analyzer fits the target.
+ */
+export function RunJobButton({
+  label = 'Run analyzer',
+  variant = 'primary',
+  size = 'md',
+  ...target
+}: Target & { label?: string; variant?: ButtonVariant; size?: 'sm' | 'md' | 'lg' }) {
+  const run = useRunJob({ ...target, label })
+  if (!run.action) return null
+  return (
+    <>
+      <Button variant={variant} size={size} onPress={run.action.onPress}>
+        <Play className="size-3.5" />
+        {label}
+      </Button>
+      {run.dialog}
     </>
   )
 }

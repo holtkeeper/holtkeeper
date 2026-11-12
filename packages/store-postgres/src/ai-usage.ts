@@ -26,6 +26,7 @@ export function dimensionFlags(
     provider: on('provider'),
     taskKind: on('taskKind'),
     analyzer: on('analyzer'),
+    origin: on('origin'),
   }
 }
 
@@ -52,6 +53,7 @@ export interface AggregateRow {
   k_provider: string
   k_task_kind: string
   k_analyzer: string
+  k_origin: string
   input_tokens: number | string | null
   output_tokens: number | string | null
   cache_read_tokens: number | string | null
@@ -60,6 +62,7 @@ export interface AggregateRow {
   runs: number | string
   errors: number | string
   denied: number | string
+  unknown_cost: number | string
   avg_duration_ms: number | string | null
 }
 
@@ -73,6 +76,7 @@ const keyColumn: Record<AiUsageDimension, keyof AggregateRow> = {
   provider: 'k_provider',
   taskKind: 'k_task_kind',
   analyzer: 'k_analyzer',
+  origin: 'k_origin',
 }
 
 /** One aggregate row as a bucket keyed by the requested dimensions only. */
@@ -89,9 +93,13 @@ export function toBucket(row: AggregateRow, groupBy: readonly AiUsageDimension[]
     runs: num(row.runs),
     errors: num(row.errors),
     denied: num(row.denied),
+    unknownCost: num(row.unknown_cost),
     avgDurationMs: num(row.avg_duration_ms),
   }
 }
+
+const originValue = (origin: AiUsageFilter['origin']) =>
+  origin === undefined ? null : origin === 'interactive'
 
 /** Every condition of an AI usage filter but `scopes`, over rows aliased `r`. */
 const plainWhere = (sql: SQL, f: AiUsageFilter) => sql`
@@ -100,6 +108,11 @@ const plainWhere = (sql: SQL, f: AiUsageFilter) => sql`
   AND (${f.repo?.forge ?? null}::text IS NULL
     OR (r.repo_forge = ${f.repo?.forge ?? null}::text AND r.repo_path = ${f.repo?.path ?? null}::text))
   AND (${f.group ?? null}::text IS NULL OR r.groups @> jsonb_build_array(${f.group ?? null}::text))
+  AND (${f.groups === undefined ? null : sql.json(f.groups)}::jsonb IS NULL
+    OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(r.groups) rg(name)
+      WHERE rg.name IN (SELECT jsonb_array_elements_text(${f.groups === undefined ? null : sql.json(f.groups)}::jsonb))))
+  AND (${f.actor ?? null}::text IS NULL OR r.actor = ${f.actor ?? null}::text)
+  AND (${originValue(f.origin)}::boolean IS NULL OR r.interactive = ${originValue(f.origin)}::boolean)
   AND (${f.model ?? null}::text IS NULL OR r.model = ${f.model ?? null}::text)
   AND (${f.provider ?? null}::text IS NULL OR r.provider = ${f.provider ?? null}::text)
   AND (${f.taskKind ?? null}::text IS NULL OR r.task_kind = ${f.taskKind ?? null}::text)
@@ -142,12 +155,13 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
       const { sql, t } = await db()
       const [row]: AiUsageRow[] = await sql`
         INSERT INTO ${t.aiUsage} (id, at, repo_forge, repo_path, groups, task_kind, analyzer, job_id,
-          analysis_id, actor, provider, model, input_tokens, output_tokens, cache_read_tokens,
-          cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome, error, transcript_ref)
+          analysis_id, actor, interactive, subject, provider, model, input_tokens, output_tokens,
+          cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms, turns, outcome,
+          error, transcript_ref)
         VALUES (${crypto.randomUUID()}, ${record.at}, ${record.repo.forge}, ${record.repo.path},
           ${sql.json(record.groups)}, ${record.taskKind}, ${record.analyzer ?? null},
           ${record.jobId ?? null}, ${record.analysisId ?? null}, ${record.actor},
-          ${record.provider}, ${record.model}, ${record.inputTokens}, ${record.outputTokens},
+          ${record.interactive ?? false}, ${record.subject ?? null}, ${record.provider}, ${record.model}, ${record.inputTokens}, ${record.outputTokens},
           ${record.cacheReadTokens}, ${record.cacheWriteTokens}, ${record.costUsd}::float8,
           ${record.costSource}, ${record.durationMs}, ${record.turns}, ${record.outcome},
           ${record.error ?? null}, ${record.transcriptRef ?? null})
@@ -180,6 +194,8 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
           CASE WHEN ${on.provider}::boolean THEN r.provider ELSE '' END AS k_provider,
           CASE WHEN ${on.taskKind}::boolean THEN r.task_kind ELSE '' END AS k_task_kind,
           CASE WHEN ${on.analyzer}::boolean THEN COALESCE(r.analyzer, '') ELSE '' END AS k_analyzer,
+          CASE WHEN ${on.origin}::boolean
+            THEN CASE WHEN r.interactive THEN 'interactive' ELSE 'automatic' END ELSE '' END AS k_origin,
           SUM(r.input_tokens) AS input_tokens,
           SUM(r.output_tokens) AS output_tokens,
           SUM(r.cache_read_tokens) AS cache_read_tokens,
@@ -188,6 +204,7 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
           COUNT(*)::int AS runs,
           (COUNT(*) FILTER (WHERE r.outcome = 'error'))::int AS errors,
           (COUNT(*) FILTER (WHERE r.outcome = 'denied-budget'))::int AS denied,
+          (COUNT(*) FILTER (WHERE r.outcome <> 'denied-budget' AND r.cost_source = 'unknown'))::int AS unknown_cost,
           (AVG(r.duration_ms) FILTER (WHERE r.outcome <> 'denied-budget'))::float8 AS avg_duration_ms
         FROM ${t.aiUsage} r
         CROSS JOIN LATERAL (
@@ -196,7 +213,7 @@ export function postgresAiUsage(db: () => Promise<Db>): AiUsageStore {
           SELECT '' WHERE NOT ${on.group}::boolean OR jsonb_array_length(r.groups) = 0
         ) g
         WHERE ${await where(sql, t, aggregateFilter(query))}
-        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9`
+        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8, 9, 10`
       return sortAiUsageBuckets(
         rows.map((row) => toBucket(row, groupBy)),
         groupBy,

@@ -1,7 +1,14 @@
+import type { SystemHealth, SystemHealthCheck } from '@holtkeeper/api'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { Store } from '@holtkeeper/store'
 
+import type { ServerDeps } from './context.ts'
+import { lastLibraryRun, librariesConfigOf, librariesEnabled } from './libraries.ts'
+import { libraryProgress } from './library-progress.ts'
 import type { Metrics } from './metrics.ts'
+import { retiredReadOnlyEntries } from './read-only.ts'
+import { workerStorageReports } from './storage-reports.ts'
+import { storageHistory, storageOverview, weekAgoSnapshot } from './storage.ts'
 
 export interface ProbeOptions {
   /**
@@ -35,6 +42,15 @@ const withTimeout = <T>(promise: Promise<T>, ms: number) => {
     }),
   ]).finally(() => clearTimeout(timer))
 }
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/** `undefined` when `check` settles within `ms`, else its error message. */
+const failureOf = (check: () => Promise<unknown>, ms: number) =>
+  withTimeout(check(), ms).then(
+    () => undefined,
+    (error: unknown) => messageOf(error),
+  )
 
 /** Probes checking the store, the artifact store and the draining flag. */
 export function createProbes(options: ProbeOptions): Probes {
@@ -74,6 +90,30 @@ export function createProbes(options: ProbeOptions): Probes {
   }
 }
 
+/**
+ * The release this process runs: `version` (else `HOLTKEEPER_VERSION`) trimmed, `undefined` when
+ * empty, so an image built without a version reports none.
+ */
+export const releaseVersion = (version?: string): string | undefined =>
+  (version ?? Bun.env.HOLTKEEPER_VERSION)?.trim() || undefined
+
+/**
+ * The `warn` check listing stored `repo.readOnly: true` entries, which no longer stop writes;
+ * `undefined` when there are none.
+ */
+export async function retiredReadOnlyCheck(
+  store: Pick<Store, 'settings'>,
+): Promise<SystemHealthCheck | undefined> {
+  const leftover = await retiredReadOnlyEntries(store)
+  if (leftover.length === 0) return undefined
+  return {
+    id: 'retired-read-only',
+    label: 'Read-only entries',
+    status: 'warn',
+    detail: `${leftover.length} retired repo.readOnly ${leftover.length === 1 ? 'entry no longer protects its' : 'entries no longer protect their'} repositories: set them again as repo.freeze`,
+  }
+}
+
 const webhookPath = /^\/api\/webhooks\/([^/]+)/
 
 /**
@@ -101,5 +141,127 @@ export function opsFetch(
     const forge = webhookPath.exec(pathname)?.[1]
     if (forge && request.method === 'POST') ops.metrics.observeWebhook(forge, response.status)
     return response
+  }
+}
+
+const answering = (
+  id: SystemHealthCheck['id'],
+  label: string,
+  error: string | undefined,
+): SystemHealthCheck => ({
+  id,
+  label,
+  status: error === undefined ? 'ok' : 'error',
+  detail: error ?? 'answering',
+})
+
+const worst = (checks: readonly SystemHealthCheck[]): SystemHealth['status'] =>
+  checks.some((check) => check.status === 'error')
+    ? 'error'
+    : checks.some((check) => check.status === 'warn')
+      ? 'warn'
+      : 'ok'
+
+async function libraryCheck(
+  deps: Pick<ServerDeps, 'store'>,
+): Promise<SystemHealthCheck | undefined> {
+  const { store } = deps
+  if (!store.libraries || !librariesEnabled(await librariesConfigOf(store.settings)))
+    return undefined
+  const base = { id: 'library-index', label: 'Library index' } as const
+  const progress = await libraryProgress(store.kv)
+  if (progress?.waitingUntil)
+    return {
+      ...base,
+      status: 'warn',
+      detail: `waiting for GitHub quota, ${progress.done} of ${progress.total}`,
+    }
+  if (progress)
+    return { ...base, status: 'ok', detail: `indexing ${progress.done} of ${progress.total}` }
+  const last = await lastLibraryRun(store.kv)
+  if (last?.error) return { ...base, status: 'warn', detail: `last run failed: ${last.error}` }
+  return { ...base, status: 'ok', detail: last ? 'idle' : 'not run yet' }
+}
+
+/**
+ * Settings › System at a glance: whether the store answers and its migrations are applied, the
+ * artifact store answers, workers report and the library index runs, plus storage now against the
+ * newest daily snapshot at least seven days old. Each check fails after `timeoutMs` (default 3 s).
+ */
+export async function systemHealth(
+  deps: Pick<ServerDeps, 'store' | 'artifacts' | 'storage' | 'version' | 'now'>,
+  options: { startedAt: string; timeoutMs?: number },
+): Promise<SystemHealth> {
+  const now = deps.now()
+  const timeoutMs = options.timeoutMs ?? 3000
+  const store: Store & { ready?: () => Promise<void> } = deps.store
+  const [
+    storeError,
+    migrationsError,
+    artifactsError,
+    reports,
+    library,
+    overview,
+    history,
+    retired,
+  ] = await Promise.all([
+    failureOf(() => store.jobs.list({ limit: 1 }), timeoutMs),
+    typeof store.ready === 'function'
+      ? failureOf(() => store.ready?.() ?? Promise.resolve(), timeoutMs)
+      : Promise.resolve(undefined),
+    deps.artifacts
+      ? failureOf(() => deps.artifacts?.ping() ?? Promise.resolve(), timeoutMs)
+      : Promise.resolve(undefined),
+    store.kv ? workerStorageReports(store.kv, { now }) : Promise.resolve([]),
+    libraryCheck(deps).catch((error: unknown): SystemHealthCheck => ({
+      id: 'library-index',
+      label: 'Library index',
+      status: 'error',
+      detail: messageOf(error),
+    })),
+    storageOverview({ providers: deps.storage ?? [], kv: store.kv, now }),
+    storageHistory(store.kv),
+    retiredReadOnlyCheck(store).catch(() => undefined),
+  ])
+  const checks: SystemHealthCheck[] = [
+    answering('store', 'Store', storeError),
+    ...(typeof store.ready === 'function'
+      ? [
+          {
+            id: 'migrations',
+            label: 'Migrations',
+            status: migrationsError === undefined ? 'ok' : 'error',
+            detail: migrationsError ?? 'up to date',
+          } satisfies SystemHealthCheck,
+        ]
+      : []),
+    ...(deps.artifacts ? [answering('artifacts', 'Artifacts', artifactsError)] : []),
+    ...(store.kv
+      ? [
+          {
+            id: 'workers',
+            label: 'Workers',
+            status: reports.length ? 'ok' : 'warn',
+            detail: reports.length
+              ? `${reports.length} ${reports.length === 1 ? 'worker' : 'workers'} reporting`
+              : 'no worker reported in 15 minutes',
+          } satisfies SystemHealthCheck,
+        ]
+      : []),
+    ...(library ? [library] : []),
+    ...(retired ? [retired] : []),
+  ]
+  const past = weekAgoSnapshot(history, now)
+  return {
+    status: worst(checks),
+    checks,
+    checkedAt: now.toISOString(),
+    storage: {
+      totalBytes: overview.totalBytes,
+      ...(past && { since: past.day, weekAgoBytes: past.bytes, weekAgo: past.areas }),
+    },
+    workers: reports.length,
+    ...(deps.version?.trim() && { version: deps.version.trim() }),
+    startedAt: options.startedAt,
   }
 }

@@ -45,7 +45,8 @@ export function TriggerForm({
   onDone: () => void
 }) {
   const isNew = entry === undefined
-  const [draft, setDraft] = useState<TriggerDraft>(() => toTriggerDraft(entry?.data))
+  const [initial] = useState<TriggerDraft>(() => toTriggerDraft(entry?.data))
+  const [draft, setDraft] = useState<TriggerDraft>(initial)
   const [submitted, setSubmitted] = useState(false)
   const [removing, setRemoving] = useState(false)
   const { put } = useConfigMutations('triggers')
@@ -84,7 +85,9 @@ export function TriggerForm({
       <RuleForm
         writable={writable}
         isPending={put.isPending}
+        dirty={JSON.stringify(draft) !== JSON.stringify(initial)}
         onSave={save}
+        onDiscard={() => setDraft(initial)}
         {...(entry ? { onRemove: () => setRemoving(true) } : {})}
         notice={
           put.error ? (
@@ -190,9 +193,7 @@ export function TriggerForm({
                 onChange={(v) => set('analyzer', v)}
                 placeholder="Choose an analyzer"
               />
-              {errors.analyzer ? (
-                <span className="text-xs text-danger">{errors.analyzer}</span>
-              ) : null}
+              {errors.analyzer ? <span className="text-xs text-bad">{errors.analyzer}</span> : null}
             </div>
           ) : draft.on === 'newRepo' ? (
             <>

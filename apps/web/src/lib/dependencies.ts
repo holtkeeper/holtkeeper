@@ -1,5 +1,7 @@
 import type {
+  DependencyApiChange,
   DependencyDetail,
+  DependencyMergeRequest,
   DependencyRepo,
   DependencyRow,
   GroupMatch,
@@ -7,25 +9,160 @@ import type {
 } from '@holtkeeper/api'
 
 import { type ScopeView, inHomeGroups } from './home-scope.ts'
+import { parseEcosystem } from './libraries.ts'
 import { repoKey } from './repo.ts'
+import { searchEntry, searchEnum, searchText } from './search-params.ts'
+import { type SortState, type SortValue, sortRows as sortTableRows } from './table-sort.ts'
 
 type LibraryEcosystem = DependencyRow['ecosystem']
 
-/** Which libraries to show. */
+/** Words of an API change kind between two versions. */
+export const apiChangeLabel: Record<DependencyApiChange['change'] | 'added', string> = {
+  added: 'Added',
+  removed: 'Removed',
+  changed: 'Changed',
+  deprecated: 'Deprecated',
+}
+
+/** Words of an update merge request's state. */
+export const mergeRequestStatusLabel: Record<DependencyMergeRequest['status'], string> = {
+  broken: 'Broken',
+  open: 'Open',
+  draft: 'Draft',
+}
+
+/** Which libraries to show: `all` is every third-party library, `internal` the organization's own. */
 export type DependencyFilter = 'all' | 'behind' | 'advisories' | 'updates' | 'internal'
 
-/** Tabs of a library, in the sheet and on its own page. */
+/** The segments of the Libraries table, in order. */
+export const dependencyFilters: readonly { id: DependencyFilter; label: string }[] = [
+  { id: 'all', label: 'Third-party' },
+  { id: 'behind', label: 'Behind a major' },
+  { id: 'advisories', label: 'Advisories' },
+  { id: 'updates', label: 'Update MRs' },
+  { id: 'internal', label: 'Internal' },
+]
+
+/** Tabs of a library page, in order. */
 export const libraryTabs = [
   { id: 'overview', label: 'Overview' },
+  { id: 'api', label: 'API' },
+  { id: 'changes', label: 'Changes' },
+  { id: 'used-by', label: 'Used by' },
   { id: 'upgrade', label: 'Upgrade' },
   { id: 'docs', label: 'Docs' },
 ] as const
 
 export type LibraryTab = (typeof libraryTabs)[number]['id']
 
-/** A tab id from a URL value; anything unknown is `overview`. */
-export const parseLibraryTab = (value: unknown): LibraryTab =>
-  libraryTabs.find((tab) => tab.id === value)?.id ?? 'overview'
+const sheetTabIds: readonly LibraryTab[] = ['overview', 'upgrade', 'used-by', 'docs']
+
+/** Tabs of a library in the Libraries side sheet, in sheet order; the rest live on its page. */
+export const librarySheetTabs: readonly { id: LibraryTab; label: string }[] = sheetTabIds.map(
+  (id) => libraryTabs.find((tab) => tab.id === id)!,
+)
+
+/** A tab id from a URL value; anything unknown or not among `tabs` is `overview`. */
+export const parseLibraryTab = (
+  value: unknown,
+  tabs: readonly { id: LibraryTab }[] = libraryTabs,
+): LibraryTab => tabs.find((tab) => tab.id === value)?.id ?? 'overview'
+
+/** Sortable columns of the Libraries table. */
+export type LibrariesSortKey =
+  | 'name'
+  | 'ecosystem'
+  | 'versions'
+  | 'repos'
+  | 'latest'
+  | 'behind'
+  | 'advisories'
+  | 'updates'
+
+const librariesSortKeys: readonly LibrariesSortKey[] = [
+  'name',
+  'ecosystem',
+  'versions',
+  'repos',
+  'latest',
+  'behind',
+  'advisories',
+  'updates',
+]
+
+/** Search parameters of `/supply/libraries`; omitted keys are the defaults. */
+export interface LibrariesSearch {
+  /** `forge:path` the table narrows to. */
+  repo?: string
+  /** The library open in the sheet, as `libraryKey` names it. */
+  library?: string
+  /** Tab of the open library's sheet. */
+  tab?: string
+  segment?: Exclude<DependencyFilter, 'all'>
+  ecosystem?: LibraryEcosystem
+  q?: string
+  sort?: LibrariesSortKey
+  dir?: 'asc' | 'desc'
+}
+
+/** Reads `/supply/libraries` search parameters, dropping unknown values and defaults. */
+export function parseLibrariesSearch(search: Record<string, unknown>): LibrariesSearch {
+  const segment = searchEnum(
+    search.segment,
+    dependencyFilters.map((filter) => filter.id),
+  )
+  const sort = searchEnum(search.sort, librariesSortKeys)
+  return {
+    ...searchEntry('repo', searchText(search.repo)),
+    ...searchEntry('library', searchText(search.library)),
+    ...searchEntry('tab', searchText(search.tab)),
+    ...searchEntry('segment', segment === 'all' ? undefined : segment),
+    ...searchEntry('ecosystem', parseEcosystem(search.ecosystem)),
+    ...searchEntry('q', searchText(search.q)),
+    ...(sort ? { sort, dir: search.dir === 'desc' ? ('desc' as const) : ('asc' as const) } : {}),
+  }
+}
+
+/** The table sort `search` asks for; `null` keeps the server's order. */
+export const librariesSort = (search: LibrariesSearch): SortState<LibrariesSortKey> =>
+  search.sort ? { key: search.sort, direction: search.dir ?? 'asc' } : null
+
+/** `search` with `sort` in it; `null` clears the sort back to the server's order. */
+export function withLibrariesSort(
+  search: LibrariesSearch,
+  sort: SortState<LibrariesSortKey>,
+): LibrariesSearch {
+  const { sort: _sort, dir: _dir, ...rest } = search
+  return sort ? { ...rest, sort: sort.key, dir: sort.direction } : rest
+}
+
+/** Search parameters of `/supply/libraries/<ecosystem>/<name>`; omitted keys are the defaults. */
+export interface LibrarySearch {
+  tab?: string
+  /** Used by: the export whose code is shown. */
+  export?: string
+  /** Used by: `forge:path` everything narrows to. */
+  repo?: string
+  /** Used by: only consumers on this version. */
+  using?: string
+  /** API and Changes: the recorded version of an internal package shown (`head` for the default branch). */
+  version?: string
+  /** Upgrade and the header's roll-out: the version upgraded from. */
+  from?: string
+  /** Upgrade and the header's roll-out: the version upgraded to; the latest when absent. */
+  to?: string
+}
+
+/** Reads library page search parameters, dropping empty values. */
+export const parseLibrarySearch = (search: Record<string, unknown>): LibrarySearch => ({
+  ...searchEntry('tab', searchText(search.tab)),
+  ...searchEntry('export', searchText(search.export)),
+  ...searchEntry('repo', searchText(search.repo)),
+  ...searchEntry('using', searchText(search.using)),
+  ...searchEntry('version', searchText(search.version)),
+  ...searchEntry('from', searchText(search.from)),
+  ...searchEntry('to', searchText(search.to)),
+})
 
 /** `npm:react`: how a library is named in the `library` search parameter. */
 export const libraryKey = (row: { ecosystem: LibraryEcosystem; name: string }): string =>
@@ -48,10 +185,10 @@ export function parseLibraryKey(
  * per-version repository counts, and the behind figures recomputed. `undefined` when none of
  * them uses the library. Advisories, licenses and Renovate state stay library-wide.
  */
-export function narrowRow(
-  row: DependencyRow,
+export function narrowRow<T extends DependencyRow>(
+  row: T,
   accept: (repo: string) => boolean,
-): DependencyRow | undefined {
+): T | undefined {
   const usedBy = row.usedBy.filter((entry) => accept(entry.repo))
   if (!usedBy.length) return undefined
   if (usedBy.length === row.usedBy.length) return row
@@ -69,110 +206,187 @@ export function narrowRow(
   }
 }
 
-/**
- * Rows matching a name query, an ecosystem (`*` for all) and a filter; `all`, `behind`,
- * `advisories` and `updates` leave internal packages out, `internal` shows only them. With `repo`
- * (`forge:path`), only libraries that repository uses, with its versions alone. Order is kept.
- */
-export function filterRows(
-  rows: readonly DependencyRow[],
-  options: { query?: string; ecosystem?: string; filter?: DependencyFilter; repo?: string },
-): DependencyRow[] {
+interface RowFilter {
+  query?: string
+  /** `*` or absent for every ecosystem. */
+  ecosystem?: string
+  filter?: DependencyFilter
+  /** `forge:path`: only libraries that repository uses, with its versions alone. */
+  repo?: string
+}
+
+const matchesFilter = (row: DependencyRow, filter: DependencyFilter): boolean =>
+  filter === 'internal'
+    ? row.internal
+    : !row.internal &&
+      (filter === 'all' ||
+        (filter === 'behind' && row.majorsBehind > 0) ||
+        (filter === 'advisories' && row.advisories.count > 0) ||
+        (filter === 'updates' && row.renovate !== 'none'))
+
+function narrowTo<T extends DependencyRow>(
+  rows: readonly T[],
+  options: Omit<RowFilter, 'filter' | 'ecosystem'>,
+): T[] {
   const needle = options.query?.trim().toLowerCase() ?? ''
-  const filter = options.filter ?? 'all'
   return rows.flatMap((row) => {
     if (needle && !row.name.toLowerCase().includes(needle)) return []
-    if (options.ecosystem && options.ecosystem !== '*' && row.ecosystem !== options.ecosystem)
-      return []
-    if ((filter === 'internal') !== row.internal) return []
     const narrowed = options.repo ? narrowRow(row, (repo) => repo === options.repo) : row
-    if (!narrowed) return []
-    if (filter === 'behind' && narrowed.majorsBehind === 0) return []
-    if (filter === 'advisories' && narrowed.advisories.count === 0) return []
-    if (filter === 'updates' && narrowed.renovate === 'none') return []
-    return [narrowed]
+    return narrowed ? [narrowed] : []
   })
 }
 
-/** Rows a scope position shows, the switch counts and the folded "other teams" line. */
-export interface ScopedRows {
-  /** Narrowed to the home groups' repositories for *My team*; empty for *Other teams*. */
-  shown: DependencyRow[]
-  counts: Record<ScopeView, number>
-  /** Repositories outside the home groups and the groups they are in. */
-  others: { libraries: number; repos: number; teams: number }
+const inEcosystem = (row: DependencyRow, ecosystem: string | undefined) =>
+  !ecosystem || ecosystem === '*' || row.ecosystem === ecosystem
+
+/**
+ * Rows matching a name query, an ecosystem and a segment; every segment but `internal` leaves
+ * internal packages out. With `repo`, rows narrow to that repository's versions before the
+ * segment applies. Order is kept, extra fields too.
+ */
+export function filterRows<T extends DependencyRow>(rows: readonly T[], options: RowFilter): T[] {
+  const filter = options.filter ?? 'all'
+  return narrowTo(rows, options).filter(
+    (row) => inEcosystem(row, options.ecosystem) && matchesFilter(row, filter),
+  )
 }
 
 /**
- * Splits library rows by the viewer's home groups through the repositories using them. A UI
- * default, not a permission: rows are what the viewer may already see.
+ * What each segment and each ecosystem would show: segments count with the query, ecosystem and
+ * repository applied, ecosystems with the query, segment and repository applied.
  */
-export function scopeRows(
+export function filterCounts(
+  rows: readonly DependencyRow[],
+  options: RowFilter,
+): { segments: Record<DependencyFilter, number>; ecosystems: Record<LibraryEcosystem, number> } {
+  const narrowed = narrowTo(rows, options)
+  const filter = options.filter ?? 'all'
+  const segments: Record<DependencyFilter, number> = {
+    all: 0,
+    behind: 0,
+    advisories: 0,
+    updates: 0,
+    internal: 0,
+  }
+  const ecosystems: Record<LibraryEcosystem, number> = { npm: 0, Go: 0 }
+  for (const row of narrowed) {
+    if (inEcosystem(row, options.ecosystem))
+      for (const segment of dependencyFilters)
+        if (matchesFilter(row, segment.id)) segments[segment.id] += 1
+    if (matchesFilter(row, filter)) ecosystems[row.ecosystem] += 1
+  }
+  return { segments, ecosystems }
+}
+
+/** A library row with the groups `FleetTable` folds it by. */
+export type LibraryFleetRow = DependencyRow & { groups: string[] }
+
+/**
+ * Library rows ready for `FleetTable`. Under *My teams* a library some home-group repository
+ * uses is narrowed to those repositories and carries a home group's groups, and a library only
+ * other teams use is narrowed to theirs and carries their groups, so the table folds it away.
+ * Under *All I can see* rows stay whole. A UI default, not a permission.
+ */
+export function scopeLibraryRows(
   rows: readonly DependencyRow[],
   repos: readonly DependencyRepo[],
   view: ScopeView,
   homeGroups: readonly GroupMatch[],
-): ScopedRows {
-  const mine = new Set<string>()
-  const otherRepos: DependencyRepo[] = []
-  for (const entry of repos)
-    if (inHomeGroups(homeGroups, entry.groups)) mine.add(repoKey(entry.repo))
-    else otherRepos.push(entry)
-  const homeNames = new Set(homeGroups.filter((entry) => typeof entry === 'string'))
-  const teams = new Set(
-    otherRepos.flatMap((entry) => entry.groups).filter((g) => !homeNames.has(g)),
-  )
-  const own = rows.flatMap((row) => narrowRow(row, (repo) => mine.has(repo)) ?? [])
-  const othersCount = rows.filter((row) => row.usedBy.some((used) => !mine.has(used.repo))).length
-  return {
-    shown: view === 'mine' ? own : view === 'all' ? [...rows] : [],
-    counts: { mine: own.length, all: rows.length, others: othersCount },
-    others: { libraries: othersCount, repos: otherRepos.length, teams: teams.size },
-  }
-}
-
-/**
- * Libraries only other teams use, narrowed to their repositories, with the groups they are in:
- * what the *My team* view folds into a collapsed "Other teams" section. Empty without home groups.
- */
-export function otherTeamRows(
-  rows: readonly DependencyRow[],
-  repos: readonly DependencyRepo[],
-  homeGroups: readonly GroupMatch[],
-): { rows: DependencyRow[]; teams: string[] } {
-  if (!homeGroups.length) return { rows: [], teams: [] }
-  const mine = new Set(
-    repos.filter((entry) => inHomeGroups(homeGroups, entry.groups)).map((e) => repoKey(e.repo)),
-  )
+): LibraryFleetRow[] {
   const groupsOf = new Map(repos.map((entry) => [repoKey(entry.repo), entry.groups]))
-  const homeNames = new Set(
-    homeGroups.flatMap((entry) => (typeof entry === 'string' ? [entry] : entry)),
-  )
-  const others = rows.flatMap((row) =>
-    row.usedBy.some((used) => mine.has(used.repo))
-      ? []
-      : (narrowRow(row, (repo) => !mine.has(repo)) ?? []),
-  )
-  const teams = new Set(
-    others.flatMap((row) => row.usedBy.flatMap((used) => groupsOf.get(used.repo) ?? [])),
-  )
-  return { rows: others, teams: [...teams].filter((team) => !homeNames.has(team)).toSorted() }
+  const isMine = (repo: string) => inHomeGroups(homeGroups, groupsOf.get(repo) ?? [])
+  const groupsFor = (row: DependencyRow) => {
+    const mine = row.usedBy.find((used) => isMine(used.repo))
+    if (mine) return groupsOf.get(mine.repo) ?? []
+    return [...new Set(row.usedBy.flatMap((used) => groupsOf.get(used.repo) ?? []))].toSorted()
+  }
+  return rows.flatMap((row) => {
+    if (view === 'all' || !homeGroups.length) return [{ ...row, groups: groupsFor(row) }]
+    const usedByMine = row.usedBy.some((used) => isMine(used.repo))
+    const narrowed = narrowRow(row, (repo) => isMine(repo) === usedByMine)
+    return narrowed ? [{ ...narrowed, groups: groupsFor(narrowed) }] : []
+  })
 }
 
-/** The three tiles over third-party rows: behind a major, with advisories, update MRs. */
-export function tileCounts(rows: readonly DependencyRow[]): {
+/** Figures of the summary strip over the rows in view. */
+export function libraryTotals(rows: readonly DependencyRow[]): {
+  libraries: number
+  repos: number
   behindMajor: number
   withAdvisories: number
   renovateOpen: number
   renovateBroken: number
 } {
-  const external = rows.filter((row) => !row.internal)
   return {
-    behindMajor: external.filter((row) => row.majorsBehind > 0).length,
-    withAdvisories: external.filter((row) => row.advisories.count > 0).length,
-    renovateOpen: external.filter((row) => row.renovate === 'open').length,
-    renovateBroken: external.filter((row) => row.renovate === 'broken').length,
+    libraries: rows.length,
+    repos: new Set(rows.flatMap((row) => row.usedBy.map((used) => used.repo))).size,
+    behindMajor: rows.filter((row) => row.majorsBehind > 0).length,
+    withAdvisories: rows.filter((row) => row.advisories.count > 0).length,
+    renovateOpen: rows.filter((row) => row.renovate === 'open').length,
+    renovateBroken: rows.filter((row) => row.renovate === 'broken').length,
   }
+}
+
+const renovateRank: Record<DependencyRow['renovate'], number> = { none: 0, open: 1, broken: 2 }
+
+const librarySortValues: Record<LibrariesSortKey, (row: DependencyRow) => SortValue> = {
+  name: (row) => row.name,
+  ecosystem: (row) => row.ecosystem,
+  versions: (row) => row.versions.length,
+  repos: (row) => row.usedBy.length,
+  latest: (row) => row.latest,
+  behind: (row) => (row.latest ? row.majorsBehind * 10_000 + row.reposBehind : undefined),
+  advisories: (row) => row.advisories.count,
+  updates: (row) => renovateRank[row.renovate],
+}
+
+/** Rows sorted by a Libraries column; without a sort the order is kept. */
+export const sortRows = <T extends DependencyRow>(
+  rows: readonly T[],
+  sort: SortState<LibrariesSortKey>,
+): T[] => sortTableRows(rows, sort, (row, key) => librarySortValues[key](row))
+
+const csvCell = (value: string | number): string => {
+  const text = String(value)
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
+  return /[",\n\r]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe
+}
+
+/**
+ * The rows as CSV with a header line, one library per line: versions in use with their
+ * repository counts, latest, breaking releases behind, advisories, update MRs and licenses.
+ * Cells a spreadsheet would run as a formula are prefixed with `'`.
+ */
+export function toCsv(rows: readonly DependencyRow[]): string {
+  const header = [
+    'Library',
+    'Ecosystem',
+    'Internal',
+    'Versions in use',
+    'Repositories',
+    'Latest',
+    'Majors behind',
+    'Repositories behind',
+    'Advisories',
+    'Worst severity',
+    'Update MRs',
+    'Licenses',
+  ]
+  const lines = rows.map((row) => [
+    row.name,
+    row.ecosystem,
+    row.internal ? 'yes' : 'no',
+    row.versions.map((entry) => `${entry.version} x${entry.repos}`).join('; '),
+    row.usedBy.length,
+    row.latest ?? '',
+    row.latest ? row.majorsBehind : '',
+    row.latest ? row.reposBehind : '',
+    row.advisories.count,
+    row.advisories.severity ?? '',
+    row.renovate === 'none' ? '' : row.renovate,
+    row.licenses.join('; '),
+  ])
+  return [header, ...lines].map((line) => line.map(csvCell).join(',')).join('\r\n') + '\r\n'
 }
 
 const compareVersions = (a: string, b: string): number =>

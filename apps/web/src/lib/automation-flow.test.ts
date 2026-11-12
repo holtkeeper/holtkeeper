@@ -7,10 +7,16 @@ import {
   type AutomationInput,
   type AutomationLane,
   automationLanes,
+  automationRules,
   describeRefresh,
+  filterLane,
   jobLanes,
   laneFreshness,
+  laneRuleCounts,
+  mergedLane,
   policyEvents,
+  ruleKind,
+  ruleNodeId,
   sweepLimits,
   whyPath,
 } from './automation-flow.ts'
@@ -126,7 +132,7 @@ describe('automation lanes', () => {
     const nightly = games.nodes.find((node) => node.id === 'rule:schedule:nightly')
     expect(nightly?.data).toMatchObject({
       title: 'nightly',
-      chips: ['Cron 0 3 * * *', 'only games + toys'],
+      chips: ['Every day at 03:00', 'only games + toys'],
       events: ['schedule'],
       analyzers: ['colors'],
     })
@@ -341,4 +347,115 @@ test('refresh policies and sweep limits read in plain words', () => {
       ),
     ]),
   ).toEqual({ maxJobsPerHour: 4, maxAiJobsPerHour: 2, nightWindow: { from: '00:00', to: '05:00' } })
+})
+
+const sample = () =>
+  input({
+    triggers: [
+      trigger('push', { on: 'push', analyzers: ['colors'] }),
+      trigger('tag', { on: 'tag', analyzers: ['shapes'], groups: ['games'] }),
+    ],
+    schedules: [
+      schedule('nightly', { analyzers: ['review'], groups: ['games'], enabled: false }),
+      schedule('weekly', { analyzers: ['colors'], groups: ['toys'] }),
+    ],
+    settings: [setting('f1', 'freshness', { groups: ['games'] }, { mode: 'off' })],
+  })
+
+describe('one canvas per team', () => {
+  test('rules know their lanes and kinds', () => {
+    const rules = automationRules(sample())
+    expect(rules.map((rule) => [rule.id, rule.lanes])).toEqual([
+      ['rule:trigger:push', [ALL_LANE]],
+      ['rule:trigger:tag', ['games']],
+      ['rule:schedule:nightly', ['games']],
+      ['rule:schedule:weekly', ['toys']],
+    ])
+    expect(rules.find((rule) => rule.id === 'rule:schedule:nightly')?.ai).toBe(true)
+    expect(ruleNodeId({ type: 'policy', settingId: 's1', policyId: 'p' })).toBe('rule:policy:s1:p')
+    expect(ruleKind({ type: 'trigger', id: 'push' })).toBe('trigger')
+    expect(ruleKind({ type: 'freshness' })).toBe('builtin')
+    expect(ruleKind({ type: 'release' })).toBe('builtin')
+  })
+
+  test('a team lane merged with every repository, the team winning shared nodes', () => {
+    const lanes = automationLanes(sample())
+    const games = mergedLane(lanes, 'games')
+    expect(games).toMatchObject({ id: 'games', group: 'games', label: 'games' })
+    expect(ids(games, 'event')).toEqual([
+      'event:push',
+      'event:tag',
+      'event:mergeRequest',
+      'event:schedule',
+      'event:freshness',
+    ])
+    expect(ids(games, 'rule')).toEqual([
+      'rule:trigger:push',
+      'rule:freshness',
+      'rule:release',
+      'rule:trigger:tag',
+      'rule:schedule:nightly',
+    ])
+    expect(ids(games, 'rule')).not.toContain('rule:schedule:weekly')
+    const freshness = games.nodes.find((node) => node.id === 'rule:freshness')
+    expect(freshness?.data).toMatchObject({ enabled: false, chips: ['off for this team'] })
+    expect(games.edges).toContainEqual({
+      from: 'event:freshness',
+      to: 'rule:freshness',
+      dashed: true,
+    })
+    expect(games.edges.filter((e) => e.to === 'rule:freshness')).toHaveLength(1)
+    const labels = games.nodes.flatMap((node) => (node.kind === 'action' ? [node.data.label] : []))
+    expect(labels).toEqual(labels.toSorted((a, b) => a.localeCompare(b)))
+  })
+
+  test('every repository alone for all or an unknown team', () => {
+    const lanes = automationLanes(sample())
+    const all = lane(lanes, ALL_LANE)
+    expect(
+      mergedLane(lanes)
+        .nodes.map((n) => n.id)
+        .toSorted(),
+    ).toEqual(all.nodes.map((n) => n.id).toSorted())
+    expect(mergedLane(lanes, 'nobody')).toMatchObject({ id: ALL_LANE, label: 'All repositories' })
+    expect(mergedLane(lanes, 'nobody').group).toBeUndefined()
+  })
+
+  test('rule counts per lane', () => {
+    expect(laneRuleCounts(automationLanes(sample()))).toEqual({ all: 3, games: 3, toys: 2 })
+  })
+
+  test('filters keep matching rules with their events and actions', () => {
+    const games = mergedLane(automationLanes(sample()), 'games')
+    const schedules = filterLane(games, { kinds: ['schedule'] })
+    expect(ids(schedules, 'rule')).toEqual(['rule:schedule:nightly'])
+    expect(ids(schedules, 'event')).toEqual(['event:schedule'])
+    expect(ids(schedules, 'action')).toEqual(['analyzer:review'])
+    expect(schedules.edges).toEqual([
+      { from: 'event:schedule', to: 'rule:schedule:nightly', dashed: true },
+      { from: 'rule:schedule:nightly', to: 'analyzer:review', dashed: true },
+    ])
+    expect(ids(filterLane(games, { ai: true }), 'rule')).toEqual(['rule:schedule:nightly'])
+    expect(ids(filterLane(games, { kinds: ['builtin'] }), 'rule')).toEqual([
+      'rule:freshness',
+      'rule:release',
+    ])
+    expect(ids(filterLane(games, { kinds: ['trigger', 'policy'] }), 'rule')).toEqual([
+      'rule:trigger:push',
+      'rule:trigger:tag',
+    ])
+  })
+
+  test('the text matches titles, chips and linked events or actions', () => {
+    const games = mergedLane(automationLanes(sample()), 'games')
+    expect(ids(filterLane(games, { query: 'branch PUSH' }), 'rule')).toEqual(['rule:trigger:push'])
+    expect(ids(filterLane(games, { query: 'off for' }), 'rule')).toEqual(['rule:freshness'])
+    expect(ids(filterLane(games, { query: 'SHAPES' }), 'rule')).toEqual(['rule:trigger:tag'])
+    expect(ids(filterLane(games, { query: 'release step' }), 'rule')).toEqual(['rule:release'])
+    const none = filterLane(games, { query: 'nothing like this' })
+    expect(none.nodes).toEqual([])
+    expect(none.edges).toEqual([])
+    expect(filterLane(games, {})).toEqual(games)
+    expect(filterLane(games, { query: 'colors', kinds: ['schedule'] }).nodes).toEqual([])
+  })
 })

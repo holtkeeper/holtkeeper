@@ -1,3 +1,4 @@
+import type { AuditFindingMetric, AuditMetrics } from '@holtkeeper/analyzers'
 import type {
   DependencyAdvisory,
   DependencyBundleShare,
@@ -20,10 +21,14 @@ import { type LibraryUse, libraryOfModule, majorsBehind } from '@holtkeeper/libr
 import {
   type LicensePolicyData,
   type LicensedPackage,
+  type LicensesMetrics,
+  type PackageVerdict,
+  compareVerdict,
   licensesDataSchema,
 } from '@holtkeeper/licenses'
-import { isBroken, renovateDataSchema } from '@holtkeeper/renovate'
+import { type RenovateMetrics, isBroken, renovateDataSchema } from '@holtkeeper/renovate'
 import type {
+  AnalysisHead,
   AnalysisStore,
   AuditRunStore,
   KnowledgeEntry,
@@ -31,7 +36,7 @@ import type {
   LibraryEcosystem,
   LibraryRef,
 } from '@holtkeeper/store'
-import type { Finding, Severity } from '@holtkeeper/vuln'
+import type { Severity } from '@holtkeeper/vuln'
 
 const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
@@ -101,6 +106,12 @@ export function versionSpread(
     }))
 }
 
+/** One advisory sighting in one repository, as `advisoriesByLibrary` groups it. */
+export type AdvisorySighting = Pick<
+  AuditFindingMetric,
+  'id' | 'severity' | 'summary' | 'url' | 'fixedIn' | 'package' | 'ecosystem' | 'version'
+>
+
 /** Audit runs read to find the newest one of each repository. */
 const AUDIT_POOL = 1000
 
@@ -108,41 +119,71 @@ const AUDIT_POOL = 1000
 export async function newestAuditFindings(
   auditRuns: Pick<AuditRunStore, 'list'>,
   canRead: (repo: RepoRef) => boolean,
-): Promise<Map<string, Finding[]>> {
-  const newest = new Map<string, Finding[]>()
+): Promise<Map<string, AdvisorySighting[]>> {
+  const newest = new Map<string, AdvisorySighting[]>()
   for (const run of await auditRuns.list({ limit: AUDIT_POOL })) {
     const key = repoKey(run.repo)
     if (newest.has(key) || !canRead(run.repo)) continue
-    newest.set(key, [
-      ...run.report.findings,
-      ...run.report.ignored.map((ignored) => ignored.finding),
-    ])
+    newest.set(
+      key,
+      [...run.report.findings, ...run.report.ignored.map((ignored) => ignored.finding)].map(
+        (finding) => ({
+          id: finding.id,
+          severity: finding.severity,
+          summary: finding.summary,
+          url: finding.url,
+          fixedIn: finding.fixedVersions,
+          package: finding.package.name,
+          ecosystem: finding.package.ecosystem,
+          version: finding.package.version,
+        }),
+      ),
+    )
   }
   return newest
+}
+
+/**
+ * Every finding (allowlisted ones too) in the stored metrics of the newest main-line `audit` heads
+ * of the repositories `canRead` allows, by `forge:path`.
+ */
+export function auditHeadFindings(
+  heads: readonly AnalysisHead[],
+  canRead: (repo: RepoRef) => boolean,
+): Map<string, AdvisorySighting[]> {
+  const result = new Map<string, AdvisorySighting[]>()
+  for (const head of heads) {
+    const metrics = head.metrics
+    if (!canRead(head.repo) || !metrics || !('advisories' in metrics)) continue
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- written by auditMetrics
+    const { advisories } = metrics as AuditMetrics
+    if (Array.isArray(advisories)) result.set(repoKey(head.repo), advisories)
+  }
+  return result
 }
 
 const severityOrder: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown']
 
 /** Advisories of `findings` by library key, worst first. */
 export function advisoriesByLibrary(
-  findings: ReadonlyMap<string, Finding[]>,
+  findings: ReadonlyMap<string, readonly AdvisorySighting[]>,
 ): Map<string, DependencyAdvisory[]> {
   const byLibrary = new Map<
     string,
-    Map<string, { finding: Finding; versions: Set<string>; repos: Set<string> }>
+    Map<string, { finding: AdvisorySighting; versions: Set<string>; repos: Set<string> }>
   >()
   for (const [origin, list] of findings)
     for (const finding of list) {
-      const ecosystem = ecosystemOf(finding.package.ecosystem)
+      const ecosystem = ecosystemOf(finding.ecosystem)
       if (!ecosystem) continue
-      const key = libraryKeyOf({ ecosystem, name: finding.package.name })
+      const key = libraryKeyOf({ ecosystem, name: finding.package })
       const advisories = byLibrary.get(key) ?? new Map()
       const known = advisories.get(finding.id) ?? {
         finding,
         versions: new Set<string>(),
         repos: new Set<string>(),
       }
-      known.versions.add(finding.package.version)
+      known.versions.add(finding.version)
       known.repos.add(origin)
       advisories.set(finding.id, known)
       byLibrary.set(key, advisories)
@@ -156,7 +197,7 @@ export function advisoriesByLibrary(
           severity: finding.severity,
           summary: finding.summary,
           url: finding.url,
-          fixedVersions: finding.fixedVersions,
+          fixedVersions: finding.fixedIn,
           versions: [...versions].toSorted(compareVersions),
           repos: [...repos].toSorted(),
         }))
@@ -210,13 +251,41 @@ export async function licenseSightings(
   return { libraries, policies }
 }
 
-const verdictOrder = ['denied', 'unlisted', 'unknown', 'allowed', 'internal', 'ignored']
+/** License expressions and the worst verdict of one library over a fleet's license scans. */
+export interface LibraryLicenseState {
+  licenses: string[]
+  verdict: PackageVerdict
+}
 
-/** The worst verdict of `sightings`. */
-export const worstVerdict = (sightings: readonly LicenseSighting[]) =>
-  sightings
-    .map((sighting) => sighting.pkg.verdict)
-    .toSorted((a, b) => verdictOrder.indexOf(a) - verdictOrder.indexOf(b))[0]
+/**
+ * Licenses and worst verdict of every library, read from the stored metrics of the `licenses`
+ * heads `canRead` allows; heads stored without per-package metrics add nothing.
+ */
+export function licenseStates(
+  heads: readonly AnalysisHead[],
+  canRead: (repo: RepoRef) => boolean,
+): Map<string, LibraryLicenseState> {
+  const states = new Map<string, LibraryLicenseState>()
+  for (const head of heads) {
+    if (head.kind !== 'licenses' || !canRead(head.repo)) continue
+    const metrics: Partial<LicensesMetrics> | undefined = head.metrics
+    const packages = metrics?.byPackage
+    for (const [pkgKey, pkg] of Object.entries(packages ?? {})) {
+      const separator = pkgKey.indexOf(':')
+      const ecosystem = ecosystemOf(pkgKey.slice(0, separator))
+      if (!ecosystem) continue
+      const key = libraryKeyOf({ ecosystem, name: pkgKey.slice(separator + 1) })
+      const known = states.get(key)
+      if (!known) {
+        states.set(key, { licenses: pkg.licenses, verdict: pkg.verdict })
+        continue
+      }
+      known.licenses = [...new Set([...known.licenses, ...pkg.licenses])].toSorted()
+      if (compareVerdict(pkg.verdict, known.verdict) < 0) known.verdict = pkg.verdict
+    }
+  }
+  return states
+}
 
 /** License expressions and verdicts of `sightings`, one entry per version, lowest first. */
 export function licensesOf(sightings: readonly LicenseSighting[]): DependencyLicense[] {
@@ -280,6 +349,30 @@ interface RenovateSighting extends DependencyMergeRequest {
 const managerEcosystem = (manager: string): LibraryEcosystem | undefined =>
   manager === 'gomod' ? 'Go' : ['npm', 'pnpm', 'yarn', 'bun'].includes(manager) ? 'npm' : undefined
 
+/**
+ * Renovate's state of every library touched by an open merge request, read from the stored
+ * metrics of the `renovate` heads `canRead` allows: `broken` when any of them is broken.
+ */
+export function renovateStates(
+  heads: readonly AnalysisHead[],
+  canRead: (repo: RepoRef) => boolean,
+): Map<string, DependencyRenovateState> {
+  const states = new Map<string, DependencyRenovateState>()
+  for (const head of heads) {
+    if (head.kind !== 'renovate' || !canRead(head.repo)) continue
+    const metrics: Partial<RenovateMetrics> | undefined = head.metrics
+    const pending = metrics?.pending
+    for (const [updateKey, state] of Object.entries(pending ?? {})) {
+      const separator = updateKey.indexOf(':')
+      const ecosystem = managerEcosystem(updateKey.slice(0, separator))
+      if (!ecosystem) continue
+      const key = libraryKeyOf({ ecosystem, name: updateKey.slice(separator + 1) })
+      if (states.get(key) !== 'broken') states.set(key, state)
+    }
+  }
+  return states
+}
+
 /** Open Renovate merge requests of the newest record of each repository `canRead` allows. */
 export async function renovateMergeRequests(
   analyses: Pick<AnalysisStore, 'latest'>,
@@ -312,16 +405,6 @@ export async function renovateMergeRequests(
     }
   }
   return result
-}
-
-/** Renovate's state for one library over `sightings`. */
-export function renovateState(
-  sightings: readonly RenovateSighting[],
-  key: string,
-): DependencyRenovateState {
-  const own = sightings.filter((sighting) => sighting.libraries.has(key))
-  if (own.some((sighting) => sighting.status === 'broken')) return 'broken'
-  return own.length ? 'open' : 'none'
 }
 
 /** `sightings` of one library, without the library sets. */

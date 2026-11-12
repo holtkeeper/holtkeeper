@@ -1,9 +1,11 @@
 import type { Principal } from '@holtkeeper/access'
 import { type RegistryToolset, ToolError, capText } from '@holtkeeper/agent-tools'
+import type { ForbiddenError } from '@holtkeeper/api'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import type { z } from 'zod'
 
+import { ForbiddenException, ForbiddenToolError } from '../context.ts'
 import { type McpToolsetsContext, mcpToolsets } from '../tools/registry.ts'
 import type { McpUsage } from './usage.ts'
 
@@ -29,8 +31,9 @@ export interface McpCaller {
 /**
  * An MCP server serving `toolsets`: every tool under its own name and input schema, annotated
  * read-only unless it writes, with server instructions joined from the toolsets. A `ToolError`
- * reaches the client as it is, other failures as `Failed: <message>`; every call is recorded in
- * `caller.usage`.
+ * reaches the client as it is, other failures as `Failed: <message>`; a missing permission
+ * (`ForbiddenToolError`, `ForbiddenException`) also carries the `ForbiddenError` body as
+ * `structuredContent`. Every call is recorded in `caller.usage`.
  */
 export function registryServer(toolsets: readonly RegistryToolset[], caller: McpCaller): McpServer {
   const server = new McpServer(
@@ -52,7 +55,9 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
     },
     callback: (
       args: Record<string, unknown>,
-    ) => Promise<ReturnType<typeof text> & { isError?: boolean }>,
+    ) => Promise<
+      ReturnType<typeof text> & { isError?: boolean; structuredContent?: ForbiddenError }
+    >,
   ) => void
 
   for (const tool of toolsets.flatMap((toolset) => toolset.tools))
@@ -73,8 +78,13 @@ export function registryServer(toolsets: readonly RegistryToolset[], caller: Mcp
         } catch (error) {
           ok = false
           const message = error instanceof Error ? error.message : String(error)
+          const missing =
+            error instanceof ForbiddenToolError || error instanceof ForbiddenException
+              ? error.missing
+              : undefined
           return {
-            ...text(error instanceof ToolError ? message : `Failed: ${message}`),
+            ...text(error instanceof ToolError || missing ? message : `Failed: ${message}`),
+            ...(missing && { structuredContent: { error: message, missing } }),
             isError: true,
           }
         } finally {

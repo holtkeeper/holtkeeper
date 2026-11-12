@@ -58,14 +58,14 @@ export const branchesDataSchema: z.ZodType<BranchesData> = z.object({
       ageDays: z.number(),
       author: z.string().optional(),
       protected: z.literal(true).optional(),
-      webUrl: z.string().optional(),
+      webUrl: z.url({ protocol: /^https?$/ }).optional(),
       mergeRequest: z
         .object({
           id: z.number(),
           state: z.enum(['open', 'merged', 'closed']),
           title: z.string(),
           author: z.string(),
-          webUrl: z.string(),
+          webUrl: z.url({ protocol: /^https?$/ }),
         })
         .optional(),
     }),

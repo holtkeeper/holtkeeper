@@ -1,8 +1,6 @@
 import { useSettings } from '../../api/queries.ts'
 import { type Space, entryNamesSpace, settingScopeOfSpace } from '../../lib/guide.ts'
-import { knowledgeSettingKeys } from '../../lib/knowledge.ts'
 import { SettingEntries } from '../settings/SettingEntries.tsx'
-import { SettingsSheet } from '../settings/SettingsSheet.tsx'
 import { useSession } from '../shell/session.ts'
 
 /**
@@ -36,9 +34,4 @@ export function PolicyBlock({
       />
     </div>
   )
-}
-
-/** The Knowledge settings (what agents may add without review, review options) in a side sheet. */
-export function KnowledgeSettingsSheet({ onClose }: { onClose: () => void }) {
-  return <SettingsSheet title="Knowledge settings" keys={knowledgeSettingKeys} onClose={onClose} />
 }

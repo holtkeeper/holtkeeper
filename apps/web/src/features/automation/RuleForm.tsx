@@ -5,8 +5,9 @@ import { Button } from '../../ui/index.ts'
 import { FormSection } from './shared.tsx'
 
 /**
- * The linear form of the rule drawer: When / Where / If / Then / Limits, then Save and, for a
- * stored rule, Remove. Sections left `undefined` are not shown; without `writable` nothing saves.
+ * The linear form of the rule drawer: When / Where / If / Then / Limits, then a footer pinned to
+ * the bottom of the sheet with Remove (stored rules), an unsaved-changes note, Discard and Save.
+ * Sections left `undefined` are not shown; without `writable` nothing saves.
  */
 export function RuleForm({
   when,
@@ -15,10 +16,11 @@ export function RuleForm({
   then,
   limits,
   notice,
-  footer,
   writable,
   isPending,
+  dirty = false,
   onSave,
+  onDiscard,
   onRemove,
 }: {
   when: ReactNode
@@ -27,11 +29,12 @@ export function RuleForm({
   then: ReactNode
   limits?: ReactNode
   notice?: ReactNode
-  /** Extra controls before Save, e.g. Run now. */
-  footer?: ReactNode
   writable: boolean
   isPending: boolean
+  /** The draft differs from what is stored. */
+  dirty?: boolean
   onSave: () => void
+  onDiscard?: () => void
   onRemove?: () => void
 }) {
   return (
@@ -50,8 +53,7 @@ export function RuleForm({
         <FormSection title="Then">{then}</FormSection>
         {limits !== undefined ? <FormSection title="Limits">{limits}</FormSection> : null}
       </fieldset>
-      <div className="flex items-center gap-2 border-t border-line pt-3">
-        {footer}
+      <div className="sticky bottom-0 z-[3] -mx-4 -mb-4 flex items-center gap-2 border-t border-line bg-panel px-4 py-3">
         {writable && onRemove ? (
           <Button variant="ghost" size="sm" onPress={onRemove}>
             <Trash2 className="size-3.5" />
@@ -59,9 +61,17 @@ export function RuleForm({
           </Button>
         ) : null}
         {writable ? (
-          <Button type="submit" variant="primary" className="ml-auto" isPending={isPending}>
-            Save
-          </Button>
+          <>
+            <span className="ml-auto text-xs text-muted">{dirty ? 'Unsaved changes' : null}</span>
+            {dirty && onDiscard ? (
+              <Button size="sm" onPress={onDiscard}>
+                Discard
+              </Button>
+            ) : null}
+            <Button type="submit" variant="primary" size="sm" isPending={isPending}>
+              Save rule
+            </Button>
+          </>
         ) : (
           <span className="ml-auto text-xs text-muted">
             Read only: editing needs settings:write.

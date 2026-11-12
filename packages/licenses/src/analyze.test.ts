@@ -77,7 +77,10 @@ test('fails when osv-scanner fails', async () => {
 test('options take lists or comma-separated flags and default to the permissive policy', () => {
   expect(licensesOptionsSchema.parse({})).toEqual({
     ...resolvePolicy(),
+    review: [],
     unknown: 'warn',
+    devDependencies: 'check',
+    exceptions: [],
     requireProjectLicense: false,
   })
   expect(licensesOptionsSchema.parse({ allow: 'MIT, ISC', ignore: ['x'] })).toMatchObject({
@@ -149,4 +152,120 @@ test('presets are valid options with unique ids', () => {
     policy,
   ).map((pkg) => pkg.verdict)
   expect(verdicts).toEqual(['denied', 'unlisted', 'allowed'])
+})
+
+test('review licenses need a sign-off even when allowed; deny still wins', () => {
+  const policy = resolvePolicy({ allow: ['MIT', 'MPL-*'], review: ['MPL-2.0'], deny: ['MPL-1.1'] })
+  expect(policy.review).toEqual(['MPL-2.0'])
+  const packages = [
+    scanned('a', ['MIT']),
+    scanned('b', ['MPL-2.0']),
+    scanned('c', ['MPL-1.1']),
+    scanned('d', ['MIT OR MPL-2.0']),
+  ]
+  expect(evaluatePackages(packages, policy).map((pkg) => [pkg.verdict, pkg.culprits])).toEqual([
+    ['allowed', undefined],
+    ['unlisted', ['MPL-2.0']],
+    ['denied', ['MPL-1.1']],
+    ['allowed', undefined],
+  ])
+})
+
+test('devDependencies: ignore leaves out packages only dev groups use', () => {
+  const dev = { ...scanned('dev-tool', ['GPL-3.0-only']), groups: ['dev'] }
+  const both = { ...scanned('shared', ['GPL-3.0-only']), groups: ['dev', 'optional'] }
+  expect(evaluatePackages([dev, both], resolvePolicy()).map((pkg) => pkg.verdict)).toEqual([
+    'denied',
+    'denied',
+  ])
+  const policy = resolvePolicy({ devDependencies: 'ignore' })
+  expect(policy.devDependencies).toBe('ignore')
+  expect(evaluatePackages([dev, both], policy).map((pkg) => pkg.verdict)).toEqual([
+    'ignored',
+    'denied',
+  ])
+})
+
+test('exceptions accept matching packages that would not pass until they expire', () => {
+  const options = {
+    exceptions: [
+      {
+        package: 'widget-*',
+        license: 'GPL-3.0-only',
+        reason: 'Build tool only.',
+        expires: '2026-12-31',
+      },
+      { package: 'some-lib', version: '2.0.0', reason: 'Vendor agreement ABC-123.' },
+      { package: 'old-lib', reason: 'Expired.', expires: '2026-01-01' },
+    ],
+  }
+  const policy = resolvePolicy(options, '2026-11-12')
+  expect(policy.exceptions?.map((exception) => exception.package)).toEqual(['widget-*', 'some-lib'])
+  expect(resolvePolicy(options).exceptions).toHaveLength(3)
+  const packages = [
+    scanned('widget-cli', ['GPL-3.0-only']),
+    scanned('widget-core', ['AGPL-3.0-only']),
+    { ...scanned('some-lib', ['SSPL-1.0']), version: '2.0.0' },
+    scanned('some-lib', ['SSPL-1.0']),
+    scanned('old-lib', ['GPL-3.0-only']),
+    scanned('widget-ok', ['MIT']),
+  ]
+  expect(
+    evaluatePackages(packages, policy).map((pkg) => [pkg.name, pkg.verdict, pkg.exception]),
+  ).toEqual([
+    ['widget-cli', 'excepted', 'Build tool only.'],
+    ['widget-core', 'denied', undefined],
+    ['some-lib', 'excepted', 'Vendor agreement ABC-123.'],
+    ['some-lib', 'denied', undefined],
+    ['old-lib', 'denied', undefined],
+    ['widget-ok', 'allowed', undefined],
+  ])
+})
+
+test('analyze applies review, dev and exception options from the analyzer settings', async () => {
+  const dir = await realpath(tmpdir())
+  const { runner } = createFakeRunner((command) => {
+    if (command[1] === '--version') return { stdout: '' }
+    return {
+      stdout: JSON.stringify({
+        results: [
+          {
+            source: { path: join(dir, 'package-lock.json'), type: 'lockfile' },
+            packages: [
+              {
+                package: { name: 'mpl', version: '1.0.0', ecosystem: 'npm' },
+                licenses: ['MPL-2.0'],
+              },
+              {
+                package: { name: 'lint-kit', version: '1.0.0', ecosystem: 'npm' },
+                licenses: ['GPL-3.0-only'],
+                dependency_groups: ['dev'],
+              },
+              {
+                package: { name: 'fooUtil', version: '3.1.0', ecosystem: 'npm' },
+                licenses: ['BUSL-1.1'],
+              },
+            ],
+          },
+        ],
+      }),
+    }
+  })
+  const policy = licensesOptionsSchema.parse({
+    allow: 'MIT, MPL-2.0',
+    review: 'MPL-*',
+    devDependencies: 'ignore',
+    exceptions: [{ package: 'fooUtil', reason: 'Licensed by contract.', expires: '2027-01-01' }],
+  })
+  const data = await analyzeLicenses({ dir, runner, policy, today: '2026-11-12' })
+  expect(Object.fromEntries(data.packages.map((pkg) => [pkg.name, pkg.verdict]))).toEqual({
+    mpl: 'unlisted',
+    'lint-kit': 'ignored',
+    fooUtil: 'excepted',
+  })
+  expect(data.policy).toMatchObject({
+    review: ['MPL-*'],
+    devDependencies: 'ignore',
+    exceptions: [{ package: 'fooUtil', reason: 'Licensed by contract.', expires: '2027-01-01' }],
+  })
 })

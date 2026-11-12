@@ -1,6 +1,7 @@
 import { compilePattern, hasBody, parseTitle, ticketKeys } from './title.ts'
 import type {
   BranchRules,
+  CommitConventions,
   CommitRules,
   PatternRule,
   Problem,
@@ -17,6 +18,7 @@ function patternProblems(patterns: readonly PatternRule[], text: string, what: s
     return [
       {
         message: `${what} ${rule.negative ? 'must not match' : 'must match'} \`${rule.pattern}\``,
+        rule: 'pattern',
         source: rule.source,
         severity: severity(rule.source),
       },
@@ -35,7 +37,7 @@ export function checkCommitMessage(ruleset: Ruleset<CommitRules>, message: strin
   const problems = patternProblems(ruleset.patterns, message, 'The message')
   const add = (field: keyof CommitRules, text: string) => {
     const source = sources[field] ?? 'setting'
-    problems.push({ message: text, source, severity: severity(source) })
+    problems.push({ message: text, rule: field, source, severity: severity(source) })
   }
   const headline = message.split('\n')[0]?.trim() ?? ''
   const title = parseTitle(headline)
@@ -73,7 +75,7 @@ export function checkBranchName(ruleset: Ruleset<BranchRules>, name: string): Pr
   const problems = patternProblems(ruleset.patterns, name, 'The branch name')
   const add = (field: keyof BranchRules, text: string) => {
     const source = sources[field] ?? 'setting'
-    problems.push({ message: text, source, severity: severity(source) })
+    problems.push({ message: text, rule: field, source, severity: severity(source) })
   }
   const slash = name.indexOf('/')
   const prefix = slash > 0 ? name.slice(0, slash) : undefined
@@ -90,4 +92,33 @@ export function checkBranchName(ruleset: Ruleset<BranchRules>, name: string): Pr
   if (rules.case === 'snake' && !/^[a-z0-9/_]*$/u.test(rest))
     add('case', 'Use lowercase words joined by `_`')
   return problems
+}
+
+/** The problems of one checked text. */
+export interface ConventionsCheck {
+  target: 'message' | 'branch'
+  problems: Problem[]
+}
+
+/**
+ * Checks a commit message (or merge request title) and a branch name against `conventions`: one
+ * entry per text given, message first. Every caller (MCP, HTTP, write tasks) gets the same verdict.
+ */
+export function checkConventions(
+  conventions: Pick<CommitConventions, 'commit' | 'branch'>,
+  input: { message?: string; branch?: string },
+): ConventionsCheck[] {
+  return [
+    ...(input.message
+      ? [
+          {
+            target: 'message' as const,
+            problems: checkCommitMessage(conventions.commit, input.message),
+          },
+        ]
+      : []),
+    ...(input.branch
+      ? [{ target: 'branch' as const, problems: checkBranchName(conventions.branch, input.branch) }]
+      : []),
+  ]
 }

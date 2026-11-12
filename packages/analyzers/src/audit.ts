@@ -1,5 +1,5 @@
 import { defineAnalyzer } from '@holtkeeper/analyzer'
-import { type Metric, type Report, defineAnalysis } from '@holtkeeper/report'
+import { type Metric, type MetricsContext, type Report, defineAnalysis } from '@holtkeeper/report'
 import {
   type AuditReport,
   type Finding,
@@ -50,12 +50,116 @@ const summarizeAudit = (report: AuditReport): Metric[] => [
     : []),
 ]
 
+/** One finding of an `audit` record as its metrics keep it, for fleet tables. */
+export interface AuditFindingMetric {
+  /** Primary advisory id. */
+  id: string
+  aliases: string[]
+  summary: string
+  url: string
+  severity: Severity
+  package: string
+  /** OSV ecosystem name: `npm`, `Go`, ... */
+  ecosystem: string
+  version: string
+  /** Lockfile or manifest it was found in. */
+  source: string
+  /** Versions that fix it, lowest first. */
+  fixedIn: string[]
+  /** Set when the allowlist hid it; `until` is the entry's last day, absent when it never expires. */
+  allowlisted?: { until?: string }
+}
+
+/** Stored headline numbers of one `audit` record. */
+export interface AuditMetrics {
+  /** Active advisories: present after fixing and not allowlisted. */
+  findings: number
+  /** Active advisories per severity; every severity is present. */
+  severities: Record<Severity, number>
+  /** Advisories the allowlist hides. */
+  ignored: number
+  /** Allowlist entries past their expiry. */
+  expired: number
+  /** Advisories fixing removed during the run. */
+  resolved: number
+  /** Active and allowlisted findings, in report order. */
+  advisories: AuditFindingMetric[]
+  /**
+   * When each finding (`auditFindingKey`) of `advisories` was first reported on this line of
+   * history: carried over from the previous record, else this record's creation time. A key is
+   * missing when neither is known (records written before first-seen times were stored).
+   */
+  firstSeen: Record<string, string>
+}
+
+/** The key of a finding in `AuditMetrics.firstSeen`: advisory and package, not version or source. */
+export const auditFindingKey = (finding: { id: string; ecosystem: string; package: string }) =>
+  `${finding.id}|${finding.ecosystem}|${finding.package}`
+
+const findingMetric = (finding: Finding, until?: string | null): AuditFindingMetric => ({
+  id: finding.id,
+  aliases: finding.aliases,
+  summary: finding.summary,
+  url: finding.url,
+  severity: finding.severity,
+  package: finding.package.name,
+  ecosystem: finding.package.ecosystem,
+  version: finding.package.version,
+  source: finding.source,
+  fixedIn: finding.fixedVersions,
+  ...(until !== undefined && { allowlisted: until === null ? {} : { until } }),
+})
+
+const previousFirstSeen = (previous: unknown): Record<string, unknown> => {
+  if (typeof previous !== 'object' || previous === null || !('firstSeen' in previous)) return {}
+  const { firstSeen } = previous
+  return typeof firstSeen === 'object' && firstSeen !== null ? { ...firstSeen } : {}
+}
+
+/**
+ * `AuditMetrics` of an audit report. First-seen times come from `context.previous` and
+ * `context.createdAt`.
+ */
+export function auditMetrics(
+  report: AuditReport,
+  context: MetricsContext<AuditMetrics> = {},
+): AuditMetrics {
+  const advisories = [
+    ...report.findings.map((finding) => findingMetric(finding)),
+    ...report.ignored.map(({ finding, entry }) => findingMetric(finding, entry.expires ?? null)),
+  ]
+  const carried = previousFirstSeen(context.previous)
+  const firstSeen: Record<string, string> = {}
+  for (const advisory of advisories) {
+    const key = auditFindingKey(advisory)
+    const seen = carried[key]
+    if (typeof seen === 'string') firstSeen[key] = seen
+    else if (context.createdAt) firstSeen[key] = context.createdAt
+  }
+  return {
+    findings: report.findings.length,
+    severities: {
+      critical: count(report.findings, 'critical'),
+      high: count(report.findings, 'high'),
+      medium: count(report.findings, 'medium'),
+      low: count(report.findings, 'low'),
+      unknown: count(report.findings, 'unknown'),
+    },
+    ignored: report.ignored.length,
+    expired: report.expired.length,
+    resolved: report.resolved.length,
+    advisories,
+    firstSeen,
+  }
+}
+
 /** Vulnerability audits run as background jobs; the server also stores each one as an audit run. */
-export const auditAnalysis = defineAnalysis<AuditReport>({
+export const auditAnalysis = defineAnalysis<AuditReport, AuditMetrics>({
   kind: 'audit',
   label: 'Vulnerability audit',
   schema: auditReportSchema,
   summarize: summarizeAudit,
+  metrics: auditMetrics,
   toReport(current): Report {
     const report = current.data
     return {

@@ -1,7 +1,8 @@
 import type { Action, Principal, RepoTarget, Target } from '@holtkeeper/access'
 import { can } from '@holtkeeper/access'
 import type { Agent, AiCatalog, AiProviderPlugin, LanguageModelFactory } from '@holtkeeper/agent'
-import type { JobAnalyzerView } from '@holtkeeper/api'
+import { ToolError } from '@holtkeeper/agent-tools'
+import type { ForbiddenError, JobAnalyzerView } from '@holtkeeper/api'
 import type { ArtifactStore, StorageProvider } from '@holtkeeper/artifacts'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { type HoltkeeperConfig, resolveRepo } from '@holtkeeper/core'
@@ -25,6 +26,7 @@ import type { AuditEnrichment } from './audit.ts'
 import type { ChatAgentFor } from './chat-threads.ts'
 import type { MediaEngine } from './media/engine.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
+import type { SupplyToolsAccess } from './tools/repos.ts'
 
 /** Everything route handlers use. Built once by `createServer`; tests build it with fakes. */
 export interface ServerDeps {
@@ -39,8 +41,10 @@ export interface ServerDeps {
   config: HoltkeeperConfig
   /** Panel-managed configuration; config routes answer 503 without it. */
   configSource?: ConfigSource
-  /** The `repo.readOnly` setting; events of read-only repositories other than tags are ignored. */
+  /** The `repo.freeze` setting; events of frozen repositories other than tags are ignored. */
   readOnly?: ReadOnlyRepos
+  /** The running release `/api/me` reports. Default: the `HOLTKEEPER_VERSION` environment variable. */
+  version?: string
   /** Shared per-credential limits for forge clients, agents and job admission. */
   limiter?: Limiter
   auth: AuthProvider
@@ -57,6 +61,11 @@ export interface ServerDeps {
   artifacts?: ArtifactStore
   /** Image engine of the media routes. Default: `@holtkeeper/media`, loaded on first use. */
   media?: MediaEngine
+  /**
+   * Findings and licenses per asker, shared by their HTTP routes, MCP and chat so they keep one
+   * fleet cache each. Default: one `supplyToolsAccess` per `createApp`.
+   */
+  supply?: (principal: Principal) => SupplyToolsAccess
   /** Provider and model catalog of `ai-sdk` credentials; catalog routes answer an error without it. */
   aiCatalog?: AiCatalog
   /** AI providers from the config's `ai.providers`, which `ai-sdk` credentials may name. */
@@ -136,19 +145,59 @@ export function principalOf(c: AppContext): Principal {
   return principal
 }
 
+/** `forge:path` of a repository, the key clients send and audit events name. */
+export const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
+
 /**
- * Throws 403 unless the caller may perform `action` on `target`. An allowed repository target is
- * remembered for the request, so its audit event may name that repository.
+ * A 403 answered with a `ForbiddenError` body: the missing `action` and, for a repository, its key
+ * as the client sent it. Callers never pass groups, and pass the same target whether the
+ * repository exists or not.
+ */
+export class ForbiddenException extends HTTPException {
+  readonly missing: ForbiddenError['missing']
+
+  constructor(action: Action, target?: string, message = `missing permission ${action}`) {
+    super(403, { message })
+    this.missing = target === undefined ? { action } : { action, target }
+  }
+
+  body(): ForbiddenError {
+    return { error: this.message, missing: this.missing }
+  }
+}
+
+/**
+ * A tool refusal for a missing permission. The MCP endpoint answers it as an error result whose
+ * `structuredContent` is the same `ForbiddenError` body the HTTP API sends.
+ */
+export class ForbiddenToolError extends ToolError {
+  readonly missing: ForbiddenError['missing']
+
+  constructor(message: string, action: Action, target?: string) {
+    super(message)
+    this.missing = target === undefined ? { action } : { action, target }
+  }
+}
+
+/**
+ * Throws `ForbiddenException` unless the caller may perform `action` on `target`. An allowed
+ * repository target is remembered for the request, so its audit event may name that repository.
  */
 export function authorize(c: AppContext, action: Action, target: Target): Principal {
+  if (!can(principalOf(c), action, target))
+    throw new ForbiddenException(action, target.kind === 'repo' ? repoKey(target.repo) : undefined)
+  return authorizeRecord(c, action, target)
+}
+
+/**
+ * `authorize` for a repository resolved from a stored record rather than sent by the client: the
+ * 403 names only the action, so a record id never reveals the repository it belongs to.
+ */
+export function authorizeRecord(c: AppContext, action: Action, target: Target): Principal {
   const principal = principalOf(c)
-  if (!can(principal, action, target))
-    throw new HTTPException(403, { message: `missing permission ${action}` })
+  if (!can(principal, action, target)) throw new ForbiddenException(action)
   if (target.kind === 'repo')
-    c.set('allowedRepos', [
-      ...(c.get('allowedRepos') ?? []),
-      `${target.repo.forge}:${target.repo.path}`,
-    ])
+    c.set('allowedRepos', [...(c.get('allowedRepos') ?? []), repoKey(target.repo)])
   return principal
 }
 
@@ -168,27 +217,41 @@ export function parseRepo(value: string | undefined): RepoRef | undefined {
   return { forge: value.slice(0, separator), path: value.slice(separator + 1) }
 }
 
-/** Parses a JSON body with a zod-like schema, answering 400 with the first problem. */
-export async function readBody<T>(
-  c: AppContext,
-  schema: {
-    safeParse(
-      value: unknown,
-    ):
-      | { success: true; data: T }
-      | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } }
-  },
-): Promise<T> {
-  const body: unknown = await c.req.json().catch(() => undefined)
-  const result = schema.safeParse(body)
+interface ZodLike<T> {
+  safeParse(
+    value: unknown,
+  ):
+    | { success: true; data: T }
+    | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } }
+}
+
+const parseOr400 = <T>(schema: ZodLike<T>, value: unknown, fallback: string): T => {
+  const result = schema.safeParse(value)
   if (!result.success) {
     const issue = result.error.issues[0]
     const path = issue?.path.map(String).join('.')
     throw new HTTPException(400, {
-      message: issue ? `${path ? `${path}: ` : ''}${issue.message}` : 'invalid body',
+      message: issue ? `${path ? `${path}: ` : ''}${issue.message}` : fallback,
     })
   }
   return result.data
+}
+
+/** Parses a JSON body with a zod-like schema, answering 400 with the first problem. */
+export async function readBody<T>(c: AppContext, schema: ZodLike<T>): Promise<T> {
+  const body: unknown = await c.req.json().catch(() => undefined)
+  return parseOr400(schema, body, 'invalid body')
+}
+
+/**
+ * Parses the query string with a zod-like schema, empty values counting as absent, answering 400
+ * with the first problem in the same shape as `readBody`.
+ */
+export function readQuery<T>(c: AppContext, schema: ZodLike<T>): T {
+  const query = Object.fromEntries(
+    Object.entries(c.req.query()).filter(([, value]) => value !== ''),
+  )
+  return parseOr400(schema, query, 'invalid query')
 }
 
 export const limitParam = (value: string | undefined, fallback = 50) =>

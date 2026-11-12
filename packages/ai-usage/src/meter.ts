@@ -47,6 +47,8 @@ export interface MeteredContext {
   analysisId?: string
   /** A person started the runs; see `BudgetCheck.interactive`. Default `false`. */
   interactive?: boolean
+  /** What the runs work on, stored as `AiUsageRecord.subject`. */
+  subject?: string
 }
 
 /** `task` with `maxCostUsd` lowered to `remainingUsd` when that is smaller. */
@@ -103,6 +105,8 @@ export function usageEntry(
     actor: string
     provider: string
     model: string
+    interactive?: boolean
+    subject?: string
     analyzer?: string
     jobId?: string
     analysisId?: string
@@ -123,6 +127,8 @@ export function usageEntry(
     ...(base.jobId !== undefined && { jobId: base.jobId }),
     ...(base.analysisId !== undefined && { analysisId: base.analysisId }),
     actor: base.actor,
+    interactive: base.interactive ?? false,
+    ...(base.subject !== undefined && { subject: base.subject }),
     provider: base.provider,
     model: base.model,
     inputTokens: usage.inputTokens,
@@ -171,6 +177,8 @@ export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent 
         actor: context.actor,
         provider: context.provider,
         model: context.model,
+        interactive: context.interactive ?? false,
+        ...(context.subject !== undefined && { subject: context.subject }),
         ...(context.analyzer !== undefined && { analyzer: context.analyzer }),
         ...(context.jobId !== undefined && { jobId: context.jobId }),
         ...(context.analysisId !== undefined && { analysisId: context.analysisId }),
@@ -214,6 +222,10 @@ export interface AgentRunInfo {
   durationMs: number
   /** Default `system`. */
   actor?: string
+  /** A person started the run; see `BudgetCheck.interactive`. Default `false`. */
+  interactive?: boolean
+  /** What the run worked on, stored as `AiUsageRecord.subject`. */
+  subject?: string
   analyzer?: string
   jobId?: string
   analysisId?: string
@@ -250,6 +262,8 @@ export function usageRecorder(
       actor: info.actor ?? 'system',
       provider: info.provider,
       model: info.model,
+      interactive: info.interactive ?? false,
+      ...(info.subject !== undefined && { subject: info.subject }),
       ...(info.analyzer !== undefined && { analyzer: info.analyzer }),
       ...(info.jobId !== undefined && { jobId: info.jobId }),
       ...(info.analysisId !== undefined && { analysisId: info.analysisId }),

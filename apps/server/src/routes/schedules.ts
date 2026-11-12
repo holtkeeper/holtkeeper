@@ -1,5 +1,13 @@
 import type { ScheduleRunList, ScheduleRunResult, ScheduleRunStarted } from '@holtkeeper/api'
-import { enqueueUnique, groupRepositories, planSchedule, scheduleRuns } from '@holtkeeper/jobs'
+import {
+  enqueueUnique,
+  groupRepositories,
+  nextRuns,
+  planSchedule,
+  scheduleRuns,
+  systemTimeZone,
+} from '@holtkeeper/jobs'
+import type { Job } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
@@ -9,12 +17,16 @@ import { knownRepos, queueNewRepoJobs } from '../new-repos.ts'
 
 const GLOBAL = { kind: 'global' } as const
 
-/** Jobs read per schedule to build its recent runs. */
+/** Jobs read per schedule on the first try to build its recent runs. */
 const RUN_JOBS = 500
+/** Jobs read per schedule at most, however few runs that covers. */
+const MAX_RUN_JOBS = 32_000
+/** Upcoming run times listed per schedule. */
+const NEXT_RUNS = 5
 
 /**
- * Recent runs of every schedule, running one by hand, and running the new repository trigger on
- * every repository Holtkeeper already knows.
+ * Recent runs and the next run times of every schedule, running one by hand, and running the new
+ * repository trigger on every repository Holtkeeper already knows.
  */
 export function scheduleRoutes(deps: ServerDeps) {
   const { store, config } = deps
@@ -25,12 +37,18 @@ export function scheduleRoutes(deps: ServerDeps) {
     const limit = Math.min(Math.max(Number(c.req.query('limit')) || 10, 1), 50)
     const schedules = config.jobs.schedules
     const lists = await Promise.all(
-      schedules.map((schedule) => store.jobs.list({ schedule: schedule.name, limit: RUN_JOBS })),
+      schedules.map((schedule) => runJobs(store, schedule.name, limit)),
     )
+    const now = deps.now()
     return c.json<ScheduleRunList>({
       schedules: schedules.map((schedule, index) => ({
         id: schedule.name,
         runs: scheduleRuns(lists[index] ?? [], limit),
+        next: schedule.enabled
+          ? nextRuns(schedule, now, NEXT_RUNS, {
+              timezone: schedule.timezone ?? systemTimeZone(),
+            }).map((run) => run.toISOString())
+          : [],
       })),
     })
   })
@@ -110,4 +128,16 @@ export function scheduleRoutes(deps: ServerDeps) {
   })
 
   return app
+}
+
+/** The jobs of a schedule's newest `runs` runs, each whole: a run the read cuts off is left out. */
+async function runJobs(store: ServerDeps['store'], schedule: string, runs: number): Promise<Job[]> {
+  for (let limit = RUN_JOBS; ; limit *= 4) {
+    const jobs = await store.jobs.list({ schedule, limit })
+    if (jobs.length < limit) return jobs
+    const last = jobs.at(-1)?.createdAt
+    const whole = jobs.filter((job) => job.createdAt !== last)
+    if (new Set(whole.map((job) => job.createdAt)).size >= runs || limit >= MAX_RUN_JOBS)
+      return whole
+  }
 }

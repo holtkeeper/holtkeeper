@@ -1,16 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
-  auditFreshness,
+  parsePastedPaths,
+  parseRepoHubSearch,
   parseRepoKey,
-  repoAccessAdvice,
+  parseRepoSplat,
+  pathCheck,
   repoInitials,
   repoKey,
   repoName,
+  repoSplat,
   splitRepoPath,
+  suggestRepos,
   validateGroupId,
   validateRepoPath,
-  withRepo,
+  withRepos,
 } from './repo.ts'
 
 test('repo keys round-trip', () => {
@@ -23,6 +27,30 @@ test('repo keys round-trip', () => {
   expect(repoName(repo)).toBe('app-x')
 })
 
+test('hub splats round-trip and reject a missing forge or path', () => {
+  const repo = { forge: 'work', path: 'acme/sub/widget-kit' }
+  expect(repoSplat(repo)).toBe('work/acme/sub/widget-kit')
+  expect(parseRepoSplat('work/acme/sub/widget-kit')).toEqual(repo)
+  expect(parseRepoSplat('/work/acme/widget-kit/')).toEqual({
+    forge: 'work',
+    path: 'acme/widget-kit',
+  })
+  for (const splat of [undefined, '', 'work', 'work/', '/acme']) {
+    expect(parseRepoSplat(splat)).toBeUndefined()
+  }
+})
+
+test('hub search keeps known tabs and non-empty strings only', () => {
+  expect(
+    parseRepoHubSearch({ tab: 'quality', section: 'assets', file: 'img/a.png', ref: 'abc' }),
+  ).toEqual({ tab: 'quality', section: 'assets', file: 'img/a.png', ref: 'abc' })
+  expect(parseRepoHubSearch({ tab: 'assets', section: '', file: 3, ref: undefined })).toEqual({})
+  expect(parseRepoHubSearch({ tab: 'settings', section: 'updates' })).toEqual({
+    tab: 'settings',
+    section: 'updates',
+  })
+})
+
 test('repository paths and group ids are checked before saving', () => {
   expect(validateRepoPath('games/app')).toBeUndefined()
   expect(validateRepoPath('')).toBe('Enter the repository path')
@@ -33,22 +61,61 @@ test('repository paths and group ids are checked before saving', () => {
   expect(validateGroupId('Games')).toBe('Lowercase letters, digits and dashes')
 })
 
-test('withRepo adds a path once and lifts its exclusion', () => {
-  expect(withRepo(undefined, 'work', 'games/app')).toEqual({
+test('withRepos adds paths once and lifts their exclusion', () => {
+  expect(withRepos(undefined, 'work', ['games/app', 'games/app', 'games/tool'])).toEqual({
     forge: 'work',
-    include: ['games/app'],
+    include: ['games/app', 'games/tool'],
     exclude: [],
   })
-  const group = { forge: 'work', include: ['games/*'], exclude: ['games/app'] }
-  expect(withRepo(group, 'other', 'games/app')).toEqual({
+  const group = { forge: 'work', include: ['games/*'], exclude: ['games/app', 'games/old'] }
+  expect(withRepos(group, 'other', ['games/app'])).toEqual({
     forge: 'work',
     include: ['games/*', 'games/app'],
-    exclude: [],
+    exclude: ['games/old'],
   })
-  expect(withRepo(withRepo(group, 'work', 'games/app'), 'work', 'games/app').include).toEqual([
-    'games/*',
-    'games/app',
-  ])
+  expect(withRepos(withRepos(group, 'work', ['games/app']), 'work', ['games/app']).include).toEqual(
+    ['games/*', 'games/app'],
+  )
+})
+
+describe('parsePastedPaths', () => {
+  test('reads one path per line, trims forge URLs and clone addresses, skips repeats', () => {
+    expect(
+      parsePastedPaths(
+        [
+          'acme/widget-kit',
+          '',
+          '  https://gitlab.acme.dev/acme/payments/ledger-api/-/tree/main  ',
+          'https://github.com/acme/http-client/pull/12',
+          'git@gitlab.acme.dev:acme/notify-svc.git',
+          'acme/widget-kit, acme/search-svc',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      paths: [
+        'acme/widget-kit',
+        'acme/payments/ledger-api',
+        'acme/http-client',
+        'acme/notify-svc',
+        'acme/search-svc',
+      ],
+      fromUrl: ['acme/payments/ledger-api', 'acme/http-client', 'acme/notify-svc'],
+      invalid: [],
+    })
+  })
+
+  test('reports lines that are no exact path', () => {
+    expect(parsePastedPaths('widget\nacme/*\nhttps://gitlab.acme.dev/\n')).toEqual({
+      paths: [],
+      fromUrl: [],
+      invalid: [
+        { line: 'widget', error: 'Include the namespace: team/app' },
+        { line: 'acme/*', error: 'Use an exact path; edit the group for patterns' },
+        { line: 'https://gitlab.acme.dev/', error: 'Enter the repository path' },
+      ],
+    })
+    expect(parsePastedPaths('   \n')).toEqual({ paths: [], fromUrl: [], invalid: [] })
+  })
 })
 
 test('splitRepoPath separates the namespace from the name', () => {
@@ -59,39 +126,72 @@ test('splitRepoPath separates the namespace from the name', () => {
   expect(splitRepoPath('solo')).toEqual({ namespace: '', name: 'solo' })
 })
 
-test('auditFreshness buckets by age', () => {
-  const now = new Date('2026-10-30T00:00:00.000Z')
-  expect(auditFreshness(undefined, now)).toBe('never')
-  expect(auditFreshness('2026-10-25T00:00:00.000Z', now)).toBe('fresh')
-  expect(auditFreshness('2026-10-10T00:00:00.000Z', now)).toBe('aging')
-  expect(auditFreshness('2026-08-01T00:00:00.000Z', now)).toBe('stale')
-})
-
 test('repoInitials match the server-generated avatar', () => {
   expect(repoInitials('acme/data-tools/dealer-frontend')).toBe('DD')
   expect(repoInitials('game-frontend')).toBe('GF')
   expect(repoInitials('api')).toBe('AP')
 })
 
-const account = { username: 'holtkeeper-bot', name: 'Holtkeeper' }
-const addable = (status: Parameters<typeof repoAccessAdvice>[0]['status']) =>
-  repoAccessAdvice({ status, account }, 'team/app').addable
+const account = { username: 'holtkeeper-bot' }
+const ready = (result: Parameters<typeof pathCheck>[0] & object) => pathCheck(result).ready
 
-describe('repoAccessAdvice', () => {
+describe('pathCheck', () => {
   test('names the account to invite when the repository is not visible', () => {
-    const advice = repoAccessAdvice({ status: 'not-found', account }, 'team/app')
-    expect(advice).toMatchObject({ tone: 'danger', addable: false })
-    expect(advice.text).toContain('invite @holtkeeper-bot')
-    expect(repoAccessAdvice({ status: 'not-found' }, 'team/app').text).toContain(
+    const check = pathCheck({ path: 'team/app', status: 'not-found' }, { account })
+    expect(check).toMatchObject({ label: 'Not found', tone: 'danger', ready: false })
+    expect(check.why).toContain('@holtkeeper-bot is not a member')
+    expect(pathCheck({ path: 'team/app', status: 'not-found' }).why).toContain(
       'the account of the forge token',
     )
   })
 
-  test('only readable repositories and unanswered checks can be added', () => {
-    expect(addable('ok')).toBe(true)
-    expect(addable('error')).toBe(true)
-    expect(addable('unauthorized')).toBe(false)
-    expect(addable('forbidden')).toBe(false)
-    expect(addable('archived')).toBe(false)
+  test('only readable paths and unanswered checks are ready; added ones are skipped', () => {
+    expect(ready({ path: 'a/b', status: 'ok' })).toBe(true)
+    expect(ready({ path: 'a/b', status: 'error', message: 'timeout' })).toBe(true)
+    expect(ready({ path: 'a/b', status: 'unauthorized' })).toBe(false)
+    expect(ready({ path: 'a/b', status: 'forbidden' })).toBe(false)
+    expect(ready({ path: 'a/b', status: 'archived' })).toBe(false)
+    expect(pathCheck({ path: 'a/b', status: 'ok' }, { added: true })).toMatchObject({
+      label: 'Already added',
+      ready: false,
+    })
+    expect(pathCheck(undefined, { fromUrl: true })).toMatchObject({
+      label: 'Not checked',
+      why: 'Trimmed from a forge URL',
+      ready: false,
+    })
+  })
+})
+
+describe('suggestRepos', () => {
+  const repos = [
+    { forge: 'work', path: 'acme/checkout-web' },
+    { forge: 'work', path: 'acme/checkout-api' },
+    { forge: 'work', path: 'acme/widgets' },
+    { forge: 'hub', path: 'tools/gadget' },
+  ]
+
+  test('suggests visible repositories a few typos away, closest first', () => {
+    expect(suggestRepos('acme/checkout-wb', repos)).toEqual([
+      { forge: 'work', path: 'acme/checkout-web' },
+      { forge: 'work', path: 'acme/checkout-api' },
+    ])
+    expect(suggestRepos('work:acme/widget', repos)).toEqual([
+      { forge: 'work', path: 'acme/widgets' },
+    ])
+    expect(suggestRepos('/gadgt/', repos)).toEqual([{ forge: 'hub', path: 'tools/gadget' }])
+  })
+
+  test('says nothing for unrelated addresses, empty input or exact matches', () => {
+    expect(suggestRepos('supply/licenses', repos)).toEqual([])
+    expect(suggestRepos('  ', repos)).toEqual([])
+    expect(suggestRepos('work:acme/widgets', repos)).toEqual([])
+    expect(suggestRepos('acme/widgets', [])).toEqual([])
+  })
+
+  test('caps the number of suggestions', () => {
+    expect(suggestRepos('acme/checkout', repos, 1)).toEqual([
+      { forge: 'work', path: 'acme/checkout-api' },
+    ])
   })
 })

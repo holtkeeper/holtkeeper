@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test'
 import type { ChatForm, ChatMessageList, ChatMessageView, ChatThreadView } from '@holtkeeper/api'
 
 import {
+  addableRepos,
   asksAgent,
   firstUnreadId,
   formCommand,
@@ -19,7 +20,12 @@ import {
   withOlder,
   missingFields,
   parseMentions,
+  refKey,
+  refLabel,
   scopeThreads,
+  threadBadge,
+  threadKind,
+  threadRefs,
   threadScope,
   toolCalls,
   toolSummary,
@@ -65,14 +71,32 @@ const message = (status: 'running' | 'done', at: string): ChatMessageView => ({
   authorType: 'system',
   body: '',
   mentions: [],
+  refs: [],
   createdAt: at,
   card: { blocks: [{ type: 'steps', steps: [{ label: 'qa', status }] }] },
+})
+const taskMessage = (status: 'waiting' | 'running' | 'active'): ChatMessageView => ({
+  ...message('done', '2026-11-02T11:00:00Z'),
+  card: {
+    blocks: [
+      {
+        type: 'task',
+        repos: ['work:acme/widget-kit'],
+        summary: 'Bump some-lib.',
+        status: 'running',
+        steps: [{ label: 'work:acme/widget-kit', status }],
+      },
+    ],
+  },
 })
 test('live cards are recent cards with unfinished steps', () => {
   const now = new Date('2026-11-02T12:00:00Z')
   expect(hasLiveCards([message('done', '2026-11-02T11:00:00Z')], now)).toBe(false)
   expect(hasLiveCards([message('running', '2026-11-02T11:00:00Z')], now)).toBe(true)
   expect(hasLiveCards([message('running', '2026-10-30T11:00:00Z')], now)).toBe(false)
+  expect(hasLiveCards([taskMessage('running')], now)).toBe(true)
+  expect(hasLiveCards([taskMessage('waiting')], now)).toBe(false)
+  expect(hasLiveCards([taskMessage('active')], now)).toBe(false)
 })
 
 test('hints match the first word, prefix or not', () => {
@@ -96,6 +120,7 @@ const said = (
   ...(author !== undefined && { authorId: author }),
   body: `message ${seq}`,
   mentions: [],
+  refs: [],
   createdAt: at,
   ...extra,
 })
@@ -204,15 +229,25 @@ test('threads scope by home groups, team-wide threads count as mine', () => {
     { id: 'b', groups: ['games'] },
     { id: 'c', groups: ['puzzles'] },
   ]
-  const ids = (view: 'mine' | 'all' | 'others') =>
+  const ids = (view: 'mine' | 'all') =>
     scopeThreads(threads, view, ['games']).shown.map((thread) => thread.id)
   expect(ids('mine')).toEqual(['a', 'b'])
-  expect(ids('others')).toEqual(['c'])
   expect(ids('all')).toEqual(['a', 'b', 'c'])
-  expect(scopeThreads(threads, 'mine', ['games']).counts).toEqual({ mine: 2, all: 3, others: 1 })
+  expect(scopeThreads(threads, 'mine', ['games']).counts).toEqual({ mine: 2, all: 3 })
+  expect(scopeThreads(threads, 'mine', ['games'])).toMatchObject({
+    others: [{ id: 'c' }],
+    teams: ['puzzles'],
+  })
+  expect(scopeThreads(threads, 'all', ['games'])).toMatchObject({ others: [], teams: [] })
+  expect(scopeThreads(threads, 'mine', []).shown).toHaveLength(3)
   expect(threadScope({ repo: 'work:g/app' })).toBe('g/app')
   expect(threadScope({ group: 'games' })).toBe('games')
   expect(threadScope({})).toBe('Team')
+  expect([{ repo: 'work:g/app' }, { group: 'games' }, {}].map(threadKind)).toEqual([
+    'Repository thread',
+    'Group thread',
+    'Team thread',
+  ])
 })
 
 test('tool traces pair calls with results and summarize', () => {
@@ -247,6 +282,55 @@ test('costs and badges format compactly', () => {
   expect(unreadBadge(0)).toBe('')
   expect(unreadBadge(7)).toBe('7')
   expect(unreadBadge(120)).toBe('99+')
+  expect(threadBadge({ unread: 3, muted: false })).toBe('3')
+  expect(threadBadge({ unread: 3, muted: true })).toBe('')
+})
+
+test('refs read as short labels and list once per thread, repositories aside', () => {
+  expect(
+    [
+      { kind: 'repo', repo: 'work:acme/widget-kit' },
+      { kind: 'note', id: '5c2e81d0-4f1a' },
+      { kind: 'task', id: '0f3a9c21-77aa' },
+      { kind: 'job', id: '9b1e44d0-1234' },
+      { kind: 'mr', repo: 'work:acme/storefront', iid: 418 },
+    ].map((ref) => refLabel(ref as Parameters<typeof refLabel>[0])),
+  ).toEqual([
+    'acme/widget-kit',
+    'kb:5c2e81d0',
+    'Task 0f3a9c21',
+    'Run 9b1e44d0',
+    'acme/storefront!418',
+  ])
+  expect(refKey({ kind: 'mr', repo: 'work:acme/storefront', iid: 418 })).toBe(
+    'mr:work:acme/storefront!418',
+  )
+  expect(
+    threadRefs([
+      {
+        refs: [
+          { kind: 'repo', repo: 'work:acme/widget-kit' },
+          { kind: 'note', id: '12' },
+        ],
+      },
+      {
+        refs: [
+          { kind: 'task', id: 'g1' },
+          { kind: 'note', id: '12' },
+        ],
+      },
+      { refs: [] },
+    ]),
+  ).toEqual([
+    { kind: 'note', id: '12' },
+    { kind: 'task', id: 'g1' },
+  ])
+  expect(
+    addableRepos(
+      ['work:acme/storefront', 'work:acme/admin-console', 'work:acme/widget-kit'],
+      ['work:acme/widget-kit'],
+    ),
+  ).toEqual(['work:acme/admin-console', 'work:acme/storefront'])
 })
 
 test('polls fold newer messages in, older pages go in front', () => {
@@ -263,6 +347,9 @@ test('polls fold newer messages in, older pages go in front', () => {
     unread: 0,
     participants: [],
     summarized: false,
+    messageCount: 0,
+    contextRepos: [],
+    muted: false,
   }
   const page = (seqs: number[], hasMore: boolean, serverTime: string): ChatMessageList => ({
     thread,

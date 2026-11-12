@@ -4,10 +4,10 @@ import { createFakeRunner } from '@holtkeeper/exec/testing'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { HEAD, addedFile, fakeAgent, fakeForge } from '../test/fakes.ts'
-import { reviewAnalysis } from './analysis.ts'
+import { reviewAnalysis, reviewMetrics, reviewMetricsSchema } from './analysis.ts'
 import { createReviewAnalyzer, reviewOptionsSchema } from './analyzer.ts'
 import { requireReviewForge } from './pipeline.ts'
-import type { ReviewData } from './schema.ts'
+import { type ReviewData, reviewDataSchema } from './schema.ts'
 
 const repo = { forge: 'work', path: 'games/a' }
 
@@ -180,7 +180,7 @@ describe('review analyzer', () => {
     const analyzer = createReviewAnalyzer({
       guideFor: async (target, request) => {
         asked.push({ target, request })
-        return '# Repository guide\n\nTeam rule.'
+        return { text: '# Repository guide\n\nTeam rule.', scopes: [] }
       },
     })
     const { agent, tasks } = fakeAgent({
@@ -294,7 +294,9 @@ describe('review analyzer', () => {
     const { agent, tasks } = fakeAgent({
       review: [{ action: 'concede', body: 'Right.', resolve: false }],
     })
-    const analyzer = createReviewAnalyzer({ guideFor: async () => 'Prices are integer cents.' })
+    const analyzer = createReviewAnalyzer({
+      guideFor: async () => ({ text: 'Prices are integer cents.', scopes: ['all', 'group:web'] }),
+    })
     const result = await analyzer.run({
       repo,
       forge,
@@ -304,5 +306,61 @@ describe('review analyzer', () => {
     })
     expect(tasks[0]?.context).toBe('Prices are integer cents.')
     expect(result.data.summary).toBe('Answered thread d1 (concede).')
+    expect(result.data.guideScopes).toEqual(['all', 'group:web'])
+    expect(result.data.usage?.model).toBe('fake-main')
+    expect(result.data.durationMs).toBeGreaterThanOrEqual(0)
   })
+})
+
+test('review metrics count posted comments per severity', () => {
+  expect(reviewMetrics(data())).toEqual({
+    mergeRequest: 7,
+    title: 'Add pricing',
+    url: 'https://x/7',
+    author: 'jane',
+    verdict: 'needs-changes',
+    mode: 'full',
+    comments: 1,
+    severities: { info: 0, minor: 0, major: 1, critical: 0 },
+    suggestions: 1,
+    rejected: 1,
+    resolved: 1,
+    approved: false,
+    costUsd: 0.12,
+  })
+})
+
+test('review metrics carry the model, wall time and Guide scopes of newer runs', () => {
+  const metrics = reviewMetrics(
+    data({
+      usage: { turns: 2, model: 'model-a' },
+      durationMs: 4200,
+      guideScopes: ['all', 'group:web'],
+    }),
+  )
+  expect(metrics).toMatchObject({
+    model: 'model-a',
+    durationMs: 4200,
+    guideScopes: ['all', 'group:web'],
+  })
+  expect(reviewMetricsSchema.parse(metrics)).toEqual(metrics)
+})
+
+test('records stored before the model, wall time and Guide scopes existed still parse', () => {
+  const old = data()
+  expect(reviewDataSchema.safeParse(old).success).toBe(true)
+  const metrics = reviewMetricsSchema.parse({
+    mergeRequest: 7,
+    verdict: 'looks-good',
+    mode: 'full',
+    comments: 0,
+    severities: { info: 0, minor: 0, major: 0, critical: 0 },
+    suggestions: 0,
+    rejected: 0,
+    resolved: 0,
+    approved: false,
+  })
+  expect(metrics.title).toBeUndefined()
+  expect(metrics.model).toBeUndefined()
+  expect(metrics.guideScopes).toBeUndefined()
 })

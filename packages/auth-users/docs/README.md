@@ -10,6 +10,7 @@ import { usersAuth } from '@holtkeeper/auth-users'
 const auth = usersAuth({
   store: store.users,
   audit: store.audit,
+  kv: store.kv,
   sessionSecret: { env: 'HOLTKEEPER_SESSION_SECRET' },
   origin: 'https://keeper.example.com',
   bootstrap: { name: 'Admin', email: 'admin@example.com' },
@@ -46,7 +47,7 @@ for (const line of (await auth.start?.()) ?? []) console.log(line)
   account management for operators with direct store access (the CLI's `users` command), without
   delegation checks. `issueUserLink` with purpose `login` returns a single-use sign-in link that
   needs no passkey.
-- Types `UserView`, `UserList`, `LinkResponse`, `LinkInfo`, `ExternalAccountView`,
+- Types `UserView`, `UserList`, `LinkResponse`, `LinkInfo`, `LinkRole`, `LinkGone`, `ExternalAccountView`,
   `ExternalAccountList` — structurally identical to those in `@holtkeeper/api`; `ForgeIssuer` for
   `forges`.
 
@@ -64,6 +65,14 @@ holder opens `/link/<token>` in the web UI, which calls `GET /link/:token` for `
 The registration challenge cookie is bound to the link's token hash. A successful registration
 stores the passkey (users may hold several), marks the link used and signs the holder in. A
 recovery link also bumps the user's `sessionVersion`, which ends every other session.
+
+`LinkInfo` is what the holder sees before signing in, so it is served only for a live, unused link
+and carries no scopes, group names or the issuer's name: `purpose`, `userName`, `expiresAt` and
+`grants: { count, role }`. Who gave the access shows only after sign-in (`UserView.creator`). `role` (`LinkRole`) is `roleOf` from
+[@holtkeeper/access](../../access/docs/README.md#roles), the same role the web app shows in Account
+and on the Forbidden card: `admin` for `*` on every repository, `viewer` when every action only
+reads, `none` without grants, otherwise `custom`. A used or expired link answers 410 on every link route with
+`LinkGone { error, state: 'used' | 'expired', at }`, where `at` is when it was used or expired.
 
 **Own passkeys** — a signed-in user reads their account with `GET /me` (a `UserView`) and manages
 their passkeys there: `POST /me/passkeys/options` and `POST /me/passkeys/verify { response, label? }`
@@ -113,6 +122,28 @@ usersAuth({
 
 `UserView.avatarUrl` is `/api/avatars/<avatarSeed or id>.svg`, rendered by the server.
 
+**People views** — every `UserView` (admin list, invite and recovery answers, `GET /me`) also
+carries:
+
+- `creator`: name and avatar of the user behind `createdBy`; absent when `createdBy` is not a user
+  (`cli`, `bootstrap`) or that user is gone. The Account page shows it as "Given by".
+- `lastSeenAt`: the last signed-in request. `authenticate` writes it through
+  `UserStore.touchUser` at most once a minute per user; a failed write never fails the request.
+- `teams`: the home groups the user picked (read from `prefs:<id>` in `kv`, where the server keeps
+  preferences), else every group their grants name, in grant order; group combinations read
+  `a + b`. Without `kv`, always the grants' groups.
+- `invite`: the newest enrollment link (`createdAt`, `expiresAt`, `expired`, `createdBy`) while the
+  user never signed in (no passkey, no identity, no `lastSeenAt`). Inviting and
+  `POST /admin/users/:id/invite` remember it in `kv` under `users:invite:<id>`; without `kv` there is
+  no invite state. Links issued by the CLI or the bootstrap are not tracked.
+
+`POST /admin/users/:id/invite` issues a fresh enrollment link for a user who never signed in
+(needs `users:invite` and the right to manage the user; 409 once they signed in, use a recovery link
+then). Older links keep working until they expire. `GET /admin/summary` counts the users the
+caller may see (`PeopleSummary`): `total`, `disabled`, and among enabled users `invited` (pending
+invite), `active` (the rest), `admins` (`*` on everything) and `withoutSignIn` (neither passkey nor
+identity), plus `signIn`: `passkeys` and each OIDC provider id.
+
 **Sessions** — `hk_session` carries `{ uid, v }`, HMAC-signed with `sessionSecret`. `authenticate`
 returns a principal only for an existing, enabled user whose `sessionVersion` equals `v`.
 `POST /logout` clears the cookie on this device.
@@ -121,7 +152,7 @@ returns a principal only for an existing, enabled user whose `sessionVersion` eq
 
 Relative to `/auth/users`. Errors are `{ error }` JSON: 400 invalid input or expired challenge,
 401 not signed in or failed verification, 403 forbidden, 404 unknown, 405 wrong method, 409
-duplicate email or passkey, 410 used or expired link.
+duplicate email or passkey, 410 used or expired link (`LinkGone`, which adds `state` and `at`).
 
 | Method | Path                                   | Result                               |
 | ------ | -------------------------------------- | ------------------------------------ |
@@ -139,9 +170,11 @@ duplicate email or passkey, 410 used or expired link.
 | POST   | `/me/passkeys/verify`                  | 201 `UserView`                       |
 | PATCH  | `/me/passkeys/:passkeyId`              | `UserView`                           |
 | DELETE | `/me/passkeys/:passkeyId`              | 204                                  |
+| GET    | `/admin/summary`                       | `PeopleSummary`                      |
 | GET    | `/admin/users`                         | `UserList`                           |
 | POST   | `/admin/users`                         | 201 `LinkResponse` (enrollment link) |
 | PATCH  | `/admin/users/:id`                     | `UserView`                           |
+| POST   | `/admin/users/:id/invite`              | 201 `LinkResponse` (new invite)      |
 | POST   | `/admin/users/:id/recovery`            | 201 `LinkResponse` (recovery link)   |
 | DELETE | `/admin/users/:id/passkeys/:passkeyId` | 204                                  |
 | GET    | `/admin/users/:id/accounts`            | `ExternalAccountList`                |
@@ -154,7 +187,8 @@ A global admin holds every action on everything (`grantsWithin(root, caller.gran
 
 - **See** a user: global admin, or `users:read` and the user's grants are within the caller's.
   Users the caller cannot see answer 404 everywhere.
-- **Invite**: `users:invite` and `canDelegate(caller, grants)`.
+- **Invite**: `users:invite` and `canDelegate(caller, grants)`. Sending an invite again needs
+  `users:invite` and the right to manage the user.
 - **Manage** (patch, recovery link, delete passkey, link or unlink accounts): global admin, or `users:write` and the
   target's current grants are within the caller's. New grants additionally need `canDelegate`.
 - Nobody changes their own grants or disables themselves.

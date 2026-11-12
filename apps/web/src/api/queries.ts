@@ -1,10 +1,16 @@
 import type {
   AcceptLearningInput,
+  AcceptLearningsInput,
+  AllowlistRenewInput,
+  AssetsQuery,
+  CiFleetJobSort,
+  InboxItem,
   AgentTaskStatus,
   EditLearningInput,
   FamilyInput,
   GuideScopeKey,
   GuideSectionName,
+  GuideSectionRejectInput,
   GuideTask,
   LearningStatus,
   PutGuideSectionInput,
@@ -40,6 +46,7 @@ import type {
   PutConfigInput,
   PutSettingInput,
   RepoRef,
+  ReviewQuery,
   UpdateCredentialInput,
   UpdateKnowledgeInput,
   UpdateUserInput,
@@ -50,17 +57,24 @@ import {
   keepPreviousData,
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
 
 import { hasLiveCards, mergeMessages, withNewer, withOlder } from '../lib/chat.ts'
+import { runBulk } from '../lib/inbox.ts'
+import { browserStorage, clearRecent } from '../lib/palette.ts'
 import { repoKey } from '../lib/repo.ts'
+import type { ScopeFocus } from '../lib/scope.ts'
 import {
+  type AiOverviewQuery,
   type AiUsageQuery,
   type ConfigCollections,
   type HistoryQuery,
   type JobQuery,
+  type PublicApiSearchQuery,
+  type PublicApiSymbolQuery,
   api,
 } from './endpoints.ts'
 
@@ -69,26 +83,41 @@ export const keys = {
   me: ['me'] as const,
   preferences: ['me', 'preferences'] as const,
   home: ['home'] as const,
+  inbox: ['inbox'] as const,
+  inboxCount: ['inbox', 'count'] as const,
   repos: ['repos'] as const,
   repoUpdates: (repo: RepoRef) => ['repos', 'updates', repoKey(repo)] as const,
   groupListing: (group: string) => ['repos', 'updates', 'group', group] as const,
   auditRuns: (repo?: RepoRef, limit?: number) =>
     ['audit-runs', 'list', repo ? repoKey(repo) : '*', limit ?? 0] as const,
   auditRun: (runId: string) => ['audit-runs', 'detail', runId] as const,
+  findings: (repo?: RepoRef) => ['audit-runs', 'findings', repo ? repoKey(repo) : '*'] as const,
+  licenses: ['licenses'] as const,
   analyses: (kind: string, repo?: RepoRef) =>
     ['analyses', 'list', kind, repo ? repoKey(repo) : '*'] as const,
   analysis: (analysisId: string, compare?: string) =>
     ['analyses', 'detail', analysisId, compare ?? ''] as const,
   credentials: ['credentials'] as const,
   settings: ['settings'] as const,
-  resolved: (repo: RepoRef) => ['settings', 'resolve', repoKey(repo)] as const,
+  resolved: (focus: ScopeFocus) =>
+    [
+      'settings',
+      'resolve',
+      focus.kind === 'repo' ? repoKey(focus.repo) : `group:${focus.group}`,
+    ] as const,
   knowledge: ['knowledge'] as const,
+  knowledgeCounts: ['knowledge', 'counts'] as const,
   guide: ['guide'] as const,
   guideScope: (scope: GuideScopeKey) => ['guide', 'scope', scope] as const,
   guideSection: (scope: GuideScopeKey, section: GuideSectionName) =>
     ['guide', 'section', scope, section] as const,
   guidePreview: (repo: RepoRef, task: GuideTask) =>
     ['guide', 'preview', repoKey(repo), task] as const,
+  guideChain: (repo: RepoRef, section?: GuideSectionName) =>
+    ['guide', 'chain', repoKey(repo), section ?? '*'] as const,
+  guideRepoFiles: (repo: RepoRef) => ['guide', 'repo-files', repoKey(repo)] as const,
+  guideGeneratedHistory: (scope: GuideScopeKey, section: GuideSectionName) =>
+    ['guide', 'generated', scope, section] as const,
   families: ['families'] as const,
   learnings: ['learnings'] as const,
   config: ['config'] as const,
@@ -101,6 +130,7 @@ export const keys = {
   libraries: ['libraries'] as const,
   accounts: ['accounts'] as const,
   chat: ['chat'] as const,
+  chatContext: (threadId: string) => ['chat', 'context', threadId] as const,
   slack: ['slack'] as const,
   users: ['users'] as const,
   account: ['account'] as const,
@@ -111,6 +141,7 @@ export const keys = {
   releaseVersion: (repo: RepoRef, tag: string) =>
     ['releases', 'version', repoKey(repo), tag] as const,
   releaseRepo: (repo: RepoRef) => ['releases', 'repo', repoKey(repo)] as const,
+  releaseDetect: (repo: RepoRef) => ['release-detect', repoKey(repo)] as const,
   releaseDeploy: (repo: RepoRef, tag: string) =>
     ['releases', 'deploy', repoKey(repo), tag] as const,
 }
@@ -123,8 +154,174 @@ export const useMe = () =>
 export const useHome = () =>
   useQuery({ queryKey: keys.home, queryFn: api.home, refetchInterval: 60_000 })
 
+/** Inbox and Home, which list decisions; every decision refreshes both. */
+const decisionKeys = [keys.inbox, keys.home] as const
+
+const refreshDecisions = (client: ReturnType<typeof useQueryClient>) =>
+  Promise.all(decisionKeys.map((queryKey) => client.invalidateQueries({ queryKey })))
+
+/** Every decision the caller may make, both sections, snoozed ones marked. */
+export const useInbox = () =>
+  useQuery({ queryKey: [...keys.inbox, 'feed'], queryFn: api.inbox, refetchInterval: 60_000 })
+
+/** Open decisions per section, for badges; read at most every 30 seconds. */
+export const useInboxCount = (enabled = true) =>
+  useQuery({
+    queryKey: keys.inboxCount,
+    queryFn: api.inboxCount,
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+
+/** Snooze and unsnooze Inbox and Home items; each refreshes Inbox and Home. */
+export function useSnoozeMutations() {
+  const client = useQueryClient()
+  const onSuccess = () => refreshDecisions(client)
+  return {
+    snooze: useMutation({
+      mutationFn: ({ id, until }: { id: string; until: string }) => api.snooze({ id, until }),
+      onSuccess,
+    }),
+    unsnooze: useMutation({ mutationFn: (id: string) => api.unsnooze(id), onSuccess }),
+  }
+}
+
+/** A decision on an Inbox item: the positive one (approve, accept, renew) or reject. */
+export type InboxDecision = 'approve' | 'reject'
+
+/**
+ * Optional parts of a decision: the learning scope (else `suggestedScope`), the renewal date and
+ * a reason that replaces the allowlist entry's.
+ */
+export interface InboxDecisionOptions {
+  scope?: GuideScopeKey
+  expires?: string
+  reason?: string
+}
+
+/** Sends one Inbox decision to its kind's endpoint; a task reject goes to the reject endpoint, audited as `task.reject`. */
+export function decideInbox(
+  item: InboxItem,
+  decision: InboxDecision,
+  options: InboxDecisionOptions = {},
+): Promise<unknown> {
+  const approve = decision === 'approve'
+  switch (item.kind) {
+    case 'task':
+      return approve ? api.approveTaskGroup(item.groupId) : api.rejectTaskGroup(item.groupId)
+    case 'note':
+      return api.reviewKnowledge(item.entryId, approve ? 'accept' : 'reject')
+    case 'learning':
+      return approve
+        ? api.acceptLearning(item.learningId, options.scope ? { scope: options.scope } : {})
+        : api.rejectLearning(item.learningId)
+    case 'guide':
+      return approve
+        ? api.acceptGuideSection(item.guideScope, item.section, { inputHash: item.inputHash })
+        : api.rejectGuideSection({
+            scope: item.guideScope,
+            section: item.section,
+            inputHash: item.inputHash,
+          })
+    case 'release':
+      return approve
+        ? api.acceptRelease({ repo: item.repo })
+        : api.dismissRelease({ repo: item.repo, sha: item.head })
+    case 'budget':
+      return Promise.reject(new Error('a budget warning has nothing to decide'))
+    default: {
+      if (!approve) return Promise.reject(new Error('an allowlist entry can only be renewed'))
+      if (!options.expires) return Promise.reject(new Error('choose the new last day'))
+      const input: AllowlistRenewInput = {
+        settingId: item.settingId,
+        advisory: item.entry.id,
+        expires: options.expires,
+        ...(item.entry.package ? { package: item.entry.package } : {}),
+        ...(options.reason?.trim() ? { reason: options.reason.trim() } : {}),
+      }
+      return api.renewAllowlist(input)
+    }
+  }
+}
+
+const areaKeys: Record<InboxItem['kind'], readonly (readonly string[])[]> = {
+  task: [['tasks'], ['chat', 'poll']],
+  note: [keys.knowledge],
+  learning: [keys.learnings, keys.guide, keys.knowledgeCounts],
+  guide: [keys.guide, keys.knowledgeCounts],
+  release: [keys.releases],
+  allowlist: [keys.settings, ['audit-runs']],
+  budget: [keys.ai],
+}
+
+/** Query keys a decision on items of `kinds` refreshes: Inbox, Home, then each kind's own area. */
+export const decisionQueryKeys = (kinds: readonly InboxItem['kind'][]): (readonly string[])[] => {
+  const all = [...decisionKeys, ...[...new Set(kinds)].flatMap((kind) => areaKeys[kind])]
+  return all.filter((key, index) => all.findIndex((k) => k.join('\0') === key.join('\0')) === index)
+}
+
+/**
+ * Decisions on Inbox items, one at a time or in bulk. Bulk runs the rows one after another on
+ * the client and reports errors per row. Every decision refreshes Inbox, Home and the queries of
+ * the item's own area (tasks, knowledge, learnings, Guide, releases, settings).
+ */
+export function useInboxDecisions() {
+  const client = useQueryClient()
+  const refresh = (kinds: readonly InboxItem['kind'][]) =>
+    Promise.all(decisionQueryKeys(kinds).map((queryKey) => client.invalidateQueries({ queryKey })))
+  return {
+    decide: useMutation({
+      mutationFn: ({
+        item,
+        decision,
+        ...options
+      }: { item: InboxItem; decision: InboxDecision } & InboxDecisionOptions) =>
+        decideInbox(item, decision, options),
+      onSuccess: (_data, { item }) => refresh([item.kind]),
+    }),
+    bulk: useMutation({
+      mutationFn: ({
+        items,
+        decision,
+        options,
+      }: {
+        items: readonly InboxItem[]
+        decision: InboxDecision
+        options?: (item: InboxItem) => InboxDecisionOptions
+      }) => runBulk(items, (item) => decideInbox(item, decision, options?.(item))),
+      onSettled: (_data, _error, { items }) => refresh(items.map((item) => item.kind)),
+    }),
+    snoozeMany: useMutation({
+      mutationFn: ({ items, until }: { items: readonly InboxItem[]; until: string }) =>
+        runBulk(items, (item) => api.snooze({ id: item.id, until })),
+      onSettled: () => refreshDecisions(client),
+    }),
+  }
+}
+
+/**
+ * Retry of a Home job-failure item: queues `analyzer` again on each of `repos` (`forge:path`).
+ * Refreshes jobs, Home and Inbox.
+ */
+export function useRetryAttention() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ analyzer, repos }: { analyzer: string; repos: readonly string[] }) =>
+      Promise.all(repos.map((repo) => api.createJob({ analyzer, repo }))),
+    onSuccess: () =>
+      Promise.all([client.invalidateQueries({ queryKey: keys.jobs }), refreshDecisions(client)]),
+  })
+}
+
 export const useRepos = (enabled = true) =>
   useQuery({ queryKey: keys.repos, queryFn: api.repos, enabled })
+
+/** Groups of the repositories the viewer can see, sorted, for scope suggestions. */
+export function useGroupNames(enabled = true): string[] {
+  const repos = useRepos(enabled)
+  return [...new Set((repos.data?.repos ?? []).flatMap((repo) => repo.groups))].toSorted()
+}
 
 /** Audit run summaries, newest first; all repositories when `repo` is omitted. */
 export const useAuditRuns = (repo?: RepoRef, limit = 100, enabled = true) =>
@@ -135,6 +332,16 @@ export const useAuditRuns = (repo?: RepoRef, limit = 100, enabled = true) =>
     enabled,
   })
 
+/** Each audit run's detail, in order; one query per run id. */
+export const useAuditRunDetails = (runIds: readonly string[]) =>
+  useQueries({
+    queries: runIds.map((runId) => ({
+      queryKey: keys.auditRun(runId),
+      queryFn: () => api.auditRun(runId),
+      staleTime: Infinity,
+    })),
+  })
+
 export const useAuditRun = (runId: string) =>
   useQuery({
     queryKey: keys.auditRun(runId),
@@ -142,9 +349,19 @@ export const useAuditRun = (runId: string) =>
     staleTime: Infinity,
   })
 
-/** Analysis kinds the server understands. */
-export const useAnalysisKinds = () =>
-  useQuery({ queryKey: ['analyses', 'kinds'], queryFn: api.analysisKinds, staleTime: Infinity })
+/** Open, fixing and allowlisted findings grouped by advisory and package; all repositories when `repo` is omitted. */
+export const useFindings = (repo?: RepoRef, enabled = true) =>
+  useQuery({
+    queryKey: keys.findings(repo),
+    queryFn: () => api.findings(repo),
+    placeholderData: keepPreviousData,
+    enabled,
+    staleTime: 60_000,
+  })
+
+/** Fleet license overview: KPIs, license mix, violations, per-repository rows and the policy. */
+export const useLicenses = (enabled = true) =>
+  useQuery({ queryKey: keys.licenses, queryFn: api.licenses, enabled, staleTime: 60_000 })
 
 /** Analysis records of one kind, newest first; all repositories when `repo` is omitted. */
 export const useAnalyses = (kind: string, repo?: RepoRef, limit = 100, enabled = true) =>
@@ -158,6 +375,24 @@ export const useAnalyses = (kind: string, repo?: RepoRef, limit = 100, enabled =
 /** Repositories with CI runs in the last 30 days, one card each, from their newest `ci-jobs` record. */
 export const useCiOverview = () =>
   useQuery({ queryKey: ['ci', 'overview'], queryFn: api.ciOverview, staleTime: 60_000 })
+
+/** One repository's CI jobs as table rows, at most `limit` (server default when absent); disabled without a repository. */
+export const useCiJobs = (repo: RepoRef | undefined, limit?: number) =>
+  useQuery({
+    queryKey: ['ci', 'jobs', repo ? repoKey(repo) : 'none', limit ?? 0],
+    queryFn: () => api.ciJobs(repo!, limit),
+    enabled: repo !== undefined,
+    staleTime: 60_000,
+  })
+
+/** The worst CI jobs across every readable repository, ranked by `sort`. */
+export const useCiFleetJobs = (sort: CiFleetJobSort, limit?: number) =>
+  useQuery({
+    queryKey: ['ci', 'fleet-jobs', sort, limit ?? 0],
+    queryFn: () => api.ciFleetJobs(sort, limit),
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  })
 
 /** One repository's newest `ci-jobs` record with its problem jobs. */
 export const useCiRepo = (repo: RepoRef | undefined) =>
@@ -185,6 +420,30 @@ export const useRepoCoverage = (repo: RepoRef | undefined) =>
     staleTime: 60_000,
   })
 
+/**
+ * The fleet Assets table under `query`'s filters and sort, one page per `limit` (server default
+ * when absent); further pages continue from the previous page's `nextCursor`.
+ */
+export const useAssets = (query: Omit<AssetsQuery, 'cursor'> = {}, enabled = true) =>
+  useInfiniteQuery({
+    queryKey: ['assets', 'list', query],
+    queryFn: ({ pageParam }) =>
+      api.assets({ ...query, ...(pageParam ? { cursor: pageParam } : {}) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+    enabled,
+  })
+
+/** Bundle targets of every readable repository with a bundle record, from stored metrics. */
+export const useBundlesOverview = () =>
+  useQuery({ queryKey: ['bundles', 'overview'], queryFn: api.bundles, staleTime: 60_000 })
+
+/** Branches worth deleting in every readable repository with a branches record. */
+export const useBranchesOverview = () =>
+  useQuery({ queryKey: ['branches', 'overview'], queryFn: api.branches, staleTime: 60_000 })
+
 /** A repository's effective asset policy and its newest assets record. */
 export const useRepoAssets = (repo: RepoRef) =>
   useQuery({
@@ -194,12 +453,17 @@ export const useRepoAssets = (repo: RepoRef) =>
   })
 
 /** Direct dependencies of every readable repository, joined per library. */
-export const useDependencies = (enabled = true) =>
+export const useDependencies = () =>
+  useQuery({ queryKey: ['dependencies'], queryFn: api.dependencies, staleTime: 60_000 })
+
+/** Libraries whose name contains `q`, best first; idle while `q` is empty. */
+export const useDependencySearch = (q: string) =>
   useQuery({
-    queryKey: ['dependencies'],
-    queryFn: api.dependencies,
-    staleTime: 60_000,
-    enabled,
+    queryKey: ['dependencies', 'search', q],
+    queryFn: () => api.dependencySearch(q, 10),
+    placeholderData: keepPreviousData,
+    enabled: q.trim().length > 0,
+    staleTime: 30_000,
   })
 
 /** The newest stack record of every readable group: runtimes, end of life and conventions. */
@@ -212,6 +476,18 @@ export const useDependency = (library: { ecosystem: string; name: string } | und
     queryKey: ['dependencies', 'library', library?.ecosystem ?? '', library?.name ?? ''],
     queryFn: () => api.dependency(library!.ecosystem, library!.name),
     enabled: library !== undefined,
+    staleTime: 60_000,
+  })
+
+/** Where a library's API is recorded, with export totals and entry points; idle until `enabled`. */
+export const useDependencyApi = (
+  library: { ecosystem: string; name: string } | undefined,
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: ['dependencies', 'api', library?.ecosystem ?? '', library?.name ?? ''],
+    queryFn: () => api.dependencyApi(library!.ecosystem, library!.name),
+    enabled: enabled && library !== undefined,
     staleTime: 60_000,
   })
 
@@ -397,11 +673,24 @@ export function useListGroup(group: string) {
 export const useSettings = (enabled = true) =>
   useQuery({ queryKey: keys.settings, queryFn: api.settings, enabled })
 
-export const useResolvedSettings = (repo: RepoRef | undefined) =>
+/** Every setting as it applies to a repository or a group, with winner and source; off without a focus. */
+export const useResolvedScope = (focus: ScopeFocus | undefined) =>
   useQuery({
-    queryKey: repo ? keys.resolved(repo) : ['settings', 'resolve', 'none'],
-    queryFn: () => api.resolveSettings(repo!),
-    enabled: repo !== undefined,
+    queryKey: focus ? keys.resolved(focus) : ['settings', 'resolve', 'none'],
+    queryFn: () => api.resolveSettings(focus!),
+    enabled: focus !== undefined,
+  })
+
+export const useResolvedSettings = (repo: RepoRef | undefined) =>
+  useResolvedScope(repo && { kind: 'repo', repo })
+
+/** The resolver's answer for each repository, in order; one query per repository. */
+export const useResolvedRepos = (repos: readonly RepoRef[]) =>
+  useQueries({
+    queries: repos.map((repo) => ({
+      queryKey: keys.resolved({ kind: 'repo', repo }),
+      queryFn: () => api.resolveSettings({ kind: 'repo', repo }),
+    })),
   })
 
 export function useSettingMutations() {
@@ -433,7 +722,22 @@ export const useKnowledge = (
     enabled,
   })
 
-/** Create, edit, review and delete knowledge entries; each refreshes every knowledge list. */
+/** Guide, Notes and Learnings totals per Knowledge space the caller may read, for the sidebar. */
+export const useKnowledgeCounts = (enabled = true) =>
+  useQuery({ queryKey: keys.knowledgeCounts, queryFn: api.knowledgeCounts, enabled })
+
+/** One knowledge entry with its history; off while `entryId` is unknown. */
+export const useKnowledgeEntry = (entryId: string | undefined) =>
+  useQuery({
+    queryKey: [...keys.knowledge, 'entry', entryId ?? ''],
+    queryFn: () => api.knowledgeEntry(entryId!),
+    enabled: entryId !== undefined,
+  })
+
+/**
+ * Create, edit, review and delete knowledge entries; each refreshes every knowledge list, and a
+ * review also Inbox and Home.
+ */
 export function useKnowledgeMutations() {
   const client = useQueryClient()
   const onSuccess = () => client.invalidateQueries({ queryKey: keys.knowledge })
@@ -450,7 +754,7 @@ export function useKnowledgeMutations() {
     review: useMutation({
       mutationFn: ({ id, action }: { id: string; action: 'accept' | 'reject' | 'archive' }) =>
         api.reviewKnowledge(id, action),
-      onSuccess,
+      onSuccess: () => Promise.all([onSuccess(), refreshDecisions(client)]),
     }),
     remove: useMutation({ mutationFn: (id: string) => api.deleteKnowledge(id), onSuccess }),
   }
@@ -480,10 +784,44 @@ export const useGuidePreview = (repo: RepoRef | undefined, task: GuideTask) =>
     enabled: repo !== undefined,
   })
 
-/** Edit, restore and accept Guide sections, and queue regeneration; each refreshes every Guide query. */
+/** The layered Guide chain of `repo` (one section, or all), with the budget; off without `repo`. */
+export const useGuideChain = (repo: RepoRef | undefined, section?: GuideSectionName) =>
+  useQuery({
+    queryKey: repo ? keys.guideChain(repo, section) : ['guide', 'chain', 'none'],
+    queryFn: () => api.guideChain(repo!, section),
+    enabled: repo !== undefined,
+  })
+
+/** The repository's own rules files the chain reads first; off without `repo`. */
+export const useGuideRepoFiles = (repo: RepoRef | undefined) =>
+  useQuery({
+    queryKey: repo ? keys.guideRepoFiles(repo) : ['guide', 'repo-files', 'none'],
+    queryFn: () => api.guideRepoFiles(repo!),
+    enabled: repo !== undefined,
+  })
+
+/** Every generated text a section stored, newest version first; off until `section` is given. */
+export const useGuideGeneratedHistory = (
+  scope: GuideScopeKey,
+  section: GuideSectionName | undefined,
+) =>
+  useQuery({
+    queryKey: section ? keys.guideGeneratedHistory(scope, section) : ['guide', 'generated', 'none'],
+    queryFn: () => api.guideGeneratedHistory(scope, section!),
+    enabled: section !== undefined,
+  })
+
+/**
+ * Edit, restore and accept Guide sections, and queue regeneration; each refreshes every Guide
+ * query, and accepting also Inbox and Home.
+ */
 export function useGuideMutations() {
   const client = useQueryClient()
-  const onSuccess = () => client.invalidateQueries({ queryKey: keys.guide })
+  const onSuccess = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: keys.guide }),
+      client.invalidateQueries({ queryKey: keys.knowledgeCounts }),
+    ])
   return {
     save: useMutation({
       mutationFn: ({
@@ -519,7 +857,11 @@ export function useGuideMutations() {
         section: GuideSectionName
         inputHash?: string
       }) => api.acceptGuideSection(scope, section, inputHash ? { inputHash } : {}),
-      onSuccess,
+      onSuccess: () => Promise.all([onSuccess(), refreshDecisions(client)]),
+    }),
+    reject: useMutation({
+      mutationFn: (input: GuideSectionRejectInput) => api.rejectGuideSection(input),
+      onSuccess: () => Promise.all([onSuccess(), refreshDecisions(client)]),
     }),
     regenerate: useMutation({
       mutationFn: ({ repo, input }: { repo: RepoRef; input: RegenerateGuideInput }) =>
@@ -589,14 +931,21 @@ export const useReactionTotals = (repo: RepoRef | undefined, enabled = true) =>
     retry: false,
   })
 
-/** Accept, edit and reject learning candidates; each refreshes learnings and every Guide. */
+const refreshLearnings = (client: ReturnType<typeof useQueryClient>) =>
+  Promise.all([
+    client.invalidateQueries({ queryKey: keys.learnings }),
+    client.invalidateQueries({ queryKey: keys.guide }),
+    client.invalidateQueries({ queryKey: keys.knowledgeCounts }),
+    refreshDecisions(client),
+  ])
+
+/**
+ * Accept, edit and reject learning candidates; each refreshes learnings, every Guide, the
+ * Knowledge counts, Inbox and Home.
+ */
 export function useLearningMutations() {
   const client = useQueryClient()
-  const onSuccess = () =>
-    Promise.all([
-      client.invalidateQueries({ queryKey: keys.learnings }),
-      client.invalidateQueries({ queryKey: keys.guide }),
-    ])
+  const onSuccess = () => refreshLearnings(client)
   return {
     accept: useMutation({
       mutationFn: ({ id, input }: { id: string; input: AcceptLearningInput }) =>
@@ -610,6 +959,18 @@ export function useLearningMutations() {
     }),
     reject: useMutation({ mutationFn: (id: string) => api.rejectLearning(id), onSuccess }),
   }
+}
+
+/**
+ * Accepts several learning candidates in one request; answers which were accepted and which
+ * failed, and refreshes like a single accept (also after a partial failure).
+ */
+export function useAcceptLearnings() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (input: AcceptLearningsInput) => api.acceptLearnings(input),
+    onSettled: () => refreshLearnings(client),
+  })
 }
 
 /** Forges of the effective config; needs global `settings:read`. */
@@ -658,14 +1019,11 @@ export const useForgeRepositories = (forgeId: string | undefined, search: string
     retry: false,
   })
 
-/** Whether the forge's token can read `path`; off until both are given. */
-export const useRepoAccess = (forgeId: string | undefined, path: string | undefined) =>
-  useQuery({
-    queryKey: ['repo-access', forgeId ?? '', path ?? ''],
-    queryFn: () => api.repoAccess(forgeId ?? '', path ?? ''),
-    enabled: forgeId !== undefined && path !== undefined,
-    staleTime: 30_000,
-    retry: false,
+/** Checks up to 50 paths at once against the forge's token; results are not cached. */
+export const useCheckRepoAccess = () =>
+  useMutation({
+    mutationFn: ({ forgeId, paths }: { forgeId: string; paths: readonly string[] }) =>
+      api.checkRepoAccess(forgeId, { paths: [...paths] }),
   })
 
 /** Repository groups of the effective config; needs global `settings:read`. */
@@ -720,14 +1078,6 @@ export function useConfigMutations<C extends keyof ConfigCollections>(collection
   }
 }
 
-/** Upcoming run times of a schedule of the effective config. */
-export const useSchedulePreview = (scheduleId: string | undefined, count = 10) =>
-  useQuery({
-    queryKey: [...keys.config, 'schedules', 'preview', scheduleId ?? '', count],
-    queryFn: () => api.schedulePreview(scheduleId ?? '', count),
-    enabled: scheduleId !== undefined,
-  })
-
 /**
  * A counter bumped after the avatar of `repo` changed, so `<img>`s showing it reload; 0 until then.
  * Lives only in the query cache.
@@ -760,20 +1110,41 @@ export function useRepoAvatarMutations(repo: RepoRef) {
   }
 }
 
-/** The repository page's Overview: newest records, head, audit, dependencies and stack. */
-export const useRepoOverview = (repo: RepoRef) =>
+/**
+ * The repository hub's header and Overview: health strip, cards, freshness records, delivery data.
+ * Not fetched while `enabled` is false (the reader lacks `analyses:read`).
+ */
+export const useRepoOverview = (repo: RepoRef, enabled = true) =>
   useQuery({
     queryKey: ['repo-page', 'overview', repoKey(repo)],
     queryFn: () => api.repoOverview(repo),
     staleTime: 60_000,
+    enabled,
   })
 
-/** The newest review runs of a repository with cost and reactions. */
-export const useRepoReviews = (repo: RepoRef) =>
-  useQuery({
-    queryKey: ['repo-page', 'reviews', repoKey(repo)],
-    queryFn: () => api.repoReviews(repo),
+/**
+ * Review runs on readable repositories, newest first, one page per `limit` (server default when
+ * absent); further pages continue from the previous page's `nextBefore`.
+ */
+export const useReviews = (query: Omit<ReviewQuery, 'before'> = {}, enabled = true) =>
+  useInfiniteQuery({
+    queryKey: ['reviews', 'list', query],
+    queryFn: ({ pageParam }) =>
+      api.reviews({ ...query, ...(pageParam ? { before: pageParam } : {}) }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextBefore,
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
+    enabled,
+  })
+
+/** One review run with its findings; disabled without an id. */
+export const useReview = (analysisId: string | undefined) =>
+  useQuery({
+    queryKey: ['reviews', 'detail', analysisId ?? 'none'],
+    queryFn: () => api.review(analysisId!),
+    enabled: analysisId !== undefined,
+    staleTime: 5 * 60_000,
   })
 
 /** Analyzers jobs can run, with their option schemas; `enabled` is false without jobs. */
@@ -811,6 +1182,28 @@ export function useJobs(filter: JobQuery = {}, enabled = true, pageSize = 50) {
         : 30_000,
   })
 }
+
+/**
+ * Queue statistics over the jobs the viewer may read (narrowed to `repos` when given), with live
+ * workers for viewers who read every job; refreshes every 10 seconds.
+ */
+export const useJobStats = (repos?: readonly string[], enabled = true) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'stats', repos?.join(',') ?? ''],
+    queryFn: () => api.jobStats(repos ? { repos } : {}),
+    placeholderData: keepPreviousData,
+    enabled,
+    refetchInterval: 10_000,
+  })
+
+/** How many jobs match `filter` created since `filter.since`, by status (`GET /api/jobs/count`). */
+export const useJobCount = (filter: JobQuery & { since?: string }, enabled = true) =>
+  useQuery({
+    queryKey: [...keys.jobs, 'count', filter],
+    queryFn: () => api.jobCount(filter),
+    placeholderData: keepPreviousData,
+    enabled,
+  })
 
 /** Repositories and groups with jobs the viewer may read, with their groups, for the scope switch. */
 export const useJobTargets = () =>
@@ -862,11 +1255,14 @@ export function useBackfillAnalyses() {
   })
 }
 
-/** Recent runs of every schedule; refreshes every few seconds while a run is unfinished. */
-export const useScheduleRuns = () =>
+/**
+ * The newest `limit` runs and the next five run times of every schedule; refreshes every few
+ * seconds while a run is unfinished.
+ */
+export const useScheduleRuns = (limit = 10) =>
   useQuery({
-    queryKey: [...keys.jobs, 'schedule-runs'],
-    queryFn: () => api.scheduleRuns(),
+    queryKey: [...keys.jobs, 'schedule-runs', limit],
+    queryFn: () => api.scheduleRuns(limit),
     refetchInterval: (query) =>
       query.state.data?.schedules.some((s) => s.runs.some((run) => run.queued + run.running > 0))
         ? 4_000
@@ -932,9 +1328,13 @@ export function useJobMutations() {
   }
 }
 
-/** This month's AI usage at a glance; needs `ai:read`. */
-export const useAiOverview = (enabled = true) =>
-  useQuery({ queryKey: [...keys.ai, 'overview'], queryFn: api.aiOverview, enabled })
+/** One period of AI usage at a glance (default this week); needs `ai:read`. */
+export const useAiOverview = (enabled = true, query: AiOverviewQuery = {}) =>
+  useQuery({
+    queryKey: [...keys.ai, 'overview', query],
+    queryFn: () => api.aiOverview(query),
+    enabled,
+  })
 
 /** AI usage sums grouped by `groupBy` (comma list of dimensions). */
 export const useAiUsage = (filter: AiUsageQuery & { groupBy?: string }) =>
@@ -966,6 +1366,14 @@ export function useHistory(filter: HistoryQuery, enabled = true, pageSize = 50) 
     enabled,
   })
 }
+
+/** The newest audit events about one repository, for the hub's Recent activity. */
+export const useRepoHistory = (repo: RepoRef, limit = 6) =>
+  useQuery({
+    queryKey: [...keys.history, 'repo', repoKey(repo), limit],
+    queryFn: () => api.history({ repos: repoKey(repo), limit }),
+    staleTime: 60_000,
+  })
 
 /** The repositories the caller's History covers and whether it sees instance-level events. */
 export const useHistoryScope = () =>
@@ -1079,12 +1487,25 @@ export function useSlackMutations() {
   }
 }
 
-/** Team chat threads the caller can see; polls every 10 s for new activity and unread counts. */
-export const useChatThreads = (archived = false) =>
+/**
+ * Team chat threads the caller can see, optionally only titles containing `q`; polls every 10 s
+ * for new activity and unread counts.
+ */
+export const useChatThreads = (archived = false, q = '') =>
   useQuery({
-    queryKey: [...keys.chat, 'threads', archived],
-    queryFn: () => api.chatThreads(archived),
+    queryKey: [...keys.chat, 'threads', archived, q.trim()],
+    queryFn: () => api.chatThreads(archived, q),
+    placeholderData: keepPreviousData,
     refetchInterval: 10_000,
+  })
+
+/** Totals of one thread for its context column; polls every 30 s, off without a thread. */
+export const useChatContext = (threadId: string | undefined) =>
+  useQuery({
+    queryKey: threadId ? keys.chatContext(threadId) : ['chat', 'context', 'none'],
+    queryFn: () => api.chatContext(threadId!),
+    enabled: threadId !== undefined,
+    refetchInterval: 30_000,
   })
 
 /** Unread chat messages across visible threads, for the rail badge; polls every 30 s. */
@@ -1183,6 +1604,7 @@ export function useChatMutations() {
           chatMessagesKey(thread.id),
           (now) => now && { ...now, thread },
         )
+        void client.invalidateQueries({ queryKey: keys.chatContext(thread.id) })
         return refreshLists()
       },
     }),
@@ -1199,6 +1621,7 @@ export function useChatMutations() {
             },
         )
         void client.invalidateQueries({ queryKey: [...keys.chat, 'poll', id] })
+        void client.invalidateQueries({ queryKey: keys.chatContext(id) })
         return refreshLists()
       },
     }),
@@ -1241,13 +1664,24 @@ export const useTaskGroup = (groupId: string | undefined) =>
       query.state.data && taskActive(query.state.data.status) ? 3_000 : false,
   })
 
+/** How many task groups the viewer sees that wait for approval, for the Tasks badge; every 30 s. */
+export const useTaskApprovalCount = (enabled = true) =>
+  useQuery({
+    queryKey: [...tasksKey, 'needs-approval'],
+    queryFn: api.taskApprovalCount,
+    enabled,
+    refetchInterval: 30_000,
+  })
+
 /** The `tasks.write` switch and caps with the write pool's status. */
 export const useWriteTasks = (enabled = true) =>
   useQuery({ queryKey: [...tasksKey, 'write'], queryFn: api.writeTasks, enabled })
 
 /**
- * Proposes, approves, cancels and retries agent tasks and decides repositories a task asked for.
- * Task lists and open chat threads load again afterwards, so cards show the new status at once.
+ * Proposes, approves, rejects, cancels and retries agent tasks (one task, or every failed or
+ * cancelled task of a group) and decides repositories a task asked for.
+ * Task lists, open chat threads, Inbox and Home load again afterwards, so cards show the new
+ * status at once.
  */
 export function useTaskGroupMutations() {
   const client = useQueryClient()
@@ -1255,11 +1689,14 @@ export function useTaskGroupMutations() {
     Promise.all([
       client.invalidateQueries({ queryKey: [...keys.chat, 'poll'] }),
       client.invalidateQueries({ queryKey: tasksKey }),
+      refreshDecisions(client),
     ])
   return {
     create: useMutation({ mutationFn: api.createTaskGroup, onSuccess: refresh }),
     approve: useMutation({ mutationFn: api.approveTaskGroup, onSuccess: refresh }),
     cancel: useMutation({ mutationFn: api.cancelTaskGroup, onSuccess: refresh }),
+    reject: useMutation({ mutationFn: api.rejectTaskGroup, onSuccess: refresh }),
+    retryGroup: useMutation({ mutationFn: api.retryTaskGroup, onSuccess: refresh }),
     retryTask: useMutation({ mutationFn: api.retryTask, onSuccess: refresh }),
     cancelTask: useMutation({ mutationFn: api.cancelTask, onSuccess: refresh }),
     decide: useMutation({
@@ -1398,7 +1835,13 @@ export function useAuthMutations() {
       },
       onSuccess,
     }),
-    logout: useMutation({ mutationFn: (url: string) => api.logout(url), onSuccess }),
+    logout: useMutation({
+      mutationFn: (url: string) => api.logout(url),
+      onSuccess: async () => {
+        clearRecent(browserStorage())
+        await onSuccess()
+      },
+    }),
   }
 }
 
@@ -1456,14 +1899,43 @@ export const usePublicApiDiff = (
     enabled,
   })
 
-/** Exported names across the catalog; idle until there is a query. */
-export const usePublicApiSearch = (query: { q: string; package?: string; kind?: string }) =>
+/** Exported names across the catalog with facet counts; idle until there is a query. */
+export const usePublicApiSearch = (query: Omit<PublicApiSearchQuery, 'limit'>, limit = 60) =>
   useQuery({
-    queryKey: ['public-api', 'search', query.q, query.package ?? '', query.kind ?? ''],
-    queryFn: () => api.publicApiSearch({ ...query, limit: 60 }),
+    queryKey: [
+      'public-api',
+      'search',
+      query.q,
+      query.package ?? '',
+      query.repo ?? '',
+      query.subpath ?? '',
+      query.kind ?? '',
+      query.match ?? '',
+      limit,
+    ],
+    queryFn: () => api.publicApiSearch({ ...query, limit }),
     placeholderData: keepPreviousData,
     enabled: query.q.trim().length > 0,
     staleTime: 30_000,
+  })
+
+/** One exported name with its declaration, docs and history; idle while `query` is undefined. */
+export const usePublicApiSymbol = (query: PublicApiSymbolQuery | undefined) =>
+  useQuery({
+    queryKey: [
+      'public-api',
+      'symbol',
+      query?.package ?? '',
+      query?.name ?? '',
+      query?.subpath ?? '',
+      query?.version ?? '',
+      query?.repo ?? '',
+      query?.limit ?? 0,
+    ],
+    queryFn: () => api.publicApiSymbol(query!),
+    enabled: query !== undefined,
+    staleTime: 60_000,
+    retry: false,
   })
 
 /** Who uses a package across repositories and which of its exports, members and props. */
@@ -1501,27 +1973,6 @@ export const useUsageSites = (
     queryFn: () => api.usageSites({ ...query, limit: 100 }),
     placeholderData: keepPreviousData,
     staleTime: 60_000,
-    enabled,
-  })
-
-/** The uses an upgrade between two recorded versions affects. */
-export const useUpgradeImpact = (
-  query: { package: string; from?: string; to?: string; repo?: string },
-  enabled = true,
-) =>
-  useQuery({
-    queryKey: [
-      'public-api',
-      'usages',
-      'impact',
-      query.package,
-      query.from ?? '',
-      query.to ?? '',
-      query.repo ?? '',
-    ],
-    queryFn: () => api.upgradeImpact(query),
-    staleTime: 60_000,
-    retry: false,
     enabled,
   })
 
@@ -1609,6 +2060,19 @@ export const useReleaseRepo = (repo: RepoRef | undefined) =>
     refetchInterval: (query) => (deployActive(query.state.data?.deploy) ? 5_000 : 60_000),
   })
 
+/**
+ * The flow suggested for a repository from what it already does; read from the forge only while
+ * `enabled` and on an explicit refetch, never by invalidating release queries.
+ */
+export const useReleaseDetect = (repo: RepoRef | undefined, enabled: boolean) =>
+  useQuery({
+    queryKey: repo ? keys.releaseDetect(repo) : ['release-detect', 'none'],
+    queryFn: () => api.releaseDetect(repo!),
+    enabled: enabled && repo !== undefined,
+    staleTime: Infinity,
+    retry: false,
+  })
+
 /** Deploy state of one version; polls while a job is pending or running. */
 export const useReleaseDeploy = (repo: RepoRef, tag: string | undefined, initial?: DeployState) =>
   useQuery({
@@ -1619,7 +2083,7 @@ export const useReleaseDeploy = (repo: RepoRef, tag: string | undefined, initial
     refetchInterval: (query) => (deployActive(query.state.data) ? 5_000 : 30_000),
   })
 
-/** Every release action; each refreshes the release queries when it settles. */
+/** Every release action; each refreshes the release queries when it settles, accepting also Inbox and Home. */
 export function useReleaseActions() {
   const client = useQueryClient()
   const onSettled = () => client.invalidateQueries({ queryKey: keys.releases })
@@ -1643,7 +2107,7 @@ export function useReleaseActions() {
     }),
     accept: useMutation({
       mutationFn: (input: ReleaseAcceptInput) => api.acceptRelease(input),
-      onSettled,
+      onSettled: () => Promise.all([onSettled(), refreshDecisions(client)]),
     }),
     withdraw: useMutation({ mutationFn: (repo: RepoRef) => api.withdrawRelease(repo), onSettled }),
     deploy: useMutation({

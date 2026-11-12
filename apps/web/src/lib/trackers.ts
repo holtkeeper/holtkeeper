@@ -1,3 +1,5 @@
+import type { Scope } from '@holtkeeper/api'
+
 import { type JsonSchema, initialValue, resolve } from './schema-form.ts'
 
 /** A part of a tracker: a source, rule or output config, keyed by `kind`. */
@@ -252,3 +254,39 @@ export function newTracker(taken: readonly string[]): TrackerValue {
 
 /** Whether `step` is a valid key normalization step. */
 export const isNormalizeStep = (step: string) => NORMALIZE_STEP.test(step)
+
+/** One configured tracker as the Integrations table lists it. */
+export interface TrackerRow {
+  /** The `trackers` setting entry holding it. */
+  settingId: string
+  scope: Scope
+  id: string
+  name: string
+  entity: string
+  sources: string[]
+  rules: number
+  outputs: string[]
+}
+
+/**
+ * The trackers stored in `trackers` setting entries, in entry order; defaults and other keys are
+ * left out, so the table shows only what someone configured.
+ */
+export function trackerRows(
+  entries: readonly { id: string; key: string; scope: Scope; value: unknown; secret: boolean }[],
+): TrackerRow[] {
+  return entries
+    .filter((entry) => entry.key === 'trackers' && !entry.secret)
+    .flatMap((entry) =>
+      normalizeTrackers(entry.value).map((tracker) => ({
+        settingId: entry.id,
+        scope: entry.scope,
+        id: tracker.id,
+        name: tracker.name || tracker.id,
+        entity: tracker.entity.label,
+        sources: [...new Set(tracker.sources.map((part) => part.kind))],
+        rules: tracker.rules.length,
+        outputs: [...new Set(tracker.outputs.map((part) => part.kind))],
+      })),
+    )
+}

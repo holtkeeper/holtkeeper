@@ -40,6 +40,7 @@ import {
 } from '@holtkeeper/ai-usage'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { CredentialService } from '@holtkeeper/credentials'
 import type { CommandRunner } from '@holtkeeper/exec'
 import type { RepoRef } from '@holtkeeper/forge'
 import { createGuideResolver, guideTaskOf } from '@holtkeeper/guide'
@@ -64,6 +65,7 @@ import { type CatalogToolsContext, catalogToolset } from './tools/catalog.ts'
 import { type OpsToolsAccess, opsToolset } from './tools/ops.ts'
 import { agentCatalogContext, agentRulesAccess, taskToolsets } from './tools/registry.ts'
 import { type ReleaseToolsAccess, releasesToolset } from './tools/releases.ts'
+import type { SupplyToolsAccess } from './tools/repos.ts'
 import { type RulesAccess, rulesToolset, testIdsReader } from './tools/rules.ts'
 import { stackToolset } from './tools/stack.ts'
 import { storeTranscript } from './transcripts.ts'
@@ -90,6 +92,8 @@ interface AgentRunOrigin {
    * budget reserve. Default `false`: automatic work.
    */
   interactive?: boolean
+  /** What the runs work on (a merge request, a version, a task title), kept on usage records. */
+  subject?: string
 }
 
 /** One finished (or budget-denied) agent run. Exactly one of `result` and `error` is set. */
@@ -358,6 +362,8 @@ export interface SettingsAgentOptions {
   config: HoltkeeperConfig
   store: Store
   vault: Vault
+  /** Records each use of a provider or GitHub credential the agent opens. */
+  credentials?: Pick<CredentialService, 'markUsed'>
   now?: () => Date
   /** Runs commands for docs lookups and the AI SDK `run_command` when a job gives none. */
   runner?: CommandRunner
@@ -376,6 +382,8 @@ export interface SettingsAgentOptions {
    * when a person asked; without it agents get no `ops` toolset.
    */
   ops?: (repo: RepoTarget, requester?: Principal) => OpsToolsAccess | undefined
+  /** Findings and licenses for the person who asked; without it chat gets no supply tools. */
+  supply?: (principal: Principal) => SupplyToolsAccess
   /**
    * Hears about every run. Default: `usageRecorder(store.aiUsage)`, which records usage in the
    * store (and keeps the default budget guard's cached spend current).
@@ -515,6 +523,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         secret: await vault.open(credential.secret),
         ...(credential.options && { options: credential.options }),
       }
+      void options.credentials?.markUsed(credential.id)
       const key = `${credential.id}:${credential.updatedAt}`
       const listing = await catalog.list(key, aiProvider)
       const pricing =
@@ -560,6 +569,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
                   reveal: async (id) => {
                     const found = (await store.credentials.list()).find((item) => item.id === id)
                     if (!found) throw new Error(`no credential ${id}`)
+                    void options.credentials?.markUsed(id)
                     return vault.open(found.secret)
                   },
                 },
@@ -581,6 +591,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
       ...(job?.analyzer !== undefined && { analyzer: job.analyzer }),
       ...(job?.jobId !== undefined && { jobId: job.jobId }),
       ...(job?.interactive !== undefined && { interactive: job.interactive }),
+      ...(job?.subject !== undefined && { subject: job.subject }),
     }
     const wrapped = withServerDefaults(agent, {
       repo: target,
@@ -625,6 +636,7 @@ export function settingsAgentFor(options: SettingsAgentOptions): ServerAgentFor 
         policy: crossTeamOf(entries),
         ...(requester && { requester }),
         ...(options.artifacts && { artifacts: options.artifacts }),
+        ...(options.supply && { supply: options.supply }),
         now,
       }),
       onRunError: (error) =>

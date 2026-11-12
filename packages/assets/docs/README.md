@@ -46,6 +46,8 @@ Prose rules (which component renders images, where files go) belong in the Guide
 
 `assetsSummary(data, limit = 200)` → `AssetsSummary { files, totalBytes, totals, errors, warnings, budgets, savings, duplicateBytes, rows, more }`: per file (`AssetRow { path, kind, format, bytes, width?, height?, severity, problems, suggestion? }`) the policy violations, extra copies (`duplicate`, info) and the best suggestion (a file with only a suggestion gets a `saving` info problem), errors first, then by size. The repository Assets tab and the `repo_assets` tool show it.
 
+`assetsMetrics(data, { previous? })` is the kind's `metrics`, stored with every record as `AssetsMetrics`: `files`, `bytes` and `kinds` (bytes per kind), policy `errors` and `warnings`, exceeded `budgets`, `savings`, `duplicateBytes`, `delta` (`bytes` minus the previous record's), `rows` (the first 50 `assetsSummary` rows, errors first, then by size) and `moreRows` (rows left out). The fleet Assets table reads `rows` from the newest records' metrics, so it never loads record data; files past the first 50 of a repository show only in that repository's summary. `parseAssetsMetrics(value)` reads stored metrics back (`undefined` when they are not in that shape; metrics stored before `rows` existed read as having none). `assetProblemRules` lists every `AssetProblem['rule']`: the policy rules, `duplicate` and `saving`.
+
 `analyzeAssets(options)` runs the same pipeline without the analyzer wrapper; it never writes to the checkout. `options.cache` (the analyzer passes `context.cache`) is handed to `encodeVariants`, so images whose bytes did not change since an earlier run — on any machine sharing the store — are not encoded again.
 
 ## Pipeline

@@ -25,6 +25,7 @@ import {
   utilization,
   utilizationColor,
 } from '../../lib/github-usage.ts'
+import { settingAnchor } from '../../lib/settings-sections.ts'
 import {
   Chip,
   ErrorState,
@@ -140,7 +141,12 @@ function PoolUsage({ usage }: { usage: GitHubTokenUsage }) {
           GitHub allows 60 anonymous requests an hour, which the library index spends on its first
           few libraries. Add a credential of kind github: every one is used, and a new index run
           starts with it. The <code className="font-mono text-xs">github</code> field of the{' '}
-          <Link to="/settings" search={{ tab: 'system' }} className="font-medium hover:underline">
+          <Link
+            to="/settings/$section"
+            params={{ section: 'system' }}
+            hash={settingAnchor('libraries')}
+            className="font-medium hover:underline"
+          >
             libraries setting
           </Link>{' '}
           picks some of them instead, and an empty list keeps GitHub anonymous.

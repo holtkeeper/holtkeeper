@@ -70,6 +70,11 @@ export interface StoredCredential {
    * Cleared when the endpoint, secret, kind or options change.
    */
   capabilities?: CredentialCapabilities
+  /**
+   * When something last used the secret. Moved by `CredentialStore.touch`; `put` keeps the later
+   * of the stored and the given value, so a write never moves it back.
+   */
+  lastUsedAt?: Timestamp
   createdAt: Timestamp
   updatedAt: Timestamp
 }
@@ -90,9 +95,11 @@ export interface CredentialCapabilities {
 export interface CredentialStore {
   list(): Promise<StoredCredential[]>
   get(id: string): Promise<StoredCredential | undefined>
-  /** Creates or replaces by id. */
+  /** Creates or replaces by id (see `StoredCredential.lastUsedAt`). */
   put(credential: StoredCredential): Promise<void>
   remove(id: string): Promise<void>
+  /** Sets `lastUsedAt` to `at` when it is later than the stored value; unknown ids are ignored. */
+  touch(id: string, at: Timestamp): Promise<void>
 }
 
 /**
@@ -128,6 +135,11 @@ export interface User {
   createdBy?: string
   /** Seed of the generated avatar instead of the user id; set to reroll the avatar. */
   avatarSeed?: string
+  /**
+   * When the user last made a signed-in request. Moved by `UserStore.touchUser`; `putUser` keeps
+   * the later of the stored and the given value, so a write never moves it back.
+   */
+  lastSeenAt?: Timestamp
 }
 
 export interface Passkey {
@@ -167,6 +179,8 @@ export interface UserStore {
   findUserByEmail(email: string): Promise<User | undefined>
   putUser(user: User): Promise<void>
   removeUser(id: string): Promise<void>
+  /** Sets `lastSeenAt` to `at` when it is later than the stored value; unknown ids are ignored. */
+  touchUser(id: string, at: Timestamp): Promise<void>
 
   listPasskeys(userId: string): Promise<Passkey[]>
   getPasskey(id: string): Promise<Passkey | undefined>
@@ -196,9 +210,18 @@ export interface AnalysisRecord<Data = unknown> {
   createdAt: Timestamp
   actor?: string
   data: Data
+  /**
+   * The kind's structured headline numbers (coverage percent, gzip per target, counts per
+   * severity, ...), computed from `data` when the record was stored. Stored as given; absent on
+   * records stored before metrics existed and on kinds that define none.
+   */
+  metrics?: AnalysisMetrics
 }
 
-/** An analysis record without its data. */
+/** Plain JSON object of one record's metrics; its shape belongs to the record's kind. */
+export type AnalysisMetrics = object
+
+/** An analysis record without its data; `metrics` are kept, so heads answer lists and health. */
 export type AnalysisHead = Omit<AnalysisRecord, 'data'>
 
 export interface AnalysisQuery {
@@ -206,6 +229,8 @@ export interface AnalysisQuery {
   kind?: string
   /** Only records created before this time; used for paging and for finding the previous one. */
   before?: Timestamp
+  /** Only records created at or after this time; combines with `before` and `limit`. */
+  since?: Timestamp
   /** Default 50. */
   limit?: number
 }
@@ -343,13 +368,40 @@ export interface JobQuery {
   before?: Timestamp
   /** Only jobs whose `errorSignature` is exactly this. */
   errorSignature?: string
+  /** Only jobs whose stored result is this analysis: the job (or jobs) that produced it. */
+  analysisId?: string
   /**
    * Only jobs of these repositories (group jobs by `{ forge, path: <group name> }`); an empty list
    * matches nothing. Lets callers apply visibility before `limit`.
    */
   repos?: RepoRef[]
+  /**
+   * Only jobs whose id starts with `search.text`, whose repository path, group or analyzer
+   * contains it (all case-insensitive), or whose analyzer is one of `search.analyzers`.
+   */
+  search?: JobSearch
   /** Default 50. */
   limit?: number
+}
+
+/** A text search over jobs; see `JobQuery.search`. */
+export interface JobSearch {
+  text: string
+  /** Analyzer kinds that match as well, e.g. those whose label contains `text`. */
+  analyzers?: string[]
+}
+
+/** Which jobs `JobStore.count` counts: the filters of `JobQuery`, without paging. */
+export interface JobCountQuery extends Omit<JobQuery, 'before' | 'limit'> {
+  /** Only jobs created at or after this time. */
+  since?: Timestamp
+}
+
+/** How many jobs match a `JobCountQuery`, by status. */
+export interface JobCounts {
+  total: number
+  /** Every status, zero included; sums to `total`. */
+  byStatus: Record<JobStatus, number>
 }
 
 /** Which failed jobs `JobStore.failures` groups. */
@@ -445,6 +497,8 @@ export interface JobStore {
   get(id: string): Promise<Job | undefined>
   /** Newest first. */
   list(query?: JobQuery): Promise<Job[]>
+  /** How many jobs match, by status; without a query every job. */
+  count(query?: JobCountQuery): Promise<JobCounts>
   /** Failed jobs grouped by analyzer and `errorSignature`, the group that failed last first. */
   failures(query: JobFailureQuery): Promise<JobFailureGroup[]>
   /** Every distinct repository or group that has jobs, in no particular order. */
@@ -596,6 +650,13 @@ export type GuideScopeKey = 'all' | `group:${string}` | `family:${string}` | `re
 
 /** The text a generator proposed for a section from repository signals; humans accept it. */
 export interface GuideGenerated {
+  /**
+   * Which generator run of this scope and section stored the text: 1 for the first, up by one per
+   * run that stored new text. The store assigns it.
+   */
+  version: number
+  /** The job that generated the text, when a job did. */
+  jobId?: string
   /** Markdown. */
   body: string
   /** Hash of everything the generator read; an unchanged hash means no new LLM call. */
@@ -653,8 +714,17 @@ export interface GuideSection extends GuideHumanLayer {
   learnings: GuideLearning[]
 }
 
-/** What `GuideStore.put` takes: the section without the version the store assigns. */
-export type GuideSectionInput = Omit<GuideSection, 'version'>
+/**
+ * A generated layer as `GuideStore.put` takes it: `version` is assigned by the store and only kept
+ * for a layer it already stored.
+ */
+export type GuideGeneratedInput = Omit<GuideGenerated, 'version'> & { version?: number }
+
+/** What `GuideStore.put` takes: the section without the versions the store assigns. */
+export type GuideSectionInput = Omit<GuideSection, 'version' | 'generated' | 'proposal'> & {
+  generated?: GuideGeneratedInput
+  proposal?: GuideGeneratedInput
+}
 
 /** A previous human layer of a section, with who made it and when. */
 export interface GuideRevision extends GuideHumanLayer {
@@ -679,11 +749,22 @@ export interface GuideStore {
    * stored ones, the previous human layer goes to the history (with its `editedBy`/`editedAt`)
    * and `version` grows by one; otherwise `version`, `editedBy` and `editedAt` stay as stored, so
    * writing the generated layer or learnings never makes a revision.
+   *
+   * A generated layer (`generated` or `proposal`) with the `generatedAt` and `body` of a layer
+   * the section already holds keeps that layer's `version` (accepting a proposal, refreshing the
+   * hash of kept text); any other layer is a new generator run: it gets the next version of the
+   * section and is appended to the generated history. The history entry of a stored version
+   * follows later writes of that version, so it shows acceptance too.
    */
   put(section: GuideSectionInput): Promise<GuideSection>
   /** Previous human layers, newest first; empty for unknown sections. */
   history(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideRevision[]>
-  /** Removes every section of the scope and their history. */
+  /**
+   * Every generated layer the section ever stored with a version above 0, newest version first,
+   * each as last written; empty for unknown sections.
+   */
+  generatedHistory(scope: GuideScopeKey, section: GuideSectionName): Promise<GuideGenerated[]>
+  /** Removes every section of the scope, their history and their generated history. */
   removeScope(scope: GuideScopeKey): Promise<void>
 }
 
@@ -847,6 +928,13 @@ export interface AiUsageRecord {
   analysisId?: string
   /** Principal id, or `system` / `agent:<name>` for unattended runs. */
   actor: string
+  /**
+   * A person started the work (a click in the panel, chat, a command on a merge request), so it
+   * could spend the budget reserve; `false` for automatic work (schedules, triggers, freshness).
+   */
+  interactive: boolean
+  /** What the run worked on in a few words, e.g. `MR !42` or `v2.3.0`, when the caller said. */
+  subject?: string
   /** Credential id or name the run was billed to, or `anthropic`. */
   provider: string
   model: string
@@ -865,6 +953,12 @@ export interface AiUsageRecord {
   transcriptRef?: string
 }
 
+/** A new AI usage record; `interactive` defaults to `false`. */
+export type NewAiUsageRecord = Omit<AiUsageRecord, 'id' | 'interactive'> & { interactive?: boolean }
+
+/** Who started AI runs: a person (`interactive`) or automation (`automatic`). */
+export type AiRunOrigin = 'interactive' | 'automatic'
+
 /** Filters for AI usage. Every given field must match; `from` is inclusive, `to` exclusive. */
 export interface AiUsageFilter {
   from?: Timestamp
@@ -872,6 +966,11 @@ export interface AiUsageFilter {
   repo?: RepoRef
   /** Records whose `groups` contain this group. */
   group?: string
+  /** Records whose `groups` contain at least one of these groups; an empty list matches nothing. */
+  groups?: string[]
+  actor?: string
+  /** `interactive` records only, or automatic ones only. */
+  origin?: AiRunOrigin
   model?: string
   provider?: string
   taskKind?: string
@@ -896,6 +995,7 @@ export interface AiUsageQuery extends AiUsageFilter {
  * What aggregates can be split by. `day` is `YYYY-MM-DD`, `week` the Monday starting the ISO week
  * (`YYYY-MM-DD`), `month` `YYYY-MM`, all in UTC; `repo` is `forge:path`. Missing analyzers are `''`.
  * With `group` a record counts once in each of its groups, and records without groups under `''`.
+ * `origin` is `interactive` or `automatic` (`AiRunOrigin`).
  */
 export type AiUsageDimension =
   | 'day'
@@ -907,6 +1007,7 @@ export type AiUsageDimension =
   | 'provider'
   | 'taskKind'
   | 'analyzer'
+  | 'origin'
 
 /** Sums over a set of AI usage records. */
 export interface AiUsageTotals {
@@ -921,6 +1022,8 @@ export interface AiUsageTotals {
   errors: number
   /** Records with outcome `denied-budget`. */
   denied: number
+  /** Records whose cost is unknown (`costSource` `unknown`), denied ones excluded. */
+  unknownCost: number
   /** Mean duration of runs that were not denied; 0 when there are none. */
   avgDurationMs: number
 }
@@ -940,7 +1043,7 @@ export interface AiUsageAggregateQuery {
 
 /** AI usage history. Append-only. */
 export interface AiUsageStore {
-  append(record: Omit<AiUsageRecord, 'id'>): Promise<AiUsageRecord>
+  append(record: NewAiUsageRecord): Promise<AiUsageRecord>
   /** Newest first. */
   list(query?: AiUsageQuery): Promise<AiUsageRecord[]>
   /**
@@ -1325,6 +1428,26 @@ export interface AuditVerification {
   broken?: { seq: number; id: string; reason: 'hash' | 'link' | 'gap' | 'tail' }
 }
 
+/** How many matching events one value of a summary dimension has. */
+export interface AuditCount {
+  key: string
+  count: number
+}
+
+/**
+ * Aggregate of the events matching a filter. `days` are UTC calendar days (`YYYY-MM-DD`) that
+ * have events, oldest first. `actions` (full action names), `actors` (actor ids, `name` from the
+ * actor's newest matching event) and `repos` (events without `target.repo` are left out) are
+ * sorted by count, most first, then by key.
+ */
+export interface AuditSummary {
+  total: number
+  days: AuditCount[]
+  actions: AuditCount[]
+  actors: (AuditCount & { name: string })[]
+  repos: AuditCount[]
+}
+
 /**
  * The append-only audit log. Appends are serialized so the chain has no forks. Nothing edits
  * events; `sweep` only drops the oldest ones.
@@ -1335,6 +1458,8 @@ export interface AuditStore {
   /** Newest first (by `seq`). */
   list(query?: AuditQuery): Promise<AuditPage>
   count(filter?: AuditFilter): Promise<number>
+  /** Counts of the matching events by day, action, actor and repository (see `AuditSummary`). */
+  summary(filter?: AuditFilter): Promise<AuditSummary>
   /** Every distinct `target.repo` among the kept events, sorted. */
   repos(): Promise<string[]>
   /** Every matching event, oldest first, read in batches. */
@@ -1816,6 +1941,11 @@ export interface ChatThread {
   /** Principal ids of people who wrote or were mentioned, in order of first appearance. */
   participants: string[]
   /**
+   * Repositories (`forge:path`) people attached to the thread as context, in the order given and
+   * without duplicates; empty when none.
+   */
+  contextRepos: string[]
+  /**
    * The name and email each poster last wrote under, by principal id, so prompts can scrub them
    * also for people without a `users` account (header sign-in).
    */
@@ -1835,8 +1965,22 @@ export interface ChatPerson {
 }
 
 /** What `ChatStore.createThread` takes. */
-export type ChatThreadInput = Omit<ChatThread, 'updatedAt' | 'archived' | 'participants'> &
-  Partial<Pick<ChatThread, 'participants'>>
+export type ChatThreadInput = Omit<
+  ChatThread,
+  'updatedAt' | 'archived' | 'participants' | 'contextRepos'
+> &
+  Partial<Pick<ChatThread, 'participants' | 'contextRepos'>>
+
+/** Which threads `ChatStore.listThreads` returns. */
+export interface ChatThreadFilter {
+  /** `false` (default) unarchived threads, `true` only archived ones, `'all'` both. */
+  archived?: boolean | 'all'
+  /**
+   * Only threads whose title contains this text, ignoring case and surrounding blanks; blank text
+   * filters nothing.
+   */
+  q?: string
+}
 
 /** Fields of a thread `ChatStore.updateThread` may change; `null` clears an optional one. */
 export interface ChatThreadPatch {
@@ -1844,6 +1988,8 @@ export interface ChatThreadPatch {
   archived?: boolean
   autoReply?: boolean
   participants?: string[]
+  /** Replaces `contextRepos`; duplicates are dropped, first occurrence kept. */
+  contextRepos?: string[]
   /** Appends the ids not yet among `participants`, in order, to the thread as stored. */
   addParticipants?: string[]
   /** Replaces the entries of `people` with these ids, or adds them, as stored. */
@@ -1865,6 +2011,18 @@ export interface ChatToolUse {
 }
 
 /**
+ * Something a chat message refers to, stored with the message so views never parse bodies:
+ * a repository, a job, an agent task, a knowledge note or a merge request. `repo` (`forge:path`)
+ * is set whenever the thing belongs to a repository, so readers can hide what they may not see.
+ */
+export type ChatMessageRef =
+  | { kind: 'repo'; repo: string }
+  | { kind: 'job'; id: string; repo?: string }
+  | { kind: 'task'; id: string; repo?: string }
+  | { kind: 'note'; id: string }
+  | { kind: 'mr'; repo: string; iid: number }
+
+/**
  * One message of a thread. `seq` is assigned by the store, grows with every message of the
  * store and orders messages; cursors are `seq` values.
  */
@@ -1883,13 +2041,39 @@ export interface ChatMessage {
   transcriptRef?: string
   /** Lowercased names after `@` in the body, e.g. `holtkeeper`. */
   mentions: string[]
+  /** What the message refers to, in the order the writer gave; empty when nothing. */
+  refs: ChatMessageRef[]
   createdAt: Timestamp
-  /** When the card or body was last changed in place. */
+  /** When the card, body or refs were last changed in place. */
   updatedAt?: Timestamp
 }
 
-/** What `ChatStore.addMessage` takes. */
-export type ChatMessageInput = Omit<ChatMessage, 'seq' | 'updatedAt'>
+/** What `ChatStore.addMessage` takes; `refs` default to none. */
+export type ChatMessageInput = Omit<ChatMessage, 'seq' | 'updatedAt' | 'refs'> &
+  Partial<Pick<ChatMessage, 'refs'>>
+
+/** One human author of a thread and how many messages they wrote. */
+export interface ChatContextParticipant {
+  /** Principal id. */
+  id: string
+  messages: number
+}
+
+/** Totals over every message of one thread, for its context column. */
+export interface ChatThreadContext {
+  messageCount: number
+  /** Sum of the messages' `costUsd`; 0 when none has one. */
+  costUsd: number
+  /**
+   * The thread's `contextRepos` in their order, then the repositories of message `refs` not among
+   * them, in order of first mention; no duplicates.
+   */
+  repos: string[]
+  /** Calls per tool summed over every `toolTrace`, most calls first, then by tool name. */
+  tools: ChatToolUse[]
+  /** Human authors in order of their first message. */
+  participants: ChatContextParticipant[]
+}
 
 /** Which messages `ChatStore.listMessages` returns. */
 export interface ChatMessageQuery {
@@ -1915,17 +2099,20 @@ export interface ChatThreadRead {
 export interface ChatStore {
   createThread(thread: ChatThreadInput): Promise<ChatThread>
   getThread(id: string): Promise<ChatThread | undefined>
-  /** Most recently updated first; archived threads only with `archived: true`. */
-  listThreads(filter?: { archived?: boolean }): Promise<ChatThread[]>
+  /** Threads that pass `filter` (see `ChatThreadFilter`), most recently updated first. */
+  listThreads(filter?: ChatThreadFilter): Promise<ChatThread[]>
   /** Applies `patch`; `undefined` when the thread does not exist. */
   updateThread(id: string, patch: ChatThreadPatch): Promise<ChatThread | undefined>
   /** Stores a message with the next `seq` and moves the thread's `updatedAt` to its `createdAt`. */
   addMessage(message: ChatMessageInput): Promise<ChatMessage>
   getMessage(id: string): Promise<ChatMessage | undefined>
-  /** Replaces the card or body of a message and stamps `updatedAt`; `undefined` when it is gone. */
+  /**
+   * Replaces the card, body or refs of a message and stamps `updatedAt`; `undefined` when it is
+   * gone.
+   */
   updateMessage(
     id: string,
-    patch: { card?: Card; body?: string; updatedAt: Timestamp },
+    patch: { card?: Card; body?: string; refs?: ChatMessageRef[]; updatedAt: Timestamp },
   ): Promise<ChatMessage | undefined>
   /** Messages of a thread, oldest first (see `ChatMessageQuery`). */
   listMessages(threadId: string, query?: ChatMessageQuery): Promise<ChatMessage[]>
@@ -1938,6 +2125,14 @@ export interface ChatStore {
    * a thread without a marker counts all of them.
    */
   unreadCounts(userId: string, threadIds: readonly string[]): Promise<Record<string, number>>
+  /** Messages per thread of `threadIds` with any, counted without reading them. */
+  messageCounts(threadIds: readonly string[]): Promise<Record<string, number>>
+  /** Totals over the thread's messages (see `ChatThreadContext`); `undefined` for unknown threads. */
+  context(threadId: string): Promise<ChatThreadContext | undefined>
+  /** Mutes or unmutes the thread for one person; muting twice or unmuting an unmuted thread is a no-op. */
+  setMuted(threadId: string, userId: string, muted: boolean): Promise<void>
+  /** Ids of the threads the person muted, sorted. */
+  mutedThreads(userId: string): Promise<string[]>
 }
 
 /** What an agent task does; it shapes the agent's instructions and where people see it. */
@@ -1979,6 +2174,17 @@ export interface AgentTaskMergeRequest {
   ci?: AgentTaskCi
   /** When state and CI were last read from the forge. */
   checkedAt?: Timestamp
+  /** Files changed and lines added and removed by the merge request, read from the forge. */
+  diffstat?: AgentTaskDiffstat
+  /** The merge request's head commit `diffstat` was read at. */
+  diffSha?: string
+}
+
+/** How big a change is: files touched, lines added and lines removed. */
+export interface AgentTaskDiffstat {
+  files: number
+  additions: number
+  deletions: number
 }
 
 /**
@@ -2114,7 +2320,7 @@ export interface Store {
   config?: ConfigStore
   /** Small expiring state; servers without it keep such state in memory. */
   kv?: KvStore
-  /** Tamper-evident audit log of who did what; the History page reads it. */
+  /** Tamper-evident audit log of who did what; Settings › Audit log reads it. */
   audit: AuditStore
   /** External accounts linked to principals; servers without it cannot link accounts. */
   externalAccounts?: ExternalAccountStore

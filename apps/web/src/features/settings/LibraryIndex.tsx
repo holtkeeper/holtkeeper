@@ -1,7 +1,7 @@
 import type { LibraryIndexRun, LibrarySummary } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
 import { AlertTriangle, Bot, LibraryBig, RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useGitHubTokens, useLibraryIndex, useReindexLibraries } from '../../api/queries.ts'
@@ -35,6 +35,7 @@ import {
 } from '../../ui/index.ts'
 import { GitHubUsageSection, usageHidden } from '../credentials/GitHubUsage.tsx'
 import { useSession } from '../shell/session.ts'
+import { SystemPanel } from '../storage/SystemPanel.tsx'
 import { IndexCoverage, RunningIndex } from './IndexStatus.tsx'
 
 const shownVersions = 4
@@ -54,18 +55,18 @@ function AgentToolsNote() {
           </span>
         ))}
         , answering for the version the asking repository uses. Developers find the same docs on
-        each library of the{' '}
-        <Link to="/dependencies" className="text-foreground hover:underline">
-          Dependencies
-        </Link>{' '}
-        page.
+        each library in{' '}
+        <Link to="/supply/libraries" className="text-foreground hover:underline">
+          Supply › Libraries
+        </Link>
+        .
       </p>
     </div>
   )
 }
 
 /**
- * The library index admin for Settings → System: what is indexed for agents, the run going on,
+ * The library index admin for Settings › System: what is indexed for agents, the run going on,
  * coverage per source, the last run's failures and GitHub API usage. Global `settings:read`.
  */
 export function LibraryIndex() {
@@ -80,50 +81,60 @@ export function LibraryIndex() {
   const github = useGitHubTokens(days)
   const data = libraries.data
 
+  const reindexButton = canGlobal('analyses:run') ? (
+    <Button
+      variant="secondary"
+      size="sm"
+      isPending={reindex.isPending}
+      onPress={() =>
+        reindex.mutate(undefined, {
+          onSuccess: (result) =>
+            result.started
+              ? notify.success('Indexing started', 'The list refreshes once the run is done.')
+              : notify.info('A run is already going'),
+          onError: (error) => notify.error('Not started', messageOf(error)),
+        })
+      }
+    >
+      <RefreshCw className="size-3.5" />
+      Reindex now
+    </Button>
+  ) : null
+  const panel = (children: ReactNode, on: boolean) => (
+    <SystemPanel
+      id="library-index"
+      title="Library index"
+      description="Docs, release notes and issues of the libraries the fleet uses"
+      aside={on ? reindexButton : null}
+    >
+      <div className="flex flex-col gap-4 p-3.5">{children}</div>
+    </SystemPanel>
+  )
+
   if (libraries.isPending)
-    return (
-      <div className="flex flex-col gap-4">
+    return panel(
+      <>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[0, 1, 2, 3].map((index) => (
             <Placeholder key={index} className="h-24" />
           ))}
         </div>
         <Placeholder className="h-96" />
-      </div>
+      </>,
+      false,
     )
-  if (libraries.isError) return <ErrorState error={libraries.error} />
+  if (libraries.isError) return panel(<ErrorState error={libraries.error} />, false)
   if (!data?.enabled)
-    return (
+    return panel(
       <EmptyState
         icon={<LibraryBig />}
         title="Library indexing is off"
-        description="Turn on the libraries setting (enabled: true) and run the server with a store that keeps libraries. The indexer then fetches docs, release notes and APIs of every library the repositories resolve, plus the versions an upgrade would land on."
-      />
+        description="Turn on the libraries setting under Background work (enabled: true) and run the server with a store that keeps libraries. The indexer then fetches docs, release notes and APIs of every library the repositories resolve, plus the versions an upgrade would land on."
+      />,
+      false,
     )
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">Library index</h2>
-        {canGlobal('analyses:run') ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            isPending={reindex.isPending}
-            onPress={() =>
-              reindex.mutate(undefined, {
-                onSuccess: (result) =>
-                  result.started
-                    ? notify.success('Indexing started', 'The list refreshes once the run is done.')
-                    : notify.info('A run is already going'),
-                onError: (error) => notify.error('Not started', messageOf(error)),
-              })
-            }
-          >
-            <RefreshCw className="size-3.5" />
-            Reindex now
-          </Button>
-        ) : null}
-      </div>
+  return panel(
+    <>
       <Totals libraries={data.libraries} />
       <AgentToolsNote />
       {data.progress ? <RunningIndex progress={data.progress} /> : null}
@@ -189,7 +200,8 @@ export function LibraryIndex() {
           />
         )}
       </Panel>
-    </div>
+    </>,
+    true,
   )
 }
 

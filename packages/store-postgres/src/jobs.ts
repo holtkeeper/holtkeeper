@@ -1,8 +1,10 @@
-import type { JobAttempt, JobStore } from '@holtkeeper/store'
+import type { JobAttempt, JobCountQuery, JobSearch, JobStatus, JobStore } from '@holtkeeper/store'
 import {
   claimDueBy,
   DEFAULT_MAX_ATTEMPTS,
   errorSignature,
+  jobCounts,
+  likeText,
   STALE_JOB_ERROR,
 } from '@holtkeeper/store'
 import { SQL } from 'bun'
@@ -47,6 +49,33 @@ const inRepos = (sql: SQL, repos: { forge: string; path: string }[] | undefined)
   return sql`(${list === null ? null : sql.json(list)}::jsonb IS NULL
     OR jsonb_build_array(repo_forge, repo_path) IN (
       SELECT jsonb_array_elements(${list === null ? null : sql.json(list)}::jsonb)))`
+}
+
+const matchesSearch = (sql: SQL, search: JobSearch | undefined) => {
+  const text = search ? likeText(search.text) : null
+  return sql`(${text}::text IS NULL OR lower(id) LIKE ${text}::text || '%'
+    OR lower(repo_path) LIKE '%' || ${text}::text || '%'
+    OR lower(coalesce(group_name, '')) LIKE '%' || ${text}::text || '%'
+    OR lower(analyzer) LIKE '%' || ${text}::text || '%'
+    OR analyzer IN (SELECT jsonb_array_elements_text(${sql.json(search?.analyzers ?? [])}::jsonb)))`
+}
+
+/** Every condition of a job query but paging and `since`, as one SQL fragment. */
+const jobWhere = (sql: SQL, query: JobCountQuery) => {
+  const { status, repo, analyzer, schedule, trigger, repos, analysisId } = query
+  const signature = query.errorSignature ?? null
+  const statuses = statusList(status)
+  return sql`(${statuses === null ? null : sql.json(statuses)}::jsonb IS NULL
+      OR status IN (SELECT jsonb_array_elements_text(${statuses === null ? null : sql.json(statuses)}::jsonb)))
+    AND (${repo?.forge ?? null}::text IS NULL
+      OR (repo_forge = ${repo?.forge ?? null}::text AND repo_path = ${repo?.path ?? null}::text))
+    AND (${analyzer ?? null}::text IS NULL OR analyzer = ${analyzer ?? null}::text)
+    AND (${schedule ?? null}::text IS NULL OR schedule = ${schedule ?? null}::text)
+    AND (${trigger ?? null}::text IS NULL OR trigger = ${trigger ?? null}::text)
+    AND (${signature}::text IS NULL OR error_signature = ${signature}::text)
+    AND (${analysisId ?? null}::text IS NULL OR analysis_id = ${analysisId ?? null}::text)
+    AND ${inRepos(sql, repos)}
+    AND ${matchesSearch(sql, query.search)}`
 }
 
 interface FailureRow {
@@ -219,24 +248,24 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       return one(await sql`SELECT * FROM ${t.jobs} WHERE id = ${id}`)
     },
     async list(query = {}) {
-      const { status, repo, analyzer, schedule, trigger, before, repos, limit = 50 } = query
-      const signature = query.errorSignature ?? null
+      const { before, limit = 50 } = query
       const { sql, t } = await db()
-      const statuses = statusList(status)
       const rows: JobRow[] = await sql`
         SELECT * FROM ${t.jobs}
-        WHERE (${statuses === null ? null : sql.json(statuses)}::jsonb IS NULL
-            OR status IN (SELECT jsonb_array_elements_text(${statuses === null ? null : sql.json(statuses)}::jsonb)))
-          AND (${repo?.forge ?? null}::text IS NULL
-            OR (repo_forge = ${repo?.forge ?? null}::text AND repo_path = ${repo?.path ?? null}::text))
-          AND (${analyzer ?? null}::text IS NULL OR analyzer = ${analyzer ?? null}::text)
-          AND (${schedule ?? null}::text IS NULL OR schedule = ${schedule ?? null}::text)
-          AND (${trigger ?? null}::text IS NULL OR trigger = ${trigger ?? null}::text)
+        WHERE ${jobWhere(sql, query)}
           AND (${before ?? null}::timestamptz IS NULL OR created_at < ${before ?? null}::timestamptz)
-          AND (${signature}::text IS NULL OR error_signature = ${signature}::text)
-          AND ${inRepos(sql, repos)}
         ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
       return rows.map(toJob)
+    },
+    async count(query = {}) {
+      const { since } = query
+      const { sql, t } = await db()
+      const rows: { status: JobStatus; count: number | string }[] = await sql`
+        SELECT status, count(*) AS count FROM ${t.jobs}
+        WHERE ${jobWhere(sql, query)}
+          AND (${since ?? null}::timestamptz IS NULL OR created_at >= ${since ?? null}::timestamptz)
+        GROUP BY status`
+      return jobCounts(rows.map((row) => [row.status, Number(row.count)] as const))
     },
     async failures({ since, analyzer, repos, limit = 50 }) {
       const { sql, t } = await db()

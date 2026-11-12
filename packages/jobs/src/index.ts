@@ -66,6 +66,14 @@ export {
 } from './worker.ts'
 export { type ScheduleRunSummary, scheduleRuns } from './runs.ts'
 export {
+  type LiveWorker,
+  WORKERS_KEY,
+  WORKER_TTL_MS,
+  liveWorkers,
+  removeWorker,
+  touchWorker,
+} from './registry.ts'
+export {
   type JobLog,
   type JobLogLine,
   type JobLogOptions,

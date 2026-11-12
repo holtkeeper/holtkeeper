@@ -131,7 +131,7 @@ function SettingHelp({ definition }: { definition: SettingDefinitionView }) {
           <span>
             Add one entry for all repositories, then narrower entries for groups or repository
             patterns. Usually the most specific entry covering a repository wins; settings that
-            combine entries say so above. Check the outcome on the Resolve tab.
+            combine entries say so above. A repository's or group's Settings tab shows the outcome.
           </span>
         )}
       </div>

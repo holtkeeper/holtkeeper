@@ -12,6 +12,7 @@
     "@holtkeeper/auth": "workspace:*",
     "@holtkeeper/forge": "workspace:*",
     "@holtkeeper/store": "workspace:*",
+    "@holtkeeper/web-paths": "workspace:*",
     "zod": "^4.6.7"
   }
 }

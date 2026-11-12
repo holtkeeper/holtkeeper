@@ -240,8 +240,10 @@ interface ActionSpec {
   ai: boolean
 }
 
-interface RuleSpec extends RuleData {
+/** A rule as the canvas and the list see it: its node data, lanes and actions. */
+export interface AutomationRule extends RuleData {
   id: string
+  /** `all`, or the groups it sits in. */
   lanes: string[]
   actions: ActionSpec[]
 }
@@ -258,7 +260,7 @@ export interface AutomationInput {
 }
 
 /** Node id of a rule. */
-function ruleNodeId(ref: RuleRef): string {
+export function ruleNodeId(ref: RuleRef): string {
   switch (ref.type) {
     case 'trigger':
       return `rule:trigger:${ref.id}`
@@ -277,14 +279,11 @@ const sizes = {
 }
 
 /**
- * Lanes of the automation canvas, projected from the stored documents (nothing here is stored):
- * one for every repository, then one per config group. Each lane links event nodes to the rules
- * (triggers, merge request policies, schedules, freshness and the release assistant) that react
- * to them, and rules to the actions they take. A rule limited to groups sits in each member
- * group's lane; one without groups, or limited to repositories only, in the every-repository
- * lane. Freshness has a rule in every lane, with that lane's override. Disabled rules draw dashed.
+ * The stored rules (triggers, merge request policies and schedules) with the lanes they sit in and
+ * the actions they take, in that order. A rule limited to groups sits in each member group's
+ * lane; one without groups, or limited to repositories only, in the every-repository lane.
  */
-export function automationLanes(input: AutomationInput): AutomationLane[] {
+export function automationRules(input: AutomationInput): AutomationRule[] {
   const byKind = new Map(input.analyzers.map((analyzer) => [analyzer.kind, analyzer]))
   const usesAgent = (kind: string) => byKind.get(kind)?.needs.agent !== undefined
   const analyzerAction = (kind: string): ActionSpec => ({
@@ -294,8 +293,8 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
     kind,
     ai: usesAgent(kind),
   })
-  const rules: RuleSpec[] = []
-  const add = (spec: Omit<RuleSpec, 'id' | 'ai'>) =>
+  const rules: AutomationRule[] = []
+  const add = (spec: Omit<AutomationRule, 'id' | 'ai'>) =>
     rules.push({ ...spec, id: ruleNodeId(spec.ref), ai: spec.actions.some((a) => a.ai) })
 
   for (const entry of input.triggers) {
@@ -407,6 +406,18 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
     })
   }
 
+  return rules
+}
+
+/**
+ * Lanes of the automation canvas, projected from the stored documents (nothing here is stored):
+ * one for every repository, then one per config group. Each lane links event nodes to the rules
+ * (triggers, merge request policies, schedules, freshness and the release assistant) that react
+ * to them, and rules to the actions they take, placed as `automationRules` says. Freshness has a
+ * rule in every lane, with that lane's override. Disabled rules draw dashed.
+ */
+export function automationLanes(input: AutomationInput): AutomationLane[] {
+  const rules = automationRules(input)
   const fresh = input.analyzers.filter((analyzer) => analyzer.refresh !== undefined)
   const lanes: { id: string; group?: string; label: string }[] = [
     { id: ALL_LANE, label: 'All repositories' },
@@ -416,7 +427,7 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
   return lanes.map((lane) => {
     const own = rules.filter((rule) => rule.lanes.includes(lane.id))
     const override = laneFreshness(input.settings, lane.group)
-    const freshness: RuleSpec = {
+    const freshness: AutomationRule = {
       id: ruleNodeId({ type: 'freshness' }),
       ref: { type: 'freshness' },
       title: 'Freshness',
@@ -442,7 +453,7 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
         },
       ],
     }
-    const release: RuleSpec = {
+    const release: AutomationRule = {
       id: ruleNodeId({ type: 'release' }),
       ref: { type: 'release' },
       title: 'Release assistant',
@@ -490,6 +501,107 @@ export function automationLanes(input: AutomationInput): AutomationLane[] {
     return { ...lane, nodes, edges }
   })
 }
+
+/** What kind of rule a node stands for: a trigger, schedule, policy, or a built-in rule. */
+export type RuleKind = 'trigger' | 'schedule' | 'policy' | 'builtin'
+
+/** Rule kinds in the order the map's filter lists them, with their names. */
+export const ruleKinds: readonly { id: RuleKind; label: string }[] = [
+  { id: 'trigger', label: 'Triggers' },
+  { id: 'schedule', label: 'Schedules' },
+  { id: 'policy', label: 'Policies' },
+  { id: 'builtin', label: 'Built in' },
+]
+
+/** The kind of a rule: freshness and the release assistant are built in. */
+export const ruleKind = (ref: RuleRef): RuleKind =>
+  ref.type === 'freshness' || ref.type === 'release' ? 'builtin' : ref.type
+
+/**
+ * One canvas for a team: the every-repository lane merged with the lane of `laneId` (just the
+ * every-repository lane for `all` or an unknown id). Nodes and edges both lanes share appear once,
+ * the team's version winning, so its freshness override shows; events keep their order, the
+ * team's own rules follow the shared ones, actions are sorted by label.
+ */
+export function mergedLane(lanes: readonly AutomationLane[], laneId: string = ALL_LANE) {
+  const base = lanes.find((lane) => lane.id === ALL_LANE)
+  const own = laneId === ALL_LANE ? undefined : lanes.find((lane) => lane.id === laneId)
+  const parts = [base, own].filter((lane) => lane !== undefined)
+  const nodes = new Map<string, AutomationNode>()
+  const edges = new Map<string, FlowEdgeSpec>()
+  for (const lane of parts) {
+    for (const node of lane.nodes) nodes.set(node.id, node)
+    for (const edge of lane.edges) edges.set(`${edge.from}->${edge.to}`, edge)
+  }
+  const all = [...nodes.values()]
+  const merged: AutomationLane = {
+    id: own?.id ?? ALL_LANE,
+    ...(own?.group !== undefined && { group: own.group }),
+    label: own?.label ?? base?.label ?? 'All repositories',
+    nodes: [
+      ...eventOrder.flatMap((event) => all.filter((node) => node.id === `event:${event}`)),
+      ...all.filter((node) => node.kind === 'rule'),
+      ...all
+        .filter((node) => node.kind === 'action')
+        .toSorted((a, b) =>
+          a.kind === 'action' && b.kind === 'action' ? a.data.label.localeCompare(b.data.label) : 0,
+        ),
+    ],
+    edges: [...edges.values()],
+  }
+  return merged
+}
+
+/** What the map shows: rule kinds (none means all), only rules that call AI, and a text match. */
+export interface LaneFilter {
+  kinds?: readonly RuleKind[]
+  ai?: boolean
+  query?: string
+}
+
+const nodeLabel = (node: AutomationNode) =>
+  node.kind === 'rule' ? node.data.title : node.data.label
+
+/**
+ * `lane` with only the rules that pass `filter`, and the events and actions linked to them. The
+ * text matches a rule's title or chips, or the label of an event or action it is linked to.
+ */
+export function filterLane(lane: AutomationLane, filter: LaneFilter): AutomationLane {
+  const needle = filter.query?.trim().toLowerCase()
+  const byId = new Map(lane.nodes.map((node) => [node.id, node]))
+  const linked = (rule: string) =>
+    lane.edges.flatMap((edge) =>
+      edge.to === rule ? [edge.from] : edge.from === rule ? [edge.to] : [],
+    )
+  const kept = new Set<string>()
+  for (const node of lane.nodes) {
+    if (node.kind !== 'rule') continue
+    if (filter.kinds?.length && !filter.kinds.includes(ruleKind(node.data.ref))) continue
+    if (filter.ai && !node.data.ai) continue
+    const texts = [
+      node.data.title,
+      ...node.data.chips,
+      ...linked(node.id).flatMap((id) => {
+        const other = byId.get(id)
+        return other ? [nodeLabel(other)] : []
+      }),
+    ]
+    if (needle && !texts.some((text) => text.toLowerCase().includes(needle))) continue
+    kept.add(node.id)
+    for (const id of linked(node.id)) kept.add(id)
+  }
+  return {
+    ...lane,
+    nodes: lane.nodes.filter((node) => kept.has(node.id)),
+    edges: lane.edges.filter((edge) => kept.has(edge.from) && kept.has(edge.to)),
+  }
+}
+
+/** Rule nodes per lane id, for the team switch's counts. */
+export const laneRuleCounts = (lanes: readonly AutomationLane[]): Record<string, number> =>
+  Object.fromEntries(
+    lanes.map((lane) => [lane.id, lane.nodes.filter((node) => node.kind === 'rule').length]),
+  )
 
 /** Lanes a job's path can show in: every repository, then the job's config groups. */
 export const jobLanes = (groups: readonly string[]): string[] => [ALL_LANE, ...groups]

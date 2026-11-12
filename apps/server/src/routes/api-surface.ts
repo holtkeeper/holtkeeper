@@ -6,8 +6,10 @@ import type {
   McpUsageOverview,
   PublicApiDiff,
   PublicApiPackageDetail,
+  PublicApiMatch,
   PublicApiPackageList,
   PublicApiSearchResult,
+  PublicApiSymbol,
 } from '@holtkeeper/api'
 import { apiSymbolKinds, isApiSymbolKind, renderPackage } from '@holtkeeper/api-surface'
 import type { RepoRef } from '@holtkeeper/forge'
@@ -17,7 +19,7 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
-import { type RepoFilter, createApiCatalog } from '../api-surface/catalog.ts'
+import { type RepoFilter, cachedCatalog, createApiCatalog } from '../api-surface/catalog.ts'
 import { handleMcpRequest } from '../api-surface/mcp.ts'
 import { type McpTokens, mcpTokens } from '../api-surface/tokens.ts'
 import { mcpUsage } from '../api-surface/usage.ts'
@@ -34,6 +36,7 @@ import {
   readBody,
   repoTarget,
 } from '../context.ts'
+import { createFleetCache } from '../fleet-cache.ts'
 import {
   agentSummarize,
   githubClientFor,
@@ -44,11 +47,13 @@ import {
 } from '../libraries.ts'
 import { principalOpsAccess } from '../ops-tools.ts'
 import { releaseToolsAccess } from '../release-steps.ts'
+import { releaseServiceFor } from '../releases.ts'
 import { taskToolsAccess } from '../tasks.ts'
 import { storedAssetTools } from '../tools/assets.ts'
 import type { KnowledgeToolsContext } from '../tools/knowledge.ts'
 import type { LibraryIndex } from '../tools/libraries.ts'
 import { storedStackTools } from '../tools/registry.ts'
+import type { SupplyToolsAccess } from '../tools/repos.ts'
 import {
   type CommitConventionsAccess,
   type RulesAccess,
@@ -88,6 +93,46 @@ const requireName = (c: AppContext) => {
   return name
 }
 
+const matches: readonly PublicApiMatch[] = ['exact', 'prefix', 'part', 'doc']
+const SYMBOL_HISTORY = 20
+const SYMBOL_HISTORY_MAX = 100
+
+const kindParam = (c: AppContext) => {
+  const kind = c.req.query('kind')
+  if (!kind) return undefined
+  if (!isApiSymbolKind(kind))
+    throw new HTTPException(400, { message: `kind must be one of ${apiSymbolKinds.join(', ')}` })
+  return kind
+}
+
+const matchParam = (c: AppContext) => {
+  const match = c.req.query('match')
+  if (!match) return undefined
+  const found = matches.find((value) => value === match)
+  if (!found)
+    throw new HTTPException(400, { message: `match must be one of ${matches.join(', ')}` })
+  return found
+}
+
+const historyLimit = (value: string | undefined) => {
+  if (value === undefined) return SYMBOL_HISTORY
+  const limit = Number(value)
+  if (!/^\d+$/.test(value) || limit < 1 || limit > SYMBOL_HISTORY_MAX)
+    throw new HTTPException(400, {
+      message: `limit must be a whole number from 1 to ${SYMBOL_HISTORY_MAX}`,
+    })
+  return limit
+}
+
+const params = <K extends string>(c: AppContext, keys: readonly K[]) => {
+  const found: Partial<Record<K, string>> = {}
+  for (const key of keys) {
+    const value = c.req.query(key)
+    if (value) found[key] = value
+  }
+  return found
+}
+
 const resolveQuery = (c: AppContext) => {
   const version = c.req.query('version')
   const repo = c.req.query('repo')
@@ -99,10 +144,14 @@ const resolveQuery = (c: AppContext) => {
  * records: routes under `/api/api-surface` for the web UI, the MCP endpoint for agents, personal
  * access tokens for both and MCP call statistics.
  */
-export function createApiSurface(deps: ServerDeps) {
+export function createApiSurface(
+  deps: ServerDeps,
+  supplyFor: (principal: Principal) => SupplyToolsAccess,
+) {
   const { store, config } = deps
   const catalog = createApiCatalog({ analyses: store.analyses })
   const usages = createUsageIndex({ analyses: store.analyses })
+  const cache = createFleetCache()
   const usage = mcpUsage({ ...(store.kv ? { kv: store.kv } : {}), now: deps.now })
   const tokens: McpTokens | undefined = store.kv
     ? mcpTokens({ kv: store.kv, users: store.users, now: deps.now })
@@ -237,17 +286,47 @@ export function createApiSurface(deps: ServerDeps) {
   routes.route('/', usageRoutes({ catalog, usages, reach, groupsOf }))
   routes.route(
     '/',
-    dependencyRoutes(deps, { catalog, usages, reach, libraryIndex: libraryContext }),
+    dependencyRoutes(deps, { catalog, usages, reach, libraryIndex: libraryContext, cache }),
   )
 
   routes.get('/api-surface/packages', async (c) => {
-    const principal = principalOf(c)
-    const packages = await catalog.packages(
-      await readable(principal),
-      c.req.query('q') || undefined,
+    const canRead = await readable(principalOf(c))
+    const kind = kindParam(c)
+    const query = {
+      ...params(c, ['q', 'repo']),
+      ...(kind ? { kind } : {}),
+    }
+    const list = await cachedCatalog(
+      cache,
+      catalog,
+      canRead,
+      `api-surface/packages?${new URLSearchParams(query).toString()}`,
+      async () => catalog.packageList(canRead, query),
     )
     const indexedAt = catalog.indexedAt()
-    return c.json<PublicApiPackageList>({ packages, ...(indexedAt ? { indexedAt } : {}) })
+    return c.json<PublicApiPackageList>({ ...list, ...(indexedAt ? { indexedAt } : {}) })
+  })
+
+  routes.get('/api-surface/symbol', async (c) => {
+    const pkg = c.req.query('package')
+    const name = c.req.query('name')
+    if (!pkg || !name) throw new HTTPException(400, { message: 'package and name are required' })
+    const canRead = await readable(principalOf(c))
+    const query = {
+      package: pkg,
+      name,
+      ...params(c, ['subpath', 'version', 'repo']),
+      limit: historyLimit(c.req.query('limit')),
+    }
+    const found = await cachedCatalog(
+      cache,
+      catalog,
+      canRead,
+      `api-surface/symbol?${new URLSearchParams({ ...query, limit: String(query.limit) }).toString()}`,
+      async () => catalog.symbol(canRead, query),
+    )
+    if (!found) throw new HTTPException(404, { message: `no recorded symbol ${name} in ${pkg}` })
+    return c.json<PublicApiSymbol>(found)
   })
 
   routes.get('/api-surface/package', async (c) => {
@@ -300,16 +379,23 @@ export function createApiSurface(deps: ServerDeps) {
 
   routes.get('/api-surface/search', async (c) => {
     const principal = principalOf(c)
-    const kind = c.req.query('kind')
-    if (kind && !isApiSymbolKind(kind))
-      throw new HTTPException(400, { message: `kind must be one of ${apiSymbolKinds.join(', ')}` })
-    const name = c.req.query('package')
-    const result = await catalog.search(await readable(principal), c.req.query('q') ?? '', {
-      ...(name ? { package: name } : {}),
-      ...(kind && isApiSymbolKind(kind) ? { kind } : {}),
-      limit: Math.min(Math.max(Number(c.req.query('limit')) || 30, 1), 100),
+    const kind = kindParam(c)
+    const match = matchParam(c)
+    const { facets, ...result } = await catalog.search(
+      await readable(principal),
+      c.req.query('q') ?? '',
+      {
+        ...params(c, ['package', 'repo', 'subpath']),
+        ...(kind ? { kind } : {}),
+        ...(match ? { match } : {}),
+        limit: Math.min(Math.max(Number(c.req.query('limit')) || 30, 1), 100),
+        facets: true,
+      },
+    )
+    return c.json<PublicApiSearchResult>({
+      ...result,
+      facets: facets ?? { kinds: [], packages: [], repos: [], subpaths: [], matches: [] },
     })
-    return c.json<PublicApiSearchResult>(result)
   })
 
   routes.post('/api-surface/rescan', async (c) => {
@@ -327,7 +413,7 @@ export function createApiSurface(deps: ServerDeps) {
   routes.post('/api-surface/mcp/tokens', async (c) => {
     const principal = principalOf(c)
     if (bearerToken(c.req.raw))
-      throw new HTTPException(403, { message: 'tokens cannot issue tokens; sign in instead' })
+      throw new HTTPException(401, { message: 'tokens cannot issue tokens; sign in instead' })
     const input: CreateMcpTokenInput = await readBody(c, createTokenSchema)
     const result = await tokensOf().create(principal, {
       name: input.name,
@@ -349,7 +435,7 @@ export function createApiSurface(deps: ServerDeps) {
   routes.delete('/api-surface/mcp/tokens/:id', async (c) => {
     const principal = principalOf(c)
     if (bearerToken(c.req.raw))
-      throw new HTTPException(403, { message: 'tokens cannot revoke tokens; sign in instead' })
+      throw new HTTPException(401, { message: 'tokens cannot revoke tokens; sign in instead' })
     if (!(await tokensOf().revoke(principal, c.req.param('id'))))
       throw new HTTPException(404, { message: 'no such token' })
     c.set('audit', {
@@ -388,7 +474,7 @@ export function createApiSurface(deps: ServerDeps) {
           id: null,
           error: {
             code: -32001,
-            message: 'send Authorization: Bearer <token from Settings → Access → MCP server>',
+            message: 'send Authorization: Bearer <token from Account › Connect agents>',
           },
         },
         401,
@@ -415,7 +501,7 @@ export function createApiSurface(deps: ServerDeps) {
           principal.grants.some((grant) => grant.actions.includes('releases:run')),
         channel: 'mcp',
       }),
-      ops: principalOpsAccess(deps, principal),
+      ops: principalOpsAccess(deps, principal, () => releaseServiceFor(deps).snapshot(principal)),
       tasks: taskToolsAccess(
         { ...deps, readOnly: deps.readOnly ?? (async () => false) },
         principal,
@@ -430,6 +516,7 @@ export function createApiSurface(deps: ServerDeps) {
         canReadScope: (entryScope) =>
           can(principal, 'settings:read', { kind: 'scope', scope: entryScope }),
       }),
+      supply: supplyFor(principal),
       principal,
       canRead: scope.catalog,
       canReadSnippets: scope.snippets,

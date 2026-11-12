@@ -13,6 +13,7 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { type GuideGeneratorOptions, createGuideAnalyzer } from './analyzer.ts'
 import { DETERMINISTIC_MODEL } from './generate.ts'
 import { GENERATOR_CONTEXT, type GeneratorOutput } from './prompt.ts'
+import { rememberGuideRejection } from './rejections.ts'
 
 const fixture = join(import.meta.dir, '../../../fixtures/service')
 const repo = { forge: 'work', path: 'shapes/service' }
@@ -86,7 +87,7 @@ const forge: ConventionsForge = {
 const run = (
   agent: Agent | undefined,
   options: Partial<GuideGeneratorOptions> = {},
-  extra: { forge?: ConventionsForge } = {},
+  extra: { forge?: ConventionsForge; jobId?: string } = {},
 ) =>
   createGuideAnalyzer({ store, groupsOf: () => ['shapes'] }).run({
     repo,
@@ -94,6 +95,7 @@ const run = (
     runner: createFakeRunner(() => ({ stdout: 'abc123\n' })).runner,
     ...(agent && { agent }),
     ...(extra.forge && { forge: extra.forge as never }),
+    ...(extra.jobId && { jobId: extra.jobId }),
     history: { analyses: store.analyses, auditRuns: store.auditRuns },
     options: { force: false, ...options },
   })
@@ -140,6 +142,25 @@ test('a second run over the same evidence makes no call', async () => {
     'unchanged',
     'unchanged',
   ])
+})
+
+test('a forced run does not propose again what a person rejected', async () => {
+  await run(fakeAgent().agent)
+  const general = await store.guides.get(repoScope, 'general')
+  await rememberGuideRejection(store.kv!, repoScope, 'general', {
+    inputHash: general!.generated!.inputHash,
+    generatedAt: general!.generated!.generatedAt,
+    by: 'user:a',
+    at: '2026-11-01T00:00:00.000Z',
+  })
+  const { agent, tasks } = fakeAgent()
+  const { data } = await run(agent, { force: true })
+  expect(data.sections.slice(0, 2).map((section) => [section.section, section.outcome])).toEqual([
+    ['general', 'skipped'],
+    ['testing', 'proposed'],
+  ])
+  expect(data.sections[0]?.reason).toBe('a person rejected text from these inputs')
+  expect(tasks[0]?.prompt).not.toContain('# Section general')
 })
 
 test('changed steering regenerates only that section, on the fast tier when general is unchanged', async () => {
@@ -213,6 +234,28 @@ test('new text over accepted text becomes a proposal; equal text keeps the accep
     status: 'proposed',
     prompt: 'Mention the build target.',
   })
+})
+
+test('every stored run gets the next version and its job, and lands in the generated history', async () => {
+  await run(fakeAgent().agent, { sections: ['general'] }, { jobId: 'job-1' })
+  const first = await store.guides.get(repoScope, 'general')
+  expect(first?.generated).toMatchObject({ version: 1, jobId: 'job-1', status: 'proposed' })
+  await store.guides.put({
+    ...first!,
+    generated: { ...first!.generated!, status: 'accepted', acceptedBy: 'jane' },
+  })
+
+  const { agent } = fakeAgent(() => ({ sections: { general: ['Run `make build` to build.'] } }))
+  await run(agent, { force: true, sections: ['general'] }, { jobId: 'job-2' })
+  const second = await store.guides.get(repoScope, 'general')
+  expect(second?.generated).toMatchObject({ version: 1, status: 'accepted' })
+  expect(second?.proposal).toMatchObject({ version: 2, jobId: 'job-2', status: 'proposed' })
+
+  const history = await store.guides.generatedHistory(repoScope, 'general')
+  expect(history.map((layer) => [layer.version, layer.jobId, layer.status])).toEqual([
+    [2, 'job-2', 'proposed'],
+    [1, 'job-1', 'accepted'],
+  ])
 })
 
 test('the extra prompt reaches the model', async () => {

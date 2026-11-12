@@ -218,7 +218,10 @@ function SchemaField(props: FieldProps) {
         <Select
           {...(props.hideLabel ? {} : { label: props.label })}
           aria-label={props.label}
-          options={node.options.map((option) => ({ id: option, label: option }))}
+          options={node.options.map((option) => ({
+            id: option,
+            label: node.labels?.[option] ?? option,
+          }))}
           value={typeof props.value === 'string' ? props.value : undefined}
           onChange={props.onChange}
         />

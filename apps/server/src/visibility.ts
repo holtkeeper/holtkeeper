@@ -8,7 +8,7 @@ import {
 } from '@holtkeeper/access'
 import type { RepoRef } from '@holtkeeper/forge'
 import { type CrossTeamCatalog, crossTeamLevels, defaultCrossTeam } from '@holtkeeper/settings'
-import type { SettingEntry, SettingStore } from '@holtkeeper/store'
+import type { KnowledgeEntry, SettingEntry, SettingStore } from '@holtkeeper/store'
 
 /** Whether a listed repository-bound item is visible; lists filter instead of failing. */
 export const canSee = (principal: Principal, action: Action, repo: RepoTarget) =>
@@ -88,6 +88,10 @@ export const catalogReach =
   (settings: Pick<SettingStore, 'list'>, targetOf: (repo: RepoRef) => RepoTarget) =>
   async (principal: Principal): Promise<CatalogReach> =>
     reachOf(principal, await crossTeamPolicy(settings), targetOf)
+
+/** Whether a knowledge entry is in the cross-team catalog: accepted and marked `shared`. */
+export const isSharedEntry = (entry: Pick<KnowledgeEntry, 'visibility' | 'status'>): boolean =>
+  entry.visibility === 'shared' && entry.status === 'accepted'
 
 /**
  * Whether the principal may read a `shared` knowledge entry of `scope`: `catalog:read` over the

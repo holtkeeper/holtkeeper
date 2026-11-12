@@ -4,6 +4,7 @@ import {
   auditCursorSeq,
   auditVerifyRange,
   sealAuditEvent,
+  sortAuditSummary,
   verifyAuditEvents,
 } from '@holtkeeper/store'
 import type { SQL } from 'bun'
@@ -104,6 +105,33 @@ export function postgresAudit(db: () => Promise<Db>): AuditStore {
       const [row]: { count: number }[] = await sql`
         SELECT COUNT(*)::int AS count FROM ${t.auditEvents} WHERE ${where(sql, filter)}`
       return row?.count ?? 0
+    },
+    async summary(filter = {}) {
+      const { sql, t } = await db()
+      type Count = { key: string; count: number }
+      const [days, actions, actors, repos]: [
+        Count[],
+        Count[],
+        (Count & { name: string })[],
+        Count[],
+      ] = await Promise.all([
+        sql`SELECT to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS key, COUNT(*)::int AS count
+            FROM ${t.auditEvents} WHERE ${where(sql, filter)} GROUP BY 1`,
+        sql`SELECT action AS key, COUNT(*)::int AS count
+            FROM ${t.auditEvents} WHERE ${where(sql, filter)} GROUP BY 1`,
+        sql`SELECT actor_id AS key, COUNT(*)::int AS count,
+              (array_agg(event->'actor'->>'name' ORDER BY seq DESC))[1] AS name
+            FROM ${t.auditEvents} WHERE ${where(sql, filter)} GROUP BY 1`,
+        sql`SELECT target_repo AS key, COUNT(*)::int AS count
+            FROM ${t.auditEvents} WHERE ${where(sql, filter)} AND target_repo IS NOT NULL GROUP BY 1`,
+      ])
+      return sortAuditSummary({
+        total: days.reduce((sum, day) => sum + day.count, 0),
+        days: [...days],
+        actions: [...actions],
+        actors: actors.map(({ key, count, name }) => ({ key, count, name })),
+        repos: [...repos],
+      })
     },
     async repos() {
       const { sql, t } = await db()

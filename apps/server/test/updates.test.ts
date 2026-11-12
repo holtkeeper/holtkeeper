@@ -124,7 +124,7 @@ describe('repository webhook', () => {
     expect(url).toMatch(/\/api\/webhooks\/r\/[\w-]{32}$/)
 
     const path = new URL(url).pathname
-    expect((await app.request(path, mergeRequestHook('games/other'))).status).toBe(403)
+    expect((await app.request(path, mergeRequestHook('games/other'))).status).toBe(400)
     const delivered = await app.request(path, mergeRequestHook('games/a'))
     expect(delivered.status).toBe(202)
     expect((await store.jobs.list({})).map((job) => job.analyzer)).toEqual(['review'])
@@ -133,7 +133,43 @@ describe('repository webhook', () => {
       await app.request('/api/repos/updates?repo=work:games/a')
     ).json()) as RepoUpdatesView
     expect(after.viaWebhook).toBe(true)
-    expect(after.webhook?.lastDelivery).toMatchObject({ event: 'Merge Request Hook', enqueued: 1 })
+    expect(after.webhook?.createdBy).toEqual({ id: 'root', name: 'root' })
+    expect(after.webhook?.deliveries24h).toEqual({ total: 2, failed: 1 })
+    expect(after.webhook?.deliveries).toEqual([
+      {
+        at: now.toISOString(),
+        event: 'Merge Request Hook',
+        summary: 'merge request !7 open',
+        enqueued: 1,
+        durationMs: 0,
+      },
+      {
+        at: now.toISOString(),
+        event: 'Merge Request Hook',
+        enqueued: 0,
+        error: 'this webhook belongs to another repository',
+        durationMs: 0,
+      },
+    ])
+  })
+
+  test('keeps the last 50 deliveries and counts only the last day', async () => {
+    const app = createApp(deps())
+    const view = (await (
+      await app.request('/api/repos/updates/webhook', json({ repo: 'work:games/a' }))
+    ).json()) as RepoUpdatesView
+    const path = new URL(view.webhook?.url ?? '').pathname
+    for (let index = 0; index < 52; index += 1) {
+      now = new Date(now.getTime() + 3_600_000)
+      // oxlint-disable-next-line no-await-in-loop -- deliveries arrive one after another
+      await app.request(path, mergeRequestHook('games/a'))
+    }
+    const after = (await (
+      await app.request('/api/repos/updates?repo=work:games/a')
+    ).json()) as RepoUpdatesView
+    expect(after.webhook?.deliveries).toHaveLength(50)
+    expect(after.webhook?.deliveries[0]?.at).toBe(now.toISOString())
+    expect(after.webhook?.deliveries24h).toEqual({ total: 24, failed: 0 })
   })
 
   test('rotating invalidates the old URL and re-registers the hook on the forge', async () => {
@@ -223,6 +259,41 @@ describe('polling', () => {
       await app.request('/api/repos/updates/groups/games')
     ).json()) as GroupListingView
     expect(shown.listedAt).toBe(now.toISOString())
+    expect(shown.nextAt).toBe(new Date(now.getTime() + 30 * 60_000).toISOString())
     expect((await app.request('/api/repos/updates/groups/nope')).status).toBe(404)
+  })
+
+  test('a listing keeps what include patterns matched before excludes', async () => {
+    const listed = [
+      { path: 'games/a', archived: false },
+      { path: 'games/old', archived: false },
+      { path: 'tools/x', archived: false },
+    ]
+    const listingForge = {
+      ...fakeForge,
+      listRepositories: async function* () {
+        yield* listed
+      },
+    } as unknown as GitForge
+    const groupsConfig = parseConfig({
+      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => listingForge } },
+      groups: { games: { forge: 'work', include: ['games/*'], exclude: ['games/old'] } },
+    })
+    const app = createApp({ ...deps(), config: groupsConfig })
+    expect((await app.request('/api/repos/updates/groups/games')).status).toBe(200)
+    const before = (await (
+      await app.request('/api/repos/updates/groups/games')
+    ).json()) as GroupListingView
+    expect(before).toMatchObject({ repos: [], matched: [], attempts: [] })
+    expect(before.nextAt).toBeUndefined()
+
+    const view = (await (
+      await app.request('/api/repos/updates/groups/games/list', { method: 'POST' })
+    ).json()) as GroupListingView
+    expect(view.repos).toEqual([{ forge: 'work', path: 'games/a' }])
+    expect(view.matched).toEqual([
+      { forge: 'work', path: 'games/a' },
+      { forge: 'work', path: 'games/old' },
+    ])
   })
 })

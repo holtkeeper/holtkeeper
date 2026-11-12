@@ -8,7 +8,10 @@ import { type AgentReview, type ReviewUsage, agentReviewSchema, categories } fro
 import type { FileScope } from './scope.ts'
 import type { Candidate } from './validate.ts'
 
-/** Runs a task and adds its turns, cost and token counts to `usage`. */
+/**
+ * Runs a task and adds its turns, cost and token counts to `usage`; the first run that names its
+ * model sets `usage.model`.
+ */
 export async function runTracked<Output>(
   agent: Agent,
   task: AgentTask<Output>,
@@ -16,6 +19,7 @@ export async function runTracked<Output>(
 ): Promise<AgentResult<Output>> {
   const result = await agent.run(task)
   usage.turns += result.turns
+  if (result.model && !usage.model) usage.model = result.model
   if (result.costUsd !== undefined) usage.costUsd = (usage.costUsd ?? 0) + result.costUsd
   if (result.usage) {
     usage.inputTokens = (usage.inputTokens ?? 0) + result.usage.inputTokens

@@ -94,6 +94,12 @@ export function requireReviewForge(forge: GitForge): ReviewForge {
   )
 }
 
+/** A resolved Guide: its text and the Guide scopes whose rules it carries, broad to narrow. */
+export interface ReviewGuide {
+  text: string
+  scopes: string[]
+}
+
 /** Everything one review run uses. */
 export interface ReviewRun {
   repo: RepoRef
@@ -109,7 +115,7 @@ export interface ReviewRun {
    * Resolves the repository's Guide for the review from its rules files and the text notes are
    * ranked by (title and files in scope); replaces the plain guidelines block in the context.
    */
-  guide?: (docs: readonly Guideline[], query: string) => Promise<string | undefined>
+  guide?: (docs: readonly Guideline[], query: string) => Promise<ReviewGuide | undefined>
   /** Passed to the agent as `toolsets`, e.g. code navigation and knowledge tools. */
   toolsets?: readonly Toolset[]
   botUsername?: string
@@ -149,6 +155,8 @@ export interface AgentOutcome {
   verdict: 'looks-good' | 'needs-changes'
   walkthrough?: ReviewWalkthrough
   effort?: number
+  /** Guide scopes whose rules reached the agent, broad to narrow. */
+  guideScopes?: string[]
 }
 
 /** The replaceable steps of a review. */
@@ -303,7 +311,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       .filter((path) => matchesAny(path, [rule.glob]))
     return files.length ? [{ ...rule, files }] : []
   })
-  return runAgentReview({
+  const outcome = await runAgentReview({
     agent: run.agent,
     dir: run.dir,
     usage,
@@ -318,7 +326,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       mode: planned.mode,
       ...(planned.previousHead ? { previousHead: planned.previousHead } : {}),
       guidelines: planned.guidelines,
-      ...(guide ? { guide } : {}),
+      ...(guide?.text ? { guide: guide.text } : {}),
       ...(instructions ? { instructions } : {}),
       ...(pathRules.length ? { pathInstructions: pathRules } : {}),
       ...(requests?.length
@@ -339,6 +347,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),
     ...(run.signal ? { signal: run.signal } : {}),
   })
+  return guide?.text && guide.scopes.length ? { ...outcome, guideScopes: guide.scopes } : outcome
 }
 
 const media: ReviewSteps['media'] = async (run, loaded) => {
@@ -482,9 +491,16 @@ const emptyDropped = { belowSeverity: 0, overLimit: 0, duplicates: 0, invalid: 0
 /**
  * Reviews one merge request: loads it, scopes the diff, collects deterministic and agent findings,
  * validates, deduplicates and ranks them, re-checks our earlier threads and posts one review.
- * Returns the stored data; what the forge rejected is marked in `comments`.
+ * Returns the stored data with the run's wall time; what the forge rejected is marked in
+ * `comments`.
  */
 export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
+  const started = performance.now()
+  const data = await reviewOnce(run)
+  return { ...data, durationMs: Math.round(performance.now() - started) }
+}
+
+async function reviewOnce(run: ReviewRun): Promise<ReviewData> {
   const steps = { ...defaultSteps, ...run.steps }
   const usage: ReviewUsage = { turns: 0 }
   const loaded = await steps.load(run)
@@ -627,6 +643,7 @@ export async function reviewMergeRequest(run: ReviewRun): Promise<ReviewData> {
       .join('\n\n'),
     ...(agentOutcome?.walkthrough ? { walkthrough: agentOutcome.walkthrough } : {}),
     ...(agentOutcome?.effort ? { effort: agentOutcome.effort } : {}),
+    ...(agentOutcome?.guideScopes?.length ? { guideScopes: agentOutcome.guideScopes } : {}),
     comments,
     threads,
     skipped: scope.skipped,

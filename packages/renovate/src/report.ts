@@ -69,8 +69,62 @@ const count = <T>(items: T[], test: (item: T) => boolean) => items.filter(test).
 
 const open = (d: RenovateData) => count(d.mergeRequests, (mr) => mr.state === 'open')
 const broken = (d: RenovateData) => count(d.mergeRequests, isBroken)
-const majors = (d: RenovateData) => count(d.updates, (u) => u.type === 'major')
+const ofType = (d: RenovateData, type: RenovateUpdateType) =>
+  count(d.updates, (u) => u.type === type)
+const majors = (d: RenovateData) => ofType(d, 'major')
 const security = (d: RenovateData) => count(d.updates, (u) => u.vulnerability)
+
+/** Stored headline numbers of one `renovate` record. */
+export interface RenovateMetrics {
+  status: RenovateData['status']
+  /** Dependencies Renovate looked up, and how many of them have an update. */
+  dependencies: number
+  outdated: number
+  /** Available updates that are major, and those that fix a known vulnerability. */
+  major: number
+  security: number
+  /** Available minor and patch updates; absent on records stored before they were counted. */
+  minor?: number
+  patch?: number
+  /** Open merge requests, and those of them that are broken. */
+  open: number
+  broken: number
+  /**
+   * Dependencies touched by an open merge request, by `manager:dependency`: `broken` when one of
+   * those merge requests is broken. Absent on records stored before it was kept.
+   */
+  pending?: Record<string, 'open' | 'broken'>
+}
+
+function pending(data: RenovateData): Record<string, 'open' | 'broken'> {
+  const found: Record<string, 'open' | 'broken'> = {}
+  for (const mr of data.mergeRequests) {
+    if (mr.state !== 'open') continue
+    const state = isBroken(mr) ? 'broken' : 'open'
+    for (const update of data.updates) {
+      if (update.mergeRequest !== mr.id) continue
+      const key = `${update.manager}:${update.dependency}`
+      if (found[key] !== 'broken') found[key] = state
+    }
+  }
+  return found
+}
+
+/** `RenovateMetrics` of `data`. */
+export function renovateMetrics(data: RenovateData): RenovateMetrics {
+  return {
+    status: data.status,
+    dependencies: data.dependencies,
+    outdated: data.outdated,
+    major: majors(data),
+    security: security(data),
+    minor: ofType(data, 'minor'),
+    patch: ofType(data, 'patch'),
+    open: open(data),
+    broken: broken(data),
+    pending: pending(data),
+  }
+}
 
 function metrics(data: RenovateData, previous?: RenovateData): Metric[] {
   const prev = <T>(read: (d: RenovateData) => T) => (previous ? { previous: read(previous) } : {})
@@ -304,10 +358,11 @@ export function renovateReport(
 }
 
 /** The `renovate` analysis kind: outdated dependencies, Renovate merge requests and their health. */
-export const renovateAnalysis = defineAnalysis<RenovateData>({
+export const renovateAnalysis = defineAnalysis<RenovateData, RenovateMetrics>({
   kind: 'renovate',
   label: 'Renovate',
   schema: renovateDataSchema,
+  metrics: renovateMetrics,
   summarize: (data) => metrics(data),
   toReport(current, previous) {
     return {

@@ -25,17 +25,15 @@ import {
   parseRepo,
   principalOf,
   repoTarget,
+  ForbiddenException,
 } from '../context.ts'
-import { canReadShared, crossTeamPolicy, scopeOwner } from '../visibility.ts'
+import { canReadShared, crossTeamPolicy, isSharedEntry, scopeOwner } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
 
 const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
 
 /** Candidates ranked before the repository filter, so filtering does not starve `limit`. */
 const pool = 500
-
-const isShared = (entry: KnowledgeEntry) =>
-  entry.visibility === 'shared' && entry.status === 'accepted'
 
 const statusFor = { accept: 'accepted', reject: 'rejected', archive: 'archived' } as const
 
@@ -143,7 +141,7 @@ export function knowledgeRoutes(deps: ServerDeps) {
       visible = hits.filter(
         (entry) =>
           can(principal, 'knowledge:read', scopeTarget(entry.scope)) ||
-          (isShared(entry) && canReadShared(principal, entry.scope, policy)),
+          (isSharedEntry(entry) && canReadShared(principal, entry.scope, policy)),
       )
     }
     const entries: KnowledgeEntryView[] = visible
@@ -165,12 +163,10 @@ export function knowledgeRoutes(deps: ServerDeps) {
     const readable =
       own ||
       (entry &&
-        isShared(entry) &&
+        isSharedEntry(entry) &&
         canReadShared(principal, entry.scope, await crossTeamPolicy(store.settings)))
-    if (!entry || !readable)
-      throw new HTTPException(entry ? 403 : 404, {
-        message: entry ? 'missing permission knowledge:read' : 'knowledge entry not found',
-      })
+    if (!entry) throw new HTTPException(404, { message: 'knowledge entry not found' })
+    if (!readable) throw new ForbiddenException('knowledge:read')
     return c.json<KnowledgeDetail>({
       entry,
       history: own ? await store.knowledge.history(entry.id) : [],

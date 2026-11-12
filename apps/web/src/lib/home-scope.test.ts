@@ -29,16 +29,15 @@ describe('home scope', () => {
   test('my team lists the home groups and counts the rest by team', () => {
     const scoped = scopeList(items, 'mine', ['widgets'])
     expect(names(scoped.shown)).toEqual(['widget-app', 'shared-widget'])
-    expect(scoped.counts).toEqual({ mine: 2, all: 5, others: 3 })
+    expect(scoped.counts).toEqual({ mine: 2, all: 5 })
     expect(scoped.others).toEqual({ items: 3, teams: 3 })
   })
 
-  test('all lists everything, other teams lists nothing but keeps the counts', () => {
-    expect(names(scopeList(items, 'all', ['widgets']).shown)).toHaveLength(5)
-    const others = scopeList(items, 'others', [['gadgets', 'shared']])
-    expect(others.shown).toEqual([])
-    expect(others.counts).toEqual({ mine: 1, all: 5, others: 4 })
-    expect(others.others).toEqual({ items: 4, teams: 3 })
+  test('all lists everything and still summarises the other teams', () => {
+    const all = scopeList(items, 'all', [['gadgets', 'shared']])
+    expect(names(all.shown)).toHaveLength(5)
+    expect(all.counts).toEqual({ mine: 1, all: 5 })
+    expect(all.others).toEqual({ items: 4, teams: 3 })
   })
 
   test('without home groups the default is everything', () => {
@@ -47,10 +46,14 @@ describe('home scope', () => {
     expect(scopeList(items, 'mine', []).counts.mine).toBe(0)
   })
 
-  test('parses stored positions', () => {
-    expect(parseScopeView('others')).toBe('others')
+  test('parses stored positions; retired and unknown ones fall back to the default', () => {
+    expect(parseScopeView('mine')).toBe('mine')
+    expect(parseScopeView('all')).toBe('all')
+    expect(parseScopeView('others')).toBeUndefined()
     expect(parseScopeView('team')).toBeUndefined()
     expect(parseScopeView(null)).toBeUndefined()
+    expect(parseScopeView('others') ?? defaultScopeView(['widgets'])).toBe('mine')
+    expect(parseScopeView('others') ?? defaultScopeView([])).toBe('all')
   })
 })
 

@@ -8,8 +8,7 @@ import {
 import {
   type CommitConventions,
   type ConventionsForge,
-  checkBranchName,
-  checkCommitMessage,
+  checkConventions,
   commitConventions,
   commitConventionsKey,
   commitConventionsSchema,
@@ -17,17 +16,18 @@ import {
   renderProblems,
 } from '@holtkeeper/commit-conventions'
 import {
+  type GuideChainLayer,
   type GuideTask,
   LEARNING_RULE_MAX,
   type ResolvedGuide,
   type RuleProposalOutcome,
+  chainLayers,
+  chainTaskOf,
   guideSectionLabels,
   guideSections,
   guideTasks,
-  testIdOverridesFor,
   testIdsSettingKey,
 } from '@holtkeeper/guide'
-import { resolveSetting } from '@holtkeeper/settings'
 import type { GuideSectionName, LearningScopeKind, SettingStore, Store } from '@holtkeeper/store'
 import {
   type TestIdConvention,
@@ -37,9 +37,13 @@ import {
   learnTestIdOptions,
   renderTestIdConvention,
   testIdConvention,
+  testIdOverridesOf,
   testIdsDataSchema,
 } from '@holtkeeper/testids'
+import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
+
+import { applyingEntry } from '../setting-rules.ts'
 
 /** Commit conventions as the rules tools read them, for one caller. */
 export interface CommitConventionsAccess {
@@ -61,16 +65,17 @@ const maxEntries = 500
 
 /**
  * Commit conventions per repository, reused for `ttlMs` while the `commits.conventions` setting
- * that applies stays the same. Failed reads are not kept.
+ * that applies (resolved as `GET /api/settings/resolve` does) stays the same. Failed reads are not
+ * kept.
  */
 export function commitConventionsReader(deps: CommitConventionsDeps) {
   const ttl = deps.ttlMs ?? 10 * 60_000
   const cache = new Map<string, { at: number; value: Promise<CommitConventions> }>()
 
   return async (repo: RepoTarget, commits = 100): Promise<CommitConventions> => {
-    const entry = resolveSetting(
+    const entry = applyingEntry(
       await deps.settings.list(commitConventionsKey),
-      commitConventionsKey,
+      { key: commitConventionsKey },
       repo,
     )
     const parsed = commitConventionsSchema.safeParse(entry?.value)
@@ -103,7 +108,11 @@ interface GuideRulesAccess {
    */
   resolve(
     repo: string,
-    request: { task: GuideTask; section?: GuideSectionName },
+    request: {
+      task: GuideTask
+      section?: GuideSectionName
+      focus?: readonly GuideSectionName[]
+    },
   ): Promise<ResolvedGuide | undefined>
 }
 
@@ -138,7 +147,8 @@ interface TestIdsAccess {
 
 /**
  * The test id snapshot of a repository: the newest `testids` record and the `analyzers.testids`
- * overrides that apply to it. Records that fail the catalog schema read as missing.
+ * overrides that apply to it, resolved as `GET /api/settings/resolve` does. Records that fail the
+ * catalog schema read as missing.
  */
 export function testIdsReader(deps: { store: Pick<Store, 'analyses' | 'settings'> }) {
   return async (repo: RepoTarget): Promise<TestIdsSnapshot> => {
@@ -155,7 +165,7 @@ export function testIdsReader(deps: { store: Pick<Store, 'analyses' | 'settings'
             ...(record.sha && { sha: record.sha }),
           }
         : {}),
-      overrides: testIdOverridesFor(entries, repo),
+      overrides: testIdOverridesOf(applyingEntry(entries, { key: testIdsSettingKey }, repo)?.value),
     }
   }
 }
@@ -173,6 +183,16 @@ export interface RulesAccess {
 }
 
 const repoArg = z.string().min(1).describe('The repository, as forge:path')
+
+/** Numbered layers as `repo_rules` lists them under the Guide text. */
+const renderChainLayers = (layers: readonly GuideChainLayer[]): string =>
+  [
+    'Layers, in the order you read them (higher wins over lower; people over generated):',
+    ...layers.map(
+      (layer) =>
+        `${layer.n}. ${layer.source} (${layer.kind}${layer.version ? ` v${layer.version}` : ''}${layer.proposed ? ', proposed' : ''}): ${layer.chars} chars${layer.cut ? `, cut from ${layer.fullChars}` : ''}`,
+    ),
+  ].join('\n')
 
 const noRepo = (repo: string) =>
   new ToolError(`No readable repository ${repo}; pass forge:path, e.g. gitlab:group/app.`)
@@ -195,18 +215,28 @@ function guideTools(access: GuideRulesAccess): RegistryTool[] {
           .enum(guideSections)
           .optional()
           .describe('The topic of the work besides general rules, e.g. testing or testids'),
+        only: z
+          .enum(guideSections)
+          .optional()
+          .describe(
+            'Read just this section with its layers, as Knowledge › Guide shows it; overrides task and section',
+          ),
       }),
-      run: async ({ repo, task, section }) => {
-        const resolved = await access.resolve(repo, {
-          task: task ?? 'agent',
-          ...(section && { section }),
-        })
+      run: async ({ repo, task, section, only }) => {
+        const topic = only ?? section
+        const resolved = await access.resolve(
+          repo,
+          only
+            ? { task: chainTaskOf(only), focus: [only] }
+            : { task: task ?? 'agent', ...(section && { section }) },
+        )
         if (!resolved) throw noRepo(repo)
         if (!resolved.text.trim())
-          return `No team rules apply to \`${repo}\` yet${section ? ` for ${guideSectionLabels[section]}` : ''}; follow the repository's own rules files and its existing code.`
+          return `No team rules apply to \`${repo}\` yet${topic ? ` for ${guideSectionLabels[topic]}` : ''}; follow the repository's own rules files and its existing code.`
         return [
           `# Rules for \`${repo}\``,
           resolved.text.trim(),
+          renderChainLayers(chainLayers(resolved)),
           ...(resolved.warnings.length ? [`Notes: ${resolved.warnings.join(' ')}`] : []),
         ].join('\n\n')
       },
@@ -261,7 +291,7 @@ function proposalTools(access: RuleProposalAccess): RegistryTool[] {
         const { candidate } = outcome
         return outcome.status === 'exists'
           ? `Not added: \`${repo}\` already has this rule as a ${candidate.status} candidate: "${candidate.rule}".`
-          : `Proposed "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\`. People review it under Knowledge → Learnings before agents use it.`
+          : `Proposed "${candidate.rule}" for ${guideSectionLabels[candidate.section]} of \`${repo}\`. People review it in Knowledge › Learnings (${webPaths.knowledge('learnings', { space: `repo:${repo}` })}) before agents use it.`
       },
       subject: ({ repo }) => repo,
     }),
@@ -426,14 +456,15 @@ function commitTools(access: CommitConventionsAccess): RegistryTool[] {
       run: async ({ repo, message, branch }) => {
         if (!message && !branch) throw new ToolError('Pass message, branch or both.')
         const conventions = await conventionsOf(repo)
-        return renderProblems([
-          ...(message
-            ? [{ what: 'Message', problems: checkCommitMessage(conventions.commit, message) }]
-            : []),
-          ...(branch
-            ? [{ what: 'Branch', problems: checkBranchName(conventions.branch, branch) }]
-            : []),
-        ])
+        return renderProblems(
+          checkConventions(conventions, {
+            ...(message && { message }),
+            ...(branch && { branch }),
+          }).map(({ target, problems }) => ({
+            what: target === 'message' ? 'Message' : 'Branch',
+            problems,
+          })),
+        )
       },
       subject: ({ repo }) => repo,
     }),

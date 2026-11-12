@@ -11,12 +11,13 @@ import {
 import type { RepoRef } from '@holtkeeper/forge'
 import { parseVerifyCommand } from '@holtkeeper/identities'
 import type { ReleaseEvent } from '@holtkeeper/release'
+import { webPaths, webUrl } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
 import { deployCard, type LiveDeploy, releaseCommand } from './chat-release.ts'
 import { type ChatReplies, chatReplies } from './chat-threads.ts'
 import { webSurface } from './chat-web.ts'
-import { type ServerDeps, repoTarget } from './context.ts'
+import { type ServerDeps, repoKey, repoTarget } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
 import { identitiesFor } from './routes/accounts.ts'
 
@@ -26,8 +27,7 @@ export const CHAT_MARKER = 'holtkeeper:chat'
 /** How long a deploy card keeps following release events. */
 const LIVE_TTL_SECONDS = 3 * 86_400
 
-const repoKeyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
-const liveKey = (repo: RepoRef) => `chat:live-deploys:${repoKeyOf(repo)}`
+const liveKey = (repo: RepoRef) => `chat:live-deploys:${repoKey(repo)}`
 
 const liveDeploySchema = z.array(
   z.object({
@@ -77,8 +77,8 @@ function createServerChat(deps: ServerDeps): ServerChat {
   }
 
   const pageOf = (repo: RepoRef) => {
-    const base = config.server?.publicUrl?.replace(/\/$/, '')
-    return base ? `${base}/releases/${encodeURI(repoKeyOf(repo))}` : undefined
+    const base = config.server?.publicUrl
+    return base ? webUrl(base, webPaths.releaseTimeline(repoKey(repo))) : undefined
   }
 
   const livesOf = async (repo: RepoRef): Promise<LiveDeploy[]> => {

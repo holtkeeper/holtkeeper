@@ -5,6 +5,8 @@ import type {
   AuditRun,
   Identity,
   Job,
+  JobSearch,
+  JobStatus,
   JobStore,
   LinkToken,
   Passkey,
@@ -17,6 +19,8 @@ import {
   claimDueBy,
   DEFAULT_MAX_ATTEMPTS,
   errorSignature,
+  jobCounts,
+  likeText,
   STALE_JOB_ERROR,
 } from '@holtkeeper/store'
 
@@ -74,6 +78,7 @@ interface AnalysisRow {
   created_at: string
   actor: string | null
   data: string
+  metrics: string | null
 }
 
 const toAnalysis = (r: AnalysisRow): AnalysisRecord => ({
@@ -85,6 +90,7 @@ const toAnalysis = (r: AnalysisRow): AnalysisRecord => ({
   createdAt: r.created_at,
   ...(r.actor !== null && { actor: r.actor }),
   data: JSON.parse(r.data),
+  ...(r.metrics !== null && { metrics: JSON.parse(r.metrics) }),
 })
 
 interface CredentialRow {
@@ -100,6 +106,7 @@ interface CredentialRow {
   last_error: string | null
   options: string | null
   capabilities: string | null
+  last_used_at: string | null
   created_at: string
   updated_at: string
 }
@@ -117,6 +124,7 @@ const toCredential = (r: CredentialRow): StoredCredential => ({
   ...(r.last_error !== null && { lastError: r.last_error }),
   ...(r.options !== null && { options: JSON.parse(r.options) }),
   ...(r.capabilities !== null && { capabilities: JSON.parse(r.capabilities) }),
+  ...(r.last_used_at !== null && { lastUsedAt: r.last_used_at }),
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 })
@@ -151,6 +159,7 @@ interface UserRow {
   created_at: string
   created_by: string | null
   avatar_seed: string | null
+  last_seen_at: string | null
 }
 
 const toUser = (r: UserRow): User => ({
@@ -163,6 +172,7 @@ const toUser = (r: UserRow): User => ({
   createdAt: r.created_at,
   ...(r.created_by !== null && { createdBy: r.created_by }),
   ...(r.avatar_seed !== null && { avatarSeed: r.avatar_seed }),
+  ...(r.last_seen_at !== null && { lastSeenAt: r.last_seen_at }),
 })
 
 interface PasskeyRow {
@@ -244,27 +254,27 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
        ORDER BY finished_at DESC, seq DESC LIMIT ?4`,
     ),
     analysisInsert: db.prepare(
-      `INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, sha, created_at, actor, data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO analyses (id, repo_forge, repo_path, kind, ref, sha, created_at, actor, data, metrics)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     analysisGet: db.query<AnalysisRow, [string]>('SELECT * FROM analyses WHERE id = ?'),
     analysisList: db.query<
       AnalysisRow,
-      [string | null, string | null, string | null, string | null, number]
+      [string | null, string | null, string | null, string | null, string | null, number]
     >(
       `SELECT * FROM analyses
        WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR kind = ?3)
-         AND (?4 IS NULL OR created_at < ?4)
-       ORDER BY created_at DESC, seq DESC LIMIT ?5`,
+         AND (?4 IS NULL OR created_at < ?4) AND (?5 IS NULL OR created_at >= ?5)
+       ORDER BY created_at DESC, seq DESC LIMIT ?6`,
     ),
     analysisHeads: db.query<
       AnalysisRow,
-      [string | null, string | null, string | null, string | null, number]
+      [string | null, string | null, string | null, string | null, string | null, number]
     >(
-      `SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, 'null' AS data FROM analyses
+      `SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, 'null' AS data, metrics FROM analyses
        WHERE (?1 IS NULL OR (repo_forge = ?1 AND repo_path = ?2)) AND (?3 IS NULL OR kind = ?3)
-         AND (?4 IS NULL OR created_at < ?4)
-       ORDER BY created_at DESC, seq DESC LIMIT ?5`,
+         AND (?4 IS NULL OR created_at < ?4) AND (?5 IS NULL OR created_at >= ?5)
+       ORDER BY created_at DESC, seq DESC LIMIT ?6`,
     ),
     analysisLatest: db.query<AnalysisRow, [string | null, string | null, string | null]>(
       `SELECT * FROM analyses WHERE seq IN (
@@ -277,7 +287,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
        ORDER BY created_at DESC, seq DESC`,
     ),
     analysisLatestHeads: db.query<AnalysisRow, [string | null, string | null, string | null]>(
-      `SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, 'null' AS data
+      `SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, 'null' AS data, metrics
        FROM analyses WHERE seq IN (
          SELECT seq FROM (
            SELECT seq, ROW_NUMBER() OVER (
@@ -296,14 +306,18 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
     credList: db.query<CredentialRow, []>('SELECT * FROM credentials ORDER BY seq'),
     credGet: db.query<CredentialRow, [string]>('SELECT * FROM credentials WHERE id = ?'),
     credPut: db.prepare(
-      `INSERT INTO credentials (id, name, kind, url, scope, secret, expires_at, rotation, last_rotated_at, last_error, options, capabilities, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO credentials (id, name, kind, url, scope, secret, expires_at, rotation, last_rotated_at, last_error, options, capabilities, created_at, updated_at, last_used_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET name = excluded.name, kind = excluded.kind, url = excluded.url, scope = excluded.scope,
          secret = excluded.secret, expires_at = excluded.expires_at, rotation = excluded.rotation,
          last_rotated_at = excluded.last_rotated_at, last_error = excluded.last_error, options = excluded.options,
-         capabilities = excluded.capabilities, created_at = excluded.created_at, updated_at = excluded.updated_at`,
+         capabilities = excluded.capabilities, created_at = excluded.created_at, updated_at = excluded.updated_at,
+         last_used_at = max(coalesce(last_used_at, excluded.last_used_at), coalesce(excluded.last_used_at, last_used_at))`,
     ),
     credRemove: db.prepare('DELETE FROM credentials WHERE id = ?'),
+    credTouch: db.prepare<unknown, [string, string]>(
+      'UPDATE credentials SET last_used_at = ?1 WHERE id = ?2 AND (last_used_at IS NULL OR last_used_at < ?1)',
+    ),
     settingList: db.query<SettingRow, [string | null]>(
       'SELECT * FROM settings WHERE (?1 IS NULL OR key = ?1) ORDER BY seq',
     ),
@@ -320,13 +334,17 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
       'SELECT * FROM users WHERE email_lower = ? ORDER BY seq LIMIT 1',
     ),
     userPut: db.prepare(
-      `INSERT INTO users (id, name, email, email_lower, grants, disabled, session_version, created_at, created_by, avatar_seed)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, name, email, email_lower, grants, disabled, session_version, created_at, created_by, avatar_seed, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id) DO UPDATE SET name = excluded.name, email = excluded.email, email_lower = excluded.email_lower,
          grants = excluded.grants, disabled = excluded.disabled, session_version = excluded.session_version,
-         created_at = excluded.created_at, created_by = excluded.created_by, avatar_seed = excluded.avatar_seed`,
+         created_at = excluded.created_at, created_by = excluded.created_by, avatar_seed = excluded.avatar_seed,
+         last_seen_at = max(coalesce(last_seen_at, excluded.last_seen_at), coalesce(excluded.last_seen_at, last_seen_at))`,
     ),
     userRemove: db.prepare('DELETE FROM users WHERE id = ?'),
+    userTouch: db.prepare<unknown, [string, string]>(
+      'UPDATE users SET last_seen_at = ?1 WHERE id = ?2 AND (last_seen_at IS NULL OR last_seen_at < ?1)',
+    ),
     userAccountsRemove: db.prepare('DELETE FROM external_accounts WHERE user_id = ?'),
     passkeyList: db.query<PasskeyRow, [string]>(
       'SELECT * FROM passkeys WHERE user_id = ? ORDER BY seq',
@@ -397,6 +415,7 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
           record.createdAt,
           orNull(record.actor),
           json(record.data),
+          record.metrics === undefined ? null : json(record.metrics),
         )
         return stored
       },
@@ -404,14 +423,28 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
         const row = sql.analysisGet.get(id)
         return row ? toAnalysis(row) : undefined
       },
-      async list({ repo, kind, before, limit = 50 } = {}) {
+      async list({ repo, kind, before, since, limit = 50 } = {}) {
         return sql.analysisList
-          .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind), orNull(before), limit)
+          .all(
+            orNull(repo?.forge),
+            orNull(repo?.path),
+            orNull(kind),
+            orNull(before),
+            orNull(since),
+            limit,
+          )
           .map(toAnalysis)
       },
-      async heads({ repo, kind, before, limit = 50 } = {}) {
+      async heads({ repo, kind, before, since, limit = 50 } = {}) {
         return sql.analysisHeads
-          .all(orNull(repo?.forge), orNull(repo?.path), orNull(kind), orNull(before), limit)
+          .all(
+            orNull(repo?.forge),
+            orNull(repo?.path),
+            orNull(kind),
+            orNull(before),
+            orNull(since),
+            limit,
+          )
           .map((row) => {
             const { data: _, ...head } = toAnalysis(row)
             return head
@@ -458,10 +491,14 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
           c.capabilities ? json(c.capabilities) : null,
           c.createdAt,
           c.updatedAt,
+          orNull(c.lastUsedAt),
         )
       },
       async remove(id) {
         sql.credRemove.run(id)
+      },
+      async touch(id, at) {
+        sql.credTouch.run(at, id)
       },
     },
     settings: {
@@ -511,7 +548,11 @@ export function sqliteStore({ path }: SqliteStoreOptions): Store {
           u.createdAt,
           orNull(u.createdBy),
           orNull(u.avatarSeed),
+          orNull(u.lastSeenAt),
         )
+      },
+      async touchUser(id, at) {
+        sql.userTouch.run(at, id)
       },
       async removeUser(id) {
         db.transaction(() => {
@@ -654,9 +695,21 @@ const attemptPatch = (patch: Record<string, string | undefined>) =>
 const reposParam = (repos: { forge: string; path: string }[] | undefined) =>
   repos === undefined ? null : JSON.stringify(repos.map((repo) => [repo.forge, repo.path]))
 
+const MATCHES_SEARCH = (text: string, analyzers: string) =>
+  `(${text} IS NULL OR lower(id) LIKE ${text} || '%' ESCAPE '\\'
+     OR lower(repo_path) LIKE '%' || ${text} || '%' ESCAPE '\\'
+     OR lower(coalesce(group_name, '')) LIKE '%' || ${text} || '%' ESCAPE '\\'
+     OR lower(analyzer) LIKE '%' || ${text} || '%' ESCAPE '\\'
+     OR analyzer IN (SELECT value FROM json_each(${analyzers})))`
+
 const IN_REPOS = (param: string) =>
   `(${param} IS NULL OR EXISTS (SELECT 1 FROM json_each(${param}) r
      WHERE json_extract(r.value, '$[0]') = repo_forge AND json_extract(r.value, '$[1]') = repo_path))`
+
+const searchParams = (search: JobSearch | undefined): [string | null, string] => [
+  search ? likeText(search.text) : null,
+  json(search?.analyzers ?? []),
+]
 
 interface FailureRow {
   analyzer: string
@@ -777,6 +830,9 @@ function sqliteJobs(db: Database): JobStore {
         string | null,
         string | null,
         string | null,
+        string | null,
+        string | null,
+        string,
       ]
     >(
       `SELECT * FROM jobs
@@ -788,7 +844,39 @@ function sqliteJobs(db: Database): JobStore {
          AND (?8 IS NULL OR error_signature = ?8)
          AND ${IN_REPOS('?9')}
          AND (?10 IS NULL OR trigger = ?10)
+         AND (?11 IS NULL OR analysis_id = ?11)
+         AND ${MATCHES_SEARCH('?12', '?13')}
        ORDER BY created_at DESC, seq DESC LIMIT ?6`,
+    ),
+    count: db.query<
+      { status: JobStatus; count: number },
+      [
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string,
+      ]
+    >(
+      `SELECT status, count(*) AS count FROM jobs
+       WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
+         AND (?2 IS NULL OR (repo_forge = ?2 AND repo_path = ?3))
+         AND (?4 IS NULL OR analyzer = ?4)
+         AND (?5 IS NULL OR created_at >= ?5)
+         AND (?6 IS NULL OR schedule = ?6)
+         AND (?7 IS NULL OR error_signature = ?7)
+         AND ${IN_REPOS('?8')}
+         AND (?9 IS NULL OR trigger = ?9)
+         AND (?10 IS NULL OR analysis_id = ?10)
+         AND ${MATCHES_SEARCH('?11', '?12')}
+       GROUP BY status`,
     ),
     // SQLite takes the bare id and error from the row that holds max(finished_at).
     failures: db.query<FailureRow, [string, string | null, string | null, number]>(
@@ -885,7 +973,11 @@ function sqliteJobs(db: Database): JobStore {
           at,
           STALE_JOB_ERROR,
           errorSignature(STALE_JOB_ERROR),
-          attemptPatch({ status: 'failed', finishedAt: at, error: STALE_JOB_ERROR }),
+          attemptPatch({
+            status: 'failed',
+            finishedAt: at,
+            error: STALE_JOB_ERROR,
+          }),
         )
         .map(toJob)
     },
@@ -906,8 +998,30 @@ function sqliteJobs(db: Database): JobStore {
           orNull(query.errorSignature),
           reposParam(repos),
           orNull(trigger),
+          orNull(query.analysisId),
+          ...searchParams(query.search),
         )
         .map(toJob)
+    },
+    async count(query = {}) {
+      const { status, repo, analyzer, schedule, trigger, since, repos } = query
+      return jobCounts(
+        sql.count
+          .all(
+            status === undefined ? null : json([status].flat()),
+            orNull(repo?.forge),
+            orNull(repo?.path),
+            orNull(analyzer),
+            orNull(since),
+            orNull(schedule),
+            orNull(query.errorSignature),
+            reposParam(repos),
+            orNull(trigger),
+            orNull(query.analysisId),
+            ...searchParams(query.search),
+          )
+          .map((row) => [row.status, row.count] as const),
+      )
     },
     async failures({ since, analyzer, repos, limit = 50 }) {
       return sql.failures.all(since, orNull(analyzer), reposParam(repos), limit).map((row) => ({

@@ -19,7 +19,8 @@ import { type ReactNode, useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
 import { useCredentials, useForgeMutations, useForges } from '../../api/queries.ts'
-import { formatDate } from '../../lib/format.ts'
+import { useIntegrationForges } from '../../api/settings-ai.ts'
+import { formatDate, formatDateTime, formatRelative, plural } from '../../lib/format.ts'
 import {
   Button,
   Chip,
@@ -36,6 +37,7 @@ import {
   TextField,
   notify,
 } from '../../ui/index.ts'
+import { useSectionHeader } from '../settings/section-header.ts'
 import { useSession } from '../shell/session.ts'
 import { type ForgeDraft, toForgeDraft, toForgeInput, validateForgeDraft } from './forge-form.ts'
 
@@ -58,6 +60,8 @@ export function ForgesSection() {
   const readable = canGlobal('settings:read')
   const writable = canGlobal('settings:write')
   const forges = useForges(readable)
+  const integration = useIntegrationForges(readable)
+  const factsOf = (id: string) => integration.data?.forges.find((forge) => forge.id === id)
   const credentials = useCredentials(can('credentials:read'))
   const { remove, removeSshKey } = useForgeMutations()
   const [editing, setEditing] = useState<ForgeEntry | 'new' | null>(null)
@@ -65,6 +69,11 @@ export function ForgesSection() {
   const [deleting, setDeleting] = useState<ForgeEntry | null>(null)
   const [unkeying, setUnkeying] = useState<ForgeEntry | null>(null)
   const [hooking, setHooking] = useState<ForgeEntry | null>(null)
+  useSectionHeader(
+    readable && writable
+      ? { primary: { label: 'Add forge', icon: Plus, onPress: () => setEditing('new') } }
+      : undefined,
+  )
   if (!readable) return null
   const list = forges.data?.entries ?? []
   const tokens = (credentials.data?.credentials ?? []).filter((c) => c.kind === 'gitlab')
@@ -73,11 +82,11 @@ export function ForgesSection() {
 
   return (
     <Panel
-      title="Forges"
+      title={<span id="forges">Forges</span>}
       description="Where repositories live. A forge uses a GitLab token credential and can issue an SSH key on that account for cloning, pushing and signing commits."
       actions={
         writable ? (
-          <Button variant="secondary" size="sm" onPress={() => setEditing('new')}>
+          <Button variant="ghost" size="sm" onPress={() => setEditing('new')}>
             <Plus className="size-4" />
             Add forge
           </Button>
@@ -120,6 +129,22 @@ export function ForgesSection() {
                           ? ` · token ${nameOf(forge.data.credentialId) ?? ''}`
                           : ''}
                       </div>
+                      {factsOf(forge.id) ? (
+                        <div className="text-xs text-muted">
+                          Repositories are <span className="font-mono">{forge.id}:path</span> ·{' '}
+                          {plural(factsOf(forge.id)!.repos, 'repository', 'repositories')} ·{' '}
+                          {factsOf(forge.id)!.lastWebhookAt ? (
+                            <span title={formatDateTime(factsOf(forge.id)!.lastWebhookAt!)}>
+                              last webhook delivery{' '}
+                              {formatRelative(factsOf(forge.id)!.lastWebhookAt!)}
+                            </span>
+                          ) : factsOf(forge.id)!.webhook ? (
+                            'no webhook delivery yet'
+                          ) : (
+                            'no webhook, changes arrive by polling'
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   {writable ? (

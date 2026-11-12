@@ -56,7 +56,16 @@ describe('merge request flow with the version after acceptance', () => {
       next: '1.1.0',
       ahead: 2,
       tickets: ['ABC-2', 'ABC-3'],
+      tasks: 2,
+      leftOut: 0,
+      blockers: [],
+      acceptanceRequired: true,
+      environments: [
+        { name: 'preprod', status: 'no-pipeline' },
+        { name: 'prod', status: 'no-pipeline' },
+      ],
     })
+    expect(boardRow(settings, current, now).reasons.length).toBeGreaterThan(0)
 
     const proposal = planRelease({ step: 'propose', facts: current, settings, now })
     expect(proposal.title).toBe('Release candidate 2026-11-01')

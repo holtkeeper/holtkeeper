@@ -1,6 +1,6 @@
 import type { Grant } from '@holtkeeper/access'
 import type { Secret } from '@holtkeeper/forge'
-import type { AuditStore, ExternalAccountStore, UserStore } from '@holtkeeper/store'
+import type { AuditStore, ExternalAccountStore, KvStore, UserStore } from '@holtkeeper/store'
 
 /** One OpenID Connect provider users can sign in with. */
 export interface OidcProviderOptions {
@@ -38,6 +38,12 @@ export interface ForgeIssuer {
 /** Configuration of `usersAuth`. */
 export interface UsersAuthOptions {
   store: UserStore
+  /**
+   * The server's key-value store (`store.kv`). With it, `UserView.invite` tracks enrollment links
+   * (`users:invite:<id>`) and `UserView.teams` honours the home groups people picked
+   * (`prefs:<id>`); without it there are no invite states and teams come from grants.
+   */
+  kv?: Pick<KvStore, 'get' | 'set'>
   /**
    * Receives sign-ins and what users change about themselves (`user.*`, `passkey.*`,
    * `identity.*`, `account.linked`) when given. Admin changes are audited by the server's

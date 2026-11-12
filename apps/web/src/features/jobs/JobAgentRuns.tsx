@@ -3,7 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 
 import { useJobRuns, useJobTranscript } from '../../api/queries.ts'
-import { formatCost } from '../../lib/chat.ts'
+import { formatUsd } from '../../lib/ai-usage.ts'
 import { formatDuration } from '../../lib/format.ts'
 import { ErrorState, Placeholder, Tag } from '../../ui/index.ts'
 
@@ -52,7 +52,7 @@ function TranscriptLine({ line }: { line: Line }) {
         <p className={`text-[11px] ${line.outcome === 'ok' ? 'text-muted' : 'text-bad'}`}>
           Ended {line.outcome}
           {line.turns !== undefined ? ` after ${line.turns} turns` : ''}
-          {line.costUsd !== undefined ? ` · ${formatCost(line.costUsd)}` : ''}
+          {line.costUsd !== undefined ? ` · ${formatUsd(line.costUsd)}` : ''}
           {line.error ? ` · ${line.error}` : ''}
         </p>
       )
@@ -102,7 +102,7 @@ function Run({ jobId, run }: { jobId: string; run: AiUsageRecord }) {
           {run.outputTokens.toLocaleString()} out · {run.turns} turns ·{' '}
           {formatDuration(run.durationMs)}
         </span>
-        <span className="mono w-14 shrink-0 text-right tabular">{formatCost(run.costUsd)}</span>
+        <span className="mono w-14 shrink-0 text-right tabular">{formatUsd(run.costUsd)}</span>
       </button>
       {open && ref !== undefined ? <Transcript jobId={jobId} transcriptRef={ref} /> : null}
     </li>
@@ -120,7 +120,7 @@ export function JobAgentRuns({ jobId, live }: { jobId: string; live: boolean }) 
     <section className="flex flex-col gap-1">
       <h3 className="flex items-baseline gap-2 text-xs font-medium text-muted">
         Agent runs
-        <span className="mono text-foreground">{formatCost(runs.data.costUsd)}</span>
+        <span className="mono text-foreground">{formatUsd(runs.data.costUsd)}</span>
       </h3>
       <ul>
         {runs.data.runs.map((run) => (

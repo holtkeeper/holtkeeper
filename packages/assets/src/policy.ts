@@ -40,6 +40,7 @@ export const assetsPolicySetting = {
   description:
     'Formats, size and dimension limits, ignored files and budgets assets are checked against.',
   section: 'Repositories',
+  default: defaultAssetsPolicy,
   schema: assetsPolicySchema,
   help,
   presets: [

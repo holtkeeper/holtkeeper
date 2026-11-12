@@ -120,17 +120,6 @@ export function excerpt(markdown: string, max = 280): string {
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
-/** `url` when it is an absolute http(s) URL, else `undefined`; third-party links go through it. */
-export const httpUrl = (url: string | undefined): string | undefined => {
-  if (!url) return undefined
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined
-  } catch {
-    return undefined
-  }
-}
-
 /** One line about an indexing run: libraries, versions added and removed, failures, duration. */
 export function runSummary(run: LibraryIndexRun): string {
   const parts = [

@@ -40,3 +40,48 @@ export function pollingCadence(view: RepoUpdatesView): {
     }
   return { text, tone: 'default' }
 }
+
+/** One row of the Updates section's event list: a webhook delivery or a poll. */
+export interface UpdateEvent {
+  at: string
+  via: 'webhook' | 'poll'
+  /** What arrived or how the poll started. */
+  event: string
+  result: string
+  failed: boolean
+  durationMs: number
+}
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+
+/** What a webhook delivery did, in words. */
+export function deliveryResult(
+  delivery: NonNullable<RepoUpdatesView['webhook']>['deliveries'][number],
+): string {
+  if (delivery.error) return `Rejected: ${delivery.error}`
+  if (delivery.ignored) return `Ignored: ${delivery.ignored}`
+  return `${plural(delivery.enqueued, 'job')} queued`
+}
+
+/** Webhook deliveries and polls of a repository in one list, newest first. */
+export function updateEvents(view: RepoUpdatesView): UpdateEvent[] {
+  const deliveries = (view.webhook?.deliveries ?? []).map((delivery): UpdateEvent => ({
+    at: delivery.at,
+    via: 'webhook',
+    event: delivery.summary ?? delivery.event,
+    result: deliveryResult(delivery),
+    failed: delivery.error !== undefined,
+    durationMs: delivery.durationMs,
+  }))
+  const polls = view.polling.attempts.map((attempt): UpdateEvent => ({
+    at: attempt.at,
+    via: 'poll',
+    event: attempt.trigger === 'manual' ? 'Poll by hand' : 'Scheduled poll',
+    result: attempt.error
+      ? `Failed: ${attempt.error}`
+      : `${plural(attempt.events ?? 0, 'change')}, ${plural(attempt.enqueued ?? 0, 'job')}`,
+    failed: attempt.error !== undefined,
+    durationMs: attempt.durationMs,
+  }))
+  return [...deliveries, ...polls].toSorted((a, b) => b.at.localeCompare(a.at))
+}

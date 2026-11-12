@@ -1,17 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { RepoTarget, Scope } from '@holtkeeper/access'
-import type { AiUsageRecord, SettingEntry, Store } from '@holtkeeper/store'
+import type { NewAiUsageRecord, SettingEntry, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import {
   applicableBudgets,
+  broadestBudget,
   budgetGuard,
   budgetSchema,
   budgetStatuses,
   parseBudgets,
 } from './budget.ts'
-import { monthRange, previousMonth, projectPeriodEnd, weekRange } from './period.ts'
+import { automaticStopsAt, spendForecast } from './forecast.ts'
+import { monthRange, periodSpans, previousWeek, weekRange } from './period.ts'
 
 const app: RepoTarget = { forge: 'work', path: 'games/app', groups: ['games'] }
 
@@ -25,8 +27,8 @@ const entry = (
 const spend = (
   at: string,
   costUsd: number,
-  overrides: Partial<Omit<AiUsageRecord, 'id'>> = {},
-): Omit<AiUsageRecord, 'id'> => ({
+  overrides: Partial<NewAiUsageRecord> = {},
+): NewAiUsageRecord => ({
   at,
   repo: { forge: app.forge, path: app.path },
   groups: app.groups,
@@ -54,7 +56,6 @@ describe('periods', () => {
       key: '2026-10',
     })
     expect(monthRange(new Date('2026-12-15T00:00:00.000Z')).to).toBe('2027-01-01T00:00:00.000Z')
-    expect(previousMonth(new Date('2026-01-10T00:00:00.000Z')).key).toBe('2025-12')
   })
 
   test('weeks start on Monday 00:00 in the given time zone', () => {
@@ -84,16 +85,55 @@ describe('periods', () => {
     )
   })
 
-  test('projects period-end spend linearly', () => {
-    const week = weekRange(new Date('2026-11-09T00:00:00.000Z'), 'UTC')
-    expect(projectPeriodEnd(10, week, new Date('2026-11-12T12:00:00.000Z'))).toBeCloseTo(20)
-    expect(projectPeriodEnd(5, week, new Date('2026-11-09T00:00:00.000Z'))).toBe(5)
+  test('previousWeek steps back one local week', () => {
+    const week = weekRange(new Date('2026-10-28T12:00:00.000Z'), 'Europe/Berlin')
+    expect(previousWeek(week, 'Europe/Berlin')).toEqual({
+      from: '2026-10-18T22:00:00.000Z',
+      to: '2026-10-25T23:00:00.000Z',
+      key: '2026-10-19',
+    })
+  })
+
+  test('period spans compare the same elapsed span of the period before', () => {
+    const now = new Date('2026-11-12T12:00:00.000Z')
+    expect(periodSpans('week', now, 'UTC')).toEqual({
+      current: { from: '2026-11-09T00:00:00.000Z', to: now.toISOString(), key: '2026-11-09' },
+      comparison: {
+        from: '2026-11-02T00:00:00.000Z',
+        to: '2026-11-05T12:00:00.000Z',
+        key: '2026-11-02',
+      },
+    })
+    expect(periodSpans('month', now, 'UTC')).toEqual({
+      current: { from: '2026-11-01T00:00:00.000Z', to: now.toISOString(), key: '2026-11' },
+      comparison: {
+        from: '2026-10-01T00:00:00.000Z',
+        to: '2026-10-12T12:00:00.000Z',
+        key: '2026-10',
+      },
+    })
+    expect(periodSpans('month', new Date('2026-03-31T10:00:00.000Z')).comparison.to).toBe(
+      '2026-03-01T00:00:00.000Z',
+    )
+    expect(periodSpans('30d', now)).toEqual({
+      current: { from: '2026-10-13T12:00:00.000Z', to: now.toISOString(), key: '30d:2026-11-12' },
+      comparison: {
+        from: '2026-09-13T12:00:00.000Z',
+        to: '2026-10-13T12:00:00.000Z',
+        key: '30d:2026-10-13',
+      },
+    })
   })
 })
 
 describe('budget values', () => {
   test('defaults to $150 a week with a $25 reserve that blocks', () => {
-    expect(budgetSchema.parse({})).toEqual({ weeklyUsd: 150, reserveUsd: 25, action: 'block' })
+    expect(budgetSchema.parse({})).toEqual({
+      weeklyUsd: 150,
+      reserveUsd: 25,
+      action: 'block',
+      warnPercent: 80,
+    })
     expect(budgetSchema.safeParse({ weeklyUsd: 0 }).success).toBeFalse()
     expect(budgetSchema.safeParse({ reserveUsd: -1 }).success).toBeFalse()
   })
@@ -131,7 +171,7 @@ describe('budget resolution', () => {
   })
 })
 
-const setup = async (entries: SettingEntry[], records: Omit<AiUsageRecord, 'id'>[]) => {
+const setup = async (entries: SettingEntry[], records: NewAiUsageRecord[]) => {
   const store: Store = memoryStore()
   for (const e of entries) await store.settings.put(e)
   for (const r of records) await store.aiUsage.append(r)
@@ -288,7 +328,7 @@ describe('budgetGuard', () => {
   })
 })
 
-test('budgetStatuses reports weekly spend, percent and projection', async () => {
+test('budgetStatuses reports weekly spend, percent, forecast and when automatic work stops', async () => {
   const store = memoryStore()
   await store.aiUsage.append(spend('2026-11-09T01:00:00.000Z', 3))
   await store.aiUsage.append(spend('2026-11-10T00:00:00.000Z', 2, { taskKind: 'port' }))
@@ -306,14 +346,102 @@ test('budgetStatuses reports weekly spend, percent and projection', async () => 
     action: 'warn',
     weeklyUsd: 20,
     reserveUsd: 5,
+    warnPercent: 80,
     spentUsd: 5,
+    automaticUsd: 5,
     percent: 25,
-    projectedUsd: 10,
+    forecastUsd: 55,
+    automaticStopsAt: '2026-11-13T04:48:00.000Z',
     week: { from: '2026-11-09T00:00:00.000Z', to: '2026-11-16T00:00:00.000Z', key: '2026-11-09' },
   })
   expect(
     (await budgetStatuses([], store.aiUsage, now, { timeZone: 'UTC', includeDefault: true })).map(
-      (s) => [s.id, s.weeklyUsd, s.reserveUsd, s.spentUsd],
+      (s) => [s.id, s.weeklyUsd, s.reserveUsd, s.spentUsd, s.automaticStopsAt],
     ),
-  ).toEqual([['default', 150, 25, 5]])
+  ).toEqual([['default', 150, 25, 5, undefined]])
+})
+
+const status = (id: string, scope: Scope, percent: number) => ({ id, scope, percent })
+
+test('broadestBudget prefers a global budget, then the least specific, then the fullest', () => {
+  expect(
+    broadestBudget([
+      status('repo', { repos: ['work:games/app'] }, 90),
+      status('all', { all: true }, 10),
+    ])?.id,
+  ).toBe('all')
+  expect(
+    broadestBudget([
+      status('repo', { repos: ['work:games/app'] }, 90),
+      status('games', { groups: ['games'] }, 10),
+      status('tools', { groups: ['tools'] }, 40),
+    ])?.id,
+  ).toBe('tools')
+  expect(broadestBudget([])).toBeUndefined()
+})
+
+describe('spendForecast', () => {
+  const now = new Date('2026-11-12T12:00:00.000Z')
+
+  test('adds the mean of the same remaining span of the last 4 full weeks', async () => {
+    const store = memoryStore()
+    const records = [
+      spend('2026-11-09T08:00:00.000Z', 6),
+      spend('2026-11-10T08:00:00.000Z', 4, { interactive: true, actor: 'jane' }),
+      spend('2026-11-07T08:00:00.000Z', 8),
+      spend('2026-11-03T08:00:00.000Z', 100),
+      spend('2026-10-31T08:00:00.000Z', 4, { interactive: true, actor: 'jane' }),
+      spend('2026-10-24T08:00:00.000Z', 12),
+      spend('2026-10-17T08:00:00.000Z', 20),
+      spend('2026-10-10T08:00:00.000Z', 999),
+    ]
+    await Promise.all(records.map((record) => store.aiUsage.append(record)))
+    expect(await spendForecast(store.aiUsage, now, { timeZone: 'UTC' })).toEqual({
+      week: { from: '2026-11-09T00:00:00.000Z', to: '2026-11-16T00:00:00.000Z', key: '2026-11-09' },
+      spentUsd: 10,
+      automaticUsd: 6,
+      forecastUsd: 10 + (8 + 4 + 12 + 20) / 4,
+      automaticForecastUsd: 6 + (8 + 12 + 20) / 4,
+      automaticWeeklyMeanUsd: (108 + 12 + 20) / 4,
+      weeks: 4,
+    })
+    const people = await spendForecast(store.aiUsage, now, {
+      timeZone: 'UTC',
+      filter: { origin: 'interactive' },
+    })
+    expect(people).toMatchObject({ spentUsd: 4, forecastUsd: 4 + 4 / 2, weeks: 2 })
+  })
+
+  test('without a full past week the pace so far is extended to the week end', async () => {
+    const store = memoryStore()
+    await store.aiUsage.append(spend('2026-11-10T08:00:00.000Z', 7))
+    expect(await spendForecast(store.aiUsage, now, { timeZone: 'UTC' })).toMatchObject({
+      spentUsd: 7,
+      forecastUsd: 14,
+      automaticForecastUsd: 14,
+      automaticWeeklyMeanUsd: 14,
+      weeks: 0,
+    })
+    const early = new Date('2026-11-09T06:00:00.000Z')
+    await store.aiUsage.append(spend('2026-11-09T01:00:00.000Z', 1))
+    expect((await spendForecast(store.aiUsage, early, { timeZone: 'UTC' })).forecastUsd).toBe(7)
+    expect((await spendForecast(memoryStore().aiUsage, now, { timeZone: 'UTC' })).forecastUsd).toBe(
+      0,
+    )
+  })
+})
+
+test('automaticStopsAt spreads the forecast over the rest of the week', () => {
+  const week = {
+    from: '2026-11-09T00:00:00.000Z',
+    to: '2026-11-16T00:00:00.000Z',
+    key: '2026-11-09',
+  }
+  const now = new Date('2026-11-12T12:00:00.000Z')
+  const budget = { weeklyUsd: 150, reserveUsd: 25 }
+  expect(automaticStopsAt(budget, { week, spentUsd: 100, forecastUsd: 150 }, now)).toBe(
+    '2026-11-14T06:00:00.000Z',
+  )
+  expect(automaticStopsAt(budget, { week, spentUsd: 100, forecastUsd: 125 }, now)).toBeUndefined()
+  expect(automaticStopsAt(budget, { week, spentUsd: 125, forecastUsd: 200 }, now)).toBeUndefined()
 })

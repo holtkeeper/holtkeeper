@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 
+import { assetsMetrics, parseAssetsMetrics } from './analysis.ts'
 import type { AssetsData } from './data.ts'
 import { assetsSummary } from './summary.ts'
 
@@ -144,4 +145,30 @@ test('the row limit counts what it leaves out', () => {
   const summary = assetsSummary(data, 1)
   expect(summary.rows).toHaveLength(1)
   expect(summary.more).toBe(2)
+})
+
+test('metrics: weight per kind, policy counts, file rows and the delta to the previous record', () => {
+  const metrics = assetsMetrics(data)
+  expect(metrics).toEqual({
+    rows: assetsSummary(data).rows,
+    moreRows: 0,
+    files: 4,
+    bytes: 1_340_000,
+    kinds: { image: 940_000, audio: 400_000 },
+    errors: 1,
+    warnings: 2,
+    budgets: 1,
+    savings: 900_000,
+    duplicateBytes: 20_000,
+  })
+  expect(assetsMetrics(data, { previous: { ...metrics, bytes: 1_000_000 } }).delta).toBe(340_000)
+})
+
+test('stored metrics read back, older ones without rows read as having none', () => {
+  const metrics = assetsMetrics(data)
+  expect(parseAssetsMetrics(JSON.parse(JSON.stringify(metrics)))).toEqual(metrics)
+  const { rows: _rows, moreRows: _more, ...older } = metrics
+  expect(parseAssetsMetrics(older)).toEqual({ ...older, rows: [], moreRows: 0 })
+  expect(parseAssetsMetrics({ files: 'x' })).toBeUndefined()
+  expect(parseAssetsMetrics(undefined)).toBeUndefined()
 })

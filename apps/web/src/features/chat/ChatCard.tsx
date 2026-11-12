@@ -22,7 +22,7 @@ import {
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import { useTaskGroupMutations, useWriteTasks } from '../../api/queries.ts'
+import { useTaskGroupMutations } from '../../api/queries.ts'
 import { type FormValues, formCommand, initialValues, missingFields } from '../../lib/chat.ts'
 import { taskCancellable, taskStatusLabel, taskStatusTone } from '../../lib/tasks.ts'
 import {
@@ -37,7 +37,6 @@ import {
   buttonClass,
   notify,
 } from '../../ui/index.ts'
-import { WriteTasksOff } from '../tasks/TaskGroupView.tsx'
 
 const toneBar: Record<ChatCardTone, string> = {
   neutral: 'bg-default',
@@ -366,129 +365,104 @@ function Block({
 type TaskCardBlock = Extract<ChatCardBlock, { type: 'task' }>
 
 /**
- * A proposed code change: summary, target repositories with their merge requests, the status, a
- * link to the task on the Tasks page and, while it is proposed, Approve and Cancel. Approving
- * queues the change for the person who clicked; the server refuses when they may not run tasks
- * there.
+ * A code change: summary, a step per repository as the server updates it (or the repositories
+ * with their merge requests on cards without steps), the status, links to its Inbox item while it
+ * waits and to the task, and Cancel while something can still stop. Approval happens in the Inbox
+ * only.
  */
 function TaskBlock({ block }: { block: TaskCardBlock }) {
   const tasks = useTaskGroupMutations()
-  const [confirming, setConfirming] = useState<'approve' | 'cancel'>()
-  const write = useWriteTasks(confirming === 'approve')
-  const switchedOff = write.data?.enabled === false
-  const close = () => setConfirming(undefined)
-  const busy = tasks.approve.isPending || tasks.cancel.isPending
+  const [confirming, setConfirming] = useState(false)
   const groupId = block.groupId
-  const open = groupId !== undefined && block.status === 'proposed'
+  const waiting = groupId !== undefined && block.status === 'proposed'
   const cancellable = groupId !== undefined && taskCancellable(block.status)
   const merge = new Map((block.mergeRequests ?? []).map((mr) => [mr.repo, mr]))
   const cap = block.budgetUsd !== undefined ? `$${block.budgetUsd.toFixed(2)}` : undefined
   return (
     <div className="flex flex-col gap-2">
       <Markdown text={block.summary} className="text-sm" />
-      <ul className="flex flex-col gap-1">
-        {block.repos.map((repo) => {
-          const mr = merge.get(repo)
-          return (
-            <li key={repo} className="flex flex-wrap items-center gap-2 text-xs">
-              <Tag mono>{repo}</Tag>
-              {mr ? (
-                <a
-                  href={mr.url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="mono inline-flex items-center gap-1 hover:underline"
-                >
-                  !{mr.id}
-                  {mr.draft ? ' draft' : ''}
-                  <ExternalLink aria-hidden className="size-3" />
-                </a>
-              ) : null}
-            </li>
-          )
-        })}
-      </ul>
+      {block.steps?.length ? (
+        <Steps items={block.steps} />
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {block.repos.map((repo) => {
+            const mr = merge.get(repo)
+            return (
+              <li key={repo} className="flex flex-wrap items-center gap-2 text-xs">
+                <Tag mono>{repo}</Tag>
+                {mr ? (
+                  <a
+                    href={mr.url}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="mono inline-flex items-center gap-1 hover:underline"
+                  >
+                    !{mr.id}
+                    {mr.draft ? ' draft' : ''}
+                    <ExternalLink aria-hidden className="size-3" />
+                  </a>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Tag tone={taskStatusTone[block.status]} dot>
           {taskStatusLabel[block.status]}
         </Tag>
-        {open && cap ? <span className="mono text-xs text-muted">cap {cap}</span> : null}
-        {groupId !== undefined ? (
-          <Link
-            to="/tasks"
-            search={{ group: groupId }}
-            className="text-xs text-muted hover:text-foreground hover:underline"
-          >
-            Details
-          </Link>
-        ) : null}
-        {cancellable ? (
-          <div className="ml-auto flex gap-2">
+        {waiting && cap ? <span className="mono text-xs text-muted">cap {cap}</span> : null}
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          {waiting ? (
+            <Link
+              to="/inbox"
+              search={{ item: `task:${groupId}`, kind: 'task' }}
+              className={buttonClass('secondary', 'sm', 'no-underline')}
+            >
+              Review in Inbox
+            </Link>
+          ) : null}
+          {groupId !== undefined ? (
+            <Link
+              to="/ops/tasks"
+              search={{ group: groupId }}
+              className={buttonClass('ghost', 'sm', 'no-underline')}
+            >
+              Task details
+            </Link>
+          ) : null}
+          {cancellable ? (
             <Button
               size="sm"
               variant="ghost"
-              isDisabled={busy}
-              onPress={() => setConfirming('cancel')}
+              isDisabled={tasks.cancel.isPending}
+              onPress={() => setConfirming(true)}
             >
-              Cancel
+              Cancel task
             </Button>
-            {open ? (
-              <Button
-                size="sm"
-                variant="primary"
-                isDisabled={busy}
-                onPress={() => setConfirming('approve')}
-              >
-                Approve
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
+          ) : null}
+        </span>
       </div>
-      {open ? (
-        <ConfirmDialog
-          isOpen={confirming === 'approve'}
-          onOpenChange={(isOpen) => !isOpen && close()}
-          title="Run this change?"
-          confirmLabel="Approve and run"
-          isPending={tasks.approve.isPending}
-          isDisabled={switchedOff}
-          onConfirm={() =>
-            tasks.approve.mutate(groupId, {
-              onSuccess: () => {
-                close()
-                notify.success('Queued on the write workers')
-              },
-              onError: (error) => {
-                close()
-                notify.error('Not started', messageOf(error))
-              },
-            })
-          }
-        >
-          An agent changes{' '}
-          {block.repos.length === 1
-            ? 'this repository'
-            : `these ${block.repos.length} repositories`}{' '}
-          and opens draft merge requests for review. It runs as your request
-          {cap ? `, capped at ${cap}` : ''}.{switchedOff ? <WriteTasksOff /> : null}
-        </ConfirmDialog>
+      {waiting ? (
+        <p className="text-xs text-muted">
+          Approvals live in the Inbox, next to everything else waiting on people.
+        </p>
       ) : null}
       {cancellable ? (
         <ConfirmDialog
-          isOpen={confirming === 'cancel'}
-          onOpenChange={(isOpen) => !isOpen && close()}
+          isOpen={confirming}
+          onOpenChange={setConfirming}
           title="Cancel this task?"
           confirmLabel="Cancel it"
           isPending={tasks.cancel.isPending}
           onConfirm={() =>
             tasks.cancel.mutate(groupId, {
               onSuccess: () => {
-                close()
+                setConfirming(false)
                 notify.success('Task cancelled')
               },
               onError: (error) => {
-                close()
+                setConfirming(false)
                 notify.error('Not cancelled', messageOf(error))
               },
             })

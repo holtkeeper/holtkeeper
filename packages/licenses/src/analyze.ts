@@ -6,6 +6,7 @@ import {
   defaultAllow,
   defaultDeny,
   type LicensedPackage,
+  type LicenseException,
   type LicensePolicyData,
   type LicensesData,
 } from './model.ts'
@@ -18,19 +19,37 @@ export interface LicensePolicyOptions {
   deny?: readonly string[]
   /** Package names (`*` wildcards allowed) whose licenses are not judged. */
   ignore?: readonly string[]
+  /** Licenses that need a sign-off even when `allow` matches them. Default none. */
+  review?: readonly string[]
   /** `violation` judges packages with unknown licenses not allowed. Default `warn`. */
   unknown?: 'warn' | 'violation'
+  /** `ignore` leaves out packages only dev dependency groups use. Default `check`. */
+  devDependencies?: 'check' | 'ignore'
+  /** Packages accepted although their license would not pass. Default none. */
+  exceptions?: readonly LicenseException[]
   /** Warn when the repository itself has no license file. Default false. */
   requireProjectLicense?: boolean
 }
 
-/** The policy with defaults applied. */
-export function resolvePolicy(options: LicensePolicyOptions = {}): LicensePolicyData {
+/**
+ * The policy with defaults applied. With `today` (`YYYY-MM-DD`), exceptions that expired before it
+ * are left out.
+ */
+export function resolvePolicy(
+  options: LicensePolicyOptions = {},
+  today?: string,
+): LicensePolicyData {
+  const exceptions = (options.exceptions ?? []).filter(
+    (exception) => !today || !exception.expires || exception.expires >= today,
+  )
   return {
     allow: [...(options.allow ?? defaultAllow)],
     deny: [...(options.deny ?? defaultDeny)],
     ignore: [...(options.ignore ?? [])],
+    ...(options.review?.length ? { review: [...options.review] } : {}),
     ...(options.unknown === 'violation' ? { unknown: 'violation' as const } : {}),
+    ...(options.devDependencies === 'ignore' ? { devDependencies: 'ignore' as const } : {}),
+    ...(exceptions.length ? { exceptions: exceptions.map((exception) => ({ ...exception })) } : {}),
     ...(options.requireProjectLicense ? { requireProjectLicense: true } : {}),
   }
 }
@@ -60,9 +79,19 @@ const namePattern = (pattern: string) =>
  */
 export type InternalPackages = (ecosystem: string, name: string) => string | undefined
 
+const devOnly = (pkg: ScannedPackage) =>
+  !!pkg.groups?.length && pkg.groups.every((group) => group === 'dev')
+
+const sameLicense = (declared: readonly string[], wanted: string) => {
+  const text = declared.join(' AND ').toLowerCase()
+  return text === wanted.trim().toLowerCase()
+}
+
 /**
- * Judges every package against the policy: `ignore` first, then `internal`, then the licenses.
- * Pure: the same packages, policy and internal packages give the same verdicts.
+ * Judges every package against the policy: `ignore` first (and dev-only packages when
+ * `devDependencies` is `ignore`), then `internal`, then the licenses; a package whose licenses do
+ * not pass becomes `excepted` when one of `policy.exceptions` matches its name, version and
+ * declared licenses. Pure: the same packages, policy and internal packages give the same verdicts.
  */
 export function evaluatePackages(
   packages: readonly ScannedPackage[],
@@ -71,8 +100,20 @@ export function evaluatePackages(
 ): LicensedPackage[] {
   const evaluate = licenseEvaluator(policy)
   const ignored = policy.ignore.map(namePattern)
-  return packages.map((pkg) => {
+  const exceptions = (policy.exceptions ?? []).map((exception) => ({
+    exception,
+    name: namePattern(exception.package),
+  }))
+  const exceptionFor = (pkg: ScannedPackage) =>
+    exceptions.find(
+      ({ exception, name }) =>
+        name.test(pkg.name) &&
+        (!exception.version || exception.version === pkg.version) &&
+        (!exception.license || sameLicense(pkg.licenses, exception.license)),
+    )?.exception
+  return packages.map((pkg): LicensedPackage => {
     if (ignored.some((pattern) => pattern.test(pkg.name))) return { ...pkg, verdict: 'ignored' }
+    if (policy.devDependencies === 'ignore' && devOnly(pkg)) return { ...pkg, verdict: 'ignored' }
     const definedIn = internal?.(pkg.ecosystem, pkg.name)
     if (definedIn !== undefined) return { ...pkg, verdict: 'internal', definedIn }
     const result = evaluate(pkg.licenses)
@@ -84,6 +125,14 @@ export function evaluatePackages(
           ? pkg.licenses
           : ['UNKNOWN']
         : result.culprits
+    const exception = verdict === 'allowed' ? undefined : exceptionFor(pkg)
+    if (exception)
+      return {
+        ...pkg,
+        verdict: 'excepted',
+        exception: exception.reason,
+        ...(culprits.length > 0 ? { culprits } : {}),
+      }
     return { ...pkg, verdict, ...(culprits.length > 0 ? { culprits } : {}) }
   })
 }
@@ -98,6 +147,8 @@ export interface AnalyzeLicensesOptions {
   binary?: string
   /** Extra arguments for `osv-scanner scan source`. */
   args?: readonly string[]
+  /** The day exceptions are checked against, `YYYY-MM-DD`. Default today (UTC). */
+  today?: string
   signal?: AbortSignal
 }
 
@@ -129,6 +180,7 @@ export async function analyzeLicenses({
   internal,
   binary = 'osv-scanner',
   args = [],
+  today = new Date().toISOString().slice(0, 10),
   signal,
 }: AnalyzeLicensesOptions): Promise<LicensesData> {
   // osv-scanner reports resolved paths; resolve too so sources come out relative to `dir`.
@@ -153,7 +205,7 @@ export async function analyzeLicenses({
     options,
     [0, VULNERABILITIES_FOUND],
   )
-  const resolved = resolvePolicy(policy)
+  const resolved = resolvePolicy(policy, today)
   return {
     tool: { name: 'osv-scanner', ...(version ? { version } : {}) },
     policy: resolved,

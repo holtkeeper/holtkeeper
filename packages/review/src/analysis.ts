@@ -9,6 +9,7 @@ import {
   metric,
 } from '@holtkeeper/report'
 import type { AnalysisRecord } from '@holtkeeper/store'
+import { z } from 'zod'
 
 import { countBySeverity, walkthroughTable } from './format.ts'
 import {
@@ -151,10 +152,75 @@ function findingsSection(data: ReviewData, previous?: ReviewData): Section {
   return { id: 'findings', title: 'Findings', blocks }
 }
 
-export const reviewAnalysis = defineAnalysis<ReviewData>({
+const severityCounts = z.object({
+  info: z.number(),
+  minor: z.number(),
+  major: z.number(),
+  critical: z.number(),
+})
+
+/**
+ * Stored headline numbers of one `review` record (one review run of a merge request). Parsing
+ * stored metrics with it accepts records stored before a field existed: those fields are absent.
+ */
+export const reviewMetricsSchema = z.object({
+  mergeRequest: z.number(),
+  title: z.string().optional(),
+  url: z.string().optional(),
+  author: z.string().optional(),
+  verdict: z.enum(['looks-good', 'needs-changes', 'skipped']),
+  mode: z.enum(['full', 'incremental', 'reply', 'skipped']),
+  /** Findings the forge accepted as comments, in total and per severity (every one present). */
+  comments: z.number(),
+  severities: severityCounts,
+  /** Posted comments that carry a suggested replacement. */
+  suggestions: z.number(),
+  /** Findings the forge rejected. */
+  rejected: z.number(),
+  /** Discussions the run resolved. */
+  resolved: z.number(),
+  approved: z.boolean(),
+  costUsd: z.number().optional(),
+  /** Model of the main agent run, as `ReviewData.usage.model`. */
+  model: z.string().optional(),
+  durationMs: z.number().optional(),
+  /** As `ReviewData.guideScopes`; absent when the run named none. */
+  guideScopes: z.array(z.string()).optional(),
+})
+
+/** Parsed stored metrics of one review record; fields newer than the record are absent. */
+export type ReviewMetrics = z.infer<typeof reviewMetricsSchema>
+
+/** `ReviewMetrics` of `data`; every field the data has is set. */
+export function reviewMetrics(data: ReviewData): ReviewMetrics {
+  const now = posted(data)
+  const severities: Record<ReviewSeverity, number> = { info: 0, minor: 0, major: 0, critical: 0 }
+  for (const comment of now) severities[comment.severity] += 1
+  return {
+    mergeRequest: data.mergeRequest.id,
+    title: data.mergeRequest.title,
+    url: data.mergeRequest.webUrl,
+    author: data.mergeRequest.author,
+    verdict: data.verdict,
+    mode: data.mode,
+    comments: now.length,
+    severities,
+    suggestions: now.filter((comment) => comment.suggestion).length,
+    rejected: data.comments.length - now.length,
+    resolved: data.threads.filter((thread) => thread.action === 'resolved').length,
+    approved: data.approved,
+    ...(data.usage?.costUsd === undefined ? {} : { costUsd: data.usage.costUsd }),
+    ...(data.usage?.model ? { model: data.usage.model } : {}),
+    ...(data.durationMs === undefined ? {} : { durationMs: data.durationMs }),
+    ...(data.guideScopes?.length ? { guideScopes: data.guideScopes } : {}),
+  }
+}
+
+export const reviewAnalysis = defineAnalysis<ReviewData, ReviewMetrics>({
   kind: 'review',
   label: 'Code review',
   schema: reviewDataSchema,
+  metrics: reviewMetrics,
   summarize: (data) => metricsOf(data),
   toReport(current, previousRecord) {
     const data = current.data

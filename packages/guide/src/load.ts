@@ -2,7 +2,7 @@ import type { RepoTarget } from '@holtkeeper/access'
 import type { GuideSectionName, Store } from '@holtkeeper/store'
 
 import { familyOf } from './families.ts'
-import { type GuideTask, repoKey, scopesFor, sectionsForTask } from './model.ts'
+import { type GuideTask, guideSections, repoKey, scopesFor, sectionsForTask } from './model.ts'
 import { policiesFor } from './policies.ts'
 import { type GuideCaps, type RepoDoc, type ResolvedGuide, resolveGuide } from './resolve.ts'
 
@@ -11,7 +11,9 @@ export interface GuideRequest {
   repo: RepoTarget
   task: GuideTask
   section?: GuideSectionName
-  /** The repository's own rules files, when the caller has a checkout. */
+  /** The sections to read instead of the task's. */
+  focus?: readonly GuideSectionName[]
+  /** The repository's own rules files, when the caller has a checkout or read them from the forge. */
   repoDocs?: readonly RepoDoc[]
   /** Text to rank knowledge notes by. */
   query?: string
@@ -40,7 +42,9 @@ export function createGuideResolver(deps: {
     const [sections, settings, entries] = await Promise.all([
       store.guides.list({
         scopes: scopesFor(request.repo, family?.id),
-        sections: sectionsForTask(request.task, request.section),
+        sections: request.focus
+          ? guideSections.filter((name) => request.focus?.includes(name))
+          : sectionsForTask(request.task, request.section),
       }),
       store.settings.list(),
       notesChars === 0 ? [] : store.knowledge.list({ status: 'accepted' }),
@@ -49,6 +53,7 @@ export function createGuideResolver(deps: {
       repo: request.repo,
       task: request.task,
       ...(request.section && { section: request.section }),
+      ...(request.focus && { focus: request.focus }),
       ...(family && { family: { id: family.id, name: family.name } }),
       sections,
       ...(request.repoDocs && { repoDocs: request.repoDocs }),

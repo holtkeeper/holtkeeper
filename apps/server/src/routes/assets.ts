@@ -1,12 +1,43 @@
 import { can } from '@holtkeeper/access'
-import type { RepoAssetsView } from '@holtkeeper/api'
+import type { AssetsOverview, RepoAssetsView } from '@holtkeeper/api'
+import { assetKinds, assetProblemRules } from '@holtkeeper/assets'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import { z } from 'zod'
 
-import { repoAssetsView } from '../assets.ts'
-import { type Env, type ServerDeps, authorize, parseRepo, repoTarget } from '../context.ts'
+import { latestHeadsWithMetrics } from '../analyses.ts'
+import { ASSETS_PAGE_DEFAULT, assetsPage, assetsTable, repoAssetsView } from '../assets.ts'
+import {
+  type Env,
+  type ServerDeps,
+  authorize,
+  parseRepo,
+  principalOf,
+  readQuery,
+  repoKey,
+  repoTarget,
+} from '../context.ts'
+import { createFleetCache } from '../fleet-cache.ts'
+import { canSee } from '../visibility.ts'
+
+const overviewQuery = z.object({
+  group: z.string().max(200).optional(),
+  repo: z.string().max(500).optional(),
+  status: z.enum(['policy', 'saving', 'any']).optional(),
+  kind: z.enum(assetKinds).optional(),
+  problem: z.enum(assetProblemRules).optional(),
+  format: z.string().max(20).optional(),
+  sort: z.enum(['severity', 'saving', 'size']).optional(),
+  cursor: z
+    .string()
+    .regex(/^\d{1,9}$/, 'cursor must come from nextCursor')
+    .optional(),
+  limit: z.coerce.number().int().positive().optional(),
+})
 
 /**
+ * `GET /assets`: the fleet Assets table over the newest `assets` record of every repository the
+ * caller may read (`analyses:read`), from stored metrics only, one page at a time.
  * `GET /assets/repo?repo=forge:path`: a repository's effective asset policy, the newest `assets`
  * record as a summary and the trend of recent records. Needs `analyses:read` on the repository;
  * the policy's entry is named only with `settings:read` on its scope.
@@ -14,6 +45,37 @@ import { type Env, type ServerDeps, authorize, parseRepo, repoTarget } from '../
 export function assetsRoutes(deps: ServerDeps) {
   const { store, config } = deps
   const app = new Hono<Env>()
+  const cache = createFleetCache()
+  const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
+
+  app.get('/assets', async (c) => {
+    const { group, repo: repoParam, cursor, limit, ...filters } = readQuery(c, overviewQuery)
+    const principal = principalOf(c)
+    const repo = parseRepo(repoParam)
+    const newest = (
+      await latestHeadsWithMetrics(store.analyses, kinds, {
+        kind: 'assets',
+        ...(repo ? { repo } : {}),
+      })
+    )
+      .map((head) => ({ head, target: repoTarget(config, head.repo) }))
+      .filter(
+        ({ target }) =>
+          canSee(principal, 'analyses:read', target) &&
+          (group === undefined || target.groups.includes(group)),
+      )
+    const table = await cache.read(
+      {
+        endpoint: `assets?${JSON.stringify([group, repoParam, filters])}`,
+        analysisIds: newest.map(({ head }) => head.id),
+        repos: newest.map(({ head }) => repoKey(head.repo)),
+      },
+      async () => assetsTable(newest, filters),
+    )
+    return c.json<AssetsOverview>(
+      assetsPage(table, Number(cursor ?? 0), limit ?? ASSETS_PAGE_DEFAULT),
+    )
+  })
 
   app.get('/assets/repo', async (c) => {
     const repo = parseRepo(c.req.query('repo'))

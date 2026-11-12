@@ -15,7 +15,7 @@ import { Button, Tooltip, notify } from '../../ui/index.ts'
 const sizes = {
   sm: 'size-6 rounded-md text-[10px]',
   md: 'size-9 rounded-lg text-xs',
-  lg: 'size-13 rounded-2xl text-base',
+  lg: 'size-10 rounded-[10px] text-[13px]',
 } as const
 
 /**
@@ -67,7 +67,7 @@ const sourceText = {
   generated: 'Generated from the path',
 } as const
 
-/** The large avatar of a repository page, with upload and reset for `settings:write`. */
+/** The avatar of the repository hub's header, with upload and reset for `settings:write`. */
 export function RepoAvatarEditor({ repo, writable }: { repo: RepoRef; writable: boolean }) {
   const info = useRepoAvatarInfo(repo)
   const { upload, reset } = useRepoAvatarMutations(repo)
@@ -108,11 +108,11 @@ export function RepoAvatarEditor({ repo, writable }: { repo: RepoRef; writable: 
           aria-label="Upload an avatar"
           disabled={upload.isPending}
           onClick={() => input.current?.click()}
-          className="relative block rounded-2xl focus-visible:outline-2 focus-visible:outline-focus"
+          className="relative block rounded-[10px] focus-visible:outline-2 focus-visible:outline-focus"
         >
           {avatar}
-          <span className="absolute inset-0 grid place-items-center rounded-2xl bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100">
-            <ImageUp className="size-5" />
+          <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100">
+            <ImageUp className="size-4" />
           </span>
         </button>
       </Tooltip>

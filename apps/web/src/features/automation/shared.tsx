@@ -2,14 +2,8 @@ import type { ConfigEntryView } from '@holtkeeper/api'
 import type { ReactNode } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import {
-  useConfigMutations,
-  useGroups,
-  useJobAnalyzers,
-  useSchedulePreview,
-} from '../../api/queries.ts'
-import { formatDateTime, formatRelative } from '../../lib/format.ts'
-import { ConfirmDialog, MultiToggle, Placeholder, TagInput, notify } from '../../ui/index.ts'
+import { useConfigMutations, useGroups, useJobAnalyzers } from '../../api/queries.ts'
+import { ConfirmDialog, MultiToggle, TagInput, notify } from '../../ui/index.ts'
 
 /** A titled block of a form. */
 export function FormSection({
@@ -70,7 +64,7 @@ export function AnalyzerPicker({
         <TagInput label={label} values={value} onChange={onChange} placeholder="licenses" />
       )}
       {description ? <span className="text-xs text-muted">{description}</span> : null}
-      {error ? <span className="text-xs text-danger">{error}</span> : null}
+      {error ? <span className="text-xs text-bad">{error}</span> : null}
     </div>
   )
 }
@@ -142,28 +136,5 @@ export function RemoveEntryDialog({
     >
       The {noun} and its history are removed.
     </ConfirmDialog>
-  )
-}
-
-/** The next few run times of a saved schedule. */
-export function NextRuns({ id, count = 3 }: { id: string; count?: number }) {
-  const preview = useSchedulePreview(id, count)
-  if (preview.isPending) return <Placeholder className="h-8 w-28" />
-  if (preview.isError)
-    return <span className="text-xs text-danger">{messageOf(preview.error)}</span>
-  const [first, ...rest] = preview.data.runs
-  if (!first) return <span className="text-sm text-muted">None soon</span>
-  const now = new Date()
-  return (
-    <div className="flex flex-col gap-0.5 whitespace-nowrap" title={preview.data.timezone}>
-      <span className="text-sm" title={formatDateTime(first)}>
-        {formatRelative(first, now)}
-      </span>
-      {rest.map((run) => (
-        <span key={run} className="text-xs text-muted">
-          {formatDateTime(run)}
-        </span>
-      ))}
-    </div>
   )
 }

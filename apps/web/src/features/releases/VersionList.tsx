@@ -1,169 +1,97 @@
-import type { ReleaseRepoView, ReleaseVersionView, RepoRef } from '@holtkeeper/api'
-import { ChevronRight, ExternalLink, History, PanelRight } from 'lucide-react'
+import type { ReleaseRepoView, RepoRef } from '@holtkeeper/api'
+import { History, PanelRight } from 'lucide-react'
 import { useState } from 'react'
 
-import { useReleaseTimeline, useReleaseVersion } from '../../api/queries.ts'
+import { useReleaseTimeline } from '../../api/queries.ts'
 import { neighbours } from '../../lib/flow.ts'
-import { formatDate, formatRelative, plural } from '../../lib/format.ts'
-import { countLabel, versionTicks } from '../../lib/releases.ts'
+import { formatDate, shortSha } from '../../lib/format.ts'
+import {
+  changesText,
+  filterVersions,
+  versionDeployCell,
+  versionEnvironments,
+} from '../../lib/release-timeline.ts'
 import {
   Button,
+  Count,
+  Dot,
   EmptyState,
   ErrorState,
+  FilterButton,
+  Kbd,
+  ListFooter,
   LoadMore,
-  Markdown,
   Placeholder,
-  SideSheet,
-  TickStrip,
-  Tooltip,
+  Table,
+  Td,
+  Th,
+  Tr,
 } from '../../ui/index.ts'
-import { DeployStrip } from './DeployStrip.tsx'
-import { BumpTag, TaskList } from './parts.tsx'
+import { BumpTag } from './parts.tsx'
+import { VersionSheet } from './VersionSheet.tsx'
 
-function VersionBody({
-  repo,
-  view,
-  tag,
-  full,
-}: {
-  repo: RepoRef
-  view: ReleaseRepoView
-  tag: string
-  full?: boolean
-}) {
-  const detail = useReleaseVersion(repo, tag)
-  if (detail.isPending) return <Placeholder className="h-24" />
-  if (detail.isError) return <ErrorState error={detail.error} />
-  const data = detail.data
-  return (
-    <div className="flex flex-col gap-4">
-      {full ? (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-          <BumpTag bump={data.bump} />
-          <span>{countLabel(data.commitCount, data.capped)}</span>
-          {data.previous ? (
-            <span>
-              since <span className="mono">{data.previous}</span>
-            </span>
-          ) : null}
-          {data.date ? <span>{formatDate(data.date)}</span> : null}
-          <span className="mono">{data.sha.slice(0, 8)}</span>
-          {data.compareUrl ? (
-            <a
-              href={data.compareUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
-            >
-              Compare <ExternalLink className="size-3" />
-            </a>
-          ) : null}
-        </div>
-      ) : null}
-      {full && data.deploy ? (
-        <DeployStrip repo={repo} view={view} tag={data.tag} initial={data.deploy} />
-      ) : null}
-      <section className="flex flex-col gap-2">
-        <h4 className="text-xs text-dim">Tasks · {data.tasks.length}</h4>
-        <TaskList tasks={data.tasks} />
-      </section>
-      <section className="flex flex-col gap-2">
-        <h4 className="text-xs text-dim">Changelog</h4>
-        {data.changelog.trim() ? (
-          <Markdown text={data.changelog} />
-        ) : (
-          <p className="text-sm text-muted">No entries.</p>
-        )}
-      </section>
-    </div>
-  )
-}
-
-function VersionRow({
-  repo,
-  view,
-  version,
-  onOpen,
-}: {
-  repo: RepoRef
-  view: ReleaseRepoView
-  version: ReleaseVersionView
-  onOpen: () => void
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const environments = view.settings.deploy.environments.map((env) => env.name)
-  const ticks = versionTicks(version.deploys, environments)
-  return (
-    <li className="border-b border-line last:border-b-0">
-      <div className="flex items-center gap-3 px-3 py-2">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${version.tag}`}
-          onClick={() => setExpanded((on) => !on)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <ChevronRight
-            className={`size-3.5 shrink-0 text-muted transition-transform ${expanded ? 'rotate-90' : ''}`}
-          />
-          <span className="mono w-32 shrink-0 truncate text-[13px] font-semibold">
-            {version.tag}
-          </span>
-          <BumpTag bump={version.bump} />
-          <span className="truncate text-xs text-muted">
-            {countLabel(version.commitCount, version.capped)}
-            {version.tickets.length ? ` · ${plural(version.tickets.length, 'task')}` : ''}
-          </span>
-        </button>
-        {ticks.length ? (
-          <TickStrip
-            ticks={ticks}
-            aria-label={ticks.map((tick) => tick.label).join(', ')}
-            className="hidden w-24 sm:flex"
-          />
-        ) : null}
-        <span className="hidden w-24 shrink-0 text-right text-xs text-dim sm:block">
-          {version.date ? formatRelative(version.date) : ''}
-        </span>
-        <Tooltip content="Open in the side sheet">
-          <Button
-            size="sm"
-            variant="ghost"
-            isIconOnly
-            aria-label={`Open ${version.tag}`}
-            onPress={onOpen}
-          >
-            <PanelRight className="size-3.5" />
-          </Button>
-        </Tooltip>
-      </div>
-      {expanded ? (
-        <div className="px-3 pb-3 pl-9">
-          <VersionBody repo={repo} view={view} tag={version.tag} />
-        </div>
-      ) : null}
-    </li>
-  )
-}
+const bumpOptions = [
+  { id: 'major', label: 'Major' },
+  { id: 'minor', label: 'Minor' },
+  { id: 'patch', label: 'Patch' },
+]
 
 /**
- * Past versions, newest first, loaded a page at a time as the list scrolls. A row expands to its
- * tasks and changelog; opening one shows it in the side sheet with its deploys, and J/K step
- * through the loaded versions.
+ * Past versions, newest first, a page at a time: a table with the bump, the changes, one column
+ * per environment with where the version stands there, the release date and commit. `query`
+ * (the page's search field) and the Bump and Environment filters narrow the loaded versions. A
+ * row opens the version sheet; J and K step through the shown rows.
  */
-export function VersionList({ repo, view }: { repo: RepoRef; view: ReleaseRepoView }) {
+export function VersionList({
+  repo,
+  view,
+  query = '',
+}: {
+  repo: RepoRef
+  view: ReleaseRepoView
+  query?: string
+}) {
   const timeline = useReleaseTimeline(repo)
   const [openTag, setOpenTag] = useState<string>()
-  const versions = timeline.data?.pages.flatMap((page) => page.versions) ?? []
+  const [bumps, setBumps] = useState<string[]>([])
+  const [deployedTo, setDeployedTo] = useState<string[]>([])
+  const loaded = timeline.data?.pages.flatMap((page) => page.versions) ?? []
   const total = timeline.data?.pages[0]?.total ?? 0
-  const tags = versions.map((version) => version.tag)
-  const step = neighbours(tags, openTag)
+  const environments = versionEnvironments(
+    view.settings.deploy.environments.map((env) => env.name),
+    loaded,
+  )
+  const versions = filterVersions(loaded, { query, bumps, environments: deployedTo })
+  const filtered = versions.length !== loaded.length
+  const step = neighbours(
+    versions.map((version) => version.tag),
+    openTag,
+  )
+  const opened = loaded.find((version) => version.tag === openTag)
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-xs text-dim">
-        Versions{total ? <span className="tabular"> · {total}</span> : null}
-      </h2>
+    <section aria-label="Versions" className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-[13px] font-semibold">Versions</h2>
+        {total ? <Count>{total}</Count> : null}
+        <span className="flex-1" />
+        <FilterButton
+          label="Bump"
+          all="All"
+          options={bumpOptions}
+          value={bumps}
+          onChange={setBumps}
+        />
+        {environments.length ? (
+          <FilterButton
+            label="Deployed to"
+            all="Any"
+            options={environments.map((name) => ({ id: name, label: name }))}
+            value={deployedTo}
+            onChange={setDeployedTo}
+          />
+        ) : null}
+      </div>
       <div className="overflow-hidden rounded-xl border border-line bg-panel">
         {timeline.isPending ? (
           <div className="flex flex-col gap-1 p-3">
@@ -173,42 +101,116 @@ export function VersionList({ repo, view }: { repo: RepoRef; view: ReleaseRepoVi
           </div>
         ) : timeline.isError ? (
           <ErrorState error={timeline.error} />
-        ) : versions.length === 0 ? (
+        ) : loaded.length === 0 ? (
           <EmptyState icon={<History />} title="No versions yet" />
+        ) : versions.length === 0 ? (
+          <EmptyState icon={<History />} title="No loaded version matches" />
         ) : (
-          <ul>
-            {versions.map((version) => (
-              <VersionRow
-                key={version.tag}
-                repo={repo}
-                view={view}
-                version={version}
-                onOpen={() => setOpenTag(version.tag)}
-              />
-            ))}
-          </ul>
+          <Table label={`Versions of ${repo.path}`}>
+            <thead>
+              <tr>
+                <Th>Version</Th>
+                <Th>Bump</Th>
+                <Th>Changes</Th>
+                {environments.map((name) => (
+                  <Th key={name}>
+                    <span className="mono">{name}</span>
+                  </Th>
+                ))}
+                <Th>Released</Th>
+                <Th>Commit</Th>
+                <Th>
+                  <span className="sr-only">Open</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {versions.map((version) => (
+                <Tr
+                  key={version.tag}
+                  selected={version.tag === openTag}
+                  onClick={() => setOpenTag(version.tag)}
+                >
+                  <Td>
+                    <span className="mono text-[13px] font-semibold">{version.tag}</span>
+                  </Td>
+                  <Td>
+                    <BumpTag bump={version.bump} />
+                  </Td>
+                  <Td className="whitespace-nowrap text-xs text-muted">{changesText(version)}</Td>
+                  {environments.map((name) => {
+                    const cell = versionDeployCell(version, name)
+                    return (
+                      <Td key={name} className="whitespace-nowrap text-xs">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Dot tone={cell.tone} />
+                          <span className={cell.tone === 'none' ? 'text-dim' : ''}>
+                            {cell.label}
+                          </span>
+                        </span>
+                      </Td>
+                    )
+                  })}
+                  <Td className="whitespace-nowrap text-xs text-muted">
+                    {version.date ? formatDate(version.date) : '—'}
+                  </Td>
+                  <Td>
+                    <span className="mono text-xs text-muted">{shortSha(version.sha)}</span>
+                  </Td>
+                  <Td align="right">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      isIconOnly
+                      aria-label={`Open ${version.tag} in the side sheet`}
+                      onPress={() => setOpenTag(version.tag)}
+                    >
+                      <PanelRight className="size-3.5" />
+                    </Button>
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
         )}
+        {loaded.length ? (
+          <ListFooter
+            className="border-t border-line"
+            shown={loaded.length}
+            total={total}
+            noun="versions"
+            {...(filtered ? { caption: `· ${versions.length} match` } : {})}
+            more={
+              timeline.hasNextPage ? (
+                <LoadMore
+                  onLoad={() => void timeline.fetchNextPage()}
+                  isPending={timeline.isFetchingNextPage}
+                >
+                  Older versions
+                </LoadMore>
+              ) : undefined
+            }
+            hints={
+              <>
+                Step <Kbd>J</Kbd>
+                <Kbd>K</Kbd> · open <Kbd>↵</Kbd>
+              </>
+            }
+          />
+        ) : null}
       </div>
-      {timeline.hasNextPage ? (
-        <LoadMore
-          onLoad={() => void timeline.fetchNextPage()}
-          isPending={timeline.isFetchingNextPage}
-          className="self-center"
-        >
-          Older versions
-        </LoadMore>
+      {opened ? (
+        <VersionSheet
+          key={opened.tag}
+          repo={repo}
+          view={view}
+          version={opened}
+          onClose={() => setOpenTag(undefined)}
+          {...(step.index >= 0 ? { index: step.index, total: versions.length } : {})}
+          {...(step.previous ? { onPrevious: () => setOpenTag(step.previous) } : {})}
+          {...(step.next ? { onNext: () => setOpenTag(step.next) } : {})}
+        />
       ) : null}
-      <SideSheet
-        open={openTag !== undefined}
-        onClose={() => setOpenTag(undefined)}
-        id={openTag}
-        title={repo.path}
-        {...(step.index >= 0 ? { index: step.index, total } : {})}
-        {...(step.previous ? { onPrevious: () => setOpenTag(step.previous) } : {})}
-        {...(step.next ? { onNext: () => setOpenTag(step.next) } : {})}
-      >
-        {openTag ? <VersionBody key={openTag} repo={repo} view={view} tag={openTag} full /> : null}
-      </SideSheet>
     </section>
   )
 }

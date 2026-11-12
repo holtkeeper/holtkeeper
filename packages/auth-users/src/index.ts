@@ -6,7 +6,9 @@ export type { ForgeIssuer, OidcProviderOptions, UsersAuthOptions } from './optio
 export type {
   ExternalAccountList,
   ExternalAccountView,
+  LinkGone,
   LinkInfo,
+  LinkRole,
   LinkResponse,
   UserList,
   UserView,

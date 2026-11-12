@@ -128,12 +128,15 @@ export function Switch({
 export function Checkbox({
   label,
   isSelected,
+  isIndeterminate,
   onChange,
   isDisabled,
   className,
 }: {
   label: ReactNode
   isSelected: boolean
+  /** Shows and announces a mixed state, for a select-all with part of the rows selected. */
+  isIndeterminate?: boolean
   onChange: (selected: boolean) => void
   isDisabled?: boolean
   className?: string
@@ -141,6 +144,7 @@ export function Checkbox({
   return (
     <HeroCheckbox
       isSelected={isSelected}
+      isIndeterminate={isIndeterminate === true}
       onChange={onChange}
       isDisabled={isDisabled === true}
       className={className}

@@ -112,6 +112,8 @@ export interface CommitConventions {
 /** One rule a commit message or branch name breaks. */
 export interface Problem {
   message: string
+  /** The rule field it breaks (`types`, `ticket`, `maxLength`, ...) or `pattern` for a forge pattern. */
+  rule?: string
   source: RuleSource
   /** Rules seen in history only are `warning`; configured and enforced rules are `error`. */
   severity: 'error' | 'warning'

@@ -21,7 +21,7 @@ type GroupMatch = string | string[]
 
 A repository can sit in several groups, so groups work as tags. A `groups` entry is a group name or a list of groups the repository must belong to all at once; entries combine with OR. `{ groups: ['tools', ['frontend', 'storefront']] }` covers every repository of `tools` and the repositories that are both `frontend` and `storefront`.
 
-Actions: `repos:read`, `audits:read`, `audits:run`, `audits:allowlist`, `analyses:read`, `analyses:run`, `catalog:read` (implied by `analyses:read` on the same scope), `releases:read`, `releases:run`, `tasks:run` (approve [write tasks](../../write-task/docs/README.md) that push a branch and open a merge request on the repository; for another team's repository the grant must cover it explicitly, see the server's agent tasks), `settings:read`, `settings:write`, `credentials:read`, `credentials:write`, `knowledge:read`, `knowledge:write`, `ai:read`, `ai:admin` (includes `ai:read` for the AI usage views), `users:read`, `users:invite`, `users:write`, `audit:read` (the tamper-evident audit log; only checked globally); `*` allows all.
+Actions: `repos:read`, `audits:read`, `audits:run`, `analyses:read`, `analyses:run`, `catalog:read` (implied by `analyses:read` on the same scope), `releases:read`, `releases:run`, `tasks:run` (approve [write tasks](../../write-task/docs/README.md) that push a branch and open a merge request on the repository; for another team's repository the grant must cover it explicitly, see the server's agent tasks), `settings:read`, `settings:write`, `credentials:read`, `credentials:write`, `knowledge:read`, `knowledge:write`, `ai:read`, `ai:admin` (includes `ai:read` for the AI usage views), `users:read`, `users:invite`, `users:write`, `audit:read` (the tamper-evident audit log; only checked globally); `*` allows all.
 
 `catalog:read` covers derived, low-sensitivity metadata about a repository: its package and version inventory, public API, stack and tool versions, usage counts and knowledge entries marked `shared`. It never covers findings, audits, jobs, releases, review output or code. The server widens it across teams under the _Cross-team catalog_ setting; see `apps/server/docs/README.md`.
 
@@ -38,6 +38,10 @@ Actions: `repos:read`, `audits:read`, `audits:run`, `audits:allowlist`, `analyse
 `groupsMatch(entries, memberOf)` checks a group list against the groups of one repository; `groupNames(entries)` lists every group named, for validating references. `scopeSpecificity(scope)` ranks scopes for picking the entry that applies when several cover a repository: everything (0) < groups (1) < group intersections (between 1 and 2, more groups rank higher) < path globs (2) < exact paths (3). Settings, merge request policies, knowledge and AI budgets all use it.
 
 `scopeWithin` treats an intersection as covered by any entry that asks for a subset of its groups: `['frontend', 'storefront']` is within `['frontend']`, never the other way round. It is exact for literal paths and `prefix/**` globs. For other glob shapes it cannot prove containment and answers `false`, so delegation can only ever be too strict, never too generous.
+
+## Roles
+
+`roleOf(grants)` reads a set of grants as one coarse `Role` that every surface shows the same way (the setup link page, Account, the Forbidden card): `admin` for `*` on every repository (`scope.all`), `viewer` when every action only reads, `none` without grants and `custom` otherwise. It lives in `@holtkeeper/access/roles` too, so the web app can import it without the schemas.
 
 ## Examples
 

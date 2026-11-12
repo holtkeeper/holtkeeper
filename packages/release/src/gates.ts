@@ -7,11 +7,13 @@ function pipelineGate(
   branch: string,
 ): GateResult | undefined {
   if (!settings.gates.pipeline) return undefined
-  if (!pipeline) return { id: 'pipeline', ok: true, message: `${branch} has no pipeline` }
+  if (!pipeline)
+    return { id: 'pipeline', ok: true, severity: 'info', message: `${branch} has no pipeline` }
   const ok = pipeline.status !== 'failed' && pipeline.status !== 'canceled'
   return {
     id: 'pipeline',
     ok,
+    severity: 'block',
     message: ok
       ? `${branch} pipeline ${pipeline.status}`
       : `${branch} pipeline is ${pipeline.status}`,
@@ -19,9 +21,10 @@ function pipelineGate(
 }
 
 /**
- * Checks before a step: the pipeline of the branch it works on (failed or canceled blocks),
- * blocking merge requests, and for `version` the acceptance unless `acceptance` is `none`. Each
- * result says why; callers refuse failing ones unless a person overrides them.
+ * Checks before a step: the pipeline of the branch it works on (failed or canceled blocks, a
+ * missing one is `info`), blocking merge requests, and for `version` the acceptance unless
+ * `acceptance` is `none`. Each result says why and how much it matters; callers refuse failing
+ * `block` ones unless a person overrides them.
  */
 export function checkGates(
   step: 'propose' | 'version',
@@ -41,9 +44,10 @@ export function checkGates(
         ? {
             id: 'blockers',
             ok: false,
+            severity: 'block',
             message: `blocked by ${facts.blockers.map((mr) => `!${mr.id}`).join(', ')}`,
           }
-        : { id: 'blockers', ok: true, message: 'no blocking merge requests' },
+        : { id: 'blockers', ok: true, severity: 'block', message: 'no blocking merge requests' },
     )
 
   if (step === 'version' && settings.acceptance !== 'none') {
@@ -53,11 +57,13 @@ export function checkGates(
         ? {
             id: 'acceptance',
             ok: true,
+            severity: 'block',
             message: `accepted by ${facts.acceptance?.by} (${facts.acceptance?.via})`,
           }
         : {
             id: 'acceptance',
             ok: false,
+            severity: 'block',
             message: facts.acceptance
               ? 'new changes reached the target branch after the acceptance'
               : 'the changes are not accepted yet',
@@ -67,5 +73,6 @@ export function checkGates(
   return results
 }
 
-/** Whether every gate passed. */
-export const gatesPass = (gates: readonly GateResult[]) => gates.every((gate) => gate.ok)
+/** Whether no `block` gate fails; failing `warn` and `info` gates never stop a step. */
+export const gatesPass = (gates: readonly GateResult[]) =>
+  gates.every((gate) => gate.ok || gate.severity !== 'block')

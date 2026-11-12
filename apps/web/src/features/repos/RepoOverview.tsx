@@ -1,313 +1,398 @@
-import { type RepoOverview as Overview, type RepoRef, formatBytes } from '@holtkeeper/api'
+import type { PersonView, RepoOverview as Overview, RepoRef } from '@holtkeeper/api'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, ChevronRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { useRepoAssets, useRepoOverview } from '../../api/queries.ts'
-import { formatDateTime, formatRelative, plural } from '../../lib/format.ts'
+import { useRepoHistory } from '../../api/queries.ts'
+import { actionLabel, outcomeTone } from '../../lib/audit-log.ts'
+import { formatDateTime, formatRelative } from '../../lib/format.ts'
+import { freshnessLabel, freshnessTone } from '../../lib/freshness.ts'
+import { cellTones } from '../../lib/home.ts'
+import { personOf } from '../../lib/people.ts'
 import {
+  type DeliveryCard,
+  accessText,
+  cardLabels,
+  cardTarget,
+  deliveryCards,
   freshnessRows,
-  recordFreshnessLabel,
-  recordFreshnessTone,
-  stackHealth,
+  freshnessTally,
+  hubSearch,
+  stripCells,
 } from '../../lib/repo-page.ts'
 import { repoKey } from '../../lib/repo.ts'
-import { supportLabel, supportTone } from '../../lib/stack.ts'
 import { formatValue } from '../../lib/units.ts'
-import type { StatusTone } from '../../ui/colors.ts'
-import { ErrorState, Placeholder, SeverityBar, Tag } from '../../ui/index.ts'
+import { CopyButton, Dot, KeyValue, Placeholder, Table, Tag, Td, Th } from '../../ui/index.ts'
+import { HubCard, HubLink, hubLinkClass } from '../repo/HubCard.tsx'
 import { useSession } from '../shell/session.ts'
-import { RepoCoverageCard } from '../test-coverage/CoverageCard.tsx'
 
-const shortSha = (sha: string) => sha.slice(0, 8)
+const shortSha = (sha: string) => sha.slice(0, 7)
 
-function Card({
+function Block({
   title,
-  status,
+  hint,
   link,
   children,
 }: {
   title: string
-  status?: { tone: StatusTone; label: string }
+  hint: string
   link?: ReactNode
   children: ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-3.5">
-      <header className="flex items-start justify-between gap-2">
+    <section className="flex min-w-0 flex-col gap-2.5 border-b border-line p-3.5 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-[13px] font-semibold">{title}</h2>
-        {status ? (
-          <Tag tone={status.tone} dot>
-            {status.label}
-          </Tag>
-        ) : null}
-      </header>
-      <div className="flex flex-1 flex-col gap-2 text-sm">{children}</div>
-      {link}
+        <span className="text-xs text-muted">{hint}</span>
+        {link ? <span className="ms-auto">{link}</span> : null}
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(232px,1fr))] gap-2.5">{children}</div>
     </section>
   )
 }
 
-const linkClass =
-  'inline-flex items-center gap-1 self-start text-xs font-medium text-[var(--brand)] hover:underline'
-
-function AssetsCard({ repo, onOpen }: { repo: RepoRef; onOpen: () => void }) {
-  const assets = useRepoAssets(repo)
-  if (assets.isPending) return <Placeholder className="h-40" />
-  if (assets.isError) return <ErrorState error={assets.error} />
-  const { summary, createdAt } = assets.data
-  const open = (
-    <button type="button" onClick={onOpen} className={linkClass}>
-      Assets tab
-      <ArrowRight className="size-3" />
-    </button>
-  )
-  if (!summary)
+function deliveryLink(repo: RepoRef, key: DeliveryCard['key']): ReactNode {
+  if (key === 'work')
     return (
-      <Card title="Assets" link={open}>
-        <span className="text-muted">No assets record yet.</span>
-      </Card>
+      <Link to="/ops/runs" search={{ repo: repoKey(repo) }} className={hubLinkClass}>
+        Open
+        <ArrowRight className="size-3" />
+      </Link>
     )
+  const search =
+    key === 'releases'
+      ? hubSearch('releases')
+      : key === 'reviews'
+        ? hubSearch('quality', 'reviews')
+        : hubSearch('knowledge')
   return (
-    <Card
-      title="Assets"
-      status={
-        summary.errors
-          ? { tone: 'danger', label: plural(summary.errors, 'error') }
-          : summary.warnings
-            ? { tone: 'warning', label: plural(summary.warnings, 'warning') }
-            : { tone: 'success', label: 'within policy' }
-      }
-      link={open}
-    >
-      <div className="flex items-baseline gap-2">
-        <span className="mono text-[15px] font-semibold">{formatBytes(summary.totalBytes)}</span>
-        <span className="text-xs text-muted">in {plural(summary.files, 'file')}</span>
-      </div>
-      <span className="text-xs text-muted">
-        {summary.savings ? (
-          <>
-            could save <span className="mono">{formatBytes(summary.savings)}</span>
-          </>
-        ) : (
-          'nothing to shrink'
-        )}
-        {createdAt ? ` · checked ${formatRelative(createdAt)}` : ''}
-      </span>
-    </Card>
+    <HubLink repo={repo} search={search}>
+      Open
+    </HubLink>
   )
 }
 
-function DependenciesCard({ repo, overview }: { repo: RepoRef; overview: Overview }) {
-  const { audit, dependencies } = overview
-  const severe = audit ? audit.severities.critical + audit.severities.high : 0
+function FreshnessTable({ repo, overview }: { repo: RepoRef; overview: Overview }) {
+  const rows = freshnessRows(overview)
+  const tally = freshnessTally(rows)
+  const legend = [
+    { tone: 'success' as const, count: tally.current, label: 'current' },
+    { tone: 'info' as const, count: tally.behind, label: 'behind HEAD' },
+    { tone: 'warning' as const, count: tally.aging, label: 'over a week old' },
+    { tone: 'danger' as const, count: tally.bad, label: 'failed or month old' },
+  ]
   return (
-    <Card
-      title="Dependencies"
-      {...(audit
-        ? {
-            status: audit.active
-              ? {
-                  tone: severe ? ('danger' as const) : ('warning' as const),
-                  label: plural(audit.active, 'vulnerability', 'vulnerabilities'),
-                }
-              : { tone: 'success' as const, label: 'no known vulnerabilities' },
-          }
-        : {})}
-      link={
-        <div className="flex flex-wrap gap-3">
-          <Link to="/dependencies" search={{ repo: repoKey(repo) }} className={linkClass}>
-            Dependencies
+    <section
+      aria-labelledby="hub-freshness"
+      className="flex min-w-0 flex-[999_1_640px] flex-col rounded-[10px] border border-line bg-sunk"
+    >
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-[11px]">
+        <h2 id="hub-freshness" className="text-[13px] font-semibold">
+          Freshness
+        </h2>
+        <span className="text-xs text-muted">Latest record of every analysis, worst first</span>
+        <span className="ms-auto flex flex-wrap items-center gap-3 text-xs text-muted">
+          {legend.map((entry) => (
+            <span key={entry.label} className="inline-flex items-center gap-1.5">
+              <Dot tone={entry.tone} />
+              <b className="font-semibold text-foreground">{entry.count}</b> {entry.label}
+            </span>
+          ))}
+          <Link to="/ops/runs" search={{ repo: repoKey(repo) }} className={hubLinkClass}>
+            Runs
             <ArrowRight className="size-3" />
           </Link>
-          {audit ? (
-            <Link to="/audits/$runId" params={{ runId: audit.id }} className={linkClass}>
-              Latest audit
-              <ArrowRight className="size-3" />
-            </Link>
-          ) : null}
-        </div>
-      }
-    >
-      {dependencies ? (
-        <span>
-          <span className="mono font-semibold">{dependencies.direct}</span>{' '}
-          <span className="text-muted">direct, read {formatRelative(dependencies.createdAt)}</span>
         </span>
-      ) : (
-        <span className="text-muted">No dependency graph yet.</span>
-      )}
-      {audit ? (
-        <>
-          <SeverityBar counts={audit.severities} />
-          <span className="text-xs text-muted">
-            audited {formatRelative(audit.finishedAt)}
-            {audit.ignored ? `, ${audit.ignored} allowlisted` : ''}
-          </span>
-        </>
-      ) : null}
-    </Card>
-  )
-}
-
-function StackCard({ overview }: { overview: Overview }) {
-  const { stack } = overview
-  const [group] = overview.groups
-  const link = group ? (
-    <Link
-      to="/repos/groups/$groupId"
-      params={{ groupId: group }}
-      search={{ tab: 'stack' }}
-      className={linkClass}
-    >
-      Stack of {group}
-      <ArrowRight className="size-3" />
-    </Link>
-  ) : (
-    <Link to="/stack" className={linkClass}>
-      Stack
-      <ArrowRight className="size-3" />
-    </Link>
-  )
-  if (!stack)
-    return (
-      <Card title="Stack" link={link}>
-        <span className="text-muted">Not in a stack record yet.</span>
-      </Card>
-    )
-  const health = stackHealth(stack)
-  const failing = stack.conventions.drifts + stack.conventions.missing
-  return (
-    <Card
-      title="Stack"
-      status={{
-        tone: health.tone,
-        label: health.ending
-          ? `${health.ending} ending`
-          : failing
-            ? plural(failing, 'convention drift')
-            : 'supported',
-      }}
-      link={link}
-    >
-      <ul className="flex flex-col gap-1">
-        {stack.tools.slice(0, 5).map((tool) => (
-          <li
-            key={`${tool.id}:${tool.file}:${tool.declared}`}
-            className="flex items-center justify-between gap-2 text-xs"
-          >
-            <span className="min-w-0 truncate" title={tool.file}>
-              {tool.name} <span className="mono text-muted">{tool.declared}</span>
-            </span>
-            <Tag tone={supportTone(tool.support)}>{supportLabel[tool.support]}</Tag>
-          </li>
-        ))}
-      </ul>
-      {stack.tools.length > 5 ? (
-        <span className="text-xs text-dim">{stack.tools.length - 5} more</span>
-      ) : null}
-      <span className="text-xs text-muted">
-        conventions: {stack.conventions.matches} match
-        {failing ? `, ${failing} drift or missing` : ''}
-      </span>
-    </Card>
-  )
-}
-
-function ReleaseCard({ repo }: { repo: RepoRef }) {
-  return (
-    <Card
-      title="Releases"
-      link={
-        <Link to="/releases/$" params={{ _splat: repoKey(repo) }} className={linkClass}>
-          Release timeline
-          <ArrowRight className="size-3" />
-        </Link>
-      }
-    >
-      <span className="text-muted">
-        Versions, what changed since the last tag, the next release and its deploys.
-      </span>
-    </Card>
-  )
-}
-
-function FreshnessCard({ repo, overview }: { repo: RepoRef; overview: Overview }) {
-  const rows = freshnessRows(overview)
-  return (
-    <section className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-3.5 sm:col-span-2 xl:col-span-3">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-[13px] font-semibold">Analyses</h2>
-        <span className="text-xs text-muted">
-          {overview.head ? (
-            <>
-              HEAD <span className="mono">{shortSha(overview.head.sha)}</span> since{' '}
-              {formatRelative(overview.head.at)}
-            </>
-          ) : (
-            'default-branch head not seen yet'
-          )}
-          {' · '}
-          <Link to="/jobs" search={{ repo: repoKey(repo) }} className="hover:underline">
-            jobs
-          </Link>
-        </span>
-      </header>
+      </div>
       {rows.length ? (
-        <ul className="flex flex-col divide-y divide-line">
-          {rows.map(({ record, freshness }) => (
-            <li key={record.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
-              <Link
-                to="/analyses/$id"
-                params={{ id: record.id }}
-                className="min-w-40 text-sm font-medium hover:underline"
-              >
-                {record.label}
-              </Link>
-              <span className="min-w-0 flex-1 truncate text-xs text-muted">
-                {record.metrics
-                  .slice(0, 2)
-                  .map((metric) => `${metric.label} ${formatValue(metric.value, metric.unit)}`)
-                  .join(' · ')}
-              </span>
-              <span className="text-xs text-muted" title={formatDateTime(record.createdAt)}>
-                {record.sha ? <span className="mono">{shortSha(record.sha)} </span> : null}
-                {formatRelative(record.createdAt)}
-              </span>
-              <Tag tone={recordFreshnessTone[freshness]} dot>
-                {recordFreshnessLabel[freshness]}
-              </Tag>
-            </li>
-          ))}
-        </ul>
+        <Table label="Freshness of every analysis">
+          <thead>
+            <tr>
+              <Th>Analysis kind</Th>
+              <Th>Headline</Th>
+              <Th>Last run</Th>
+              <Th>Commit</Th>
+              <Th>Age</Th>
+              <Th>Status</Th>
+              <Th>
+                <span className="sr-only">Open</span>
+              </Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ record, freshness }) => (
+              <tr key={record.id}>
+                <Td>
+                  <Link
+                    to="/analyses/$id"
+                    params={{ id: record.id }}
+                    search={{}}
+                    className="font-medium text-foreground no-underline hover:underline"
+                  >
+                    {record.label}
+                  </Link>
+                </Td>
+                <Td className="max-w-72 truncate text-muted">
+                  {record.metrics
+                    .slice(0, 2)
+                    .map((metric) => `${metric.label} ${formatValue(metric.value, metric.unit)}`)
+                    .join(' · ')}
+                </Td>
+                <Td className="text-muted">{formatDateTime(record.createdAt)}</Td>
+                <Td className="mono">{record.sha ? shortSha(record.sha) : '—'}</Td>
+                <Td className="mono text-muted">{formatRelative(record.createdAt)}</Td>
+                <Td>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Dot tone={freshnessTone[freshness]} />
+                    {freshnessLabel[freshness]}
+                  </span>
+                </Td>
+                <Td align="right">
+                  <Link
+                    to="/analyses/$id"
+                    params={{ id: record.id }}
+                    search={{}}
+                    aria-label={`Open latest ${record.label} record`}
+                    className="inline-grid size-7 place-items-center rounded-[7px] text-muted hover:bg-raise hover:text-foreground"
+                  >
+                    <ChevronRight className="size-3.5" />
+                  </Link>
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
       ) : (
-        <span className="text-sm text-muted">Nothing analyzed yet.</span>
+        <p className="px-3.5 py-3 text-sm text-muted">Nothing analysed yet.</p>
       )}
     </section>
   )
 }
 
-/** The repository's analysis cards: coverage, assets, dependencies, stack, releases, freshness. */
-export function RepoOverview({ repo, onAssets }: { repo: RepoRef; onAssets: () => void }) {
-  const { can } = useSession()
-  const overview = useRepoOverview(repo)
-  if (overview.isPending)
-    return (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Placeholder className="h-40" />
-        <Placeholder className="h-40" />
-        <Placeholder className="h-40" />
-      </div>
-    )
-  if (overview.isError) return <ErrorState error={overview.error} />
+function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      <RepoCoverageCard repo={repo} />
-      <AssetsCard repo={repo} onOpen={onAssets} />
-      <DependenciesCard repo={repo} overview={overview.data} />
-      <StackCard overview={overview.data} />
-      {can('releases:read') ? <ReleaseCard repo={repo} /> : null}
-      <FreshnessCard repo={repo} overview={overview.data} />
+    <section
+      aria-labelledby="hub-facts"
+      className="flex flex-col gap-2.5 rounded-[10px] border border-line bg-sunk px-3.5 py-3"
+    >
+      <div className="flex items-center gap-2">
+        <h2 id="hub-facts" className="text-[13px] font-semibold">
+          Repository
+        </h2>
+        <span className="ms-auto">
+          <HubLink repo={repo} search={hubSearch('settings')}>
+            Settings
+          </HubLink>
+        </span>
+      </div>
+      <KeyValue
+        rows={[
+          { label: 'Forge', value: <span className="mono">{repo.forge}</span> },
+          {
+            label: 'Path',
+            value: (
+              <>
+                <span className="mono truncate">{repo.path}</span>
+                <CopyButton text={() => repo.path} variant="ghost">
+                  Copy
+                </CopyButton>
+              </>
+            ),
+          },
+          {
+            label: 'Default branch',
+            value: overview.defaultBranch ? (
+              <span className="mono">{overview.defaultBranch}</span>
+            ) : null,
+          },
+          {
+            label: 'HEAD',
+            value: overview.head ? (
+              <>
+                <span className="mono">{shortSha(overview.head.sha)}</span>
+                <span className="text-muted">since {formatRelative(overview.head.at)}</span>
+              </>
+            ) : null,
+          },
+          {
+            label: 'Groups',
+            value: overview.groups.length ? (
+              <span className="flex flex-wrap gap-1">
+                {overview.groups.map((group) => (
+                  <Link
+                    key={group}
+                    to="/repos/groups/$groupId"
+                    params={{ groupId: group }}
+                    className="no-underline"
+                  >
+                    <Tag>{group}</Tag>
+                  </Link>
+                ))}
+              </span>
+            ) : null,
+          },
+          {
+            label: 'Toolchain',
+            value: overview.toolchain.length ? (
+              <span className="mono truncate">
+                {overview.toolchain.map((tool) => `${tool.name} ${tool.version}`).join(' · ')}
+              </span>
+            ) : null,
+          },
+          { label: 'Access', value: accessText(overview.access) },
+        ]}
+      />
+    </section>
+  )
+}
+
+function ActivityFeed({ repo }: { repo: RepoRef }) {
+  const history = useRepoHistory(repo, 6)
+  return (
+    <section
+      aria-labelledby="hub-activity"
+      className="flex flex-col gap-2.5 rounded-[10px] border border-line bg-sunk px-3.5 py-3"
+    >
+      <div className="flex items-center gap-2">
+        <h2 id="hub-activity" className="text-[13px] font-semibold">
+          Recent activity
+        </h2>
+        <span className="ms-auto">
+          <HubLink repo={repo} search={hubSearch('activity')}>
+            Activity
+          </HubLink>
+        </span>
+      </div>
+      {history.isPending ? (
+        <Placeholder className="h-24" />
+      ) : history.isError || !history.data.events.length ? (
+        <p className="text-xs text-muted">
+          {history.isError ? 'Activity could not be read.' : 'Nothing happened here yet.'}
+        </p>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-2.5 p-0 text-xs">
+          {history.data.events.map((event) => {
+            const person: PersonView = personOf(history.data.people, event.actor.id)
+            return (
+              <li key={event.id} className="flex items-start gap-2">
+                <span className="pt-[5px]">
+                  <Dot tone={outcomeTone(event.outcome)} />
+                </span>
+                <span className="flex min-w-0 flex-col gap-px">
+                  <span className="truncate">
+                    {actionLabel(event.action)}
+                    {event.outcome === 'ok' ? '' : ` · ${event.outcome}`}
+                  </span>
+                  <span className="text-[11.5px] text-muted">
+                    <span className="mono">{event.id.slice(0, 8)}</span> ·{' '}
+                    <time dateTime={event.at} title={formatDateTime(event.at)}>
+                      {formatRelative(event.at)}
+                    </time>{' '}
+                    · {person.name}
+                  </span>
+                </span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The hub's health strip: one entry per health cell the caller may read, each named and with its
+ * status in words, then the default-branch head freshness last saw.
+ */
+export function RepoHealthStrip({ overview }: { overview: Overview | undefined }) {
+  const cells = overview
+    ? stripCells.flatMap(({ key, label }) => {
+        const cell = overview.cells[key]
+        return cell ? [{ key, label, cell }] : []
+      })
+    : []
+  return (
+    <ul
+      aria-label="Health"
+      className="m-0 flex list-none flex-wrap items-center gap-x-[18px] gap-y-1.5 border-b border-line px-3.5 py-2.5 text-xs text-muted"
+    >
+      <li className="text-[11.5px] font-medium">Health</li>
+      {overview && !cells.length ? <li>Nothing you may see is analysed yet.</li> : null}
+      {cells.map(({ key, label, cell }) => (
+        <li key={key} className="inline-flex items-center gap-1.5" title={cell.sub || undefined}>
+          {label}
+          <span className="inline-flex items-center gap-[5px] font-medium text-foreground">
+            <Dot tone={cellTones[cell.tone]} />
+            {cell.value}
+          </span>
+        </li>
+      ))}
+      {overview?.head ? (
+        <li className="ms-auto">
+          HEAD <b className="mono font-semibold text-foreground">{shortSha(overview.head.sha)}</b>{' '}
+          since {formatRelative(overview.head.at)}
+        </li>
+      ) : null}
+    </ul>
+  )
+}
+
+/**
+ * The hub's Overview tab: Supply chain and Quality cards from the server, Delivery and activity
+ * cards, the freshness of every analysis, the repository's facts and its recent audit events.
+ */
+export function RepoOverview({ repo, overview }: { repo: RepoRef; overview: Overview }) {
+  const { can } = useSession()
+  const cards = (section: 'supply' | 'quality') =>
+    overview.cards
+      .filter((card) => card.section === section)
+      .map((card) => (
+        <HubCard
+          key={card.key}
+          card={{ ...card, label: cardLabels[card.key] }}
+          open={
+            <HubLink repo={repo} search={cardTarget(card)}>
+              Open
+            </HubLink>
+          }
+        />
+      ))
+  return (
+    <div className="-mx-4 -mt-4 flex flex-col">
+      <Block
+        title="Supply chain"
+        hint="What the repository pulls in and whether it is safe"
+        link={
+          <HubLink repo={repo} search={hubSearch('supply')}>
+            Supply chain tab
+          </HubLink>
+        }
+      >
+        {cards('supply')}
+      </Block>
+      <Block
+        title="Quality"
+        hint="Tests, size, pipelines and branch hygiene"
+        link={
+          <HubLink repo={repo} search={hubSearch('quality')}>
+            Quality tab
+          </HubLink>
+        }
+      >
+        {cards('quality')}
+      </Block>
+      <Block title="Delivery and activity" hint="Releases, reviews, agent work and team knowledge">
+        {deliveryCards(overview, can('releases:read')).map((card) => (
+          <HubCard key={card.key} card={card} open={deliveryLink(repo, card.key)} />
+        ))}
+      </Block>
+      <div className="flex flex-wrap items-start gap-3 p-3.5">
+        <FreshnessTable repo={repo} overview={overview} />
+        <div className="flex max-w-[400px] min-w-0 flex-[1_1_300px] flex-col gap-3">
+          <Facts repo={repo} overview={overview} />
+          {can('repos:read') || can('audit:read') ? <ActivityFeed repo={repo} /> : null}
+        </div>
+      </div>
     </div>
   )
 }

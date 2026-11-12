@@ -16,11 +16,6 @@ export function monthRange(now: Date): PeriodRange {
   return { from, to: new Date(end).toISOString(), key: from.slice(0, 7) }
 }
 
-/** The month before the one containing `now`. */
-export function previousMonth(now: Date): PeriodRange {
-  return monthRange(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)))
-}
-
 const localParts = (at: number, timeZone: string) => {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -73,12 +68,58 @@ export function weekRange(now: Date, timeZone: string = instanceTimeZone()): Per
   }
 }
 
+/** The week before `week` (a `weekRange`), in the same time zone. */
+export const previousWeek = (week: PeriodRange, timeZone: string = instanceTimeZone()) =>
+  weekRange(new Date(Date.parse(week.from) - 1), timeZone)
+
+/** The spans usage overviews report: the budget week, the UTC month, the last 30 days. */
+export type PeriodKind = 'week' | 'month' | '30d'
+
+/** Every `PeriodKind`. */
+export const periodKinds: readonly PeriodKind[] = ['week', 'month', '30d']
+
+const DAY_MS = 86_400_000
+
+/** A range of `elapsed` milliseconds from `from`, never past `end`. */
+const span = (from: string, elapsed: number, end: string, key: string): PeriodRange => ({
+  from,
+  to: new Date(Math.min(Date.parse(from) + elapsed, Date.parse(end))).toISOString(),
+  key,
+})
+
 /**
- * Linear projection of a period's spend to its end from what was spent so far. At the very start
- * of the period there is nothing to extrapolate from, so it returns `spent`.
+ * A period from its start to `now` and the same elapsed span of the period before: for `week`
+ * Monday 00:00 (instance time zone) to now against Monday 00:00 to the same weekday and time last
+ * week; for `month` the UTC month so far against the same days of the previous month (cut at its
+ * end); for `30d` the last 30 days against the 30 days before. Keys: the Monday (`2026-11-09`), the
+ * month (`2026-11`), or `30d:` with the span's last UTC day (`30d:2026-11-12`).
  */
-export function projectPeriodEnd(spent: number, range: PeriodRange, now: Date): number {
-  const elapsed = now.getTime() - Date.parse(range.from)
-  const total = Date.parse(range.to) - Date.parse(range.from)
-  return elapsed <= 0 ? spent : (spent * total) / elapsed
+export function periodSpans(
+  kind: PeriodKind,
+  now: Date,
+  timeZone: string = instanceTimeZone(),
+): { current: PeriodRange; comparison: PeriodRange } {
+  const at = now.toISOString()
+  if (kind === 'week' || kind === 'month') {
+    const range = kind === 'week' ? weekRange(now, timeZone) : monthRange(now)
+    const last =
+      kind === 'week'
+        ? previousWeek(range, timeZone)
+        : monthRange(new Date(Date.parse(range.from) - 1))
+    const elapsed = now.getTime() - Date.parse(range.from)
+    return {
+      current: { from: range.from, to: at, key: range.key },
+      comparison: span(last.from, elapsed, last.to, last.key),
+    }
+  }
+  const start = new Date(now.getTime() - 30 * DAY_MS)
+  const before = new Date(start.getTime() - 30 * DAY_MS)
+  return {
+    current: { from: start.toISOString(), to: at, key: `30d:${at.slice(0, 10)}` },
+    comparison: {
+      from: before.toISOString(),
+      to: start.toISOString(),
+      key: `30d:${start.toISOString().slice(0, 10)}`,
+    },
+  }
 }

@@ -1,4 +1,15 @@
-import type { BundlePoint, BundleSeries } from '@holtkeeper/api'
+import type {
+  BundlePoint,
+  BundleSeries,
+  BundlesOverview,
+  BundleTargetRow,
+  RepoRef,
+  Section,
+} from '@holtkeeper/api'
+
+import { repoKey } from './repo.ts'
+import { searchEntry, searchEnum, searchList, searchText } from './search-params.ts'
+import type { SortState, SortValue } from './table-sort.ts'
 
 /** Which size a bundle chart and table show. */
 export type Compression = 'gzip' | 'brotli' | 'raw'
@@ -18,42 +29,6 @@ export const pointSearch = (point: BundlePoint) =>
   point.version ? { version: point.version } : { analysis: point.analysisId }
 
 const lastOk = (points: BundlePoint[]) => points.findLast((point) => point.status === 'ok')
-
-/** One row of the target list. */
-export interface TargetRow {
-  name: string
-  source: BundleSeries['source']
-  /** Newest point, measured or not. */
-  latest: BundlePoint | undefined
-  size: number | undefined
-  /** Change of the newest measured point against the measured point before it. */
-  delta: number | undefined
-  points: number
-  failed: boolean
-}
-
-/** The target list: newest size and its change per target, largest first. */
-export function targetRows(series: BundleSeries[], compression: Compression): TargetRow[] {
-  return series
-    .map((entry): TargetRow => {
-      const measured = entry.points.filter((point) => point.status === 'ok')
-      const current = measured.at(-1)
-      const before = measured.at(-2)
-      const size = current?.total?.[compression]
-      const previous = before?.total?.[compression]
-      const latest = entry.points.at(-1)
-      return {
-        name: entry.name,
-        source: entry.source,
-        latest,
-        size,
-        delta: size !== undefined && previous !== undefined ? size - previous : undefined,
-        points: entry.points.length,
-        failed: latest?.status === 'failed',
-      }
-    })
-    .toSorted((a, b) => (b.size ?? -1) - (a.size ?? -1) || a.name.localeCompare(b.name))
-}
 
 /** Entrypoints worth a line of their own: the largest by their newest initial size. */
 export function chartEntrypoints(series: BundleSeries, compression: Compression): string[] {
@@ -109,4 +84,253 @@ export function overallChange(series: BundleSeries, compression: Compression) {
   const last = measured.at(-1)?.total?.[compression]
   if (first === undefined || last === undefined) return undefined
   return { first, last, delta: last - first, measured: measured.length }
+}
+
+/** One measured point of a target's history with its size and change against the measured point before. */
+export interface HistoryRow {
+  point: BundlePoint
+  index: number
+  size: number | undefined
+  delta: number | undefined
+}
+
+/** The history table of one target: every point with its change, newest first. */
+export function historyRows(series: BundleSeries, compression: Compression): HistoryRow[] {
+  let before: number | undefined
+  const rows = series.points.map((point, index): HistoryRow => {
+    const size = point.status === 'ok' ? point.total?.[compression] : undefined
+    const row = {
+      point,
+      index,
+      size,
+      delta: size !== undefined && before !== undefined ? size - before : undefined,
+    }
+    if (size !== undefined) before = size
+    return row
+  })
+  return rows.toReversed()
+}
+
+/** Where a target stands: over, near or within its budget, without one, or not measured. */
+export type BudgetState = 'over' | 'near' | 'ok' | 'none' | 'failed'
+
+/** Every `BudgetState`, worst first. */
+export const budgetStates = ['over', 'failed', 'near', 'ok', 'none'] as const
+
+/** Words for each `BudgetState`. */
+export const budgetStateLabel: Record<BudgetState, string> = {
+  over: 'Over budget',
+  near: 'Near budget',
+  ok: 'Within budget',
+  none: 'No budget',
+  failed: 'Build failed',
+}
+
+/** Status tone of each `BudgetState`. */
+export const budgetStateTone = {
+  over: 'danger',
+  near: 'warning',
+  ok: 'success',
+  none: 'default',
+  failed: 'danger',
+} as const satisfies Record<BudgetState, string>
+
+/** Kinds of target: app builds and published packages. */
+const targetKinds = ['build', 'package'] as const
+
+/** One row of Quality › Bundles: a target of one repository's newest bundle records. */
+export interface BundleRow extends BundleTargetRow {
+  /** `forge:path` of the repository and the target name. */
+  key: string
+  repo: RepoRef
+  repoKey: string
+  groups: string[]
+  /** Ref of the repository's newest record. */
+  ref?: string
+}
+
+/** Key of the row of `target` in `repo`. */
+export const bundleRowKey = (repo: string, target: string) => `${repo}#${target}`
+
+/** One row per target of every repository on the overview. */
+export function bundleRows(overview: BundlesOverview): BundleRow[] {
+  return overview.repos.flatMap((entry) =>
+    entry.targets.map((target) => {
+      const key = repoKey(entry.repo)
+      return {
+        ...target,
+        key: bundleRowKey(key, target.name),
+        repo: entry.repo,
+        repoKey: key,
+        groups: entry.groups,
+        ...(entry.ref ? { ref: entry.ref } : {}),
+      }
+    }),
+  )
+}
+
+/** `BudgetState` of a target. */
+export function budgetState(row: BundleTargetRow): BudgetState {
+  if (row.status === 'failed') return 'failed'
+  if (row.overBudget || row.verdict === 'over') return 'over'
+  if (row.verdict === 'near') return 'near'
+  if (row.verdict === 'ok') return 'ok'
+  return 'none'
+}
+
+/** Gzip size as a share of the budget, `1` meaning exactly at it; absent without either. */
+export const budgetShare = (row: BundleTargetRow): number | undefined =>
+  row.gzip !== undefined && row.budget ? row.gzip / row.budget : undefined
+
+/** The change against the previous measurement in percent of that measurement. */
+export function deltaPercent(row: BundleTargetRow): number | undefined {
+  if (row.delta === undefined || row.gzip === undefined) return undefined
+  const before = row.gzip - row.delta
+  return before > 0 ? (row.delta / before) * 100 : undefined
+}
+
+/** The release a row's newest measurement belongs to: the package version, else the record's ref. */
+export const rowRelease = (row: BundleRow): string | undefined =>
+  row.version ??
+  (row.ref ? (/^[0-9a-f]{40}$/.test(row.ref) ? row.ref.slice(0, 8) : row.ref) : undefined)
+
+/** Columns of the Bundles table a person can sort by. */
+export type BundlesSortKey = 'target' | 'release' | 'size' | 'delta' | 'budget' | 'initial'
+
+const sortKeys: readonly BundlesSortKey[] = [
+  'target',
+  'release',
+  'size',
+  'delta',
+  'budget',
+  'initial',
+]
+
+const sortValues: Record<BundlesSortKey, (row: BundleRow) => SortValue> = {
+  target: (row) => `${row.name} ${row.repo.path}`,
+  release: (row) => row.createdAt,
+  size: (row) => row.gzip,
+  delta: (row) => row.delta,
+  budget: budgetShare,
+  initial: (row) => row.initial,
+}
+
+/** What a column sorts a row by. */
+export const bundleSortValue = (row: BundleRow, key: BundlesSortKey): SortValue =>
+  sortValues[key](row)
+
+/** Rows worst first: over budget, failed, near budget, then by budget used and size. */
+export function worstFirst(rows: readonly BundleRow[]): BundleRow[] {
+  const rank = (row: BundleRow) => budgetStates.indexOf(budgetState(row))
+  return rows.toSorted(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      (budgetShare(b) ?? -1) - (budgetShare(a) ?? -1) ||
+      (b.gzip ?? -1) - (a.gzip ?? -1) ||
+      a.key.localeCompare(b.key),
+  )
+}
+
+/** Figures of the Strip over the rows in scope. */
+export interface BundleKpis {
+  targets: number
+  builds: number
+  packages: number
+  over: number
+  near: number
+  /** Targets whose newest measurement grew against the one before, and by how much in all. */
+  grew: number
+  grewBy: number
+  failed: number
+}
+
+/** Strip figures over `rows`. */
+export function bundleKpis(rows: readonly BundleTargetRow[]): BundleKpis {
+  const grown = rows.filter((row) => row.status === 'ok' && (row.delta ?? 0) > 0)
+  return {
+    targets: rows.length,
+    builds: rows.filter((row) => row.source === 'build').length,
+    packages: rows.filter((row) => row.source === 'package').length,
+    over: rows.filter((row) => budgetState(row) === 'over').length,
+    near: rows.filter((row) => budgetState(row) === 'near').length,
+    grew: grown.length,
+    grewBy: grown.reduce((sum, row) => sum + (row.delta ?? 0), 0),
+    failed: rows.filter((row) => row.status === 'failed').length,
+  }
+}
+
+/** Tabs of the bundle sheet. */
+export const bundleTabs = ['composition', 'entrypoints', 'packages', 'history'] as const
+
+/** One tab of the bundle sheet. */
+export type BundleTab = (typeof bundleTabs)[number]
+
+const tabSections: Partial<Record<BundleTab, readonly string[]>> = {
+  entrypoints: ['entrypoints'],
+  packages: ['packages', 'package'],
+}
+
+/**
+ * The report sections a sheet tab shows: Entrypoints and Packages their own sections, Composition
+ * every other one (overview, composition, assets, …), History none.
+ */
+export function sheetSections(sections: readonly Section[], tab: BundleTab): Section[] {
+  if (tab === 'history') return []
+  const own = tabSections[tab]
+  if (own) return sections.filter((section) => own.includes(section.id))
+  const elsewhere = new Set(Object.values(tabSections).flat())
+  return sections.filter((section) => !elsewhere.has(section.id))
+}
+
+/**
+ * Search parameters of Quality › Bundles: `repo` (`forge:path`) narrows the table to one
+ * repository, `q`, `kind` and `budget` filter it, `sort`/`dir` order it. The sheet shows target
+ * `target` of repository `open` on tab `tab`, at a point of its history (`version` of a package
+ * or `analysis` id of a build; the newest without either).
+ */
+export interface BundlesSearch {
+  repo?: string
+  q?: string
+  kind?: (typeof targetKinds)[number][]
+  budget?: BudgetState[]
+  sort?: BundlesSortKey
+  dir?: 'asc' | 'desc'
+  open?: string
+  target?: string
+  tab?: BundleTab
+  version?: string
+  analysis?: string
+}
+
+/** `BundlesSearch` from raw search values; unknown and empty values are dropped. */
+export function parseBundlesSearch(search: Record<string, unknown>): BundlesSearch {
+  const sort = searchEnum(search.sort, sortKeys)
+  return {
+    ...searchEntry('repo', searchText(search.repo)),
+    ...searchEntry('q', searchText(search.q)),
+    ...searchEntry('kind', searchList(search.kind, targetKinds)),
+    ...searchEntry('budget', searchList(search.budget, budgetStates)),
+    ...(sort ? { sort, dir: search.dir === 'desc' ? ('desc' as const) : ('asc' as const) } : {}),
+    ...searchEntry('open', searchText(search.open)),
+    ...searchEntry('target', searchText(search.target)),
+    ...searchEntry('tab', searchEnum(search.tab, bundleTabs)),
+    ...searchEntry('version', searchText(search.version)),
+    ...searchEntry('analysis', searchText(search.analysis)),
+  }
+}
+
+/** The table sort a `BundlesSearch` names; `null` means worst first. */
+export const bundlesSort = (search: BundlesSearch): SortState<BundlesSortKey> =>
+  search.sort ? { key: search.sort, direction: search.dir ?? 'asc' } : null
+
+/** Rows matching the repository, text, kind and budget filters of `search`. */
+export function filterBundleRows(rows: readonly BundleRow[], search: BundlesSearch): BundleRow[] {
+  const q = search.q?.trim().toLowerCase()
+  return rows.filter(
+    (row) =>
+      (!search.repo || row.repoKey === search.repo) &&
+      (!q || row.name.toLowerCase().includes(q) || row.repo.path.toLowerCase().includes(q)) &&
+      (!search.kind?.length || search.kind.includes(row.source)) &&
+      (!search.budget?.length || search.budget.includes(budgetState(row))),
+  )
 }

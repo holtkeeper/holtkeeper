@@ -1,8 +1,9 @@
 import { Alert, Skeleton, Spinner } from '@heroui/react'
-import { ShieldX, TriangleAlert } from 'lucide-react'
+import { TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { isForbidden, messageOf } from '../api/client.ts'
+import { Forbidden } from '../features/shell/Forbidden.tsx'
 
 /** Centered message for empty lists and blank states. */
 export function EmptyState({
@@ -49,14 +50,13 @@ export function Notice({
   )
 }
 
-/** A failed query: "no access" for 403, otherwise the error message. */
+/**
+ * A failed query: for a 403 the card naming the missing permission and what the viewer has,
+ * otherwise the error message.
+ */
 export function ErrorState({ error }: { error: unknown }) {
   return isForbidden(error) ? (
-    <EmptyState
-      icon={<ShieldX />}
-      title="No access"
-      description="Your grants do not cover this page."
-    />
+    <Forbidden error={error} />
   ) : (
     <EmptyState icon={<TriangleAlert />} title="Could not load" description={messageOf(error)} />
   )

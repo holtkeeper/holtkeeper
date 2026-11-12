@@ -46,6 +46,7 @@ export const mergeRequestPoliciesSetting = {
 - **Skip analyzers** keeps noisy analyzers off merge requests the policy handles, e.g. dependency bumps.
 - Put shared policies on a group and override one in a repository by reusing its **id**; the most specific scope wins.
 - Try new policies on a single repository first: every decision shows up in Activity.`,
+  default: [],
   schema: policiesSchema,
   form: policiesForm,
 }

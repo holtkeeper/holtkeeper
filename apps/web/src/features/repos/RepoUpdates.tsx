@@ -5,6 +5,8 @@ import { type ReactNode, useState } from 'react'
 import { messageOf } from '../../api/client.ts'
 import { useRepoUpdateMutations, useRepoUpdates } from '../../api/queries.ts'
 import { formatDate, formatRelative } from '../../lib/format.ts'
+import { healthTagTone } from '../../lib/home.ts'
+import { updatesBadge } from '../../lib/repo-page.ts'
 import {
   Button,
   Chip,
@@ -14,13 +16,12 @@ import {
   Notice,
   Panel,
   Placeholder,
-  SideSheet,
   Tag,
   notify,
 } from '../../ui/index.ts'
 import { useSession } from '../shell/session.ts'
-import { PollAttempts } from './Attempts.tsx'
-import { pollEventLabel, pollingCadence } from './updates.ts'
+import { UpdateEvents } from './Attempts.tsx'
+import { deliveryResult, pollEventLabel, pollingCadence, updateEvents } from './updates.ts'
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -32,70 +33,69 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * A header tag saying how the repository learns about forge changes (webhook or polling); pressing
- * it opens a sheet with the polling status and the repository's own webhook URL. Hidden while
- * loading and when the server has no key-value store.
+ * The Updates area of a repository's settings: how it learns about forge changes. A Webhook panel
+ * (its own URL, who issued it, the last delivery and the last 24 hours), a Polling panel (cadence,
+ * what it looks for, last and next poll) and the recent webhook deliveries and polls in one table.
+ * "Poll now" needs `settings:write`. Hidden while loading; says so when the server has no
+ * key-value store.
  */
-export function UpdatesTag({
-  repo,
-  onOpenSettings,
-}: {
-  repo: RepoRef
-  onOpenSettings: () => void
-}) {
-  const updates = useRepoUpdates(repo)
-  const [open, setOpen] = useState(false)
-  if (!updates.isSuccess) return null
-  const { viaWebhook, polling } = updates.data
-  const tone = polling.lastError ? 'danger' : viaWebhook ? 'success' : 'default'
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="rounded-md focus-visible:outline-2 focus-visible:outline-focus"
-        aria-label="How this repository gets updates"
-      >
-        <Tag tone={tone} dot>
-          {viaWebhook ? 'webhook' : polling.enabled ? 'polling' : 'no updates'}
-        </Tag>
-      </button>
-      <SideSheet open={open} onClose={() => setOpen(false)} title="Updates">
-        <RepoUpdates
-          repo={repo}
-          onOpenSettings={() => {
-            setOpen(false)
-            onOpenSettings()
-          }}
-        />
-      </SideSheet>
-    </>
-  )
-}
-
-function RepoUpdates({ repo, onOpenSettings }: { repo: RepoRef; onOpenSettings: () => void }) {
-  const updates = useRepoUpdates(repo)
-  if (updates.isPending) return <Placeholder className="h-64" />
-  if (updates.isError) return <ErrorState error={updates.error} />
-  return (
-    <div className="flex flex-col gap-4">
-      <PollingPanel repo={repo} view={updates.data} onOpenSettings={onOpenSettings} />
-      <WebhookPanel repo={repo} view={updates.data} />
-    </div>
-  )
-}
-
-function PollingPanel({
-  repo,
-  view,
-  onOpenSettings,
-}: {
-  repo: RepoRef
-  view: RepoUpdatesView
-  onOpenSettings: () => void
-}) {
+export function RepoUpdatesSection({ repo }: { repo: RepoRef }) {
   const { can } = useSession()
+  const updates = useRepoUpdates(repo)
   const { poll } = useRepoUpdateMutations(repo)
+  if (updates.isPending) return <Placeholder className="h-48" />
+  if (updates.isError) return <ErrorState error={updates.error} />
+  const view = updates.data
+  const badge = updatesBadge(view)
+  const pollNow = () =>
+    poll.mutate(undefined, {
+      onSuccess: (result) =>
+        result.error
+          ? notify.error('Poll failed', result.error)
+          : result.skipped
+            ? notify.info('Not polled', result.skipped)
+            : notify.success(
+                `${result.events ?? 0} change(s) found`,
+                `${result.enqueued ?? 0} job(s) queued`,
+              ),
+      onError: (error) => notify.error('Poll failed', messageOf(error)),
+    })
+
+  return (
+    <section aria-label="Updates" className="flex flex-col gap-3">
+      <header className="flex flex-wrap items-center gap-2">
+        <h3 className="text-[13px] font-semibold">Updates</h3>
+        <Tag tone={healthTagTone[badge.tone]} dot>
+          {badge.text}
+        </Tag>
+        <span className="text-xs text-muted">
+          How Holtkeeper hears about pushes, merge requests, comments, pipelines and tags.
+        </span>
+        {can('settings:write') ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="ml-auto"
+            isPending={poll.isPending}
+            onPress={pollNow}
+          >
+            <RefreshCw className="size-3.5" />
+            Poll now
+          </Button>
+        ) : null}
+      </header>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <WebhookPanel repo={repo} view={view} />
+        <PollingPanel view={view} />
+      </div>
+      <Panel title="Recent events" description="Webhook deliveries and polls, newest first.">
+        <UpdateEvents events={updateEvents(view)} />
+      </Panel>
+    </section>
+  )
+}
+
+function PollingPanel({ view }: { view: RepoUpdatesView }) {
   const { polling } = view
   const cadence = pollingCadence(view)
   const now = new Date()
@@ -104,40 +104,9 @@ function PollingPanel({
     <Panel
       title="Polling"
       description="Holtkeeper looks for merge request changes, comments, finished pipelines and tags on its own and reacts as it would to a webhook."
-      actions={
-        <>
-          <Button variant="ghost" size="sm" onPress={onOpenSettings}>
-            Configure
-          </Button>
-          {can('settings:write') ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              isPending={poll.isPending}
-              onPress={() =>
-                poll.mutate(undefined, {
-                  onSuccess: (result) =>
-                    result.error
-                      ? notify.error('Poll failed', result.error)
-                      : result.skipped
-                        ? notify.info('Not polled', result.skipped)
-                        : notify.success(
-                            `${result.events ?? 0} change(s) found`,
-                            `${result.enqueued ?? 0} job(s) queued`,
-                          ),
-                  onError: (error) => notify.error('Poll failed', messageOf(error)),
-                })
-              }
-            >
-              <RefreshCw className="size-3.5" />
-              Poll now
-            </Button>
-          ) : null}
-        </>
-      }
     >
       <div className="flex flex-col gap-4">
-        <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <dl className="grid grid-cols-2 gap-4">
           <Fact label="Cadence">
             <Chip tone={cadence.tone === 'default' ? 'default' : cadence.tone} size="sm">
               {cadence.text}
@@ -187,10 +156,6 @@ function PollingPanel({
             {polling.lastError}
           </Notice>
         ) : null}
-        <div className="flex flex-col gap-2">
-          <h4 className="text-sm font-medium">Recent polls</h4>
-          <PollAttempts attempts={polling.attempts} />
-        </div>
       </div>
     </Panel>
   )
@@ -203,6 +168,7 @@ function WebhookPanel({ repo, view }: { repo: RepoRef; view: RepoUpdatesView }) 
   const [confirm, setConfirm] = useState<'rotate' | 'remove' | null>(null)
   const hook = view.webhook
   const registered = hook?.registered ?? []
+  const last = hook?.deliveries[0]
   const now = new Date()
 
   const issue = (register?: boolean) =>
@@ -256,8 +222,13 @@ function WebhookPanel({ repo, view }: { repo: RepoRef; view: RepoUpdatesView }) 
               The URL is shown to people who may change this repository's settings.
             </p>
           )}
-          <dl className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Fact label="Issued">{formatDate(hook.createdAt)}</Fact>
+          <dl className="grid grid-cols-2 gap-4">
+            <Fact label="Issued">
+              {formatDate(hook.createdAt)}
+              {hook.createdBy ? (
+                <span className="text-muted"> · by {hook.createdBy.name}</span>
+              ) : null}
+            </Fact>
             <Fact label="On the forge">
               {registered.length ? (
                 <Chip tone="success" size="sm">
@@ -268,26 +239,30 @@ function WebhookPanel({ repo, view }: { repo: RepoRef; view: RepoUpdatesView }) 
               )}
             </Fact>
             <Fact label="Last delivery">
-              {hook.lastDelivery ? (
-                <span title={formatDate(hook.lastDelivery.at)}>
-                  {formatRelative(hook.lastDelivery.at, now)}
+              {last ? (
+                <span title={formatDate(last.at)}>
+                  {formatRelative(last.at, now)}
+                  {last.summary ? <span className="text-muted"> · {last.summary}</span> : null}
                 </span>
               ) : (
                 'None yet'
               )}
             </Fact>
             <Fact label="Result">
-              {hook.lastDelivery ? (
-                hook.lastDelivery.ignored ? (
-                  <span className="text-muted" title={hook.lastDelivery.ignored}>
-                    {hook.lastDelivery.event}: ignored
-                  </span>
-                ) : (
-                  `${hook.lastDelivery.event}: ${hook.lastDelivery.enqueued} job(s)`
-                )
+              {last ? (
+                <span className={last.error ? 'text-danger' : last.ignored ? 'text-muted' : ''}>
+                  {deliveryResult(last)}
+                </span>
               ) : (
                 '—'
               )}
+            </Fact>
+            <Fact label="Last 24 h">
+              {hook.deliveries24h.total} deliveries
+              <span className={hook.deliveries24h.failed ? 'text-danger' : 'text-muted'}>
+                {' '}
+                · {hook.deliveries24h.failed} failed
+              </span>
             </Fact>
           </dl>
           {registered.length === 0 && hook.url ? (

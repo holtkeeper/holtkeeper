@@ -1,11 +1,33 @@
 import { type WebhookTarget, webhookEvents } from '@holtkeeper/forge'
-import type { RegisteredWebhook } from '@holtkeeper/store'
+import type { KvStore, RegisteredWebhook } from '@holtkeeper/store'
 
 import type { ServerDeps } from './context.ts'
 import { repoHooks } from './repo-hooks.ts'
 import { listedRepos } from './updates.ts'
 
 const SYNC_INTERVAL_MS = 3_600_000
+
+const deliveryKey = (forge: string) => `webhooks:forge:${forge}:last`
+
+/** Records that `forge` delivered a webhook at `now`; kept for 30 days. */
+export async function recordForgeDelivery(kv: KvStore, forge: string, now: Date) {
+  await kv.set(deliveryKey(forge), now.toISOString(), 30 * 86_400)
+}
+
+/** When each of `forges` last delivered a webhook, within the last 30 days; others are left out. */
+export async function lastForgeDeliveries(
+  kv: KvStore | undefined,
+  forges: readonly string[],
+): Promise<Map<string, string>> {
+  if (!kv) return new Map()
+  const stored = await Promise.all(forges.map((forge) => kv.get(deliveryKey(forge))))
+  return new Map(
+    forges.flatMap((forge, index) => {
+      const at = stored[index]
+      return typeof at === 'string' ? [[forge, at] as const] : []
+    }),
+  )
+}
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 

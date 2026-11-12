@@ -1,15 +1,24 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { CiJobStats } from '@holtkeeper/api'
+import type { CiJobStats, CiRepoCard } from '@holtkeeper/api'
 
 import {
   changeLabel,
+  ciKpis,
+  ciSort,
+  ciSortValue,
   failureTone,
+  filterCiCards,
+  moreFlagged,
+  outcomeBar,
+  parseCiSearch,
+  releaseGateText,
   seconds,
-  sortCiCards,
-  stageColumns,
+  stageBars,
   successTone,
   unreliableJobs,
+  withCiSort,
+  worstCiFirst,
 } from './ci.ts'
 
 const job = (name: string, stage: string, extra: Partial<CiJobStats> = {}): CiJobStats => ({
@@ -28,7 +37,18 @@ const job = (name: string, stage: string, extra: Partial<CiJobStats> = {}): CiJo
   ...extra,
 })
 
-const card = (path: string, problems: number) => ({ repo: { forge: 'w', path }, problems })
+const card = (path: string, extra: Partial<CiRepoCard> = {}): CiRepoCard => ({
+  repo: { forge: 'acme', path },
+  analysisId: `id-${path}`,
+  createdAt: '2026-11-12T03:00:00.000Z',
+  pipelines: 100,
+  weeks: [],
+  problems: 0,
+  groups: ['Web'],
+  status: 'healthy',
+  flakyJobs: 0,
+  ...extra,
+})
 
 describe('ci helpers', () => {
   test('durations and tones', () => {
@@ -55,27 +75,6 @@ describe('ci helpers', () => {
     expect(changeLabel(undefined).text).toBe('')
   })
 
-  test('stage columns follow the run order, keep unknown stages last and carry flags', () => {
-    const columns = stageColumns(
-      {
-        stages: ['prepare', 'check'],
-        jobs: [
-          job('unit', 'check', { failureRate: 20 }),
-          job('compile', 'prepare'),
-          job('notes', 'extra', { allowFailure: true, failureRate: 50 }),
-        ],
-      },
-      { unit: ['failing'] },
-    )
-    expect(columns.map((c) => [c.stage, c.jobs.map((j) => j.name)])).toEqual([
-      ['prepare', ['compile']],
-      ['check', ['unit']],
-      ['extra', ['notes']],
-    ])
-    expect(columns[1]?.jobs[0]).toMatchObject({ tone: 'danger', flags: ['failing'], median: 60 })
-    expect(columns[2]?.jobs[0]?.tone).toBe('default')
-  })
-
   test('unreliable jobs: worst failure rate first, then most flaky', () => {
     const list = unreliableJobs([
       job('fine', 'a'),
@@ -85,10 +84,136 @@ describe('ci helpers', () => {
     ])
     expect(list.map((j) => j.name)).toEqual(['broken', 'flaky', 'wobbly'])
   })
+})
 
-  test('cards with problem jobs come first', () => {
-    expect(sortCiCards([card('b', 0), card('c', 2), card('a', 0)]).map((c) => c.repo.path)).toEqual(
-      ['c', 'a', 'b'],
-    )
+test('stage bars follow the run order, scale to the slowest p90 and carry flags', () => {
+  const bars = stageBars(
+    {
+      stages: ['prepare', 'check'],
+      jobs: [
+        job('unit', 'check', { duration: { samples: 5, median: 60, p90: 120 } }),
+        job('lint', 'check', { duration: { samples: 5, median: 30 } }),
+        job('compile', 'prepare', { duration: { samples: 5, median: 90, p90: 240 } }),
+        job('notes', 'extra', { duration: { samples: 0 } }),
+      ],
+    },
+    { unit: ['flaky'] },
+  )
+  expect(bars.map((bar) => [bar.stage, bar.first, bar.job])).toEqual([
+    ['prepare', true, 'compile'],
+    ['check', true, 'unit'],
+    ['check', false, 'lint'],
+    ['extra', true, 'notes'],
+  ])
+  expect(bars[1]).toMatchObject({ medianWidth: 25, p90Width: 50, flags: ['flaky'] })
+  expect(bars[2]).toMatchObject({ medianWidth: 13, p90Width: 13 })
+  expect(bars[3]).toMatchObject({ medianWidth: 0, p90Width: 0 })
+})
+
+test('worst first: state, then success rate, then path', () => {
+  expect(
+    worstCiFirst([
+      card('acme/b'),
+      card('acme/a', { status: 'flaky', successRate: 95 }),
+      card('acme/c', { status: 'failing' }),
+      card('acme/d', { status: 'flaky', successRate: 80 }),
+      card('acme/e', { status: 'idle' }),
+    ]).map((c) => c.repo.path),
+  ).toEqual(['acme/c', 'acme/d', 'acme/a', 'acme/b', 'acme/e'])
+})
+
+test('KPIs: medians of repositories, pipeline-weighted success, flaky sum and states', () => {
+  const kpis = ciKpis([
+    card('acme/a', {
+      median: 100,
+      p90: 200,
+      successRate: 90,
+      pipelines: 100,
+      flakyJobs: 2,
+      queueMedian: 10,
+    }),
+    card('acme/b', {
+      median: 300,
+      p90: 400,
+      successRate: 50,
+      pipelines: 300,
+      status: 'failing',
+      queueMedian: 30,
+    }),
+    card('acme/c', { pipelines: 0, status: 'idle' }),
+  ])
+  expect(kpis).toMatchObject({
+    repos: 3,
+    median: 200,
+    p90: 300,
+    successRate: 60,
+    flakyJobs: 2,
+    queueMedian: 20,
+    statuses: { failing: 1, flaky: 0, slower: 0, healthy: 1, idle: 1 },
   })
+  expect(ciKpis([]).successRate).toBeUndefined()
+})
+
+test('filters and sort values', () => {
+  const cards = [
+    card('acme/checkout-web', {
+      problems: 2,
+      status: 'flaky',
+      lastRunAt: '2026-11-12T01:00:00.000Z',
+    }),
+    card('acme/ledger-api', { groups: ['Payments'] }),
+  ]
+  expect(filterCiCards(cards, { q: 'payments' }).map((c) => c.repo.path)).toEqual([
+    'acme/ledger-api',
+  ])
+  expect(filterCiCards(cards, { status: ['flaky'] }).map((c) => c.repo.path)).toEqual([
+    'acme/checkout-web',
+  ])
+  expect(filterCiCards(cards, { problems: true })).toHaveLength(1)
+  const [first, second] = cards
+  if (!first || !second) throw new Error('cards missing')
+  expect(ciSortValue(first, 'status')).toBe(1)
+  expect(ciSortValue(first, 'last')).toEqual(new Date('2026-11-12T01:00:00.000Z'))
+  expect(ciSortValue(second, 'last')).toBeUndefined()
+  expect(ciSortValue(second, 'repo')).toBe('acme:acme/ledger-api')
+})
+
+test('outcome bar, extra flags and the release gate in words', () => {
+  expect(outcomeBar({ success: 355, failed: 41, canceled: 16 })?.label).toBe(
+    'Passed 355 · 86.2% · Failed 41 · Canceled 16',
+  )
+  expect(outcomeBar({ success: 0, failed: 0, canceled: 0 })).toBeUndefined()
+  expect(outcomeBar(undefined)).toBeUndefined()
+  expect(
+    moreFlagged({ unit: ['flaky', 'slower'], lint: ['failing'] }, [{ job: 'unit', kind: 'flaky' }]),
+  ).toEqual([
+    { job: 'lint', kinds: ['failing'] },
+    { job: 'unit', kinds: ['slower'] },
+  ])
+  expect(releaseGateText({ pipeline: true, branch: 'main' })).toBe('Pipeline must pass on main')
+  expect(releaseGateText({ pipeline: false, branch: 'main' })).toContain('do not wait')
+})
+
+test('CI search keeps known values only', () => {
+  expect(
+    parseCiSearch({
+      repo: 'acme:acme/widgets',
+      tab: 'x',
+      q: 'web',
+      status: 'flaky,odd',
+      problems: 'true',
+      sort: 'median',
+      dir: 'desc',
+    }),
+  ).toEqual({
+    repo: 'acme:acme/widgets',
+    q: 'web',
+    status: ['flaky'],
+    problems: true,
+    sort: 'median',
+    dir: 'desc',
+  })
+  expect(parseCiSearch({ repo: 1, problems: 'no', sort: 'odd' })).toEqual({})
+  expect(ciSort({ sort: 'p90' })).toEqual({ key: 'p90', direction: 'asc' })
+  expect(withCiSort({ sort: 'p90', dir: 'asc', q: 'a' }, null)).toEqual({ q: 'a' })
 })

@@ -6,6 +6,7 @@ import {
   auditCursorSeq,
   auditVerifyRange,
   sealAuditEvent,
+  sortAuditSummary,
   verifyAuditEvents,
 } from '@holtkeeper/store'
 
@@ -137,6 +138,33 @@ export function sqliteAudit(db: Database): AuditStore {
           )
           .get(...clause.params)?.n ?? 0
       )
+    },
+    async summary(filter = {}) {
+      const clause = where(filter)
+      const counts = (key: string, extra = '') =>
+        db
+          .query<{ key: string; count: number }, SQLQueryBindings[]>(
+            `SELECT ${key} AS key, count(*) AS count FROM audit_events ${clause.sql}${extra} GROUP BY 1`,
+          )
+          .all(...clause.params)
+      const actors = db
+        .query<{ key: string; count: number; name: string; seq: number }, SQLQueryBindings[]>(
+          `SELECT actor_id AS key, count(*) AS count, max(seq) AS seq,
+             json_extract(event, '$.actor.name') AS name
+           FROM audit_events ${clause.sql} GROUP BY actor_id`,
+        )
+        .all(...clause.params)
+      const days = counts('substr(at, 1, 10)')
+      return sortAuditSummary({
+        total: days.reduce((sum, day) => sum + day.count, 0),
+        days,
+        actions: counts('action'),
+        actors: actors.map(({ key, count, name }) => ({ key, count, name })),
+        repos: counts(
+          'target_repo',
+          clause.sql ? ' AND target_repo IS NOT NULL' : ' WHERE target_repo IS NOT NULL',
+        ),
+      })
     },
     repos: async () =>
       db

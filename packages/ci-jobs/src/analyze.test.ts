@@ -79,6 +79,35 @@ describe('analyzeCiJobs', () => {
     expect(result.lastRunAt).toBe(at(89, 14))
   })
 
+  test('a canceled pipeline is neither passed nor failed and its time is not measured', () => {
+    const records = [
+      attempt('build', at(1), 100, { pipelineId: 1 }),
+      attempt('build', at(2), 100, { pipelineId: 2, status: 'failed' }),
+      attempt('build', at(3), 30, { pipelineId: 3, status: 'canceled' }),
+      attempt('lint', at(3), 10, { pipelineId: 3, status: 'canceled', allowFailure: true }),
+      attempt('build', at(4), 100, { pipelineId: 4 }),
+      attempt('lint', at(4), 10, { pipelineId: 4, status: 'canceled', allowFailure: true }),
+    ]
+    const result = analyzeCiJobs(records, window, options)
+    expect(result.pipelines).toMatchObject({
+      count: 4,
+      successRate: 50,
+      outcomes: { success: 2, failed: 1, canceled: 1 },
+      duration: { samples: 2, median: 100 },
+    })
+    const build = result.jobs.find((j) => j.name === 'build')
+    expect(build?.outcomes).toEqual({ success: 2, failed: 1, canceled: 1 })
+    expect(build?.failureRate).toBe(33.3)
+    expect(result.jobs.find((j) => j.name === 'lint')?.outcomes).toMatchObject({ canceled: 2 })
+  })
+
+  test('job outcomes count final attempts only', () => {
+    const testJob = analyzeCiJobs(quarter(), window, { ...options, branch: 'main' }).jobs.find(
+      (j) => j.name === 'test',
+    )
+    expect(testJob?.outcomes).toEqual({ success: 81, failed: 9, canceled: 0 })
+  })
+
   test('the branch filter drops other refs', () => {
     const all = analyzeCiJobs(quarter(), window, options)
     const main = analyzeCiJobs(quarter(), window, { ...options, branch: 'main' })
@@ -94,6 +123,7 @@ describe('analyzeCiJobs', () => {
       ref: 'main',
       count: 90,
       successRate: 90,
+      outcomes: { success: 81, failed: 9, canceled: 0 },
       duration: { samples: 81, median: 100, p90: 160 },
       queue: { samples: 271, median: 30, p90: 30 },
       change: 0,

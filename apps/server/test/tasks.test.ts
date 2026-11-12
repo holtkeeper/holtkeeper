@@ -6,6 +6,7 @@ import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import type { GitForge, MergeRequest, Pipeline } from '@holtkeeper/forge'
+import { touchWorker } from '@holtkeeper/jobs'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Job, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -16,6 +17,7 @@ import { createApp } from '../src/app.ts'
 import {
   createTaskGroup,
   decideRepoRequest,
+  diffstatOf,
   postTaskCard,
   proposePropagateFixes,
   relatedRepos,
@@ -24,7 +26,7 @@ import {
   taskStarted,
   taskToolsAccess,
 } from '../src/tasks.ts'
-import { writeTaskPolicy } from '../src/write-tasks.ts'
+import { writePoolStatus, writeTaskPolicy } from '../src/write-tasks.ts'
 
 const mergeRequests = new Map<number, MergeRequest>()
 const pipelines: Pipeline[] = []
@@ -373,6 +375,24 @@ describe('task group routes', () => {
     expect((status.pool as Record<string, unknown>).workers).toBeUndefined()
   })
 
+  test('the write pool counts busy workers against the live workers in the registry', async () => {
+    await setting('tasks.write', { enabled: true, perRepoUsd: 1 })
+    await propose({ repos: ['work:shapes/a', 'work:shapes/b'], run: true })
+    await touchWorker(store.kv!, 'w-busy', now)
+    await touchWorker(store.kv!, 'w-idle', now)
+    await touchWorker(store.kv!, 'w-gone', new Date(now.getTime() - 10 * 60_000))
+    await store.jobs.claim('w-busy', now.toISOString(), { only: [WRITE_TASK_KIND] })
+    const pool = await writePoolStatus(store, now)
+    expect(pool).toMatchObject({ queued: 1, running: 1, busyWorkers: 1, totalWorkers: 2 })
+    expect(pool.workers).toEqual(['w-busy'])
+    const { kv: _kv, ...withoutKv } = store
+    expect((await writePoolStatus(withoutKv, now)).totalWorkers).toBeUndefined()
+    const status = (await (await call('GET', '/write-tasks', asReader)).json()) as {
+      pool: Record<string, unknown>
+    }
+    expect(status.pool).toMatchObject({ busyWorkers: 1, totalWorkers: 2 })
+  })
+
   test('a patch needs tasks:run to propose, and approvers see it in full', async () => {
     const patch = 'diff --git a/widget.ts b/widget.ts\n'
     expect((await propose({ repos: ['work:shapes/a'], patch }, asReader)).status).toBe(403)
@@ -406,6 +426,187 @@ const thread = async () =>
     createdAt: now.toISOString(),
     participants: {},
   } as Parameters<Store['chat']['createThread']>[0])
+
+const failAll = (group: AgentTaskGroupView) =>
+  Promise.all(
+    group.tasks.map(async (task) => {
+      const job = (await store.jobs.get(task.jobId!))!
+      await taskJobFinished(deps(), { ...job, status: 'failed', error: 'checks failed' })
+    }),
+  )
+
+describe('task group retry, reject and badge', () => {
+  test('retries every failed task of a group under the task retry rules, audited', async () => {
+    await setting('tasks.write', { enabled: true })
+    const group = (await (
+      await propose({ repos: ['work:shapes/a', 'work:shapes/b'], run: true })
+    ).json()) as AgentTaskGroupView
+    expect(group.can.retry).toBe(false)
+    expect((await call('POST', `/task-groups/${group.id}/retry`)).status).toBe(409)
+
+    await failAll(group)
+    const failed = (await (
+      await call('GET', `/task-groups/${group.id}`)
+    ).json()) as AgentTaskGroupView
+    expect(failed.can.retry).toBe(true)
+    expect((await call('POST', `/task-groups/${group.id}/retry`, asReader)).status).toBe(403)
+
+    const retried = await call('POST', `/task-groups/${group.id}/retry`)
+    expect(retried.status).toBe(200)
+    const view = (await retried.json()) as AgentTaskGroupView
+    expect(view.tasks.map((task) => task.status)).toEqual(['queued', 'queued'])
+    expect(await store.jobs.list()).toHaveLength(4)
+    const [event] = (await store.audit.list({ action: 'task.retry', outcome: 'ok' })).events
+    expect(event?.target).toMatchObject({ type: 'task-group', id: group.id })
+  })
+
+  test('group retry respects the weekly cap and retries nothing when refused', async () => {
+    await setting('tasks.write', { enabled: true, weeklyUsd: 3 })
+    const group = (await (
+      await propose({ repos: ['work:shapes/a', 'work:shapes/b'], run: true })
+    ).json()) as AgentTaskGroupView
+    await failAll(group)
+    await spend(2.5)
+    const refused = await call('POST', `/task-groups/${group.id}/retry`)
+    expect(refused.status).toBe(409)
+    expect(await refused.text()).toContain('this week')
+    expect((await store.tasks.list({ groupIds: [group.id] })).map((task) => task.status)).toEqual([
+      'failed',
+      'failed',
+    ])
+  })
+
+  test('rejecting cancels a proposed group as task.reject and refuses other states', async () => {
+    const group = (await (await propose({ repos: ['work:shapes/a'] })).json()) as AgentTaskGroupView
+    expect(group.can.reject).toBe(true)
+    expect((await call('POST', `/task-groups/${group.id}/reject`, asReader)).status).toBe(403)
+
+    const rejected = await call('POST', `/task-groups/${group.id}/reject`)
+    expect(rejected.status).toBe(200)
+    expect(((await rejected.json()) as AgentTaskGroupView).status).toBe('cancelled')
+    const [event] = (await store.audit.list({ action: 'task.reject', outcome: 'ok' })).events
+    expect(event?.target).toMatchObject({
+      type: 'task-group',
+      id: group.id,
+      repo: 'work:shapes/a',
+    })
+    expect((await call('POST', `/task-groups/${group.id}/reject`)).status).toBe(409)
+
+    await setting('tasks.write', { enabled: true })
+    const after = (await (
+      await call('GET', `/task-groups/${group.id}`)
+    ).json()) as AgentTaskGroupView
+    expect(after.can.retry).toBe(false)
+    expect(after.tasks.map((task) => task.can.retry)).toEqual([false])
+    expect((await call('POST', `/task-groups/${group.id}/retry`)).status).toBe(409)
+    expect((await call('POST', `/tasks/${after.tasks[0]!.id}/retry`)).status).toBe(409)
+
+    const running = (await (
+      await propose({ repos: ['work:shapes/a'], run: true })
+    ).json()) as AgentTaskGroupView
+    expect(running.can.reject).toBe(false)
+    expect((await call('POST', `/task-groups/${running.id}/reject`)).status).toBe(409)
+  })
+
+  test('counts proposed groups the caller sees for the Tasks badge', async () => {
+    await propose({ repos: ['work:shapes/a'] })
+    await propose({ repos: ['work:shapes/b'] })
+    await propose({ repos: ['work:tools/x'] }, asHelper)
+    const count = async (headers: typeof asShapes) =>
+      (
+        (await (await call('GET', '/task-groups/needs-approval', headers)).json()) as {
+          count: number
+        }
+      ).count
+    expect(await count(asReader)).toBe(2)
+    expect(await count(asHelper)).toBe(3)
+    const first = (await store.tasks.listGroups()).find((group) =>
+      group.repos.includes('work:shapes/a'),
+    )
+    await call('POST', `/task-groups/${first!.id}/reject`)
+    expect(await count(asReader)).toBe(1)
+  })
+
+  test('tasks show the diffstat of their patch, then of the merge request, and its CI', async () => {
+    await setting('tasks.write', { enabled: true })
+    const patch = [
+      'diff --git a/src/widget.ts b/src/widget.ts',
+      '--- a/src/widget.ts',
+      '+++ b/src/widget.ts',
+      '@@ -1,3 +1,3 @@',
+      ' export const size = 1',
+      '-export const scale = 2',
+      '+export const scale = 3',
+      ' export const depth = 4',
+      'diff --git a/src/shape.ts b/src/shape.ts',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/src/shape.ts',
+      '@@ -0,0 +1,2 @@',
+      '+--- not a header',
+      '++++ not a header either',
+    ].join('\n')
+    expect(diffstatOf(patch)).toEqual({ files: 2, additions: 3, deletions: 1 })
+
+    const group = (await (
+      await propose({ repos: ['work:shapes/a'], patch, prompt: undefined, run: true })
+    ).json()) as AgentTaskGroupView
+    expect(group.tasks[0]).toMatchObject({
+      ci: 'none',
+      diffstat: { files: 2, additions: 3, deletions: 1, source: 'patch' },
+    })
+
+    const [job] = await store.jobs.list()
+    const options = writeTaskOptionsSchema.parse(job!.options)
+    await taskStarted(deps(), job!.repo, options, job!.id)
+    await finished(job!, {
+      mergeRequest: { id: 9, url: 'https://gitlab.test/shapes/a/-/merge_requests/9', draft: false },
+    })
+    mergeRequests.set(9, {
+      id: 9,
+      title: 'fix: scale',
+      description: '',
+      sourceBranch: 'b',
+      targetBranch: 'main',
+      state: 'open',
+      draft: false,
+      labels: [],
+      author: 'holtkeeper',
+      webUrl: 'https://gitlab.test/shapes/a/-/merge_requests/9',
+    })
+    pipelines.push({
+      id: 2,
+      ref: 'b',
+      sha: 'abc',
+      status: 'running',
+      webUrl: 'https://gitlab.test/p/2',
+    })
+    const diffForge = forge as GitForge & { getMergeRequestDiff?: unknown }
+    diffForge.getMergeRequestDiff = async () => ({
+      refs: { baseSha: 'a', headSha: 'abc', startSha: 'a' },
+      files: [
+        {
+          oldPath: 'src/widget.ts',
+          newPath: 'src/widget.ts',
+          status: 'modified',
+          diff: '@@ -1,2 +1,3 @@\n-old\n+new\n+more\n context',
+        },
+      ],
+    })
+    try {
+      const listed = (await (await call('GET', '/task-groups')).json()) as {
+        groups: AgentTaskGroupView[]
+      }
+      expect(listed.groups[0]?.tasks[0]).toMatchObject({
+        status: 'mr-open',
+        ci: 'running',
+        diffstat: { files: 1, additions: 2, deletions: 1, source: 'merge-request' },
+      })
+    } finally {
+      delete diffForge.getMergeRequestDiff
+    }
+  })
+})
 
 describe('task lifecycle', () => {
   test('job progress updates the task, the chat card in place and links the merge request', async () => {

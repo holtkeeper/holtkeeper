@@ -344,7 +344,10 @@ describe('freshness sweeper', () => {
       jobs: async () => [],
       job: async () => undefined,
       log: async () => ({ total: 0, offset: 0, lines: [], complete: false, steps: [] }),
-      why: async () => ({ origin: '' }),
+      why: async () => ({ origin: '', mode: 'host' }),
+      stats: async () => {
+        throw new Error('not used')
+      },
       freshness: (repo) => freshnessStatus(deps(), { repo }, { timezone: 'UTC' }),
     }).tools
     const call = async (repo: string) => {

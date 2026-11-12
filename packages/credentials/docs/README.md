@@ -19,12 +19,18 @@ const credentials = createCredentialService({
 | `create(input)`                     | Validates, seals the secret, fills `expiresAt` from the rotator's `inspect` if not given                              |
 | `update(id, input)`                 | Changes given fields; a new secret is sealed, re-inspected and clears `lastError`                                     |
 | `remove(id)`                        | Deletes                                                                                                               |
-| `reveal(id)`                        | The plaintext secret, for internal callers that use the credential; never send it out                                 |
+| `reveal(id)`                        | The plaintext secret, for internal callers that use the credential; never send it out. Counts as a use                |
+| `open(id)`                          | The plaintext secret without recording a use, for config rebuilds and admin probes                                    |
+| `markUsed(id)`                      | Records a use for callers that open the secret themselves                                                             |
 | `rotate(id)`                        | Rotates now (see below)                                                                                               |
 | `rotateDue()`                       | Rotates every credential that is due; returns `{ id, ok, error? }[]`                                                  |
 | `setCapabilities(id, capabilities)` | Stores probe results (`{ agentLoop: 'ok' \| 'failed' \| 'unknown', checkedAt, error? }`) without changing `updatedAt` |
 
 `capabilities` are what a probe found the provider can do (the server's credential test fills them for AI providers). `update` drops them whenever the secret, `options`, `kind` or `url` changes, so a stale probe never decides how the new endpoint is used.
+
+## Last use
+
+Views carry `lastUsedAt`: when something last used the secret. `reveal(id)` records a use, and so does `markUsed(id)` for code that opens the sealed secret on its own (`open(id)` or the vault). `open(id)` records nothing: it is for code that only prepares or probes a credential. The service writes it through `CredentialStore.touch`, which only ever moves it forward, at most once a minute per credential and process; a failing write never fails the use, and unknown ids are ignored. `update` and `rotate` keep it.
 
 Input that fails validation throws `CredentialInputError` with one `field: message` entry per problem; an unknown id throws `CredentialNotFoundError`. Validation requires a non-empty `name`, `kind` and `secret`, an http(s) `url`, a valid `Scope`, an ISO 8601 `expiresAt`, and a rotation policy with positive integer `daysBefore` < `lifetimeDays` (otherwise a fresh token would be due again at once).
 

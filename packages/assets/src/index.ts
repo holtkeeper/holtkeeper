@@ -1,9 +1,11 @@
 export {
   type AssetsAnalysisOptions,
+  type AssetsMetrics,
   assetTree,
   assetsAnalysis,
   createAssetsAnalysis,
   detailsOf,
+  parseAssetsMetrics,
 } from './analysis.ts'
 export {
   type AnalyzeAssetsOptions,
@@ -142,4 +144,10 @@ export {
   requiredFormats,
   worthSaving,
 } from './policy.ts'
-export { type AssetProblem, type AssetRow, type AssetsSummary, assetsSummary } from './summary.ts'
+export {
+  type AssetProblem,
+  type AssetRow,
+  type AssetsSummary,
+  assetProblemRules,
+  assetsSummary,
+} from './summary.ts'

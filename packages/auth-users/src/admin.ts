@@ -12,7 +12,8 @@ import { z } from 'zod'
 import type { Context } from './context.ts'
 import { HttpError } from './errors.ts'
 import { issueLink } from './links.ts'
-import { type LinkResponse, type UserView, toUserView } from './views.ts'
+import { hasSignedIn, peopleSummary, rememberInvite } from './people.ts'
+import { type LinkResponse, type PeopleSummary, type UserView, toUserView } from './views.ts'
 
 const everything: Grant[] = [{ scope: { all: true }, actions: ['*'] }]
 
@@ -47,10 +48,39 @@ export const updateSchema = z.object({
   disabled: z.boolean().optional(),
 })
 
-export async function listUsers(ctx: Context, caller: Principal): Promise<UserView[]> {
+async function visibleUsers(ctx: Context, caller: Principal): Promise<User[]> {
   const users = (await ctx.store.listUsers()).filter((user) => canSeeUser(caller, user))
-  users.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  return Promise.all(users.map((user) => toUserView(ctx.store, user)))
+  return users.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+}
+
+export async function listUsers(ctx: Context, caller: Principal): Promise<UserView[]> {
+  return Promise.all((await visibleUsers(ctx, caller)).map((user) => toUserView(ctx, user)))
+}
+
+/** The People strip over the users the caller may see. */
+export async function summarizeUsers(
+  ctx: Context,
+  caller: Principal,
+  signIn: string[],
+): Promise<PeopleSummary> {
+  return peopleSummary(ctx, await visibleUsers(ctx, caller), signIn)
+}
+
+async function enrollmentLink(ctx: Context, caller: Principal, user: User, now: Date) {
+  const link = await issueLink(ctx.store, {
+    origin: ctx.origin,
+    userId: user.id,
+    purpose: 'enroll',
+    ttlMs: ctx.linkTtlMs,
+    now,
+    createdBy: caller.id,
+  })
+  await rememberInvite(ctx, user.id, {
+    createdAt: now.toISOString(),
+    expiresAt: link.expiresAt,
+    createdBy: caller.id,
+  })
+  return link
 }
 
 async function ensureEmailFree(ctx: Context, email: string | undefined, userId?: string) {
@@ -81,15 +111,25 @@ export async function inviteUser(
     createdBy: caller.id,
   }
   await ctx.store.putUser(user)
-  const link = await issueLink(ctx.store, {
-    origin: ctx.origin,
-    userId: user.id,
-    purpose: 'enroll',
-    ttlMs: ctx.linkTtlMs,
-    now,
-    createdBy: caller.id,
-  })
-  return { user: await toUserView(ctx.store, user), ...link }
+  const link = await enrollmentLink(ctx, caller, user, now)
+  return { user: await toUserView(ctx, user), ...link }
+}
+
+/**
+ * A fresh enrollment link for a user who never signed in, replacing the invite they have; needs
+ * `users:invite` and the right to manage the user. Earlier links keep working until they expire.
+ */
+export async function resendInvite(
+  ctx: Context,
+  caller: Principal,
+  id: string,
+): Promise<LinkResponse> {
+  const user = await managedUser(ctx, caller, id)
+  if (!hasAction(caller, 'users:invite')) throw new HttpError(403, 'you may not invite people')
+  if (await hasSignedIn(ctx.store, user))
+    throw new HttpError(409, 'the user has signed in; create a recovery link instead')
+  const link = await enrollmentLink(ctx, caller, user, ctx.now())
+  return { user: await toUserView(ctx, user), ...link }
 }
 
 async function managedUser(ctx: Context, caller: Principal, id: string): Promise<User> {
@@ -127,7 +167,7 @@ export async function updateUser(
       grantsChanged || disabledChanged ? user.sessionVersion + 1 : user.sessionVersion,
   }
   await ctx.store.putUser(updated)
-  return toUserView(ctx.store, updated)
+  return toUserView(ctx, updated)
 }
 
 /** A recovery link; using it registers a new passkey and ends the user's other sessions. */
@@ -145,7 +185,7 @@ export async function issueRecovery(
     now: ctx.now(),
     createdBy: caller.id,
   })
-  return { user: await toUserView(ctx.store, user), ...link }
+  return { user: await toUserView(ctx, user), ...link }
 }
 
 export async function removePasskey(

@@ -147,6 +147,11 @@ test('one entry per group with uses judged at the record time and conventions wi
     ['shapes/square', '24.3', 'lts', 'major', '24'],
   ])
   expect(group?.tools[0]).toMatchObject({ latest: '26.1.0', latestLts: '24.11.0' })
+  expect(group?.tools[0]?.cycles).toEqual([
+    { cycle: '26', eol: '2029-04-30' },
+    { cycle: '24', eol: '2028-04-30', lts: '2025-10-28' },
+    { cycle: '18', eol: '2025-04-30', lts: true },
+  ])
   const [circle, square] = group?.conventions ?? []
   expect(circle).toMatchObject({ status: 'drifts', changeId: expect.stringMatching(/^stack:/) })
   expect(circle?.diff?.[0]).toMatchObject({ file: '.nvmrc', status: 'modified' })

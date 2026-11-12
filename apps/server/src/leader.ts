@@ -133,3 +133,30 @@ export function startLeaderElection(options: LeaderElectionOptions): LeaderElect
     },
   }
 }
+
+/**
+ * A leader duty that runs `task` at once and then every `intervalMs` while this process leads.
+ * Runs never overlap; a failing run is logged as `<name>: … failed` and the next one still comes.
+ */
+export function periodicDuty(
+  name: string,
+  task: () => Promise<unknown>,
+  options: { intervalMs: number; log?: (line: string) => void },
+): LeaderDuty {
+  return () => {
+    let running: Promise<unknown> | undefined
+    const run = () => {
+      running ??= task()
+        .catch((error: unknown) => options.log?.(`${name}: run failed: ${messageOf(error)}`))
+        .finally(() => {
+          running = undefined
+        })
+    }
+    run()
+    const timer = setInterval(run, options.intervalMs)
+    return async () => {
+      clearInterval(timer)
+      await running
+    }
+  }
+}

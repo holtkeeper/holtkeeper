@@ -1,4 +1,4 @@
-import type { MediaVariantsInput } from '@holtkeeper/api'
+import { type MediaVariantsInput, type MediaVariantsResult, formatBytes } from '@holtkeeper/api'
 
 /** Output formats the media engine encodes; none selected means its own choice. */
 export const mediaFormats = ['avif', 'webp', 'png', 'jpeg'] as const
@@ -131,3 +131,143 @@ export function duplicatePaths(paths: readonly string[]): Set<string> {
   }
   return duplicates
 }
+
+/** The optimizer's steps in order. */
+export const mediaSteps = [
+  { id: 'configure', label: 'Configure' },
+  { id: 'variants', label: 'Choose variants' },
+  { id: 'markup', label: 'Markup' },
+  { id: 'deliver', label: 'Merge request or ZIP' },
+] as const
+
+/** Id of one optimizer step. */
+export type MediaStep = (typeof mediaSteps)[number]['id']
+
+/** Whether `step` is behind, at or ahead of `current`. */
+export function stepState(step: MediaStep, current: MediaStep): 'done' | 'current' | 'todo' {
+  const at = mediaSteps.findIndex((s) => s.id === current)
+  const index = mediaSteps.findIndex((s) => s.id === step)
+  return index < at ? 'done' : index === at ? 'current' : 'todo'
+}
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** A sent draft as labelled lines for the collapsed Configure step. */
+export function configSummary(draft: MediaDraft): { label: string; value: string }[] {
+  const widths = parseNumbers(draft.widths)
+  const densities = parseNumbers(draft.densities)
+  const preset = (mediaPresets as readonly string[]).includes(draft.preset)
+    ? draft.preset
+    : 'default'
+  const quality = draft.quality.trim()
+    ? `q${Number(draft.quality)}`
+    : 'tuned (AVIF 55, WebP and JPEG 78)'
+  return [
+    {
+      label: 'Formats',
+      value: draft.formats.length
+        ? draft.formats.map((format) => format.toUpperCase()).join(', ')
+        : 'AVIF, WebP and the source format',
+    },
+    {
+      label: 'Widths',
+      value: widths.length ? `${widths.join(', ')} px` : 'responsive ladder up to the source width',
+    },
+    {
+      label: 'Densities',
+      value: densities.length ? densities.map((d) => `@${d}x`).join(', ') : 'none',
+    },
+    { label: 'Effort · quality', value: `${capitalize(preset)} · ${quality}` },
+    { label: 'Read from', value: draft.ref.trim() || 'default branch' },
+  ]
+}
+
+/**
+ * The artifact that can replace the original file: the optimized SVG, else a variant generated at
+ * the original's own path (the re-encoded original).
+ */
+export function replacementOf(result: MediaVariantsResult, file: string): string | undefined {
+  if (result.svg) return result.svg.id
+  return result.variants.find((variant) => variant.path === file.trim())?.id
+}
+
+/** Variants offered as new files: every variant except the replacement of the original. */
+export const offeredVariants = (
+  result: MediaVariantsResult,
+  file: string,
+): MediaVariantsResult['variants'] => {
+  const replacement = replacementOf(result, file)
+  return result.variants.filter((variant) => variant.id !== replacement)
+}
+
+/** Variants chosen at first: every offered one whose suggested path does not exist yet. */
+export const initialSelection = (result: MediaVariantsResult, file: string): string[] =>
+  offeredVariants(result, file)
+    .filter((variant) => !result.exists[variant.path])
+    .map((variant) => variant.id)
+
+/**
+ * Chosen variants that would overwrite a file at the ref: the path is still the suggested one and
+ * the server reported it as existing. Edited paths are checked when the merge request opens.
+ */
+export function conflictIds(
+  result: MediaVariantsResult,
+  selected: readonly string[],
+  paths: Readonly<Record<string, string>>,
+): string[] {
+  return result.variants
+    .filter(
+      (variant) =>
+        selected.includes(variant.id) &&
+        (paths[variant.id] ?? variant.path).trim() === variant.path &&
+        result.exists[variant.path] === true,
+    )
+    .map((variant) => variant.id)
+}
+
+/** The error under a variant's path field, or nothing when it can be written. */
+export function pathError(
+  path: string,
+  { duplicate, exists, ref }: { duplicate: boolean; exists: boolean; ref: string },
+): string | undefined {
+  if (!path.trim()) return 'Enter a path'
+  if (duplicate) return 'Another variant uses this path'
+  if (exists) return `Already exists on ${ref.trim() || 'the default branch'}`
+  return undefined
+}
+
+/** "5 of 7 chosen, 1.2 MB added" for the variants step. */
+export function selectionText(
+  offered: readonly { id: string; bytes: number }[],
+  selected: readonly string[],
+): string {
+  const chosen = offered.filter((variant) => selected.includes(variant.id))
+  const bytes = chosen.reduce((total, variant) => total + variant.bytes, 0)
+  return `${chosen.length} of ${offered.length} chosen${chosen.length ? `, ${formatBytes(bytes)} added` : ''}`
+}
+
+/** Why the variants cannot be delivered yet, or nothing when they can. */
+export function deliverBlocker({
+  chosen,
+  replace,
+  emptyPaths,
+  duplicates,
+  conflicts,
+}: {
+  chosen: number
+  replace: boolean
+  emptyPaths: number
+  duplicates: number
+  conflicts: number
+}): string | undefined {
+  if (!chosen && !replace) return 'Choose a variant or replace the original'
+  if (emptyPaths) return 'Enter a path for every chosen variant'
+  if (duplicates) return 'Give every chosen variant its own path'
+  if (conflicts)
+    return `Fix ${conflicts === 1 ? '1 conflict' : `${conflicts} conflicts`} to continue`
+  return undefined
+}
+
+/** Default merge request title for a file: "Optimize hero.png". */
+export const mediaTitle = (file: string): string =>
+  `Optimize ${file.trim().split('/').at(-1) || 'image'}`

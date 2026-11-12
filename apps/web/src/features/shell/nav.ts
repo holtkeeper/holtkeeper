@@ -1,80 +1,119 @@
 import type { Action, CrossTeamLevel, Principal } from '@holtkeeper/api'
+import type { LinkProps } from '@tanstack/react-router'
 import {
   BookOpen,
   Bot,
   Boxes,
+  ChartColumn,
+  CircleDollarSign,
   CodeXml,
   FileSearch,
   FlaskConical,
   FolderGit2,
   GitBranch,
-  History,
   HardDrive,
+  History,
+  Images,
   Layers,
   LayoutDashboard,
   Library,
+  Inbox,
+  Lightbulb,
   ListChecks,
+  ListTree,
   type LucideIcon,
+  MessageSquareCode,
   MessagesSquare,
-  Network,
+  NotebookPen,
+  Package,
   Plug,
+  Radar,
   Rocket,
   Scale,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Timer,
   Users,
+  Waypoints,
   Workflow,
 } from 'lucide-react'
 
-import { can, canCatalog, canGlobal } from '../../lib/access.ts'
+import { can, canCatalog, canGlobal, visibleSettingsSections } from '../../lib/access.ts'
 import { analysisPages, stackRecords } from '../../lib/analyses.ts'
-import { type SettingsTabId, parseSettingsTab, settingsTabs } from '../../lib/settings-tabs.ts'
+import {
+  type SettingsSectionId,
+  settingsSectionIds,
+  settingsSections,
+} from '../../lib/settings-sections.ts'
 import type { BrandIconName } from '../../ui/BrandIcon.tsx'
 
-/** A rail entry: a group of pages that share the segmented tabs of the top bar. */
+/** A group of pages that share one set of segmented tabs in the page header. */
 export interface Workspace {
-  id: 'home' | 'repos' | 'chat' | 'code' | 'delivery' | 'team' | 'ops' | 'admin'
+  id:
+    | 'home'
+    | 'repos'
+    | 'chat'
+    | 'supply'
+    | 'quality'
+    | 'releases'
+    | 'knowledge'
+    | 'ops'
+    | 'settings'
+  /** Short name under the rail icon, also the tabs' accessible name. */
   label: string
+  /** Name in page titles and crumbs when it differs from `label`. */
+  title?: string
   icon: LucideIcon
+  /** Reached from the rail's bottom button instead of the workspace list. */
+  bottom?: boolean
 }
 
-/** Rail entries in display order. */
+/** Workspaces in rail order; `settings` is the rail's bottom Settings button. */
 const workspaces: readonly Workspace[] = [
   { id: 'home', label: 'Home', icon: LayoutDashboard },
-  { id: 'repos', label: 'Repositories', icon: FolderGit2 },
+  { id: 'repos', label: 'Repos', icon: FolderGit2 },
   { id: 'chat', label: 'Chat', icon: MessagesSquare },
-  { id: 'code', label: 'Code', icon: CodeXml },
-  { id: 'delivery', label: 'Delivery', icon: Rocket },
-  { id: 'team', label: 'Team', icon: BookOpen },
-  { id: 'ops', label: 'Ops', icon: Workflow },
-  { id: 'admin', label: 'Admin', icon: Settings2 },
+  { id: 'supply', label: 'Supply', title: 'Supply chain', icon: Package },
+  { id: 'quality', label: 'Quality', icon: ChartColumn },
+  { id: 'releases', label: 'Releases', icon: Rocket },
+  { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
+  { id: 'ops', label: 'Ops', icon: Bot },
+  { id: 'settings', label: 'Settings', icon: Settings2, bottom: true },
 ]
 
 /** A page reachable from the shell, shown as a tab of its workspace. */
 export interface NavItem {
   to:
     | '/'
+    | '/inbox'
     | '/repos'
-    | '/audits'
-    | '/releases'
-    | '/bundles'
-    | '/dependencies'
-    | '/coverage'
-    | '/branches'
-    | '/ci'
-    | '/licenses'
-    | '/stack'
-    | '/public-api'
-    | '/jobs'
-    | '/tasks'
-    | '/knowledge'
-    | '/automation'
-    | '/settings'
-    | '/history'
+    | '/repos/groups'
     | '/chat'
-  /** The page's `tab` search parameter, for entries that open one tab of a shared page. */
-  tab?: string
+    | '/supply/libraries'
+    | '/supply/security'
+    | '/supply/licenses'
+    | '/supply/stack'
+    | '/supply/public-api'
+    | '/quality/coverage'
+    | '/quality/bundles'
+    | '/quality/assets'
+    | '/quality/ci'
+    | '/quality/branches'
+    | '/quality/reviews'
+    | '/releases'
+    | '/releases/timeline'
+    | '/releases/setup'
+    | '/knowledge/guide'
+    | '/knowledge/notes'
+    | '/knowledge/learnings'
+    | '/ops/runs'
+    | '/ops/tasks'
+    | '/ops/automation'
+    | '/ops/spend'
+    | '/settings/$section'
+  /** The Settings section of a `/settings/$section` entry; its visibility follows `visibleSettingsSections`. */
+  section?: SettingsSectionId
   workspace: Workspace['id']
   label: string
   icon: LucideIcon
@@ -86,16 +125,48 @@ export interface NavItem {
   global?: boolean
   /** Catalog reach is enough (`canCatalog`), like the server's catalog check; replaces `requires`. */
   catalog?: boolean
+  /** The count its tab shows: open Inbox decisions, or task groups waiting for approval. */
+  badge?: NavBadge
+}
+
+/** What a tab's badge counts. */
+export type NavBadge = 'inbox' | 'tasks'
+
+/** How a tab's badge reads to screen readers after its count. */
+export const navBadgeWord: Record<NavBadge, string> = {
+  inbox: 'waiting',
+  tasks: 'need approval',
+}
+
+const settingsEntries: Readonly<
+  Record<SettingsSectionId, { icon: LucideIcon; brand: BrandIconName }>
+> = {
+  people: { icon: Users, brand: 'users' },
+  ai: { icon: Sparkles, brand: 'ai' },
+  integrations: { icon: Plug, brand: 'credentials' },
+  analyzers: { icon: Radar, brand: 'jobs' },
+  policies: { icon: ShieldCheck, brand: 'audit' },
+  system: { icon: HardDrive, brand: 'storage' },
+  audit: { icon: History, brand: 'auditlog' },
 }
 
 const navItems: readonly NavItem[] = [
-  { workspace: 'home', to: '/', label: 'Home', icon: LayoutDashboard },
+  { workspace: 'home', to: '/', label: 'Overview', icon: LayoutDashboard },
+  { workspace: 'home', to: '/inbox', label: 'Inbox', icon: Inbox, badge: 'inbox' },
   {
     workspace: 'repos',
     to: '/repos',
     brand: 'repos',
     label: 'Repositories',
     icon: FolderGit2,
+    requires: 'repos:read',
+  },
+  {
+    workspace: 'repos',
+    to: '/repos/groups',
+    brand: 'repos',
+    label: 'Groups',
+    icon: Users,
     requires: 'repos:read',
   },
   {
@@ -107,96 +178,161 @@ const navItems: readonly NavItem[] = [
     requires: 'repos:read',
   },
   {
-    workspace: 'code',
-    to: '/dependencies',
+    workspace: 'supply',
+    to: '/supply/libraries',
     brand: 'updates',
-    label: 'Dependencies',
-    icon: Network,
-    catalog: true,
-  },
-  {
-    workspace: 'code',
-    to: '/public-api',
-    brand: 'api',
-    label: 'Public API',
+    label: 'Libraries',
     icon: Library,
     catalog: true,
   },
   {
-    workspace: 'code',
-    to: '/stack',
-    brand: 'stack',
-    label: 'Stack',
-    icon: Layers,
-    catalog: true,
-  },
-  {
-    workspace: 'code',
-    to: '/audits',
+    workspace: 'supply',
+    to: '/supply/security',
     brand: 'audit',
-    label: 'Audits',
+    label: 'Security',
     icon: FileSearch,
     requires: 'audits:read',
   },
   {
-    workspace: 'code',
-    to: '/licenses',
+    workspace: 'supply',
+    to: '/supply/licenses',
     brand: 'licenses',
     label: 'Licenses',
     icon: Scale,
     requires: 'analyses:read',
   },
   {
-    workspace: 'code',
-    to: '/bundles',
-    brand: 'bundles',
-    label: 'Bundles',
-    icon: Boxes,
-    requires: 'analyses:read',
+    workspace: 'supply',
+    to: '/supply/stack',
+    brand: 'stack',
+    label: 'Stack',
+    icon: Layers,
+    catalog: true,
   },
   {
-    workspace: 'code',
-    to: '/coverage',
+    workspace: 'supply',
+    to: '/supply/public-api',
+    brand: 'api',
+    label: 'Public API',
+    icon: CodeXml,
+    catalog: true,
+  },
+  {
+    workspace: 'quality',
+    to: '/quality/coverage',
     brand: 'coverage',
     label: 'Coverage',
     icon: FlaskConical,
     requires: 'analyses:read',
   },
   {
-    workspace: 'code',
-    to: '/branches',
-    brand: 'branches',
-    label: 'Branches',
-    icon: GitBranch,
+    workspace: 'quality',
+    to: '/quality/bundles',
+    brand: 'bundles',
+    label: 'Bundles',
+    icon: Boxes,
     requires: 'analyses:read',
   },
   {
-    workspace: 'delivery',
-    to: '/releases',
-    brand: 'releaseboard',
-    label: 'Releases',
-    icon: Rocket,
-    requires: 'releases:read',
+    workspace: 'quality',
+    to: '/quality/assets',
+    brand: 'assets',
+    label: 'Assets',
+    icon: Images,
+    requires: 'analyses:read',
   },
   {
-    workspace: 'delivery',
-    to: '/ci',
+    workspace: 'quality',
+    to: '/quality/ci',
     brand: 'ci',
     label: 'CI',
     icon: Timer,
     requires: 'analyses:read',
   },
   {
-    workspace: 'team',
-    to: '/knowledge',
+    workspace: 'quality',
+    to: '/quality/branches',
+    brand: 'branches',
+    label: 'Branches',
+    icon: GitBranch,
+    requires: 'analyses:read',
+  },
+  {
+    workspace: 'quality',
+    to: '/quality/reviews',
+    brand: 'review',
+    label: 'Reviews',
+    icon: MessageSquareCode,
+    requires: 'analyses:read',
+  },
+  {
+    workspace: 'releases',
+    to: '/releases',
+    brand: 'releaseboard',
+    label: 'Overview',
+    icon: Rocket,
+    requires: 'releases:read',
+  },
+  {
+    workspace: 'releases',
+    to: '/releases/timeline',
+    brand: 'releaseboard',
+    label: 'Timeline',
+    icon: ListTree,
+    requires: 'releases:read',
+  },
+  {
+    workspace: 'releases',
+    to: '/releases/setup',
+    brand: 'releaseboard',
+    label: 'Flow setup',
+    icon: Waypoints,
+    requires: 'releases:read',
+  },
+  {
+    workspace: 'knowledge',
+    to: '/knowledge/guide',
     brand: 'knowledge',
-    label: 'Knowledge',
+    label: 'Guide',
     icon: BookOpen,
     requires: 'knowledge:read',
   },
   {
+    workspace: 'knowledge',
+    to: '/knowledge/notes',
+    brand: 'knowledge',
+    label: 'Notes',
+    icon: NotebookPen,
+    requires: 'knowledge:read',
+  },
+  {
+    workspace: 'knowledge',
+    to: '/knowledge/learnings',
+    brand: 'knowledge',
+    label: 'Learnings',
+    icon: Lightbulb,
+    requires: 'knowledge:read',
+  },
+  {
     workspace: 'ops',
-    to: '/automation',
+    to: '/ops/runs',
+    brand: 'jobs',
+    label: 'Runs',
+    icon: ListChecks,
+    requires: 'analyses:read',
+  },
+  {
+    workspace: 'ops',
+    to: '/ops/tasks',
+    brand: 'jobs',
+    label: 'Tasks',
+    icon: Bot,
+    requires: 'repos:read',
+    badge: 'tasks',
+  },
+  {
+    workspace: 'ops',
+    to: '/ops/automation',
     global: true,
     brand: 'automation',
     label: 'Automation',
@@ -205,67 +341,24 @@ const navItems: readonly NavItem[] = [
   },
   {
     workspace: 'ops',
-    to: '/jobs',
-    brand: 'jobs',
-    label: 'Jobs',
-    icon: ListChecks,
-    requires: 'analyses:read',
-  },
-  {
-    workspace: 'ops',
-    to: '/tasks',
-    brand: 'jobs',
-    label: 'Tasks',
-    icon: Bot,
-    requires: 'repos:read',
-  },
-  {
-    workspace: 'ops',
-    to: '/history',
-    brand: 'auditlog',
-    label: 'History',
-    icon: History,
-    requires: 'repos:read',
-  },
-  {
-    workspace: 'admin',
-    to: '/settings',
-    tab: 'ai',
+    to: '/ops/spend',
     brand: 'ai',
-    label: settingsTabs.ai.label,
-    icon: Sparkles,
-    requires: ['ai:read', 'ai:admin', 'settings:read', 'credentials:read'],
+    label: 'AI spend',
+    icon: CircleDollarSign,
+    requires: ['ai:read', 'ai:admin'],
   },
-  {
-    workspace: 'admin',
-    to: '/settings',
-    tab: 'access',
-    brand: 'users',
-    label: settingsTabs.access.label,
-    icon: Users,
-  },
-  {
-    workspace: 'admin',
-    to: '/settings',
-    tab: 'integrations',
-    brand: 'credentials',
-    label: settingsTabs.integrations.label,
-    icon: Plug,
-    requires: ['credentials:read', 'settings:read'],
-  },
-  {
-    workspace: 'admin',
-    to: '/settings',
-    tab: 'system',
-    global: true,
-    brand: 'storage',
-    label: settingsTabs.system.label,
-    icon: HardDrive,
-    requires: 'settings:read',
-  },
+  ...settingsSectionIds.map((section): NavItem => ({
+    workspace: 'settings',
+    to: '/settings/$section',
+    section,
+    icon: settingsEntries[section].icon,
+    brand: settingsEntries[section].brand,
+    label: settingsSections[section].label,
+  })),
 ]
 
 const allowed = (item: NavItem, principal: Principal, crossTeam: CrossTeamLevel) => {
+  if (item.section) return visibleSettingsSections(principal).includes(item.section)
   if (item.catalog) return canCatalog(principal, crossTeam)
   if (!item.requires) return true
   const check = item.global ? canGlobal : can
@@ -278,14 +371,11 @@ const allowed = (item: NavItem, principal: Principal, crossTeam: CrossTeamLevel)
 export const visibleNav = (principal: Principal, crossTeam: CrossTeamLevel): NavItem[] =>
   navItems.filter((item) => allowed(item, principal, crossTeam))
 
-/** The Settings tabs the principal can open, in display order. */
-export const visibleSettingsTabs = (principal: Principal): SettingsTabId[] =>
-  visibleNav(principal, 'off').flatMap((item) => {
-    const tab = item.to === '/settings' ? parseSettingsTab(item.tab) : undefined
-    return tab ? [tab] : []
-  })
-
 /** `items` grouped under their workspaces in rail order; workspaces left without items are dropped. */
+/** The entries the palette lists as pages; Settings sections come from the settings index instead. */
+export const paletteNav = (items: readonly NavItem[]): NavItem[] =>
+  items.filter((item) => !item.section)
+
 export const groupByWorkspace = (
   items: readonly NavItem[],
 ): { workspace: Workspace; items: NavItem[] }[] =>
@@ -294,44 +384,38 @@ export const groupByWorkspace = (
     return entries.length ? [{ workspace, items: entries }] : []
   })
 
-/** Stable key of an entry, unique even when several entries open tabs of one page. */
-export const navKey = (item: NavItem): string => (item.tab ? `${item.to}?tab=${item.tab}` : item.to)
+/** The path an entry opens, with its Settings section filled in. */
+const navPath = (item: NavItem): string => (item.section ? `/settings/${item.section}` : item.to)
 
-const analysisPrefix = '/analyses/'
+/** Stable key of an entry, unique even when several entries share a route (the Settings sections). */
+export const navKey = (item: NavItem): string => navPath(item)
 
-const pick = (candidates: readonly NavItem[], tab: string | undefined): NavItem | undefined =>
-  candidates.find((item) => item.tab !== undefined && item.tab === tab) ??
-  candidates.find((item) => item.tab === undefined) ??
-  candidates[0]
+/** Router link props that open an entry. */
+export const navLink = (item: NavItem): LinkProps =>
+  item.section ? { to: '/settings/$section', params: { section: item.section } } : { to: item.to }
+
+const under = (pathname: string, path: string) =>
+  path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(`${path}/`)
 
 /**
- * The entry a page belongs to: the one whose path is `pathname` or a parent of it. When several
- * entries open tabs of one page, `tab` (the page's `tab` search parameter) picks among them,
- * falling back to the entry without a tab, then to the first. A single analysis record
- * (`/analyses/$id`) belongs to the page of its kind, so pass `analysisKind` once it is known;
- * kinds without a page belong to Repositories, whose repository page shows them. Pass `items`
- * (the principal's `visibleNav`) so a tab the principal cannot open is never picked.
+ * The entry a page belongs to: the one whose path is the longest prefix of `pathname` (`/` only
+ * matches itself). A single analysis record (`/analyses/$id`) belongs to the page of its kind, so
+ * pass `analysisKind` once it is known; kinds without a page belong to Repositories. Pass `items`
+ * (the principal's `visibleNav`) so an entry the principal cannot open is never picked.
  */
 export const activeNav = (
   pathname: string,
   analysisKind?: string,
-  tab?: string,
   items: readonly NavItem[] = navItems,
 ): NavItem | undefined => {
-  if (pathname.startsWith(analysisPrefix)) {
+  if (pathname.startsWith('/analyses/')) {
     if (analysisKind === undefined) return undefined
     const to = [...analysisPages, stackRecords].find((p) => p.kind === analysisKind)?.to ?? '/repos'
-    return pick(
-      items.filter((item) => item.to === to),
-      undefined,
-    )
+    return items.find((item) => item.to === to)
   }
-  return pick(
-    items.filter(
-      (item) => pathname === item.to || (item.to !== '/' && pathname.startsWith(`${item.to}/`)),
-    ),
-    tab,
-  )
+  const matches = items.filter((item) => under(pathname, navPath(item)))
+  const longest = Math.max(-1, ...matches.map((item) => navPath(item).length))
+  return matches.find((item) => navPath(item).length === longest)
 }
 
 /** The public Holtkeeper documentation site. */

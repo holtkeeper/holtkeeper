@@ -77,6 +77,7 @@ describe('resolveGuide', () => {
             scope: 'repo:work:games/app',
             rules: 'REPO rule.',
             generated: {
+              version: 1,
               body: '- GENERATED line.',
               inputHash: 'h',
               model: 'm',
@@ -168,6 +169,7 @@ describe('resolveGuide', () => {
     const generated = row({
       scope: 'repo:work:games/app',
       generated: {
+        version: 1,
         body: '- Proposed line.',
         inputHash: 'h',
         model: 'm',
@@ -200,6 +202,7 @@ describe('resolveGuide', () => {
             scope: 'repo:work:games/app',
             section: 'testing',
             generated: {
+              version: 2,
               body: Array.from({ length: 40 }, (_, i) => `- generated line ${i}`).join('\n'),
               inputHash: 'h',
               model: 'm',
@@ -272,6 +275,64 @@ describe('resolveGuide', () => {
     const full = resolveGuide(input({ notes: { entries, kind: 'review' } }))
     expect(full.text.length).toBeLessThanOrEqual(12_000)
     expect(full.text.length).toBeGreaterThan(10_000)
+  })
+})
+
+describe('repository files and block texts', () => {
+  test('rules files form one repo-file layer first, and block texts add up to the prompt', () => {
+    const resolved = resolveGuide(
+      input({
+        task: 'chat',
+        section: 'testing',
+        repoDocs: [
+          { file: 'REVIEW.md', text: 'Flag widgets without a ShapeBase.' },
+          { file: 'AGENTS.md', text: 'Run bun test before pushing.' },
+        ],
+        sections: [
+          row({ scope: 'repo:work:games/app', rules: 'REPO rule.' }),
+          row({ scope: 'all', section: 'testing', rules: 'ALL testing rule.' }),
+          row({
+            scope: 'repo:work:games/app',
+            section: 'testing',
+            generated: {
+              version: 3,
+              body: '- Generated testing line.',
+              inputHash: 'h',
+              model: 'm',
+              costUsd: 0,
+              status: 'accepted',
+              generatedAt: '2026-11-01T10:00:00.000Z',
+            },
+          }),
+        ],
+      }),
+    )
+    expect(resolved.blocks.map((block) => [block.layer, block.source])).toEqual([
+      ['repo-file', 'REVIEW.md · AGENTS.md'],
+      ['repo', 'This repository'],
+      ['all', 'All repositories'],
+      ['generated', 'Generated Testing'],
+    ])
+    expect(resolved.blocks.find((block) => block.layer === 'generated')?.version).toBe(3)
+    const header = resolved.text.indexOf('## Rules from the repository')
+    expect(resolved.text.slice(header)).toBe(
+      resolved.blocks
+        .map((block) => block.text)
+        .join('')
+        .trimEnd(),
+    )
+    expect(resolved.blocks.every((block) => block.chars === block.text.length)).toBe(true)
+  })
+
+  test('focus reads only the given sections whatever the task', () => {
+    const sections = [
+      row({ scope: 'all', rules: 'GENERAL rule.' }),
+      row({ scope: 'all', section: 'review', rules: 'REVIEW rule.' }),
+    ]
+    const focused = resolveGuide(input({ task: 'review', focus: ['review'], sections }))
+    expect(focused.sections).toEqual(['review'])
+    expect(focused.text).toContain('REVIEW rule')
+    expect(focused.text).not.toContain('GENERAL rule')
   })
 })
 

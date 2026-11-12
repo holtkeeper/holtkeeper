@@ -5,6 +5,7 @@ import type { SettingEntry } from '@holtkeeper/store'
 
 import { builtinSettings } from './definitions.ts'
 import {
+  effectiveSettings,
   resolveGlobalSetting,
   resolveSetting,
   resolveSettings,
@@ -124,5 +125,44 @@ describe('builtinSettings', () => {
         .success,
     ).toBe(true)
     expect(allowlist?.schema.safeParse([{ id: 'GHSA-1' }]).success).toBe(false)
+  })
+})
+
+const at = (key: string, id: string, scope: Scope, value: unknown): SettingEntry => ({
+  ...entry(id, scope, value),
+  key,
+})
+
+describe('effectiveSettings', () => {
+  const entries = [
+    at('audit.upgrade', 'global', { all: true }, 'major'),
+    at('audit.upgrade', 'group', { groups: ['games'] }, 'minor'),
+    at('llm.provider', 'narrow', { groups: ['games'] }, 'Other'),
+    at('llm.provider', 'everywhere', { all: true }, 'Main'),
+    at('llm.model', 'retired', { all: true }, 'old'),
+    at('acme.unknown', 'unknown', { all: true }, 1),
+  ]
+  const rows = effectiveSettings(builtinSettings, entries, repo)
+
+  test('lists every live definition once, in definition order', () => {
+    expect(rows.map((row) => row.definition.key)).toEqual(builtinSettings.map((d) => d.key))
+  })
+
+  test('gives the single winner and what it overrides', () => {
+    const upgrade = rows.find((row) => row.definition.key === 'audit.upgrade')
+    expect(upgrade?.entry?.id).toBe('group')
+    expect(upgrade?.overridden.map((e) => e.id)).toEqual(['global'])
+  })
+
+  test('counts only entries for everything on global settings', () => {
+    const provider = rows.find((row) => row.definition.key === 'llm.provider')
+    expect(provider?.entry?.id).toBe('everywhere')
+    expect(provider?.overridden).toEqual([])
+  })
+
+  test('leaves the entry out when the default applies', () => {
+    const fix = rows.find((row) => row.definition.key === 'audit.fix')
+    expect(fix?.entry).toBeUndefined()
+    expect(fix?.definition.default).toBe(false)
   })
 })

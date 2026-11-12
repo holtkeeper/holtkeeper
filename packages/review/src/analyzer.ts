@@ -10,6 +10,7 @@ import { type ReviewCheckName, reviewCheckNames } from './checks.ts'
 import { type Guideline, readGuidelines } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
 import {
+  type ReviewGuide,
   type ReviewOptions,
   type ReviewSteps,
   requireReviewForge,
@@ -70,11 +71,12 @@ export interface ReviewAnalyzerDeps {
   /**
    * The repository's Guide for a review or thread reply, from its rules files (read from the
    * checkout) and the text knowledge notes are ranked by; it becomes the agent's stable context.
+   * Scopes it names are stored with the review as `guideScopes`.
    */
   guideFor?: (
     repo: RepoRef,
     request: { docs: readonly Guideline[]; query?: string },
-  ) => Promise<string | undefined>
+  ) => Promise<ReviewGuide | undefined>
   /**
    * The team knowledge base: the `knowledge` toolset is mounted. `groupsOf` gives the repository's
    * config groups.
@@ -183,6 +185,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
 
       if (options.replyTo) {
         if (!context.agent) throw new Error('answering a thread needs an agent')
+        const started = performance.now()
         const usage: ReviewUsage = { turns: 0 }
         const guide = deps.guideFor
           ? await deps
@@ -204,7 +207,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           ...(botUsername ? { botUsername } : {}),
           ...(options.language ? { language: options.language } : {}),
           ...(toolsets ? { toolsets } : {}),
-          ...(guide ? { context: guide } : {}),
+          ...(guide?.text ? { context: guide.text } : {}),
           usage,
           ...(context.signal ? { signal: context.signal } : {}),
         })
@@ -242,6 +245,8 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
           approved: false,
           checks: [],
           ...(usage.turns ? { usage } : {}),
+          ...(guide?.text && guide.scopes.length ? { guideScopes: guide.scopes } : {}),
+          durationMs: Math.round(performance.now() - started),
         }
         return { data, ref: reviewRef(mr.id) }
       }

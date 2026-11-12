@@ -1,9 +1,11 @@
+import type { RepoTarget } from '@holtkeeper/access'
+import type { RepoUpdatesSummary } from '@holtkeeper/api'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { RepoRef } from '@holtkeeper/forge'
 import { groupRepositories, staticPrefix } from '@holtkeeper/jobs'
 import { type Limiter, resolveLimitPolicy } from '@holtkeeper/limits'
 import { resolveSetting } from '@holtkeeper/settings'
-import type { KvStore, Store } from '@holtkeeper/store'
+import type { KvStore, SettingEntry, Store } from '@holtkeeper/store'
 import {
   DEFAULT_POLL_SHARE,
   type PollingConfig,
@@ -34,26 +36,74 @@ const REPO_LIST_TTL_MS = 30 * 60_000
 /** Attempts kept per repository and per group. */
 const MAX_ATTEMPTS = 20
 
+const exactIncludes = (group: HoltkeeperConfig['groups'][string]): RepoRef[] =>
+  group.include
+    .filter((path) => staticPrefix(path) === path)
+    .map((path) => ({ forge: group.forge, path }))
+
 /**
- * Repositories the poller last listed for the config's groups, plus exact include paths; read
- * from the store only, so it never calls a forge.
+ * Repositories the poller last listed for the config's groups (none without `kv`), plus exact
+ * include paths; read from the store only, so it never calls a forge.
  */
-export async function listedRepos(kv: KvStore, config: HoltkeeperConfig): Promise<RepoRef[]> {
+export async function listedRepos(
+  kv: KvStore | undefined,
+  config: HoltkeeperConfig,
+): Promise<RepoRef[]> {
+  const groups = Object.entries(config.groups)
+  const listings = kv ? await Promise.all(groups.map(([name]) => kv.get(groupKey(name)))) : []
   const found = new Map<string, RepoRef>()
-  for (const [name, group] of Object.entries(config.groups)) {
-    // oxlint-disable-next-line no-await-in-loop -- one store read per group
-    const listing = await kv.get(groupKey(name))
+  for (const listing of listings)
     if (isGroupListing(listing)) for (const repo of listing.repos) found.set(repoId(repo), repo)
-    for (const path of group.include)
-      if (staticPrefix(path) === path)
-        found.set(`${group.forge}:${path}`, { forge: group.forge, path })
-  }
+  for (const [, group] of groups)
+    for (const repo of exactIncludes(group)) found.set(repoId(repo), repo)
   return [...found.values()]
 }
 
 /** Records that a webhook delivered an event about `repo`. */
 export async function markWebhookSeen(kv: KvStore, repo: RepoRef, now: Date) {
   await kv.set(seenKey(repo), now.toISOString(), 7 * 86_400)
+}
+
+/**
+ * How each of `repos` learns about forge changes, keyed `forge:path`, from stored state only, all
+ * keys read at once: `webhook` after a delivery in the last day, `polling` when the `polling` entry
+ * among `entries` covering it is enabled, else `off`.
+ */
+export async function repoUpdatesSummaries(
+  kv: KvStore,
+  entries: readonly SettingEntry[],
+  repos: readonly RepoTarget[],
+  now: Date,
+): Promise<Map<string, RepoUpdatesSummary>> {
+  const stored = await Promise.all(
+    repos.map((repo) => Promise.all([kv.get(seenKey(repo)), kv.get(stateKey(repo))])),
+  )
+  return new Map(
+    repos.map((repo, index) => {
+      const [seen, state] = stored[index] ?? []
+      return [repoId(repo), updatesSummary(entries, repo, now, seen, state)]
+    }),
+  )
+}
+
+function updatesSummary(
+  entries: readonly SettingEntry[],
+  repo: RepoTarget,
+  now: Date,
+  seen: unknown,
+  stored: unknown,
+): RepoUpdatesSummary {
+  const state = isPollState(stored) ? stored : {}
+  const entry = resolveSetting(entries, pollingSetting.key, repo)
+  const polling = pollingConfig(entry && !entry.secret ? entry.value : undefined)
+  const last = {
+    ...(state.lastPolledAt && { lastPolledAt: state.lastPolledAt }),
+    ...(state.lastError && { lastError: state.lastError }),
+  }
+  if (typeof seen === 'string' && now.getTime() - Date.parse(seen) < WEBHOOK_FRESH_MS)
+    return { via: 'webhook', ...last }
+  if (!polling.enabled) return { via: 'off', ...last }
+  return { via: 'polling', intervalMs: state.intervalMs ?? polling.intervalMs, ...last }
 }
 
 /** How an attempt started: on its schedule or from a person. */
@@ -83,6 +133,8 @@ interface ListingAttempt {
 interface GroupListing {
   /** Repositories of the last successful listing. */
   repos: RepoRef[]
+  /** What the include patterns matched in that listing, before exclude patterns applied. */
+  matched?: RepoRef[]
   listedAt?: string
   /** Newest first. */
   attempts: ListingAttempt[]
@@ -188,7 +240,16 @@ function createPoller(options: PollerOptions) {
     let listing: GroupListing
     let added: RepoRef[] = []
     try {
-      const repos = await groupRepositories(config)(group)
+      const definition = config.groups[group]
+      const matched = definition
+        ? await groupRepositories({
+            ...config,
+            groups: { ...config.groups, [group]: { ...definition, exclude: [] } },
+          })(group)
+        : []
+      const repos = matched.filter(
+        (repo) => !definition?.exclude.some((pattern) => new Bun.Glob(pattern).match(repo.path)),
+      )
       if (options.onNewRepos) {
         const known = new Set<string>()
         for (const name of Object.keys(config.groups)) {
@@ -200,6 +261,7 @@ function createPoller(options: PollerOptions) {
       }
       listing = {
         repos,
+        matched,
         listedAt: started.toISOString(),
         attempts: withAttempt(previous?.attempts, attempt({ repos: repos.length })),
       }
@@ -207,6 +269,7 @@ function createPoller(options: PollerOptions) {
       options.log(`polling: could not list group ${group}: ${messageOf(error)}`)
       listing = {
         repos: previous?.repos ?? [],
+        ...(previous?.matched && { matched: previous.matched }),
         ...(previous?.listedAt && { listedAt: previous.listedAt }),
         attempts: withAttempt(previous?.attempts, attempt({ error: messageOf(error) })),
       }
@@ -239,10 +302,7 @@ function createPoller(options: PollerOptions) {
           : // oxlint-disable-next-line no-await-in-loop
             await listGroup(name, 'scheduled')
       for (const repo of listing.repos) found.set(repoId(repo), repo)
-      if (!listing.listedAt)
-        for (const path of group.include)
-          if (staticPrefix(path) === path)
-            found.set(`${group.forge}:${path}`, { forge: group.forge, path })
+      if (!listing.listedAt) for (const repo of exactIncludes(group)) found.set(repoId(repo), repo)
     }
     for (const entry of await store.settings.list(pollingSetting.key))
       for (const pattern of entry.scope.repos ?? []) {
@@ -439,6 +499,11 @@ function createPoller(options: PollerOptions) {
     },
     /** The stored listing of a group. */
     listing: readListing,
+    /** When the next scheduled listing of a group is due; absent before its first listing. */
+    nextListingAt: (listing: GroupListing | undefined) => {
+      const lastAt = listing?.attempts[0]?.at
+      return lastAt ? new Date(Date.parse(lastAt) + REPO_LIST_TTL_MS).toISOString() : undefined
+    },
     /** Lists a group's repositories now; the next tick polls what it found. */
     listGroup: (group: string) => listGroup(group, 'manual'),
     /** Ticks every `tickMs` until the returned function is called; a leader duty. */

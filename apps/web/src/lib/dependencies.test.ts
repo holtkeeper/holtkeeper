@@ -5,17 +5,24 @@ import type { DependencyRepo, DependencyRow, UpgradeImpact } from '@holtkeeper/a
 import {
   behindLabel,
   behindTone,
+  filterCounts,
   filterRows,
+  librariesSort,
   libraryKey,
+  librarySheetTabs,
+  libraryTotals,
   narrowImpact,
   narrowRow,
-  otherTeamRows,
+  parseLibrariesSearch,
   parseLibraryKey,
+  parseLibrarySearch,
   parseLibraryTab,
   rolloutTargets,
-  scopeRows,
-  tileCounts,
+  scopeLibraryRows,
+  sortRows,
+  toCsv,
   upgradeVersions,
+  withLibrariesSort,
 } from './dependencies.ts'
 
 const row = (name: string, fields: Partial<DependencyRow> = {}): DependencyRow => ({
@@ -104,8 +111,20 @@ describe('library keys and tabs', () => {
 
   test('tabs fall back to overview', () => {
     expect(parseLibraryTab('upgrade')).toBe('upgrade')
+    expect(parseLibraryTab('used-by')).toBe('used-by')
     expect(parseLibraryTab('matrix')).toBe('overview')
     expect(parseLibraryTab(undefined)).toBe('overview')
+  })
+
+  test('the sheet keeps overview, upgrade, used by and docs', () => {
+    expect(librarySheetTabs.map((tab) => tab.id)).toEqual([
+      'overview',
+      'upgrade',
+      'used-by',
+      'docs',
+    ])
+    expect(parseLibraryTab('api', librarySheetTabs)).toBe('overview')
+    expect(parseLibraryTab('docs', librarySheetTabs)).toBe('docs')
   })
 })
 
@@ -130,58 +149,124 @@ const repoEntry = (path: string, groups: string[]): DependencyRepo => ({
   dependencies: 1,
 })
 
-describe('scopeRows', () => {
+describe('scopeLibraryRows', () => {
   const repos = [repoEntry('games/arcade', ['games']), repoEntry('tools/cli', ['tools', 'infra'])]
   const list = [
     row('widget-kit'),
     row('shape-lib', { usedBy: [{ repo: 'work:tools/cli', versions: ['2.0.0'] }] }),
   ]
 
-  test('my team narrows rows to its repositories and counts the rest', () => {
-    const scoped = scopeRows(list, repos, 'mine', ['games'])
-    expect(names(scoped.shown)).toEqual(['widget-kit'])
-    expect(scoped.shown[0]?.usedBy).toEqual([{ repo: 'work:games/arcade', versions: ['1.0.0'] }])
-    expect(scoped.counts).toEqual({ mine: 1, all: 2, others: 2 })
-    expect(scoped.others).toEqual({ libraries: 2, repos: 1, teams: 2 })
+  test('my teams narrows shared rows to its repositories and marks the rest as other teams', () => {
+    const scoped = scopeLibraryRows(list, repos, 'mine', ['games'])
+    expect(scoped.map((item) => [item.name, item.groups])).toEqual([
+      ['widget-kit', ['games']],
+      ['shape-lib', ['infra', 'tools']],
+    ])
+    expect(scoped[0]?.usedBy).toEqual([{ repo: 'work:games/arcade', versions: ['1.0.0'] }])
+    expect(scoped[0]?.majorsBehind).toBe(1)
   })
 
-  test('all keeps every row whole; other teams shows counts only', () => {
-    expect(scopeRows(list, repos, 'all', ['games']).shown).toEqual(list)
-    expect(scopeRows(list, repos, 'others', ['games']).shown).toEqual([])
+  test('all keeps rows whole with the groups of a home-group user first', () => {
+    const scoped = scopeLibraryRows(list, repos, 'all', ['games'])
+    expect(scoped[0]?.usedBy).toHaveLength(2)
+    expect(scoped[0]?.groups).toEqual(['games'])
   })
 
-  test('without home groups everything belongs to other teams', () => {
-    expect(scopeRows(list, repos, 'mine', []).counts).toEqual({ mine: 0, all: 2, others: 2 })
-  })
-})
-
-describe('otherTeamRows', () => {
-  const repos = [repoEntry('games/arcade', ['games']), repoEntry('tools/cli', ['tools', 'infra'])]
-  const list = [
-    row('widget-kit'),
-    row('shape-lib', { usedBy: [{ repo: 'work:tools/cli', versions: ['2.0.0'] }] }),
-  ]
-
-  test('folds libraries only other teams use, narrowed to their repositories', () => {
-    const folded = otherTeamRows(list, repos, ['games'])
-    expect(names(folded.rows)).toEqual(['shape-lib'])
-    expect(folded.rows[0]?.usedBy).toEqual([{ repo: 'work:tools/cli', versions: ['2.0.0'] }])
-    expect(folded.teams).toEqual(['infra', 'tools'])
-  })
-
-  test('folds nothing without home groups', () => {
-    expect(otherTeamRows(list, repos, [])).toEqual({ rows: [], teams: [] })
+  test('without home groups rows stay whole', () => {
+    expect(scopeLibraryRows(list, repos, 'mine', [])[0]?.usedBy).toHaveLength(2)
   })
 })
 
-test('tileCounts counts third-party rows only', () => {
+describe('filterCounts', () => {
+  test('segments ignore the segment, ecosystems ignore the ecosystem', () => {
+    expect(filterCounts(rows, { ecosystem: 'npm', filter: 'advisories' })).toEqual({
+      segments: { all: 2, behind: 1, advisories: 1, updates: 1, internal: 1 },
+      ecosystems: { npm: 1, Go: 0 },
+    })
+    expect(filterCounts(rows, { query: 'gears' }).segments.all).toBe(1)
+  })
+
+  test('counts one repository by its own versions', () => {
+    expect(filterCounts([row('widget-kit')], { repo: 'work:tools/cli' }).segments.behind).toBe(0)
+  })
+})
+
+test('libraryTotals counts the rows and the repositories using them', () => {
   expect(
-    tileCounts([
+    libraryTotals([
       row('widget-kit', { renovate: 'broken' }),
       row('shape-lib', { majorsBehind: 0, advisories: { count: 1 }, renovate: 'open' }),
-      row('@acme/engine', { internal: true, advisories: { count: 3 } }),
     ]),
-  ).toEqual({ behindMajor: 1, withAdvisories: 1, renovateOpen: 1, renovateBroken: 1 })
+  ).toEqual({
+    libraries: 2,
+    repos: 2,
+    behindMajor: 1,
+    withAdvisories: 1,
+    renovateOpen: 1,
+    renovateBroken: 1,
+  })
+})
+
+describe('sortRows', () => {
+  const list = [
+    row('shape-lib', { majorsBehind: 0, reposBehind: 0, renovate: 'broken' }),
+    row('widget-kit', { latest: undefined }),
+    row('fooUtil', { majorsBehind: 2, reposBehind: 1 }),
+  ]
+
+  test('by name, behind and update state; unknown latest last', () => {
+    expect(names(sortRows(list, { key: 'name', direction: 'asc' }))).toEqual([
+      'fooUtil',
+      'shape-lib',
+      'widget-kit',
+    ])
+    expect(names(sortRows(list, { key: 'behind', direction: 'desc' }))).toEqual([
+      'fooUtil',
+      'shape-lib',
+      'widget-kit',
+    ])
+    expect(names(sortRows(list, { key: 'updates', direction: 'desc' }))[0]).toBe('shape-lib')
+    expect(sortRows(list, null)).toEqual(list)
+  })
+
+  test('search round trip', () => {
+    expect(librariesSort({ sort: 'repos', dir: 'desc' })).toEqual({
+      key: 'repos',
+      direction: 'desc',
+    })
+    expect(librariesSort({})).toBeNull()
+    expect(withLibrariesSort({ q: 'kit', sort: 'name', dir: 'asc' }, null)).toEqual({ q: 'kit' })
+    expect(withLibrariesSort({}, { key: 'latest', direction: 'asc' })).toEqual({
+      sort: 'latest',
+      dir: 'asc',
+    })
+  })
+})
+
+describe('toCsv', () => {
+  test('one line per library with a header, quoting and formula guards', () => {
+    const csv = toCsv([
+      row('widget-kit', {
+        licenses: ['MIT', 'Apache-2.0'],
+        advisories: { count: 1, severity: 'high' },
+      }),
+      row('=cmd', { latest: undefined, renovate: 'open', name: 'say "hi", =cmd' }),
+    ])
+    const lines = csv.split('\r\n')
+    expect(lines[0]).toBe(
+      'Library,Ecosystem,Internal,Versions in use,Repositories,Latest,Majors behind,Repositories behind,Advisories,Worst severity,Update MRs,Licenses',
+    )
+    expect(lines[1]).toBe(
+      'widget-kit,npm,no,1.0.0 x1; 2.0.0 x1,2,2.0.0,1,1,1,high,,MIT; Apache-2.0',
+    )
+    expect(lines[2]).toBe('"say ""hi"", =cmd",npm,no,1.0.0 x1; 2.0.0 x1,2,,,,0,,open,')
+    expect(
+      toCsv([row('=SUM(A1)')])
+        .split('\r\n')[1]
+        ?.startsWith("'=SUM(A1)"),
+    ).toBe(true)
+    expect(lines.at(-1)).toBe('')
+  })
 })
 
 test('upgradeVersions offers used versions up and indexed versions plus latest down', () => {
@@ -249,5 +334,48 @@ describe('rolloutTargets', () => {
         '2.0.0',
       ),
     ).toEqual(['work:shapes/a', 'work:shapes/c'])
+  })
+})
+
+describe('search parameters', () => {
+  test('parseLibrariesSearch keeps known values and drops defaults', () => {
+    expect(
+      parseLibrariesSearch({
+        repo: 'gitlab:acme/storefront',
+        library: 'npm:some-lib',
+        tab: 'upgrade',
+        segment: 'behind',
+        ecosystem: 'Go',
+        q: 'widget',
+        sort: 'repos',
+        dir: 'desc',
+      }),
+    ).toEqual({
+      repo: 'gitlab:acme/storefront',
+      library: 'npm:some-lib',
+      tab: 'upgrade',
+      segment: 'behind',
+      ecosystem: 'Go',
+      q: 'widget',
+      sort: 'repos',
+      dir: 'desc',
+    })
+    expect(
+      parseLibrariesSearch({ segment: 'all', ecosystem: 'PyPI', sort: 'size', q: '' }),
+    ).toEqual({})
+    expect(parseLibrariesSearch({ sort: 'name' })).toEqual({ sort: 'name', dir: 'asc' })
+  })
+
+  test('parseLibrarySearch keeps non-empty values', () => {
+    expect(
+      parseLibrarySearch({
+        tab: 'used-by',
+        export: 'createWidget',
+        version: '',
+        repo: 3,
+        from: '3.9.1',
+        to: '4.2.0',
+      }),
+    ).toEqual({ tab: 'used-by', export: 'createWidget', from: '3.9.1', to: '4.2.0' })
   })
 })

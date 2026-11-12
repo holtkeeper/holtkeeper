@@ -10,6 +10,7 @@ import {
   rolesOf,
   trackerLinks,
   trackerProblems,
+  trackerRows,
 } from './trackers.ts'
 
 const schema = {
@@ -202,5 +203,53 @@ describe('new values', () => {
       role: '',
       paths: [],
     })
+  })
+})
+
+describe('trackerRows', () => {
+  test('lists only stored trackers with their parts', () => {
+    const rows = trackerRows([
+      {
+        id: 's1',
+        key: 'trackers',
+        scope: { all: true },
+        secret: false,
+        value: [
+          {
+            id: 'flags',
+            name: 'Feature flags',
+            entity: { label: 'Flag' },
+            sources: [{ kind: 'files' }, { kind: 'files' }, { kind: 'commits' }],
+            rules: [{ kind: 'stale' }],
+            outputs: [{ kind: 'report' }],
+          },
+          { id: 'tickets', sources: [] },
+        ],
+      },
+      { id: 's2', key: 'limits.credentials', scope: { all: true }, secret: false, value: [] },
+    ])
+    expect(rows).toEqual([
+      {
+        settingId: 's1',
+        scope: { all: true },
+        id: 'flags',
+        name: 'Feature flags',
+        entity: 'Flag',
+        sources: ['files', 'commits'],
+        rules: 1,
+        outputs: ['report'],
+      },
+      {
+        settingId: 's1',
+        scope: { all: true },
+        id: 'tickets',
+        name: 'tickets',
+        entity: 'Entity',
+        sources: [],
+        rules: 0,
+        outputs: [],
+      },
+    ])
+    expect(trackerRows([])).toEqual([])
   })
 })

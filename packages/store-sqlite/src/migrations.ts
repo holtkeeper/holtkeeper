@@ -648,6 +648,56 @@ export const migrations: readonly Migration[] = [
       DROP TABLE retired_config;
     `,
   },
+  {
+    version: 23,
+    sql: `ALTER TABLE analyses ADD COLUMN metrics TEXT;`,
+  },
+  {
+    version: 24,
+    sql: `
+      ALTER TABLE ai_usage ADD COLUMN interactive INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE ai_usage ADD COLUMN subject TEXT;
+      CREATE INDEX ai_usage_actor_at ON ai_usage (actor, at);
+      CREATE INDEX jobs_analysis ON jobs (analysis_id) WHERE analysis_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 25,
+    sql: `
+      CREATE TABLE guide_generated (
+        scope TEXT NOT NULL,
+        section TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        PRIMARY KEY (scope, section, version)
+      );
+      UPDATE guides SET data = json_set(data, '$.generated.version', 0)
+        WHERE json_type(data, '$.generated') = 'object'
+          AND json_type(data, '$.generated.version') IS NULL;
+      UPDATE guides SET data = json_set(data, '$.proposal.version', 0)
+        WHERE json_type(data, '$.proposal') = 'object'
+          AND json_type(data, '$.proposal.version') IS NULL;
+    `,
+  },
+  {
+    version: 26,
+    sql: `
+      ALTER TABLE chat_threads ADD COLUMN context_repos TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE chat_messages ADD COLUMN refs TEXT NOT NULL DEFAULT '[]';
+      CREATE TABLE chat_thread_mutes (
+        thread_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        PRIMARY KEY (user_id, thread_id)
+      );
+    `,
+  },
+  {
+    version: 27,
+    sql: `
+      ALTER TABLE users ADD COLUMN last_seen_at TEXT;
+      ALTER TABLE credentials ADD COLUMN last_used_at TEXT;
+    `,
+  },
 ]
 
 /**

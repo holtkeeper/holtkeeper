@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { checkBranchName, checkCommitMessage } from './check.ts'
+import { checkBranchName, checkCommitMessage, checkConventions } from './check.ts'
 import type { BranchRules, CommitRules, Ruleset } from './types.ts'
 
 const commits: Ruleset<CommitRules> = {
@@ -80,6 +80,34 @@ describe('checkBranchName', () => {
       'Start with one of `feat/`, `fix/`',
       'The name needs a ticket key matching `ABC-\\d+`',
       'Use lowercase words joined by `-`',
+    ])
+  })
+})
+
+describe('checkConventions', () => {
+  test('checks the texts given, message first, naming the rule each problem breaks', () => {
+    const branch: Ruleset<BranchRules> = {
+      rules: { prefixes: ['feature'] },
+      sources: { prefixes: 'setting' },
+      patterns: [],
+      examples: [],
+    }
+    const result = checkConventions(
+      { commit: commits, branch },
+      { message: 'feat: add the widget', branch: 'widget-board' },
+    )
+    expect(result.map((check) => check.target)).toEqual(['message', 'branch'])
+    expect(result[0]?.problems.map((problem) => problem.rule)).toEqual(['ticket'])
+    expect(result[1]?.problems).toEqual([
+      {
+        message: 'Start with one of `feature/`',
+        rule: 'prefixes',
+        source: 'setting',
+        severity: 'error',
+      },
+    ])
+    expect(checkConventions({ commit: commits, branch }, { branch: 'feature/x' })).toEqual([
+      { target: 'branch', problems: [] },
     ])
   })
 })

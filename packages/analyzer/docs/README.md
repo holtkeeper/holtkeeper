@@ -8,6 +8,14 @@ The contract between analyzers and the runner that runs them (the task engine of
 
 `defaultBranchOnly: true` marks an analyzer whose run reads only the default branch and rejects a `ref`; event triggers and merge request policies, whose jobs carry one, leave it out instead of queuing a job bound to fail.
 
+## Metrics
+
+The metrics functions wrap `AnalysisKind.metrics` (see [`@holtkeeper/report`](../../report/docs/README.md)) for both places that store records, the task engine's worker and the server's upload route:
+
+- `analysisMetrics(kind, data, context?)` — the kind's metrics of `data` as plain JSON (`undefined` fields dropped). `undefined` for an unknown kind, a kind without metrics, data that fails the kind's schema (a shape an older release wrote) or a kind that throws; never throws.
+- `recordMetrics(analyses, kind, { repo, ref?, createdAt?, data }, options?)` — the metrics to store with a new record. It looks up the previous record on the same line of history, the newest one created before `createdAt`: one with the same ref, falling back to one without a ref (the default branch) when a record with a ref has no earlier record on its ref (runs on other branches are left out); and passes its stored metrics (or metrics computed from its data when it has none) as `previous`, and `createdAt` when given. Never throws.
+- `metricsOf(kind, record)` — a record's stored metrics typed as the kind defines them; `undefined` for records of another kind or without metrics.
+
 ## Freshness
 
 `refresh?: AnalyzerRefresh` says when the server's freshness sweeper queues the analyzer on its own:

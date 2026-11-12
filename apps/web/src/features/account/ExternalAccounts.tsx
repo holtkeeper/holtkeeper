@@ -37,7 +37,7 @@ import { useSession } from '../shell/session.ts'
 const unavailable = (error: unknown) => error instanceof ApiError && error.status === 503
 const otherProvider = '__other'
 
-/** The signed-in principal's linked GitLab, GitHub and other accounts, with self-verification. */
+/** Account › Linked accounts: the signed-in principal's GitLab, GitHub and other accounts, with self-verification. */
 export function ExternalAccounts() {
   const accounts = useAccounts()
   const { unlink, challenge } = useAccountMutations()
@@ -50,18 +50,17 @@ export function ExternalAccounts() {
   const [verifying, setVerifying] = useState<string>()
   const now = new Date()
 
-  const description =
-    'Link the accounts you use on forges and chat so bots and merge request commands act as you. A link counts only once it is verified.'
+  const description = 'A link counts only once it is verified.'
 
   if (accounts.isPending)
     return (
-      <Panel title="External accounts" description={description}>
+      <Panel title="Accounts" description={description}>
         <Placeholder className="h-24" />
       </Panel>
     )
   if (accounts.isError) {
     return (
-      <Panel title="External accounts" description={description}>
+      <Panel title="Accounts" description={description}>
         {unavailable(accounts.error) ? (
           <p className="text-sm text-muted">
             External accounts are not available on this server: its store keeps no account links.
@@ -85,7 +84,7 @@ export function ExternalAccounts() {
 
   return (
     <Panel
-      title="External accounts"
+      title="Accounts"
       description={description}
       actions={
         <Button variant="secondary" size="sm" onPress={() => setLinking(true)}>

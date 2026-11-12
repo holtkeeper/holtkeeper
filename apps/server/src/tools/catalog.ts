@@ -25,10 +25,11 @@ import { z } from 'zod'
 
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import { type UsageIndex, impactOf, impactOfChanges } from '../api-surface/usages.ts'
+import { repoKey } from '../context.ts'
 import { evaluateDependency } from './dependency.ts'
 import type { KnowledgeToolsContext } from './knowledge.ts'
 import { type LibraryIndex, ecosystemArg } from './libraries.ts'
-import { readableRepo, repoKey } from './repos.ts'
+import { type SupplyToolsAccess, readableRepo, supplyTools } from './repos.ts'
 import type { StackToolsContext } from './stack.ts'
 import { whoUses } from './who-uses.ts'
 
@@ -56,6 +57,8 @@ export interface CatalogToolsContext {
   stack?: StackToolsContext
   /** The third-party library index; without it only the organization's own packages are covered. */
   library?: Pick<LibraryIndex, 'api' | 'store'>
+  /** The asker's findings and licenses; with it `security_findings` and `license_overview` are offered. */
+  supply?: SupplyToolsAccess
 }
 
 const repoOfKey = (key: string): RepoRef => {
@@ -102,8 +105,9 @@ const renderExternal = (
  * The `catalog` toolset over the organization's packages and how repositories use them, with
  * third-party fallbacks from the library index: `list_packages`, `get_package_api`,
  * `search_symbols`, `get_symbol`, `list_versions`, `diff_versions`, `package_usage`,
- * `find_usages`, `upgrade_impact`, `repo_packages` and `evaluate_dependency`. Every result is
- * limited to the repositories `canRead` allows.
+ * `find_usages`, `upgrade_impact`, `repo_packages`, `evaluate_dependency` and `who_uses`, plus
+ * `security_findings` and `license_overview` with `supply`. Every result is limited to the
+ * repositories `canRead` allows; findings and licenses to what `supply` answers the asker.
  */
 export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
   const { catalog, usages, canRead, library } = context
@@ -224,6 +228,12 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       'repositories use a library, internal package or stack tool at which versions.',
       'Before adding or upgrading a dependency, call evaluate_dependency: who already uses it,',
       'advisories, licenses, bundle share and team decisions about it.',
+      ...(context.supply
+        ? [
+            'security_findings lists open, fixing and allowlisted vulnerability findings across',
+            'repositories; license_overview shows license compliance and the license policy.',
+          ]
+        : []),
     ].join(' '),
     tools: [
       defineTool({
@@ -725,6 +735,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
           ),
         subject: ({ subject }) => subject,
       }),
+      ...(context.supply ? supplyTools(context.supply) : []),
     ],
   }
 }

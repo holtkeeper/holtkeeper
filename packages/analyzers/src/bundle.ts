@@ -17,6 +17,7 @@ import {
   analyzeBuildTarget,
   analyzePackage,
   bundleAnalysis,
+  bundleBudgetsSchema,
   bundleTargetSchema,
   bundleTargets,
   compareVersions,
@@ -76,6 +77,11 @@ const bundleOptions = z.object({
    * `.npmrc`, the forge's own registry and npmjs.
    */
   registries: z.record(z.string(), z.string().url()).default({}),
+  /**
+   * Maximum JS and CSS gzip bytes per target name or glob (`app`, `@acme/*`); stored metrics and
+   * health judge targets by them. An exact name wins over globs.
+   */
+  budgets: bundleBudgetsSchema.default({}),
 })
 
 type BundleOptions = z.infer<typeof bundleOptions>

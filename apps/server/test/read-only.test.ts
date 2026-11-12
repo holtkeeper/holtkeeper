@@ -38,10 +38,13 @@ const config = parseConfig({
 const vault = aesVault('v'.repeat(32))
 const credentials = () => createCredentialService({ credentials: store.credentials, vault })
 
-const markReadOnly = (scope: { groups: string[] } | { repos: string[] }, value = true) =>
+const freeze = (
+  scope: { groups: string[] } | { repos: string[] },
+  value: { reason: string; until?: string } = { reason: 'Shared library' },
+) =>
   store.settings.put({
     id: JSON.stringify(scope),
-    key: 'repo.readOnly',
+    key: 'repo.freeze',
     scope,
     value,
     secret: false,
@@ -55,18 +58,40 @@ beforeEach(() => {
   comments = []
 })
 
-describe('repo.readOnly', () => {
-  test('resolves by group and by the more specific repository entry', async () => {
-    await markReadOnly({ groups: ['libs'] })
-    await markReadOnly({ repos: ['libs/open'] }, false)
-    const readOnly = readOnlyRepos(store, () => config)
+describe('repo.freeze', () => {
+  test('resolves by group and repository and counts only before until', async () => {
+    await freeze({ groups: ['libs'] })
+    await freeze(
+      { repos: ['games/a'] },
+      { reason: 'Code freeze', until: '2026-11-01T00:00:00.000Z' },
+    )
+    let now = new Date('2026-10-31T00:00:00.000Z')
+    const readOnly = readOnlyRepos(
+      store,
+      () => config,
+      () => now,
+    )
     expect(await readOnly(repo('libs/ui'))).toBe(true)
-    expect(await readOnly(repo('libs/open'))).toBe(false)
+    expect(await readOnly(repo('games/a'))).toBe(true)
+    expect(await readOnly(repo('games/b'))).toBe(false)
+    now = new Date('2026-11-01T00:00:00.000Z')
     expect(await readOnly(repo('games/a'))).toBe(false)
+    expect(await readOnly(repo('libs/ui'))).toBe(true)
+  })
+
+  test('an expired repository freeze leaves the group freeze in force', async () => {
+    await freeze({ groups: ['libs'] })
+    await freeze({ repos: ['libs/open'] }, { reason: 'Hotfix', until: '2026-10-01T00:00:00.000Z' })
+    const readOnly = readOnlyRepos(
+      store,
+      () => config,
+      () => new Date('2026-10-31T00:00:00.000Z'),
+    )
+    expect(await readOnly(repo('libs/open'))).toBe(true)
   })
 
   test('forge clients of the managed config refuse writes to read-only repositories', async () => {
-    await markReadOnly({ groups: ['libs'] })
+    await freeze({ groups: ['libs'] })
     const service = credentials()
     const credential = await service.create({
       name: 'work',
@@ -108,7 +133,7 @@ describe('repo.readOnly', () => {
   })
 
   test('events of read-only repositories are ignored, except tags', async () => {
-    await markReadOnly({ groups: ['libs'] })
+    await freeze({ groups: ['libs'] })
     const deps: ServerDeps = {
       config,
       auth: noAuth(),

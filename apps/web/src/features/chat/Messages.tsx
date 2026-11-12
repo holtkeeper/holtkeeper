@@ -9,6 +9,7 @@ import { formatDate, formatDateTime } from '../../lib/format.ts'
 import { avatarOf } from '../../lib/people.ts'
 import { Avatar, BrandIcon, Markdown, Tag } from '../../ui/index.ts'
 import { ChatCard } from './ChatCard.tsx'
+import { RefChips } from './Refs.tsx'
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
 
@@ -97,7 +98,11 @@ function Body({
           />
         )
       ) : null}
-      {message.card ? <ChatCard card={message.card} busy={busy} onRun={onRun} /> : null}
+      {message.card ? (
+        <ChatCard card={message.card} busy={busy} onRun={onRun} />
+      ) : (
+        <RefChips refs={message.refs} />
+      )}
       {message.authorType === 'agent' && (message.toolTrace?.length || message.costUsd) ? (
         <div className="flex flex-wrap items-center gap-2">
           {message.toolTrace?.length ? <ToolTrace message={message} /> : null}

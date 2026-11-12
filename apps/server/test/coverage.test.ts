@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
+import { recordMetrics } from '@holtkeeper/analyzer'
 import type { CoverageOverview, RepoCoverageView } from '@holtkeeper/api'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { parseConfig } from '@holtkeeper/core'
@@ -10,6 +11,7 @@ import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 import { aesVault } from '@holtkeeper/vault'
 
+import { LINE_SCAN } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
 import { noteHead } from '../src/freshness.ts'
 
@@ -57,15 +59,45 @@ const setup = () => {
   })
 }
 
-const add = (path: string, data: unknown, createdAt: string, sha?: string, ref?: string) =>
-  store.analyses.add({
+const add = async (path: string, data: unknown, createdAt: string, sha?: string, ref?: string) => {
+  const record = {
     repo: { forge: 'work', path },
     kind: 'coverage',
     createdAt,
     ...(sha ? { sha } : {}),
     ...(ref ? { ref } : {}),
     data,
-  })
+  }
+  const metrics = await recordMetrics(store.analyses, coverageAnalysis, record)
+  return store.analyses.add({ ...record, ...(metrics ? { metrics } : {}) })
+}
+
+/** Store calls of the routes, with the limit each asked for. */
+const spy = () => {
+  const calls: { method: string; limit?: number }[] = []
+  const analyses = store.analyses
+  store = {
+    ...store,
+    analyses: {
+      ...analyses,
+      list: async (query) => (
+        calls.push({ method: 'list', limit: query?.limit }),
+        analyses.list(query)
+      ),
+      heads: async (query) => (
+        calls.push({ method: 'heads', limit: query?.limit }),
+        analyses.heads(query)
+      ),
+      latest: async (query) => (calls.push({ method: 'latest' }), analyses.latest(query)),
+      latestHeads: async (query) => (
+        calls.push({ method: 'latestHeads' }),
+        analyses.latestHeads(query)
+      ),
+      get: async (id) => (calls.push({ method: 'get' }), analyses.get(id)),
+    },
+  }
+  return calls
+}
 
 const get = async (path: string, headers = asAdmin) => {
   const response = await setup().request(path, { headers })
@@ -92,13 +124,13 @@ describe('coverage overview', () => {
       head: 'ccc333',
       tools: ['vitest --coverage'],
       change: 20,
-      changed: { files: 1, lines: { covered: 60, total: 80 } },
       totals: { files: 2, untested: 1, untestedLines: 20, lines: { covered: 60, total: 100 } },
     })
     expect(circle?.trend).toEqual([
       { at: '2026-10-20T03:00:00.000Z', lines: 40, branches: 50 },
       { at: '2026-10-27T03:00:00.000Z', lines: 60, branches: 50 },
     ])
+    expect(circle?.changed).toBeUndefined()
 
     const shapes = (await get('/api/coverage', asShapes)).body as CoverageOverview
     expect(shapes.repos.map((card) => card.repo.path)).toEqual(['shapes/circle'])
@@ -118,9 +150,84 @@ describe('coverage overview', () => {
     expect(lint).toMatchObject({ sha: 'eee555', ref: 'main', change: 20 })
   })
 
+  test('reads heads only, within the line limit, and never record data', async () => {
+    for (let day = 10; day < 26; day++)
+      await add('shapes/circle', coverage(day), `2026-10-${day}T03:00:00.000Z`)
+    await add('tools/lint', coverage(10), '2026-10-27T03:00:00.000Z')
+    const calls = spy()
+    const [circle] = ((await get('/api/coverage')).body as CoverageOverview).repos
+    expect(circle?.trend).toHaveLength(12)
+    expect(calls.map((call) => call.method).toSorted()).toEqual(['heads', 'heads', 'latestHeads'])
+    expect(
+      calls.every((call) => call.method !== 'heads' || (call.limit ?? Infinity) <= LINE_SCAN),
+    ).toBe(true)
+  })
+
+  test('a newest record stored with older metrics reads its data once for the counts', async () => {
+    const created = await add('shapes/circle', coverage(60), '2026-10-27T03:00:00.000Z')
+    const { tools: _, totals: __, ...older } = created.metrics as Record<string, unknown>
+    store = memoryStore()
+    await store.analyses.add({ ...created, metrics: older })
+    const calls = spy()
+    const [circle] = ((await get('/api/coverage')).body as CoverageOverview).repos
+    expect(circle).toMatchObject({ tools: ['vitest --coverage'], totals: { files: 2 } })
+    expect(calls.filter((call) => call.method === 'get')).toHaveLength(1)
+  })
+
+  test('answers again from the cache until a newer record arrives', async () => {
+    await add('shapes/circle', coverage(40), '2026-10-20T03:00:00.000Z')
+    const calls = spy()
+    const app = setup()
+    const read = async () =>
+      (
+        (await (
+          await app.request('/api/coverage', { headers: asAdmin })
+        ).json()) as CoverageOverview
+      ).repos
+    const heads = () => calls.filter((call) => call.method === 'heads').length
+    expect((await read())[0]?.totals.lines.covered).toBe(40)
+    const first = heads()
+    expect(first).toBeGreaterThan(0)
+    await read()
+    expect(heads()).toBe(first)
+    await add('shapes/circle', coverage(50), '2026-10-21T03:00:00.000Z')
+    const before = heads()
+    expect((await read())[0]?.totals.lines.covered).toBe(50)
+    expect(heads()).toBeGreaterThan(before)
+  })
+
   test('records in an unknown shape are skipped', async () => {
     await add('shapes/square', { files: 'nope' }, '2026-10-27T03:00:00.000Z')
     expect(((await get('/api/coverage')).body as CoverageOverview).repos).toEqual([])
+  })
+
+  test('each card carries the target of the entry that applies to its repository', async () => {
+    await add('shapes/circle', coverage(70), '2026-10-27T03:00:00.000Z')
+    await add('tools/lint', coverage(70), '2026-10-27T03:00:00.000Z')
+    const entry = {
+      key: 'analyzers.coverage',
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    }
+    await store.settings.put({ ...entry, id: 'all', scope: { all: true }, value: { target: 60 } })
+    await store.settings.put({
+      ...entry,
+      id: 'shapes',
+      scope: { groups: ['shapes'] },
+      value: { target: '80' },
+    })
+    await store.settings.put({
+      ...entry,
+      id: 'lint',
+      scope: { repos: ['work:tools/lint'] },
+      value: { exclude: ['dist/**'] },
+    })
+
+    const { repos } = (await get('/api/coverage')).body as CoverageOverview
+    expect(repos.map((card) => [card.repo.path, card.target])).toEqual([
+      ['shapes/circle', 80],
+      ['tools/lint', undefined],
+    ])
   })
 })
 
@@ -132,8 +239,16 @@ describe('repository coverage', () => {
       coverage(60, [{ file: 'src/extra.ts', lines: { covered: 10, total: 10 } }]),
       '2026-10-27T03:00:00.000Z',
     )
+    const calls = spy()
     const body = (await get('/api/coverage/repo?repo=work:shapes/circle')).body as RepoCoverageView
-    expect(body.card?.analysisId).toBeDefined()
+    expect(calls.filter((call) => call.method === 'get')).toHaveLength(2)
+    expect(calls.some((call) => call.method === 'list' || call.method === 'latest')).toBe(false)
+    expect(body.card).toMatchObject({
+      change: 20,
+      changed: { files: 2, lines: { covered: 70, total: 90 } },
+      totals: { lines: { covered: 60, total: 100 } },
+    })
+    expect(body.card?.trend).toHaveLength(2)
     expect(body.groups.map((group) => [group.path, group.lines])).toEqual([
       ['packages/widget', { covered: 60, total: 80 }],
       ['src', { covered: 10, total: 30 }],
@@ -143,6 +258,23 @@ describe('repository coverage', () => {
       ['src/extra.ts', 100],
       ['packages/widget/src/a.ts', 25],
     ])
+  })
+
+  test('names the job behind the newest record', async () => {
+    const stored = await add('shapes/circle', coverage(60), '2026-10-27T03:00:00.000Z')
+    const job = await store.jobs.enqueue({
+      analyzer: 'coverage',
+      repo: { forge: 'work', path: 'shapes/circle' },
+      options: {},
+      trigger: 'manual',
+      actor: 'user:jane',
+      reason: 'asked from the panel',
+      createdAt: '2026-10-27T02:59:00.000Z',
+    })
+    await store.jobs.claim('worker-1', '2026-10-27T02:59:01.000Z')
+    await store.jobs.complete(job.id, { at: '2026-10-27T03:00:00.000Z', analysisId: stored.id })
+    const body = (await get('/api/coverage/repo?repo=work:shapes/circle')).body as RepoCoverageView
+    expect(body.job).toMatchObject({ id: job.id, status: 'succeeded', trigger: 'manual' })
   })
 
   test('answers without a card before the analyzer ran; others are forbidden', async () => {

@@ -8,16 +8,19 @@ export function Segmented<T extends string>({
   onChange,
   'aria-label': ariaLabel,
   size = 'sm',
+  isDisabled,
 }: {
   options: readonly { id: T; label: ReactNode }[]
   value: T
   onChange: (value: T) => void
   'aria-label': string
   size?: 'sm' | 'md'
+  isDisabled?: boolean
 }) {
   return (
     <ToggleButtonGroup
       aria-label={ariaLabel}
+      {...(isDisabled !== undefined && { isDisabled })}
       selectionMode="single"
       disallowEmptySelection
       selectedKeys={new Set([value])}

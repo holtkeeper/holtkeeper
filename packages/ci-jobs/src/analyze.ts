@@ -4,6 +4,7 @@ import { addDays, groupBy, median, percent, round, spread, weekOf, weeksOf } fro
 import type {
   ChangePoint,
   CiJobsData,
+  CiOutcomes,
   CiJobsOptions,
   JobStats,
   JobTrend,
@@ -34,6 +35,13 @@ const byTime = (a: CiJobRecord, b: CiJobRecord) =>
 /** Final attempts that count towards failure rates: not allowed to fail, not canceled. */
 const counted = (finals: readonly CiJobRecord[]) =>
   finals.filter((r) => !r.allowFailure && r.status !== 'canceled')
+
+/** Final attempts by how they ended. */
+function jobOutcomes(finals: readonly CiJobRecord[]): CiOutcomes {
+  const outcomes: CiOutcomes = { success: 0, failed: 0, canceled: 0 }
+  for (const r of finals) outcomes[r.status]++
+  return outcomes
+}
 
 /** Pipelines where an attempt failed and a later attempt of the same job passed. */
 function flakyPipelines(runs: readonly CiJobRecord[]): number {
@@ -117,7 +125,8 @@ function jobStats(
   const last = ordered.at(-1) ?? ordered[0]
   if (!last) throw new Error(`job ${name} has no runs`)
   const byPipeline = groupBy(ordered, (r) => String(r.pipelineId))
-  const considered = counted(ordered.filter((r) => context.finals.has(r)))
+  const finals = ordered.filter((r) => context.finals.has(r))
+  const considered = counted(finals)
   const failures = considered.filter((r) => r.status === 'failed').length
   const failureRate = percent(failures, considered.length)
   const successes = ordered.filter(succeeded)
@@ -139,6 +148,7 @@ function jobStats(
     retryRate:
       percent([...byPipeline.values()].filter((a) => a.length > 1).length, byPipeline.size) ?? 0,
     flaky: flakyPipelines(ordered),
+    outcomes: jobOutcomes(finals),
     allowFailure: last.allowFailure,
     duration: spread(seconds(successes)),
     ...trend,
@@ -157,6 +167,8 @@ interface PipelineSpan {
   tag: boolean
   /** A final attempt of a job not allowed to fail failed. */
   failed: boolean
+  /** Not failed, but such an attempt was canceled. */
+  canceled: boolean
   /** Seconds at least one job ran, gaps left out; absent when a job lacks times. */
   wallSeconds?: number
   jobs: CiJobRecord[]
@@ -184,11 +196,14 @@ function pipelineSpans(
   return [...groupBy(records, (r) => String(r.pipelineId)).values()].map((jobs) => {
     const createdAt = jobs.map((j) => j.createdAt).toSorted()[0] ?? ''
     const ref = jobs.find((j) => j.ref)?.ref
+    const gating = jobs.filter((j) => finals.has(j) && !j.allowFailure)
+    const failed = gating.some((j) => j.status === 'failed')
     const base = {
       createdAt,
       ...(ref ? { ref } : {}),
       tag: jobs.some((j) => j.tag),
-      failed: counted(jobs.filter((j) => finals.has(j))).some((j) => j.status === 'failed'),
+      failed,
+      canceled: !failed && gating.some((j) => j.status === 'canceled'),
       jobs,
     }
     const intervals = jobs.map((j): [number, number] => [
@@ -223,8 +238,10 @@ export function stageOrder(records: readonly CiJobRecord[]): string[] {
     .map(([stage]) => stage)
 }
 
+const passed = (span: PipelineSpan) => !span.failed && !span.canceled
+
 const passedSeconds = (spans: readonly PipelineSpan[]) =>
-  defined(spans.filter((s) => !s.failed).map((s) => s.wallSeconds))
+  defined(spans.filter(passed).map((s) => s.wallSeconds))
 
 function pipelineStats(spans: readonly PipelineSpan[], to: string, ref?: string): PipelineStats {
   const weekAgo = addDays(to, -7)
@@ -233,11 +250,14 @@ function pipelineStats(spans: readonly PipelineSpan[], to: string, ref?: string)
   const before = median(
     passedSeconds(spans.filter((s) => s.createdAt >= twoWeeksAgo && s.createdAt < weekAgo)),
   )
-  const successRate = percent(spans.filter((s) => !s.failed).length, spans.length)
+  const success = spans.filter(passed).length
+  const failed = spans.filter((s) => s.failed).length
+  const successRate = percent(success, spans.length)
   return {
     ...(ref ? { ref } : {}),
     count: spans.length,
     ...(successRate === undefined ? {} : { successRate }),
+    outcomes: { success, failed, canceled: spans.length - success - failed },
     duration: spread(passedSeconds(spans)),
     queue: spread(defined(spans.flatMap((s) => s.jobs.map((j) => j.queuedSeconds)))),
     ...(recent !== undefined && before

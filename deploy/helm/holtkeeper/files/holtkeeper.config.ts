@@ -47,6 +47,7 @@ function auth() {
     store: store.users,
     audit: store.audit,
     externalAccounts: store.externalAccounts,
+    kv: store.kv,
     sessionSecret: env('HOLTKEEPER_SESSION_SECRET'),
     origin: publicUrl,
     secureCookies,

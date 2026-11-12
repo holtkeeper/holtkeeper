@@ -1,6 +1,8 @@
 import type {
   ReleaseAcceptInput,
   ReleaseDeployInput,
+  ReleaseDetectView,
+  ReleaseDismissInput,
   ReleaseEditsInput,
   ReleaseGateError,
   ReleaseOverview,
@@ -34,6 +36,8 @@ import {
   principalOf,
   readBody,
   repoTarget,
+  ForbiddenException,
+  repoKey,
 } from '../context.ts'
 import { releaseServiceFor } from '../releases.ts'
 
@@ -55,12 +59,17 @@ const pageSchema = z.object({
   limit: z.coerce.number().int().min(1).max(30).optional(),
 })
 const acceptSchema = z.object({ repo: z.string().min(1), note: z.string().max(500).optional() })
+const dismissSchema = z.object({
+  repo: z.string().min(1).max(600),
+  sha: z.string().min(1).max(64),
+})
 const deploySchema = z.object({
   repo: z.string().min(1),
   tag: z.string().min(1),
   environment: z.string().min(1),
   redeploy: z.boolean().optional(),
   force: z.boolean().optional(),
+  reason: z.string().trim().max(500).optional(),
 })
 const requireRepo = (value: string | undefined) => {
   const repo = parseRepo(value)
@@ -68,13 +77,16 @@ const requireRepo = (value: string | undefined) => {
   return repo
 }
 
-/** Answers refused steps with 409 and their gates, other step failures with 409 or 403. */
-function stepError(c: AppContext, error: unknown) {
+/**
+ * Answers refused steps with 409 and their gates, writes to a read-only repository with a 403
+ * `ForbiddenError` and other step failures with 409.
+ */
+function stepError(c: AppContext, error: unknown, repo: RepoRef) {
   if (error instanceof HTTPException) throw error
   if (error instanceof GateError)
     return c.json<ReleaseGateError>({ error: error.message, gates: error.gates }, 409)
   if (error instanceof ReadOnlyRepositoryError)
-    return c.json<ReleaseGateError>({ error: error.message }, 403)
+    throw new ForbiddenException('releases:run', repoKey(repo), error.message)
   if (
     error instanceof DeployError ||
     error instanceof UnsupportedForgeError ||
@@ -86,8 +98,10 @@ function stepError(c: AppContext, error: unknown) {
 
 /**
  * The release assistant: the overview, each repository's version timeline and next-version plans,
- * and the steps that act on them. Reads need `releases:read` on the repository, steps
- * `releases:run` and a repository Holtkeeper may write to.
+ * the flow suggested for a repository (read on demand), and the steps that act on them. Reads need
+ * `releases:read` on the repository, steps
+ * `releases:run` and a repository Holtkeeper may write to. Dismissing a waiting release needs
+ * `releases:run` only, since it writes nothing to the forge.
  */
 export function releaseRoutes(deps: ServerDeps) {
   const { config } = deps
@@ -98,7 +112,11 @@ export function releaseRoutes(deps: ServerDeps) {
   const runnable = async (c: AppContext, repo: RepoRef): Promise<ReleaseActor> => {
     const principal = authorize(c, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) })
     if (await releases.isReadOnly(repo))
-      throw new HTTPException(403, { message: `${repo.path} is read-only for Holtkeeper` })
+      throw new ForbiddenException(
+        'releases:run',
+        repoKey(repo),
+        `${repo.path} is read-only for Holtkeeper`,
+      )
     return { id: principal.id, name: principal.name, channel: viaOf(c, c.req.path) }
   }
 
@@ -121,7 +139,10 @@ export function releaseRoutes(deps: ServerDeps) {
 
   app.get('/releases/timeline', async (c) => {
     const repo = requireRepo(c.req.query('repo'))
-    authorize(c, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) })
+    const principal = authorize(c, 'releases:read', {
+      kind: 'repo',
+      repo: repoTarget(config, repo),
+    })
     const page = pageSchema.safeParse({
       offset: c.req.query('offset'),
       limit: c.req.query('limit'),
@@ -129,13 +150,13 @@ export function releaseRoutes(deps: ServerDeps) {
     if (!page.success) throw new HTTPException(400, { message: 'offset or limit is invalid' })
     try {
       return c.json<ReleaseTimelineView>(
-        await releases.timeline(repo, {
+        await releases.timeline(principal, repo, {
           ...(page.data.offset !== undefined ? { offset: page.data.offset } : {}),
           ...(page.data.limit !== undefined ? { limit: page.data.limit } : {}),
         }),
       )
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
     }
   })
 
@@ -148,7 +169,7 @@ export function releaseRoutes(deps: ServerDeps) {
     try {
       detail = await releases.versionOf(repo, tag)
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
     }
     if (!detail)
       throw new HTTPException(404, { message: `${tag} is not a version of ${repo.path}` })
@@ -164,7 +185,19 @@ export function releaseRoutes(deps: ServerDeps) {
     try {
       return c.json<ReleaseRepoView>(await releases.view(principal, repo))
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
+    }
+  })
+
+  app.get('/releases/detect', async (c) => {
+    const repo = requireRepo(c.req.query('repo'))
+    authorize(c, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) })
+    if (!config.forges[repo.forge])
+      throw new HTTPException(404, { message: `forge ${repo.forge} is not configured` })
+    try {
+      return c.json<ReleaseDetectView>(await releases.detect(repo))
+    } catch (error) {
+      return stepError(c, error, repo)
     }
   })
 
@@ -176,7 +209,7 @@ export function releaseRoutes(deps: ServerDeps) {
     try {
       return c.json<DeployState>(await releases.deployOf(repo, tag))
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
     }
   })
 
@@ -195,7 +228,7 @@ export function releaseRoutes(deps: ServerDeps) {
     try {
       return c.json({ markdown: await releases.summarize(repo, input.step, actor) })
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
     }
   })
 
@@ -211,7 +244,7 @@ export function releaseRoutes(deps: ServerDeps) {
             : await releases.version(repo, actor, input.force),
         )
       } catch (error) {
-        return stepError(c, error)
+        return stepError(c, error, repo)
       }
     })
 
@@ -222,7 +255,7 @@ export function releaseRoutes(deps: ServerDeps) {
     try {
       return c.json<ReleaseStepResult>(await releases.accept(repo, actor, input.note))
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
     }
   })
 
@@ -230,6 +263,31 @@ export function releaseRoutes(deps: ServerDeps) {
     const repo = requireRepo(c.req.query('repo'))
     await runnable(c, repo)
     await releases.withdraw(repo)
+    return c.json({ ok: true })
+  })
+
+  app.post('/releases/dismiss', async (c) => {
+    const input: ReleaseDismissInput = await readBody(c, dismissSchema)
+    const repo = requireRepo(input.repo)
+    const principal = authorize(c, 'releases:run', {
+      kind: 'repo',
+      repo: repoTarget(config, repo),
+    })
+    const result = await releases.dismiss(repo, input.sha, principal.id)
+    if (result.kind === 'moved')
+      return c.json(
+        {
+          error: result.head
+            ? `${repo.path} moved to ${result.head.slice(0, 8)} since`
+            : `nothing waits in ${repo.path}`,
+        },
+        409,
+      )
+    c.set('audit', {
+      action: 'release.dismiss',
+      target: { type: 'release', repo: repoKey(repo) },
+      details: { sha: input.sha },
+    })
     return c.json({ ok: true })
   })
 
@@ -246,12 +304,13 @@ export function releaseRoutes(deps: ServerDeps) {
             environment: input.environment,
             ...(input.redeploy ? { redeploy: true } : {}),
             ...(input.force ? { force: true } : {}),
+            ...(input.reason ? { reason: input.reason } : {}),
           },
           actor,
         ),
       )
     } catch (error) {
-      return stepError(c, error)
+      return stepError(c, error, repo)
     }
   })
 

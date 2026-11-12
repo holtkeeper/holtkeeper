@@ -655,6 +655,54 @@ export const migrations: readonly Migration[] = [
         WHERE (type, id) IN (SELECT type, id FROM retired_config WHERE NOT dead);
     `,
   },
+  {
+    version: 22,
+    sql: `ALTER TABLE analyses ADD COLUMN metrics jsonb;`,
+  },
+  {
+    version: 23,
+    sql: `
+      ALTER TABLE ai_usage ADD COLUMN interactive boolean NOT NULL DEFAULT false;
+      ALTER TABLE ai_usage ADD COLUMN subject text;
+      CREATE INDEX ai_usage_actor_at ON ai_usage (actor, at);
+      CREATE INDEX jobs_analysis ON jobs (analysis_id) WHERE analysis_id IS NOT NULL;
+    `,
+  },
+  {
+    version: 24,
+    sql: `
+      CREATE TABLE guide_generated (
+        scope text NOT NULL,
+        section text NOT NULL,
+        version integer NOT NULL,
+        data jsonb NOT NULL,
+        PRIMARY KEY (scope, section, version)
+      );
+      UPDATE guides SET data = jsonb_set(data, '{generated,version}', '0')
+        WHERE jsonb_typeof(data->'generated') = 'object' AND NOT (data->'generated' ? 'version');
+      UPDATE guides SET data = jsonb_set(data, '{proposal,version}', '0')
+        WHERE jsonb_typeof(data->'proposal') = 'object' AND NOT (data->'proposal' ? 'version');
+    `,
+  },
+  {
+    version: 25,
+    sql: `
+      ALTER TABLE chat_threads ADD COLUMN context_repos jsonb NOT NULL DEFAULT '[]'::jsonb;
+      ALTER TABLE chat_messages ADD COLUMN refs jsonb NOT NULL DEFAULT '[]'::jsonb;
+      CREATE TABLE chat_thread_mutes (
+        thread_id text NOT NULL,
+        user_id text NOT NULL,
+        PRIMARY KEY (user_id, thread_id)
+      );
+    `,
+  },
+  {
+    version: 26,
+    sql: `
+      ALTER TABLE users ADD COLUMN last_seen_at timestamptz;
+      ALTER TABLE credentials ADD COLUMN last_used_at timestamptz;
+    `,
+  },
 ]
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/

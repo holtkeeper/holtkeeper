@@ -38,6 +38,7 @@ describe('syncWebhooks', () => {
       ...hook,
       registered: [{ hookId: '7', scope: 'project', target: 'games/libs', url }],
     })
+    await hooks.recordDelivery(repo, { at, event: 'Push Hook', enqueued: 1, durationMs: 4 })
     await store.config.put({
       type: 'forge',
       id: 'work',
@@ -76,6 +77,9 @@ describe('syncWebhooks', () => {
     ])
     expect(calls[0]?.hook.events).toEqual([...webhookEvents])
     expect((await hooks.get(repo))?.registered?.[0]?.events).toEqual([...webhookEvents])
+    expect(await hooks.deliveries(repo)).toEqual([
+      { at, event: 'Push Hook', enqueued: 1, durationMs: 4 },
+    ])
 
     expect(await syncWebhooks(deps)).toEqual({ updated: 0, failed: 0 })
     expect(calls).toHaveLength(2)

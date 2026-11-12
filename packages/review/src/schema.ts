@@ -41,7 +41,7 @@ const findingSchema = z.object({
   /** Whether the forge accepted it; `false` with `error` when it rejected the comment. */
   posted: z.boolean(),
   error: z.string().optional(),
-  href: z.string().optional(),
+  href: z.url({ protocol: /^https?$/ }).optional(),
 })
 
 const threadSchema = z.object({
@@ -74,7 +74,7 @@ export const reviewDataSchema = z.object({
   mergeRequest: z.object({
     id: z.number().int(),
     title: z.string(),
-    webUrl: z.string(),
+    webUrl: z.url({ protocol: /^https?$/ }),
     sourceBranch: z.string(),
     targetBranch: z.string(),
     author: z.string(),
@@ -112,8 +112,14 @@ export const reviewDataSchema = z.object({
       costUsd: z.number().optional(),
       inputTokens: z.number().optional(),
       outputTokens: z.number().optional(),
+      /** Provider id of the model the review's main agent run used. */
+      model: z.string().optional(),
     })
     .optional(),
+  /** Guide scopes whose rules reached the agent, broad to narrow, e.g. `all`, `group:web`. */
+  guideScopes: z.array(z.string()).optional(),
+  /** Wall time of the run, posting included. */
+  durationMs: z.number().int().nonnegative().optional(),
 })
 
 export type ReviewData = z.infer<typeof reviewDataSchema>

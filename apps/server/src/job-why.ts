@@ -53,18 +53,22 @@ function jobOutcome(job: Job): string | undefined {
 }
 
 /**
- * Why `job` ran or why it still waits: its origin, its outcome, and for a queued job the claim
- * rules that hold it back and the due jobs ahead of it. `people` is left empty for the caller.
+ * Why `job` ran or why it still waits: its origin, its outcome, the execution mode, the spend cap
+ * it carries, and for a queued job the claim rules that hold it back and the due jobs ahead of it.
+ * `people` is left empty for the caller.
  */
 export async function explainJob(
-  deps: Pick<ServerDeps, 'store' | 'analyzers' | 'now'>,
+  deps: Pick<ServerDeps, 'store' | 'analyzers' | 'now' | 'config'>,
   job: Job,
 ): Promise<JobWhy> {
   const outcome = jobOutcome(job)
+  const cap = job.options.budgetUsd
   const base: JobWhy = {
     origin: jobOrigin(job),
     ...(job.actor !== undefined && { actor: job.actor }),
     ...(outcome !== undefined && { outcome }),
+    mode: deps.config.jobs.execution?.mode ?? 'host',
+    ...(typeof cap === 'number' && Number.isFinite(cap) && { costCapUsd: cap }),
     people: {},
   }
   if (job.status !== 'queued') return base

@@ -14,12 +14,10 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
-import {
-  useCredentialMutations,
-  useCredentials,
-  useGitHubTokens,
-  useTestCredential,
-} from '../../api/queries.ts'
+import { useCredentialMutations, useCredentials, useTestCredential } from '../../api/queries.ts'
+import { useAiBudget, useWeekUsageByProvider } from '../../api/settings-ai.ts'
+import { formatUsd } from '../../lib/ai-usage.ts'
+import { credentialStatus, lastUsedLabel } from '../../lib/credential-status.ts'
 import {
   daysUntil,
   expiryTone,
@@ -28,7 +26,6 @@ import {
   formatRelative,
   plural,
 } from '../../lib/format.ts'
-import { defaultGitHubRange } from '../../lib/github-usage.ts'
 import {
   Button,
   Chip,
@@ -36,15 +33,16 @@ import {
   EmptyState,
   ErrorState,
   Placeholder,
+  Tag,
   Tooltip,
   notify,
 } from '../../ui/index.ts'
 import { ScopeBadge } from '../access/ScopeEditor.tsx'
+import { useSectionHeader } from '../settings/section-header.ts'
 import { SettingsSection } from '../settings/SettingsSection.tsx'
 import { useSession } from '../shell/session.ts'
 import { CredentialDialog } from './CredentialDialog.tsx'
 import { aiProviderKinds } from './form.ts'
-import { GitHubCredentialUsage, usageHidden } from './GitHubUsage.tsx'
 import { ModelsDialog } from './ModelsDialog.tsx'
 
 function Expiry({ at }: { at: string | undefined }) {
@@ -67,12 +65,24 @@ function Expiry({ at }: { at: string | undefined }) {
   )
 }
 
+/** This week's spend and runs per provider credential name, when the viewer may read usage. */
+function useProviderSpend(enabled: boolean): Map<string, { costUsd: number; runs: number }> {
+  const budget = useAiBudget(enabled)
+  const usage = useWeekUsageByProvider(budget.data?.week.from, enabled)
+  return new Map(
+    (usage.data?.buckets ?? []).map((bucket) => [
+      bucket.key.provider ?? '',
+      { costUsd: bucket.costUsd, runs: bucket.runs - bucket.denied },
+    ]),
+  )
+}
+
 /**
- * Credentials with expiry, rotation and scope: `ai` lists AI provider credentials (with their
- * models and a test), `other` everything else (forge tokens, API keys, trackers, egress secrets).
+ * Settings › AI › Providers: AI provider credentials as cards with expiry, rotation, scope, whether
+ * agents use them, this week's spend, the last use, their models and a test.
  */
-export function Credentials({ kinds }: { kinds: 'ai' | 'other' }) {
-  const { can, canGlobal } = useSession()
+export function Credentials() {
+  const { can } = useSession()
   const credentials = useCredentials()
   const { rotate, remove } = useCredentialMutations()
   const test = useTestCredential()
@@ -80,30 +90,21 @@ export function Credentials({ kinds }: { kinds: 'ai' | 'other' }) {
   const [deleting, setDeleting] = useState<CredentialView | null>(null)
   const [browsing, setBrowsing] = useState<CredentialView | null>(null)
   const writable = can('credentials:write')
-  const list = (credentials.data?.credentials ?? []).filter(
-    (credential) => aiProviderKinds.includes(credential.kind) === (kinds === 'ai'),
+  const spend = useProviderSpend(can('ai:read') || can('ai:admin'))
+  const now = new Date()
+  const list = (credentials.data?.credentials ?? []).filter((credential) =>
+    aiProviderKinds.includes(credential.kind),
   )
-  const days = defaultGitHubRange
-  const github = useGitHubTokens(days, canGlobal('settings:read'))
-  const githubUsage = usageHidden(github.error) ? undefined : github
-  const githubTokens = githubUsage?.data?.tokens ?? []
+  useSectionHeader(
+    writable
+      ? { primary: { label: 'Add provider', icon: Plus, onPress: () => setEditing('new') } }
+      : undefined,
+  )
 
   return (
     <SettingsSection
-      title={kinds === 'ai' ? 'AI providers' : 'Credentials'}
-      description={
-        kinds === 'ai'
-          ? "Keys and endpoints agents run on; a modelMap in the options maps tier models to the provider's ids"
-          : 'Tokens Holtkeeper uses to reach forges and services'
-      }
-      actions={
-        writable ? (
-          <Button variant="primary" onPress={() => setEditing('new')}>
-            <Plus className="size-4" />
-            New credential
-          </Button>
-        ) : null
-      }
+      title={<span id="providers">Providers</span>}
+      description="Keys and endpoints agents run on. One provider serves all repositories. Secrets are sealed by the vault and never shown again."
     >
       {credentials.isPending ? (
         <div className="grid gap-4 md:grid-cols-2">
@@ -115,16 +116,12 @@ export function Credentials({ kinds }: { kinds: 'ai' | 'other' }) {
       ) : list.length === 0 ? (
         <EmptyState
           icon={<KeyRound />}
-          title={kinds === 'ai' ? 'No AI provider yet' : 'No credentials yet'}
-          description={
-            kinds === 'ai'
-              ? 'Add an Anthropic key or a gateway so agents can run.'
-              : 'Add a forge token so Holtkeeper can open merge requests.'
-          }
+          title="No AI provider yet"
+          description="Add an Anthropic key or a gateway so agents can run."
           action={
             writable ? (
-              <Button variant="primary" onPress={() => setEditing('new')}>
-                Add credential
+              <Button variant="secondary" onPress={() => setEditing('new')}>
+                Add provider
               </Button>
             ) : undefined
           }
@@ -151,7 +148,12 @@ export function Credentials({ kinds }: { kinds: 'ai' | 'other' }) {
                       <div className="truncate font-mono text-xs text-muted">{credential.url}</div>
                     </div>
                   </div>
-                  <Chip variant="secondary">{credential.kind}</Chip>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {credential.usedBy?.some((use) => use.id === 'llm.provider') ? (
+                      <Tag tone="accent">Agents use it</Tag>
+                    ) : null}
+                    <Chip variant="secondary">{credential.kind}</Chip>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Expiry at={credential.expiresAt} />
@@ -166,13 +168,38 @@ export function Credentials({ kinds }: { kinds: 'ai' | 'other' }) {
                     <Chip>Manual rotation</Chip>
                   ) : null}
                 </div>
-                {credential.kind === 'github' && githubUsage?.data ? (
-                  <GitHubCredentialUsage
-                    token={githubTokens.find((token) => token.credentialId === credential.id)}
-                    tokens={githubTokens}
-                    days={days}
-                  />
-                ) : null}
+                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-muted">This week</dt>
+                  <dd className="font-mono">
+                    {spend.has(credential.name)
+                      ? `${formatUsd(spend.get(credential.name)!.costUsd)} · ${plural(spend.get(credential.name)!.runs, 'run')}`
+                      : '—'}
+                  </dd>
+                  <dt className="text-muted">Last used</dt>
+                  <dd
+                    title={
+                      credential.lastUsedAt ? formatDateTime(credential.lastUsedAt) : undefined
+                    }
+                  >
+                    {lastUsedLabel(credential.lastUsedAt, now)}
+                  </dd>
+                  <dt className="text-muted">Status</dt>
+                  <dd>
+                    {(() => {
+                      const status = credentialStatus(credential, now)
+                      return (
+                        <span className="inline-flex items-center gap-1.5" title={status.why}>
+                          <Tag tone={status.tone} dot>
+                            {status.label}
+                          </Tag>
+                          {credential.capabilities?.agentLoop === 'ok' ? (
+                            <span className="text-muted">tool use works</span>
+                          ) : null}
+                        </span>
+                      )
+                    })()}
+                  </dd>
+                </dl>
                 {credential.lastError ? (
                   <div className="flex items-start gap-2 rounded-xl bg-danger-soft p-2.5 text-xs text-danger-soft-foreground">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />

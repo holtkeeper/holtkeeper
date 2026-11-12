@@ -14,6 +14,7 @@ import {
 
 import { type BundleComparison, compareBundles } from './compare.ts'
 import { APP, type BundleData, type BundleEntrypoint, UNMAPPED } from './data.ts'
+import { type BundleMetrics, bundleMetrics } from './metrics.ts'
 import {
   type BundleAnalysisData,
   type BundleTarget,
@@ -721,12 +722,13 @@ function targetsSection(
 /** The `bundle` analysis kind with custom thresholds. */
 export function createBundleAnalysis(
   options: BundleAnalysisOptions = {},
-): AnalysisKind<BundleAnalysisData> {
+): AnalysisKind<BundleAnalysisData, BundleMetrics> {
   const settings = settingsOf(options)
-  return defineAnalysis<BundleAnalysisData>({
+  return defineAnalysis<BundleAnalysisData, BundleMetrics>({
     kind: 'bundle',
     label: 'Bundle size',
     schema: bundleAnalysisSchema,
+    metrics: bundleMetrics,
     summarize(data) {
       const targets = bundleTargets(data)
       const only = targets.length === 1 ? targets[0] : undefined
@@ -775,4 +777,5 @@ export function createBundleAnalysis(
 }
 
 /** Bundle sizes per target, entrypoint, asset and package, compared with the previous release. */
-export const bundleAnalysis: AnalysisKind<BundleAnalysisData> = createBundleAnalysis()
+export const bundleAnalysis: AnalysisKind<BundleAnalysisData, BundleMetrics> =
+  createBundleAnalysis()

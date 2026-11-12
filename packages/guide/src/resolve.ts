@@ -11,6 +11,7 @@ import {
   type GuideTask,
   guideScopeKey,
   guideSectionLabels,
+  guideSections,
   scopesFor,
   sectionsForTask,
 } from './model.ts'
@@ -58,6 +59,8 @@ export interface ResolveGuideInput {
   task: GuideTask
   /** The section the work is about, for chat and agent tasks. */
   section?: GuideSectionName
+  /** The sections to read instead of the task's, in `guideSections` order (the Guide chain reads one). */
+  focus?: readonly GuideSectionName[]
   /** Id and name of the family the repository belongs to. */
   family?: { id: string; name: string }
   /** Stored sections; rows of scopes that do not apply to the repository are ignored. */
@@ -69,7 +72,7 @@ export interface ResolveGuideInput {
 }
 
 export type GuideLayer =
-  | 'repo-docs'
+  | 'repo-file'
   | 'repo'
   | 'family'
   | 'group'
@@ -84,6 +87,10 @@ export interface GuideBlock {
   layer: GuideLayer
   scope?: GuideScopeKey
   title: string
+  /** Where the block comes from in words: `REVIEW.md · AGENTS.md`, `Team games`, `All repositories`, … */
+  source: string
+  /** The block as the prompt has it, cut when `cut` is set; empty when left out. */
+  text: string
   /** Characters in the text, 0 when left out. */
   chars: number
   /** Characters the block would take whole. */
@@ -91,6 +98,8 @@ export interface GuideBlock {
   cut: boolean
   /** For `generated`: proposed text that nobody accepted yet. */
   proposed?: boolean
+  /** For `generated`: the stored version of the text. */
+  version?: number
 }
 
 export interface ResolvedGuide {
@@ -119,8 +128,10 @@ interface Candidate {
   layer: GuideLayer
   scope?: GuideScopeKey
   title: string
+  source: string
   body: string
   proposed?: boolean
+  version?: number
 }
 
 const render = (candidate: Candidate, body = candidate.body) =>
@@ -157,7 +168,9 @@ const sectionBodies = (
  */
 export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
   const caps = { ...GUIDE_CAPS, ...input.caps }
-  const sections = sectionsForTask(input.task, input.section)
+  const sections = input.focus
+    ? guideSections.filter((name) => input.focus?.includes(name))
+    : sectionsForTask(input.task, input.section)
   const scopes = scopesFor(input.repo, input.family?.id)
   const applies = new Set<string>(scopes)
   const rows = new Map<string, GuideSection>()
@@ -166,12 +179,19 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
   const repoScope = scopes[0] ?? guideScopeKey({ kind: 'repo', ...input.repo })
 
   const docs = (input.repoDocs ?? []).filter((doc) => doc.text.trim())
-  const titleOf = (scope: GuideScopeKey): { layer: GuideLayer; title: string } => {
-    if (scope === repoScope) return { layer: 'repo', title: 'Team rules for this repository' }
-    if (scope === 'all') return { layer: 'all', title: 'Team rules for all repositories' }
+  const titleOf = (scope: GuideScopeKey): { layer: GuideLayer; title: string; source: string } => {
+    if (scope === repoScope)
+      return { layer: 'repo', title: 'Team rules for this repository', source: 'This repository' }
+    if (scope === 'all')
+      return { layer: 'all', title: 'Team rules for all repositories', source: 'All repositories' }
     if (scope.startsWith('family:'))
-      return { layer: 'family', title: `Team rules for the ${input.family?.name ?? ''} family` }
-    return { layer: 'group', title: `Team rules for team ${scope.slice('group:'.length)}` }
+      return {
+        layer: 'family',
+        title: `Team rules for the ${input.family?.name ?? ''} family`,
+        source: `Family ${input.family?.name ?? scope.slice('family:'.length)}`,
+      }
+    const group = scope.slice('group:'.length)
+    return { layer: 'group', title: `Team rules for team ${group}`, source: `Team ${group}` }
   }
   const ruleBlocks: Candidate[] = scopes.flatMap((scope) => {
     const body = sectionBodies(rows, scope, sections, (row) => row.rules)
@@ -194,8 +214,9 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
     ...(docs.length
       ? [
           {
-            layer: 'repo-docs' as const,
+            layer: 'repo-file' as const,
             title: 'Rules from the repository',
+            source: docs.map((doc) => doc.file).join(' · '),
             body: docs.map((doc) => `### ${doc.file}\n\n${doc.text.trim()}`).join('\n\n'),
           },
         ]
@@ -204,13 +225,21 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
   ]
   const others: Candidate[] = [
     ...(policies.length
-      ? [{ layer: 'policies' as const, title: 'Policies', body: policies.join('\n\n') }]
+      ? [
+          {
+            layer: 'policies' as const,
+            title: 'Policies',
+            source: 'Policies',
+            body: policies.join('\n\n'),
+          },
+        ]
       : []),
     ...(learnings.length
       ? [
           {
             layer: 'learnings' as const,
             title: 'Learned rules',
+            source: 'Learned rules',
             body: learnings.map((learning) => `- ${learning.rule.trim()}`).join('\n'),
           },
         ]
@@ -266,8 +295,10 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
       {
         layer: 'generated' as const,
         title: guideSectionLabels[section],
+        source: `Generated ${guideSectionLabels[section]}`,
         body: generated.body,
         ...(proposed && { proposed: true }),
+        version: generated.version,
       },
     ]
   })
@@ -281,7 +312,10 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
     const room = generatedCap - generatedUsed - intro
     const body =
       full.length <= room ? full : room >= MIN_PIECE ? `${cutText(full, room - 2)}\n\n` : ''
-    generatedTexts.set(block, { text: body, full: full.length })
+    generatedTexts.set(block, {
+      text: body ? (intro ? generatedIntro : '') + body : '',
+      full: full.length + intro,
+    })
     if (body) generatedUsed += intro + body.length
   }
 
@@ -309,10 +343,13 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
       layer: candidate.layer,
       ...(candidate.scope && { scope: candidate.scope }),
       title: candidate.title,
+      source: candidate.source,
+      text: value.text,
       chars: value.text.length,
       fullChars: value.full,
       cut: value.text.length < value.full,
       ...(candidate.proposed && { proposed: true }),
+      ...(candidate.version !== undefined && { version: candidate.version }),
     })
   const humanSorted = [
     ...repoLevel,
@@ -325,17 +362,16 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
     blocks.push({
       layer: 'notes',
       title: 'Team knowledge',
+      source: 'Team knowledge',
+      text: notesText,
       chars: notesText.length,
       fullChars: notesText.length,
       cut: notes.omitted.length > 0,
     })
 
-  const generatedText = generatedBlocks
-    .map((block) => generatedTexts.get(block)?.text ?? '')
-    .join('')
   const body = [
     ...humanSorted.map((block) => placed.get(block)?.text ?? ''),
-    generatedText ? generatedIntro + generatedText : '',
+    ...generatedBlocks.map((block) => generatedTexts.get(block)?.text ?? ''),
     notesText,
   ].join('')
   const text = body ? `${header}${body}`.trimEnd() : ''
@@ -355,7 +391,7 @@ export function resolveGuide(input: ResolveGuideInput): ResolvedGuide {
 }
 
 /** Prompt order of human blocks: precedence, strongest first. */
-const order: GuideLayer[] = ['repo-docs', 'repo', 'family', 'group', 'all', 'learnings', 'policies']
+const order: GuideLayer[] = ['repo-file', 'repo', 'family', 'group', 'all', 'learnings', 'policies']
 
 function cutBlock(candidate: Candidate, room: number): string {
   const head = `## ${candidate.title}\n\n`

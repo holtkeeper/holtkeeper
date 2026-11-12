@@ -1,6 +1,11 @@
 import type {
+  PublicApiFacetCount,
+  PublicApiFacets,
+  PublicApiMatch,
   PublicApiPackageRemoval,
   PublicApiPackageSummary,
+  PublicApiSymbol,
+  PublicApiSymbolChange,
   PublicApiSymbolHit,
   PublicApiVersion,
   RepoRef,
@@ -8,6 +13,7 @@ import type {
 import {
   type ApiPackage,
   type ApiSurfaceData,
+  type ApiSymbol,
   type ApiSymbolKind,
   type PackageDiff,
   apiSurfaceDataSchema,
@@ -16,6 +22,8 @@ import {
   importPath,
 } from '@holtkeeper/api-surface'
 import type { AnalysisStore } from '@holtkeeper/store'
+
+import type { FleetCache } from '../fleet-cache.ts'
 
 const kind = 'api-surface'
 const pageSize = 20
@@ -34,6 +42,7 @@ interface IndexedPackage {
   exports: number
   documented: number
   deprecated: number
+  kinds: ApiSymbolKind[]
 }
 
 /** What the catalog keeps of a record without its data. */
@@ -73,6 +82,9 @@ function indexRecord(record: {
         exports: totals.symbols,
         documented: totals.documented,
         deprecated: totals.deprecated,
+        kinds: [
+          ...new Set(pkg.entries.flatMap((entry) => entry.symbols.map((symbol) => symbol.kind))),
+        ],
       }
     }),
   }
@@ -104,6 +116,61 @@ export interface ApiCatalogOptions {
 
 /** Which repositories the caller may read; lists filter on it. */
 export type RepoFilter = (repo: RepoRef) => boolean
+
+const matchRank: Record<PublicApiMatch, number> = { exact: 4, prefix: 3, part: 2, doc: 1 }
+
+function matchOf(name: string, needle: string, doc?: string): PublicApiMatch | undefined {
+  const lower = name.toLowerCase()
+  if (lower === needle) return 'exact'
+  if (lower.startsWith(needle)) return 'prefix'
+  if (lower.includes(needle)) return 'part'
+  return doc?.toLowerCase().includes(needle) ? 'doc' : undefined
+}
+
+const facetOf = (values: Iterable<string>): PublicApiFacetCount[] => {
+  const counts = new Map<string, number>()
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1)
+  return [...counts]
+    .map(([value, count]) => ({ value, count }))
+    .toSorted((a, b) => b.count - a.count || a.value.localeCompare(b.value))
+}
+
+/** Filters of `ApiCatalog.packageList`; facets count the packages before `repo` and `kind` apply. */
+export interface PackageListQuery {
+  /** Substring of the name, description or repository. */
+  q?: string
+  /** `forge:path`. */
+  repo?: string
+  /** Only packages exporting a symbol of this kind. */
+  kind?: ApiSymbolKind
+}
+
+/** Filters of `ApiCatalog.search`. */
+export interface SearchFilters {
+  package?: string
+  kind?: ApiSymbolKind
+  /** `forge:path`. */
+  repo?: string
+  subpath?: string
+  match?: PublicApiMatch
+  /** Hits returned; default 20. */
+  limit?: number
+  /** Also count facets over every match before the filters above apply. */
+  facets?: boolean
+}
+
+/** What `ApiCatalog.symbol` looks up. */
+export interface SymbolQuery {
+  package: string
+  name: string
+  /** Entry point; the main one (`.`) or else the first exporting the name when absent. */
+  subpath?: string
+  version?: string
+  /** `forge:path`. */
+  repo?: string
+  /** Recorded versions compared for the history, newest first. */
+  limit: number
+}
 
 /**
  * The packages, versions and symbols of every `api-surface` record, for the API routes and the
@@ -330,6 +397,71 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     }
   }
 
+  const newestPairs = (all: IndexedRecord[]) => {
+    const pairs = new Map<string, { record: IndexedRecord; pkg: IndexedPackage }>()
+    for (const record of all)
+      for (const pkg of record.packages) {
+        const key = `${repoKey(record.repo)}\u0000${pkg.name}`
+        if (!pairs.has(key)) pairs.set(key, { record, pkg })
+      }
+    return [...pairs.values()]
+  }
+
+  const summaries = (all: IndexedRecord[], query?: string) => {
+    const needle = query?.toLowerCase()
+    const result: { summary: PublicApiPackageSummary; kinds: ApiSymbolKind[] }[] = []
+    for (const { record, pkg } of newestPairs(all)) {
+      const repo = repoKey(record.repo)
+      const match = needle
+        ? (matchOf(pkg.name, needle, pkg.description) ??
+          (repo.toLowerCase().includes(needle) ? 'doc' : undefined))
+        : undefined
+      if (needle && !match) continue
+      const { kinds, ...facts } = pkg
+      const removed = removalOf(all, pkg.name, repo)
+      result.push({
+        kinds,
+        summary: {
+          ...facts,
+          repo: record.repo,
+          ...(record.ref ? { ref: record.ref } : {}),
+          analysisId: record.id,
+          analyzedAt: record.createdAt,
+          versions: versionsOf(all, pkg.name, repo).length,
+          ...(removed ? { removed } : {}),
+          ...(match ? { match } : {}),
+        },
+      })
+    }
+    return result.toSorted(
+      (a, b) =>
+        a.summary.name.localeCompare(b.summary.name) ||
+        repoKey(a.summary.repo).localeCompare(repoKey(b.summary.repo)),
+    )
+  }
+
+  const symbolVersions = async (
+    all: IndexedRecord[],
+    query: { package: string; name: string; subpath: string; repo: string; limit: number },
+  ) => {
+    const versions = versionsOf(all, query.package, query.repo)
+    const compared = versions.slice(0, query.limit)
+    const symbols: (ApiSymbol | undefined)[] = []
+    for (let start = 0; start < compared.length; start += readConcurrency) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded parallel reads
+      const batch = await Promise.all(
+        compared.slice(start, start + readConcurrency).map(async (version) =>
+          (await data(version.record.id))?.packages
+            .find((pkg) => pkg.name === query.package)
+            ?.entries.find((entry) => entry.subpath === query.subpath)
+            ?.symbols.find((symbol) => symbol.name === query.name),
+        ),
+      )
+      symbols.push(...batch)
+    }
+    return { compared, symbols, capped: versions.length > compared.length }
+  }
+
   return {
     /** Rereads every record now, e.g. after a backfill. */
     rescan: () => refresh(true),
@@ -337,38 +469,46 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     indexedAt: () => (scannedAt ? new Date(scannedAt).toISOString() : undefined),
 
     /**
+     * Ids of the records readable repositories have in the catalog and those repositories as
+     * `forge:path`: a cache key that changes whenever an answer read through `filter` may change.
+     */
+    async fingerprint(filter: RepoFilter): Promise<{ analysisIds: string[]; repos: string[] }> {
+      const all = await visible(filter)
+      return {
+        analysisIds: all.map((record) => record.id),
+        repos: [...new Set(all.map((record) => repoKey(record.repo)))],
+      }
+    },
+
+    /**
      * The newest version of every package in readable repositories, sorted by name; packages their
-     * repository dropped stay listed with `removed`.
+     * repository dropped stay listed with `removed`. With `query`, only packages whose name,
+     * description or repository contains it, each with its `match`.
      */
     async packages(filter: RepoFilter, query?: string): Promise<PublicApiPackageSummary[]> {
-      const all = await visible(filter)
-      const latest = new Map<string, PublicApiPackageSummary>()
-      const needle = query?.toLowerCase()
-      for (const record of all)
-        for (const pkg of record.packages) {
-          const key = `${repoKey(record.repo)}\u0000${pkg.name}`
-          if (latest.has(key)) continue
-          if (
-            needle &&
-            !pkg.name.toLowerCase().includes(needle) &&
-            !pkg.description?.toLowerCase().includes(needle) &&
-            !repoKey(record.repo).toLowerCase().includes(needle)
+      return summaries(await visible(filter), query).map((item) => item.summary)
+    },
+
+    /** What `packages` lists for `query.q`, narrowed by `repo` and `kind`, with facets counted before. */
+    async packageList(
+      filter: RepoFilter,
+      query: PackageListQuery = {},
+    ): Promise<{ packages: PublicApiPackageSummary[]; facets: PublicApiFacets }> {
+      const items = summaries(await visible(filter), query.q)
+      return {
+        packages: items
+          .filter(
+            (item) =>
+              (!query.repo || repoKey(item.summary.repo) === query.repo) &&
+              (!query.kind || item.kinds.includes(query.kind)),
           )
-            continue
-          const removed = removalOf(all, pkg.name, repoKey(record.repo))
-          latest.set(key, {
-            ...pkg,
-            repo: record.repo,
-            ...(record.ref ? { ref: record.ref } : {}),
-            analysisId: record.id,
-            analyzedAt: record.createdAt,
-            versions: versionsOf(all, pkg.name, repoKey(record.repo)).length,
-            ...(removed ? { removed } : {}),
-          })
-        }
-      return [...latest.values()].toSorted(
-        (a, b) => a.name.localeCompare(b.name) || repoKey(a.repo).localeCompare(repoKey(b.repo)),
-      )
+          .map((item) => item.summary),
+        facets: {
+          kinds: facetOf(items.flatMap((item) => item.kinds)),
+          packages: facetOf(items.map((item) => item.summary.name)),
+          repos: facetOf(items.map((item) => repoKey(item.summary.repo))),
+        },
+      }
     },
 
     resolve,
@@ -403,69 +543,166 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     },
 
     /**
-     * Exported names matching `query` in the newest record of each readable repository: exact
-     * names first, then prefixes, substrings of names, and matches in doc comments.
+     * Exported names matching `query` in the newest record of each readable repository and
+     * package (packages their repository dropped included, marked `removed`): exact names first,
+     * then prefixes, substrings of names, and matches in doc comments.
      */
     async search(
       filter: RepoFilter,
       query: string,
-      filters: { package?: string; kind?: ApiSymbolKind; limit?: number } = {},
-    ): Promise<{ hits: PublicApiSymbolHit[]; more: number }> {
+      filters: SearchFilters = {},
+    ): Promise<{ hits: PublicApiSymbolHit[]; more: number; facets?: PublicApiFacets }> {
       const needle = query.trim().toLowerCase()
       const limit = filters.limit ?? 20
-      if (!needle) return { hits: [], more: 0 }
-      const all = await visible(filter)
-      const newest = new Map<string, IndexedRecord>()
-      for (const record of all)
-        if (!newest.has(repoKey(record.repo))) newest.set(repoKey(record.repo), record)
-      const scored: { score: number; hit: PublicApiSymbolHit }[] = []
-      for (const record of newest.values()) {
-        if (filters.package && !record.packages.some((p) => p.name === filters.package)) continue
+      const wide = filters.facets === true
+      const keep = (hit: PublicApiSymbolHit) =>
+        (!filters.package || hit.package === filters.package) &&
+        (!filters.kind || hit.symbol.kind === filters.kind) &&
+        (!filters.repo || repoKey(hit.repo) === filters.repo) &&
+        (!filters.subpath || hit.subpath === filters.subpath) &&
+        (!filters.match || hit.match === filters.match)
+      const found: PublicApiSymbolHit[] = []
+      const all = needle ? await visible(filter) : []
+      const byRecord = new Map<string, { record: IndexedRecord; names: Set<string> }>()
+      for (const { record, pkg } of newestPairs(all)) {
+        if (!wide && filters.package && pkg.name !== filters.package) continue
+        if (!wide && filters.repo && repoKey(record.repo) !== filters.repo) continue
+        const entry = byRecord.get(record.id) ?? { record, names: new Set<string>() }
+        entry.names.add(pkg.name)
+        byRecord.set(record.id, entry)
+      }
+      for (const { record, names } of byRecord.values()) {
         // oxlint-disable-next-line no-await-in-loop -- records come from a small cache
         const parsed = await data(record.id)
         for (const pkg of parsed?.packages ?? []) {
-          if (filters.package && pkg.name !== filters.package) continue
+          if (!names.has(pkg.name)) continue
+          const removed = removalOf(all, pkg.name, repoKey(record.repo)) !== undefined
           for (const entry of pkg.entries)
             for (const symbol of entry.symbols) {
-              if (filters.kind && symbol.kind !== filters.kind) continue
-              const name = symbol.name.toLowerCase()
-              const score =
-                name === needle
-                  ? 4
-                  : name.startsWith(needle)
-                    ? 3
-                    : name.includes(needle)
-                      ? 2
-                      : symbol.doc?.toLowerCase().includes(needle)
-                        ? 1
-                        : 0
-              if (!score) continue
-              scored.push({
-                score,
-                hit: {
-                  package: pkg.name,
-                  ...(pkg.version ? { version: pkg.version } : {}),
-                  repo: record.repo,
-                  subpath: entry.subpath,
-                  importPath: importPath(pkg.name, entry.subpath),
-                  symbol,
-                },
+              if (!wide && filters.kind && symbol.kind !== filters.kind) continue
+              const match = matchOf(symbol.name, needle, symbol.doc)
+              if (!match) continue
+              found.push({
+                package: pkg.name,
+                ...(pkg.version ? { version: pkg.version } : {}),
+                repo: record.repo,
+                subpath: entry.subpath,
+                importPath: importPath(pkg.name, entry.subpath),
+                ...(record.ref ? { ref: record.ref } : {}),
+                match,
+                deprecated: symbol.deprecated !== undefined,
+                removed,
+                symbol,
               })
             }
         }
       }
-      scored.sort(
-        (a, b) =>
-          b.score - a.score ||
-          a.hit.symbol.name.length - b.hit.symbol.name.length ||
-          a.hit.importPath.localeCompare(b.hit.importPath),
-      )
+      const hits = found
+        .filter(keep)
+        .toSorted(
+          (a, b) =>
+            matchRank[b.match] - matchRank[a.match] ||
+            Number(a.removed) - Number(b.removed) ||
+            a.symbol.name.length - b.symbol.name.length ||
+            a.importPath.localeCompare(b.importPath),
+        )
       return {
-        hits: scored.slice(0, limit).map((item) => item.hit),
-        more: Math.max(0, scored.length - limit),
+        hits: hits.slice(0, limit),
+        more: Math.max(0, hits.length - limit),
+        ...(wide
+          ? {
+              facets: {
+                kinds: facetOf(found.map((hit) => hit.symbol.kind)),
+                packages: facetOf(found.map((hit) => hit.package)),
+                repos: facetOf(found.map((hit) => repoKey(hit.repo))),
+                subpaths: facetOf(found.map((hit) => hit.subpath)),
+                matches: facetOf(found.map((hit) => hit.match)),
+              },
+            }
+          : {}),
+      }
+    },
+
+    /**
+     * One exported symbol of a resolved package version and the recorded versions where it was
+     * added, changed, deprecated or dropped, comparing at most `query.limit` versions of its
+     * repository, newest first; `undefined` when the version or the symbol is not on record.
+     */
+    async symbol(filter: RepoFilter, query: SymbolQuery): Promise<PublicApiSymbol | undefined> {
+      const found = await resolve(filter, query.package, {
+        ...(query.version ? { version: query.version } : {}),
+        ...(query.repo ? { repo: query.repo } : {}),
+      })
+      if (!found) return undefined
+      const exporting = found.package.entries.filter((entry) =>
+        entry.symbols.some((symbol) => symbol.name === query.name),
+      )
+      const entry = query.subpath
+        ? exporting.find((item) => item.subpath === query.subpath)
+        : (exporting.find((item) => item.subpath === '.') ?? exporting[0])
+      const symbol = entry?.symbols.find((item) => item.name === query.name)
+      if (!entry || !symbol) return undefined
+      const { compared, symbols, capped } = await symbolVersions(await visible(filter), {
+        package: query.package,
+        name: query.name,
+        subpath: entry.subpath,
+        repo: repoKey(found.record.repo),
+        limit: query.limit,
+      })
+      const changes: PublicApiSymbolChange[] = []
+      for (const [index, version] of compared.entries()) {
+        const after = symbols[index]
+        const before = symbols[index + 1]
+        const base = {
+          version: version.version,
+          ...(version.ref ? { ref: version.ref } : {}),
+          analyzedAt: version.analyzedAt,
+        }
+        if (index === compared.length - 1) {
+          if (after && !capped) changes.push({ ...base, change: 'added', after: after.signature })
+        } else if (after && !before)
+          changes.push({ ...base, change: 'added', after: after.signature })
+        else if (!after && before)
+          changes.push({ ...base, change: 'removed', before: before.signature })
+        else if (after && before) {
+          const deprecated = after.deprecated !== undefined && before.deprecated === undefined
+          if (deprecated || after.signature !== before.signature)
+            changes.push({
+              ...base,
+              change: deprecated ? 'deprecated' : 'changed',
+              before: before.signature,
+              after: after.signature,
+            })
+        }
+      }
+      return {
+        package: found.package.name,
+        ...(found.package.version ? { version: found.package.version } : {}),
+        repo: found.record.repo,
+        ...(found.record.ref ? { ref: found.record.ref } : {}),
+        analysisId: found.record.id,
+        analyzedAt: found.record.createdAt,
+        subpath: entry.subpath,
+        importPath: importPath(found.package.name, entry.subpath),
+        symbol,
+        alsoIn: exporting.filter((item) => item !== entry).map((item) => item.subpath),
+        ...(found.removed ? { removed: found.removed } : {}),
+        history: { changes, versions: compared.length, capped },
       }
     },
   }
 }
 
 export type ApiCatalog = ReturnType<typeof createApiCatalog>
+
+/**
+ * `load` through `cache`: the answer stays while the catalog records `canRead` sees stay the same,
+ * per `endpoint` (which names every parameter that changes the answer).
+ */
+export const cachedCatalog = async <T>(
+  cache: FleetCache,
+  catalog: ApiCatalog,
+  canRead: RepoFilter,
+  endpoint: string,
+  load: () => Promise<T>,
+): Promise<T> => cache.read({ endpoint, ...(await catalog.fingerprint(canRead)) }, load)

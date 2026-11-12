@@ -60,7 +60,7 @@ A `bundle` record holds `BundleRecordData { targets }`: every thing one run meas
 
 ## Report
 
-A record with one target is reported like that target (`targetReport`, compared with the target of the same name in the previous record). A record with several shows metrics over all of them (total gzip of measured targets, targets, not measured) and a **Targets** table with each one's sizes, change against the same target in the previous record, largest initial load and status; failed targets and changes over the thresholds are listed above it. The details of one target are on the Bundles page of the web app.
+A record with one target is reported like that target (`targetReport`, compared with the target of the same name in the previous record). A record with several shows metrics over all of them (total gzip of measured targets, targets, not measured) and a **Targets** table with each one's sizes, change against the same target in the previous record, largest initial load and status; failed targets and changes over the thresholds are listed above it. The details of one target are in Quality › Bundles of the web app.
 
 For a single target, `bundleAnalysis` (kind `bundle`, or `createBundleAnalysis({ growthPercent, growthBytes, heavyPackageBytes, treemapModules })` for other thresholds) produces:
 
@@ -70,6 +70,15 @@ For a single target, `bundleAnalysis` (kind `bundle`, or `createBundleAnalysis({
 - **Composition** — treemap entrypoint → package, with `(app)` broken down into modules.
 - **Packages** — raw and estimated gzip size, delta, share of all JS and CSS gzip, versions, entrypoints, `added` / `removed` / `duplicate` tags.
 - **Assets** — normalized name, file, kind, sizes, delta, `added` / `removed` / `changed` tags.
+
+## Metrics
+
+`bundleAnalysis.metrics` (`bundleMetrics`) stores `BundleMetrics` with every record:
+
+- `targets` — one `BundleTargetMetrics` per target name, sorted by name; for packages the highest version the record measured. Each has `name`, `source`, `version`, `status`, `gzip` (JS and CSS gzip bytes of every asset), `initial` (initial gzip of the largest entrypoint), `delta` (`gzip` minus the previous record's target of the same name) and, when a budget applies, `budget` and `verdict`.
+- `failed` — targets whose build or download failed.
+
+Budgets come from the `budgets` option of the `bundle` analyzer ([@holtkeeper/analyzers](../../analyzers/docs/README.md#bundle)): maximum gzip bytes keyed by target name or by a glob over names (`@acme/*`), validated by `bundleBudgetsSchema`. An exact name wins over globs, then the first matching glob in the order they are written. A target is `over` above its budget, `near` from 90% of it, else `ok`; failed targets get no verdict. `budgetFor(budgets, name)` and `budgetVerdict(gzip, budget)` are that rule, exported so repository health judges budgets the same way. `judgeTarget(target, budgets)` judges a stored target by the budgets that apply now: with `budgets` (the option is set for the repository) its budget for the target's name, otherwise the budget stored with the target; the verdict needs both a budget and a size. Repository health and the Quality › Bundles overview both use it, so a budget changed in the settings shows without a new measurement.
 
 ## Attribution limits
 

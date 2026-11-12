@@ -1,8 +1,11 @@
 import type {
   ChatMessage,
+  ChatMessageInput,
   ChatMessageQuery,
   ChatStore,
   ChatThread,
+  ChatThreadContext,
+  ChatThreadFilter,
   ChatThreadInput,
   ChatThreadPatch,
   ChatThreadRead,
@@ -17,13 +20,65 @@ export const CHAT_PAGE = { default: 50, max: 500 } as const
 export const chatPageSize = (query: ChatMessageQuery = {}) =>
   Math.min(Math.max(Math.trunc(query.limit ?? CHAT_PAGE.default), 1), CHAT_PAGE.max)
 
+const unique = (values: readonly string[]) => [...new Set(values)]
+
 /** The stored thread `ChatStore.createThread` makes of `input`. */
 export const newChatThread = (input: ChatThreadInput): ChatThread => ({
   ...input,
   updatedAt: input.createdAt,
   archived: false,
   participants: input.participants ?? [],
+  contextRepos: unique(input.contextRepos ?? []),
 })
+
+/** The stored message `ChatStore.addMessage` makes of `input`, without its `seq`. */
+export const newChatMessage = (input: ChatMessageInput): Omit<ChatMessage, 'seq'> => ({
+  ...input,
+  refs: input.refs ?? [],
+})
+
+/** Whether `thread` passes `filter` (see `ChatThreadFilter`). */
+export function matchesChatThreadFilter(
+  thread: ChatThread,
+  filter: ChatThreadFilter = {},
+): boolean {
+  const archived = filter.archived ?? false
+  if (archived !== 'all' && thread.archived !== archived) return false
+  const text = filter.q?.trim().toLowerCase()
+  return !text || thread.title.toLowerCase().includes(text)
+}
+
+/** The `ChatStore.context` totals of `thread` over its `messages`. */
+export function chatThreadContext(
+  thread: ChatThread,
+  messages: readonly Pick<
+    ChatMessage,
+    'authorType' | 'authorId' | 'costUsd' | 'toolTrace' | 'refs'
+  >[],
+): ChatThreadContext {
+  const repos = [...thread.contextRepos]
+  const tools = new Map<string, number>()
+  const authors = new Map<string, number>()
+  let costUsd = 0
+  for (const message of messages) {
+    costUsd += message.costUsd ?? 0
+    for (const use of message.toolTrace ?? [])
+      tools.set(use.tool, (tools.get(use.tool) ?? 0) + use.calls)
+    for (const ref of message.refs)
+      if ('repo' in ref && ref.repo && !repos.includes(ref.repo)) repos.push(ref.repo)
+    if (message.authorType === 'human' && message.authorId)
+      authors.set(message.authorId, (authors.get(message.authorId) ?? 0) + 1)
+  }
+  return {
+    messageCount: messages.length,
+    costUsd,
+    repos,
+    tools: [...tools]
+      .map(([tool, calls]) => ({ tool, calls }))
+      .toSorted((a, b) => b.calls - a.calls || (a.tool < b.tool ? -1 : a.tool > b.tool ? 1 : 0)),
+    participants: [...authors].map(([id, count]) => ({ id, messages: count })),
+  }
+}
 
 /** `thread` with `patch` applied; `null` fields are removed (see `ChatThreadPatch`). */
 export function patchChatThread(thread: ChatThread, patch: ChatThreadPatch): ChatThread {
@@ -32,6 +87,7 @@ export function patchChatThread(thread: ChatThread, patch: ChatThreadPatch): Cha
   if (patch.archived !== undefined) next.archived = patch.archived
   if (patch.autoReply !== undefined) next.autoReply = patch.autoReply
   if (patch.participants !== undefined) next.participants = patch.participants
+  if (patch.contextRepos !== undefined) next.contextRepos = unique(patch.contextRepos)
   if (patch.addParticipants !== undefined)
     next.participants = [
       ...next.participants,
@@ -97,6 +153,7 @@ export function memoryChat(): ChatStore {
   const threads = new Map<string, ChatThread>()
   const messages = new Map<string, ChatMessage>()
   const reads = new Map<string, ChatThreadRead>()
+  const mutes = new Set<string>()
   let seq = 0
 
   const ofThread = (threadId: string) =>
@@ -113,7 +170,7 @@ export function memoryChat(): ChatStore {
     getThread: async (id) => clone(threads.get(id)),
     listThreads: async (filter = {}) =>
       [...threads.values()]
-        .filter((thread) => thread.archived === (filter.archived ?? false))
+        .filter((thread) => matchesChatThreadFilter(thread, filter))
         .toSorted(byChatThreadUpdate)
         .map(clone),
     async updateThread(id, patch) {
@@ -125,7 +182,7 @@ export function memoryChat(): ChatStore {
     },
     async addMessage(input) {
       seq += 1
-      const message: ChatMessage = { ...clone(input), seq }
+      const message: ChatMessage = { ...newChatMessage(clone(input)), seq }
       messages.set(message.id, message)
       const thread = threads.get(message.threadId)
       if (thread && thread.updatedAt < message.createdAt) thread.updatedAt = message.createdAt
@@ -137,6 +194,7 @@ export function memoryChat(): ChatStore {
       if (!message) return undefined
       if (patch.card !== undefined) message.card = clone(patch.card)
       if (patch.body !== undefined) message.body = patch.body
+      if (patch.refs !== undefined) message.refs = clone(patch.refs)
       message.updatedAt = patch.updatedAt
       return clone(message)
     },
@@ -163,5 +221,27 @@ export function memoryChat(): ChatStore {
       }
       return counts
     },
+    async messageCounts(threadIds) {
+      const counts: Record<string, number> = {}
+      for (const threadId of threadIds) {
+        const count = ofThread(threadId).length
+        if (count > 0) counts[threadId] = count
+      }
+      return counts
+    },
+    async context(threadId) {
+      const thread = threads.get(threadId)
+      return thread ? clone(chatThreadContext(thread, ofThread(threadId))) : undefined
+    },
+    async setMuted(threadId, userId, muted) {
+      if (muted) mutes.add(readKey(threadId, userId))
+      else mutes.delete(readKey(threadId, userId))
+    },
+    mutedThreads: async (userId) =>
+      [...mutes]
+        .map((key) => key.split('\u0000'))
+        .filter(([, user]) => user === userId)
+        .map(([threadId]) => threadId ?? '')
+        .toSorted(),
   }
 }

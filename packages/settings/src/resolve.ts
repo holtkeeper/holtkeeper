@@ -1,6 +1,7 @@
 import { type RepoTarget, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import type { SettingEntry } from '@holtkeeper/store'
 
+import type { SettingDefinition } from './definitions.ts'
 import { isRetiredSetting } from './retired.ts'
 
 /**
@@ -74,4 +75,34 @@ export function resolveGlobalSetting(
   return entries
     .filter((entry) => entry.key === key && entry.scope.all === true)
     .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+}
+
+/** One setting as it applies to a repository. */
+export interface EffectiveSetting {
+  definition: SettingDefinition
+  /** The entry that applies; absent when none covers the repository and `definition.default` applies. */
+  entry?: SettingEntry
+  /** Covering entries `entry` overrides, from narrow to broad. */
+  overridden: SettingEntry[]
+}
+
+/**
+ * Every definition in `definitions` order, retired keys left out, with the single entry that
+ * applies to `repo` as a whole (values are never merged field by field). A `global` setting
+ * counts only entries scoped `{ all: true }`. Entries of keys without a definition are ignored.
+ */
+export function effectiveSettings(
+  definitions: readonly SettingDefinition[],
+  entries: readonly SettingEntry[],
+  repo: RepoTarget,
+): EffectiveSetting[] {
+  return definitions
+    .filter((definition) => !isRetiredSetting(definition.key))
+    .map((definition) => {
+      const cascade = settingCascade(entries, definition.key, repo).filter(
+        (entry) => !definition.global || entry.scope.all === true,
+      )
+      const [entry, ...overridden] = cascade
+      return entry ? { definition, entry, overridden } : { definition, overridden }
+    })
 }

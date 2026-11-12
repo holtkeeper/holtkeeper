@@ -1,6 +1,7 @@
 import { changeItem } from '@holtkeeper/media'
 import {
   type AnalysisKind,
+  type MetricsContext,
   type Cell,
   type Issue,
   type Metric,
@@ -12,6 +13,7 @@ import {
   formatBytes,
   metric,
 } from '@holtkeeper/report'
+import { z } from 'zod'
 
 import { overBudgetCount } from './budgets.ts'
 import { type AssetComparison, compareAssets } from './compare.ts'
@@ -22,9 +24,11 @@ import {
   type BudgetViolation,
   type ImageOptimization,
   assetsDataSchema,
+  kindSchema,
 } from './data.ts'
 import { wasted } from './findings.ts'
 import { defaultAssetsPolicy } from './policy.ts'
+import { type AssetRow, assetRowSchema, assetsSummary } from './summary.ts'
 
 /** Display settings of the report. */
 export interface AssetsAnalysisOptions {
@@ -875,17 +879,88 @@ const assetsExclude: ReportExclude = {
   ],
 }
 
+/** File rows kept in the metrics of one record. */
+const METRIC_ROWS = 50
+
+/** Stored headline numbers of one `assets` record. */
+export interface AssetsMetrics {
+  files: number
+  bytes: number
+  /** Bytes per kind; only kinds that have files. */
+  kinds: Partial<Record<AssetKind, number>>
+  /** Policy violations by severity. */
+  errors: number
+  warnings: number
+  /** Budgets over every file or a kind that are exceeded. */
+  budgets: number
+  /** Bytes every suggestion together would save. */
+  savings: number
+  /** Bytes taken by extra copies of identical files. */
+  duplicateBytes: number
+  /** `bytes` minus the previous record's. */
+  delta?: number
+  /** The first 50 rows of `assetsSummary`: errors first, then by size. */
+  rows: AssetRow[]
+  /** Rows of `assetsSummary` left out of `rows`. */
+  moreRows: number
+}
+
+const assetsMetricsSchema = z.object({
+  files: z.number(),
+  bytes: z.number(),
+  kinds: z.partialRecord(kindSchema, z.number()),
+  errors: z.number(),
+  warnings: z.number(),
+  budgets: z.number(),
+  savings: z.number(),
+  duplicateBytes: z.number(),
+  delta: z.number().optional(),
+  rows: z.array(assetRowSchema).catch([]),
+  moreRows: z.number().catch(0),
+}) satisfies z.ZodType<AssetsMetrics>
+
+/**
+ * Stored `metrics` of an `assets` record as `AssetsMetrics`; `undefined` when absent or not in
+ * that shape. Metrics stored before rows were kept read as having none.
+ */
+export function parseAssetsMetrics(value: unknown): AssetsMetrics | undefined {
+  const parsed = assetsMetricsSchema.safeParse(value)
+  return parsed.success ? parsed.data : undefined
+}
+
+/** `AssetsMetrics` of `data`, with the weight delta against `previous`. */
+export function assetsMetrics(
+  data: AssetsData,
+  { previous }: MetricsContext<AssetsMetrics> = {},
+): AssetsMetrics {
+  const summary = assetsSummary(data, METRIC_ROWS)
+  return {
+    files: summary.files,
+    bytes: summary.totalBytes,
+    kinds: Object.fromEntries(data.totals.map((total) => [total.kind, total.bytes])),
+    errors: summary.errors,
+    warnings: summary.warnings,
+    budgets: summary.budgets.length,
+    savings: summary.savings,
+    duplicateBytes: summary.duplicateBytes,
+    ...(previous ? { delta: summary.totalBytes - previous.bytes } : {}),
+    rows: summary.rows,
+    moreRows: summary.more,
+  }
+}
+
 /** The `assets` analysis kind with custom display settings. */
 export function createAssetsAnalysis(
   options: AssetsAnalysisOptions = {},
-): AnalysisKind<AssetsData> {
+): AnalysisKind<AssetsData, AssetsMetrics> {
   const largest = options.largest ?? 25
   const treemapFiles = options.treemapFiles ?? 40
   const imageCards = options.imageCards ?? 10
-  return defineAnalysis<AssetsData>({
+  return defineAnalysis<AssetsData, AssetsMetrics>({
     kind: 'assets',
     label: 'Asset budgets',
     schema: assetsDataSchema,
+    metrics: assetsMetrics,
     summarize: (data) => metricsOf(data),
     changes: (data) => data.changes ?? [],
     toReport(current, previous): Report {
@@ -923,4 +998,4 @@ export function createAssetsAnalysis(
 }
 
 /** Images, audio, fonts and other shipped files against budgets, compared with the previous record. */
-export const assetsAnalysis: AnalysisKind<AssetsData> = createAssetsAnalysis()
+export const assetsAnalysis: AnalysisKind<AssetsData, AssetsMetrics> = createAssetsAnalysis()

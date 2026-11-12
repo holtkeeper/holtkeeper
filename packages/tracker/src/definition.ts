@@ -81,6 +81,7 @@ export const trackersSetting = {
 - **Sources** say where entities appear (code, configs, documents); **rules** decide what is a problem (unused, expired, missing an owner); **outputs** say where the overview goes.
 - Give sources and outputs explicit ids when a tracker has several of the same kind, so rules and history stay stable.
 - Start with one source and one output, check the first run, then add rules.`,
+  default: [],
   schema: trackersSchema,
   form: trackersSchema.meta({ 'x-editor': 'trackers' }),
 }

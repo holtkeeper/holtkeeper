@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { sectionAnchor } from '../../lib/analyses.ts'
 import { formatDateTime, formatRef, formatRelative } from '../../lib/format.ts'
 import { repoKey } from '../../lib/repo.ts'
-import { Chip, EmptyState, stagger } from '../../ui/index.ts'
+import { Chip, EmptyState } from '../../ui/index.ts'
 import { BlockView } from './BlockView.tsx'
 import { MetricCard } from './MetricCard.tsx'
 
@@ -32,10 +32,11 @@ function useActiveSection(ids: readonly string[]): string | undefined {
 }
 
 /**
- * Renders any analysis report: header, headline metrics with deltas, and its sections with a
- * table of contents. Knows nothing about the analysis kind.
+ * Renders any analysis report: header (unless `header` is false, for pages that show the subject
+ * themselves), headline metrics with deltas, and its sections with a table of contents. Knows
+ * nothing about the analysis kind.
  */
-export function ReportView({ report }: { report: Report }) {
+export function ReportView({ report, header = true }: { report: Report; header?: boolean }) {
   const anchors = useMemo(
     () => report.sections.map((section) => sectionAnchor(section.id)),
     [report.sections],
@@ -44,47 +45,49 @@ export function ReportView({ report }: { report: Report }) {
   const { subject } = report
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2 rounded-2xl border border-border bg-surface p-5">
-        <h2 className="text-xl font-semibold tracking-tight">{report.title}</h2>
-        {report.subtitle ? <p className="text-sm text-muted">{report.subtitle}</p> : null}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-          {subject?.repo ? <Chip>{repoKey(subject.repo)}</Chip> : null}
-          {subject?.ref ? (
-            <span className="inline-flex items-center gap-1 font-mono" title={subject.ref}>
-              <GitBranch className="size-3.5" />
-              {formatRef(subject.ref)}
+    <div className="flex flex-col gap-4">
+      {header ? (
+        <header className="flex flex-col gap-2 rounded-xl border border-line bg-panel p-4">
+          <h2 className="text-base font-semibold">{report.title}</h2>
+          {report.subtitle ? <p className="text-sm text-muted">{report.subtitle}</p> : null}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+            {subject?.repo ? <Chip>{repoKey(subject.repo)}</Chip> : null}
+            {subject?.ref ? (
+              <span className="inline-flex items-center gap-1 font-mono" title={subject.ref}>
+                <GitBranch className="size-3.5" />
+                {formatRef(subject.ref)}
+              </span>
+            ) : null}
+            {subject?.compareTo ? (
+              <span className="inline-flex items-center gap-1">
+                <GitCompareArrows className="size-3.5" />
+                compared to <span className="font-mono">{subject.compareTo}</span>
+              </span>
+            ) : null}
+            <span
+              className="inline-flex items-center gap-1"
+              title={formatDateTime(report.generatedAt)}
+            >
+              <CalendarClock className="size-3.5" />
+              generated {formatRelative(report.generatedAt)}
             </span>
-          ) : null}
-          {subject?.compareTo ? (
-            <span className="inline-flex items-center gap-1">
-              <GitCompareArrows className="size-3.5" />
-              compared to <span className="font-mono">{subject.compareTo}</span>
-            </span>
-          ) : null}
-          <span
-            className="inline-flex items-center gap-1"
-            title={formatDateTime(report.generatedAt)}
-          >
-            <CalendarClock className="size-3.5" />
-            generated {formatRelative(report.generatedAt)}
-          </span>
-        </div>
-      </header>
+          </div>
+        </header>
+      ) : null}
 
       {report.metrics.length ? (
-        <motion.div {...stagger} className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
           {report.metrics.map((metric) => (
             <MetricCard key={metric.id} metric={metric} />
           ))}
-        </motion.div>
+        </div>
       ) : null}
 
       {report.sections.length === 0 ? (
         <EmptyState icon={<ListTree />} title="This report has no sections" />
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_13rem]">
-          <div className="flex min-w-0 flex-col gap-6">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_13rem]">
+          <div className="flex min-w-0 flex-col gap-4">
             {report.sections.map((section, index) => (
               <motion.section
                 key={section.id}
@@ -94,16 +97,16 @@ export function ReportView({ report }: { report: Report }) {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: '-40px' }}
                 transition={{ duration: 0.3 }}
-                className="flex scroll-mt-20 flex-col gap-4 rounded-2xl border border-border bg-surface p-5"
+                className="flex scroll-mt-20 flex-col gap-3 rounded-xl border border-line bg-panel p-4"
               >
                 <div>
-                  <h2 id={`${anchors[index]}-title`} className="text-base font-semibold">
+                  <h2 id={`${anchors[index]}-title`} className="text-[13px] font-semibold">
                     <a href={`#${anchors[index]}`} className="hover:underline">
                       {section.title}
                     </a>
                   </h2>
                   {section.description ? (
-                    <p className="mt-0.5 text-sm text-muted">{section.description}</p>
+                    <p className="mt-0.5 text-xs text-muted">{section.description}</p>
                   ) : null}
                 </div>
                 {section.blocks.map((block, blockIndex) => (
@@ -113,7 +116,7 @@ export function ReportView({ report }: { report: Report }) {
             ))}
           </div>
           <nav aria-label="Report sections" className="hidden xl:block">
-            <ul className="sticky top-20 flex flex-col gap-0.5 border-l border-separator text-sm">
+            <ul className="sticky top-20 flex flex-col gap-0.5 border-l border-line text-xs">
               {report.sections.map((section, index) => {
                 const current = active === anchors[index]
                 return (
@@ -121,7 +124,7 @@ export function ReportView({ report }: { report: Report }) {
                     {current ? (
                       <motion.span
                         layoutId="report-toc"
-                        className="absolute -left-px inset-y-0 w-0.5 rounded-full bg-accent"
+                        className="absolute -left-px inset-y-0 w-0.5 rounded-full bg-foreground"
                       />
                     ) : null}
                     <a

@@ -1,18 +1,25 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { KnowledgeEntry } from '@holtkeeper/api'
+import type { KnowledgeEntry, KnowledgeRevision } from '@holtkeeper/api'
 
 import {
-  countByStatus,
+  changedFields,
   draftOf,
   draftProblems,
   emptyDraft,
-  entriesOfGroup,
+  filterNotes,
   groupNotes,
   inputOf,
   isInherited,
+  kbId,
   matchesFilter,
+  noteLink,
+  noteSections,
+  noteTopics,
+  noteTotals,
+  noteVersions,
   notesOfSpace,
+  restoreInput,
 } from './knowledge.ts'
 
 const entry = (overrides: Partial<KnowledgeEntry> = {}): KnowledgeEntry => ({
@@ -93,16 +100,6 @@ describe('knowledge drafts', () => {
     })
     expect(draftOf(entry()).visibility).toBe('team')
   })
-
-  test('group entries and status counts', () => {
-    const list = [
-      entry(),
-      entry({ id: 'k2', scope: { all: true }, status: 'proposed' }),
-      entry({ id: 'k3', scope: { groups: ['tools'] }, status: 'proposed' }),
-    ]
-    expect(entriesOfGroup(list, 'games').map((e) => e.id)).toEqual(['k1'])
-    expect(countByStatus(list)).toEqual({ proposed: 2, accepted: 1, rejected: 0, archived: 0 })
-  })
 })
 
 describe('notes of a space', () => {
@@ -150,5 +147,141 @@ describe('notes of a space', () => {
   test('the live filter keeps proposals and accepted entries', () => {
     expect(list.filter((e) => matchesFilter(e, 'live')).map((e) => e.id)).toEqual(['a', 'b', 'c'])
     expect(list.filter((e) => matchesFilter(e, 'archived')).map((e) => e.id)).toEqual(['d'])
+  })
+})
+
+describe('notes table', () => {
+  const list = [
+    entry({ id: 'aa11', title: 'Widgets are immutable', topics: ['state'] }),
+    entry({
+      id: 'bb22',
+      title: 'Retry through fooUtil',
+      kind: 'quirk',
+      topics: ['retries', 'state'],
+      status: 'proposed',
+      updatedAt: '2026-10-03T00:00:00.000Z',
+    }),
+    entry({
+      id: 'cc33',
+      title: 'Old shape',
+      topics: [],
+      status: 'proposed',
+      updatedAt: '2026-10-05T00:00:00.000Z',
+    }),
+    entry({ id: 'dd44', status: 'rejected', topics: ['state'] }),
+    entry({ id: 'ee55', scope: { all: true }, visibility: 'shared', topics: [] }),
+  ]
+  const live = { filter: 'live' as const, text: '', kinds: [], topics: [] }
+
+  test('proposals lead under Waiting for review, newest first, the rest by topic', () => {
+    expect(
+      noteSections(filterNotes(list, live), 'topic').map((s) => [
+        s.label,
+        s.entries.map((e) => e.id),
+      ]),
+    ).toEqual([
+      ['Waiting for review', ['cc33', 'bb22']],
+      ['state', ['aa11']],
+      ['No topic', ['ee55']],
+    ])
+  })
+
+  test('filters by text, kb id, kind and topic', () => {
+    expect(filterNotes(list, { ...live, text: 'FOOUTIL' }).map((e) => e.id)).toEqual(['bb22'])
+    expect(filterNotes(list, { ...live, text: 'kb:aa' }).map((e) => e.id)).toEqual(['aa11'])
+    expect(filterNotes(list, { ...live, kinds: ['quirk'] }).map((e) => e.id)).toEqual(['bb22'])
+    expect(filterNotes(list, { ...live, topics: ['state'] }).map((e) => e.id)).toEqual([
+      'aa11',
+      'bb22',
+    ])
+    expect(filterNotes(list, { ...live, filter: 'rejected' }).map((e) => e.id)).toEqual(['dd44'])
+    expect(noteTopics(list)).toEqual(['retries', 'state'])
+  })
+
+  test('filters by task and groups by status', () => {
+    const tasks = [
+      entry({ id: 'p1', appliesTo: ['port'] }),
+      entry({ id: 'r1', appliesTo: ['review'], status: 'proposed' }),
+      entry({ id: 'a1', appliesTo: ['*'] }),
+    ]
+    expect(filterNotes(tasks, { ...live, tasks: ['port'] }).map((e) => e.id)).toEqual(['p1', 'a1'])
+    expect(noteSections(tasks, 'status').map((s) => [s.label, s.entries.map((e) => e.id)])).toEqual(
+      [
+        ['Waiting for review', ['r1']],
+        ['Accepted', ['p1', 'a1']],
+      ],
+    )
+  })
+
+  test('totals count live notes of the space', () => {
+    const repo = { kind: 'repo' as const, repo: { forge: 'w', path: 'shapes/circle' } }
+    expect(noteTotals(list, { kind: 'all' })).toEqual({
+      accepted: 2,
+      proposed: 2,
+      inherited: 0,
+      shared: 1,
+    })
+    expect(noteTotals(list, repo).inherited).toBe(4)
+  })
+
+  test('ids and links', () => {
+    expect(kbId('0123456789ab')).toBe('kb:0123456789ab')
+    expect(kbId('0123456789ab', true)).toBe('kb:01234567')
+    expect(noteLink('https://hk.test', 'a b')).toBe('https://hk.test/knowledge/notes?note=a%20b')
+  })
+})
+
+const revision = (
+  version: number,
+  overrides: Partial<KnowledgeRevision> = {},
+): KnowledgeRevision => {
+  const {
+    id: _id,
+    source: _source,
+    author: _author,
+    createdAt: _c,
+    updatedAt: _u,
+    version: _v,
+    ...content
+  } = entry()
+  return {
+    ...content,
+    version,
+    editedBy: `u${version}`,
+    editedAt: `2026-10-0${version}T00:00:00.000Z`,
+    ...overrides,
+  }
+}
+
+describe('note history', () => {
+  test('lists the current version first with what each version changed', () => {
+    const current = entry({ title: 'Use the shiny facade', updatedBy: 'u9', version: 3 })
+    const rows = noteVersions(current, [revision(1, { body: 'First text.' }), revision(2)])
+    expect(rows.map((row) => [row.version, row.by, row.changed, row.current])).toEqual([
+      [3, 'u9', ['title'], true],
+      [2, 'u2', ['text'], false],
+      [1, 'u1', [], false],
+    ])
+  })
+
+  test('changed fields follow form order', () => {
+    expect(
+      changedFields(revision(1), revision(2, { topics: ['x'], title: 'New', status: 'proposed' })),
+    ).toEqual(['title', 'topics', 'status'])
+  })
+
+  test('restoring sends the old content guarded by the current version', () => {
+    const current = entry({ version: 5, title: 'Now' })
+    expect(restoreInput(current, revision(2, { title: 'Then', visibility: 'shared' }))).toEqual({
+      title: 'Then',
+      body: 'Never import the engine.',
+      kind: 'convention',
+      scope: { groups: ['games'] },
+      topics: ['style'],
+      appliesTo: ['review'],
+      visibility: 'shared',
+      evidence: [],
+      version: 5,
+    })
   })
 })

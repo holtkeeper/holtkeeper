@@ -7,7 +7,6 @@ import {
   formatRoles,
   groupDocuments,
   headingPath,
-  httpUrl,
   libraryListQuery,
   librarySearchQuery,
   parseEcosystem,
@@ -90,12 +89,8 @@ describe('excerpt', () => {
   })
 })
 
-test('heading path and http-only links', () => {
+test('heading path', () => {
   expect(headingPath(['Guide', 'Install'])).toBe('Guide › Install')
-  expect(httpUrl('https://github.com/a/b')).toBe('https://github.com/a/b')
-  expect(httpUrl('javascript:alert(1)')).toBeUndefined()
-  expect(httpUrl('/relative')).toBeUndefined()
-  expect(httpUrl(undefined)).toBeUndefined()
 })
 
 test('summarizes a run', () => {

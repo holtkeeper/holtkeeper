@@ -140,9 +140,10 @@ export function PolicyForm({
 }) {
   const stored = useMemo(() => normalizePolicies(entry?.value), [entry])
   const original = stored.find((policy) => policy.id === policyId)
-  const [policy, setPolicy] = useState<PolicyValue>(
+  const [initial] = useState<PolicyValue>(
     () => original ?? newPolicy([...taken, ...stored.map((p) => p.id)]),
   )
+  const [policy, setPolicy] = useState<PolicyValue>(initial)
   const [invalid, setInvalid] = useState<ReadonlySet<number>>(() => new Set())
   const [removing, setRemoving] = useState(false)
   const { put, remove } = useSettingMutations()
@@ -185,6 +186,8 @@ export function PolicyForm({
       <RuleForm
         writable={writable}
         isPending={put.isPending || remove.isPending}
+        dirty={JSON.stringify(policy) !== JSON.stringify(initial)}
+        onDiscard={() => setPolicy(initial)}
         onSave={() => {
           if (problems.length || invalid.size) return
           store(next, original ? 'Policy saved' : 'Policy added')

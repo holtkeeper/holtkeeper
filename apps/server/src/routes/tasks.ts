@@ -4,24 +4,35 @@ import type {
   AgentTaskGroupList,
   AgentTaskGroupView,
   AgentTaskView,
+  TaskApprovalCount,
   WriteTasksStatus,
 } from '@holtkeeper/api'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
-import { type Env, type ServerDeps, limitParam, principalOf, readBody } from '../context.ts'
+import {
+  type Env,
+  type ServerDeps,
+  limitParam,
+  principalOf,
+  readBody,
+  ForbiddenException,
+} from '../context.ts'
 import {
   TaskError,
   type TaskDeps,
   approveTaskGroup,
   canSeeGroup,
   cancelTaskGroup,
+  countGroupsAwaitingApproval,
   createTaskGroup,
   decideRepoRequest,
   groupView,
   refreshTaskGroup,
+  rejectTaskGroup,
   retryTask,
+  retryTaskGroup,
   taskGroupRequestSchema,
 } from '../tasks.ts'
 import { tasksWriteSettings, weeklyWriteSpend, writePoolStatus } from '../write-tasks.ts'
@@ -47,17 +58,21 @@ const guarded = async <T>(work: () => Promise<T>): Promise<T> => {
     return await work()
   } catch (error) {
     if (error instanceof TaskError)
-      throw new HTTPException(error.status, { message: error.message })
+      throw error.missing
+        ? new ForbiddenException(error.missing.action, error.missing.target, error.message)
+        : new HTTPException(error.status, { message: error.message })
     throw error
   }
 }
 
 /**
- * Agent task routes: `GET /api/task-groups` (groups with a target the caller may see),
- * `GET /api/task-groups/:id` (reads open merge requests' state and CI from the forge at most once a
- * minute), `POST /api/task-groups` (propose; `run: true` approves at once), `POST
- * /api/task-groups/:id/approve` and `/cancel`, `POST /api/task-groups/:id/requests` (decide a
- * repository a task asked for), `GET /api/tasks/:id`, `POST /api/tasks/:id/retry` and `/cancel`
+ * Agent task routes: `GET /api/task-groups` (groups with a target the caller may see; both lists
+ * and `GET /api/task-groups/:id` read open merge requests' state, CI and diffstat from the forge
+ * at most once a minute), `GET /api/task-groups/needs-approval` (the Tasks badge count),
+ * `POST /api/task-groups` (propose; `run: true` approves at once), `POST
+ * /api/task-groups/:id/approve`, `/cancel`, `/reject` (cancel a proposed group, audited as
+ * `task.reject`) and `/retry` (every failed or cancelled task), `POST /api/task-groups/:id/requests`
+ * (decide a repository a task asked for), `GET /api/tasks/:id`, `POST /api/tasks/:id/retry` and `/cancel`
  * (one task), and `GET /api/write-tasks` (the switch, caps and write pool status). Refusals of
  * the task service answer with its status.
  */
@@ -81,16 +96,34 @@ export function taskRoutes(deps: ServerDeps) {
       ...(repo ? { repos: [repo] } : {}),
     })
     const limit = limitParam(c.req.query('limit'))
+    const visible = groups.filter((group) => canSeeGroup(deps, principal, group)).slice(0, limit)
+    const open = visible.length
+      ? await deps.store.tasks.list({
+          groupIds: visible.map((group) => group.id),
+          status: ['mr-open'],
+        })
+      : []
+    const openIds = new Set(open.map((task) => task.groupId))
+    await Promise.all([...openIds].map((id) => refreshTaskGroup(taskDeps, id).catch(() => {})))
     const views: AgentTaskGroupView[] = []
-    for (const group of groups) {
-      if (views.length >= limit) break
-      if (canSeeGroup(deps, principal, group))
-        // oxlint-disable-next-line no-await-in-loop -- one view per visible group, newest first
-        views.push(await groupView(taskDeps, principal, group))
+    for (const group of visible) {
+      const current = openIds.has(group.id)
+        ? // oxlint-disable-next-line no-await-in-loop -- one view per visible group, newest first
+          ((await deps.store.tasks.getGroup(group.id)) ?? group)
+        : group
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      views.push(await groupView(taskDeps, principal, current))
     }
     return c.json<AgentTaskGroupList>({
       groups: views,
       people: await peopleOf(deps, peopleIds(views)),
+    })
+  })
+
+  app.get('/task-groups/needs-approval', async (c) => {
+    const principal = principalOf(c)
+    return c.json<TaskApprovalCount>({
+      count: await countGroupsAwaitingApproval(deps, principal),
     })
   })
 
@@ -144,6 +177,34 @@ export function taskRoutes(deps: ServerDeps) {
     return c.json<AgentTaskGroupView>(view)
   })
 
+  app.post('/task-groups/:id/reject', async (c) => {
+    const principal = principalOf(c)
+    const group = await visibleGroup(principal, c.req.param('id'))
+    const view = await guarded(() => rejectTaskGroup(taskDeps, principal, group.id))
+    c.set('audit', {
+      action: 'task.reject',
+      target: {
+        type: 'task-group',
+        id: group.id,
+        ...(view.repos.length === 1 && { repo: view.repos[0] }),
+      },
+      details: { repos: view.repos },
+    })
+    return c.json<AgentTaskGroupView>(view)
+  })
+
+  app.post('/task-groups/:id/retry', async (c) => {
+    const principal = principalOf(c)
+    const group = await visibleGroup(principal, c.req.param('id'))
+    const view = await guarded(() => retryTaskGroup(taskDeps, principal, group.id))
+    c.set('audit', {
+      action: 'task.retry',
+      target: { type: 'task-group', id: group.id },
+      details: { repos: view.repos },
+    })
+    return c.json<AgentTaskGroupView>(view)
+  })
+
   app.post('/task-groups/:id/requests', async (c) => {
     const principal = principalOf(c)
     const group = await visibleGroup(principal, c.req.param('id'))
@@ -193,7 +254,7 @@ export function taskRoutes(deps: ServerDeps) {
     const admin = can(principal, 'settings:read', GLOBAL)
     const [settings, pool] = await Promise.all([
       tasksWriteSettings(deps.store),
-      writePoolStatus(deps.store),
+      writePoolStatus(deps.store, deps.now()),
     ])
     const { workers, ...counts } = pool
     return c.json<WriteTasksStatus>({

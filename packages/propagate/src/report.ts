@@ -9,6 +9,7 @@ import {
   type Section,
   type Tone,
 } from '@holtkeeper/report'
+import { webPaths } from '@holtkeeper/web-paths'
 
 import { trimText } from './notes.ts'
 import { propagationDataSchema } from './schema.ts'
@@ -94,7 +95,7 @@ const link = (outcome: RepoOutcome): Cell =>
   outcome.webUrl ? { text: outcome.repo, href: outcome.webUrl } : outcome.repo
 
 const taskHref = (data: PropagationData, task: string) =>
-  `/tasks?${new URLSearchParams({ ...(data.fixGroup && { group: data.fixGroup }), task }).toString()}`
+  webPaths.tasks({ group: data.fixGroup, task })
 
 function overview(data: PropagationData, previous?: PropagationData): Section {
   const before = new Map(

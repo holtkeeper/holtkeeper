@@ -1,8 +1,12 @@
 import { Database } from 'bun:sqlite'
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { sqliteConfig } from './config.ts'
 import { type Migration, migrate, migrations } from './migrations.ts'
+import { sqliteStore } from './sqlite.ts'
 
 const versions = (db: Database) =>
   db
@@ -41,6 +45,142 @@ describe('migrate', () => {
       .get()
     expect(row?.options).toBeNull()
     db.close()
+  })
+
+  test('v23 adds analysis metrics without touching existing records', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 22),
+    )
+    db.run(
+      `INSERT INTO analyses (id, repo_forge, repo_path, kind, created_at, data)
+       VALUES ('a1', 'work', 'shapes/a', 'coverage', '2026-10-01T00:00:00.000Z', '{"n":1}')`,
+    )
+    db.close()
+    const { analyses } = sqliteStore({ path })
+    expect(await analyses.get('a1')).not.toHaveProperty('metrics')
+    expect((await analyses.latestHeads())[0]).toMatchObject({ id: 'a1', kind: 'coverage' })
+    const added = await analyses.add({
+      repo: { forge: 'work', path: 'shapes/a' },
+      kind: 'coverage',
+      createdAt: '2026-10-02T00:00:00.000Z',
+      data: { n: 2 },
+      metrics: { percent: 50 },
+    })
+    expect((await analyses.latestHeads())[0]).toMatchObject({
+      id: added.id,
+      metrics: { percent: 50 },
+    })
+  })
+
+  test('v24 adds ai usage origin and subject and indexes jobs by analysis', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 23),
+    )
+    db.run(
+      `INSERT INTO ai_usage (id, at, repo_forge, repo_path, groups, task_kind, actor, provider, model,
+         input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, cost_source,
+         duration_ms, turns, outcome)
+       VALUES ('u1', '2026-10-01T00:00:00.000Z', 'work', 'shapes/a', '[]', 'review', 'system',
+         'anthropic', 'm', 1, 1, 0, 0, 0.5, 'reported', 10, 1, 'ok')`,
+    )
+    migrate(db)
+    const indexes = db
+      .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'index'")
+      .all()
+      .map((row) => row.name)
+    expect(indexes).toEqual(
+      expect.arrayContaining(['jobs_analysis', 'ai_usage_actor_at', 'ai_usage_job']),
+    )
+    db.close()
+    const { aiUsage } = sqliteStore({ path })
+    const [old] = await aiUsage.list()
+    expect(old).toMatchObject({ id: 'u1', interactive: false })
+    expect(old).not.toHaveProperty('subject')
+  })
+
+  test('v25 and v26 add guide generated history and chat context; old rows read empty', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'hk-sqlite-')), 'store.db')
+    const db = new Database(path, { create: true })
+    migrate(
+      db,
+      migrations.filter((m) => m.version <= 24),
+    )
+    const at = '2026-11-01T00:00:00.000Z'
+    const layer = {
+      body: '- Run `bun test`.',
+      inputHash: 'h1',
+      model: 'model-fast',
+      costUsd: 0,
+      status: 'proposed',
+      generatedAt: at,
+    }
+    db.run('INSERT INTO guides (scope, section, data) VALUES (?, ?, ?)', [
+      'repo:gl:acme/widget-kit',
+      'testing',
+      JSON.stringify({
+        scope: 'repo:gl:acme/widget-kit',
+        section: 'testing',
+        rules: '',
+        steering: '',
+        version: 0,
+        generated: layer,
+        proposal: layer,
+        learnings: [],
+      }),
+    ])
+    db.run('INSERT INTO chat_threads (id, updated_at, archived, data) VALUES (?, ?, 0, ?)', [
+      't1',
+      at,
+      JSON.stringify({
+        id: 't1',
+        title: 'Widget rollout',
+        createdBy: 'user-1',
+        createdAt: at,
+        updatedAt: at,
+        archived: false,
+        autoReply: false,
+        participants: ['user-1'],
+      }),
+    ])
+    db.run(
+      'INSERT INTO chat_messages (id, thread_id, author_id, created_at, data) VALUES (?, ?, ?, ?, ?)',
+      [
+        'm1',
+        't1',
+        'user-1',
+        at,
+        JSON.stringify({
+          id: 'm1',
+          threadId: 't1',
+          authorType: 'human',
+          authorId: 'user-1',
+          body: 'Hi',
+          mentions: [],
+          createdAt: at,
+        }),
+      ],
+    )
+    migrate(db)
+    expect(versions(db)).toEqual(expect.arrayContaining([25, 26]))
+    db.close()
+
+    const { guides, chat } = sqliteStore({ path })
+    expect(await guides.get('repo:gl:acme/widget-kit', 'testing')).toMatchObject({
+      generated: { ...layer, version: 0 },
+      proposal: { ...layer, version: 0 },
+    })
+    expect(await guides.generatedHistory('repo:gl:acme/widget-kit', 'testing')).toEqual([])
+
+    expect((await chat.getThread('t1'))?.contextRepos).toEqual([])
+    expect((await chat.getMessage('m1'))?.refs).toEqual([])
+    expect(await chat.context('t1')).toMatchObject({ messageCount: 1, repos: [] })
+    expect(await chat.mutedThreads('user-1')).toEqual([])
   })
 
   test('v7 adds config documents, their history and kv to a v6 database', () => {

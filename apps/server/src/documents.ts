@@ -1,6 +1,7 @@
 import { type RepoTarget, scopeCoversRepo, scopeSpecificity } from '@holtkeeper/access'
 import { confluenceFromCredential } from '@holtkeeper/confluence'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
+import type { CredentialService } from '@holtkeeper/credentials'
 import type { RepoRef } from '@holtkeeper/forge'
 import { resolveSetting } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
@@ -10,14 +11,13 @@ import {
   type TrackerDefinitionInput,
   trackersSchema,
 } from '@holtkeeper/tracker'
-import type { Vault } from '@holtkeeper/vault'
 
 import { repoTarget } from './context.ts'
 
 interface DocumentDeps {
   config: HoltkeeperConfig
   store: Store
-  vault: Vault
+  credentials: Pick<CredentialService, 'reveal'>
 }
 
 /** Group analyses use `{ forge, path: <group> }`; such a target belongs to that group. */
@@ -28,13 +28,13 @@ function targetOf(config: HoltkeeperConfig, repo: RepoRef): RepoTarget {
     : target
 }
 
-async function confluenceFor({ config, store, vault }: DocumentDeps, repo: RepoRef) {
+async function confluenceFor({ config, store, credentials }: DocumentDeps, repo: RepoRef) {
   const target = targetOf(config, repo)
   const credential = (await store.credentials.list())
     .filter((c) => c.kind === 'confluence' && scopeCoversRepo(c.scope, target))
     .toSorted((a, b) => scopeSpecificity(b.scope) - scopeSpecificity(a.scope))[0]
   return credential
-    ? confluenceFromCredential(credential, await vault.open(credential.secret))
+    ? confluenceFromCredential(credential, await credentials.reveal(credential.id))
     : undefined
 }
 

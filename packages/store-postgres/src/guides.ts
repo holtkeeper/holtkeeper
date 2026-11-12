@@ -1,6 +1,7 @@
 import type {
   Family,
   FamilyStore,
+  GuideGenerated,
   GuideRevision,
   GuideSection,
   GuideStore,
@@ -9,7 +10,10 @@ import { assertNoFamilyConflict, matchesGuideFilter, nextGuideSection } from '@h
 
 import type { Db } from './tables.ts'
 
-/** The SQL `GuideStore`: one JSON row per scope and section in `guides`, revisions in `guide_history`. */
+/**
+ * The SQL `GuideStore`: one JSON row per scope and section in `guides`, revisions in
+ * `guide_history`, generated layers by version in `guide_generated`.
+ */
 export function postgresGuides(db: () => Promise<Db>, schema: string): GuideStore {
   return {
     async get(scope, section) {
@@ -30,11 +34,24 @@ export function postgresGuides(db: () => Promise<Db>, schema: string): GuideStor
         await tx`SELECT pg_advisory_xact_lock(hashtextextended(${`holtkeeper.guides:${schema}:${input.scope}:${input.section}`}, 0))`
         const [row]: { data: GuideSection }[] = await tx`
           SELECT data FROM ${t.guides} WHERE scope = ${input.scope} AND section = ${input.section}`
-        const { stored, revision } = nextGuideSection(input, row?.data)
+        const [last]: { version: number | null }[] = await tx`
+          SELECT max(version) AS version FROM ${t.guideGenerated}
+          WHERE scope = ${input.scope} AND section = ${input.section}`
+        const { stored, revision, generated } = nextGuideSection(
+          input,
+          row?.data,
+          last?.version ?? 0,
+        )
         if (revision)
           await tx`
             INSERT INTO ${t.guideHistory} (scope, section, version, data)
             VALUES (${input.scope}, ${input.section}, ${revision.version}, ${tx.json(revision)})`
+        for (const layer of generated)
+          // oxlint-disable-next-line no-await-in-loop -- at most two layers, in one transaction
+          await tx`
+            INSERT INTO ${t.guideGenerated} (scope, section, version, data)
+            VALUES (${input.scope}, ${input.section}, ${layer.version}, ${tx.json(layer)})
+            ON CONFLICT (scope, section, version) DO UPDATE SET data = excluded.data`
         await tx`
           INSERT INTO ${t.guides} (scope, section, data)
           VALUES (${input.scope}, ${input.section}, ${tx.json(stored)})
@@ -49,11 +66,19 @@ export function postgresGuides(db: () => Promise<Db>, schema: string): GuideStor
         ORDER BY version DESC`
       return rows.map((row) => row.data)
     },
+    async generatedHistory(scope, section) {
+      const { sql, t } = await db()
+      const rows: { data: GuideGenerated }[] = await sql`
+        SELECT data FROM ${t.guideGenerated} WHERE scope = ${scope} AND section = ${section}
+        ORDER BY version DESC`
+      return rows.map((row) => row.data)
+    },
     async removeScope(scope) {
       const { sql, t } = await db()
       await sql.begin(async (tx) => {
         await tx`DELETE FROM ${t.guides} WHERE scope = ${scope}`
         await tx`DELETE FROM ${t.guideHistory} WHERE scope = ${scope}`
+        await tx`DELETE FROM ${t.guideGenerated} WHERE scope = ${scope}`
       })
     },
   }

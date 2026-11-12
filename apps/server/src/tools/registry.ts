@@ -15,6 +15,7 @@ import type { Family, Store } from '@holtkeeper/store'
 
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
 import type { UsageIndex } from '../api-surface/usages.ts'
+import { repoKey } from '../context.ts'
 import { repoDependencies, stackGroupViews } from '../stack.ts'
 import { canReadShared, reachOf, scopeOwner } from '../visibility.ts'
 import { type AssetToolsAccess, assetsToolset } from './assets.ts'
@@ -23,7 +24,7 @@ import { knowledgeToolset } from './knowledge.ts'
 import { type LibraryIndex, libraryToolset } from './libraries.ts'
 import { type OpsToolsAccess, opsToolset } from './ops.ts'
 import { type ReleaseToolsAccess, releasesToolset } from './releases.ts'
-import { repoKey } from './repos.ts'
+import type { SupplyToolsAccess } from './repos.ts'
 import { type RulesAccess, type TestIdsSnapshot, rulesToolset } from './rules.ts'
 import { type StackToolsContext, stackToolset } from './stack.ts'
 import { type TaskToolsAccess, tasksToolset } from './tasks.ts'
@@ -138,6 +139,8 @@ export interface AgentCatalogOptions {
   requester?: Principal
   /** Where the library index keeps API surfaces; with it, third-party packages are covered too. */
   artifacts?: ArtifactStore
+  /** Findings and licenses per asker (`supplyToolsAccess`); offered to a `requester` only. */
+  supply?: (principal: Principal) => SupplyToolsAccess
   now: () => Date
 }
 
@@ -147,7 +150,8 @@ export interface AgentCatalogOptions {
  * `policy` is not `off` (usage snippets only under `snippets`), and only repositories sharing a
  * group with `repo` when it is `off`. With a `requester` (chat), reach is exactly theirs:
  * `canSeeCatalog` and `canSeeSnippets` under `policy`. Audits and team-scoped knowledge stay
- * limited to `repo` (and the requester's `audits:read` and `knowledge:read`).
+ * limited to `repo` (and the requester's `audits:read` and `knowledge:read`); with `supply`, a
+ * requester also gets the fleet's findings and licenses exactly as the HTTP endpoints answer them.
  */
 export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsContext {
   const { store, repo, artifacts, requester, policy, targetOf } = options
@@ -193,6 +197,7 @@ export function agentCatalogContext(options: AgentCatalogOptions): CatalogToolsC
       canDetail: canReadAnalyses,
       groupsOf,
     }),
+    ...(requester && options.supply ? { supply: options.supply(requester) } : {}),
     ...(store.libraries && artifacts
       ? {
           library: {

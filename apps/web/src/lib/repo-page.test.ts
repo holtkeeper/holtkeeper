@@ -1,18 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { Action, AnalysisSummary, SettingView } from '@holtkeeper/api'
+import type { Action, AnalysisSummary } from '@holtkeeper/api'
 
 import {
   approvalShare,
+  accessText,
+  cardTarget,
+  deliveryCards,
   freshnessRows,
-  groupTabs,
-  inheritedEntry,
-  inheritedFrom,
-  overriddenKeys,
+  freshnessTally,
+  hubSearch,
   pickTab,
-  recordFreshness,
+  qualitySections,
   repoTabs,
-  stackHealth,
+  supplySections,
+  updatesBadge,
   visibleTabs,
 } from './repo-page.ts'
 
@@ -32,73 +34,63 @@ const only =
   (action: Action) =>
     actions.includes(action)
 
-const tool = (support: 'eol' | 'eol-soon' | 'active') => ({
-  id: support,
-  name: support,
-  declared: '1',
-  file: '.nvmrc',
-  support,
-})
-
-const entry = (id: string, key: string, scope: SettingView['scope']): SettingView => ({
-  id,
-  key,
-  scope,
-  value: id,
-  secret: false,
-  updatedAt: '2026-11-01T00:00:00.000Z',
-})
-
 describe('tabs', () => {
-  test('repository tabs follow the reader’s permissions', () => {
+  test('hub tabs follow the reader’s permissions', () => {
     expect(visibleTabs(repoTabs, only('analyses:read')).map((t) => t.id)).toEqual([
       'overview',
-      'assets',
-      'reviews',
+      'supply',
+      'quality',
     ])
-    expect(visibleTabs(repoTabs, only('knowledge:read', 'settings:read')).map((t) => t.id)).toEqual(
-      ['guide', 'settings'],
-    )
-    expect(visibleTabs(repoTabs, only())).toEqual([])
-  })
-
-  test('the group page always has its repositories', () => {
-    expect(visibleTabs(groupTabs, only()).map((t) => t.id)).toEqual(['repos'])
+    expect(visibleTabs(repoTabs, only('audits:read')).map((t) => t.id)).toEqual(['supply'])
     expect(
-      visibleTabs(groupTabs, only('analyses:read', 'knowledge:read', 'settings:read')).map(
-        (t) => t.id,
-      ),
-    ).toEqual(['repos', 'guide', 'stack', 'settings'])
+      visibleTabs(repoTabs, only('repos:read', 'knowledge:read', 'settings:read')).map((t) => t.id),
+    ).toEqual(['activity', 'knowledge', 'settings'])
+    expect(visibleTabs(repoTabs, only('releases:read')).map((t) => t.id)).toEqual(['releases'])
+    expect(visibleTabs(repoTabs, only())).toEqual([])
   })
 
   test('an unknown or hidden tab falls back to the first visible one', () => {
     const tabs = visibleTabs(repoTabs, only('analyses:read'))
-    expect(pickTab(tabs, 'reviews')).toBe('reviews')
+    expect(pickTab(tabs, 'quality')).toBe('quality')
     expect(pickTab(tabs, 'settings')).toBe('overview')
     expect(pickTab(tabs, undefined)).toBe('overview')
     expect(pickTab([], 'overview')).toBeUndefined()
+  })
+
+  test('areas of Supply chain and Quality', () => {
+    expect(visibleTabs(supplySections, only('analyses:read')).map((s) => s.id)).toEqual([
+      'libraries',
+      'licenses',
+      'stack',
+      'public-api',
+    ])
+    expect(visibleTabs(supplySections, only('audits:read')).map((s) => s.id)).toEqual(['security'])
+    expect(qualitySections.map((s) => s.id)).toEqual([
+      'coverage',
+      'bundles',
+      'assets',
+      'ci',
+      'branches',
+      'reviews',
+    ])
+    expect(pickTab(qualitySections, 'assets')).toBe('assets')
+    expect(pickTab(qualitySections, 'nope')).toBe('coverage')
+  })
+
+  test('hub links leave the default tab and empty sections out', () => {
+    expect(hubSearch('overview')).toEqual({})
+    expect(hubSearch('settings', 'updates')).toEqual({ tab: 'settings', section: 'updates' })
+    expect(hubSearch('quality', '')).toEqual({ tab: 'quality' })
+    expect(cardTarget({ key: 'ci', section: 'quality' })).toEqual({ tab: 'quality', section: 'ci' })
+    expect(cardTarget({ key: 'security', section: 'supply' })).toEqual({
+      tab: 'supply',
+      section: 'security',
+    })
   })
 })
 
 describe('freshness', () => {
   const head = { sha: 'c'.repeat(40), at: '2026-11-10T00:00:00.000Z' }
-
-  test('age first, then the sha against the known head', () => {
-    expect(recordFreshness(record('a', '2026-10-01T00:00:00.000Z', head.sha), head, now)).toBe(
-      'stale',
-    )
-    expect(recordFreshness(record('a', '2026-11-02T00:00:00.000Z'), head, now)).toBe('aging')
-    expect(
-      recordFreshness(record('a', '2026-11-10T00:00:00.000Z', 'a'.repeat(40)), head, now),
-    ).toBe('behind')
-    expect(recordFreshness(record('a', '2026-11-10T00:00:00.000Z', head.sha), head, now)).toBe(
-      'current',
-    )
-    expect(recordFreshness(record('a', '2026-11-10T00:00:00.000Z'), head, now)).toBe('current')
-    expect(recordFreshness(record('a', '2026-11-10T00:00:00.000Z', 'a'), undefined, now)).toBe(
-      'current',
-    )
-  })
 
   test('rows list the most worrying records first', () => {
     const rows = freshnessRows(
@@ -117,64 +109,109 @@ describe('freshness', () => {
       ['coverage', 'behind'],
       ['licenses', 'current'],
     ])
+    expect(freshnessTally(rows)).toEqual({ current: 1, behind: 1, aging: 0, bad: 1 })
+    expect(
+      freshnessTally([{ freshness: 'failed' }, { freshness: 'aging' }, { freshness: 'never' }]),
+    ).toEqual({ current: 0, behind: 0, aging: 1, bad: 1 })
   })
 })
 
-test('stack health counts ending lines and failing conventions', () => {
-  const conventions = { matches: 1, drifts: 0, missing: 0, error: 0 }
-  expect(stackHealth({ checkedAt: '', tools: [tool('active')], conventions })).toEqual({
-    ending: 0,
-    tone: 'success',
+describe('delivery cards', () => {
+  const base = {
+    cells: {},
+    reviews30d: { reviews: 0, posted: 0, resolved: 0, up: 0, down: 0, costUsd: 0 },
+    work: { runs: 0, failed: 0, awaitingApproval: 0, costUsd: 0 },
+  }
+
+  test('quiet repository without releases or knowledge access', () => {
+    expect(deliveryCards(base, false, now).map((card) => [card.key, card.status])).toEqual([
+      ['reviews', 'No reviews'],
+      ['work', 'Quiet'],
+    ])
+    expect(deliveryCards(base, true, now)[0]).toMatchObject({ key: 'releases', status: 'Off' })
   })
-  expect(
-    stackHealth({
-      checkedAt: '',
-      tools: [tool('active')],
-      conventions: { ...conventions, missing: 1 },
-    }).tone,
-  ).toBe('warning')
-  expect(
-    stackHealth({ checkedAt: '', tools: [tool('eol'), tool('eol-soon')], conventions }),
-  ).toEqual({ ending: 2, tone: 'danger' })
+
+  test('runs without task or spend access leave those lines out', () => {
+    const work = deliveryCards({ ...base, work: { runs: 3, failed: 1 } }, false, now)[1]
+    expect(work).toMatchObject({ status: '1 failed', lines: ['1 failed'] })
+  })
+
+  test('release, reviews, work and knowledge', () => {
+    const cards = deliveryCards(
+      {
+        cells: { release: { value: 'Waiting', sub: '', tone: 'warn' } },
+        release: {
+          stage: 'released',
+          latest: { tag: 'v2.13.2', version: '2.13.2', sha: 'a', date: '2026-11-01T00:00:00.000Z' },
+          next: '2.14.0',
+          bump: 'minor',
+          unreleased: 18,
+          unreleasedCapped: false,
+          deployed: { environment: 'production', at: '2026-11-11T10:00:00.000Z' },
+        },
+        reviews30d: { reviews: 20, posted: 57, resolved: 41, up: 6, down: 1, costUsd: 3.4 },
+        work: { runs: 23, failed: 0, awaitingApproval: 1, costUsd: 6.4 },
+        knowledge: { sections: 14, notes: 3, proposed: 0, inherits: ['group web'] },
+      },
+      true,
+      now,
+    )
+    expect(cards.map((card) => [card.key, card.tone, card.status, card.value])).toEqual([
+      ['releases', 'warn', 'Waiting', 'v2.13.2'],
+      ['reviews', 'ok', '86% helpful', '20'],
+      ['work', 'warn', '1 needs approval', '23'],
+      ['knowledge', 'ok', 'Written', '14'],
+    ])
+    expect(cards[0]?.lines).toEqual(['Next 2.14.0 · minor', 'production deploy 2 hours ago'])
+    expect(cards[1]?.segments).toEqual([
+      { tone: 'ok', share: 0.857 },
+      { tone: 'bad', share: 0.143 },
+    ])
+    expect(cards[1]?.lines).toEqual(['57 comments posted · 41 resolved', 'Spend $3.40'])
+    expect(cards[3]?.lines).toEqual(['3 notes · 0 learnings proposed', 'Inherits group web'])
+  })
+})
+
+describe('header and facts', () => {
+  const polling = {
+    enabled: true,
+    intervalMs: 300_000,
+    events: [],
+    key: 'k',
+    attempts: [],
+  }
+
+  test('updates badge prefers errors, then webhooks, then polling', () => {
+    expect(
+      updatesBadge({ viaWebhook: true, polling: { ...polling, lastError: 'boom' } }, now),
+    ).toEqual({ tone: 'bad', text: 'Poll failed' })
+    expect(
+      updatesBadge({ viaWebhook: true, webhookSeenAt: '2026-11-11T11:56:00.000Z', polling }, now),
+    ).toEqual({ tone: 'ok', text: 'Webhook OK · 4 minutes ago' })
+    expect(updatesBadge({ viaWebhook: false, polling }, now)).toEqual({
+      tone: 'info',
+      text: 'Polling',
+    })
+    expect(updatesBadge({ viaWebhook: false, polling: { ...polling, enabled: false } })).toEqual({
+      tone: 'none',
+      text: 'Off',
+    })
+  })
+
+  test('access in words', () => {
+    expect(accessText({ readOnly: true, reason: 'Code freeze', writeTasks: false })).toBe(
+      'Read-only · Code freeze',
+    )
+    expect(accessText({ readOnly: false, writeTasks: true })).toBe(
+      'Read and write · agents may open merge requests',
+    )
+    expect(accessText({ readOnly: false, writeTasks: false })).toBe(
+      'Read and write · write tasks off',
+    )
+  })
 })
 
 test('approval share ignores runs without reactions', () => {
   expect(approvalShare({ up: 0, down: 0 })).toBeUndefined()
   expect(approvalShare({ up: 3, down: 1 })).toBe(0.75)
-})
-
-describe('overrides', () => {
-  const entries = [
-    entry('all', 'polling', { all: true }),
-    entry('shapes', 'polling', { groups: ['shapes'] }),
-    entry('both', 'polling', { groups: [['shapes', 'colors']] }),
-    entry('mine', 'polling', { repos: ['work:shapes/circle'] }),
-    entry('other', 'toolchain', { groups: ['colors'] }),
-  ]
-  const focus = { kind: 'repo' as const, repo }
-
-  test('the inherited entry is the most specific one covering the focus', () => {
-    expect(inheritedEntry(entries, 'polling', focus, ['shapes'])?.id).toBe('shapes')
-    expect(inheritedEntry(entries, 'polling', focus, ['shapes', 'colors'])?.id).toMatch(
-      /shapes|both/,
-    )
-    expect(inheritedEntry(entries, 'polling', focus, [])?.id).toBe('all')
-    expect(inheritedEntry(entries, 'toolchain', focus, ['shapes'])).toBeUndefined()
-    expect(inheritedEntry(entries, 'polling', { kind: 'group', group: 'shapes' }, [])?.id).toBe(
-      'all',
-    )
-  })
-
-  test('labels where it comes from', () => {
-    expect(inheritedFrom(entry('x', 'polling', { groups: ['shapes'] }))).toBe('group shapes')
-    expect(inheritedFrom(entry('x', 'polling', { all: true }))).toBe('everything')
-  })
-
-  test('only keys with entries naming the focus count as overrides', () => {
-    const definitions = [{ key: 'toolchain' }, { key: 'polling' }]
-    expect(overriddenKeys(definitions, entries, focus)).toEqual(['polling'])
-    expect(overriddenKeys(definitions, entries, { kind: 'group', group: 'colors' })).toEqual([
-      'toolchain',
-    ])
-  })
 })

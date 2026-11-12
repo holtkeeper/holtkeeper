@@ -3,11 +3,14 @@ import { describe, expect, test } from 'bun:test'
 import {
   daysUntil,
   expiryTone,
+  formatDayLabel,
   formatDuration,
   formatRef,
   formatRelative,
   isoDay,
   plural,
+  shortId,
+  shortSha,
 } from './format.ts'
 
 const now = new Date('2026-10-29T12:00:00.000Z')
@@ -56,4 +59,17 @@ test('plural and isoDay', () => {
   expect(plural(2, 'finding')).toBe('2 findings')
   expect(plural(0, 'entry', 'entries')).toBe('0 entries')
   expect(isoDay(now)).toBe('2026-10-29')
+})
+
+test('formatDayLabel reads a day as month and date', () => {
+  expect(formatDayLabel('2026-10-29')).toBe('Oct 29')
+  expect(formatDayLabel('2026-01-05')).toBe('Jan 5')
+})
+
+test('shortSha keeps the first 8 characters', () => {
+  expect(shortSha('0123456789abcdef0123456789abcdef01234567')).toBe('01234567')
+})
+
+test('shortId keeps the first 8 characters of an id', () => {
+  expect(shortId('0f3a9c21-7b4e-4d2a-9c11-5e6f7a8b9c0d')).toBe('0f3a9c21')
 })

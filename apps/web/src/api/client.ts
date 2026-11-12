@@ -1,13 +1,18 @@
-import type { ApiError as ApiErrorBody } from '@holtkeeper/api'
+import type { ApiError as ApiErrorBody, ForbiddenError, LinkGone } from '@holtkeeper/api'
 
-/** A non-2xx response. `status` is the HTTP status; `message` the server's `error` text. */
+/**
+ * A non-2xx response. `status` is the HTTP status; `message` the server's `error` text; `body`
+ * the parsed JSON body, when there was one.
+ */
 export class ApiError extends Error {
   readonly status: number
+  readonly body: unknown
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.body = body
   }
 }
 
@@ -23,21 +28,16 @@ function withQuery(path: string, query?: Query): string {
   return text ? `${path}?${text}` : path
 }
 
-async function errorMessage(response: Response): Promise<string> {
-  try {
-    const body: unknown = await response.json()
-    if (
-      typeof body === 'object' &&
-      body !== null &&
-      'error' in body &&
-      typeof body.error === 'string'
-    ) {
-      return body.error satisfies ApiErrorBody['error']
-    }
-  } catch {
-    // Not JSON; fall through to the status text.
-  }
-  return response.statusText || `Request failed with ${response.status}`
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+async function errorOf(response: Response): Promise<ApiError> {
+  const body: unknown = await response.json().catch(() => undefined)
+  const message =
+    isRecord(body) && typeof body.error === 'string'
+      ? (body.error satisfies ApiErrorBody['error'])
+      : response.statusText || `Request failed with ${response.status}`
+  return new ApiError(response.status, message, body)
 }
 
 /**
@@ -59,7 +59,7 @@ export async function request<T>(
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
     ...(options.signal ? { signal: options.signal } : {}),
   })
-  if (!response.ok) throw new ApiError(response.status, await errorMessage(response))
+  if (!response.ok) throw await errorOf(response)
   const text = response.status === 204 ? '' : await response.text()
   // The server is the trust boundary: its responses follow the shared `@holtkeeper/api` types.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
@@ -116,7 +116,7 @@ export async function requestBlob(
       ? {}
       : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(options.body) }),
   })
-  if (!response.ok) throw new ApiError(response.status, await errorMessage(response))
+  if (!response.ok) throw await errorOf(response)
   return response.blob()
 }
 
@@ -139,7 +139,7 @@ export async function uploadFile<T>(
     },
     body: file,
   })
-  if (!response.ok) throw new ApiError(response.status, await errorMessage(response))
+  if (!response.ok) throw await errorOf(response)
   // The server is the trust boundary: its responses follow the shared `@holtkeeper/api` types.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   return (await response.json()) as T
@@ -152,3 +152,28 @@ export const messageOf = (error: unknown): string =>
 /** Whether the error is a 403 from the server, i.e. the principal lacks access. */
 export const isForbidden = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 403
+
+/**
+ * The missing permission a 403 names (`ForbiddenError.missing`), or `undefined` for other errors
+ * and for 403s without one.
+ */
+export function missingOf(error: unknown): ForbiddenError['missing'] | undefined {
+  if (!isForbidden(error) || !(error instanceof ApiError) || !isRecord(error.body)) return undefined
+  const missing = error.body.missing
+  if (!isRecord(missing) || typeof missing.action !== 'string') return undefined
+  return {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+    action: missing.action as ForbiddenError['missing']['action'],
+    ...(typeof missing.target === 'string' ? { target: missing.target } : {}),
+  }
+}
+
+/** When and how a setup or recovery link stopped working (a 410 `LinkGone`), else `undefined`. */
+export function linkGoneOf(error: unknown): Omit<LinkGone, 'error'> | undefined {
+  if (!(error instanceof ApiError) || error.status !== 410 || !isRecord(error.body))
+    return undefined
+  const { state, at } = error.body
+  return (state === 'used' || state === 'expired') && typeof at === 'string'
+    ? { state, at }
+    : undefined
+}

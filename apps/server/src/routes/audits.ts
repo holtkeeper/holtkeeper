@@ -1,28 +1,58 @@
-import type { AuditRunDetail, AuditRunList, RepoList, RepoSummary } from '@holtkeeper/api'
+import type { Principal } from '@holtkeeper/access'
+import type { AuditRunDetail, AuditRunList, FindingsResponse, SettingView } from '@holtkeeper/api'
 import { summarizeRun } from '@holtkeeper/api'
-import { staticPrefix } from '@holtkeeper/jobs'
+import { allowlistSchema } from '@holtkeeper/vuln'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import { z } from 'zod'
 
-import { summarizeAnalysis } from '../analyses.ts'
+import { diffChanges } from '../audit.ts'
 import {
   type Env,
   type ServerDeps,
   authorize,
+  authorizeRecord,
   limitParam,
   parseRepo,
   principalOf,
   readBody,
+  repoKey,
   repoTarget,
 } from '../context.ts'
 import { ingestAuditRunSchema } from '../schemas.ts'
+import { allowlistEntryProblem, allowlistPolicyFor } from '../setting-rules.ts'
+import type { SupplyToolsAccess } from '../tools/repos.ts'
 import { canSee } from '../visibility.ts'
 
-/** Audit runs and the repositories they cover. */
-export function auditRoutes(deps: ServerDeps) {
+const renewSchema = z.object({
+  settingId: z.string().min(1).max(200),
+  advisory: z.string().min(1).max(200),
+  package: z.string().min(1).max(200).optional(),
+  expires: z.iso.date(),
+  reason: z.string().trim().min(1).max(1000).optional(),
+})
+
+/**
+ * Audit runs (list, read, ingest), `GET /api/audits/findings` (`supplyFor(caller).findings`,
+ * optionally one `repo`) and `POST /api/audits/allowlist/renew`, which moves the expiry of one
+ * `audit.allowlist` entry (and replaces its reason when one is given): `settings:write` on the
+ * setting's scope, the `audit.allowlistPolicy` covering that scope (`maxDays`, `requireReason`),
+ * last write wins, audited as `allowlist.renew`.
+ */
+export function auditRoutes(
+  deps: ServerDeps,
+  supplyFor: (principal: Principal) => SupplyToolsAccess,
+) {
   const { config, store } = deps
-  const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
   const app = new Hono<Env>()
+
+  app.get('/audits/findings', async (c) => {
+    const repo = parseRepo(c.req.query('repo'))
+    const findings = await supplyFor(principalOf(c)).findings(
+      repo ? { repos: [repoKey(repo)] } : {},
+    )
+    return c.json<FindingsResponse>(findings)
+  })
 
   app.get('/audit-runs', async (c) => {
     const principal = principalOf(c)
@@ -41,7 +71,7 @@ export function auditRoutes(deps: ServerDeps) {
   app.get('/audit-runs/:id', async (c) => {
     const run = await store.auditRuns.get(c.req.param('id'))
     if (!run) throw new HTTPException(404, { message: 'audit run not found' })
-    authorize(c, 'audits:read', { kind: 'repo', repo: repoTarget(config, run.repo) })
+    authorizeRecord(c, 'audits:read', { kind: 'repo', repo: repoTarget(config, run.repo) })
     return c.json<AuditRunDetail>({ run, summary: summarizeRun(run) })
   })
 
@@ -63,48 +93,67 @@ export function auditRoutes(deps: ServerDeps) {
     return c.json<AuditRunDetail>({ run, summary: summarizeRun(run) }, 201)
   })
 
-  app.get('/repos', async (c) => {
-    const principal = principalOf(c)
-    const latest = new Map<string, RepoSummary>()
-    for (const run of await store.auditRuns.list({ limit: 500 })) {
-      const key = `${run.repo.forge}:${run.repo.path}`
-      if (latest.has(key)) continue
-      const target = repoTarget(config, run.repo)
-      if (!canSee(principal, 'repos:read', target) && !canSee(principal, 'audits:read', target))
-        continue
-      latest.set(key, {
-        repo: run.repo,
-        groups: target.groups,
-        ...(canSee(principal, 'audits:read', target) ? { latestAudit: summarizeRun(run) } : {}),
+  app.post('/audits/allowlist/renew', async (c) => {
+    const input = await readBody(c, renewSchema)
+    c.set('audit', { action: 'allowlist.renew', target: { type: 'setting', id: input.settingId } })
+    const previous = await store.settings.get(input.settingId)
+    if (!previous || previous.key !== 'audit.allowlist')
+      throw new HTTPException(404, { message: 'allowlist setting not found' })
+    const principal = authorize(c, 'settings:write', { kind: 'scope', scope: previous.scope })
+    const today = deps.now().toISOString().slice(0, 10)
+    if (input.expires < today)
+      throw new HTTPException(400, { message: 'expires must not be in the past' })
+    const parsed = allowlistSchema.safeParse(previous.value)
+    if (!parsed.success)
+      throw new HTTPException(409, {
+        message: 'the stored allowlist is not valid; edit it in full',
       })
-    }
-    for (const group of Object.values(config.groups)) {
-      for (const path of group.include) {
-        if (staticPrefix(path) !== path) continue
-        const key = `${group.forge}:${path}`
-        if (latest.has(key)) continue
-        const target = repoTarget(config, { forge: group.forge, path })
-        if (!target.groups.length) continue
-        if (!canSee(principal, 'repos:read', target) && !canSee(principal, 'audits:read', target))
-          continue
-        latest.set(key, { repo: { forge: group.forge, path }, groups: target.groups })
-      }
-    }
-    for (const summary of latest.values())
-      if (canSee(principal, 'settings:write', repoTarget(config, summary.repo)))
-        summary.configurable = true
-    await Promise.all(
-      [...latest.values()].map(async (summary) => {
-        if (!canSee(principal, 'analyses:read', repoTarget(config, summary.repo))) return
-        const newest = await store.analyses.latest({ repo: summary.repo })
-        if (newest.length)
-          summary.latestAnalyses = newest.map((record) => summarizeAnalysis(kinds, record))
-      }),
+    const index = parsed.data.findIndex(
+      (entry) => entry.id === input.advisory && entry.package === input.package,
     )
-    const repos = [...latest.values()].toSorted((a, b) =>
-      `${a.repo.forge}:${a.repo.path}`.localeCompare(`${b.repo.forge}:${b.repo.path}`),
+    const found = parsed.data[index]
+    if (!found) throw new HTTPException(404, { message: 'allowlist entry not found' })
+    const renewed = {
+      ...found,
+      expires: input.expires,
+      ...(input.reason !== undefined && { reason: input.reason }),
+    }
+    const problem = allowlistEntryProblem(
+      allowlistPolicyFor(await store.settings.list(), previous.scope),
+      renewed,
+      today,
     )
-    return c.json<RepoList>({ repos })
+    if (problem) throw new HTTPException(400, { message: problem })
+    const value = parsed.data.with(index, renewed)
+    const entry = {
+      ...previous,
+      value,
+      updatedAt: deps.now().toISOString(),
+      updatedBy: principal.id,
+    }
+    await store.settings.put(entry)
+    c.set('audit', {
+      action: 'allowlist.renew',
+      target: { type: 'setting', id: entry.id },
+      changes: diffChanges(
+        { expires: found.expires, reason: found.reason },
+        { expires: renewed.expires, reason: renewed.reason },
+      ),
+      details: {
+        key: entry.key,
+        advisory: input.advisory,
+        ...(input.package && { package: input.package }),
+      },
+    })
+    return c.json<SettingView>({
+      id: entry.id,
+      key: entry.key,
+      scope: entry.scope,
+      value: entry.value,
+      secret: false,
+      updatedAt: entry.updatedAt,
+      updatedBy: principal.id,
+    })
   })
 
   return app

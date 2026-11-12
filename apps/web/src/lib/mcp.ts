@@ -16,9 +16,33 @@ export function mcpSetup(endpoint: string, secret = '<token>') {
       null,
       2,
     ),
+    cursor: JSON.stringify(
+      {
+        mcpServers: {
+          holtkeeper: { url: endpoint, headers: { Authorization: `Bearer ${secret}` } },
+        },
+      },
+      null,
+      2,
+    ),
     curl: `curl -s ${endpoint} -H "${header}" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`,
   }
 }
+
+/** A client the setup block has a tab for. */
+export type McpClient = 'claude-code' | 'cursor' | 'json' | 'curl'
+
+/** The setup block's client tabs in order, each naming the `mcpSetup` field it shows. */
+export const mcpClients: readonly {
+  id: McpClient
+  label: string
+  field: keyof ReturnType<typeof mcpSetup>
+}[] = [
+  { id: 'claude-code', label: 'Claude Code', field: 'claudeCode' },
+  { id: 'cursor', label: 'Cursor', field: 'cursor' },
+  { id: 'json', label: '.mcp.json', field: 'json' },
+  { id: 'curl', label: 'curl check', field: 'curl' },
+]
 
 /** Expiry choices of a new token, in days; `0` never expires. */
 export const tokenLifetimes = [
@@ -115,7 +139,7 @@ export const groupTools = (tools: readonly McpTool[]) =>
       id: 'knowledge',
       label: 'Team knowledge',
       description:
-        'Decisions, conventions and migration notes of the knowledge base; proposals from agents wait for review on the Knowledge page.',
+        'Decisions, conventions and migration notes of the knowledge base; proposals from agents wait for review in Knowledge › Notes.',
       tools: tools.filter((tool) => isKnowledgeTool(tool.name)),
     },
   ].filter((group) => group.tools.length)

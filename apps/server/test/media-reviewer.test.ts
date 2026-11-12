@@ -84,7 +84,7 @@ test('raster images get a savings table, a <picture> suggestion and a panel link
   expect(result.summary).toContain('`public/hero.png`: no AVIF/WebP version comes with it.')
   expect(result.summary).toContain('| 375 px @2x | 750 px |')
   expect(result.summary).toContain(
-    '[Variants and snippets for `hero.png`](https://hk.example.com/repos/view?repo=work%3Aweb%2Fsite&tab=assets&file=public%2Fhero.png&ref=h1)',
+    '[Variants and snippets for `hero.png`](https://hk.example.com/repos/work/web/site?tab=quality&section=assets&file=public%2Fhero.png&ref=h1)',
   )
 }, 30_000)
 
@@ -129,7 +129,7 @@ test('unreadable images are mentioned, not reviewed', async () => {
   expect(result.summary).toContain('`a.png`: not readable')
   expect(result.summary).toContain('`b.png`: cannot decode')
   expect(panelLink('https://x.test', { ...base, files: [], usages: [] }, 'a b.png')).toBe(
-    'https://x.test/repos/view?repo=work%3Aweb%2Fsite&tab=assets&file=a+b.png&ref=h1',
+    'https://x.test/repos/work/web/site?tab=quality&section=assets&file=a+b.png&ref=h1',
   )
 })
 

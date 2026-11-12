@@ -19,6 +19,7 @@ import {
   buildChatPrompt,
   buildSummaryPrompt,
   planSummary,
+  textRefs,
 } from './chat-prompt.ts'
 import { type ServerDeps, repoTarget } from './context.ts'
 import { TaskError, createTaskGroup, postTaskCard, proposalBudget } from './tasks.ts'
@@ -50,6 +51,8 @@ export interface ChatAgentRun {
   actor: string
   interactive: true
   requester: Principal
+  /** The thread's title, kept on usage records. */
+  subject: string
 }
 
 /**
@@ -87,6 +90,17 @@ export function canSeeThread(
     return can(principal, 'repos:read', { kind: 'scope', scope: { groups: [thread.group] } })
   return hasChatAccess(principal)
 }
+
+/** Whether `repo` (`forge:path`) is a repository of a configured forge the principal may read. */
+export function canReadRepo(config: HoltkeeperConfig, principal: Principal, repo: string): boolean {
+  const key = parseKey(repo)
+  if (!key.forge || !key.path || !config.forges[key.forge]) return false
+  return can(principal, 'repos:read', { kind: 'repo', repo: repoTarget(config, key) })
+}
+
+/** Refs of a message body written in a thread (see `textRefs`), for configured forges only. */
+export const bodyRefs = (config: HoltkeeperConfig, body: string) =>
+  textRefs(body, (forge) => config.forges[forge] !== undefined)
 
 /** The target the agent of a thread works for (see `ChatAgentFor`). */
 function agentTarget(
@@ -171,8 +185,9 @@ export interface ChatReplies {
  * summary, first folds old messages into the summary on the `fast` tier when they pass
  * `SUMMARY_THRESHOLD_TOKENS`, then runs the agent on `main` (`CHAT_REPLY_LIMITS`) as interactive
  * work of the requester with the anonymized prompt (`buildChatPrompt`, scrubbing every `users`
- * account, the thread's remembered posters and the requester). The answer, its cost,
- * transcript and tool use are stored as an agent message; task proposals become `task` cards.
+ * account, the thread's remembered posters and the requester; context repositories only those the
+ * requester may read). The answer, its cost, transcript, tool use and refs (`bodyRefs`) are stored
+ * as an agent message; task proposals become `task` cards.
  * Failures (no agent, budget, errors) are posted as system messages. One reply per thread runs at
  * a time across processes (the thread's reply claim, `STALE_REPLY_MS`); triggers during a reply
  * run one more reply afterwards.
@@ -211,7 +226,12 @@ export function chatReplies(deps: ServerDeps): ChatReplies {
     } catch (error) {
       if (!(error instanceof TaskError)) throw error
       const card: Card = taskCard(proposal.repos, proposal.summary, { status: 'cancelled' })
-      await post(thread, { authorType: 'agent', body: '', card })
+      await post(thread, {
+        authorType: 'agent',
+        body: '',
+        card,
+        refs: proposal.repos.map((repo) => ({ kind: 'repo', repo })),
+      })
       await notice(thread, `This change cannot be proposed: ${error.message}.`)
     }
   }
@@ -296,6 +316,7 @@ export function chatReplies(deps: ServerDeps): ChatReplies {
       actor: requester.id,
       interactive: true,
       requester,
+      subject: thread.title || 'chat',
     })
     if (!agent) {
       await notice(thread, 'No AI provider is configured, so Holtkeeper cannot reply here.')
@@ -304,11 +325,15 @@ export function chatReplies(deps: ServerDeps): ChatReplies {
     const dir = await mkdtemp(join(tmpdir(), 'holtkeeper-chat-'))
     try {
       const people = await knownPeople(thread, requester)
+      const contextRepos = thread.contextRepos.filter((repo) =>
+        canReadRepo(deps.config, requester, repo),
+      )
       const history = await refreshSummary(agent, thread, {
         participants: thread.participants,
         people,
         ...(thread.summary && { summary: thread.summary }),
         messages: await loadHistory(thread),
+        contextRepos,
       })
       const proposals: Proposal[] = []
       const result = await agent.run({
@@ -321,9 +346,11 @@ export function chatReplies(deps: ServerDeps): ChatReplies {
         ...CHAT_REPLY_LIMITS,
       })
       const toolTrace = await toolTraceOf(deps, result.transcriptRef)
+      const body = result.text.trim()
       await post(thread, {
         authorType: 'agent',
-        body: result.text.trim(),
+        body,
+        refs: bodyRefs(deps.config, body),
         ...(toolTrace.length > 0 && { toolTrace }),
         ...(result.costUsd !== undefined && { costUsd: result.costUsd }),
         ...(result.transcriptRef !== undefined && { transcriptRef: result.transcriptRef }),

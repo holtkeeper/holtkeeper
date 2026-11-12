@@ -4,18 +4,19 @@ import type { ExternalAccount } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
-import { type Env, type ServerDeps, principalOf } from '../context.ts'
+import { type Env, ForbiddenException, type ServerDeps, principalOf } from '../context.ts'
 
-const statusOf = { invalid: 400, forbidden: 403, 'not-found': 404, conflict: 409 } as const
+const statusOf = { invalid: 400, 'not-found': 404, conflict: 409 } as const
 
 /** Runs an identity operation, turning `IdentityError`s into HTTP errors. */
 async function attempt<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
-    if (error instanceof IdentityError)
-      throw new HTTPException(statusOf[error.code], { message: error.message })
-    throw error
+    if (!(error instanceof IdentityError)) throw error
+    if (error.code === 'forbidden')
+      throw new ForbiddenException('users:write', undefined, error.message)
+    throw new HTTPException(statusOf[error.code], { message: error.message })
   }
 }
 

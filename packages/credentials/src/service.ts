@@ -23,6 +23,9 @@ export const DEFAULT_LIFETIME_DAYS = 90
 
 const DAY_MS = 86_400_000
 
+/** `lastUsedAt` moves at most this often per credential. */
+const TOUCH_INTERVAL_MS = 60_000
+
 export interface CredentialServiceOptions {
   credentials: CredentialStore
   /**
@@ -54,8 +57,23 @@ export interface CredentialService {
   update(id: string, input: UpdateCredentialInput): Promise<CredentialView>
   /** Throws `CredentialNotFoundError`. */
   remove(id: string): Promise<void>
-  /** The plaintext secret. For internal callers that use the credential; never expose it over an API. */
+  /**
+   * The plaintext secret. For internal callers that use the credential; never expose it over an
+   * API. Counts as a use (see `markUsed`).
+   */
   reveal(id: string): Promise<string>
+  /**
+   * The plaintext secret without recording a use, for callers that only prepare or probe the
+   * credential (config rebuilds, admin tests) and record real uses with `markUsed`. Throws
+   * `CredentialNotFoundError`.
+   */
+  open(id: string): Promise<string>
+  /**
+   * Records that something used the credential now, for callers that open its secret themselves.
+   * `lastUsedAt` moves at most once a minute per credential and process; failures to record it
+   * are swallowed, unknown ids ignored.
+   */
+  markUsed(id: string): Promise<void>
   /**
    * Replaces the secret with a fresh token from the kind's rotator and stores it. A kind without a
    * rotator throws `CredentialInputError` and changes nothing; any other failure records `lastError`
@@ -79,6 +97,15 @@ export function createCredentialService(options: CredentialServiceOptions): Cred
   const { credentials, audit, vault, now = () => new Date() } = options
   const rotators = new Map((options.rotators ?? []).map((rotator) => [rotator.kind, rotator]))
   const inFlight = new Map<string, Promise<CredentialView>>()
+  const touched = new Map<string, number>()
+
+  const markUsed = async (id: string) => {
+    const at = now()
+    const last = touched.get(id)
+    if (last !== undefined && at.getTime() - last < TOUCH_INTERVAL_MS) return
+    touched.set(id, at.getTime())
+    await credentials.touch(id, at.toISOString()).catch(() => {})
+  }
 
   const toView = ({ secret: _secret, ...view }: StoredCredential): CredentialView => ({
     ...view,
@@ -219,7 +246,17 @@ export function createCredentialService(options: CredentialServiceOptions): Cred
       await credentials.remove(id)
     },
 
-    reveal: async (id) => vault.open((await load(id)).secret),
+    async reveal(id) {
+      const secret = await vault.open((await load(id)).secret)
+      await markUsed(id)
+      return secret
+    },
+
+    async open(id) {
+      return vault.open((await load(id)).secret)
+    },
+
+    markUsed,
 
     async setCapabilities(id, capabilities) {
       const next = { ...(await load(id)), capabilities }

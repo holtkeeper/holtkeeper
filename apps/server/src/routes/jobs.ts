@@ -1,18 +1,22 @@
 import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
 import type {
   AgentTranscriptView,
+  AnalyzerHealthList,
   Job,
   JobAnalyzerList,
   JobAnalyzerView,
+  JobCountView,
   JobFailureList,
   JobList,
   JobLog,
   JobRunList,
+  JobStats,
   JobTargetList,
   JobWhy,
 } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import { readJobLog } from '@holtkeeper/jobs'
+import type { JobSearch } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -22,12 +26,14 @@ import {
   type Env,
   type ServerDeps,
   authorize,
+  authorizeRecord,
   limitParam,
   parseRepo,
   principalOf,
   readBody,
   repoTarget,
 } from '../context.ts'
+import { type CostReader, analyzerHealth, jobCosts, jobStats, waitHints } from '../job-stats.ts'
 import { explainJob } from '../job-why.ts'
 import { readTranscript } from '../transcripts.ts'
 import { canSee } from '../visibility.ts'
@@ -50,6 +56,8 @@ const triggerSchema = z
     'freshness',
   ])
   .optional()
+
+const MAX_SEARCH = 200
 
 const keyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
@@ -87,6 +95,7 @@ const createSchema = z.object({
 })
 
 const DAY_MS = 86_400_000
+const HEALTH_DAYS = 7
 
 /** A non-negative integer query parameter; `undefined` when absent, 400 when malformed. */
 function countParam(value: string | undefined, name: string): number | undefined {
@@ -117,11 +126,28 @@ export const jobTarget = (
 ): RepoTarget =>
   job.group !== undefined ? { ...job.repo, groups: [job.group] } : repoTarget(config, job.repo)
 
+/** The jobs whose agent cost `principal` may read: `ai:read` or `ai:admin` on the job's target. */
+export function costReaderOf(config: ServerDeps['config'], principal: Principal): CostReader {
+  const readsAi = principal.grants.some((grant) =>
+    grant.actions.some((action) => action === '*' || action === 'ai:read' || action === 'ai:admin'),
+  )
+  if (!readsAi) return undefined
+  return (job) => {
+    const target = { kind: 'repo', repo: jobTarget(config, job) } as const
+    return can(principal, 'ai:read', target) || can(principal, 'ai:admin', target)
+  }
+}
+
 /**
- * Background analysis jobs: list, group failures, inspect (log with steps, why it ran or waits,
- * agent runs), queue and cancel. A job's agent runs and transcripts (`/jobs/:id/runs`,
- * `/jobs/:id/transcripts/:ref`) are readable by whoever may read the job, and only transcripts
- * its own runs recorded.
+ * Background analysis jobs: list (also the jobs that produced an analysis, `analysisId=`, with
+ * wait hints for queued rows and agent cost per row), count, queue stats, group failures, health
+ * per analyzer over seven days (`/jobs/analyzers/health`), inspect (log with steps, why it ran or
+ * waits, agent runs), queue and cancel.
+ * Lists, counts and stats only cover repositories (and groups) the caller may read; stats list
+ * workers only for callers with `analyses:read` over everything. A job's agent runs
+ * and transcripts (`/jobs/:id/runs`, `/jobs/:id/transcripts/:ref`) are readable by whoever may
+ * read the job, and only transcripts its own runs recorded. Agent cost in lists and stats needs
+ * `ai:read` or `ai:admin` on the job's target as well.
  */
 export function jobRoutes(deps: ServerDeps) {
   const { store, config } = deps
@@ -151,12 +177,27 @@ export function jobRoutes(deps: ServerDeps) {
   const readable = async (c: AppContext, id: string) => {
     const job = await store.jobs.get(id)
     if (!job) throw new HTTPException(404, { message: 'job not found' })
-    authorize(c, 'analyses:read', { kind: 'repo', repo: jobTarget(config, job) })
+    authorizeRecord(c, 'analyses:read', { kind: 'repo', repo: jobTarget(config, job) })
     return job
   }
 
-  app.get('/jobs', async (c) => {
-    const principal = principalOf(c)
+  /** `q` as a job search that also matches analyzers whose label contains it. */
+  const searchOf = (q: string | undefined): JobSearch | undefined => {
+    const text = q?.trim()
+    if (!text) return undefined
+    if (text.length > MAX_SEARCH)
+      throw new HTTPException(400, { message: `q must be at most ${MAX_SEARCH} characters` })
+    const needle = text.toLowerCase()
+    return {
+      text,
+      analyzers: analyzerViews
+        .filter((view) => view.label.toLowerCase().includes(needle))
+        .map((view) => view.kind),
+    }
+  }
+
+  /** The filters `GET /jobs` and `GET /jobs/count` share, narrowed to what the caller may read. */
+  const queryOf = async (c: AppContext) => {
     const parsedStatus = statusSchema.safeParse(c.req.query('status') || undefined)
     if (!parsedStatus.success) {
       throw new HTTPException(400, {
@@ -171,27 +212,60 @@ export function jobRoutes(deps: ServerDeps) {
       })
     const trigger = parsedTrigger.data
     const repo = parseRepo(c.req.query('repo'))
-    const before = c.req.query('before')
     const schedule = c.req.query('schedule')
     const analyzer = c.req.query('analyzer')
     const signature = c.req.query('signature')
-    const repos = narrowRepos(reposParam(c.req.query('repos')), await visibleRepos(principal))
-    const jobs = await store.jobs.list({
+    const analysisId = c.req.query('analysisId')
+    const search = searchOf(c.req.query('q'))
+    const repos = narrowRepos(reposParam(c.req.query('repos')), await visibleRepos(principalOf(c)))
+    return {
       ...(analyzer ? { analyzer } : {}),
       ...(status ? { status } : {}),
       ...(trigger ? { trigger } : {}),
       ...(repo ? { repo } : {}),
       ...(schedule ? { schedule } : {}),
       ...(signature ? { errorSignature: signature } : {}),
-      ...(before ? { before } : {}),
+      ...(analysisId ? { analysisId } : {}),
+      ...(search && { search }),
       ...(repos && { repos }),
+    }
+  }
+
+  app.get('/jobs', async (c) => {
+    const before = c.req.query('before')
+    const jobs = await store.jobs.list({
+      ...(await queryOf(c)),
+      ...(before ? { before } : {}),
       limit: limitParam(c.req.query('limit')),
     })
-    const people = await peopleOf(
-      deps,
-      jobs.flatMap((job) => (job.actor ? [job.actor] : [])),
-    )
-    return c.json<JobList>({ jobs, people })
+    const [people, hints, costs] = await Promise.all([
+      peopleOf(
+        deps,
+        jobs.flatMap((job) => (job.actor ? [job.actor] : [])),
+      ),
+      waitHints(deps, jobs),
+      jobCosts(deps, jobs, costReaderOf(config, principalOf(c))),
+    ])
+    return c.json<JobList>({ jobs, people, waitHints: hints, costs })
+  })
+
+  app.get('/jobs/stats', async (c) => {
+    const principal = principalOf(c)
+    const global = can(principal, 'analyses:read', { kind: 'global' })
+    const repos = narrowRepos(reposParam(c.req.query('repos')), await visibleRepos(principal))
+    return c.json<JobStats>(await jobStats(deps, repos, global, costReaderOf(config, principal)))
+  })
+
+  app.get('/jobs/count', async (c) => {
+    const since = c.req.query('since')
+    const at = since ? Date.parse(since) : undefined
+    if (at !== undefined && Number.isNaN(at))
+      throw new HTTPException(400, { message: 'since must be a date' })
+    const counts = await store.jobs.count({
+      ...(await queryOf(c)),
+      ...(at !== undefined && { since: new Date(at).toISOString() }),
+    })
+    return c.json<JobCountView>(counts)
   })
 
   app.get('/jobs/targets', async (c) => {
@@ -229,6 +303,14 @@ export function jobRoutes(deps: ServerDeps) {
   app.get('/jobs/analyzers', (c) => {
     principalOf(c)
     return c.json<JobAnalyzerList>({ analyzers: analyzerViews })
+  })
+
+  app.get('/jobs/analyzers/health', async (c) => {
+    const principal = principalOf(c)
+    const repos = await visibleRepos(principal)
+    return c.json<AnalyzerHealthList>(
+      await analyzerHealth(deps, [...analyzers.keys()], repos, HEALTH_DAYS),
+    )
   })
 
   app.get('/jobs/:id', async (c) => c.json<Job>(await readable(c, c.req.param('id'))))
@@ -338,7 +420,7 @@ export function jobRoutes(deps: ServerDeps) {
 
   app.post('/jobs/:id/cancel', async (c) => {
     const existing = await readable(c, c.req.param('id'))
-    authorize(c, 'analyses:run', {
+    authorizeRecord(c, 'analyses:run', {
       kind: 'repo',
       repo: jobTarget(config, existing),
     })

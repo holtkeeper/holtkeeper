@@ -21,111 +21,27 @@ export function toRows(findings: readonly Finding[]): FindingRow[] {
   })
 }
 
-interface PackageGroup {
-  key: string
-  name: string
-  version: string
-  ecosystem: string
-  worst: Severity
-  rows: FindingRow[]
+/** Rows worst severity first, then by package name and advisory id. */
+export function sortFindingRows(rows: readonly FindingRow[]): FindingRow[] {
+  return rows.toSorted(
+    (a, b) =>
+      severityRank(a.finding.severity) - severityRank(b.finding.severity) ||
+      a.finding.package.name.localeCompare(b.finding.package.name) ||
+      a.finding.id.localeCompare(b.finding.id),
+  )
 }
 
-interface SourceGroup {
-  source: string
-  worst: Severity
-  count: number
-  packages: PackageGroup[]
-}
-
-interface ToolGroup {
-  label: string
-  tool: SourceInfo['tool']
-  worst: Severity
-  count: number
-  sources: SourceGroup[]
-}
-
-export interface LanguageGroup {
-  language: string
-  worst: Severity
-  count: number
-  tools: ToolGroup[]
-}
-
-const worse = (a: Severity, b: Severity): Severity => (severityRank(a) <= severityRank(b) ? a : b)
-
-function bucket<T>(map: Map<string, T>, key: string, create: () => T): T {
-  let value = map.get(key)
-  if (!value) {
-    value = create()
-    map.set(key, value)
-  }
-  return value
-}
-
-/**
- * Groups rows as Language → package manager → source file → package. Groups appear in the order
- * of their first row, so sorting the rows first (worst severity first, say) orders the groups too.
- */
-export function groupFindings(rows: readonly FindingRow[]): LanguageGroup[] {
-  const languages = new Map<
-    string,
-    {
-      group: LanguageGroup
-      tools: Map<
-        string,
-        {
-          group: ToolGroup
-          sources: Map<string, { group: SourceGroup; packages: Map<string, PackageGroup> }>
-        }
-      >
-    }
-  >()
-  for (const row of rows) {
-    const { finding, info } = row
-    const severity = finding.severity
-    const language = bucket(languages, info.language, () => ({
-      group: { language: info.language, worst: severity, count: 0, tools: [] },
-      tools: new Map(),
-    }))
-    const tool = bucket(language.tools, info.label, () => {
-      const group: ToolGroup = {
-        label: info.label,
-        tool: info.tool,
-        worst: severity,
-        count: 0,
-        sources: [],
-      }
-      language.group.tools.push(group)
-      return { group, sources: new Map() }
-    })
-    const source = bucket(tool.sources, finding.source, () => {
-      const group: SourceGroup = { source: finding.source, worst: severity, count: 0, packages: [] }
-      tool.group.sources.push(group)
-      return { group, packages: new Map() }
-    })
-    const packageKey = `${finding.package.name}@${finding.package.version}`
-    const pkg = bucket(source.packages, packageKey, () => {
-      const group: PackageGroup = {
-        key: `${finding.source}|${packageKey}`,
-        name: finding.package.name,
-        version: finding.package.version,
-        ecosystem: finding.package.ecosystem,
-        worst: severity,
-        rows: [],
-      }
-      source.group.packages.push(group)
-      return group
-    })
-    pkg.rows.push(row)
-    pkg.worst = worse(pkg.worst, severity)
-    for (const group of [source.group, tool.group, language.group]) {
-      group.count++
-      group.worst = worse(group.worst, severity)
-    }
-  }
-  return [...languages.values()].map((entry) => entry.group)
-}
+/** Rows of the given severities (all when empty) that match the free-text search. */
+export const filterFindingRows = (
+  rows: readonly FindingRow[],
+  search: string,
+  severities: readonly Severity[] = [],
+): FindingRow[] =>
+  rows.filter(
+    (row) =>
+      (!severities.length || severities.includes(row.finding.severity)) &&
+      matchesSearch(row, search),
+  )
 
 /** Whether a row matches free-text search over package, advisory ids, summary and source. */
 export function matchesSearch(row: FindingRow, search: string): boolean {
@@ -142,14 +58,6 @@ export function matchesSearch(row: FindingRow, search: string): boolean {
     row.info.label,
     row.info.language,
   ].some((value) => value.toLowerCase().includes(needle))
-}
-
-/** Distinct languages and package-manager labels among rows, sorted, for filter menus. */
-export function facets(rows: readonly FindingRow[]): { languages: string[]; tools: string[] } {
-  return {
-    languages: [...new Set(rows.map((row) => row.info.language))].toSorted(),
-    tools: [...new Set(rows.map((row) => row.info.label))].toSorted(),
-  }
 }
 
 /** Lowest fixed version, or `undefined` when no fix exists. */

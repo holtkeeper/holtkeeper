@@ -42,6 +42,7 @@ export function chatStoreTests(store: () => Store) {
       updatedAt: at(0),
       archived: false,
       participants: [],
+      contextRepos: [],
     })
     await chat.createThread(thread('t2', { group: 'games', createdAt: at(1) }))
     expect((await chat.listThreads()).map((t) => t.id)).toEqual(['t2', 't1'])
@@ -195,6 +196,8 @@ export function chatStoreTests(store: () => Store) {
     await chat.addMessage(message('m4', 't2', 4, { authorId: 'user-2' }))
 
     expect(await chat.unreadCounts('user-1', ['t1', 't2', 't3'])).toEqual({ t1: 2, t2: 1 })
+    expect(await chat.messageCounts(['t1', 't2', 't3'])).toEqual({ t1: 3, t2: 1 })
+    expect(await chat.messageCounts([])).toEqual({})
 
     await chat.markRead('t1', 'user-1', 'm3')
     await chat.markRead('t1', 'user-1', 'm1')
@@ -211,5 +214,159 @@ export function chatStoreTests(store: () => Store) {
     expect(await chat.unreadCounts('user-1', ['t1', 't2'])).toEqual({ t2: 1 })
     expect(await chat.unreadCounts('user-2', ['t1'])).toEqual({ t1: 2 })
     expect(await chat.reads('user-2')).toEqual([])
+  })
+
+  test('chat: threads list by archived state and title text', async () => {
+    const chat = store().chat
+    await chat.createThread(thread('t1', { title: 'Widget rollout' }))
+    await chat.createThread(thread('t2', { title: 'Gadget docs', createdAt: at(1) }))
+    await chat.createThread(thread('t3', { title: 'Old WIDGET notes', createdAt: at(2) }))
+    await chat.updateThread('t3', { archived: true })
+
+    expect((await chat.listThreads({ archived: 'all' })).map((t) => t.id)).toEqual([
+      't3',
+      't2',
+      't1',
+    ])
+    expect((await chat.listThreads({ q: '  widget ' })).map((t) => t.id)).toEqual(['t1'])
+    expect((await chat.listThreads({ archived: 'all', q: 'widget' })).map((t) => t.id)).toEqual([
+      't3',
+      't1',
+    ])
+    expect((await chat.listThreads({ archived: true, q: 'gadget' })).map((t) => t.id)).toEqual([])
+    expect((await chat.listThreads({ q: '   ' })).map((t) => t.id)).toEqual(['t2', 't1'])
+  })
+
+  test('chat: context repositories are stored without duplicates and patched', async () => {
+    const chat = store().chat
+    const created = await chat.createThread(
+      thread('t1', {
+        repo: 'gl:acme/widget-kit',
+        contextRepos: ['gl:acme/widget-kit', 'gl:acme/gadget', 'gl:acme/widget-kit'],
+      }),
+    )
+    expect(created.contextRepos).toEqual(['gl:acme/widget-kit', 'gl:acme/gadget'])
+    expect((await chat.getThread('t1'))?.contextRepos).toEqual([
+      'gl:acme/widget-kit',
+      'gl:acme/gadget',
+    ])
+    const patched = await chat.updateThread('t1', {
+      contextRepos: ['gl:acme/gadget', 'gl:acme/sprocket', 'gl:acme/gadget'],
+      title: 'Renamed',
+    })
+    expect(patched).toMatchObject({
+      title: 'Renamed',
+      contextRepos: ['gl:acme/gadget', 'gl:acme/sprocket'],
+    })
+    expect((await chat.listThreads())[0]?.contextRepos).toEqual([
+      'gl:acme/gadget',
+      'gl:acme/sprocket',
+    ])
+    expect((await chat.updateThread('t1', { contextRepos: [] }))?.contextRepos).toEqual([])
+  })
+
+  test('chat: messages keep their refs, default to none and change in place', async () => {
+    const chat = store().chat
+    await chat.createThread(thread('t1'))
+    const plain = await chat.addMessage(message('m1', 't1', 1))
+    expect(plain.refs).toEqual([])
+    expect((await chat.getMessage('m1'))?.refs).toEqual([])
+    const refs = [
+      { kind: 'repo' as const, repo: 'gl:acme/widget-kit' },
+      { kind: 'job' as const, id: 'job-1', repo: 'gl:acme/widget-kit' },
+      { kind: 'task' as const, id: 'task-1' },
+      { kind: 'note' as const, id: 'note-1' },
+      { kind: 'mr' as const, repo: 'gl:acme/gadget', iid: 42 },
+    ]
+    const linked = await chat.addMessage(
+      message('m2', 't1', 2, { authorType: 'agent', body: 'See ABC-123.', refs }),
+    )
+    expect(linked.refs).toEqual(refs)
+    expect((await chat.getMessage('m2'))?.refs).toEqual(refs)
+    expect((await chat.listMessages('t1')).map((m) => m.refs)).toEqual([[], refs])
+
+    const changed = await chat.updateMessage('m1', {
+      refs: [{ kind: 'note', id: 'note-2' }],
+      updatedAt: at(9),
+    })
+    expect(changed).toMatchObject({ body: 'Message m1', refs: [{ kind: 'note', id: 'note-2' }] })
+    expect((await chat.getMessage('m1'))?.refs).toEqual([{ kind: 'note', id: 'note-2' }])
+    const untouched = await chat.updateMessage('m2', { body: 'Edited.', updatedAt: at(10) })
+    expect(untouched?.refs).toEqual(refs)
+  })
+
+  test('chat: context sums messages, cost, repositories, tools and authors', async () => {
+    const chat = store().chat
+    expect(await chat.context('missing')).toBeUndefined()
+    await chat.createThread(thread('t1', { contextRepos: ['gl:acme/widget-kit'] }))
+    await chat.createThread(thread('t2'))
+    expect(await chat.context('t1')).toEqual({
+      messageCount: 0,
+      costUsd: 0,
+      repos: ['gl:acme/widget-kit'],
+      tools: [],
+      participants: [],
+    })
+    await chat.addMessage(message('m1', 't1', 1, { authorId: 'user-2' }))
+    await chat.addMessage(
+      message('m2', 't1', 2, {
+        authorType: 'agent',
+        costUsd: 0.25,
+        toolTrace: [
+          { tool: 'search_knowledge', calls: 2 },
+          { tool: 'repo_rules', calls: 1 },
+        ],
+        refs: [
+          { kind: 'mr', repo: 'gl:acme/gadget', iid: 7 },
+          { kind: 'repo', repo: 'gl:acme/widget-kit' },
+          { kind: 'note', id: 'note-1' },
+        ],
+      }),
+    )
+    await chat.addMessage(message('m3', 't1', 3))
+    await chat.addMessage(
+      message('m4', 't1', 4, {
+        authorType: 'agent',
+        costUsd: 0.5,
+        toolTrace: [
+          { tool: 'repo_rules', calls: 1 },
+          { tool: 'who_uses', calls: 2 },
+        ],
+        refs: [{ kind: 'job', id: 'job-1', repo: 'gl:acme/sprocket' }],
+      }),
+    )
+    await chat.addMessage(message('m5', 't1', 5, { authorId: 'user-2' }))
+    await chat.addMessage(message('x1', 't2', 6, { costUsd: 9 }))
+
+    expect(await chat.context('t1')).toEqual({
+      messageCount: 5,
+      costUsd: 0.75,
+      repos: ['gl:acme/widget-kit', 'gl:acme/gadget', 'gl:acme/sprocket'],
+      tools: [
+        { tool: 'repo_rules', calls: 2 },
+        { tool: 'search_knowledge', calls: 2 },
+        { tool: 'who_uses', calls: 2 },
+      ],
+      participants: [
+        { id: 'user-2', messages: 2 },
+        { id: 'user-1', messages: 1 },
+      ],
+    })
+  })
+
+  test('chat: mutes are per person and idempotent', async () => {
+    const chat = store().chat
+    await chat.createThread(thread('t1'))
+    await chat.createThread(thread('t2'))
+    await chat.setMuted('t2', 'user-1', true)
+    await chat.setMuted('t1', 'user-1', true)
+    await chat.setMuted('t1', 'user-1', true)
+    await chat.setMuted('t1', 'user-2', true)
+    expect(await chat.mutedThreads('user-1')).toEqual(['t1', 't2'])
+    await chat.setMuted('t2', 'user-1', false)
+    await chat.setMuted('t2', 'user-1', false)
+    expect(await chat.mutedThreads('user-1')).toEqual(['t1'])
+    expect(await chat.mutedThreads('user-2')).toEqual(['t1'])
+    expect(await chat.mutedThreads('user-3')).toEqual([])
   })
 }

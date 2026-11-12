@@ -25,7 +25,13 @@ import { z } from 'zod'
 import { auditAnalyzer } from './audit.ts'
 import { bundleAnalyzer } from './bundle.ts'
 
-export { auditAnalysis, auditAnalyzer } from './audit.ts'
+export {
+  type AuditFindingMetric,
+  type AuditMetrics,
+  auditAnalysis,
+  auditAnalyzer,
+  auditFindingKey,
+} from './audit.ts'
 export { bundleAnalyzer } from './bundle.ts'
 
 const checkoutOf = (dir: string | undefined) => {

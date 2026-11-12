@@ -50,6 +50,8 @@ export interface CredentialView {
   options?: Record<string, unknown>
   /** Probed provider capabilities; absent until probed and after any change to how it is reached. */
   capabilities?: CredentialCapabilities
+  /** When something last used the secret, recorded at most once a minute (`markUsed`). */
+  lastUsedAt?: Timestamp
   createdAt: Timestamp
   updatedAt: Timestamp
 }

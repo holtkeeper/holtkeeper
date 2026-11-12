@@ -12,6 +12,7 @@ import type {
   ExternalAccountList,
   ExternalAccountView,
   LinkResponse,
+  PeopleSummary,
   UserList,
   UserView,
 } from './views.ts'
@@ -109,6 +110,7 @@ function setup(oidc: { options: OidcProviderOptions; client: OidcClient }[] = []
     {
       store: store.users,
       audit: store.audit,
+      kv: store.kv,
       sessionSecret: secret,
       origin,
       oidc: oidc.map((o) => o.options),
@@ -240,6 +242,11 @@ describe('usersAuth', () => {
     await enroll(auth, invited.link)
     const again = await new Browser().send(auth, 'GET', `/link/${token}`)
     expect(again.status).toBe(410)
+    expect(await body<unknown>(again)).toEqual({
+      error: 'link has already been used',
+      state: 'used',
+      at: '2026-10-29T12:00:00.000Z',
+    })
     expect((await new Browser().send(auth, 'POST', `/link/${token}/register/options`)).status).toBe(
       410,
     )
@@ -247,18 +254,77 @@ describe('usersAuth', () => {
 
   test('link info, unknown and expired links', async () => {
     const { auth, browser, root, advance } = await rootSession()
+    const grants: Grant[] = [
+      { scope: { groups: ['widgets'] }, actions: ['repos:read', 'analyses:run'] },
+      { scope: { repos: ['acme/gadget'] }, actions: ['knowledge:read'] },
+    ]
     const invited = await body<LinkResponse>(
-      await browser.send(auth, 'POST', '/admin/users', { name: 'Ann', grants: [] }, root),
+      await browser.send(auth, 'POST', '/admin/users', { name: 'Ann', grants }, root),
     )
-    const info = await body<unknown>(
-      await new Browser().send(auth, 'GET', `/link/${tokenOf(invited.link)}`),
-    )
-    expect(info).toEqual({ purpose: 'enroll', userName: 'Ann', expiresAt: invited.expiresAt })
+    const live = await new Browser().send(auth, 'GET', `/link/${tokenOf(invited.link)}`)
+    const info = await body<unknown>(live)
+    expect(info).toEqual({
+      purpose: 'enroll',
+      userName: 'Ann',
+      expiresAt: invited.expiresAt,
+      grants: { count: 2, role: 'custom' },
+    })
+    expect(JSON.stringify(info)).not.toContain('widgets')
+    expect(JSON.stringify(info)).not.toContain('Root')
     expect((await new Browser().send(auth, 'GET', `/link/${'a'.repeat(43)}`)).status).toBe(404)
     advance(73)
-    expect((await new Browser().send(auth, 'GET', `/link/${tokenOf(invited.link)}`)).status).toBe(
-      410,
+    const expired = await new Browser().send(auth, 'GET', `/link/${tokenOf(invited.link)}`)
+    expect(expired.status).toBe(410)
+    expect(await body<unknown>(expired)).toEqual({
+      error: 'link has expired',
+      state: 'expired',
+      at: invited.expiresAt,
+    })
+  })
+
+  test('link info names the broadest role and never the inviter', async () => {
+    const { auth, store, browser, root } = await rootSession()
+    const role = async (grants: Grant[]) => {
+      const invited = await body<LinkResponse>(
+        await browser.send(auth, 'POST', '/admin/users', { name: 'Bea', grants }, root),
+      )
+      const info = await body<{ grants: unknown }>(
+        await new Browser().send(auth, 'GET', `/link/${tokenOf(invited.link)}`),
+      )
+      return info.grants
+    }
+    expect(await role([])).toEqual({ count: 0, role: 'none' })
+    expect(await role([{ scope: { all: true }, actions: ['repos:read'] }])).toEqual({
+      count: 1,
+      role: 'viewer',
+    })
+    expect(await role([{ scope: { groups: ['widgets'] }, actions: ['settings:write'] }])).toEqual({
+      count: 1,
+      role: 'custom',
+    })
+    expect(await role([{ scope: { groups: ['widgets'] }, actions: ['*'] }])).toEqual({
+      count: 1,
+      role: 'custom',
+    })
+    expect(await role([{ scope: { all: true }, actions: ['*'] }])).toEqual({
+      count: 1,
+      role: 'admin',
+    })
+
+    const issued = await issueUserLink(
+      { store: store.users, audit: store.audit, actor: 'cli' },
+      {
+        user: defined(await store.users.getUser(root.id)),
+        purpose: 'recover',
+        origin,
+        ttlMs: 3_600_000,
+      },
     )
+    const info = await body<Record<string, unknown>>(
+      await new Browser().send(auth, 'GET', `/link/${tokenOf(issued.link)}`),
+    )
+    expect(info.purpose).toBe('recover')
+    expect(info).not.toHaveProperty('invitedBy')
   })
 
   test('registration needs the challenge cookie of the same link', async () => {
@@ -592,6 +658,153 @@ async function addPasskey(auth: AuthProvider, browser: Browser, id: string, labe
   const verify = await browser.send(auth, 'POST', '/me/passkeys/verify', { response, label })
   return { options, verify }
 }
+
+const groupGrant = (groups: string[]): Grant => ({
+  scope: { groups },
+  actions: ['repos:read', 'analyses:run'],
+})
+
+describe('people', () => {
+  test('invites stay pending until the person signs in and can be sent again', async () => {
+    const { auth, browser, root, advance } = await rootSession()
+    const invited = await body<LinkResponse>(
+      await browser.send(
+        auth,
+        'POST',
+        '/admin/users',
+        { name: 'Widget Dev', grants: [groupGrant(['widgets', 'gadgets'])] },
+        root,
+      ),
+    )
+    expect(invited.user.invite).toEqual({
+      createdAt: '2026-10-29T12:00:00.000Z',
+      expiresAt: invited.expiresAt,
+      expired: false,
+      createdBy: root.id,
+    })
+    expect(invited.user.creator).toEqual({ name: 'Root', avatarUrl: `/api/avatars/${root.id}.svg` })
+    expect(invited.user.teams).toEqual(['widgets', 'gadgets'])
+
+    advance(73)
+    const list = async () =>
+      (await body<UserList>(await browser.send(auth, 'GET', '/admin/users', undefined, root))).users
+    const expired = (await list()).find((user) => user.id === invited.user.id)
+    expect(expired?.invite?.expired).toBe(true)
+
+    const again = await browser.send(
+      auth,
+      'POST',
+      `/admin/users/${invited.user.id}/invite`,
+      undefined,
+      root,
+    )
+    expect(again.status).toBe(201)
+    const fresh = await body<LinkResponse>(again)
+    expect(fresh.user.invite?.expired).toBe(false)
+    expect(fresh.link).not.toBe(invited.link)
+
+    await enroll(auth, fresh.link)
+    const enrolled = (await list()).find((user) => user.id === invited.user.id)
+    expect(enrolled?.invite).toBeUndefined()
+    expect(
+      (await browser.send(auth, 'POST', `/admin/users/${invited.user.id}/invite`, undefined, root))
+        .status,
+    ).toBe(409)
+  })
+
+  test('sending an invite again needs users:invite', async () => {
+    const { auth, browser, root } = await rootSession()
+    const writer = await body<LinkResponse>(
+      await browser.send(
+        auth,
+        'POST',
+        '/admin/users',
+        {
+          name: 'Writer',
+          grants: [repoGrant(['games/**'], ['users:read', 'users:write', 'repos:read'])],
+        },
+        root,
+      ),
+    )
+    const { browser: writerBrowser } = await enroll(auth, writer.link)
+    const writerPrincipal = defined(await writerBrowser.principal(auth))
+    const target = await body<LinkResponse>(
+      await browser.send(
+        auth,
+        'POST',
+        '/admin/users',
+        { name: 'Target', grants: [repoGrant(['games/app/**'], ['repos:read'])] },
+        root,
+      ),
+    )
+    const denied = await writerBrowser.send(
+      auth,
+      'POST',
+      `/admin/users/${target.user.id}/invite`,
+      undefined,
+      writerPrincipal,
+    )
+    expect(denied.status).toBe(403)
+  })
+
+  test('the summary counts the users the caller may see by state', async () => {
+    const { auth, browser, root } = await rootSession()
+    const invite = async (name: string, grants: Grant[]) =>
+      body<LinkResponse>(await browser.send(auth, 'POST', '/admin/users', { name, grants }, root))
+    const active = await invite('Active', [groupGrant(['widgets'])])
+    await enroll(auth, active.link)
+    await invite('Pending', [groupGrant(['widgets'])])
+    const off = await invite('Off', [])
+    await browser.send(auth, 'PATCH', `/admin/users/${off.user.id}`, { disabled: true }, root)
+
+    const summary = await body<PeopleSummary>(
+      await browser.send(auth, 'GET', '/admin/summary', undefined, root),
+    )
+    expect(summary).toEqual({
+      total: 4,
+      active: 2,
+      invited: 1,
+      disabled: 1,
+      admins: 1,
+      withoutSignIn: 1,
+      signIn: ['passkeys'],
+    })
+    expect((await new Browser().send(auth, 'GET', '/admin/summary')).status).toBe(401)
+  })
+
+  test('signed-in requests record lastSeenAt at most once a minute', async () => {
+    const { auth, browser, store, root, advance } = await rootSession()
+    const seen = async () => (await store.users.getUser(root.id))?.lastSeenAt
+    expect(await seen()).toBe('2026-10-29T12:00:00.000Z')
+    advance(0.01)
+    await browser.principal(auth)
+    expect(await seen()).toBe('2026-10-29T12:00:00.000Z')
+    advance(0.01)
+    await browser.principal(auth)
+    expect(await seen()).toBe('2026-10-29T12:01:12.000Z')
+    const self = await body<UserView>(await browser.send(auth, 'GET', '/me'))
+    expect(self.lastSeenAt).toBe('2026-10-29T12:01:12.000Z')
+  })
+
+  test('teams follow the home groups a person picked', async () => {
+    const { auth, browser, root, store } = await rootSession()
+    const invited = await body<LinkResponse>(
+      await browser.send(
+        auth,
+        'POST',
+        '/admin/users',
+        { name: 'Picky', grants: [groupGrant(['widgets', 'gadgets'])] },
+        root,
+      ),
+    )
+    await store.kv?.set(`prefs:${invited.user.id}`, { homeGroups: [['widgets', 'shapes']] })
+    const users = (
+      await body<UserList>(await browser.send(auth, 'GET', '/admin/users', undefined, root))
+    ).users
+    expect(users.find((user) => user.id === invited.user.id)?.teams).toEqual(['widgets + shapes'])
+    expect(users.find((user) => user.id === root.id)?.teams).toEqual([])
+  })
+})
 
 describe('own account', () => {
   test('needs a session', async () => {

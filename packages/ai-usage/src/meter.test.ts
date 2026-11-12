@@ -81,6 +81,7 @@ describe('meteredAgent', () => {
         taskKind: 'review',
         jobId: 'j1',
         actor: 'jane',
+        interactive: false,
         provider: 'cred-1',
         model: 'claude-opus-5-5',
         inputTokens: 10,
@@ -104,7 +105,7 @@ describe('meteredAgent', () => {
     })
     const agent = meteredAgent(fakeAgent(failure), {
       record: (e) => void records.push(e),
-      context,
+      context: { ...context, subject: 'v2.3.0' },
       now: clock('2026-10-30T10:00:00.000Z', '2026-10-30T10:00:01.000Z'),
     })
     expect(agent.run({ dir: '/x', prompt: 'p' })).rejects.toBe(failure)
@@ -118,6 +119,8 @@ describe('meteredAgent', () => {
       costUsd: 4,
       costSource: 'computed',
       durationMs: 1000,
+      subject: 'v2.3.0',
+      interactive: false,
     })
   })
 
@@ -172,6 +175,9 @@ describe('meteredAgent', () => {
     )
     await interactive.run({ dir: '/x', prompt: 'p' })
     expect(caps).toEqual([2, 1.5])
+    expect((await store.aiUsage.list({ origin: 'interactive' })).map((r) => r.costUsd)).toEqual([
+      0.1,
+    ])
   })
 
   test('a failing record does not replace the result', async () => {
@@ -214,6 +220,8 @@ describe('usageRecorder', () => {
       error: new BudgetDeniedError([]),
       durationMs: 0,
       actor: 'jane',
+      interactive: true,
+      subject: 'MR !42',
       at: '2026-10-30T11:00:00.000Z',
     })
     const [denied, ok] = await store.aiUsage.list()
@@ -228,6 +236,14 @@ describe('usageRecorder', () => {
       transcriptRef: 'b'.repeat(64),
     })
     expect(denied?.transcriptRef).toBeUndefined()
-    expect(denied).toMatchObject({ groups: ['other'], actor: 'jane', outcome: 'denied-budget' })
+    expect(denied).toMatchObject({
+      groups: ['other'],
+      actor: 'jane',
+      interactive: true,
+      subject: 'MR !42',
+      outcome: 'denied-budget',
+    })
+    expect(ok?.interactive).toBe(false)
+    expect(ok?.subject).toBeUndefined()
   })
 })

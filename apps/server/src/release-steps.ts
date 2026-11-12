@@ -8,7 +8,7 @@ import type { KvStore } from '@holtkeeper/store'
 import { z } from 'zod'
 
 import { appendAudit } from './audit.ts'
-import { type ServerDeps, repoTarget } from './context.ts'
+import { type ServerDeps, repoTarget, ForbiddenToolError } from './context.ts'
 import { releaseServiceFor } from './releases.ts'
 import type { ReleaseStepInput, ReleaseToolsAccess } from './tools/releases.ts'
 import { canSee } from './visibility.ts'
@@ -18,7 +18,7 @@ export interface ReleaseStepPreview {
   action: ReleaseStepInput['action']
   title: string
   fields: { label: string; value: string }[]
-  /** Gates that fail now; soft ones can be overridden. */
+  /** Gates that fail now; `block` ones can be overridden unless hard, others only inform. */
   failing: GateResult[]
   /** Why the step cannot run at all; no confirmation is offered then. */
   blocked?: string
@@ -67,6 +67,15 @@ export function previewReleaseStep(
         `${input.action === 'accept' ? 'Accept' : 'Create a version of'} ${path}`,
         'Nothing on the target branch waits for a version.',
       )
+    if (input.action === 'accept' && !view.can.accept)
+      return blocked(
+        `Accept ${plan.range.toLabel} of ${path}`,
+        view.settings.acceptance === 'none'
+          ? 'The flow needs no acceptance: the version can be created right away.'
+          : view.row.acceptance
+            ? `${plan.range.toLabel} is already accepted.`
+            : `You may not accept releases of ${path}.`,
+      )
     if (input.action === 'accept')
       return {
         action: 'accept',
@@ -109,7 +118,14 @@ export function previewReleaseStep(
     fields: state ? [{ label: 'Now', value: state.status }] : [],
     failing:
       state?.status === 'waiting' && state.after
-        ? [{ id: 'order', ok: false, message: `${state.after} is not deployed yet` }]
+        ? [
+            {
+              id: 'order',
+              ok: false,
+              severity: 'block',
+              message: `${state.after} is not deployed yet`,
+            },
+          ]
         : [],
     tag,
   }
@@ -249,11 +265,19 @@ export function releaseToolsAccess(
   const runnable = async (repo: RepoRef, input: ReleaseStepInput) => {
     if (!can(principal, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) })) {
       await audit(repo, input, 'denied', 'missing releases:run')
-      throw new ToolError(`You may not run release steps of ${keyOf(repo)}.`)
+      throw new ForbiddenToolError(
+        `You may not run release steps of ${keyOf(repo)}.`,
+        'releases:run',
+        keyOf(repo),
+      )
     }
     if (await releases.isReadOnly(repo)) {
       await audit(repo, input, 'denied', 'repository is read-only')
-      throw new ToolError(`${keyOf(repo)} is read-only for Holtkeeper.`)
+      throw new ForbiddenToolError(
+        `${keyOf(repo)} is read-only for Holtkeeper.`,
+        'releases:run',
+        keyOf(repo),
+      )
     }
   }
 
@@ -333,6 +357,7 @@ export function releaseToolsAccess(
                 tag: stored.tag!,
                 environment: stored.environment!,
                 ...(stored.override ? { force: true } : {}),
+                ...(stored.note ? { reason: stored.note } : {}),
               },
               actor,
             )

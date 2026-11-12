@@ -39,7 +39,7 @@ plan (forge API) ─► checkout ─► bump ─► verify ─┬─ pass ─►
 
 `PropagationData`: `{ group, packages: PackageTarget[], dryRun, repos: RepoOutcome[], releaseNotes, fixGroup? }`. Each `RepoOutcome` has `status` (`unchanged`, `skipped`, `updated`, `failed`, `error`), `usages`, `bumps` (`{ package, from, to, manifest }`), `checks`, `changedFiles`, `fixTask` (the proposed write task), `mergeRequest` (`{ id, url, draft }`), `notes` and `error`.
 
-The report shows repositories targeted, updated cleanly, fix tasks, failed, skipped/unchanged and merge requests; deltas are against the previous wave of the same package names. Sections: **Wave overview** (stacked bar by status, table repo × status with the previous wave's status, fix task and merge request links), **Failures** (issues with failing output excerpts, linking the fix task when there is one), **Release notes used**, **Plan** (every declaration and what it was bumped to).
+The report shows repositories targeted, updated cleanly, fix tasks, failed, skipped/unchanged and merge requests; deltas are against the previous wave of the same package names. Sections: **Wave overview** (stacked bar by status, table repo × status with the previous wave's status, fix task and merge request links), **Failures** (issues with failing output excerpts, linking the fix task when there is one), **Release notes used**, **Plan** (every declaration and what it was bumped to). Fix task links are panel paths to Ops › Tasks (`webPaths.tasks({ group, task })` of [@holtkeeper/web-paths](../../web-paths/docs/README.md)).
 
 ## Reusable steps
 

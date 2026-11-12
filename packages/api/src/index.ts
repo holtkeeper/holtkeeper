@@ -1,8 +1,13 @@
 export * from './sources.ts'
 export * from './summary.ts'
 export type * from './types.ts'
+export type * from './settings-people.ts'
+export type * from './settings-ai.ts'
+export type * from './settings-analyzers.ts'
+export type * from './settings-system.ts'
 
 export type { Action, Grant, GroupMatch, Principal, Scope } from '@holtkeeper/access'
+export { type Role, roleOf } from '@holtkeeper/access/roles'
 export type { AuthInfo, LoginMethod } from '@holtkeeper/auth'
 export type * from '@holtkeeper/changes'
 export type * from '@holtkeeper/report'
@@ -44,9 +49,12 @@ export type {
   AiUsageDimension,
   AiUsageRecord,
   AiUsageTotals,
+  AuditCount,
   AuditEvent,
   AuditRun,
+  AuditSummary,
   AuditTrigger,
+  ChatMessageRef,
   DatabaseConnections,
   DatabaseDomain,
   DatabaseEngine,
@@ -67,6 +75,7 @@ export type {
   GuideScopeKey,
   GuideSection,
   GuideSectionName,
+  JobStatus,
   KnowledgeEntry,
   KnowledgeKind,
   KnowledgeLink,
@@ -95,8 +104,10 @@ export type {
   DeployState,
   DeployStatus,
   EnvironmentState,
+  EnvironmentSummary,
   FlowDetection,
   GateResult,
+  GateSeverity,
   PipelineState,
   ReleaseBoardRow,
   ReleaseEdits,
@@ -106,6 +117,7 @@ export type {
   ReleaseLink,
   ReleaseLinkKind,
   ReleasePlan,
+  ReleaseProvenance,
   ReleaseSettings,
   ReleaseStage,
   ReleaseTask,
@@ -122,4 +134,11 @@ export type {
   JobStats as CiJobStats,
   JobTrend as CiJobTrend,
 } from '@holtkeeper/ci-jobs'
-export type { AuditReport, Finding, FixAttempt, IgnoredFinding, Severity } from '@holtkeeper/vuln'
+export type {
+  AllowlistEntry,
+  AuditReport,
+  Finding,
+  FixAttempt,
+  IgnoredFinding,
+  Severity,
+} from '@holtkeeper/vuln'

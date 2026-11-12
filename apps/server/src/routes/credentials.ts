@@ -12,14 +12,20 @@ import {
 import type {
   CredentialList,
   CredentialTestResult,
+  CredentialUseView,
   CredentialView,
+  IntegrationForgeList,
   ProviderModelList,
 } from '@holtkeeper/api'
 import { parseCredentialInput } from '@holtkeeper/credentials'
-import type { CredentialCapabilities } from '@holtkeeper/store'
+import { resolveGlobalSetting } from '@holtkeeper/settings'
+import type { CredentialCapabilities, ForgeDocumentData } from '@holtkeeper/store'
+import { webPaths } from '@holtkeeper/web-paths'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
+import { z } from 'zod'
 
+import { providerReference } from '../agent.ts'
 import { REDACTED, diffChanges } from '../audit.ts'
 import {
   type AppContext,
@@ -29,16 +35,106 @@ import {
   principalOf,
   readBody,
 } from '../context.ts'
+import { EGRESS_SECRET_KIND } from '../egress-secrets.ts'
 import { credentialTestSchema } from '../schemas.ts'
+import { listedRepos } from '../updates.ts'
+import { lastForgeDeliveries } from '../webhook-sync.ts'
 
 const scopeTarget = (scope: Scope) => ({ kind: 'scope' as const, scope })
 
-const auditIgnored = ['createdAt', 'updatedAt', 'id']
+const auditIgnored = ['createdAt', 'updatedAt', 'id', 'lastUsedAt']
 
 const secretChange = (input: unknown) =>
   typeof input === 'object' && input !== null && 'secret' in input && input.secret !== undefined
     ? [{ field: 'secret', before: REDACTED, after: REDACTED }]
     : []
+
+const GLOBAL = { kind: 'global' } as const
+
+/** Services that use every credential of their kind. */
+const kindServices: Record<string, { id: string; label: string }> = {
+  [EGRESS_SECRET_KIND]: { id: 'egress', label: 'Job network proxy' },
+  jira: { id: 'jira', label: 'Issue lookups' },
+  confluence: { id: 'confluence', label: 'Documents' },
+}
+
+const librariesGithubSchema = z.object({
+  github: z.preprocess(
+    (value) => (typeof value === 'string' ? [value] : value),
+    z.array(z.string()).optional(),
+  ),
+})
+
+type UsedCredential = Pick<CredentialView, 'id' | 'name' | 'kind'>
+
+/**
+ * What refers to each credential: panel forges by token or SSH key, the global `llm.provider`
+ * and `libraries` settings by id or name, and the services that use every credential of a kind.
+ */
+async function credentialUses(
+  deps: Pick<ServerDeps, 'store'>,
+  credentials: readonly UsedCredential[],
+): Promise<Map<string, CredentialUseView[]>> {
+  const [forges, settings] = await Promise.all([
+    deps.store.config?.list('forge') ?? [],
+    deps.store.settings.list(),
+  ])
+  const integrations = webPaths.settings('integrations')
+  const uses = new Map<string, CredentialUseView[]>(credentials.map((c) => [c.id, []]))
+  const add = (id: string, use: CredentialUseView) => uses.get(id)?.push(use)
+  const named = (reference: string) =>
+    credentials.find((c) => c.id === reference) ?? credentials.find((c) => c.name === reference)
+
+  for (const forge of forges) {
+    const data: ForgeDocumentData = forge.data
+    add(data.credentialId, {
+      kind: 'forge',
+      id: forge.id,
+      label: `Forge ${forge.id}`,
+      href: integrations,
+    })
+    if (data.sshKey)
+      add(data.sshKey.credentialId, {
+        kind: 'forge',
+        id: forge.id,
+        label: `SSH key of ${forge.id}`,
+        href: integrations,
+      })
+  }
+
+  const provider = providerReference(settings)
+  const providerCredential = provider === undefined ? undefined : named(provider)
+  if (providerCredential && isAiProviderKind(providerCredential.kind))
+    add(providerCredential.id, {
+      kind: 'setting',
+      id: 'llm.provider',
+      label: 'Agents',
+      href: webPaths.settings('ai'),
+    })
+
+  const libraries = resolveGlobalSetting(settings, 'libraries')
+  const parsed = librariesGithubSchema.safeParse(libraries?.value ?? {})
+  const github = parsed.success ? parsed.data.github : undefined
+  const indexing = github
+    ? github.flatMap((reference) => {
+        const found = named(reference)
+        return found ? [found] : []
+      })
+    : credentials.filter((c) => c.kind === 'github')
+  for (const credential of indexing)
+    add(credential.id, {
+      kind: 'setting',
+      id: 'libraries',
+      label: 'Library index',
+      href: webPaths.settings('system'),
+    })
+
+  for (const credential of credentials) {
+    const service = kindServices[credential.kind]
+    if (service) add(credential.id, { kind: 'service', ...service })
+  }
+  return uses
+}
 
 /**
  * Forge accounts and API keys. Validation and sealing happen in the credential service; routes
@@ -46,9 +142,13 @@ const secretChange = (input: unknown) =>
  * `ai-sdk` provider; for Anthropic and Anthropic-compatible ones it probes Messages tool use
  * (`probeAgentLoop`) and stores the outcome as the credential's `capabilities.agentLoop`, which
  * decides whether agent tool loops run on the Claude Agent SDK.
+ *
+ * `GET /credentials` adds `usedBy` to each visible credential. `GET /integrations/forges` lists
+ * panel forges with their repository counts and last webhook delivery; it needs a global
+ * `settings:read`, since the counts cover every repository.
  */
 export function credentialRoutes(deps: ServerDeps) {
-  const { credentials, store, vault } = deps
+  const { credentials, store } = deps
   const app = new Hono<Env>()
 
   const existing = async (c: AppContext, action: 'credentials:read' | 'credentials:write') => {
@@ -60,10 +160,45 @@ export function credentialRoutes(deps: ServerDeps) {
 
   app.get('/credentials', async (c) => {
     const principal = principalOf(c)
-    const visible = (await credentials.list()).filter((credential) =>
+    const all = await credentials.list()
+    const visible = all.filter((credential) =>
       can(principal, 'credentials:read', scopeTarget(credential.scope)),
     )
-    return c.json<CredentialList>({ credentials: visible })
+    const uses = await credentialUses(deps, all)
+    return c.json<CredentialList>({
+      credentials: visible.map((credential) => ({
+        ...credential,
+        usedBy: uses.get(credential.id) ?? [],
+      })),
+    })
+  })
+
+  app.get('/integrations/forges', async (c) => {
+    authorize(c, 'settings:read', GLOBAL)
+    const docs = (await store.config?.list('forge')) ?? []
+    const [repos, deliveries] = await Promise.all([
+      listedRepos(store.kv, deps.config),
+      lastForgeDeliveries(
+        store.kv,
+        docs.map((doc) => doc.id),
+      ),
+    ])
+    return c.json<IntegrationForgeList>({
+      forges: docs.map((doc) => {
+        const lastWebhookAt = deliveries.get(doc.id)
+        return {
+          id: doc.id,
+          kind: doc.data.kind,
+          url: doc.data.url,
+          credentialId: doc.data.credentialId,
+          repos: repos.filter((repo) => repo.forge === doc.id).length,
+          ...(lastWebhookAt !== undefined && { lastWebhookAt }),
+          webhook:
+            doc.data.webhook !== undefined ||
+            deps.config.jobs?.webhooks?.[doc.id]?.secret !== undefined,
+        }
+      }),
+    })
   })
 
   app.post('/credentials', async (c) => {
@@ -118,12 +253,10 @@ export function credentialRoutes(deps: ServerDeps) {
     }
     const issues = providerOptionsIssues(credential.kind, credential.options)
     if (issues.length) throw new HTTPException(400, { message: issues.join('; ') })
-    const stored = await store.credentials.get(credential.id)
-    if (!stored) throw new HTTPException(404, { message: 'credential not found' })
     return {
       kind: credential.kind,
       url: credential.url,
-      secret: await vault.open(stored.secret),
+      secret: await credentials.open(credential.id),
       ...(credential.options && { options: credential.options }),
     }
   }

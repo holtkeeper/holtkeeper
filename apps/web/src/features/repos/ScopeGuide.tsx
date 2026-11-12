@@ -1,36 +1,30 @@
-import type { GuideTask } from '@holtkeeper/api'
+import type { GuideSectionName } from '@holtkeeper/api'
 import { ExternalLink } from 'lucide-react'
 import { useState } from 'react'
 
-import { guideTasks, type Space, spaceKey } from '../../lib/guide.ts'
-import { LinkButton, Segmented } from '../../ui/index.ts'
+import { type Space, spaceKey } from '../../lib/guide.ts'
+import { repoKey } from '../../lib/repo.ts'
+import { LinkButton } from '../../ui/index.ts'
+import { EffectivePromptPanel } from '../knowledge/EffectivePrompt.tsx'
 import { GuideTab } from '../knowledge/GuideTab.tsx'
-import { EffectivePrompt } from '../knowledge/PreviewSheet.tsx'
 
 /**
- * A repository's or group's Guide: for a repository first the text its tasks get with every layer
- * resolved, then the sections of its own scope to edit; Notes and Learnings stay on Knowledge.
+ * A repository's or group's Guide inside its hub: the sections table with the layers of the
+ * picked section in agent reading order, and for a repository the effective prompt its tasks get.
+ * Notes and Learnings stay on Knowledge.
  */
 export function ScopeGuide({ space }: { space: Extract<Space, { kind: 'repo' | 'group' }> }) {
-  const [task, setTask] = useState<GuideTask>('review')
+  const [section, setSection] = useState<GuideSectionName | undefined>()
+  const [prompt, setPrompt] = useState(space.kind === 'repo')
   return (
     <div className="flex flex-col gap-4">
-      {space.kind === 'repo' ? (
-        <section className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-[13px] font-semibold">Resolved guide</h2>
-            <Segmented aria-label="Task" options={guideTasks} value={task} onChange={setTask} />
-          </div>
-          <EffectivePrompt repo={space.repo} task={task} />
-        </section>
-      ) : null}
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold">
-          {space.kind === 'repo' ? 'This repository’s sections' : 'This group’s sections'}
+          {space.kind === 'repo' ? 'Guide of this repository' : 'Guide of this group'}
         </h2>
         <LinkButton
-          to="/knowledge"
-          search={{ space: spaceKey(space), tab: 'notes' }}
+          to="/knowledge/notes"
+          search={{ space: spaceKey(space) }}
           variant="ghost"
           size="sm"
         >
@@ -38,7 +32,14 @@ export function ScopeGuide({ space }: { space: Extract<Space, { kind: 'repo' | '
           <ExternalLink className="size-3.5" />
         </LinkButton>
       </div>
-      <GuideTab space={space} families={[]} />
+      {space.kind === 'repo' && prompt ? (
+        <EffectivePromptPanel
+          repos={[repoKey(space.repo)]}
+          initial={space.repo}
+          onClose={() => setPrompt(false)}
+        />
+      ) : null}
+      <GuideTab space={space} families={[]} section={section} onSection={setSection} />
     </div>
   )
 }

@@ -3,8 +3,7 @@ import { motion } from 'motion/react'
 
 import { severities, severityLabel } from '../lib/severity.ts'
 
-/** Background utility per severity; also used by charts and legends. */
-export const severityBg: Record<Severity, string> = {
+const severityBg: Record<Severity, string> = {
   critical: 'bg-sev-critical',
   high: 'bg-sev-high',
   medium: 'bg-sev-medium',

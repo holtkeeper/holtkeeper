@@ -7,7 +7,7 @@ import { freshnessSummary } from '../freshness.ts'
 import { canSee } from '../visibility.ts'
 import { jobTarget } from './jobs.ts'
 
-/** Read-only state behind the Automation page that the config and settings APIs do not cover. */
+/** Read-only state behind Ops › Automation that the config and settings APIs do not cover. */
 export function automationRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
 

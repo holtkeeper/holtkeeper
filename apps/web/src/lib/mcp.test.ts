@@ -16,6 +16,11 @@ test('mcpSetup', () => {
       },
     },
   })
+  expect(JSON.parse(setup.cursor)).toEqual({
+    mcpServers: {
+      holtkeeper: { url: 'https://hk.test/mcp', headers: { Authorization: 'Bearer hk_mcp_x' } },
+    },
+  })
   expect(setup.curl).toContain('-H "Authorization: Bearer hk_mcp_x"')
   expect(mcpSetup('https://hk.test/mcp').claudeCode).toContain('Bearer <token>')
 })

@@ -1,6 +1,6 @@
 # Agent access
 
-An AI agent with a browser can drive the web UI like any user: open pages, run analyses, edit settings. It gets there through its own account and a single-use login link, so it never needs a passkey and every action it takes is attributed to it in History.
+An AI agent with a browser can drive the web UI like any user: open pages, run analyses, edit settings. It gets there through its own account and a single-use login link, so it never needs a passkey and every action it takes is attributed to it in Settings › Audit log.
 
 This needs `users` sign-in (`HOLTKEEPER_AUTH=users`, see [@holtkeeper/auth-users](../packages/auth-users/docs/README.md)) and `server.publicUrl`. The commands run wherever the config and its secrets are, which makes whoever runs them an operator: they skip the delegation checks of the web UI. Full reference: [`holtkeeper users`](../apps/cli/docs/README.md#users-action).
 
@@ -39,6 +39,10 @@ A used or expired link answers 410: issue a new one. Login links never register 
 
 ## Audit and revocation
 
-- History (the audit log) records `user.invited` and `user.link_issued` with actor `cli`, then `user.login` (method `link`) and everything the agent does under its own user id.
+- Settings › Audit log records `user.invited` and `user.link_issued` with actor `cli`, then `user.login` (method `link`) and everything the agent does under its own user id.
 - To end the agent's sessions, disable the account or change its grants in the web UI. Both bump its `sessionVersion`, so existing cookies stop working at once. Links of a disabled user answer 403.
 - `POST /auth/users/logout` ends the session on that browser only.
+
+## In Settings › People & access
+
+The agent's account is a row like any other. Its role reads Admin for `--admin`, otherwise whatever its grants match (Custom when they match no preset). It has no passkey, so Sign-in reads "No passkey yet" and the strip counts it under "without a passkey or SSO"; it is not shown as Invited, because the CLI's links are not tracked as invites. Last seen moves with its signed-in requests (at most once a minute), and its sheet's Activity tab lists what it did. "Given by" is empty for it: `cli` is not a person.

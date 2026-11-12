@@ -1,5 +1,13 @@
 export type * from './types.ts'
-export { claimDueBy, DEFAULT_MAX_ATTEMPTS, errorSignature, STALE_JOB_ERROR } from './jobs.ts'
+export {
+  claimDueBy,
+  DEFAULT_MAX_ATTEMPTS,
+  errorSignature,
+  jobCounts,
+  likeText,
+  matchesJobSearch,
+  STALE_JOB_ERROR,
+} from './jobs.ts'
 export { knowledgeWords, matchesKnowledgeFilter } from './knowledge.ts'
 export {
   FamilyConflictError,
@@ -21,9 +29,11 @@ export {
   emptyAiUsageTotals,
   matchesAiUsageFilter,
   sortAiUsageBuckets,
+  storedAiUsage,
   weekStart,
 } from './ai-usage.ts'
 export { compareConfigDocuments, isKvLease } from './config.ts'
+export { updateKv } from './kv.ts'
 export { ExternalAccountConflictError } from './accounts.ts'
 export {
   AUDIT_EXPORT_BATCH,
@@ -36,6 +46,7 @@ export {
   formatAuditEvents,
   matchesAuditFilter,
   sealAuditEvent,
+  sortAuditSummary,
   verifyAuditEvents,
 } from './audit.ts'
 export { compareCiJobs, normalizeCiJob } from './ci-jobs.ts'
@@ -62,6 +73,9 @@ export {
   CHAT_PAGE,
   byChatThreadUpdate,
   chatPageSize,
+  chatThreadContext,
+  matchesChatThreadFilter,
+  newChatMessage,
   newChatThread,
   patchChatThread,
   selectChatMessages,

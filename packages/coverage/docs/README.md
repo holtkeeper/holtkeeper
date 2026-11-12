@@ -12,7 +12,8 @@ The `coverage` analyzer and analysis kind: runs a checkout's tests with coverage
   - `install: boolean` — default true: install JavaScript dependencies first when `node_modules` is missing (see below).
   - `installScripts: boolean` (`--install-scripts`) — default false: let that install run lifecycle scripts, for projects whose tests need `postinstall` output (Prisma clients, generated code).
   - `build: boolean` — default true: build workspace packages whose entry files are missing before the tests (see below).
-- `coverageAnalysis` — the `AnalysisKind` (`schema: coverageDataSchema`, `summarize`, `toReport(current, previous)`); `coverageReport(data, { previous?, ref?, compareTo?, generatedAt? })` builds the report directly, `coverageTree(files)` the folder treemap, `coverageTone(percent)` the tone of a share.
+  - `target: number` — default 60 (`DEFAULT_COVERAGE_TARGET`): line coverage, in percent, the repository should reach. It changes nothing in the run; stored metrics and repository health judge coverage by it. Set it per repository or group in the `analyzers.coverage` setting (`coverageTargetSchema` validates it: a number or numeric string from 0 to 100; null and empty strings fall back to 60).
+- `coverageAnalysis` — the `AnalysisKind` (`schema: coverageDataSchema`, `summarize`, `metrics`, `toReport(current, previous)`); `coverageReport(data, { previous?, ref?, compareTo?, generatedAt? })` builds the report directly, `coverageTree(files)` the folder treemap, `coverageTone(percent)` the tone of a share.
 - `analyzeCoverage({ dir, runner, file?, collectors?, exclude?, untested?, install?, installScripts?, build?, log?, signal? }): Promise<CoverageData>` — installs, collects and normalizes. `collectors` replaces the detected ones (any `CoverageCollector` from `@holtkeeper/quality-tests`).
 - `installDependencies({ dir, runner, scripts?, retryDelayMs?, signal? }): Promise<InstallOutcome>` — `skipped` (with a reason), `installed` or `failed` (with the last lines of output); a failure that looks like a network error (`npm error network`, `ECONNRESET`, `ETIMEDOUT`, `EAI_AGAIN`, `ENOTFOUND`, registry 5xx) is retried once after `retryDelayMs` (5 s); never throws for a failed install. `frozenInstallCommand(manager, scripts)` is the command.
 - `buildWorkspaces({ dir, runner, signal? }): Promise<BuildOutcome>` — `skipped`, `built` or `failed` (with the packages built before and the last lines of output); never throws for a failed build. `unbuiltWorkspaces(dir)` lists what it would build, in dependency order.
@@ -61,9 +62,22 @@ interface Counts {
 - **By folder** — treemap down to three levels, sized by lines to cover and colored by coverage.
 - **Changes** (with a previous analysis) — files whose line coverage moved by 1% or more, new files counted from zero.
 
+## Metrics
+
+`coverageMetrics(data, { options?, previous? })` is the kind's `metrics`, stored with every record as `CoverageMetrics`:
+
+- `percent`, `functions`, `branches` — shares over every file, rounded to 0.01; absent when there is nothing to cover.
+- `delta` — `percent` minus the previous record's, in percentage points; absent without both.
+- `target` — `options.target`, or 60 when unset or invalid (`coverageTargetOf(options)`). Whether `percent` reaches it is judged where it is shown (repository health), not stored.
+- `files`, `untested` — source files, and those no test loaded.
+- `tools` — the tools that produced the record.
+- `totals` — `coverageTotals(data)`: covered and total lines, functions and branches, files, untested files and their lines.
+
+`tools` and `totals` are what Quality › Coverage cards show, so the overview reads metrics only. Records written before they existed lack them; the server recomputes them from the newest record's data until the next run replaces it.
+
 ## Summaries
 
-`summary.ts` holds the pure helpers the server's Coverage page and the report share:
+`summary.ts` holds the pure helpers Quality › Coverage and the report share:
 
 - `coverageTotals(data)` — lines, functions, branches, file count, files no test loaded and their lines.
 - `coverageGroupOf(file)` / `coverageGroups(files)` — coverage per workspace package (`packages/<name>`, `apps/<name>`, `libs/<name>`, …) or top-level folder, `ROOT_GROUP` (`.`) for files in the root, most uncovered lines first.
@@ -71,4 +85,4 @@ interface Counts {
 - `coverageChanges(data, previous, minPoints = 5)` — files whose line coverage moved by at least `minPoints`, largest move first; new files count from zero.
 - `changedFilesCoverage(data, previous)` — line coverage of the files that are new or whose counts differ: the coverage of what changed between two records.
 
-The web panel shows them on **Coverage** (`/coverage`), one card per repository with a side sheet for the breakdown.
+The web panel shows them in **Quality › Coverage** (`/quality/coverage`), one card per repository with a side sheet for the breakdown.

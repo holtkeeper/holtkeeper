@@ -310,7 +310,7 @@ describe('rules toolset', () => {
       reason: 'Row selectors broke twice.',
     }
     expect(textOf(await client.callTool({ name: 'propose_rule_change', arguments: args }))).toBe(
-      'Proposed "Put test ids on list rows, not on their wrappers." for Test ids of `work:toys/kite`. People review it under Knowledge → Learnings before agents use it.',
+      'Proposed "Put test ids on list rows, not on their wrappers." for Test ids of `work:toys/kite`. People review it in Knowledge › Learnings (/knowledge/learnings?space=repo%3Awork%3Atoys%2Fkite) before agents use it.',
     )
     expect(
       textOf(await client.callTool({ name: 'propose_rule_change', arguments: args })),

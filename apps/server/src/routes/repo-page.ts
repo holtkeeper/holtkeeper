@@ -1,4 +1,4 @@
-import type { RepoOverview, RepoReviewList } from '@holtkeeper/api'
+import type { RepoOverview } from '@holtkeeper/api'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
@@ -10,16 +10,17 @@ import {
   principalOf,
   repoTarget,
 } from '../context.ts'
-import { repoOverview, repoReviews } from '../repo-page.ts'
-import { canSee } from '../visibility.ts'
+import { releaseServiceFor } from '../releases.ts'
+import { principalHealthAccess } from '../repo-health.ts'
+import { repoOverview } from '../repo-page.ts'
 
 /**
- * The repository page: `GET /repos/overview?repo=` for its Overview cards and `GET
- * /repos/reviews?repo=` for its Reviews tab. Both need `analyses:read` on the repository, read
- * stored records only and never ask the forge or a model.
+ * The repository hub: `GET /repos/overview?repo=` for its header and Overview. Needs
+ * `analyses:read` on the repository, reads stored records only and never asks the forge or a
+ * model; parts behind another permission are left out.
  */
 export function repoPageRoutes(deps: ServerDeps) {
-  const { store, config } = deps
+  const { config } = deps
   const app = new Hono<Env>()
 
   const targetOf = (value: string | undefined) => {
@@ -31,19 +32,13 @@ export function repoPageRoutes(deps: ServerDeps) {
   app.get('/repos/overview', async (c) => {
     const target = targetOf(c.req.query('repo'))
     authorize(c, 'analyses:read', { kind: 'repo', repo: target })
+    const principal = principalOf(c)
     return c.json<RepoOverview>(
       await repoOverview(deps, target, {
-        audits: canSee(principalOf(c), 'audits:read', target),
+        access: principalHealthAccess(principal, target),
+        releases: () => releaseServiceFor(deps).snapshot(principal),
         groupsOf: (repo) => repoTarget(config, repo).groups,
       }),
-    )
-  })
-
-  app.get('/repos/reviews', async (c) => {
-    const target = targetOf(c.req.query('repo'))
-    authorize(c, 'analyses:read', { kind: 'repo', repo: target })
-    return c.json<RepoReviewList>(
-      await repoReviews(store, { forge: target.forge, path: target.path }),
     )
   })
 

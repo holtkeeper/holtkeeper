@@ -9,6 +9,13 @@ import { isValidVersion, nextVersion, tagName } from './version.ts'
 /** Hidden marker in descriptions of merge requests Holtkeeper opened as release candidates. */
 export const releaseMarker = '<!-- holtkeeper:release -->'
 
+const tagGate = (message: string): GateResult => ({
+  id: 'tag-exists',
+  ok: false,
+  severity: 'block',
+  message,
+})
+
 const tidy = (text: string) => text.replace(/\n{3,}/gu, '\n\n').trim()
 
 export interface PlanOptions {
@@ -72,16 +79,40 @@ export function planRelease({
     : notes
 
   const gates: GateResult[] = checkGates(step, settings, facts)
-  const included = entries.filter((entry) => entry.included).length
-  if (commits.length === 0) gates.unshift({ id: 'empty', ok: false, message: 'nothing to release' })
-  else if (included === 0)
-    gates.unshift({ id: 'empty', ok: false, message: 'every change is left out' })
+  const included = entries.filter((entry) => entry.included)
+  if (commits.length === 0)
+    gates.unshift({ id: 'empty', ok: false, severity: 'block', message: 'nothing to release' })
+  else if (included.length === 0)
+    gates.unshift({
+      id: 'empty',
+      ok: false,
+      severity: 'block',
+      message: 'every change is left out',
+    })
+  else {
+    const untyped = included.filter((entry) => entry.type === undefined).length
+    gates.push(
+      untyped === 0
+        ? {
+            id: 'changelog',
+            ok: true,
+            severity: 'warn',
+            message: `changelog ready: ${included.length} entries`,
+          }
+        : {
+            id: 'changelog',
+            ok: false,
+            severity: 'warn',
+            message: `${untyped} of ${included.length} entries are not conventional commits`,
+          },
+    )
+  }
   if (!propose) {
-    if (!version) gates.push({ id: 'tag-exists', ok: false, message: 'no version chosen' })
+    if (!version) gates.push(tagGate('no version chosen'))
     else if (!isValidVersion(settings, version))
-      gates.push({ id: 'tag-exists', ok: false, message: `${version} is not a valid version` })
+      gates.push(tagGate(`${version} is not a valid version`))
     else if (facts.versions.some((existing) => existing.tag === tag))
-      gates.push({ id: 'tag-exists', ok: false, message: `tag ${tag} already exists` })
+      gates.push(tagGate(`tag ${tag} already exists`))
   }
 
   return {
@@ -111,6 +142,11 @@ export function planRelease({
 /** Gates a step may never override: an empty release or an unusable version. */
 export const hardGates = new Set<GateResult['id']>(['empty', 'tag-exists'])
 
-/** Failing gates that block the step: every failing one without `force`, the hard ones always. */
+/**
+ * Failing gates that block the step: every failing `block` one without `force`, the hard ones
+ * always. Failing `warn` and `info` gates never block.
+ */
 export const blockingGates = (gates: readonly GateResult[], force: boolean) =>
-  gates.filter((gate) => !gate.ok && (!force || hardGates.has(gate.id)))
+  gates.filter(
+    (gate) => !gate.ok && gate.severity === 'block' && (!force || hardGates.has(gate.id)),
+  )

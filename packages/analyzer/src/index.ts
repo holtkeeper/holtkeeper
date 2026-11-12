@@ -10,6 +10,7 @@ import { defaultBranchHead } from './head.ts'
 
 export * from './applies.ts'
 export * from './head.ts'
+export * from './metrics.ts'
 
 /**
  * Bytes kept between runs, e.g. on S3, under keys the analyzer derives from its inputs (source

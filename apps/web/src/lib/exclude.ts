@@ -39,25 +39,21 @@ export function excludeChoices(path: string): ExcludeChoice[] {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-/**
- * The setting entry to write so `option` of `repo` also lists `pattern`. The entry naming the
- * repository is extended in place; otherwise a new entry for the repository starts from the
- * winning broader value, since the most specific entry replaces it as a whole. When no entry sets
- * `option`, the pattern is added to `defaults`, the option's value without one.
- */
-export function excludeEntry(
+type SettingWrite = { id?: string; key: string; scope: Scope; value: Record<string, unknown> }
+
+function editListOption(
   key: string,
   option: string,
-  pattern: string,
   repo: RepoRef,
   effective: SettingView | undefined,
-  defaults: readonly string[] = [],
-): { id?: string; key: string; scope: Scope; value: Record<string, unknown> } {
+  defaults: readonly string[],
+  edit: (current: string[]) => string[],
+): SettingWrite {
   const value = isRecord(effective?.value) ? effective.value : {}
   const current = Array.isArray(value[option])
     ? value[option].filter((item): item is string => typeof item === 'string')
     : [...defaults]
-  const next = { ...value, [option]: current.includes(pattern) ? current : [...current, pattern] }
+  const next = { ...value, [option]: edit(current) }
   const own = (effective?.scope.repos ?? []).some(
     (entry) => entry === repoKey(repo) || entry === repo.path,
   )
@@ -65,3 +61,38 @@ export function excludeEntry(
     ? { id: effective.id, key, scope: effective.scope, value: next }
     : { key, scope: { repos: [repoKey(repo)] }, value: next }
 }
+
+/**
+ * The setting entry to write so `option` of `repo` also lists `pattern`. The entry naming the
+ * repository is extended in place; otherwise a new entry for the repository starts from the
+ * winning broader value, since the most specific entry replaces it as a whole. When no entry sets
+ * `option`, the pattern is added to `defaults`, the option's value without one.
+ */
+export const excludeEntry = (
+  key: string,
+  option: string,
+  pattern: string,
+  repo: RepoRef,
+  effective: SettingView | undefined,
+  defaults: readonly string[] = [],
+): SettingWrite =>
+  editListOption(key, option, repo, effective, defaults, (current) =>
+    current.includes(pattern) ? current : [...current, pattern],
+  )
+
+/**
+ * The setting entry to write so `option` of `repo` no longer lists `pattern`, by the same rules as
+ * `excludeEntry`: the repository's own entry changes in place, a broader one is copied into a new
+ * entry for the repository without the pattern.
+ */
+export const unexcludeEntry = (
+  key: string,
+  option: string,
+  pattern: string,
+  repo: RepoRef,
+  effective: SettingView | undefined,
+  defaults: readonly string[] = [],
+): SettingWrite =>
+  editListOption(key, option, repo, effective, defaults, (current) =>
+    current.filter((item) => item !== pattern),
+  )

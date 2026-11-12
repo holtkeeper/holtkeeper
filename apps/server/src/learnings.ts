@@ -1,7 +1,9 @@
+import type { LearningSourceKind } from '@holtkeeper/api'
 import type { Discussion, GitForge, RepoRef } from '@holtkeeper/forge'
 import { reactionCounts } from '@holtkeeper/forge'
 import { type CaptureOutcome, captureLearning, looksLikeFeedback, repoKey } from '@holtkeeper/guide'
 import { commentFinding, markerOf, reviewRef } from '@holtkeeper/review'
+import type { LearningCandidate } from '@holtkeeper/store'
 
 import type { ServerDeps } from './context.ts'
 
@@ -101,4 +103,43 @@ export async function harvestReactions(
     read++
   }
   return read
+}
+
+const distinct = (values: readonly string[]) => new Set(values).size
+
+const discussionsOf = (candidate: LearningCandidate) =>
+  distinct(
+    candidate.sources.map(
+      (source) => `${source.repo}\u0000${source.mergeRequest}\u0000${source.discussionId}`,
+    ),
+  )
+
+/**
+ * How a candidate came about: a direct proposal without replies is `mcp`, several discussions or
+ * a proposal with replies are `merged`, anything else is one `review-reply`.
+ */
+export function learningSourceKind(candidate: LearningCandidate): LearningSourceKind {
+  if (candidate.proposal && candidate.sources.length === 0) return 'mcp'
+  if (candidate.proposal || discussionsOf(candidate) > 1) return 'merged'
+  return 'review-reply'
+}
+
+/**
+ * 1–5 from the sources alone: 1, plus 1 each for at least 2 distinct discussions, 2 distinct
+ * authors, 2 distinct repositories and 3 distinct authors. Authors are the reply authors and the
+ * proposer of a direct proposal; repositories include the candidate's own.
+ */
+export function learningConfidence(candidate: LearningCandidate): number {
+  const authors = distinct([
+    ...candidate.sources.map((source) => source.author),
+    ...(candidate.proposal ? [candidate.proposal.by] : []),
+  ])
+  const repos = distinct([candidate.repo, ...candidate.sources.map((source) => source.repo)])
+  const score =
+    1 +
+    Number(discussionsOf(candidate) >= 2) +
+    Number(authors >= 2) +
+    Number(repos >= 2) +
+    Number(authors >= 3)
+  return Math.min(score, 5)
 }

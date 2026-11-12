@@ -11,6 +11,8 @@ import {
   participantLabel,
   participantLabels,
   planSummary,
+  textRefs,
+  uniqueRefs,
 } from '../src/chat-prompt.ts'
 
 let seq = 0
@@ -28,6 +30,7 @@ const message = (
     ...(authorId && { authorId }),
     body,
     mentions: parseMentions(body),
+    refs: [],
     createdAt: '2026-11-01T09:00:00.000Z',
   }
 }
@@ -37,6 +40,8 @@ const people = [
   { id: 'u-tom', name: 'Tomas Reed', email: 'treed@example.test' },
   { id: 'u-kit', name: 'Kit Moss' },
 ]
+
+const isForge = (forge: string) => forge === 'work'
 
 describe('chat prompt', () => {
   test('labels go A to Z, then AA', () => {
@@ -105,6 +110,48 @@ describe('chat prompt', () => {
         'Reply to the new messages.',
       ].join('\n\n'),
     )
+  })
+
+  test('context repositories lead the prompt when there are any', () => {
+    seq = 0
+    const prompt = buildChatPrompt({
+      participants: ['u-tom'],
+      people,
+      messages: [message('human', '@holtkeeper which one pins some-lib?', 'u-tom')],
+      contextRepos: ['work:acme/widget-kit', 'work:acme/storefront'],
+    })
+    expect(prompt).toStartWith(
+      'Repositories attached to this thread as context:\n- work:acme/widget-kit\n- work:acme/storefront\n\nNew messages',
+    )
+    expect(
+      buildChatPrompt({ participants: [], people, messages: [], contextRepos: [] }),
+    ).toStartWith('New messages')
+  })
+
+  test('refs come from citations and configured repository keys, in order, once each', () => {
+    expect(
+      textRefs(
+        'See [kb:12] for work:acme/widget-kit and work:acme/storefront. kb:12 again, work:acme/widget-kit too; other:acme/x, https://forge.test/acme/y and kb:a-3.',
+        isForge,
+      ),
+    ).toEqual([
+      { kind: 'note', id: '12' },
+      { kind: 'repo', repo: 'work:acme/widget-kit' },
+      { kind: 'repo', repo: 'work:acme/storefront' },
+      { kind: 'note', id: 'a-3' },
+    ])
+    expect(textRefs('nothing here', isForge)).toEqual([])
+    expect(
+      uniqueRefs([
+        { kind: 'task', id: 'g1' },
+        { kind: 'task', id: 'g1', repo: 'work:acme/widget-kit' },
+        { kind: 'mr', repo: 'work:acme/widget-kit', iid: 4 },
+        { kind: 'mr', repo: 'work:acme/widget-kit', iid: 4 },
+      ]),
+    ).toEqual([
+      { kind: 'task', id: 'g1' },
+      { kind: 'mr', repo: 'work:acme/widget-kit', iid: 4 },
+    ])
   })
 
   test('summaries are planned only above the threshold and keep the newest messages', () => {

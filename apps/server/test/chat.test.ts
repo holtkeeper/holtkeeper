@@ -14,12 +14,14 @@ import type {
   ChatMessageList,
   ChatPeopleView,
   ChatPostResult,
+  ChatThreadContextView,
   ChatThreadList,
   ChatThreadView,
   ChatUnreadView,
 } from '@holtkeeper/api'
 import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import { headerAuth } from '@holtkeeper/auth-header'
+import { taskCard, taskSteps } from '@holtkeeper/chat'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import { releaseSettingsDefinition } from '@holtkeeper/release'
@@ -32,6 +34,7 @@ import { aesVault } from '@holtkeeper/vault'
 import { withServerDefaults } from '../src/agent.ts'
 import { createApp } from '../src/app.ts'
 import type { ChatAgentRun } from '../src/chat-threads.ts'
+import { agentOpsAccess } from '../src/ops-tools.ts'
 import { storeTranscript } from '../src/transcripts.ts'
 
 const person = (user: string, groups: string, name: string, email: string) => ({
@@ -44,6 +47,16 @@ const asAdmin = person('jane', 'admin', 'Jane Quill', 'jane.quill@example.test')
 const asMember = person('omar', 'games', 'Omar Vale', 'omar.vale@example.test')
 const asOutsider = person('lena', 'puzzles', 'Lena Frost', 'lena.frost@example.test')
 const asNobody = person('ivo', 'none', 'Ivo Penn', 'ivo.penn@example.test')
+const asCoder = person('rhea', 'coders', 'Rhea Moss', 'rhea.moss@example.test')
+const asMixed = person('nia', 'mixed', 'Nia Bell', 'nia.bell@example.test')
+
+const chatConfig = parseConfig({
+  forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fake.forge } },
+  groups: {
+    games: { forge: 'work', include: ['g/**'] },
+    puzzles: { forge: 'work', include: ['p/**'] },
+  },
+})
 
 interface AgentCall {
   target: RepoTarget
@@ -80,19 +93,23 @@ beforeEach(async () => {
   const vault = aesVault('v'.repeat(32))
   app = createApp({
     artifacts,
-    config: parseConfig({
-      forges: { work: { kind: 'gitlab', url: 'https://gitlab.test', create: () => fake.forge } },
-      groups: {
-        games: { forge: 'work', include: ['g/**'] },
-        puzzles: { forge: 'work', include: ['p/**'] },
-      },
-    }),
+    config: chatConfig,
     auth: headerAuth({
       roles: {
-        admin: [{ scope: { all: true }, actions: ['repos:read', 'releases:read', 'releases:run'] }],
+        admin: [
+          {
+            scope: { all: true },
+            actions: ['repos:read', 'releases:read', 'releases:run', 'ai:read', 'tasks:run'],
+          },
+        ],
         games: [{ scope: { groups: ['games'] }, actions: ['repos:read', 'releases:read'] }],
         puzzles: [{ scope: { groups: ['puzzles'] }, actions: ['repos:read'] }],
         none: [{ scope: { all: true }, actions: ['audit:read'] }],
+        coders: [{ scope: { groups: ['games'] }, actions: ['repos:read', 'analyses:read'] }],
+        mixed: [
+          { scope: { groups: ['games'] }, actions: ['repos:read', 'ai:read'] },
+          { scope: { groups: ['puzzles'] }, actions: ['repos:read'] },
+        ],
       },
     }),
     store,
@@ -124,6 +141,7 @@ beforeEach(async () => {
         artifacts,
         origin: { actor: run.actor, interactive: true },
         requester: run.requester,
+        ops: agentOpsAccess({ store, config: chatConfig, artifacts, now }, target, run.requester),
       })
     },
   })
@@ -153,6 +171,15 @@ const json = async <T>(response: Response, status = 200): Promise<T> => {
   expect(response.status).toBe(status)
   return (await response.json()) as T
 }
+
+const addMetrics = (kind: string, metrics: object) =>
+  store.analyses.add({
+    repo: { forge: 'work', path: 'g/app' },
+    kind,
+    createdAt: '2026-11-01T08:00:00.000Z',
+    data: {},
+    metrics,
+  })
 
 const createThread = async (body: Record<string, unknown>, headers = asAdmin) =>
   json<ChatThreadView>(await call('POST', '/chat/threads', headers, body), 201)
@@ -300,6 +327,7 @@ describe('team chat threads', () => {
       actor: 'header:omar',
       interactive: true,
       requester: { id: 'header:omar' },
+      subject: 'Arcade',
     })
     expect(reply?.target).toMatchObject({ forge: 'work', path: 'g/app', groups: ['games'] })
     expect(reply?.task).toMatchObject({
@@ -335,6 +363,10 @@ describe('team chat threads', () => {
         status: 'proposed',
         groupId: group!.id,
         budgetUsd: 3,
+        steps: [
+          { label: 'work:g/app', status: 'waiting', detail: 'Waiting for approval' },
+          { label: 'work:g/lib', status: 'waiting', detail: 'Waiting for approval' },
+        ],
       },
     ])
     expect(page.thread.replying).toBe(false)
@@ -381,6 +413,37 @@ describe('team chat threads', () => {
     )
     expect(transcript.ref).toBe(answer?.transcriptRef ?? '')
     expect(transcript.lines.map((line) => line.type)).toEqual(['assistant', 'tool-result'])
+  })
+
+  test('health in agent answers leaves out cells the asker cannot read', async () => {
+    serverDefaults = true
+    await addMetrics('coverage', { percent: 75, delta: 0.5, target: 60, files: 4, untested: 0 })
+    await addMetrics('audit', {
+      findings: 1,
+      severities: { critical: 1, high: 0, medium: 0, low: 0, unknown: 0 },
+      ignored: 0,
+      expired: 0,
+      resolved: 0,
+    })
+    respond = async (task) => {
+      const tool = task.toolsets
+        ?.flatMap((toolset) => toolset.tools)
+        .find((entry) => entry.name.endsWith('analysis_status'))
+      const text = await tool?.run(
+        { repo: 'work:g/app' },
+        { dir: task.dir, signal: new AbortController().signal },
+      )
+      return { text: text ?? 'no tool', turns: 2, costUsd: 0.01 }
+    }
+    const thread = await createThread({ title: 'Arcade', repo: 'work:g/app' })
+    await post(thread.id, '@holtkeeper how healthy is the app?', asCoder)
+    const answer = (await messages(thread.id)).messages.find(
+      (message) => message.authorType === 'agent',
+    )
+    expect(answer?.body).toContain('# Health of work:g/app')
+    expect(answer?.body).toContain('- coverage: 75% (+0.5 pt) · ok')
+    expect(answer?.body).not.toContain('security')
+    expect(answer?.body).not.toContain('critical')
   })
 
   test('team-wide threads refuse slash commands; repository and group threads run them', async () => {
@@ -625,5 +688,263 @@ describe('team chat threads', () => {
       repo: 'work:p/game',
     })
     expect(outside.status).toBe(400)
+  })
+})
+
+const threadList = async (headers: Record<string, string>, query = '') =>
+  json<ChatThreadList>(await call('GET', `/chat/threads${query}`, headers))
+const context = async (id: string, headers = asAdmin) =>
+  json<ChatThreadContextView>(await call('GET', `/chat/threads/${id}/context`, headers))
+
+const failedTaskCard = (repos: string[]) =>
+  taskCard(repos, 'Bump some-lib to 4.2.', {
+    status: 'failed',
+    steps: taskSteps(
+      repos.map((repo) => ({
+        repo,
+        status: 'failed' as const,
+        error: `boom in ${repo}`,
+        mergeRequest: { id: 7, url: `https://forge.test/${repo}/-/mr/7`, draft: false },
+      })),
+    ),
+    mergeRequests: repos.map((repo) => ({
+      repo,
+      id: 7,
+      url: `https://forge.test/${repo}/-/mr/7`,
+      draft: false,
+    })),
+  })
+
+describe('thread context, refs, mute and export', () => {
+  test('context repositories are stored and patched; repositories a viewer cannot read never show', async () => {
+    const team = await createThread({
+      title: 'Widget rollout',
+      contextRepos: ['work:g/app', 'work:p/box', 'work:g/app'],
+    })
+    expect(team.contextRepos).toEqual(['work:g/app', 'work:p/box'])
+    expect((await store.chat.getThread(team.id))?.contextRepos).toEqual([
+      'work:g/app',
+      'work:p/box',
+    ])
+    const seen = await json<ChatThreadView>(await call('GET', `/chat/threads/${team.id}`, asMember))
+    expect(seen.contextRepos).toEqual(['work:g/app'])
+
+    expect(
+      (
+        await call('PATCH', `/chat/threads/${team.id}`, asMember, {
+          contextRepos: ['work:p/box'],
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (await call('POST', '/chat/threads', asMember, { title: 'x', contextRepos: ['work:p/box'] }))
+        .status,
+    ).toBe(403)
+    expect(
+      (await call('POST', '/chat/threads', asAdmin, { title: 'x', contextRepos: ['nope:a/b'] }))
+        .status,
+    ).toBe(400)
+
+    const patched = await json<ChatThreadView>(
+      await call('PATCH', `/chat/threads/${team.id}`, asMember, { contextRepos: ['work:g/lib'] }),
+    )
+    expect(patched.contextRepos).toEqual(['work:g/lib'])
+    expect((await store.chat.getThread(team.id))?.contextRepos).toEqual([
+      'work:g/lib',
+      'work:p/box',
+    ])
+
+    await post(team.id, 'Compare with work:p/box and work:g/app, see [kb:7].', asAdmin)
+    const asked = await context(team.id, asMember)
+    expect(asked.repos).toEqual(['work:g/lib', 'work:g/app'])
+    expect(asked.hiddenRepoCount).toBe(1)
+    expect(JSON.stringify(asked)).not.toContain('p/box')
+    const page = await messages(team.id, asMember)
+    expect(page.messages[0]?.refs).toEqual([
+      { kind: 'repo', repo: 'work:g/app' },
+      { kind: 'note', id: '7' },
+    ])
+    expect((await messages(team.id)).messages[0]?.refs).toEqual([
+      { kind: 'repo', repo: 'work:p/box' },
+      { kind: 'repo', repo: 'work:g/app' },
+      { kind: 'note', id: '7' },
+    ])
+    expect((await context(team.id)).repos).toEqual(['work:g/lib', 'work:p/box', 'work:g/app'])
+    expect((await call('GET', `/chat/threads/${team.id}/context`, asNobody)).status).toBe(403)
+    const games = await createThread({ title: 'Games', group: 'games' })
+    expect((await call('GET', `/chat/threads/${games.id}/context`, asOutsider)).status).toBe(404)
+  })
+
+  test('the agent reads context repositories only within the asker grants', async () => {
+    const team = await createThread({
+      title: 'Widget rollout',
+      autoReply: true,
+      contextRepos: ['work:g/app', 'work:p/box'],
+    })
+    await post(team.id, 'Which one pins some-lib?', asMember)
+    await post(team.id, 'And now?', asAdmin)
+    expect(calls[0]?.task.prompt).toContain('- work:g/app')
+    expect(calls[0]?.task.prompt).not.toContain('p/box')
+    expect(calls[1]?.task.prompt).toContain('- work:p/box')
+  })
+
+  test('cost shows only with ai:read; counts, tools and participants show to every reader', async () => {
+    respond = () => ({ text: 'Look at work:g/app, [kb:3].', turns: 1, costUsd: 0.05 })
+    const thread = await createThread({ title: 'Arcade', repo: 'work:g/app', autoReply: true })
+    await post(thread.id, 'Hello?', asMember)
+    const full = await context(thread.id)
+    expect(full).toMatchObject({ messageCount: 2, costUsd: 0.05, repos: ['work:g/app'] })
+    expect(full.participants).toMatchObject([
+      { id: 'header:omar', label: 'Participant B', messages: 1 },
+    ])
+    const plain = await context(thread.id, asMember)
+    expect(plain.messageCount).toBe(2)
+    expect(plain).not.toHaveProperty('costUsd')
+    const reply = (await messages(thread.id, asMember)).messages.at(-1)
+    expect(reply).not.toHaveProperty('costUsd')
+    expect(reply?.refs).toEqual([
+      { kind: 'repo', repo: 'work:g/app' },
+      { kind: 'note', id: '3' },
+    ])
+    expect((await messages(thread.id)).messages.at(-1)?.costUsd).toBe(0.05)
+    expect((await context(thread.id, asMixed)).costUsd).toBe(0.05)
+    const team = await createThread({ title: 'Team', autoReply: true }, asMixed)
+    await post(team.id, 'Hi', asMixed)
+    expect(await context(team.id, asMixed)).not.toHaveProperty('costUsd')
+    expect(
+      (await threadList(asAdmin)).threads.find((each) => each.id === thread.id)?.messageCount,
+    ).toBe(2)
+  })
+
+  test('lists count archived threads and search titles', async () => {
+    await createThread({ title: 'Widget theming' })
+    await createThread({ title: 'Games widget', group: 'games' })
+    await createThread({ title: 'Puzzle box', repo: 'work:p/box' })
+    const old = await createThread({ title: 'Old widget notes' })
+    await call('PATCH', `/chat/threads/${old.id}`, asAdmin, { archived: true })
+
+    const all = await threadList(asAdmin)
+    expect(all).toMatchObject({ archivedCount: 1 })
+    expect(all).not.toHaveProperty('otherTeams')
+    expect(all.threads).toHaveLength(3)
+    const found = await threadList(asAdmin, '?q=%20WIDGET%20')
+    expect(found.threads.map((each) => each.title)).toEqual(['Games widget', 'Widget theming'])
+    expect(found.archivedCount).toBe(1)
+    expect((await threadList(asAdmin, '?q=puzzle')).archivedCount).toBe(0)
+    expect(
+      (await threadList(asAdmin, '?archived=true&q=widget')).threads.map((t) => t.title),
+    ).toEqual(['Old widget notes'])
+
+    expect((await threadList(asMixed)).threads.map((each) => each.title)).toEqual([
+      'Puzzle box',
+      'Games widget',
+      'Widget theming',
+    ])
+  })
+
+  test('task cards leave out repositories the viewer cannot read, in messages and export', async () => {
+    const team = await createThread({ title: 'Widget bump' })
+    for (const [index, repos] of [['work:g/app', 'work:p/box'], ['work:p/box']].entries())
+      // oxlint-disable-next-line no-await-in-loop -- messages keep their order
+      await store.chat.addMessage({
+        id: `task-${index}`,
+        threadId: team.id,
+        authorType: 'agent',
+        body: '',
+        card: failedTaskCard(repos),
+        mentions: [],
+        refs: [],
+        createdAt: now().toISOString(),
+      })
+
+    const seen = (await messages(team.id, asMember)).messages
+    expect(JSON.stringify(seen)).not.toContain('p/box')
+    expect(seen[0]?.card).toMatchObject({
+      subtitle: 'work:g/app',
+      blocks: [{ type: 'task', repos: ['work:g/app'], steps: [{ label: 'work:g/app' }] }],
+    })
+    expect(seen[1]?.card?.blocks).toEqual([
+      { type: 'text', text: 'A change in repositories you cannot see.' },
+    ])
+    expect(JSON.stringify((await messages(team.id)).messages)).toContain('boom in work:p/box')
+
+    const exported = await (await call('GET', `/chat/threads/${team.id}/export`, asMember)).text()
+    expect(exported).toContain('boom in work:g/app')
+    expect(exported).not.toContain('p/box')
+    expect(exported).toContain('A change in repositories you cannot see.')
+  })
+
+  test('mute is per viewer and keeps the thread out of the unread badge', async () => {
+    const thread = await createThread({ title: 'Arcade', repo: 'work:g/app' })
+    await post(thread.id, 'Ping', asMember)
+    const muted = await json<ChatThreadView>(
+      await call('PATCH', `/chat/threads/${thread.id}`, asAdmin, { muted: true }),
+    )
+    expect(muted).toMatchObject({ muted: true, unread: 1 })
+    expect(await json<ChatUnreadView>(await call('GET', '/chat/unread', asAdmin))).toEqual({
+      threads: {},
+      total: 0,
+    })
+    expect((await threadList(asAdmin)).threads[0]?.muted).toBe(true)
+    expect((await threadList(asMember)).threads[0]?.muted).toBe(false)
+    expect((await store.audit.list({})).events).not.toContainEqual(
+      expect.objectContaining({ action: 'chat.thread.update' }),
+    )
+    await call('PATCH', `/chat/threads/${thread.id}`, asAdmin, { muted: false })
+    expect((await json<ChatUnreadView>(await call('GET', '/chat/unread', asAdmin))).total).toBe(1)
+    await call('PATCH', `/chat/threads/${thread.id}`, asAdmin, { title: 'Arcade 2' })
+    expect((await store.audit.list({})).events).toContainEqual(
+      expect.objectContaining({ action: 'chat.thread.update' }),
+    )
+  })
+
+  test('export downloads the thread as Markdown for readers only', async () => {
+    const thread = await createThread({ title: 'Widget / Theming', repo: 'work:g/app' })
+    await post(thread.id, 'How do we theme the **widget**?', asMember)
+    await post(thread.id, '/release')
+    const response = await call('GET', `/chat/threads/${thread.id}/export`, asAdmin)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/markdown')
+    expect(response.headers.get('content-disposition')).toBe(
+      'attachment; filename="widget-theming.md"',
+    )
+    const text = await response.text()
+    expect(text).toStartWith('# Widget / Theming\n\nThread about work:g/app · 3 messages')
+    expect(text).toContain('**Omar Vale (Participant B)** · 2026-11-01 09:')
+    expect(text).toContain('How do we theme the **widget**?')
+    expect(text).toContain('**Holtkeeper (system)**')
+    expect(text).toContain('#### ')
+    expect((await call('GET', `/chat/threads/${thread.id}/export`, asOutsider)).status).toBe(404)
+  })
+
+  test('task cards update step by step, cancel from the card and never carry an approve action', async () => {
+    respond = async (task) => {
+      const chat = task.toolsets?.find((toolset) => toolset.name === 'chat')
+      await chat?.tools[0]?.run(
+        { repos: ['work:g/app'], title: 'Bump some-lib', summary: 'Bump some-lib to 4.2.' },
+        { dir: task.dir, signal: new AbortController().signal },
+      )
+      return { text: 'Proposed.', turns: 1, costUsd: 0.01 }
+    }
+    const thread = await createThread({ title: 'Arcade', repo: 'work:g/app' })
+    await post(thread.id, '@holtkeeper bump it', asMember)
+    const [group] = await store.tasks.listGroups()
+    const cardMessage = (await messages(thread.id)).messages.at(-1)
+    expect(cardMessage?.refs).toEqual([
+      { kind: 'task', id: group!.id },
+      { kind: 'repo', repo: 'work:g/app' },
+    ])
+    expect(cardMessage?.card?.blocks.map((block) => block.type)).toEqual(['task'])
+
+    await json(await call('POST', `/task-groups/${group!.id}/cancel`, asAdmin))
+    const updated = (await messages(thread.id)).messages.find((m) => m.id === cardMessage?.id)
+    expect(updated?.card?.title).toBe('Change cancelled')
+    expect(updated?.card?.blocks[0]).toMatchObject({
+      type: 'task',
+      status: 'cancelled',
+      steps: [{ label: 'work:g/app', status: 'skipped', detail: 'Cancelled' }],
+    })
+    expect(updated?.updatedAt).toBeDefined()
+    expect(JSON.stringify(updated?.card)).not.toContain('approve')
   })
 })

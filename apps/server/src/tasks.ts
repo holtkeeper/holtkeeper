@@ -1,17 +1,19 @@
 import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
 import { ToolError } from '@holtkeeper/agent-tools'
-import type { AgentTaskGroupView, AgentTaskView } from '@holtkeeper/api'
-import { type TaskCardMergeRequest, taskCard } from '@holtkeeper/chat'
+import type { AgentTaskGroupView, AgentTaskView, ForbiddenError } from '@holtkeeper/api'
+import { type TaskCardMergeRequest, taskCard, taskSteps } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
 import type { FixProposer } from '@holtkeeper/propagate'
 import {
   type AgentTask,
   type AgentTaskCi,
+  type AgentTaskDiffstat,
   type AgentTaskGroup,
   type AgentTaskKind,
   type AgentTaskSource,
   type AgentTaskStatus,
   type AnalysisRecord,
+  type ChatMessageRef,
   type Job,
   type JobTrigger,
   agentGroupStatus,
@@ -29,7 +31,7 @@ import {
 } from '@holtkeeper/write-task'
 import { z } from 'zod'
 
-import { type ServerDeps, forgeFor, repoTarget } from './context.ts'
+import { type ServerDeps, forgeFor, repoKey, repoTarget, ForbiddenToolError } from './context.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
 import type { TaskToolsAccess } from './tools/tasks.ts'
 import { canSeeCatalog, crossTeamPolicy } from './visibility.ts'
@@ -54,14 +56,21 @@ const writeKinds: Record<AgentTaskKind, WriteTaskOptions['kind']> = {
   tests: 'tests',
 }
 
-/** Why a task operation was refused; `status` is the HTTP status routes answer with. */
+/**
+ * Why a task operation was refused; `status` is the HTTP status routes answer with. A 403 carries
+ * the missing permission, with the repository key as the caller passed it.
+ */
 export class TaskError extends Error {
   override name = 'TaskError'
   readonly status: 400 | 403 | 404 | 409
+  readonly missing?: ForbiddenError['missing']
 
-  constructor(status: 400 | 403 | 404 | 409, message: string) {
+  constructor(status: 400 | 404 | 409, message: string)
+  constructor(status: 403, message: string, missing: ForbiddenError['missing'])
+  constructor(status: 400 | 403 | 404 | 409, message: string, missing?: ForbiddenError['missing']) {
     super(message)
     this.status = status
+    this.missing = missing
   }
 }
 
@@ -99,8 +108,6 @@ export type TaskDeps = Pick<ServerDeps, 'store' | 'config' | 'now'> & {
 
 const shortId = (prefix: string) =>
   `${prefix}${crypto.randomUUID().replaceAll('-', '').slice(0, 7)}`
-
-const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
 const parseKey = (key: string): RepoRef | undefined => {
   const separator = key.indexOf(':')
@@ -141,19 +148,80 @@ const targetOf = (deps: TaskDeps, key: string): RepoTarget => {
 const branchOf = (task: Pick<AgentTask, 'groupId' | 'title'>) =>
   taskBranch(task.groupId, task.title)
 
+const HUNK = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/
+
+/**
+ * Files, added and removed lines of a unified diff (`git diff` output, or one file's hunks as
+ * forges return them; then `files` counts nothing). Hunk line counts decide where a hunk ends, so
+ * content lines that look like headers are counted as content.
+ */
+export function diffstatOf(patch: string): AgentTaskDiffstat {
+  const stat = { files: 0, additions: 0, deletions: 0 }
+  let oldLeft = 0
+  let newLeft = 0
+  let gitHeader = false
+  for (const line of patch.split('\n')) {
+    if (oldLeft > 0 || newLeft > 0) {
+      if (line.startsWith('+')) {
+        stat.additions++
+        newLeft--
+      } else if (line.startsWith('-')) {
+        stat.deletions++
+        oldLeft--
+      } else if (!line.startsWith('\\')) {
+        oldLeft--
+        newLeft--
+      }
+      continue
+    }
+    const hunk = HUNK.exec(line)
+    if (hunk) {
+      oldLeft = hunk[1] === undefined ? 1 : Number(hunk[1])
+      newLeft = hunk[2] === undefined ? 1 : Number(hunk[2])
+    } else if (line.startsWith('diff --git ')) {
+      stat.files++
+      gitHeader = true
+    } else if (line.startsWith('+++ ')) {
+      if (!gitHeader) stat.files++
+      gitHeader = false
+    }
+  }
+  return stat
+}
+
+/** The size of a task's change: its merge request's when read, else the patch it carries. */
+function taskDiffstat(task: AgentTask, groupPatch: string | undefined): AgentTaskView['diffstat'] {
+  const read = task.mergeRequest?.diffstat
+  if (read) return { ...read, source: 'merge-request' }
+  const patch = task.patch ?? groupPatch
+  return patch === undefined ? undefined : { ...diffstatOf(patch), source: 'patch' }
+}
+
 const taskView = (
-  { patch: _patch, ...task }: AgentTask,
+  task: AgentTask,
+  groupPatch: string | undefined,
   allowed: AgentTaskView['can'],
-): AgentTaskView => ({
-  ...task,
-  branch: branchOf(task),
-  can: allowed,
-})
+): AgentTaskView => {
+  const { patch: _patch, ...rest } = task
+  const diffstat = taskDiffstat(task, groupPatch)
+  return {
+    ...rest,
+    branch: branchOf(task),
+    ci: task.status === 'mr-open' ? (task.mergeRequest?.ci ?? 'pending') : 'none',
+    ...(diffstat && { diffstat }),
+    can: allowed,
+  }
+}
 
 const retryableStatuses: ReadonlySet<AgentTaskStatus> = new Set(['failed', 'cancelled'])
 
 const isActive = (task: Pick<AgentTask, 'status'>) =>
   !finalTaskStatuses.includes(task.status) && task.status !== 'mr-open'
+
+const retryable = (task: Pick<AgentTask, 'status' | 'mergeRequest' | 'jobId'>) =>
+  retryableStatuses.has(task.status) &&
+  task.jobId !== undefined &&
+  task.mergeRequest?.state !== 'open'
 
 /** A group with its tasks, derived status and what `principal` may do with it. */
 export async function groupView(
@@ -192,16 +260,18 @@ export async function groupView(
   const views: AgentTaskView[] = []
   for (const task of all)
     views.push(
-      taskView(task, {
+      taskView(task, patch, {
         retry:
-          retryableStatuses.has(task.status) &&
-          task.mergeRequest?.state !== 'open' &&
+          retryable(task) &&
           // oxlint-disable-next-line no-await-in-loop -- answers are cached per repository
           (await mayRun(task.repo)),
         cancel: isActive(task) && mayCancel(task),
       }),
     )
   const active = all.filter(isActive)
+  const mayRetryAll = await Promise.all(
+    all.filter(retryable).map(async (task) => mayRun(task.repo)),
+  )
   return {
     ...rest,
     status,
@@ -213,6 +283,11 @@ export async function groupView(
       cancel:
         principal !== undefined &&
         active.length > 0 &&
+        (principal.id === group.proposedBy || all.every(mayCancel)),
+      retry: mayRetryAll.length > 0 && mayRetryAll.every(Boolean),
+      reject:
+        status === 'proposed' &&
+        principal !== undefined &&
         (principal.id === group.proposedBy || all.every(mayCancel)),
     },
   }
@@ -250,10 +325,13 @@ export async function createTaskGroup(
     const target = targetOf(deps, key)
     // oxlint-disable-next-line no-await-in-loop -- few targets, settings are cached by the store
     if (!(await canSeeTaskRepo(deps, principal, target)))
-      throw new TaskError(403, `cannot see ${key}`)
+      throw new TaskError(403, `cannot see ${key}`, { action: 'repos:read', target: key })
     // oxlint-disable-next-line no-await-in-loop -- see above
     if (request.patch && !(await canRunTask(deps, principal, target)))
-      throw new TaskError(403, `proposing a patch needs tasks:run on ${key}`)
+      throw new TaskError(403, `proposing a patch needs tasks:run on ${key}`, {
+        action: 'tasks:run',
+        target: key,
+      })
   }
 
   const at = deps.now().toISOString()
@@ -392,7 +470,10 @@ async function assertMayRun(
     const target = targetOf(deps, task.repo)
     // oxlint-disable-next-line no-await-in-loop -- few targets, settings are cached by the store
     if (!(await canRunTask(deps, principal, target)))
-      throw new TaskError(403, `missing tasks:run on ${task.repo}`)
+      throw new TaskError(403, `missing tasks:run on ${task.repo}`, {
+        action: 'tasks:run',
+        target: task.repo,
+      })
     // oxlint-disable-next-line no-await-in-loop -- see above
     if (await deps.readOnly?.(target))
       throw new TaskError(409, `${task.repo} is read-only for Holtkeeper`)
@@ -540,7 +621,8 @@ export async function approveTaskGroup(
 /**
  * Runs a `failed` or `cancelled` task again on the same branch, as a new job for `principal`,
  * under the same checks as approving (`tasks.write`, `tasks:run`, read-only, weekly spend). A
- * task whose merge request is still open is refused; people work on that one in the forge.
+ * task whose merge request is still open is refused; people work on that one in the forge. A task
+ * that never ran (cancelled or rejected before approval) is refused too: retrying is no approval.
  */
 export async function retryTask(
   deps: TaskDeps,
@@ -551,8 +633,7 @@ export async function retryTask(
   const task = await deps.store.tasks.get(taskId)
   if (!task) throw new TaskError(404, 'no such task')
   const { group, tasks } = await loadGroup(deps, task.groupId)
-  if (!retryableStatuses.has(task.status) || task.mergeRequest?.state === 'open')
-    throw new TaskError(409, `a ${task.status} task cannot run again`)
+  if (!retryable(task)) throw new TaskError(409, `a ${task.status} task cannot run again`)
   const perRepo = await assertMayRun(deps, principal, group, tasks, [task])
   const at = deps.now().toISOString()
   const updated: AgentTaskGroup = {
@@ -577,6 +658,72 @@ export async function retryTask(
 }
 
 /**
+ * Runs every `failed` or `cancelled` task of the group again (those that ran once and have no
+ * open merge request), as new jobs for `principal`, under the same checks as `retryTask` for all of them at
+ * once: a refusal on any target retries none.
+ */
+export async function retryTaskGroup(
+  deps: TaskDeps,
+  principal: Principal,
+  groupId: string,
+  trigger: JobTrigger = 'manual',
+): Promise<AgentTaskGroupView> {
+  const { group, tasks } = await loadGroup(deps, groupId)
+  const pending = tasks.filter(retryable)
+  if (pending.length === 0) throw new TaskError(409, 'nothing in this task group can run again')
+  const perRepo = await assertMayRun(deps, principal, group, tasks, pending)
+  const updated: AgentTaskGroup = {
+    ...group,
+    ...(interactiveTriggers.includes(trigger) && { budgetClass: 'interactive' as const }),
+    updatedAt: deps.now().toISOString(),
+  }
+  const started = await startTasks(
+    deps,
+    principal,
+    updated,
+    pending,
+    [...retryableStatuses],
+    perRepo,
+    jobTriggerOf(updated, trigger),
+  )
+  if (started === 0) throw new TaskError(409, 'the task group changed meanwhile; reload it')
+  await deps.store.tasks.putGroup(updated)
+  const view = await groupView(deps, principal, updated)
+  await syncTaskCard(deps, view)
+  return view
+}
+
+/**
+ * Rejects a group that still waits for approval: cancels it as `cancelTaskGroup` does, with the
+ * same permissions. A group that is no longer `proposed` is refused.
+ */
+export async function rejectTaskGroup(
+  deps: TaskDeps,
+  principal: Principal,
+  groupId: string,
+): Promise<AgentTaskGroupView> {
+  const { tasks } = await loadGroup(deps, groupId)
+  if (agentGroupStatus(tasks) !== 'proposed')
+    throw new TaskError(409, 'only a proposed task group can be rejected')
+  return cancelTaskGroup(deps, principal, groupId)
+}
+
+/**
+ * How many task groups `principal` sees (`canSeeGroup`) that wait for approval: any task still
+ * `proposed`. Reads only proposed tasks and their groups.
+ */
+export async function countGroupsAwaitingApproval(
+  deps: Pick<TaskDeps, 'store' | 'config'>,
+  principal: Principal,
+): Promise<number> {
+  const proposed = await deps.store.tasks.list({ status: ['proposed'] })
+  const groups = await Promise.all(
+    [...new Set(proposed.map((task) => task.groupId))].map((id) => deps.store.tasks.getGroup(id)),
+  )
+  return groups.filter((group) => group && canSeeGroup(deps, principal, group)).length
+}
+
+/**
  * Cancels the tasks of the group that have not opened a merge request or ended (only `taskId`
  * when given), and their queued or running jobs. The proposer may cancel their own group; anyone
  * else needs `tasks:run` on every target (on the one task's repository for a single task). Open
@@ -595,7 +742,8 @@ export async function cancelTaskGroup(
   const allowed = taskId ? chosen.every((task) => task.can.cancel) : before.can.cancel
   if (!allowed) {
     const active = chosen.some(isActive)
-    throw new TaskError(active ? 403 : 409, active ? 'missing tasks:run' : 'nothing to cancel')
+    if (!active) throw new TaskError(409, 'nothing to cancel')
+    throw new TaskError(403, 'missing tasks:run', { action: 'tasks:run' })
   }
   const ids = new Set(chosen.map((task) => task.id))
   const at = deps.now().toISOString()
@@ -632,7 +780,38 @@ const mergeRequestsOf = (view: AgentTaskGroupView): TaskCardMergeRequest[] =>
       : [],
   )
 
-/** Rewrites the chat card of a group that came from a chat thread with its current state. */
+const stepsOf = (view: AgentTaskGroupView) =>
+  taskSteps(
+    view.repos.flatMap((repo) => {
+      const task = view.tasks.find((each) => each.repo === repo)
+      if (!task) return []
+      return [
+        {
+          repo,
+          status: task.status,
+          ...(task.error && { error: task.error }),
+          ...(task.mergeRequest && {
+            mergeRequest: {
+              id: task.mergeRequest.id,
+              url: task.mergeRequest.url,
+              draft: task.mergeRequest.draft,
+            },
+          }),
+        },
+      ]
+    }),
+  )
+
+/** What a group's chat card refers to: the task group and each of its repositories. */
+const cardRefs = (view: AgentTaskGroupView): ChatMessageRef[] => [
+  { kind: 'task', id: view.id },
+  ...view.repos.map((repo) => ({ kind: 'repo' as const, repo })),
+]
+
+/**
+ * Rewrites the chat card of a group that came from a chat thread with its current state: status,
+ * a step per repository and merge requests; the message's refs follow the group's repositories.
+ */
 async function syncTaskCard(deps: Pick<TaskDeps, 'store' | 'now'>, view: AgentTaskGroupView) {
   if (view.source.type !== 'chat' || !view.source.messageId) return
   const message = await deps.store.chat.getMessage(view.source.messageId)
@@ -645,16 +824,19 @@ async function syncTaskCard(deps: Pick<TaskDeps, 'store' | 'now'>, view: AgentTa
       groupId: view.id,
       ...(block.budgetUsd !== undefined && { budgetUsd: block.budgetUsd }),
       mergeRequests: mergeRequestsOf(view),
+      steps: stepsOf(view),
     }),
+    refs: cardRefs(view),
     updatedAt: deps.now().toISOString(),
   })
 }
 
-/** Posts `body` in the chat thread a group came from, as Holtkeeper. */
+/** Posts `body` with `refs` in the chat thread a group came from, as Holtkeeper. */
 async function postInThread(
   deps: Pick<TaskDeps, 'store' | 'now'>,
   group: AgentTaskGroup,
   body: string,
+  refs: ChatMessageRef[],
 ) {
   if (group.source.type !== 'chat') return
   if (!(await deps.store.chat.getThread(group.source.threadId))) return
@@ -665,12 +847,14 @@ async function postInThread(
     authorType: 'system',
     body,
     mentions: [],
+    refs,
   })
 }
 
 /**
- * Posts a proposal card for a new group in the thread it came from and remembers the card's
- * message, so later status changes update the card in place.
+ * Posts a proposal card for a new group in the thread it came from, with a step per repository
+ * and refs to the group and its repositories, and remembers the card's message, so later status
+ * changes update the card in place.
  */
 export async function postTaskCard(
   deps: Pick<TaskDeps, 'store' | 'now'>,
@@ -690,7 +874,9 @@ export async function postTaskCard(
       status: view.status,
       groupId: view.id,
       ...(budgetUsd !== undefined && { budgetUsd }),
+      steps: stepsOf(view),
     }),
+    refs: cardRefs(view),
   })
   const group = await deps.store.tasks.getGroup(view.id)
   if (group)
@@ -829,12 +1015,17 @@ export async function taskJobFinished(
       deps,
       updated.group,
       `Opened ${mr.draft ? 'draft ' : ''}merge request [!${mr.id}](${mr.url}) in \`${updated.task.repo}\`.`,
+      [
+        { kind: 'mr', repo: updated.task.repo, iid: mr.id },
+        { kind: 'task', id: updated.group.id, repo: updated.task.repo },
+      ],
     )
   else if (outcome.status === 'failed')
     await postInThread(
       deps,
       updated.group,
       `The change in \`${updated.task.repo}\` failed: ${outcome.error ?? 'unknown error'}`,
+      [{ kind: 'task', id: updated.group.id, repo: updated.task.repo }],
     )
 }
 
@@ -856,13 +1047,23 @@ const ciOf = (status: string | undefined): AgentTaskCi => {
   }
 }
 
+/** The size of a merge request from the files the forge lists. */
+const forgeDiffstat = (files: readonly { diff: string }[]): AgentTaskDiffstat => {
+  const lines = files.map((file) => diffstatOf(file.diff))
+  return {
+    files: files.length,
+    additions: lines.reduce((sum, each) => sum + each.additions, 0),
+    deletions: lines.reduce((sum, each) => sum + each.deletions, 0),
+  }
+}
+
 /** How long merge request state and CI are trusted before the forge is asked again. */
 const MERGE_REQUEST_CHECK_MS = 60_000
 
 /**
  * Reads state and CI of the open merge requests of the group's tasks from the forge, at most once
- * per `MERGE_REQUEST_CHECK_MS` each: a merged one makes its task `done`, a closed one
- * `cancelled`. Forge failures leave the task as it was.
+ * per `MERGE_REQUEST_CHECK_MS` each, and their diffstat whenever the head commit moved: a merged
+ * one makes its task `done`, a closed one `cancelled`. Forge failures leave the task as it was.
  */
 export async function refreshTaskGroup(deps: TaskDeps, groupId: string): Promise<void> {
   const { group, tasks } = await loadGroup(deps, groupId)
@@ -883,6 +1084,9 @@ export async function refreshTaskGroup(deps: TaskDeps, groupId: string): Promise
       const state = current?.state ?? mr.state ?? 'open'
       const status: AgentTaskStatus =
         state === 'merged' ? 'done' : state === 'closed' ? 'cancelled' : 'mr-open'
+      const stale = current?.headSha !== undefined && current.headSha !== mr.diffSha
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      const diff = stale ? await forge.getMergeRequestDiff?.(repo.path, mr.id) : undefined
       // oxlint-disable-next-line no-await-in-loop -- see above
       await deps.store.tasks.put({
         ...task,
@@ -893,6 +1097,7 @@ export async function refreshTaskGroup(deps: TaskDeps, groupId: string): Promise
           ...(current && { draft: current.draft }),
           ci: ciOf(pipeline?.status),
           checkedAt: deps.now().toISOString(),
+          ...(diff && current && { diffstat: forgeDiffstat(diff.files), diffSha: current.headSha }),
         },
         ...(state === 'closed' && { error: 'the merge request was closed' }),
         updatedAt: deps.now().toISOString(),
@@ -972,6 +1177,10 @@ export async function requestRepository(
     deps,
     group,
     `The change in \`${task.repo}\` asks to also change \`${input.target}\`: ${input.reason}`,
+    [
+      { kind: 'task', id: group.id, repo: task.repo },
+      { kind: 'repo', repo: input.target },
+    ],
   )
   return `Asked people to add ${input.target}. It is not part of this run; continue with this repository.`
 }
@@ -996,7 +1205,7 @@ export async function decideRepoRequest(
     !(await canRunTask(deps, principal, target)) &&
     !(principal.id === group.proposedBy && !approve)
   )
-    throw new TaskError(403, `missing tasks:run on ${repo}`)
+    throw new TaskError(403, `missing tasks:run on ${repo}`, { action: 'tasks:run', target: repo })
   const at = deps.now().toISOString()
   const decided: AgentTaskGroup = {
     ...group,
@@ -1092,7 +1301,10 @@ export function taskToolsAccess(
           return { group: proposed, started: false, reason: error.message }
         }
       } catch (error) {
-        if (error instanceof TaskError) throw new ToolError(error.message)
+        if (error instanceof TaskError)
+          throw error.missing
+            ? new ForbiddenToolError(error.message, error.missing.action, error.missing.target)
+            : new ToolError(error.message)
         throw error
       }
     },
@@ -1113,7 +1325,11 @@ export function taskToolsAccess(
         throw new ToolError(`The task in ${task.repo} has no open merge request.`)
       const target = targetOf(deps, task.repo)
       if (!options.mayRun || !(await canRunTask(deps, principal, target)))
-        throw new ToolError(`You may not request reviews in ${task.repo} (needs tasks:run).`)
+        throw new ForbiddenToolError(
+          `You may not request reviews in ${task.repo} (needs tasks:run).`,
+          'tasks:run',
+          task.repo,
+        )
       const job = await deps.store.jobs.enqueue({
         analyzer: 'review',
         repo: target,

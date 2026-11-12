@@ -32,7 +32,7 @@ export default defineConfig({
 
 ### Removed keys
 
-`removedConfigKeys` lists what a config file no longer takes, with where it is edited now: `forges`, `groups`, `repos`, `plugins`, `jobs.schedules`, `jobs.onTag`, `jobs.onPush`, `jobs.onMergeRequest`, `jobs.onNewRepo`, `jobs.onLabel`, `jobs.commands`, `jobs.botUsername` and `jobs.webhooks`. `parseConfigFile` and `loadConfig` warn once per such key (through `warn`, default `console.warn`) and ignore it; nothing is imported.
+`removedConfigKeys` lists what a config file no longer takes, with where it is edited now (the panel place and its path from [@holtkeeper/web-paths](../../web-paths/docs/README.md), e.g. `Settings › Integrations, /settings/integrations`): `forges`, `groups`, `repos`, `plugins`, `jobs.schedules`, `jobs.onTag`, `jobs.onPush`, `jobs.onMergeRequest`, `jobs.onNewRepo`, `jobs.onLabel`, `jobs.commands`, `jobs.botUsername` and `jobs.webhooks`. `parseConfigFile` and `loadConfig` warn once per such key (through `warn`, default `console.warn`) and ignore it; nothing is imported.
 
 ### Effective config
 

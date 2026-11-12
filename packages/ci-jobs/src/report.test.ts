@@ -4,7 +4,8 @@ import type { Block } from '@holtkeeper/report'
 
 import { at, quarter } from '../test/history.ts'
 import { analyzeCiJobs } from './analyze.ts'
-import { ciJobsAnalysis, ciJobsReport } from './report.ts'
+import { problemJobs } from './problems.ts'
+import { ciJobsAnalysis, ciJobsMetrics, ciJobsReport } from './report.ts'
 import type { CiJobsData } from './types.ts'
 
 const data = (records = quarter()): CiJobsData => ({
@@ -90,5 +91,33 @@ describe('ciJobsReport', () => {
     const report = ciJobsAnalysis.toReport(record(old))
     expect(report.sections.map((s) => s.id)).toEqual(['outdated'])
     expect(ciJobsAnalysis.toReport(record(data()), record(old)).metrics[0]?.delta).toBeUndefined()
+  })
+})
+
+describe('ci-jobs metrics', () => {
+  test('status follows the worst problem; idle without pipelines', () => {
+    const current = data()
+    const metrics = ciJobsMetrics(current)
+    expect(metrics).toMatchObject({
+      ref: 'main',
+      pipelines: current.pipelines.count,
+      successRate: current.pipelines.successRate,
+      median: current.pipelines.duration.median,
+      queue: current.pipelines.queue.median,
+    })
+    expect(metrics.status).toBe(
+      metrics.failing ? 'failing' : metrics.flaky ? 'flaky' : metrics.slower ? 'slower' : 'healthy',
+    )
+    expect(metrics.failing + metrics.flaky + metrics.slower).toBeGreaterThan(0)
+    expect(metrics.weeks).toEqual(current.weeks.map((week) => week.median ?? null))
+    expect(metrics.problems).toBe(problemJobs(current).length)
+    expect(metrics.outcomes).toEqual(current.pipelines.outcomes)
+    expect(ciJobsMetrics(data([]))).toMatchObject({
+      status: 'idle',
+      pipelines: 0,
+      failing: 0,
+      flaky: 0,
+      slower: 0,
+    })
   })
 })

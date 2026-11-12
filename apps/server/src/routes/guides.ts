@@ -1,16 +1,29 @@
-import { type Action, type Principal, type RepoTarget, can } from '@holtkeeper/access'
+import {
+  type Action,
+  type Principal,
+  type RepoTarget,
+  type Scope,
+  can,
+  scopeCoversRepo,
+} from '@holtkeeper/access'
 import type {
   FamilyList,
   FamilySuggestionList,
+  GuideChainView,
+  GuideGeneratedHistory,
   GuidePreview,
+  GuideRepoFilesView,
   GuideScopeView,
   GuideSectionDetail,
   Job,
+  KnowledgeCounts,
+  KnowledgeSpaceCounts,
 } from '@holtkeeper/api'
 import type { HoltkeeperConfig } from '@holtkeeper/core'
 import {
   type GuideScope,
   type RepoSignals,
+  buildGuideChain,
   createGuideResolver,
   guideScopeKey,
   guideSections,
@@ -18,11 +31,19 @@ import {
   isGuideSection,
   isGuideTask,
   parseGuideScope,
+  readRepoRuleFiles,
+  repoDocsOf,
   repoKey,
   suggestFamilies,
   suggestionKey,
 } from '@holtkeeper/guide'
-import { generatedSections, pendingGenerated } from '@holtkeeper/guide-generator'
+import {
+  generatedSections,
+  pendingGenerated,
+  rejectedHashes,
+  rememberGuideRejection,
+} from '@holtkeeper/guide-generator'
+import { GUIDELINE_FILES } from '@holtkeeper/review'
 import {
   type AnalysisStore,
   type Family,
@@ -43,11 +64,15 @@ import {
   type Env,
   type ServerDeps,
   authorize,
+  forgeFor,
   parseRepo,
   principalOf,
   readBody,
   repoTarget,
+  ForbiddenException,
 } from '../context.ts'
+import { listedRepos } from '../updates.ts'
+import { canReadShared, crossTeamPolicy, isSharedEntry } from '../visibility.ts'
 import { peopleOf } from './avatars.ts'
 
 const putSectionSchema = z.object({
@@ -57,6 +82,12 @@ const putSectionSchema = z.object({
 })
 
 const acceptSchema = z.object({ inputHash: z.string().min(1).optional() })
+
+const rejectSchema = z.object({
+  scope: z.string().min(1).max(600),
+  section: z.enum(guideSections),
+  inputHash: z.string().min(1).max(200),
+})
 
 const regenerateSchema = z.object({
   sections: z.array(z.enum(generatedSections)).min(1).optional(),
@@ -88,6 +119,29 @@ const emptySection = (scope: GuideScopeKey, section: GuideSectionName): GuideSec
   version: 0,
   learnings: [],
 })
+
+/** The section without generated text waiting for a person whose hash was rejected. */
+const withoutRejected = (section: GuideSection, rejected: ReadonlySet<string>): GuideSection => {
+  if (section.proposal && rejected.has(section.proposal.inputHash)) {
+    const { proposal: _, ...rest } = section
+    return rest
+  }
+  if (section.generated?.status === 'proposed' && rejected.has(section.generated.inputHash)) {
+    const { generated: _, ...rest } = section
+    return rest
+  }
+  return section
+}
+
+const namesGroup = (scope: Scope, group: string) =>
+  scope.groups?.some((match) =>
+    typeof match === 'string' ? match === group : match.includes(group),
+  ) ?? false
+
+const namesRepo = (scope: Scope, key: string) => {
+  const path = key.slice(key.indexOf(':') + 1)
+  return scope.repos?.some((pattern) => pattern === key || pattern === path) ?? false
+}
 
 const human = (section: GuideSection | undefined) =>
   section && { rules: section.rules, steering: section.steering }
@@ -166,9 +220,11 @@ const sectionParam = (c: AppContext): GuideSectionName => {
   return section
 }
 
-const ensure = (ok: boolean, action: Action) => {
-  if (!ok) throw new HTTPException(403, { message: `missing permission ${action}` })
+const ensure = (ok: boolean, action: Action, target?: string) => {
+  if (!ok) throw new ForbiddenException(action, target)
 }
+
+const scopeRepo = (scope: GuideScope) => (scope.kind === 'repo' ? repoKey(scope) : undefined)
 
 const labelOf = (scope: GuideScope, family?: Family) =>
   scope.kind === 'all'
@@ -203,11 +259,14 @@ const auditEdit = (
 
 /**
  * The Guide: team rules per scope (`all`, group, family, repository) and section, their revisions,
- * the effective prompt of a repository, and families with suggestions. Reading needs
+ * the generated history, the layered chain and effective prompt of a repository (its rules files
+ * read through the forge at the default branch head, cached by that sha), Knowledge counts per
+ * space, and families with suggestions. Reading needs
  * `knowledge:read` on the scope; editing `all`, a group or a family needs `settings:write` on it
  * (for a family: on every member), editing a repository's rules `knowledge:write` on it.
- * Accepting a repository's generated text needs `knowledge:write`; regenerating it (a `guide` job)
- * also `analyses:run`.
+ * Accepting or rejecting a repository's generated text needs `knowledge:write`; regenerating it (a
+ * `guide` job) also `analyses:run`. Rejected text stays stored (`rememberGuideRejection` names it)
+ * but no longer shows as waiting, and the generator does not propose it again.
  */
 export function guideRoutes(deps: ServerDeps) {
   const { store, config, now, analyzers } = deps
@@ -221,6 +280,11 @@ export function guideRoutes(deps: ServerDeps) {
   }
 
   const permitted = guideScopePermission(config)
+
+  const visible = async (section: GuideSection) =>
+    section.scope.startsWith('repo:') && pendingGenerated(section)
+      ? withoutRejected(section, await rejectedHashes(store.kv, section.scope, section.section))
+      : section
 
   const scopeParam = async (c: AppContext) => {
     const key = c.req.query('scope') ?? ''
@@ -240,8 +304,13 @@ export function guideRoutes(deps: ServerDeps) {
   app.get('/guide', async (c) => {
     const principal = principalOf(c)
     const { scope, key, family } = await scopeParam(c)
-    ensure(permitted(principal, 'knowledge:read', scope, family), 'knowledge:read')
-    const stored = new Map((await store.guides.list({ scopes: [key] })).map((s) => [s.section, s]))
+    ensure(
+      permitted(principal, 'knowledge:read', scope, family),
+      'knowledge:read',
+      scopeRepo(scope),
+    )
+    const listed = await Promise.all((await store.guides.list({ scopes: [key] })).map(visible))
+    const stored = new Map(listed.map((s) => [s.section, s]))
     const sections = guideSections.map(
       (section) => stored.get(section) ?? emptySection(key, section),
     )
@@ -265,8 +334,13 @@ export function guideRoutes(deps: ServerDeps) {
     const principal = principalOf(c)
     const { scope, key, family } = await scopeParam(c)
     const section = sectionParam(c)
-    ensure(permitted(principal, 'knowledge:read', scope, family), 'knowledge:read')
-    const stored = (await store.guides.get(key, section)) ?? emptySection(key, section)
+    ensure(
+      permitted(principal, 'knowledge:read', scope, family),
+      'knowledge:read',
+      scopeRepo(scope),
+    )
+    const found = await store.guides.get(key, section)
+    const stored = found ? await visible(found) : emptySection(key, section)
     const history = await store.guides.history(key, section)
     return c.json<GuideSectionDetail>({
       section: stored,
@@ -285,7 +359,7 @@ export function guideRoutes(deps: ServerDeps) {
     const section = sectionParam(c)
     c.set('audit', { action: 'guide.update', target: { type: 'guide', id: `${key}/${section}` } })
     const action = editAction(scope)
-    ensure(permitted(principal, action, scope, family), action)
+    ensure(permitted(principal, action, scope, family), action, scopeRepo(scope))
     c.set('audit', { action: 'guide.update', target: auditTarget(scope, key, section) })
     const input = await readBody(c, putSectionSchema)
     const previous = await store.guides.get(key, section)
@@ -310,7 +384,7 @@ export function guideRoutes(deps: ServerDeps) {
     const section = sectionParam(c)
     c.set('audit', { action: 'guide.restore', target: { type: 'guide', id: `${key}/${section}` } })
     const action = editAction(scope)
-    ensure(permitted(principal, action, scope, family), action)
+    ensure(permitted(principal, action, scope, family), action, scopeRepo(scope))
     c.set('audit', { action: 'guide.restore', target: auditTarget(scope, key, section) })
     const version = Number(c.req.query('version'))
     const revision = (await store.guides.history(key, section)).find((r) => r.version === version)
@@ -339,7 +413,8 @@ export function guideRoutes(deps: ServerDeps) {
     })
     c.set('audit', { action: 'guide.accept', target: auditTarget(scope, key, section) })
     const input = await readBody(c, acceptSchema)
-    const previous = await store.guides.get(key, section)
+    const found = await store.guides.get(key, section)
+    const previous = found && (await visible(found))
     const pending = pendingGenerated(previous)
     if (!previous || !pending)
       throw new HTTPException(409, { message: 'no generated text waits for acceptance' })
@@ -363,6 +438,53 @@ export function guideRoutes(deps: ServerDeps) {
       details: { inputHash: pending.inputHash, model: pending.model },
     })
     return c.json<GuideSection>(stored)
+  })
+
+  app.post('/guide/section/reject', async (c) => {
+    const input = await readBody(c, rejectSchema)
+    const scope = parseGuideScope(input.scope)
+    if (!scope)
+      throw new HTTPException(400, { message: 'scope must be all, group:, family: or repo:' })
+    const key = guideScopeKey(scope)
+    c.set('audit', {
+      action: 'guide.reject',
+      target: { type: 'guide', id: `${key}/${input.section}` },
+    })
+    if (scope.kind !== 'repo')
+      throw new HTTPException(400, { message: 'only repository scopes have generated text' })
+    if (!config.forges[scope.forge])
+      throw new HTTPException(404, { message: `forge ${scope.forge} is not configured` })
+    const principal = authorize(c, 'knowledge:write', {
+      kind: 'repo',
+      repo: repoTarget(config, { forge: scope.forge, path: scope.path }),
+    })
+    c.set('audit', { action: 'guide.reject', target: auditTarget(scope, key, input.section) })
+    const kv = store.kv
+    if (!kv) throw new HTTPException(503, { message: 'the store keeps no rejections' })
+    const found = await store.guides.get(key, input.section)
+    const previous = found && (await visible(found))
+    const pending = pendingGenerated(previous)
+    if (!previous || !pending)
+      throw new HTTPException(409, { message: 'no generated text waits for a decision' })
+    if (pending.inputHash !== input.inputHash)
+      throw new HTTPException(409, { message: 'the proposal changed; reload it before rejecting' })
+    const remembered = await rememberGuideRejection(kv, key, input.section, {
+      inputHash: pending.inputHash,
+      generatedAt: pending.generatedAt,
+      by: principal.id,
+      at: now().toISOString(),
+    })
+    if (!remembered) throw new HTTPException(409, { message: 'rejections changed meanwhile' })
+    c.set('audit', {
+      action: 'guide.reject',
+      target: auditTarget(scope, key, input.section),
+      details: {
+        inputHash: pending.inputHash,
+        generatedAt: pending.generatedAt,
+        model: pending.model,
+      },
+    })
+    return c.json<GuideSection>(withoutRejected(previous, new Set([pending.inputHash])))
   })
 
   app.post('/guide/regenerate', async (c) => {
@@ -400,12 +522,36 @@ export function guideRoutes(deps: ServerDeps) {
     return c.json<Job>(job, 201)
   })
 
+  const ruleFiles = (target: RepoTarget) =>
+    readRepoRuleFiles({
+      forge: forgeFor(config, target.forge),
+      forgeId: target.forge,
+      repo: target.path,
+      files: GUIDELINE_FILES,
+      ...(store.kv && { kv: store.kv }),
+    })
+
+  const readRuleFiles = async (target: RepoTarget) => {
+    try {
+      return { files: (await ruleFiles(target)).files }
+    } catch (error) {
+      return {
+        files: [],
+        warning: `The repository's rules files could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      }
+    }
+  }
+
   app.get('/guide/preview', async (c) => {
     const principal = principalOf(c)
     const repo = parseRepo(c.req.query('repo'))
     if (!repo) throw new HTTPException(400, { message: 'repo is required' })
     const target = repoTarget(config, repo)
-    ensure(can(principal, 'knowledge:read', { kind: 'repo', repo: target }), 'knowledge:read')
+    ensure(
+      can(principal, 'knowledge:read', { kind: 'repo', repo: target }),
+      'knowledge:read',
+      c.req.query('repo'),
+    )
     const task = c.req.query('task') ?? 'review'
     if (!isGuideTask(task))
       throw new HTTPException(400, { message: `task must be one of ${guideTasks.join(', ')}` })
@@ -414,12 +560,184 @@ export function guideRoutes(deps: ServerDeps) {
       throw new HTTPException(400, {
         message: `section must be one of ${guideSections.join(', ')}`,
       })
-    const resolved = await resolve({ repo: target, task, ...(section && { section }) })
+    const read = await readRuleFiles(target)
+    const resolved = await resolve({
+      repo: target,
+      task,
+      ...(section && { section }),
+      ...(read.files.length && { repoDocs: repoDocsOf(read.files) }),
+    })
     return c.json<GuidePreview>({
       repo: repoKey(repo),
       task,
       ...(section && { section }),
       ...resolved,
+      warnings: [...(read.warning ? [read.warning] : []), ...resolved.warnings],
+    })
+  })
+
+  const readableRepo = (c: AppContext) => {
+    const value = c.req.query('repo')
+    const repo = parseRepo(value)
+    if (!repo) throw new HTTPException(400, { message: 'repo is required' })
+    if (!config.forges[repo.forge])
+      throw new HTTPException(404, { message: `forge ${repo.forge} is not configured` })
+    const target = repoTarget(config, repo)
+    ensure(
+      can(principalOf(c), 'knowledge:read', { kind: 'repo', repo: target }),
+      'knowledge:read',
+      value,
+    )
+    return target
+  }
+
+  app.get('/guide/repo-files', async (c) => {
+    const target = readableRepo(c)
+    const read = await ruleFiles(target).catch((error: unknown) => {
+      if (error instanceof HTTPException) throw error
+      throw new HTTPException(502, {
+        message: `the repository files could not be read: ${error instanceof Error ? error.message : String(error)}`,
+      })
+    })
+    return c.json<GuideRepoFilesView>({
+      repo: repoKey(target),
+      ...(read.sha && { sha: read.sha }),
+      files: read.files.map((file) => ({ ...file, chars: file.text.length })),
+    })
+  })
+
+  app.get('/guide/chain', async (c) => {
+    const target = readableRepo(c)
+    const section = c.req.query('section')
+    if (section !== undefined && !isGuideSection(section))
+      throw new HTTPException(400, {
+        message: `section must be one of ${guideSections.join(', ')}`,
+      })
+    const read = await readRuleFiles(target)
+    const chain = await buildGuideChain(resolve, {
+      repo: target,
+      ...(section && { sections: [section] }),
+      ...(read.files.length && { repoDocs: repoDocsOf(read.files) }),
+    })
+    return c.json<GuideChainView>({
+      repo: repoKey(target),
+      sections: chain.sections,
+      budget: chain.budget,
+      warnings: [...(read.warning ? [read.warning] : []), ...chain.warnings],
+    })
+  })
+
+  app.get('/guide/generated/history', async (c) => {
+    const principal = principalOf(c)
+    const { scope, key, family } = await scopeParam(c)
+    const section = sectionParam(c)
+    ensure(
+      permitted(principal, 'knowledge:read', scope, family),
+      'knowledge:read',
+      scopeRepo(scope),
+    )
+    const [versions, row, rejected] = await Promise.all([
+      store.guides.generatedHistory(key, section),
+      store.guides.get(key, section),
+      rejectedHashes(store.kv, key, section),
+    ])
+    const currentOf = (version: number) =>
+      row?.generated?.version === version
+        ? ('generated' as const)
+        : row?.proposal?.version === version
+          ? ('proposal' as const)
+          : undefined
+    return c.json<GuideGeneratedHistory>({
+      scope: key,
+      section,
+      versions: versions.map((layer) => {
+        const current = currentOf(layer.version)
+        return { ...layer, rejected: rejected.has(layer.inputHash), ...(current && { current }) }
+      }),
+      people: await peopleOf(
+        deps,
+        versions.flatMap((layer) => (layer.acceptedBy ? [layer.acceptedBy] : [])),
+      ),
+    })
+  })
+
+  app.get('/knowledge/counts', async (c) => {
+    const principal = principalOf(c)
+    const [rows, notes, candidates, families, policy, listed] = await Promise.all([
+      store.guides.list(),
+      store.knowledge.list({ status: ['proposed', 'accepted'] }),
+      store.learnings.list({ status: ['proposed'] }),
+      store.families.list(),
+      crossTeamPolicy(store.settings),
+      listedRepos(store.kv, config),
+    ])
+    const counts = new Map<GuideScopeKey, KnowledgeSpaceCounts>()
+    const bump = (key: GuideScopeKey, field: keyof KnowledgeSpaceCounts, by = 1) => {
+      if (by === 0) return
+      const entry = counts.get(key) ?? { guide: 0, notes: 0, learnings: 0 }
+      entry[field] += by
+      counts.set(key, entry)
+    }
+    for (const row of rows)
+      if (row.rules.trim() || row.generated?.body.trim() || row.proposal?.body.trim())
+        bump(row.scope, 'guide')
+    const listable = notes.filter(
+      (note) =>
+        can(principal, 'knowledge:read', { kind: 'scope', scope: note.scope }) ||
+        (isSharedEntry(note) && canReadShared(principal, note.scope, policy)),
+    )
+    bump('all', 'notes', listable.length)
+    for (const group of Object.keys(config.groups))
+      bump(
+        guideScopeKey({ kind: 'group', group }),
+        'notes',
+        listable.filter((note) => namesGroup(note.scope, group)).length,
+      )
+    for (const family of families)
+      bump(
+        guideScopeKey({ kind: 'family', family: family.id }),
+        'notes',
+        listable.filter((note) => family.members.some((member) => namesRepo(note.scope, member)))
+          .length,
+      )
+    const repoKeys = new Set([
+      ...listed.map((repo) => `${repo.forge}:${repo.path}`),
+      ...families.flatMap((family) => family.members),
+      ...notes.flatMap((note) => (note.scope.repos ?? []).filter((key) => key.includes(':'))),
+      ...candidates.map((candidate) => candidate.repo),
+    ])
+    for (const key of repoKeys) {
+      const target = targetOf(key)
+      if (target)
+        bump(
+          `repo:${key}`,
+          'notes',
+          notes.filter((note) => scopeCoversRepo(note.scope, target)).length,
+        )
+    }
+    for (const candidate of candidates) {
+      const target = targetOf(candidate.repo)
+      if (!target || !can(principal, 'knowledge:read', { kind: 'repo', repo: target })) continue
+      const family = families.find((f) => f.members.includes(candidate.repo))
+      for (const key of [
+        `repo:${candidate.repo}` as const,
+        ...(family ? [guideScopeKey({ kind: 'family', family: family.id })] : []),
+        ...target.groups.map((group) => guideScopeKey({ kind: 'group', group })),
+        'all' as const,
+      ])
+        bump(key, 'learnings')
+    }
+    const readable = (key: GuideScopeKey) => {
+      const scope = parseGuideScope(key)
+      if (!scope) return false
+      if (scope.kind === 'group' && !config.groups[scope.group]) return false
+      if (scope.kind === 'repo' && !config.forges[scope.forge]) return false
+      const family =
+        scope.kind === 'family' ? families.find((f) => f.id === scope.family) : undefined
+      return permitted(principal, 'knowledge:read', scope, family)
+    }
+    return c.json<KnowledgeCounts>({
+      spaces: Object.fromEntries([...counts].filter(([key]) => readable(key))),
     })
   })
 

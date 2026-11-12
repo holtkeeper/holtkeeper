@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { FamilyConflictError } from './guides.ts'
-import type { Family, GuideSectionInput, Store } from './types.ts'
+import type { Family, GuideSection, GuideSectionInput, Store } from './types.ts'
 
 const at = (minute: number) => `2026-11-01T10:${String(minute).padStart(2, '0')}:00.000Z`
 
@@ -58,7 +58,7 @@ export function guideStoreTests(store: () => Store) {
       section({ generated, editedBy: 'agent:guide', editedAt: at(1) }),
     )
     expect(withGenerated).toMatchObject({ version: 1, editedBy: 'jane', editedAt: at(0) })
-    expect(withGenerated.generated).toEqual(generated)
+    expect(withGenerated.generated).toEqual({ ...generated, version: 1 })
 
     const learnings = [
       {
@@ -87,7 +87,7 @@ export function guideStoreTests(store: () => Store) {
       version: 2,
       editedBy: 'bob',
       editedAt: at(3),
-      generated,
+      generated: { ...generated, version: 1 },
       learnings,
     })
     await guides.put(
@@ -111,10 +111,76 @@ export function guideStoreTests(store: () => Store) {
     const generated = layer('- Run `make test`.', 'accepted')
     const proposal = layer('- Run `make check`.', 'proposed')
     const stored = await guides.put(section({ generated, proposal }))
-    expect(stored.proposal).toEqual(proposal)
-    expect((await guides.get('group:games', 'general'))?.generated).toEqual(generated)
+    expect(stored.proposal).toEqual({ ...proposal, version: 2 })
+    expect((await guides.get('group:games', 'general'))?.generated).toEqual({
+      ...generated,
+      version: 1,
+    })
     await guides.put(section({ generated }))
     expect((await guides.get('group:games', 'general'))?.proposal).toBeUndefined()
+  })
+
+  test('guides: generator runs get versions and a history, newest first', async () => {
+    const guides = store().guides
+    const scope = 'repo:gl:acme/widget-kit'
+    expect(await guides.generatedHistory(scope, 'testing')).toEqual([])
+    const first = { ...layer('- Run `bun test`.', 'proposed'), jobId: 'job-1' }
+    const one = await guides.put(section({ scope, section: 'testing', generated: first }))
+    expect(one.generated).toEqual({ ...first, version: 1 })
+
+    const accepted = {
+      ...first,
+      status: 'accepted' as const,
+      acceptedBy: 'jane',
+      acceptedAt: at(3),
+    }
+    const acceptedRow = await guides.put(
+      section({ scope, section: 'testing', generated: accepted }),
+    )
+    expect(acceptedRow.generated?.version).toBe(1)
+
+    const second = {
+      ...layer('- Run `bun test --coverage`.', 'proposed'),
+      generatedAt: at(4),
+      jobId: 'job-2',
+    }
+    const two = await guides.put(
+      section({ scope, section: 'testing', generated: accepted, proposal: second }),
+    )
+    expect(two.generated?.version).toBe(1)
+    expect(two.proposal).toEqual({ ...second, version: 2 })
+
+    const kept = await guides.put(
+      section({
+        scope,
+        section: 'testing',
+        generated: { ...accepted, inputHash: 'fresh-hash', version: 7 },
+        proposal: { ...second, version: 2 },
+      }),
+    )
+    expect(kept.generated).toMatchObject({ version: 1, inputHash: 'fresh-hash' })
+    expect(kept.proposal?.version).toBe(2)
+
+    const third = { ...layer('- Run `bun test` first.', 'proposed'), generatedAt: at(6) }
+    const three = await guides.put(
+      section({ scope, section: 'testing', generated: accepted, proposal: third }),
+    )
+    expect(three.proposal?.version).toBe(3)
+    await guides.put(section({ scope, section: 'testing', generated: accepted }))
+
+    expect(await guides.generatedHistory(scope, 'testing')).toEqual([
+      { ...third, version: 3 },
+      { ...second, version: 2 },
+      { ...accepted, version: 1 },
+    ])
+    expect(await guides.generatedHistory(scope, 'general')).toEqual([])
+    expect(await guides.generatedHistory('all', 'testing')).toEqual([])
+
+    const human = await guides.put(
+      section({ scope, section: 'testing', rules: 'New rules.', generated: accepted }),
+    )
+    expect(human.generated?.version).toBe(1)
+    expect(await guides.generatedHistory(scope, 'testing')).toHaveLength(3)
   })
 
   test('guides: an empty first write has version 0 and no byline', async () => {
@@ -123,8 +189,16 @@ export function guideStoreTests(store: () => Store) {
     delete empty.editedBy
     delete empty.editedAt
     const stored = await guides.put(empty)
-    expect(stored).toEqual({ ...empty, version: 0 })
-    expect(await guides.get('repo:work:games/a', 'general')).toEqual({ ...empty, version: 0 })
+    const expected: GuideSection = {
+      scope: empty.scope,
+      section: empty.section,
+      rules: empty.rules,
+      steering: empty.steering,
+      learnings: empty.learnings,
+      version: 0,
+    }
+    expect(stored).toEqual(expected)
+    expect(await guides.get('repo:work:games/a', 'general')).toEqual(expected)
     await guides.put({ ...empty, rules: 'First rule.', editedBy: 'jane', editedAt: at(5) })
     expect(await guides.history('repo:work:games/a', 'general')).toEqual([])
   })
@@ -154,9 +228,17 @@ export function guideStoreTests(store: () => Store) {
     ])
     expect(await keys({ scopes: [] })).toEqual([])
 
+    await guides.put(
+      section({ scope: 'family:f1', rules: 'Changed.', generated: layer('- Text.', 'proposed') }),
+    )
+    expect(await guides.generatedHistory('family:f1', 'general')).toHaveLength(1)
     await guides.removeScope('family:f1')
     expect(await guides.get('family:f1', 'general')).toBeUndefined()
     expect(await guides.history('family:f1', 'general')).toEqual([])
+    expect(await guides.generatedHistory('family:f1', 'general')).toEqual([])
+    await guides.put(section({ scope: 'family:f1', generated: layer('- Text.', 'proposed') }))
+    expect((await guides.get('family:f1', 'general'))?.generated?.version).toBe(1)
+    await guides.removeScope('family:f1')
     expect(await keys()).toHaveLength(3)
   })
 

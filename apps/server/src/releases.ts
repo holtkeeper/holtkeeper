@@ -2,6 +2,7 @@ import { can, type Principal } from '@holtkeeper/access'
 import type {
   ReleaseBoardRow,
   ReleaseCard,
+  ReleaseDetectView,
   ReleaseOverview,
   ReleaseRepoView,
   ReleaseStepResult,
@@ -9,6 +10,7 @@ import type {
   ReleaseVersionDeploy,
   ReleaseVersionView,
 } from '@holtkeeper/api'
+import type { HoltkeeperConfig } from '@holtkeeper/core'
 import type { ForgeEvent, GitForge, RepoRef } from '@holtkeeper/forge'
 import { type Issue, issuesByKey } from '@holtkeeper/issues'
 import { groupRepositories } from '@holtkeeper/jobs'
@@ -33,6 +35,7 @@ import {
   deployFinished,
   deployWatchMinutes,
   detectRepositoryFlow,
+  pendingStep,
   planRelease,
   proposeRelease,
   rangeChanges,
@@ -50,7 +53,9 @@ import {
   timelineVersions,
   versionDetail,
   versionTags,
+  versionProvenance,
   versionTimeline,
+  withDeployActors,
   withIssues,
   writeSummary,
   forgeLinks,
@@ -97,6 +102,15 @@ const repoKeyOf = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+/** Whether a person changed a plan beyond accepting its suggestions. */
+const edited = (edits: ReleaseEdits) =>
+  edits.version !== undefined ||
+  edits.title !== undefined ||
+  (edits.excluded?.length ?? 0) > 0 ||
+  (edits.included?.length ?? 0) > 0 ||
+  Object.keys(edits.texts ?? {}).length > 0 ||
+  edits.summary?.source === 'person'
+
 /** In-memory stand-in for `Store.kv` on servers without one; expiry is ignored. */
 function memoryKv(): Pick<KvStore, 'get' | 'set' | 'delete'> {
   const values = new Map<string, unknown>()
@@ -115,6 +129,39 @@ const needsAction = (row: ReleaseBoardRow) =>
   row.stage === 'candidate' ||
   (row.deploy?.environments.some((env) => env.status === 'failed' || env.status === 'ready') ??
     false)
+
+/**
+ * What `principal` may do with a repository's release, as `ReleaseCard.can`: both need exactly
+ * `releases:run` on the repository and a repository that is not read-only, `accept` also changes
+ * on the target branch that wait for a version, a flow that asks for an acceptance and no
+ * acceptance yet. Nothing without a principal.
+ */
+export function releaseCan(
+  config: HoltkeeperConfig,
+  principal: Principal | undefined,
+  row: ReleaseBoardRow,
+  readOnly = false,
+): ReleaseCard['can'] {
+  const run =
+    !readOnly &&
+    principal !== undefined &&
+    can(principal, 'releases:run', { kind: 'repo', repo: repoTarget(config, row.repo) })
+  const waits =
+    row.error === undefined &&
+    row.stage !== 'external' &&
+    row.acceptanceRequired &&
+    row.unreleased > 0 &&
+    row.acceptance === undefined
+  return { accept: run && waits, run }
+}
+
+/** The commit a decision about the waiting release names, as `ReleaseCard.head`. */
+const waitingHead = (row: ReleaseBoardRow, facts: ReleaseFacts) => {
+  if (row.error !== undefined || !needsAction(row)) return undefined
+  return row.stage === 'candidate' || row.stage === 'proposed'
+    ? facts.source?.sha
+    : facts.target.sha
+}
 
 async function mapLimited<T, R>(items: readonly T[], limit: number, map: (item: T) => Promise<R>) {
   const results: R[] = Array.from({ length: items.length })
@@ -138,10 +185,19 @@ const repoSchema = z.object({ forge: z.string(), path: z.string() })
 const boardIndexSchema = z.object({ repos: z.array(repoSchema), readAt: z.string() })
 const storedRowSchema = z.object({
   readAt: z.string(),
+  head: z.string().optional(),
   row: z.custom<ReleaseBoardRow>(
-    (value) => typeof value === 'object' && value !== null && 'repo' in value && 'stage' in value,
+    (value) =>
+      typeof value === 'object' &&
+      value !== null &&
+      'repo' in value &&
+      'stage' in value &&
+      'environments' in value,
   ),
 })
+const dismissalSchema = z.object({ sha: z.string(), by: z.string(), at: z.string() })
+type Dismissal = z.infer<typeof dismissalSchema>
+type BoardRead = { row: ReleaseBoardRow; head?: string }
 const tagsSchema = z.object({
   tags: z.array(
     z.object({
@@ -208,6 +264,7 @@ const linksFor = (forge: GitForge, webUrl: string, settings: ReleaseSettings) =>
 /** Newest outcome per environment of each tag, from the recorded deploy events. */
 const deploysOf = (history: readonly ReleaseEvent[]) => {
   const byTag = new Map<string, Map<string, ReleaseVersionDeploy>>()
+  const started = new Set<string>()
   for (const event of history) {
     if (!event.tag || !event.environment || !event.kind.startsWith('deploy-')) continue
     const environments = byTag.get(event.tag) ?? new Map<string, ReleaseVersionDeploy>()
@@ -222,8 +279,15 @@ const deploysOf = (history: readonly ReleaseEvent[]) => {
               : 'started',
         at: event.at,
         actor: event.actor,
+        ...(event.actorName ? { actorName: event.actorName } : {}),
         ...(event.url ? { url: event.url } : {}),
       })
+    const id = `${event.tag}\0${event.environment}`
+    if (event.kind === 'deploy-started' && !started.has(id)) {
+      started.add(id)
+      const entry = environments.get(event.environment)!
+      if (event.reason) entry.reason = event.reason
+    }
     byTag.set(event.tag, environments)
   }
   return (tag: string) => [...(byTag.get(tag)?.values() ?? [])]
@@ -545,6 +609,14 @@ function createReleaseService(deps: ServerDeps) {
         tag: result.tag,
         url,
         detail: `${plan.entries.filter((entry) => entry.included).length} changes${force ? ' (gates overridden)' : ''}`,
+        sha: loaded.facts.target.sha,
+        force,
+        notes: {
+          source: plan.summary.source,
+          edited: edited(plan.edits),
+          ...(plan.summary.markdown.trim() ? { markdown: plan.summary.markdown } : {}),
+        },
+        ...(result.changelogCommit ? { changelogSha: result.changelogCommit.sha } : {}),
       }),
     )
     return {
@@ -576,7 +648,13 @@ function createReleaseService(deps: ServerDeps) {
       ...(note ? { note } : {}),
     }
     await kv.set(key('acceptance', repo), acceptance)
-    await record(event('accepted', repo, actor, note ? { detail: note } : {}))
+    await record(
+      event('accepted', repo, actor, {
+        sha: acceptance.sha,
+        via,
+        ...(note ? { detail: note, note } : {}),
+      }),
+    )
     return { kind: 'accepted' as const, detail: 'Accepted' }
   }
 
@@ -587,7 +665,13 @@ function createReleaseService(deps: ServerDeps) {
 
   const deploy = async (
     repo: RepoRef,
-    input: { tag: string; environment: string; redeploy?: boolean; force?: boolean },
+    input: {
+      tag: string
+      environment: string
+      redeploy?: boolean
+      force?: boolean
+      reason?: string
+    },
     actor: ReleaseActor,
   ): Promise<ReleaseStepResult> => {
     const settings = await settingsOf(repo)
@@ -599,17 +683,18 @@ function createReleaseService(deps: ServerDeps) {
         tag: input.tag,
         detail: `would deploy ${input.tag} to ${input.environment}`,
       }
-    const { job } = await startDeploy({ forge, repo, settings, ...input })
+    const { reason: given, ...start } = input
+    const { job } = await startDeploy({ forge, repo, settings, ...start })
+    const plain = input.force ? 'order overridden' : input.redeploy ? 'redeploy' : undefined
+    const reason = given?.trim() || plain
     await record(
       event('deploy-started', repo, actor, {
         tag: input.tag,
         environment: input.environment,
         url: job.webUrl,
-        ...(input.force
-          ? { detail: 'order overridden' }
-          : input.redeploy
-            ? { detail: 'redeploy' }
-            : {}),
+        jobId: job.id,
+        ...(plain ? { detail: plain } : {}),
+        ...(reason ? { reason } : {}),
       }),
     )
     watchDeploy(repo, input.tag, input.environment, actor)
@@ -623,14 +708,33 @@ function createReleaseService(deps: ServerDeps) {
 
   // Reads
 
-  const row = async (repo: RepoRef) => {
+  /** The board row of loaded facts: the pending step's plan with its edits, deploys with who started them. */
+  const rowOf = async (
+    repo: RepoRef,
+    loaded: Awaited<ReturnType<typeof load>>,
+    known?: { deploy?: DeployState; history?: ReleaseEvent[] },
+  ) => {
+    const step = pendingStep(loaded.settings, loaded.facts)
+    const [deployState, history, edits] = await Promise.all([
+      known ? known.deploy : latestDeploy(loaded.forge, repo, loaded.settings, loaded.facts),
+      known?.history ?? historyOf(repo),
+      step ? editsOf(repo, step) : undefined,
+    ])
+    return boardRow(loaded.settings, loaded.facts, deps.now(), {
+      ...(deployState ? { deploy: withDeployActors(deployState, history) } : {}),
+      ...(edits ? { edits } : {}),
+    })
+  }
+
+  const row = async (repo: RepoRef): Promise<BoardRead | undefined> => {
     try {
       if (!(await settingsOf(repo)).enabled) return undefined
       const loaded = await load(repo)
-      const deployState = await latestDeploy(loaded.forge, repo, loaded.settings, loaded.facts)
-      return boardRow(loaded.settings, loaded.facts, deps.now(), deployState)
+      const value = await rowOf(repo, loaded)
+      const head = waitingHead(value, loaded.facts)
+      return { row: value, ...(head ? { head } : {}) }
     } catch (error) {
-      return {
+      const value: ReleaseBoardRow = {
         repo,
         stage: 'idle' as const,
         mode: 'merge-request' as const,
@@ -640,8 +744,15 @@ function createReleaseService(deps: ServerDeps) {
         unreleasedCapped: false,
         tickets: [],
         pipelines: {},
+        blockers: [],
+        acceptanceRequired: false,
+        reasons: [],
+        leftOut: 0,
+        tasks: 0,
+        environments: [],
         error: messageOf(error),
       }
+      return { row: value }
     }
   }
 
@@ -661,10 +772,15 @@ function createReleaseService(deps: ServerDeps) {
 
   // Overview: a snapshot in the key-value store, refreshed on forge events and every half hour
 
-  const saveRow = async (repo: RepoRef, value: ReleaseBoardRow | undefined) => {
-    if (value)
-      await kv.set(key('board:row', repo), { readAt: deps.now().toISOString(), row: value })
+  const dismissalOf = async (repo: RepoRef) =>
+    readStored(dismissalSchema, await kv.get(key('dismissal', repo)))
+
+  const saveRow = async (repo: RepoRef, value: BoardRead | undefined) => {
+    if (value) await kv.set(key('board:row', repo), { readAt: deps.now().toISOString(), ...value })
     else await kv.delete(key('board:row', repo))
+    const dismissal = await dismissalOf(repo)
+    if (dismissal && value?.row.error === undefined && dismissal.sha !== value?.head)
+      await kv.delete(key('dismissal', repo))
     const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
     if (!index) return
     const listed = index.repos.some((entry) => repoKeyOf(entry) === repoKeyOf(repo))
@@ -768,38 +884,85 @@ function createReleaseService(deps: ServerDeps) {
       if ((await kv.get(BOARD_REFRESHING)) === undefined) refreshBoardLater()
     }
     const repos = index.repos.filter(
-      (repo) =>
-        can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) }) &&
-        (!filter.group || repoTarget(config, repo).groups.includes(filter.group)),
+      (repo) => !filter.group || repoTarget(config, repo).groups.includes(filter.group),
     )
-    const rows = await Promise.all(repos.map(async (repo) => (await storedRow(repo))?.row))
-    const cards = rows
-      .filter((entry) => entry !== undefined)
-      .filter((entry) => !filter.action || needsAction(entry))
+    const cards = (await cardsOf(repos, principal))
+      .filter((card) => !filter.action || card.needsAction)
       .toSorted((a, b) => repoKeyOf(a.repo).localeCompare(repoKeyOf(b.repo)))
     return {
-      cards: cards.map((card) => ({ ...card, needsAction: needsAction(card) })),
+      cards,
       readAt: index.readAt,
       refreshing: refreshing !== undefined || (await kv.get(BOARD_REFRESHING)) !== undefined,
       dryRun: config.dryRun ?? false,
       people: await peopleOf(
         deps,
-        cards.flatMap((entry) => (entry.acceptance ? [entry.acceptance.by] : [])),
+        cards
+          .flatMap((card) => [card.acceptance?.by, card.dismissed?.by])
+          .filter((id) => id !== undefined),
       ),
     }
   }
 
-  /** The stored cards the principal may read, as last read; never reads a forge. */
-  const snapshot = async (principal: Principal): Promise<ReleaseCard[]> => {
-    const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
-    if (!index) return []
-    const repos = index.repos.filter((repo) =>
-      can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) }),
+  const cardOf = (
+    principal: Principal | undefined,
+    stored: BoardRead,
+    dismissal: Dismissal | undefined,
+    readOnly: boolean,
+  ): ReleaseCard => {
+    const dismissed = dismissal && dismissal.sha === stored.head ? dismissal : undefined
+    return {
+      ...stored.row,
+      needsAction: !dismissed && needsAction(stored.row),
+      ...(stored.head ? { head: stored.head } : {}),
+      can: releaseCan(config, principal, stored.row, readOnly),
+      ...(dismissed ? { dismissed } : {}),
+    }
+  }
+
+  /** Cards of `repos` that `principal` may read, or of all when no principal is given. */
+  const cardsOf = async (repos: readonly RepoRef[], principal?: Principal) => {
+    const readable = repos.filter(
+      (repo) =>
+        !principal ||
+        can(principal, 'releases:read', { kind: 'repo', repo: repoTarget(config, repo) }),
     )
-    const rows = await Promise.all(repos.map(async (repo) => (await storedRow(repo))?.row))
-    return rows
-      .filter((entry) => entry !== undefined)
-      .map((entry) => ({ ...entry, needsAction: needsAction(entry) }))
+    const cards = await Promise.all(
+      readable.map(async (repo) => {
+        const [stored, dismissal, readOnly] = await Promise.all([
+          storedRow(repo),
+          dismissalOf(repo),
+          isReadOnly(repo),
+        ])
+        return stored ? cardOf(principal, stored, dismissal, readOnly) : undefined
+      }),
+    )
+    return cards.filter((card) => card !== undefined)
+  }
+
+  /**
+   * The stored cards as last read, never reading a forge: of those `principal` may read with its
+   * `can`, or of every repository with `can` all false when no principal is given.
+   */
+  const snapshot = async (principal?: Principal): Promise<ReleaseCard[]> => {
+    const index = readStored(boardIndexSchema, await kv.get(BOARD_INDEX))
+    return index ? cardsOf(index.repos, principal) : []
+  }
+
+  /**
+   * Hides the release waiting in `repo` until its head moves past `sha`; nothing changes on the
+   * forge. `moved` when the stored head is not `sha` (or nothing waits).
+   */
+  const dismiss = async (
+    repo: RepoRef,
+    sha: string,
+    by: string,
+  ): Promise<{ kind: 'dismissed'; dismissal: Dismissal } | { kind: 'moved'; head?: string }> => {
+    const stored = await storedRow(repo)
+    if (!stored?.head || stored.head !== sha)
+      return { kind: 'moved', ...(stored?.head ? { head: stored.head } : {}) }
+    const dismissal = { sha, by, at: deps.now().toISOString() }
+    await kv.set(key('dismissal', repo), dismissal)
+    return { kind: 'dismissed', dismissal }
   }
 
   // Timeline: past versions from tags, ranges between two tags cached for good
@@ -860,6 +1023,7 @@ function createReleaseService(deps: ServerDeps) {
       complete: tags.complete,
       cache: kv,
       links: linksFor(forge, repository.webUrl, settings),
+      history,
       deploys: deploysOf(history),
     }
   }
@@ -869,6 +1033,7 @@ function createReleaseService(deps: ServerDeps) {
    * unreleased version from the overview snapshot (read now when there is none yet).
    */
   const timeline = async (
+    principal: Principal | undefined,
     repo: RepoRef,
     page: { offset?: number; limit?: number } = {},
   ): Promise<ReleaseTimelineView> => {
@@ -877,7 +1042,7 @@ function createReleaseService(deps: ServerDeps) {
     const source = await versionSource(repo, (settings, versions) =>
       knowsPage(settings, versions, offset, limit),
     )
-    const [result, next] = await Promise.all([
+    const [result, next, readOnly] = await Promise.all([
       versionTimeline({ ...source, offset, limit }),
       offset === 0 && source.settings.enabled
         ? storedRow(repo).then(async (stored) => {
@@ -886,6 +1051,7 @@ function createReleaseService(deps: ServerDeps) {
             return (await storedRow(repo))?.row
           })
         : undefined,
+      isReadOnly(repo),
     ])
     const versions: ReleaseVersionView[] = result.versions.map((entry) => ({
       ...entry,
@@ -895,6 +1061,15 @@ function createReleaseService(deps: ServerDeps) {
       repo,
       enabled: source.settings.enabled,
       ...(next ? { next } : {}),
+      can: next
+        ? releaseCan(config, principal, next, readOnly)
+        : {
+            accept: false,
+            run:
+              !readOnly &&
+              principal !== undefined &&
+              can(principal, 'releases:run', { kind: 'repo', repo: repoTarget(config, repo) }),
+          },
       versions,
       total: result.total,
       ...(result.nextOffset !== undefined ? { nextOffset: result.nextOffset } : {}),
@@ -919,7 +1094,20 @@ function createReleaseService(deps: ServerDeps) {
       source.settings.deploy.environments.length > 0
         ? await readDeployState(source.forge, repo, source.settings, tag).catch(() => undefined)
         : undefined
-    return { ...detail, deploys: source.deploys(tag), ...(live ? { deploy: live } : {}) }
+    const provenance = versionProvenance(source.history, found.tag)
+    const deploys = source.deploys(found.tag)
+    const people = await peopleOf(deps, [
+      ...(provenance?.accepted ? [provenance.accepted.actor] : []),
+      ...(provenance?.versioned ? [provenance.versioned.actor] : []),
+      ...deploys.map((entry) => entry.actor),
+    ])
+    return {
+      ...detail,
+      deploys,
+      ...(live ? { deploy: withDeployActors(live, source.history) } : {}),
+      ...(provenance ? { provenance } : {}),
+      people,
+    }
   }
 
   /**
@@ -1004,31 +1192,31 @@ function createReleaseService(deps: ServerDeps) {
   const view = async (principal: Principal, repo: RepoRef): Promise<ReleaseRepoView> => {
     const loaded = await load(repo)
     const { settings, facts, forge } = loaded
-    const [proposal, versionPlan, deployState, configured, history, agent, readOnly] =
-      await Promise.all([
-        settings.flow.mode === 'merge-request' && facts.source && facts.ahead.length > 0
-          ? planFor(repo, 'propose', loaded)
-          : undefined,
-        settings.flow.mode !== 'external' && facts.unreleased.length > 0
-          ? planFor(repo, 'version', loaded)
-          : undefined,
-        latestDeploy(forge, repo, settings, facts),
-        configuredFor(repo),
-        historyOf(repo),
-        deps.agentFor ? deps.agentFor(repo).catch(() => undefined) : undefined,
-        isReadOnly(repo),
-      ])
-    const detection = configured
-      ? undefined
-      : await detectRepositoryFlow(forge, repo).catch(() => undefined)
+    const [proposal, versionPlan, liveDeploy, history, agent, readOnly] = await Promise.all([
+      settings.flow.mode === 'merge-request' && facts.source && facts.ahead.length > 0
+        ? planFor(repo, 'propose', loaded)
+        : undefined,
+      settings.flow.mode !== 'external' && facts.unreleased.length > 0
+        ? planFor(repo, 'version', loaded)
+        : undefined,
+      latestDeploy(forge, repo, settings, facts),
+      historyOf(repo),
+      deps.agentFor ? deps.agentFor(repo).catch(() => undefined) : undefined,
+      isReadOnly(repo),
+    ])
     const target = repoTarget(config, repo)
-    const rowValue = boardRow(settings, facts, deps.now(), deployState)
+    const deployState = liveDeploy && withDeployActors(liveDeploy, history)
+    const rowValue = await rowOf(repo, loaded, {
+      ...(liveDeploy ? { deploy: liveDeploy } : {}),
+      history,
+    })
     const links = releaseLinks(forge.kind === 'github' ? 'github' : 'gitlab', facts, deployState)
     const people = await peopleOf(deps, [
       ...history.map((entry) => entry.actor),
       ...(rowValue.acceptance ? [rowValue.acceptance.by] : []),
     ])
-    await saveRow(repo, settings.enabled ? rowValue : undefined)
+    const head = waitingHead(rowValue, facts)
+    await saveRow(repo, settings.enabled ? { row: rowValue, ...(head ? { head } : {}) } : undefined)
     const issues = await issuesOf(repo, [
       ...new Set(
         [...(proposal?.entries ?? []), ...(versionPlan?.entries ?? [])].flatMap(
@@ -1044,12 +1232,11 @@ function createReleaseService(deps: ServerDeps) {
       ...(versionPlan ? { version: versionPlan } : {}),
       versions: facts.versions.slice(0, 20),
       ...(deployState ? { deploy: deployState } : {}),
-      ...(detection ? { detection } : {}),
       history,
       links,
       people,
       can: {
-        run: can(principal, 'releases:run', { kind: 'repo', repo: target }),
+        ...releaseCan(config, principal, rowValue, readOnly),
         configure: can(principal, 'settings:write', { kind: 'repo', repo: target }),
       },
       readOnly,
@@ -1057,6 +1244,18 @@ function createReleaseService(deps: ServerDeps) {
       agent: agent !== undefined,
       ...(Object.keys(issues).length > 0 ? { issues } : {}),
     }
+  }
+
+  /**
+   * The flow suggested for a repository from what it already does, read from the forge on each
+   * call, and whether a setting already names the repository or one of its groups.
+   */
+  const detect = async (repo: RepoRef): Promise<ReleaseDetectView> => {
+    const [detection, configured] = await Promise.all([
+      detectRepositoryFlow(forgeOf(repo), repo),
+      configuredFor(repo),
+    ])
+    return { repo, detection, configured }
   }
 
   const deployOf = async (repo: RepoRef, tag: string) =>
@@ -1154,11 +1353,14 @@ function createReleaseService(deps: ServerDeps) {
     settingsOf,
     overview,
     snapshot,
+    dismiss,
+    dismissalOf,
     startBoardRefresh,
     timeline,
     versionOf,
     changes,
     view,
+    detect,
     deployOf,
     saveEdits,
     summarize,

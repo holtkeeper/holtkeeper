@@ -17,7 +17,10 @@ import type {
   KnowledgePackage,
   Store,
 } from '@holtkeeper/store'
+import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
+
+import { ForbiddenToolError } from '../context.ts'
 
 /** The knowledge base as the knowledge tools read and propose to it, for one caller. */
 export interface KnowledgeToolsContext {
@@ -71,7 +74,11 @@ const renderHit = (context: KnowledgeToolsContext, entry: KnowledgeEntry) => {
 const readableRepo = (context: KnowledgeToolsContext, repo: string) => {
   const target = context.repoOf(repo)
   if (!target)
-    throw new ToolError(`You may not read the knowledge of ${repo}, or it is not a forge:path.`)
+    throw new ForbiddenToolError(
+      `You may not read the knowledge of ${repo}, or it is not a forge:path.`,
+      'knowledge:read',
+      repo,
+    )
   return target
 }
 
@@ -185,7 +192,7 @@ async function proposeKnowledge(
     })
     if (result.duplicateOf)
       return `Not added: ${citation(result.duplicateOf)} (${result.entry.status}) already says this: "${result.entry.title}".${input.evidence?.length ? ' New evidence links were added to it.' : ''}`
-    return `Proposed ${citation(result.entry.id)} as a ${result.entry.kind} for \`${input.repo}\`. People review it in the Knowledge page before agents use it.`
+    return `Proposed ${citation(result.entry.id)} as a ${result.entry.kind} for \`${input.repo}\`. People review it in Knowledge › Notes (${webPaths.knowledge('notes')}) before agents use it.`
   } catch (error) {
     if (error instanceof KnowledgeValidationError)
       throw new ToolError(`Not proposed: ${error.issues.join('; ')}`)

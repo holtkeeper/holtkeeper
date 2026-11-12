@@ -1,28 +1,50 @@
+import { environmentSummaries } from './deploy.ts'
 import { releaseStage } from './facts.ts'
-import { buildEntries, suggestBump } from './notes.ts'
+import { planRelease } from './plan.ts'
 import type { ReleaseSettings } from './settings.ts'
-import type { DeployState, ReleaseBoardRow, ReleaseFacts } from './types.ts'
-import { nextVersion } from './version.ts'
+import type { DeployState, ReleaseBoardRow, ReleaseEdits, ReleaseFacts } from './types.ts'
 
 /**
- * The board row of a repository: its stage, the next version suggested for whatever waits (the
- * target's unreleased changes first, else the source's), counts, the open candidate, acceptance,
- * pipelines and the deploy state of the latest version when given.
+ * The step whose plan the board shows: `version` while the target branch has unreleased changes,
+ * `propose` while only the source branch is ahead (merge request flow), else none.
+ */
+export function pendingStep(
+  settings: ReleaseSettings,
+  facts: ReleaseFacts,
+): 'propose' | 'version' | undefined {
+  if (settings.flow.mode === 'external') return undefined
+  if (facts.unreleased.length > 0) return 'version'
+  if (settings.flow.mode === 'merge-request' && facts.source && facts.ahead.length > 0)
+    return 'propose'
+  return undefined
+}
+
+export interface BoardRowOptions {
+  /** Deploy state of the latest version. */
+  deploy?: DeployState
+  /** A person's edits of the pending step's plan (`pendingStep`). */
+  edits?: ReleaseEdits
+}
+
+/**
+ * The board row of a repository: its stage, the plan of the pending step (next version, why,
+ * tasks, changes left out, failing gates), counts, the open candidate, acceptance, pipelines and,
+ * when given, the deploy state of the latest version with what runs on each environment.
  */
 export function boardRow(
   settings: ReleaseSettings,
   facts: ReleaseFacts,
   now: Date,
-  deploy?: DeployState,
+  { deploy, edits }: BoardRowOptions = {},
 ): ReleaseBoardRow {
   const stage = releaseStage(settings, facts)
-  const pending = facts.unreleased.length > 0 ? facts.unreleased : facts.ahead
-  const entries = buildEntries(pending, settings.changelog)
-  const { bump } = suggestBump(entries, facts.latest ? { current: facts.latest.version } : {})
-  const next =
-    stage === 'external'
-      ? undefined
-      : nextVersion(settings, facts.latest?.version, bump, facts.versions, now)
+  const step = pendingStep(settings, facts)
+  const plan = step
+    ? planRelease({ step, facts, settings, ...(edits ? { edits } : {}), now })
+    : undefined
+  const included = plan?.entries.filter((entry) => entry.included) ?? []
+  const tickets = [...new Set(included.flatMap((entry) => entry.tickets))]
+  const next = plan?.version
   const oldest = facts.unreleased.at(-1)?.date
   const waitingSince = facts.merged?.mergedAt ?? oldest
   return {
@@ -33,14 +55,12 @@ export function boardRow(
     ...(facts.source ? { source: facts.source.name } : {}),
     target: facts.target.name,
     ...(facts.latest ? { latest: facts.latest } : {}),
-    ...(next ? { next, bump } : {}),
+    ...(plan && next ? { next, bump: plan.suggested.bump } : {}),
     ahead: facts.ahead.length,
     aheadCapped: facts.aheadCapped,
     unreleased: facts.unreleased.length,
     unreleasedCapped: facts.unreleasedCapped,
-    tickets: [
-      ...new Set(entries.filter((entry) => entry.included).flatMap((entry) => entry.tickets)),
-    ],
+    tickets,
     ...(facts.request
       ? {
           request: {
@@ -54,6 +74,14 @@ export function boardRow(
     pipelines: facts.pipelines,
     ...(facts.acceptance?.sha === facts.target.sha ? { acceptance: facts.acceptance } : {}),
     ...(stage === 'awaiting-version' && waitingSince ? { waitingSince } : {}),
+    blockers: (plan?.gates ?? [])
+      .filter((gate) => !gate.ok && gate.severity === 'block' && gate.id !== 'acceptance')
+      .map((gate) => gate.message),
+    acceptanceRequired: settings.flow.mode !== 'external' && settings.acceptance !== 'none',
+    reasons: plan?.suggested.reasons.map((reason) => reason.because) ?? [],
+    leftOut: plan ? plan.entries.length - included.length : 0,
+    tasks: tickets.length,
+    environments: environmentSummaries(settings, deploy),
     ...(deploy ? { deploy } : {}),
   }
 }

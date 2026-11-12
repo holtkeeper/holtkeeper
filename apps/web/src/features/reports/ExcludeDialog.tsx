@@ -8,8 +8,9 @@ import { repoKey } from '../../lib/repo.ts'
 import { Button, Dialog, Notice, Segmented, Select, TextField, notify } from '../../ui/index.ts'
 
 /**
- * Adds a glob for `path` to a list option of the report's analyzer setting for `repo`: the file,
- * its folder or a hand-written pattern. Applies from the next run.
+ * Adds a glob to a list option of the report's analyzer setting for `repo`: with `path` the file,
+ * its folder or a hand-written pattern, without it a hand-written pattern. Applies from the next
+ * run.
  */
 export function ExcludeDialog({
   path,
@@ -17,14 +18,14 @@ export function ExcludeDialog({
   exclude,
   onClose,
 }: {
-  path: string
+  path?: string
   repo: RepoRef
   exclude: ReportExclude
   onClose: () => void
 }) {
-  const choices = excludeChoices(path)
+  const choices = path ? excludeChoices(path) : []
   const [option, setOption] = useState(exclude.options[0]?.option ?? '')
-  const [pattern, setPattern] = useState(choices[0]?.pattern ?? path)
+  const [pattern, setPattern] = useState(choices[0]?.pattern ?? path ?? '')
   const resolved = useResolvedSettings(repo)
   const { put } = useSettingMutations()
   const chosen = exclude.options.find((entry) => entry.option === option)
@@ -55,8 +56,10 @@ export function ExcludeDialog({
     <Dialog
       isOpen
       onOpenChange={(open) => (open ? undefined : onClose())}
-      title="Exclude from later runs"
-      description={<span className="break-all font-mono text-xs">{path}</span>}
+      title={path ? 'Exclude from later runs' : 'Exclude files from later runs'}
+      {...(path
+        ? { description: <span className="break-all font-mono text-xs">{path}</span> }
+        : {})}
       footer={
         <>
           <Button variant="tertiary" onPress={onClose}>
@@ -83,22 +86,24 @@ export function ExcludeDialog({
           {chosen?.description ? <p className="text-xs text-muted">{chosen.description}</p> : null}
         </div>
       ) : null}
-      <Select
-        label="Pattern"
-        options={choices.map((choice) => ({
-          id: choice.pattern,
-          text: choice.label,
-          label: (
-            <span className="flex min-w-0 flex-col">
-              <span>{choice.label}</span>
-              <span className="truncate font-mono text-[11px] text-muted">{choice.pattern}</span>
-            </span>
-          ),
-        }))}
-        value={preset}
-        placeholder="Custom pattern"
-        onChange={setPattern}
-      />
+      {choices.length ? (
+        <Select
+          label="Pattern"
+          options={choices.map((choice) => ({
+            id: choice.pattern,
+            text: choice.label,
+            label: (
+              <span className="flex min-w-0 flex-col">
+                <span>{choice.label}</span>
+                <span className="truncate font-mono text-[11px] text-muted">{choice.pattern}</span>
+              </span>
+            ),
+          }))}
+          value={preset}
+          placeholder="Custom pattern"
+          onChange={setPattern}
+        />
+      ) : null}
       <TextField
         label="Glob"
         value={pattern}

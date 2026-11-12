@@ -1,4 +1,4 @@
-import { type Grant, type GroupMatch, groupMatchSchema } from '@holtkeeper/access'
+import { type Grant, type GroupMatch, type Principal, groupMatchSchema } from '@holtkeeper/access'
 import type { UserPreferences, UserPreferencesInput } from '@holtkeeper/api'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -35,6 +35,15 @@ function viewOf(stored: StoredPreferences | undefined, grants: readonly Grant[])
 const storedOf = (value: unknown): StoredPreferences | undefined => {
   const parsed = z.object({ homeGroups: z.array(groupMatchSchema).optional() }).safeParse(value)
   return parsed.success ? parsed.data : undefined
+}
+
+/** The principal's home groups: the ones it picked, else the groups in its grants. */
+export async function homeGroupsOf(
+  deps: Pick<ServerDeps, 'store'>,
+  principal: Principal,
+): Promise<GroupMatch[]> {
+  return viewOf(storedOf(await deps.store.kv?.get(keyOf(principal.id))), principal.grants)
+    .homeGroups
 }
 
 /** The signed-in principal's own UI preferences, kept in `Store.kv` under `prefs:<principal>`. */

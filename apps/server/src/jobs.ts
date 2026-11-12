@@ -32,7 +32,7 @@ export interface JobsOptions {
   agentFor?: AgentFor
   /** The SSH key of each forge, for job checkouts. */
   gitKeyFor?: GitKeyFor
-  /** Repositories nothing may be pushed to over git (the `repo.readOnly` setting). */
+  /** Repositories nothing may be pushed to over git (the `repo.freeze` setting). */
   readOnly?: ReadOnlyRepos
   now: () => Date
   /**
@@ -89,9 +89,20 @@ function partialOptions(options: z.ZodType) {
   })
 }
 
+function optionDefaults(options: z.ZodType): Record<string, unknown> {
+  if (!(options instanceof z.ZodObject)) return {}
+  return Object.fromEntries(
+    Object.entries(options.shape).flatMap(([key, field]) => {
+      const parsed = field.safeParse(undefined)
+      return parsed.success && parsed.data !== undefined ? [[key, parsed.data]] : []
+    }),
+  )
+}
+
 /**
  * Setting definitions `analyzers.<kind>` (section `Analyzers`): per-scope partial options for each
- * analyzer but those in `RUN_ONLY_ANALYZERS`, merged over schedule options when a job runs.
+ * analyzer but those in `RUN_ONLY_ANALYZERS`, merged over schedule options when a job runs. The
+ * default is what the options schema fills in for fields nobody set.
  */
 export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] {
   return analyzers
@@ -105,6 +116,7 @@ export function analyzerSettings(analyzers: AnyAnalyzer[]): SettingDefinition[] 
         section: 'Analyzers',
         help: `Options for the ${analyzer.kind} analyzer in repositories this entry covers. Set only what differs from the defaults: unset options keep them. The most specific entry covering a repository wins as a whole, so repeat shared options in narrower entries.`,
         schema: partialOptions(shape),
+        default: optionDefaults(shape),
         ...(analyzer.presets?.length
           ? {
               presets: analyzer.presets.map(({ options, ...preset }) => ({

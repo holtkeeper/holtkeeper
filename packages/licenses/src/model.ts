@@ -3,10 +3,26 @@ import { z } from 'zod'
 import type { LicenseVerdict } from './spdx.ts'
 
 /**
- * Verdict of one package: a license verdict, `ignored` when the policy ignores the package, or
- * `internal` when one of the analyzed repositories defines it.
+ * Verdict of one package: a license verdict, `ignored` when the policy ignores the package (or it
+ * is a dev-only dependency the policy leaves out), `internal` when one of the analyzed
+ * repositories defines it, or `excepted` when a policy exception accepts a license that would not
+ * pass otherwise.
  */
-export type PackageVerdict = LicenseVerdict | 'ignored' | 'internal'
+export type PackageVerdict = LicenseVerdict | 'ignored' | 'internal' | 'excepted'
+
+/**
+ * A package the policy accepts although its license would not pass, with the reason and who
+ * approved it. `package` may use `*` wildcards; without `version` or `license` every version or
+ * license matches. Past `expires` (last day, `YYYY-MM-DD`) it no longer applies.
+ */
+export interface LicenseException {
+  package: string
+  version?: string
+  license?: string
+  reason: string
+  approvedBy?: string
+  expires?: string
+}
 
 /** One third-party package with the licenses its registry declares. */
 export interface LicensedPackage {
@@ -25,6 +41,8 @@ export interface LicensedPackage {
   culprits?: string[]
   /** For `internal` packages: the repository that defines it, as `forge:path`. */
   definedIn?: string
+  /** For `excepted` packages: the reason of the exception that accepted it. */
+  exception?: string
 }
 
 /** The policy a run evaluated against, kept so reports can show it. */
@@ -32,8 +50,14 @@ export interface LicensePolicyData {
   allow: string[]
   deny: string[]
   ignore: string[]
+  /** Licenses that need a sign-off even when `allow` matches them; absent: none. */
+  review?: string[]
   /** `violation`: unknown licenses were judged not allowed. Missing in older records: `warn`. */
   unknown?: 'warn' | 'violation'
+  /** `ignore`: packages only dev dependency groups use were not judged. Absent: `check`. */
+  devDependencies?: 'check' | 'ignore'
+  /** Exceptions that applied on the day of the run; absent: none. */
+  exceptions?: LicenseException[]
   /** The repository itself had to carry a license file. */
   requireProjectLicense?: boolean
 }
@@ -50,7 +74,25 @@ export interface LicensesData {
   }
 }
 
-const verdict = z.enum(['allowed', 'unknown', 'unlisted', 'denied', 'ignored', 'internal'])
+const verdict = z.enum([
+  'allowed',
+  'unknown',
+  'unlisted',
+  'denied',
+  'ignored',
+  'internal',
+  'excepted',
+])
+
+/** Validates one `LicenseException`. */
+export const licenseExceptionSchema = z.object({
+  package: z.string().trim().min(1).max(214),
+  version: z.string().trim().min(1).max(100).optional(),
+  license: z.string().trim().min(1).max(200).optional(),
+  reason: z.string().trim().min(1).max(500),
+  approvedBy: z.string().trim().min(1).max(200).optional(),
+  expires: z.iso.date().optional(),
+})
 
 /** Validates `LicensesData` uploads. */
 export const licensesDataSchema: z.ZodType<LicensesData> = z.object({
@@ -59,7 +101,10 @@ export const licensesDataSchema: z.ZodType<LicensesData> = z.object({
     allow: z.array(z.string()),
     deny: z.array(z.string()),
     ignore: z.array(z.string()),
+    review: z.array(z.string()).optional(),
     unknown: z.enum(['warn', 'violation']).optional(),
+    devDependencies: z.enum(['check', 'ignore']).optional(),
+    exceptions: z.array(licenseExceptionSchema).optional(),
     requireProjectLicense: z.boolean().optional(),
   }),
   project: z.object({ licenseFiles: z.array(z.string()) }).optional(),
@@ -74,6 +119,7 @@ export const licensesDataSchema: z.ZodType<LicensesData> = z.object({
       verdict,
       culprits: z.array(z.string()).optional(),
       definedIn: z.string().optional(),
+      exception: z.string().optional(),
     }),
   ),
 })

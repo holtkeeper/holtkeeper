@@ -40,8 +40,8 @@ function MissingNotice({ of }: { of: string }) {
       <span className="flex flex-col items-start gap-2">
         {notice.text}
         <LinkButton
-          to="/settings"
-          search={{ tab: of === 'ai-provider' ? 'ai' : 'integrations' }}
+          to="/settings/$section"
+          params={{ section: of === 'ai-provider' ? 'ai' : 'integrations' }}
           size="sm"
         >
           Open {of === 'ai-provider' ? 'AI providers' : 'Credentials'}

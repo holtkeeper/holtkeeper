@@ -1,11 +1,24 @@
 import type {
+  AssetsOverview,
+  AssetsQuery,
+  BranchesOverview,
+  BundlesOverview,
+  CiFleetJobSort,
+  CiFleetJobsView,
+  CiJobsView,
+  ReviewDetail,
+  ReviewList,
+  ReviewQuery,
   AcceptGuideSectionInput,
   AgentTaskGroupDetail,
   AgentTaskGroupInput,
   AgentTaskGroupList,
   AgentTaskGroupView,
+  TaskApprovalCount,
   WriteTasksStatus,
   AcceptLearningInput,
+  AcceptLearningsInput,
+  AcceptLearningsResult,
   AgentTranscriptView,
   EditLearningInput,
   Family,
@@ -13,7 +26,10 @@ import type {
   FamilyList,
   FamilySuggestionDismissInput,
   FamilySuggestionList,
+  GuideChainView,
+  GuideGeneratedHistory,
   GuidePreview,
+  GuideRepoFilesView,
   GuideScopeKey,
   GuideScopeView,
   GuideSection,
@@ -34,6 +50,7 @@ import type {
   ChatPostResult,
   ChatReadInput,
   ChatThreadInput,
+  ChatThreadContextView,
   ChatThreadList,
   ChatThreadPatchInput,
   ChatThreadView,
@@ -44,6 +61,8 @@ import type {
   AiRunList,
   AiUsageBuckets,
   AiUsageOverview,
+  AiUsagePeriodKind,
+  AiWeekBreakdown,
   AuditVerifyResponse,
   ClearStorageInput,
   ClearStorageResult,
@@ -62,8 +81,12 @@ import type {
   PublicApiPackageDetail,
   PublicApiPackageList,
   PublicApiSearchResult,
+  PublicApiMatch,
+  PublicApiSymbol,
+  FindingsResponse,
+  LicensesOverview,
+  DependencyApi,
   PackageUsageView,
-  UpgradeImpactView,
   UsageSitesView,
   CreateJobInput,
   ExternalAccountList,
@@ -72,10 +95,12 @@ import type {
   ForgeWebhookResult,
   Job,
   JobAnalyzerList,
+  JobCountView,
   JobFailureList,
   JobList,
   JobLog,
   JobRunList,
+  JobStats,
   JobTargetList,
   JobWhy,
   LinkAccountInput,
@@ -84,10 +109,10 @@ import type {
   MediaVariantsInput,
   MediaVariantsResult,
   RepoOverview,
-  RepoReviewList,
   ReleaseAcceptInput,
   ReleaseOverview,
   ReleaseDeployInput,
+  ReleaseDetectView,
   ReleaseEditsInput,
   ReleaseRepoView,
   ReleaseStepInput,
@@ -97,7 +122,6 @@ import type {
   ReleaseSummaryInput,
   DeployState,
   RepoAvatarInfo,
-  SchedulePreview,
   FreshnessOverview,
   ScheduleRunList,
   ScheduleRunStarted,
@@ -106,7 +130,6 @@ import type {
   AnalysisDetail,
   BundleTargetReportView,
   BundleTargetsView,
-  AnalysisKindList,
   AnalysisList,
   ApplyChangesInput,
   ApplyChangesResult,
@@ -122,6 +145,15 @@ import type {
   HistoryList,
   HomeView,
   HistoryScope,
+  AllowlistRenewInput,
+  GuideSectionRejectInput,
+  InboxCount,
+  InboxFeed,
+  KnowledgeCounts,
+  KnowledgeDetail,
+  ReleaseDismissInput,
+  SnoozeInput,
+  SnoozeList,
   PutConfigInput,
   AuditRunDetail,
   AuditRunList,
@@ -136,6 +168,7 @@ import type {
   RepoAssetsView,
   RepoCoverageView,
   DependencyDetail,
+  DependencySearchResult,
   DependencyTable,
   DependencyUpgrade,
   StackOverview,
@@ -152,7 +185,8 @@ import type {
   MeResponse,
   ProviderModelList,
   PutSettingInput,
-  RepoAccessView,
+  RepoAccessBatch,
+  RepoAccessBatchInput,
   RepoList,
   RepoPollResult,
   RepoRef,
@@ -179,6 +213,7 @@ import type {
 
 import type { McpTool } from '../lib/mcp.ts'
 import { repoKey } from '../lib/repo.ts'
+import type { ScopeFocus } from '../lib/scope.ts'
 import { mcpRequest, request, requestBlob, uploadFile, urlOf } from './client.ts'
 
 const id = (value: string) => encodeURIComponent(value)
@@ -192,6 +227,10 @@ export interface JobQuery {
   trigger?: string
   schedule?: string
   signature?: string
+  /** Only the jobs that produced this analysis. */
+  analysisId?: string
+  /** Id prefix, repository, group, analyzer or its label, matched by the server. */
+  q?: string
 }
 
 /** Config collections of `/api/config/<collection>` and the document type each holds. */
@@ -211,17 +250,47 @@ export interface AiUsageQuery {
   taskKind?: string
   analyzer?: string
   outcome?: string
+  /** `interactive` or `automatic`. */
+  origin?: string
+  actor?: string
+  /** Comma list of config groups; narrows what the caller may read. */
+  groups?: string
   from?: string
   to?: string
 }
 
-/** Filters of `GET /api/history` and the audit export; `repos` is a comma list. */
+/** Query of `GET /api/ai/overview`. */
+export interface AiOverviewQuery {
+  period?: AiUsagePeriodKind
+  /** Comma list of config groups. */
+  groups?: string
+}
+
+/** A job filter as the query string of `GET /api/jobs` and `GET /api/jobs/count`. */
+const jobQuery = (filter: JobQuery) => ({
+  status: filter.status,
+  repo: filter.repo ? repoKey(filter.repo) : undefined,
+  repos: filter.repos?.join(','),
+  analyzer: filter.analyzer,
+  trigger: filter.trigger,
+  schedule: filter.schedule,
+  signature: filter.signature,
+  analysisId: filter.analysisId,
+  q: filter.q?.trim() || undefined,
+})
+
+/**
+ * Filters of `GET /api/history` and the audit export; `repos` is a comma list. `targetType` and
+ * `targetId` keep the events about one target, e.g. `schedule` and a schedule's name.
+ */
 export interface HistoryQuery {
   actor?: string
   action?: string
   repos?: string
   outcome?: string
   from?: string
+  targetType?: string
+  targetId?: string
 }
 
 type Query = Record<string, string | number | undefined>
@@ -233,11 +302,43 @@ const toQuery = (value: object): Query =>
     ),
   )
 
+/** Filters of `GET /api/api-surface/search`; facet counts come back for the whole match set. */
+export interface PublicApiSearchQuery {
+  q: string
+  package?: string
+  repo?: string
+  subpath?: string
+  kind?: string
+  match?: PublicApiMatch
+  limit?: number
+}
+
+/** One exported name of `GET /api/api-surface/symbol`; `limit` caps its history entries. */
+export interface PublicApiSymbolQuery {
+  package: string
+  name: string
+  subpath?: string
+  version?: string
+  repo?: string
+  limit?: number
+}
+
 /** Every server endpoint the UI uses. Nothing outside `src/api/` knows a URL. */
 export const api = {
   me: (signal?: AbortSignal) => request<MeResponse>('GET', '/api/me', signal ? { signal } : {}),
 
   home: () => request<HomeView>('GET', '/api/home'),
+  inbox: () => request<InboxFeed>('GET', '/api/inbox'),
+  inboxCount: () => request<InboxCount>('GET', '/api/inbox/count'),
+  snooze: (input: SnoozeInput) => request<SnoozeList>('POST', '/api/me/snoozes', { body: input }),
+  unsnooze: (itemId: string) =>
+    request<SnoozeList>('DELETE', '/api/me/snoozes', { query: { id: itemId } }),
+  dismissRelease: (input: ReleaseDismissInput) =>
+    request<{ ok: true }>('POST', '/api/releases/dismiss', { body: input }),
+  rejectGuideSection: (input: GuideSectionRejectInput) =>
+    request<GuideSection>('POST', '/api/guide/section/reject', { body: input }),
+  renewAllowlist: (input: AllowlistRenewInput) =>
+    request<SettingView>('POST', '/api/audits/allowlist/renew', { body: input }),
   repos: () => request<RepoList>('GET', '/api/repos'),
   repoUpdates: (repo: string) =>
     request<RepoUpdatesView>('GET', '/api/repos/updates', { query: { repo } }),
@@ -261,11 +362,22 @@ export const api = {
       },
     }),
   auditRun: (runId: string) => request<AuditRunDetail>('GET', `/api/audit-runs/${id(runId)}`),
+  findings: (repo?: RepoRef) =>
+    request<FindingsResponse>('GET', '/api/audits/findings', {
+      query: { repo: repo ? repoKey(repo) : undefined },
+    }),
+  licenses: () => request<LicensesOverview>('GET', '/api/licenses'),
 
   dependencies: () => request<DependencyTable>('GET', '/api/dependencies'),
+  dependencySearch: (q: string, limit?: number) =>
+    request<DependencySearchResult>('GET', '/api/dependencies/search', {
+      query: toQuery({ q, limit }),
+    }),
   stack: () => request<StackOverview>('GET', '/api/stack'),
   dependency: (ecosystem: string, name: string) =>
     request<DependencyDetail>('GET', '/api/dependencies/library', { query: { ecosystem, name } }),
+  dependencyApi: (ecosystem: string, name: string) =>
+    request<DependencyApi>('GET', '/api/dependencies/api', { query: { ecosystem, name } }),
   dependencyUpgrade: (query: { ecosystem: string; name: string; from?: string; to?: string }) =>
     request<DependencyUpgrade>('GET', '/api/dependencies/upgrade', { query }),
   dependencyDocs: (query: {
@@ -278,6 +390,10 @@ export const api = {
   ciOverview: () => request<CiOverview>('GET', '/api/ci'),
   ciRepo: (repo: RepoRef) =>
     request<CiRepoView>('GET', '/api/ci/repo', { query: { repo: repoKey(repo) } }),
+  ciJobs: (repo: RepoRef, limit?: number) =>
+    request<CiJobsView>('GET', '/api/ci/jobs', { query: { repo: repoKey(repo), limit } }),
+  ciFleetJobs: (sort: CiFleetJobSort, limit?: number) =>
+    request<CiFleetJobsView>('GET', '/api/ci/jobs/fleet', { query: { sort, limit } }),
   coverageOverview: () => request<CoverageOverview>('GET', '/api/coverage'),
   repoCoverage: (repo: RepoRef) =>
     request<RepoCoverageView>('GET', '/api/coverage/repo', { query: { repo: repoKey(repo) } }),
@@ -290,8 +406,10 @@ export const api = {
     urlOf('/api/api-surface/package.md', toQuery(query)),
   publicApiDiff: (query: { name: string; from?: string; to?: string; repo?: string }) =>
     request<PublicApiDiff>('GET', '/api/api-surface/diff', { query: toQuery(query) }),
-  publicApiSearch: (query: { q: string; package?: string; kind?: string; limit?: number }) =>
+  publicApiSearch: (query: PublicApiSearchQuery) =>
     request<PublicApiSearchResult>('GET', '/api/api-surface/search', { query: toQuery(query) }),
+  publicApiSymbol: (query: PublicApiSymbolQuery) =>
+    request<PublicApiSymbol>('GET', '/api/api-surface/symbol', { query: toQuery(query) }),
   packageUsage: (name: string) =>
     request<PackageUsageView>('GET', '/api/api-surface/usages/package', { query: { name } }),
   usageSites: (query: {
@@ -303,10 +421,6 @@ export const api = {
     repo?: string
     limit?: number
   }) => request<UsageSitesView>('GET', '/api/api-surface/usages/sites', { query: toQuery(query) }),
-  upgradeImpact: (query: { package: string; from?: string; to?: string; repo?: string }) =>
-    request<UpgradeImpactView>('GET', '/api/api-surface/usages/impact', {
-      query: toQuery(query),
-    }),
   publicApiRescan: () => request<{ indexedAt?: string }>('POST', '/api/api-surface/rescan'),
   mcpTokens: () => request<McpTokenList>('GET', '/api/api-surface/mcp/tokens'),
   createMcpToken: (input: CreateMcpTokenInput) =>
@@ -317,7 +431,6 @@ export const api = {
     request<McpUsageOverview>('GET', '/api/api-surface/mcp/usage', { query: { days } }),
   mcpTools: () => mcpRequest<{ tools: McpTool[] }>('tools/list').then((result) => result.tools),
 
-  analysisKinds: () => request<AnalysisKindList>('GET', '/api/analyses/kinds'),
   analyses: (query: { repo?: RepoRef; kind?: string; limit?: number; before?: string }) =>
     request<AnalysisList>('GET', '/api/analyses', {
       query: {
@@ -330,8 +443,11 @@ export const api = {
   analysis: (analysisId: string, compare?: string) =>
     request<AnalysisDetail>('GET', `/api/analyses/${id(analysisId)}`, { query: { compare } }),
 
+  assets: (query: AssetsQuery) =>
+    request<AssetsOverview>('GET', '/api/assets', { query: toQuery(query) }),
   repoAssets: (repo: RepoRef) =>
     request<RepoAssetsView>('GET', '/api/assets/repo', { query: { repo: repoKey(repo) } }),
+  bundles: () => request<BundlesOverview>('GET', '/api/bundles'),
   bundleTargets: (repo: RepoRef) =>
     request<BundleTargetsView>('GET', '/api/bundles/targets', { query: { repo: repoKey(repo) } }),
   bundleReport: (
@@ -366,8 +482,10 @@ export const api = {
   putSetting: (input: PutSettingInput) =>
     request<SettingView>('PUT', '/api/settings', { body: input }),
   deleteSetting: (settingId: string) => request<void>('DELETE', `/api/settings/${id(settingId)}`),
-  resolveSettings: (repo: RepoRef) =>
-    request<ResolvedSettings>('GET', '/api/settings/resolve', { query: { repo: repoKey(repo) } }),
+  resolveSettings: (focus: ScopeFocus) =>
+    request<ResolvedSettings>('GET', '/api/settings/resolve', {
+      query: focus.kind === 'repo' ? { repo: repoKey(focus.repo) } : { group: focus.group },
+    }),
 
   knowledge: (query: { status?: readonly KnowledgeStatus[]; repo?: RepoRef; q?: string }) =>
     request<KnowledgeList>('GET', '/api/knowledge', {
@@ -382,9 +500,12 @@ export const api = {
     request<KnowledgeEntry>('POST', '/api/knowledge', { body: input }),
   updateKnowledge: (entryId: string, input: UpdateKnowledgeInput) =>
     request<KnowledgeEntry>('PUT', `/api/knowledge/${id(entryId)}`, { body: input }),
+  knowledgeEntry: (entryId: string) =>
+    request<KnowledgeDetail>('GET', `/api/knowledge/${id(entryId)}`),
   reviewKnowledge: (entryId: string, action: 'accept' | 'reject' | 'archive') =>
     request<KnowledgeEntry>('POST', `/api/knowledge/${id(entryId)}/${action}`),
   deleteKnowledge: (entryId: string) => request<void>('DELETE', `/api/knowledge/${id(entryId)}`),
+  knowledgeCounts: () => request<KnowledgeCounts>('GET', '/api/knowledge/counts'),
 
   guide: (scope: GuideScopeKey) =>
     request<GuideScopeView>('GET', '/api/guide', { query: { scope } }),
@@ -409,6 +530,18 @@ export const api = {
     request<Job>('POST', '/api/guide/regenerate', { query: { repo: repoKey(repo) }, body: input }),
   guidePreview: (repo: RepoRef, task: GuideTask) =>
     request<GuidePreview>('GET', '/api/guide/preview', { query: { repo: repoKey(repo), task } }),
+  guideChain: (repo: RepoRef, section?: GuideSectionName) =>
+    request<GuideChainView>('GET', '/api/guide/chain', {
+      query: { repo: repoKey(repo), section },
+    }),
+  guideRepoFiles: (repo: RepoRef) =>
+    request<GuideRepoFilesView>('GET', '/api/guide/repo-files', {
+      query: { repo: repoKey(repo) },
+    }),
+  guideGeneratedHistory: (scope: GuideScopeKey, section: GuideSectionName) =>
+    request<GuideGeneratedHistory>('GET', '/api/guide/generated/history', {
+      query: { scope, section },
+    }),
 
   families: () => request<FamilyList>('GET', '/api/families'),
   familySuggestions: () => request<FamilySuggestionList>('GET', '/api/families/suggestions'),
@@ -430,6 +563,8 @@ export const api = {
     request<LearningCandidate>('POST', `/api/learnings/${id(candidateId)}/accept`, {
       body: input,
     }),
+  acceptLearnings: (input: AcceptLearningsInput) =>
+    request<AcceptLearningsResult>('POST', '/api/learnings/accept', { body: input }),
   rejectLearning: (candidateId: string) =>
     request<LearningCandidate>('POST', `/api/learnings/${id(candidateId)}/reject`),
   editLearning: (candidateId: string, input: EditLearningInput) =>
@@ -451,9 +586,9 @@ export const api = {
     request<ForgeRepositoryList>('GET', `/api/forges/${id(forgeId)}/repositories`, {
       query: { search: search || undefined, limit: 30 },
     }),
-  repoAccess: (forgeId: string, path: string) =>
-    request<RepoAccessView>('GET', `/api/forges/${id(forgeId)}/repositories/access`, {
-      query: { path },
+  checkRepoAccess: (forgeId: string, input: RepoAccessBatchInput) =>
+    request<RepoAccessBatch>('POST', `/api/forges/${id(forgeId)}/repositories/access`, {
+      body: input,
     }),
   groups: () => request<ConfigEntryList<'group'>>('GET', '/api/config/groups'),
   putGroup: (groupId: string, data: GroupDocumentData) =>
@@ -473,10 +608,6 @@ export const api = {
     ),
   deleteConfigEntry: (collection: keyof ConfigCollections, entryId: string) =>
     request<void>('DELETE', `/api/config/${collection}/${id(entryId)}`),
-  schedulePreview: (scheduleId: string, count = 10) =>
-    request<SchedulePreview>('GET', `/api/schedules/${id(scheduleId)}/preview`, {
-      query: { count },
-    }),
   issueForgeWebhook: (forgeId: string, input: ForgeWebhookInput) =>
     request<ForgeWebhookResult>('POST', `/api/forges/${id(forgeId)}/webhook`, { body: input }),
   scheduleRuns: (limit = 10) =>
@@ -501,6 +632,8 @@ export const api = {
     }),
   releaseRepo: (repo: RepoRef) =>
     request<ReleaseRepoView>('GET', '/api/releases/repo', { query: { repo: repoKey(repo) } }),
+  releaseDetect: (repo: RepoRef) =>
+    request<ReleaseDetectView>('GET', '/api/releases/detect', { query: { repo: repoKey(repo) } }),
   releaseDeploy: (repo: RepoRef, tag: string) =>
     request<DeployState>('GET', '/api/releases/deploy', { query: { repo: repoKey(repo), tag } }),
   saveReleaseEdits: (input: ReleaseEditsInput) =>
@@ -525,24 +658,22 @@ export const api = {
     request<undefined>('DELETE', '/api/repos/avatar', { query: { repo: repoKey(repo) } }),
   repoOverview: (repo: RepoRef) =>
     request<RepoOverview>('GET', '/api/repos/overview', { query: { repo: repoKey(repo) } }),
-  repoReviews: (repo: RepoRef) =>
-    request<RepoReviewList>('GET', '/api/repos/reviews', { query: { repo: repoKey(repo) } }),
+  reviews: (query: ReviewQuery) =>
+    request<ReviewList>('GET', '/api/reviews', { query: toQuery(query) }),
+  review: (analysisId: string) => request<ReviewDetail>('GET', `/api/reviews/${id(analysisId)}`),
+  branches: () => request<BranchesOverview>('GET', '/api/branches'),
 
   jobAnalyzers: () => request<JobAnalyzerList>('GET', '/api/jobs/analyzers'),
   jobs: (filter: JobQuery & { limit?: number; before?: string }) =>
     request<JobList>('GET', '/api/jobs', {
-      query: {
-        status: filter.status,
-        repo: filter.repo ? repoKey(filter.repo) : undefined,
-        repos: filter.repos?.join(','),
-        analyzer: filter.analyzer,
-        trigger: filter.trigger,
-        schedule: filter.schedule,
-        signature: filter.signature,
-        limit: filter.limit,
-        before: filter.before,
-      },
+      query: { ...jobQuery(filter), limit: filter.limit, before: filter.before },
     }),
+  jobCount: (filter: JobQuery & { since?: string }) =>
+    request<JobCountView>('GET', '/api/jobs/count', {
+      query: { ...jobQuery(filter), since: filter.since },
+    }),
+  jobStats: (filter: { repos?: readonly string[] } = {}) =>
+    request<JobStats>('GET', '/api/jobs/stats', { query: { repos: filter.repos?.join(',') } }),
   jobTargets: () => request<JobTargetList>('GET', '/api/jobs/targets'),
   jobFailures: (filter: { days?: number; analyzer?: string; repos?: readonly string[] }) =>
     request<JobFailureList>('GET', '/api/jobs/failures', {
@@ -560,7 +691,10 @@ export const api = {
   createJob: (input: CreateJobInput) => request<Job>('POST', '/api/jobs', { body: input }),
   cancelJob: (jobId: string) => request<Job>('POST', `/api/jobs/${id(jobId)}/cancel`),
 
-  aiOverview: () => request<AiUsageOverview>('GET', '/api/ai/overview'),
+  aiOverview: (query: AiOverviewQuery = {}) =>
+    request<AiUsageOverview>('GET', '/api/ai/overview', { query: toQuery(query) }),
+  aiWeek: (query: { week?: string; groups?: string } = {}) =>
+    request<AiWeekBreakdown>('GET', '/api/ai/week', { query: toQuery(query) }),
   aiUsage: (filter: AiUsageQuery & { groupBy?: string }) =>
     request<AiUsageBuckets>('GET', '/api/ai/usage', { query: toQuery(filter) }),
   aiRuns: (filter: AiUsageQuery & { before?: string; limit?: number }) =>
@@ -606,6 +740,11 @@ export const api = {
     request<AgentTaskGroupView>('POST', `/api/task-groups/${id(groupId)}/approve`),
   cancelTaskGroup: (groupId: string) =>
     request<AgentTaskGroupView>('POST', `/api/task-groups/${id(groupId)}/cancel`),
+  rejectTaskGroup: (groupId: string) =>
+    request<AgentTaskGroupView>('POST', `/api/task-groups/${id(groupId)}/reject`),
+  retryTaskGroup: (groupId: string) =>
+    request<AgentTaskGroupView>('POST', `/api/task-groups/${id(groupId)}/retry`),
+  taskApprovalCount: () => request<TaskApprovalCount>('GET', '/api/task-groups/needs-approval'),
   taskGroups: (query: { limit?: number; source?: string; repo?: string } = {}) =>
     request<AgentTaskGroupList>('GET', '/api/task-groups', { query }),
   taskGroup: (groupId: string) =>
@@ -620,10 +759,13 @@ export const api = {
     request<AgentTaskGroupView>('POST', `/api/tasks/${id(taskId)}/cancel`),
   writeTasks: () => request<WriteTasksStatus>('GET', '/api/write-tasks'),
 
-  chatThreads: (archived = false) =>
+  chatThreads: (archived = false, q?: string) =>
     request<ChatThreadList>('GET', '/api/chat/threads', {
-      query: archived ? { archived: 'true' } : {},
+      query: { archived: archived ? 'true' : undefined, q: q?.trim() || undefined },
     }),
+  chatContext: (threadId: string) =>
+    request<ChatThreadContextView>('GET', `/api/chat/threads/${id(threadId)}/context`),
+  chatExportUrl: (threadId: string) => urlOf(`/api/chat/threads/${id(threadId)}/export`),
   createChatThread: (input: ChatThreadInput) =>
     request<ChatThreadView>('POST', '/api/chat/threads', { body: input }),
   updateChatThread: (threadId: string, input: ChatThreadPatchInput) =>

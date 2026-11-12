@@ -1,5 +1,6 @@
 import { defineAnalysis, metric } from '@holtkeeper/report'
-import type { Metric, Report, Section, Tone, TreeNode } from '@holtkeeper/report'
+import type { Metric, MetricsContext, Report, Section, Tone, TreeNode } from '@holtkeeper/report'
+import { z } from 'zod'
 
 import {
   type Counts,
@@ -9,7 +10,7 @@ import {
   percentOf,
   sumCounts,
 } from './model.ts'
-import { coverageChanges } from './summary.ts'
+import { type CoverageTotals, coverageChanges, coverageTotals } from './summary.ts'
 
 const limits = { depth: 3, changes: 50 }
 
@@ -21,6 +22,75 @@ export function coverageTone(percent: number | undefined): Tone {
   if (percent === undefined) return 'neutral'
   if (percent >= thresholds.good) return 'good'
   return percent >= thresholds.bad ? 'warning' : 'bad'
+}
+
+/** Line coverage a repository should reach when its `analyzers.coverage` options set no `target`. */
+export const DEFAULT_COVERAGE_TARGET = 60
+
+/**
+ * The `target` option of the `coverage` analyzer: line coverage to reach, in percent, as a number
+ * or numeric string from 0 to 100. Null and empty strings are rejected.
+ */
+export const coverageTargetSchema = z
+  .union([z.number(), z.string().trim().min(1)])
+  .pipe(z.coerce.number<string | number>().min(0).max(100))
+
+/** Stored headline numbers of one `coverage` record. Shares are percent, 0..100. */
+export interface CoverageMetrics {
+  /** Line coverage over every file; absent when there is nothing to cover. */
+  percent?: number
+  functions?: number
+  branches?: number
+  /** `percent` minus the previous record's, in percentage points; absent without both. */
+  delta?: number
+  /** Line coverage the repository should reach (option `target`). */
+  target: number
+  files: number
+  /** Source files no test loaded. */
+  untested: number
+  /** Tools that produced the record; absent for records written before. */
+  tools?: string[]
+  /** Covered and total counts, as `coverageTotals` gives them; absent for records written before. */
+  totals?: CoverageTotals
+}
+
+const rounded = (value: number | undefined) =>
+  value === undefined ? undefined : Math.round(value * 100) / 100
+
+/** The coverage target `options` (the `coverage` analyzer's) set; 60 when unset or invalid. */
+export function coverageTargetOf(options: unknown): number {
+  const value =
+    typeof options === 'object' && options !== null && 'target' in options
+      ? options.target
+      : undefined
+  return coverageTargetSchema.safeParse(value).data ?? DEFAULT_COVERAGE_TARGET
+}
+
+/**
+ * `CoverageMetrics` of `data`: shares rounded to 0.01, the target from `options.target` (60 when
+ * unset or invalid) and the delta against `previous`.
+ */
+export function coverageMetrics(
+  data: CoverageData,
+  { options, previous }: MetricsContext<CoverageMetrics> = {},
+): CoverageMetrics {
+  const percent = rounded(percentOf(data.summary.lines))
+  const functions = rounded(percentOf(data.summary.functions))
+  const branches = rounded(percentOf(data.summary.branches))
+  const target = coverageTargetOf(options)
+  return {
+    ...(percent === undefined ? {} : { percent }),
+    ...(functions === undefined ? {} : { functions }),
+    ...(branches === undefined ? {} : { branches }),
+    ...(percent !== undefined && previous?.percent !== undefined
+      ? { delta: Math.round((percent - previous.percent) * 100) / 100 }
+      : {}),
+    target,
+    files: data.files.length,
+    untested: untested(data),
+    tools: data.tools,
+    totals: coverageTotals(data),
+  }
 }
 
 const untested = (data: CoverageData) => data.files.filter((file) => file.loaded === false).length
@@ -155,11 +225,12 @@ export function coverageReport(
  * The `coverage` analysis kind: line, function and branch coverage of a repository's source files
  * with the folders and files that lack tests. Coverage metrics carry `better: 'up'`.
  */
-export const coverageAnalysis = defineAnalysis<CoverageData>({
+export const coverageAnalysis = defineAnalysis<CoverageData, CoverageMetrics>({
   kind: 'coverage',
   label: 'Test coverage',
   schema: coverageDataSchema,
   summarize: (data) => metrics(data),
+  metrics: coverageMetrics,
   toReport(current, previous) {
     return {
       ...coverageReport(current.data, {

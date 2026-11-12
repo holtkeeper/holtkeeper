@@ -83,6 +83,7 @@ describe('query building', () => {
         k_provider: '',
         k_task_kind: '',
         k_analyzer: '',
+        k_origin: '',
         input_tokens: '300',
         output_tokens: '60',
         cache_read_tokens: null,
@@ -91,6 +92,7 @@ describe('query building', () => {
         runs: 4,
         errors: 1,
         denied: 1,
+        unknown_cost: '2',
         avg_duration_ms: null,
       },
       ['week', 'group'],
@@ -105,6 +107,7 @@ describe('query building', () => {
       runs: 4,
       errors: 1,
       denied: 1,
+      unknownCost: 2,
       avgDurationMs: 0,
     })
   })

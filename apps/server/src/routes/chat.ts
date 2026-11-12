@@ -1,4 +1,4 @@
-import type { Principal } from '@holtkeeper/access'
+import { type Principal, can } from '@holtkeeper/access'
 import type {
   AgentTranscriptView,
   ChatCommandView,
@@ -6,17 +6,32 @@ import type {
   ChatMessageView,
   ChatPeopleView,
   ChatPostResult,
+  ChatThreadContextView,
   ChatThreadList,
   ChatThreadView,
   ChatUnreadView,
 } from '@holtkeeper/api'
-import type { ChatMessage, ChatPerson, ChatThread, User } from '@holtkeeper/store'
+import { type Card, type CardBlock, renderMarkdown } from '@holtkeeper/chat'
+import type {
+  ChatMessage,
+  ChatMessageRef,
+  ChatPerson,
+  ChatThread,
+  ChatThreadContext,
+  User,
+} from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
-import { mentionsAgent, parseMentions, participantLabels } from '../chat-prompt.ts'
-import { STALE_REPLY_MS, canSeeThread, hasChatAccess } from '../chat-threads.ts'
+import { mentionsAgent, parseMentions, participantLabels, uniqueRefs } from '../chat-prompt.ts'
+import {
+  STALE_REPLY_MS,
+  bodyRefs,
+  canReadRepo,
+  canSeeThread,
+  hasChatAccess,
+} from '../chat-threads.ts'
 import { chatFor } from '../chat.ts'
 import {
   type AppContext,
@@ -26,14 +41,20 @@ import {
   principalOf,
   readBody,
   repoTarget,
+  ForbiddenException,
 } from '../context.ts'
+import { plural } from '../text.ts'
 import { readTranscript } from '../transcripts.ts'
+import { canReadAiScope } from './ai.ts'
 import { avatarUrl } from './avatars.ts'
 
-const repoKey = z
-  .string()
-  .regex(/^[^:]+:.+$/, 'must look like <forge>:<path>')
-  .optional()
+const repoField = z.string().regex(/^[^:]+:.+$/, 'must look like <forge>:<path>')
+const repoKey = repoField.optional()
+
+/** Repositories one thread may carry as context. */
+const MAX_CONTEXT_REPOS = 20
+
+const contextReposSchema = z.array(repoField).max(MAX_CONTEXT_REPOS).optional()
 
 const threadSchema = z
   .object({
@@ -41,6 +62,7 @@ const threadSchema = z
     repo: repoKey,
     group: z.string().min(1).optional(),
     autoReply: z.boolean().optional(),
+    contextRepos: contextReposSchema,
   })
   .refine((input) => !(input.repo && input.group), 'give repo or group, not both')
 
@@ -49,8 +71,13 @@ const patchSchema = z
     title: z.string().trim().min(1).max(120).optional(),
     archived: z.boolean().optional(),
     autoReply: z.boolean().optional(),
+    contextRepos: contextReposSchema,
+    muted: z.boolean().optional(),
   })
   .refine((input) => Object.keys(input).length > 0, 'nothing to change')
+
+/** Messages read per page while exporting a thread. */
+const EXPORT_PAGE = 500
 
 const postSchema = z.object({
   body: z.string().trim().min(1).max(8000),
@@ -76,12 +103,64 @@ const cursor = (value: string | undefined, name: string) => {
 
 const caller = (c: AppContext): Principal => {
   const principal = principalOf(c)
-  if (!hasChatAccess(principal))
-    throw new HTTPException(403, { message: 'missing permission repos:read' })
+  if (!hasChatAccess(principal)) throw new ForbiddenException('repos:read')
   return principal
 }
 
-const messageView = (thread: ChatThread, message: ChatMessage): ChatMessageView => {
+/** What the viewer may see of a message: refs whose `repo` they may read, cost with `ai:read`. */
+interface MessageSight {
+  readable: (repo: string) => boolean
+  cost: boolean
+}
+
+const visibleRefs = (refs: readonly ChatMessageRef[], readable: (repo: string) => boolean) =>
+  refs.filter((ref) => !('repo' in ref) || ref.repo === undefined || readable(ref.repo))
+
+const HIDDEN_TASK = 'A change in repositories you cannot see.'
+
+/**
+ * `card` without what task blocks say about repositories the viewer may not read: their steps
+ * (with job errors) and merge requests go, and a block with no readable repository becomes a
+ * neutral line. Cards without such repositories come back as they are.
+ */
+function visibleCard(card: Card, readable: (repo: string) => boolean): Card {
+  let changed = false
+  const repos: string[] = []
+  const blocks = card.blocks.map((block): CardBlock => {
+    if (block.type !== 'task') return block
+    const seen = block.repos.filter(readable)
+    repos.push(...seen)
+    if (seen.length === block.repos.length) return block
+    changed = true
+    if (!seen.length) return { type: 'text', text: HIDDEN_TASK }
+    const steps = block.steps?.filter((step) => readable(step.label))
+    const mergeRequests = block.mergeRequests?.filter((mr) => readable(mr.repo))
+    return {
+      type: 'task',
+      repos: seen,
+      summary: block.summary,
+      status: block.status,
+      ...(block.groupId && { groupId: block.groupId }),
+      ...(block.budgetUsd !== undefined && { budgetUsd: block.budgetUsd }),
+      ...(steps?.length && { steps }),
+      ...(mergeRequests?.length && { mergeRequests }),
+    }
+  })
+  if (!changed) return card
+  return {
+    ...(card.title && { title: card.title }),
+    ...(repos.length && { subtitle: repos.join(', ') }),
+    ...(card.tone && { tone: card.tone }),
+    ...(card.url && { url: card.url }),
+    blocks,
+  }
+}
+
+const messageView = (
+  thread: ChatThread,
+  message: ChatMessage,
+  sight: MessageSight,
+): ChatMessageView => {
   const label =
     message.authorId !== undefined
       ? participantLabels(thread.participants).get(message.authorId)
@@ -94,11 +173,12 @@ const messageView = (thread: ChatThread, message: ChatMessage): ChatMessageView 
     ...(message.authorId !== undefined && { authorId: message.authorId }),
     ...(label && { authorLabel: label }),
     body: message.body,
-    ...(message.card && { card: message.card }),
+    ...(message.card && { card: visibleCard(message.card, sight.readable) }),
     ...(message.toolTrace && { toolTrace: message.toolTrace }),
-    ...(message.costUsd !== undefined && { costUsd: message.costUsd }),
+    ...(sight.cost && message.costUsd !== undefined && { costUsd: message.costUsd }),
     ...(message.transcriptRef !== undefined && { transcriptRef: message.transcriptRef }),
     mentions: message.mentions,
+    refs: visibleRefs(message.refs, sight.readable),
     createdAt: message.createdAt,
     ...(message.updatedAt !== undefined && { updatedAt: message.updatedAt }),
   }
@@ -128,21 +208,70 @@ const userPrincipal = (user: User): Principal => ({
   grants: user.grants,
 })
 
+const exportName = (title: string) =>
+  `${
+    title
+      .toLowerCase()
+      .replaceAll(/[^a-z0-9]+/g, '-')
+      .replaceAll(/^-+|-+$/g, '')
+      .slice(0, 60) || 'thread'
+  }.md`
+
+const exportTime = (at: string) => `${at.slice(0, 16).replace('T', ' ')} UTC`
+
+/**
+ * A thread as Markdown for people: title, scope and export time, then every message under its
+ * author's name and participant label and its time, cards rendered as in merge request notes.
+ */
+function exportMarkdown(
+  thread: ChatThread,
+  messages: readonly ChatMessage[],
+  people: readonly { id: string; label: string; name?: string }[],
+  now: Date,
+  readable: (repo: string) => boolean,
+): string {
+  const scope = thread.repo ?? (thread.group ? `group ${thread.group}` : 'whole team')
+  const authorOf = (message: ChatMessage) => {
+    if (message.authorType === 'agent') return 'Holtkeeper'
+    if (message.authorType === 'system') return 'Holtkeeper (system)'
+    const person = people.find((entry) => entry.id === message.authorId)
+    if (!person) return 'Someone'
+    return person.name ? `${person.name} (${person.label})` : person.label
+  }
+  return `${[
+    `# ${thread.title}`,
+    `Thread about ${scope} · ${plural(messages.length, 'message')} · exported ${exportTime(now.toISOString())}`,
+    ...messages.map((message) =>
+      [
+        `---\n\n**${authorOf(message)}** · ${exportTime(message.createdAt)}`,
+        ...(message.body ? [message.body] : []),
+        ...(message.card ? [renderMarkdown(visibleCard(message.card, readable))] : []),
+      ].join('\n\n'),
+    ),
+  ].join('\n\n')}\n`
+}
+
 /**
  * The team chat. Every endpoint needs a signed-in caller and answers 404 for threads it cannot see
  * (`canSeeThread`): repository and group threads need `repos:read` there, unscoped threads chat
- * access (`repos:read` anywhere).
+ * access (`repos:read` anywhere). Context repositories, message refs and task card entries of
+ * repositories the caller may not read are left out; costs show only with `ai:read` (or `ai:admin`) on the thread's scope
+ * (its repository, its group, everything for team-wide threads).
  *
- * - `GET /chat/threads?archived=true` — visible threads with unread counts, and the commands.
- * - `POST /chat/threads` `{ title, repo?, group?, autoReply? }` — a new thread.
- * - `GET /chat/threads/:id` and `PATCH /chat/threads/:id` `{ title?, archived?, autoReply? }`.
+ * - `GET /chat/threads?archived=true&q=` — visible threads with unread and message counts, the
+ *   archived count, and the commands.
+ * - `POST /chat/threads` `{ title, repo?, group?, autoReply?, contextRepos? }` — a new thread.
+ * - `GET /chat/threads/:id` and `PATCH /chat/threads/:id`
+ *   `{ title?, archived?, autoReply?, contextRepos?, muted? }`; `muted` is the caller's own.
+ * - `GET /chat/threads/:id/context` — totals of the whole thread for its context column.
+ * - `GET /chat/threads/:id/export` — the thread as a Markdown download.
  * - `GET /chat/threads/:id/people` — enabled `users` accounts that can see the thread, to mention.
  * - `GET /chat/threads/:id/messages?before=&after=&changedSince=&limit=` — a page of messages.
  * - `POST /chat/threads/:id/messages` `{ body, repo? }` — a message; `/command` runs a command
  *   about `repo` (400 when it lies outside a repository or group thread's scope, and always in
  *   team-wide threads),
  *   `@holtkeeper` (or `autoReply`) starts an agent reply in the background.
- * - `POST /chat/threads/:id/read` `{ messageId }` and `GET /chat/unread`.
+ * - `POST /chat/threads/:id/read` `{ messageId }` and `GET /chat/unread` (muted threads left out).
  * - `GET /chat/messages/:id/transcript` — the transcript of an agent reply in a visible thread.
  *
  * The page polls the messages with `after` and `changedSince` every few seconds.
@@ -157,6 +286,44 @@ export function chatRoutes(deps: ServerDeps) {
       throw new HTTPException(404, { message: 'thread not found' })
     return thread
   }
+
+  const readable = (principal: Principal) => (repo: string) =>
+    canReadRepo(deps.config, principal, repo)
+
+  const canSeeCost = (principal: Principal, thread: Pick<ChatThread, 'repo' | 'group'>) => {
+    const repo = parseRepo(thread.repo)
+    if (repo) {
+      const target = { kind: 'repo' as const, repo: repoTarget(deps.config, repo) }
+      return can(principal, 'ai:read', target) || can(principal, 'ai:admin', target)
+    }
+    return canReadAiScope(principal, thread.group ? { groups: [thread.group] } : { all: true })
+  }
+
+  const sightOf = (principal: Principal, thread: ChatThread): MessageSight => ({
+    readable: readable(principal),
+    cost: canSeeCost(principal, thread),
+  })
+
+  /** The caller's readable repositories of `given`; 400 for unknown forges, 403 for others. */
+  const checkedRepos = (principal: Principal, given: readonly string[]) => {
+    for (const text of given) {
+      const repo = parseRepo(text)
+      if (!repo || !deps.config.forges[repo.forge])
+        throw new HTTPException(400, { message: `${text} is not a configured repository` })
+      if (!canReadRepo(deps.config, principal, text))
+        throw new ForbiddenException('repos:read', text)
+    }
+    return [...new Set(given)]
+  }
+
+  const contextOf = async (thread: ChatThread): Promise<ChatThreadContext> =>
+    (await chat.context(thread.id)) ?? {
+      messageCount: 0,
+      costUsd: 0,
+      repos: [...thread.contextRepos],
+      tools: [],
+      participants: [],
+    }
 
   const commands = (): ChatCommandView[] =>
     chatFor(deps)
@@ -196,7 +363,11 @@ export function chatRoutes(deps: ServerDeps) {
     return thread.group ? [thread.group] : []
   }
 
-  const threadView = async (thread: ChatThread, unread = 0): Promise<ChatThreadView> => ({
+  const threadView = async (
+    principal: Principal,
+    thread: ChatThread,
+    extra: { unread?: number; muted?: boolean; messageCount?: number } = {},
+  ): Promise<ChatThreadView> => ({
     id: thread.id,
     title: thread.title,
     ...(thread.repo && { repo: thread.repo }),
@@ -210,29 +381,57 @@ export function chatRoutes(deps: ServerDeps) {
     replying:
       thread.replyingSince !== undefined &&
       deps.now().getTime() - Date.parse(thread.replyingSince) < STALE_REPLY_MS,
-    unread,
+    unread: extra.unread ?? 0,
     participants: await participantsOf(thread),
     summarized: thread.summary !== undefined,
+    messageCount: extra.messageCount ?? 0,
+    contextRepos: thread.contextRepos.filter(readable(principal)),
+    muted: extra.muted ?? false,
   })
 
-  const unreadOf = async (principal: Principal, thread: ChatThread) =>
-    (await chat.unreadCounts(principal.id, [thread.id]))[thread.id] ?? 0
+  /** The thread as the caller sees it, with their unread count and mute. */
+  const viewFor = async (principal: Principal, thread: ChatThread) => {
+    const [unread, muted, counts] = await Promise.all([
+      chat.unreadCounts(principal.id, [thread.id]),
+      chat.mutedThreads(principal.id),
+      chat.messageCounts([thread.id]),
+    ])
+    return threadView(principal, thread, {
+      unread: unread[thread.id] ?? 0,
+      muted: muted.includes(thread.id),
+      messageCount: counts[thread.id] ?? 0,
+    })
+  }
 
   app.get('/chat/threads', async (c) => {
     const principal = caller(c)
-    const threads = (
-      await chat.listThreads({ archived: c.req.query('archived') === 'true' })
-    ).filter((thread) => canSeeThread(deps.config, principal, thread))
-    const unread = await chat.unreadCounts(
-      principal.id,
-      threads.map((thread) => thread.id),
+    const archived = c.req.query('archived') === 'true'
+    const q = c.req.query('q')?.trim().slice(0, 200)
+    const visible = (await chat.listThreads({ archived: 'all', ...(q && { q }) })).filter(
+      (thread) => canSeeThread(deps.config, principal, thread),
     )
+    const threads = visible.filter((thread) => thread.archived === archived)
+    const ids = threads.map((thread) => thread.id)
+    const [unread, muted, counts] = await Promise.all([
+      chat.unreadCounts(principal.id, ids),
+      chat.mutedThreads(principal.id),
+      chat.messageCounts(ids),
+    ])
     return c.json<ChatThreadList>({
-      threads: await Promise.all(threads.map((thread) => threadView(thread, unread[thread.id]))),
+      threads: await Promise.all(
+        threads.map((thread) =>
+          threadView(principal, thread, {
+            unread: unread[thread.id] ?? 0,
+            muted: muted.includes(thread.id),
+            messageCount: counts[thread.id] ?? 0,
+          }),
+        ),
+      ),
       commands: commands(),
       groups: Object.keys(deps.config.groups).filter((group) =>
         canSeeThread(deps.config, principal, { group }),
       ),
+      archivedCount: visible.filter((thread) => thread.archived).length,
     })
   })
 
@@ -249,7 +448,8 @@ export function chatRoutes(deps: ServerDeps) {
       ...(input.group && { group: input.group }),
     }
     if (!canSeeThread(deps.config, principal, scope))
-      throw new HTTPException(403, { message: 'missing permission repos:read' })
+      throw new ForbiddenException('repos:read', input.repo)
+    const contextRepos = checkedRepos(principal, input.contextRepos ?? [])
     const thread = await chat.createThread({
       id: crypto.randomUUID(),
       title: input.title,
@@ -258,37 +458,99 @@ export function chatRoutes(deps: ServerDeps) {
       createdAt: deps.now().toISOString(),
       autoReply: input.autoReply ?? false,
       participants: [principal.id],
+      contextRepos,
     })
     c.set('audit', {
       action: 'chat.thread.create',
       target: { type: 'chat', id: thread.id },
-      details: { title: thread.title },
+      details: { title: thread.title, ...(contextRepos.length && { contextRepos }) },
     })
-    return c.json<ChatThreadView>(await threadView(thread), 201)
+    return c.json<ChatThreadView>(await threadView(principal, thread), 201)
   })
 
   app.get('/chat/threads/:id', async (c) => {
     const principal = caller(c)
     const thread = await visibleThread(principal, c.req.param('id'))
-    return c.json<ChatThreadView>(await threadView(thread, await unreadOf(principal, thread)))
+    return c.json<ChatThreadView>(await viewFor(principal, thread))
   })
 
   app.patch('/chat/threads/:id', async (c) => {
     const principal = caller(c)
     const thread = await visibleThread(principal, c.req.param('id'))
-    const input = await readBody(c, patchSchema)
-    const updated = await chat.updateThread(thread.id, {
+    const { muted, ...input } = await readBody(c, patchSchema)
+    const given = input.contextRepos && checkedRepos(principal, input.contextRepos)
+    const hidden = thread.contextRepos.filter((repo) => !canReadRepo(deps.config, principal, repo))
+    if (given && given.length + hidden.length > MAX_CONTEXT_REPOS)
+      throw new HTTPException(400, {
+        message: `a thread carries at most ${MAX_CONTEXT_REPOS} repositories`,
+      })
+    const changes = {
       ...(input.title !== undefined && { title: input.title }),
       ...(input.archived !== undefined && { archived: input.archived }),
       ...(input.autoReply !== undefined && { autoReply: input.autoReply }),
-    })
+      ...(given && { contextRepos: [...given, ...hidden] }),
+    }
+    const updated =
+      Object.keys(changes).length > 0 ? await chat.updateThread(thread.id, changes) : thread
     if (!updated) throw new HTTPException(404, { message: 'thread not found' })
-    c.set('audit', {
-      action: 'chat.thread.update',
-      target: { type: 'chat', id: thread.id },
-      details: { ...input },
+    if (muted !== undefined) await chat.setMuted(thread.id, principal.id, muted)
+    if (Object.keys(input).length > 0)
+      c.set('audit', {
+        action: 'chat.thread.update',
+        target: { type: 'chat', id: thread.id },
+        details: { ...input, ...(given && { contextRepos: given }) },
+      })
+    return c.json<ChatThreadView>(await viewFor(principal, updated))
+  })
+
+  app.get('/chat/threads/:id/context', async (c) => {
+    const principal = caller(c)
+    const thread = await visibleThread(principal, c.req.param('id'))
+    const context = await contextOf(thread)
+    const sees = readable(principal)
+    const repos = context.repos.filter(sees)
+    const labels = await participantsOf({
+      ...thread,
+      participants: [
+        ...thread.participants,
+        ...context.participants
+          .map((person) => person.id)
+          .filter((id) => !thread.participants.includes(id)),
+      ],
     })
-    return c.json<ChatThreadView>(await threadView(updated, await unreadOf(principal, updated)))
+    return c.json<ChatThreadContextView>({
+      messageCount: context.messageCount,
+      ...(canSeeCost(principal, thread) && { costUsd: context.costUsd }),
+      repos,
+      hiddenRepoCount: context.repos.length - repos.length,
+      tools: context.tools,
+      participants: context.participants.flatMap((person) => {
+        const view = labels.find((entry) => entry.id === person.id)
+        return view ? [{ ...view, messages: person.messages }] : []
+      }),
+    })
+  })
+
+  app.get('/chat/threads/:id/export', async (c) => {
+    const principal = caller(c)
+    const thread = await visibleThread(principal, c.req.param('id'))
+    const people = await participantsOf(thread)
+    const messages: ChatMessage[] = []
+    let after = 0
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- pages follow each other's cursor
+      const page = await chat.listMessages(thread.id, { after, limit: EXPORT_PAGE })
+      messages.push(...page)
+      const last = page.at(-1)
+      if (!last || page.length < EXPORT_PAGE) break
+      after = last.seq
+    }
+    const markdown = exportMarkdown(thread, messages, people, deps.now(), readable(principal))
+    c.set('audit', { action: 'chat.thread.export', target: { type: 'chat', id: thread.id } })
+    return c.body(markdown, 200, {
+      'content-type': 'text/markdown; charset=utf-8',
+      'content-disposition': `attachment; filename="${exportName(thread.title)}"`,
+    })
   })
 
   app.get('/chat/threads/:id/people', async (c) => {
@@ -335,9 +597,10 @@ export function chatRoutes(deps: ServerDeps) {
       after === undefined && first !== undefined
         ? (await chat.listMessages(thread.id, { before: first.seq, limit: 1 })).length > 0
         : false
+    const sight = sightOf(principal, thread)
     return c.json<ChatMessageList>({
-      thread: await threadView(thread, await unreadOf(principal, thread)),
-      messages: messages.map((message) => messageView(thread, message)),
+      thread: await viewFor(principal, thread),
+      messages: messages.map((message) => messageView(thread, message, sight)),
       hasMore,
       cursor: nextAfter,
       serverTime,
@@ -373,6 +636,7 @@ export function chatRoutes(deps: ServerDeps) {
           ...(joining.length > 0 && { addParticipants: joining }),
           ...(changed && { rememberPeople: [poster] }),
         })) ?? thread
+    const command = input.body.startsWith('/')
     const message = await chat.addMessage({
       id: crypto.randomUUID(),
       threadId: thread.id,
@@ -380,6 +644,10 @@ export function chatRoutes(deps: ServerDeps) {
       authorId: principal.id,
       body: input.body,
       mentions,
+      refs: uniqueRefs([
+        ...(command && input.repo ? [{ kind: 'repo' as const, repo: input.repo }] : []),
+        ...bodyRefs(deps.config, input.body),
+      ]),
       createdAt: deps.now().toISOString(),
     })
     await chat.markRead(thread.id, principal.id, message.id)
@@ -387,7 +655,7 @@ export function chatRoutes(deps: ServerDeps) {
 
     const server = chatFor(deps)
     let replying = false
-    if (input.body.startsWith('/')) {
+    if (command) {
       const surface = server.surface('web')
       if (!surface) throw new HTTPException(503, { message: 'the panel chat is not available' })
       const repo = parseRepo(repoText)
@@ -408,7 +676,10 @@ export function chatRoutes(deps: ServerDeps) {
       server.replies.trigger(thread.id, principal)
       replying = true
     }
-    return c.json<ChatPostResult>({ message: messageView(thread, message), replying })
+    return c.json<ChatPostResult>({
+      message: messageView(thread, message, sightOf(principal, thread)),
+      replying,
+    })
   })
 
   app.post('/chat/threads/:id/read', async (c) => {
@@ -421,8 +692,9 @@ export function chatRoutes(deps: ServerDeps) {
 
   app.get('/chat/unread', async (c) => {
     const principal = caller(c)
-    const threads = (await chat.listThreads()).filter((thread) =>
-      canSeeThread(deps.config, principal, thread),
+    const muted = new Set(await chat.mutedThreads(principal.id))
+    const threads = (await chat.listThreads()).filter(
+      (thread) => !muted.has(thread.id) && canSeeThread(deps.config, principal, thread),
     )
     const counts = await chat.unreadCounts(
       principal.id,

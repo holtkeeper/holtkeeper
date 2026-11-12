@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   type AiUsageRow,
+  type AnalysisRow,
   type JobRow,
   type KnowledgeRow,
   iso,
   knowledgeContent,
   num,
   toAiUsage,
+  toAnalysis,
   toCredential,
   toJob,
   toKnowledgeEntry,
@@ -27,6 +29,30 @@ describe('row mapping', () => {
     expect(num('9007199254740991')).toBe(9007199254740991)
     expect(num('5.5000')).toBe(5.5)
     expect(num(null)).toBe(0)
+  })
+
+  test('analyses: metrics come back as stored and are absent when null', () => {
+    const row: AnalysisRow = {
+      id: 'a1',
+      repo_forge: 'work',
+      repo_path: 'shapes/a',
+      kind: 'coverage',
+      ref: null,
+      sha: null,
+      created_at: at,
+      actor: null,
+      data: { n: 1 },
+      metrics: { percent: 61.5 },
+    }
+    expect(toAnalysis(row)).toEqual({
+      id: 'a1',
+      repo: { forge: 'work', path: 'shapes/a' },
+      kind: 'coverage',
+      createdAt: '2026-10-30T10:00:00.000Z',
+      data: { n: 1 },
+      metrics: { percent: 61.5 },
+    })
+    expect(toAnalysis({ ...row, metrics: null })).not.toHaveProperty('metrics')
   })
 
   test('jobs: nulls become absent fields, timestamps ISO strings', () => {
@@ -89,6 +115,7 @@ describe('row mapping', () => {
       last_error: null,
       options: { headers: { a: 'b' } },
       capabilities: null,
+      last_used_at: null,
       created_at: at,
       updated_at: at,
     })
@@ -171,6 +198,8 @@ describe('row mapping', () => {
       job_id: 'j',
       analysis_id: null,
       actor: 'jane',
+      interactive: true,
+      subject: null,
       provider: 'anthropic',
       model: 'm',
       input_tokens: '10',
@@ -192,7 +221,10 @@ describe('row mapping', () => {
       outputTokens: 20,
       cacheWriteTokens: 3,
       durationMs: 1500,
+      interactive: true,
     })
     expect('analyzer' in toAiUsage(row)).toBeFalse()
+    expect('subject' in toAiUsage(row)).toBeFalse()
+    expect(toAiUsage({ ...row, subject: 'MR !7' }).subject).toBe('MR !7')
   })
 })

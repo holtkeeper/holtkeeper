@@ -1,20 +1,26 @@
-import type { ClearStorageResult, StorageOverview, StorageProviderView } from '@holtkeeper/api'
+import type { ClearStorageResult, StorageOverview, SystemHealth } from '@holtkeeper/api'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 
 import { type Env, type ServerDeps, authorize, readBody } from '../context.ts'
+import { releaseVersion, systemHealth } from '../health.ts'
 import { reportedViews, requestStorageClear, workerStorageReports } from '../storage-reports.ts'
+import { storageOverview } from '../storage.ts'
 
 const clearSchema = z.object({ scope: z.string().min(1).max(500).optional() }).optional()
 
+const GLOBAL = { kind: 'global' } as const
+
 /**
- * Disk and bucket usage of every storage provider, and clearing them. Areas that workers report
- * (git mirrors, tool caches on their own disks) replace this process's measurement of the same
- * id; clearing them asks every worker to clear its copy.
+ * Disk and bucket usage of every storage provider, clearing them, and `GET /system/health` (all
+ * global `settings:read`, clearing `settings:write`). Areas that workers report (git mirrors,
+ * tool caches on their own disks) replace this process's measurement of the same id; clearing
+ * them asks every worker to clear its copy.
  */
 export function storageRoutes(deps: ServerDeps) {
   const app = new Hono<Env>()
+  const startedAt = deps.now().toISOString()
   const providers = () => deps.storage ?? []
   const reported = async () =>
     deps.store.kv
@@ -22,48 +28,22 @@ export function storageRoutes(deps: ServerDeps) {
       : []
 
   app.get('/storage', async (c) => {
-    authorize(c, 'settings:read', { kind: 'global' })
-    const remote = await reported()
-    const remoteIds = new Set(remote.map((view) => view.id))
-    const local = await Promise.all(
-      providers()
-        .filter((provider) => !remoteIds.has(provider.id))
-        .map(async (provider): Promise<StorageProviderView> => {
-          const base = {
-            id: provider.id,
-            label: provider.label,
-            clearable: provider.clear !== undefined,
-          }
-          try {
-            const usage = await provider.usage()
-            return {
-              ...base,
-              bytes: usage.bytes,
-              ...(usage.count !== undefined ? { count: usage.count } : {}),
-              details: usage.details ?? [],
-              available: usage.available ?? true,
-              ...(usage.note ? { note: usage.note } : {}),
-            }
-          } catch (error) {
-            return {
-              ...base,
-              bytes: 0,
-              details: [],
-              available: false,
-              error: error instanceof Error ? error.message : String(error),
-            }
-          }
-        }),
+    authorize(c, 'settings:read', GLOBAL)
+    return c.json<StorageOverview>(
+      await storageOverview({ providers: providers(), kv: deps.store.kv, now: deps.now() }),
     )
-    const views = [...local, ...remote]
-    return c.json<StorageOverview>({
-      providers: views,
-      totalBytes: views.reduce((sum, view) => sum + view.bytes, 0),
-    })
+  })
+
+  app.get('/system/health', async (c) => {
+    authorize(c, 'settings:read', GLOBAL)
+    const version = releaseVersion(deps.version)
+    return c.json<SystemHealth>(
+      await systemHealth({ ...deps, ...(version && { version }) }, { startedAt }),
+    )
   })
 
   app.post('/storage/:id/clear', async (c) => {
-    authorize(c, 'settings:write', { kind: 'global' })
+    authorize(c, 'settings:write', GLOBAL)
     const id = c.req.param('id')
     const remote = (await reported()).find((view) => view.id === id)
     if (remote && deps.store.kv) {

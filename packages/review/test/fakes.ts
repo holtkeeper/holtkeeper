@@ -89,6 +89,7 @@ export function fakeAgent(outputs: Record<string, unknown[]>) {
         output,
         turns: 2,
         costUsd: 0.01,
+        model: `fake-${task.tier ?? 'main'}`,
         usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
       }
     },

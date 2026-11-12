@@ -73,6 +73,7 @@ export const limitsCredentialsSetting = {
 - **backoff** retries on the listed statuses (429 by default) with growing delays.
 - **pollShare** is the share of **requestsPerMinute** polling for forge changes may use (0.2 by default); the rest stays for jobs.
 - Set only the fields you need; the rest keep the defaults for the credential kind.`,
+  default: {},
   schema: z.record(z.string().min(1), limitPolicySchema),
 }
 

@@ -225,7 +225,7 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
         : []),
     ]
     const failing = [...(view.proposal?.gates ?? []), ...(view.version?.gates ?? [])].filter(
-      (gate) => !gate.ok,
+      (gate) => !gate.ok && gate.severity === 'block' && !row.blockers.includes(gate.message),
     )
     const actions: CardAction[] =
       view.can.run && !view.readOnly
@@ -247,8 +247,8 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
     const flow = releaseFlow(row, view.deploy)
     return {
       title: `Release · ${repo.path}`,
-      subtitle: stageText[row.stage],
-      tone: row.error ? 'bad' : failing.length ? 'warning' : 'info',
+      subtitle: stageText(row),
+      tone: row.error ? 'bad' : failing.length || row.blockers.length ? 'warning' : 'info',
       ...(page && { url: page }),
       blocks: [
         ...(row.error ? [{ type: 'text' as const, text: row.error }] : []),
@@ -265,6 +265,31 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
               {
                 type: 'list' as const,
                 items: failing.map((gate) => ({ text: gate.message, tone: 'bad' as const })),
+              },
+            ]
+          : []),
+        ...(row.blockers.length
+          ? [
+              {
+                type: 'heading' as const,
+                text: 'Blockers',
+                detail: String(row.blockers.length),
+                tone: 'bad' as const,
+              },
+              {
+                type: 'list' as const,
+                items: row.blockers.map((text) => ({ text, tone: 'bad' as const })),
+              },
+            ]
+          : []),
+        ...(row.environments.length
+          ? [
+              {
+                type: 'fields' as const,
+                fields: row.environments.map((env) => ({
+                  label: env.name,
+                  value: env.tag ? `\`${env.tag}\` · ${env.status}` : env.status,
+                })),
               },
             ]
           : []),
@@ -321,6 +346,9 @@ export function releaseCommand({ deps, pageOf, follow }: ReleaseCommandDeps) {
       }
 
       if (step === 'accept') {
+        const view = await releases.view(principal, repo).catch(stepFailure)
+        const preview = previewReleaseStep(view, { action: 'accept' })
+        if (preview.blocked) throw new ChatUserError(preview.blocked)
         const result = await releases.accept(repo, actor, context.options.note).catch(stepFailure)
         await context.reply({
           title: `Accepted · ${repo.path}`,

@@ -1,0 +1,25 @@
+# Settings › System
+
+Part of the web app's [Settings](README.md#settings) docs.
+
+Route `/settings/system`, body `features/settings/sections/SystemSection.tsx`, endpoints and hooks in `api/settings-system.ts`. Every block is a `SystemPanel` (`features/storage/SystemPanel.tsx`): a sunken panel with a title row and the anchor the sub-navigation links to.
+
+| Block              | Anchor           | Component                                  | Data                                                                                                                                                             |
+| ------------------ | ---------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Health             | —                | `HealthStrip` in `SystemSection.tsx`       | `useSystemHealth` (`GET /api/system/health`)                                                                                                                     |
+| Storage and caches | `#storage`       | `features/storage/Storage.tsx`             | `useStorage`, weekly change from the health answer                                                                                                               |
+| Egress proxy cache | `#caches`        | `features/caches/Caches.tsx`               | `useEgressCache`                                                                                                                                                 |
+| Database           | `#database`      | `features/database/Database.tsx`           | `useDatabase`                                                                                                                                                    |
+| Library index      | `#library-index` | `features/settings/LibraryIndex.tsx`       | `useLibraryIndex`, `useGitHubTokens`                                                                                                                             |
+| Background work    | `#background`    | `BackgroundWork` in `ResolvedSettings.tsx` | `useSettings`                                                                                                                                                    |
+| All keys           | `#advanced`      | `AllKeys` in `ResolvedSettings.tsx`        | `useSettings`, `useGroups`, `useRepos`, the resolver for a group or a repository (_Resolve for_ lists the organization, the groups and every visible repository) |
+
+**Health.** One strip cell per check with a status dot and words (`ok`, `needs a look`, `failing`) plus the check's detail, then the version and the time of the check. "Check health now", the section header's primary action, refetches.
+
+**Storage and caches.** The total and its change in seven days in the title row, a stacked bar in grey shades with a legend (`storageShade`), and a table of areas: size, items, share (`shareLabel`, `<1%` for slivers), change against the week-old snapshot (`storageDelta`; shrinking is green) and Clear for clearable areas with a global `settings:write`. Without a week-old snapshot the 7 days column shows `—` and the side note says when it appears.
+
+**Database.** The version, a Healthy tag (or how many warnings the advice has), figures, findings worth a look and tabs: Tables and size, Growth, Slow queries and Sessions (Postgres), Indexes, Migrations.
+
+**Background work.** The System section's own keys (`settingsSections.system.keys`: `libraries`, `polling`, `toolchain`, `freshness.sweep`) at the organization layer, grouped by category: value (`previewValue`), who sets it (a dashed Default chip or Organization, plus how many narrower entries replace it somewhere) and, with a global `settings:write`, change (`EntryDialog`, scoped to everything) and reset (removes the organization entry). Rows carry `setting-<key>` anchors for settings search. A last line says whether agents may change code (`tasks.write`) and links to Ops › Tasks.
+
+**All keys** (decision 7). How many settings exist and, as tags, the keys no page or section homes. "Show all keys" opens every non-secret key with its winner and source: for the organization resolved from the entries by `orgRows` (`lib/resolved-settings.ts`: the newest entry scoped to everything wins, otherwise the default), filterable by text and to keys not at their default, each with where it is edited (`settingHome`); picking a group switches to `ResolvedSettings` for that group, which reads `GET /api/settings/resolve?group=`. It opens by itself when the URL hash points at a key.

@@ -9,7 +9,6 @@ import type {
   CredentialList,
   CredentialView,
   MeResponse,
-  RepoList,
   ResolvedSettings,
   SettingList,
 } from '@holtkeeper/api'
@@ -128,6 +127,7 @@ const tokenSetting = defineSetting({
   description: 'A secret setting',
   section: 'Test',
   schema: z.string().min(1),
+  default: null,
   secret: true,
 })
 const noteSetting = defineSetting({
@@ -136,6 +136,7 @@ const noteSetting = defineSetting({
   description: 'A plain text setting',
   section: 'Test',
   schema: z.string(),
+  default: '',
 })
 
 const setup = (auth: AuthProvider = noAuth()) => {
@@ -238,7 +239,7 @@ describe('server', () => {
     expect(((await response.json()) as { error: string }).error).toContain('startedAt')
   })
 
-  test('scopes audit runs and repositories to the caller', async () => {
+  test('scopes audit runs to the caller', async () => {
     await store.auditRuns.add({
       ...run('games/a', '2026-10-29T10:00:00.000Z'),
       trigger: 'cli',
@@ -256,8 +257,6 @@ describe('server', () => {
     ).json()) as AuditRunList
     expect(list.runs.map((r) => r.repo.path)).toEqual(['games/a'])
     expect((await app.request(`/api/audit-runs/${tool.id}`, { headers: asGames })).status).toBe(403)
-    const repos = (await (await app.request('/api/repos', { headers: asGames })).json()) as RepoList
-    expect(repos.repos.map((r) => [r.repo.path, r.groups])).toEqual([['games/a', ['games']]])
     expect(
       (
         await send(
@@ -269,59 +268,6 @@ describe('server', () => {
         )
       ).status,
     ).toBe(403)
-  })
-
-  test('lists repositories named exactly in groups even without audits', async () => {
-    await store.auditRuns.add({
-      ...run('games/a', '2026-10-29T10:00:00.000Z'),
-      trigger: 'cli',
-      report: report('high'),
-    })
-    const repos = (await (await setup().request('/api/repos')).json()) as RepoList
-    expect(repos.repos.map((r) => [r.repo.path, r.groups, r.latestAudit !== undefined])).toEqual([
-      ['games/a', ['games'], true],
-      ['tools/cli', ['tools'], false],
-    ])
-  })
-
-  test('marks repositories the caller may configure', async () => {
-    const auth = headerAuth({
-      roles: {
-        lead: [
-          { scope: { all: true }, actions: ['repos:read'] },
-          { scope: { groups: ['games'] }, actions: ['settings:write'] },
-        ],
-      },
-    })
-    await store.auditRuns.add({ ...run('games/a', '2026-10-29T10:00:00.000Z'), trigger: 'cli' })
-    const repos = (await (
-      await setup(auth).request('/api/repos', {
-        headers: { 'x-forwarded-user': 'jane', 'x-forwarded-groups': 'lead' },
-      })
-    ).json()) as RepoList
-    expect(repos.repos.map((r) => [r.repo.path, r.configurable])).toEqual([
-      ['games/a', true],
-      ['tools/cli', undefined],
-    ])
-  })
-
-  test('lists the newest analysis of each kind per repository', async () => {
-    await store.auditRuns.add({ ...run('games/a', '2026-10-29T10:00:00.000Z'), trigger: 'cli' })
-    await store.analyses.add({
-      repo: { forge: 'work', path: 'games/a' },
-      kind: 'size',
-      createdAt: '2026-10-01T00:00:00.000Z',
-      data: { bytes: 1 },
-    })
-    await store.analyses.add({
-      repo: { forge: 'work', path: 'games/a' },
-      kind: 'size',
-      createdAt: '2026-10-02T00:00:00.000Z',
-      data: { bytes: 2 },
-    })
-    const repos = (await (await setup().request('/api/repos')).json()) as RepoList
-    const repoA = repos.repos.find((r) => r.repo.path === 'games/a')
-    expect(repoA?.latestAnalyses?.map((a) => [a.kind, a.metrics[0]?.value])).toEqual([['size', 2]])
   })
 
   test('stores settings per scope, seals secrets and resolves for a repository', async () => {

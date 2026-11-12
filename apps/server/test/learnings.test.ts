@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type { Agent, AgentTask } from '@holtkeeper/agent'
-import type { LearningCandidate, LearningList, ReactionTotalsList } from '@holtkeeper/api'
+import type {
+  AcceptLearningsResult,
+  LearningCandidate,
+  LearningList,
+  ReactionTotalsList,
+} from '@holtkeeper/api'
 import type { AuthProvider } from '@holtkeeper/auth'
 import { headerAuth } from '@holtkeeper/auth-header'
 import { noAuth } from '@holtkeeper/auth-none'
@@ -17,6 +22,7 @@ import { z } from 'zod'
 import { createApp } from '../src/app.ts'
 import type { ServerDeps } from '../src/context.ts'
 import { createEventDispatcher } from '../src/events.ts'
+import { learningConfidence, learningSourceKind } from '../src/learnings.ts'
 
 let store: Store
 let discussions: Discussion[]
@@ -408,6 +414,122 @@ describe('routes', () => {
     expect((await store.guides.get('group:shop', 'review'))?.learnings).toHaveLength(1)
   })
 
+  test('rows carry how the candidate came about and a confidence from its sources', async () => {
+    await store.learnings.put(
+      candidate('c3', {
+        key: 'k3',
+        sources: [
+          { ...candidate('x').sources[0]!, discussionId: 'disc-1', author: 'robin' },
+          { ...candidate('x').sources[0]!, discussionId: 'disc-2', noteId: '7', author: 'lee' },
+        ],
+      }),
+    )
+    await store.learnings.put(
+      candidate('c4', {
+        key: 'k4',
+        sources: [],
+        proposal: { by: 'mcp:bot', reason: 'seen twice' },
+      }),
+    )
+    const list = (await (await send(setup(), 'GET', '/api/learnings')).json()) as LearningList
+    const rows = Object.fromEntries(
+      list.candidates.map((row) => [row.id, [row.sourceKind, row.confidence]]),
+    )
+    expect(rows).toEqual({
+      c1: ['review-reply', 1],
+      c2: ['review-reply', 2],
+      c3: ['merged', 3],
+      c4: ['mcp', 1],
+    })
+  })
+
+  test('accepts several at once with one audit event per accepted candidate', async () => {
+    await store.learnings.put(candidate('c3', { key: 'k3', repo: 'work:toys/yoyo' }))
+    const app = setup(teams)
+    const response = await send(
+      app,
+      'POST',
+      '/api/learnings/accept',
+      { ids: ['c1', 'c2', 'nope', 'c3', 'c1'] },
+      as('member'),
+    )
+    expect(response.status).toBe(200)
+    expect((await response.json()) as AcceptLearningsResult).toEqual({
+      accepted: ['c1', 'c3'],
+      failed: [
+        { id: 'c2', error: 'learning candidate not found' },
+        { id: 'nope', error: 'learning candidate not found' },
+      ],
+    })
+    expect((await store.learnings.get('c2'))?.status).toBe('proposed')
+    const events = (await store.audit.list({ action: 'learning.accept' })).events
+    expect(
+      events
+        .map((event) => [event.action, event.target.id, event.target.repo])
+        .toSorted((a, b) => String(a[1]).localeCompare(String(b[1]))),
+    ).toEqual([
+      ['learning.accept', 'c1', 'work:toys/kite'],
+      ['learning.accept', 'c3', 'work:toys/yoyo'],
+    ])
+    expect(events[0]?.actor.id).toBe('header:member')
+    expect(events[0]?.changes).toContainEqual({
+      field: 'status',
+      before: 'proposed',
+      after: 'accepted',
+    })
+    const batch = (await store.audit.list({ action: 'learnings.accept' })).events
+    expect(batch).toHaveLength(1)
+    expect(batch[0]?.details).toEqual({ accepted: 2, failed: 2 })
+  })
+
+  test('a batch checks rights per candidate and per target scope', async () => {
+    const app = setup(teams)
+    const reader = (await (
+      await send(app, 'POST', '/api/learnings/accept', { ids: ['c1'] }, as('reader'))
+    ).json()) as AcceptLearningsResult
+    expect(reader).toEqual({
+      accepted: [],
+      failed: [{ id: 'c1', error: 'missing permission knowledge:write' }],
+    })
+    const group = (await (
+      await send(
+        app,
+        'POST',
+        '/api/learnings/accept',
+        { ids: ['c1'], scope: 'group:toys' },
+        as('member'),
+      )
+    ).json()) as AcceptLearningsResult
+    expect(group.failed).toEqual([{ id: 'c1', error: 'missing permission to edit group:toys' }])
+    const elsewhere = (await (
+      await send(
+        app,
+        'POST',
+        '/api/learnings/accept',
+        { ids: ['c1'], scope: 'group:shop' },
+        as('lead'),
+      )
+    ).json()) as AcceptLearningsResult
+    expect(elsewhere.failed).toEqual([
+      { id: 'c1', error: 'group:shop does not apply to work:toys/kite' },
+    ])
+    const lead = (await (
+      await send(
+        app,
+        'POST',
+        '/api/learnings/accept',
+        { ids: ['c1'], scope: 'group:toys' },
+        as('lead'),
+      )
+    ).json()) as AcceptLearningsResult
+    expect(lead).toEqual({ accepted: ['c1'], failed: [] })
+    expect((await store.guides.get('group:toys', 'review'))?.learnings).toHaveLength(1)
+    expect((await store.audit.list({ action: 'learning.accept' })).events).toHaveLength(1)
+    expect((await send(app, 'POST', '/api/learnings/accept', { ids: [] }, as('lead'))).status).toBe(
+      400,
+    )
+  })
+
   test('reaction totals per category', async () => {
     await store.learnings.putReactions({
       repo: 'work:toys/kite',
@@ -443,5 +565,44 @@ describe('routes', () => {
     expect(
       (await send(app, 'GET', '/api/learnings/reactions', undefined, as('reader'))).status,
     ).toBe(400)
+  })
+})
+
+const source = (discussionId: string, author: string, repo = 'work:toys/kite') => ({
+  repo,
+  mergeRequest: 1,
+  discussionId,
+  noteId: `${discussionId}-${author}`,
+  author,
+  at: '2026-11-04T09:30:00.000Z',
+})
+
+describe('candidate scores', () => {
+  test('two replies in one discussion are still one review reply', () => {
+    const one = candidate('a', { sources: [source('d1', 'robin'), source('d1', 'lee')] })
+    expect(learningSourceKind(one)).toBe('review-reply')
+    expect(learningConfidence(one)).toBe(2)
+  })
+
+  test('a proposal with replies is merged and its proposer counts as an author', () => {
+    const merged = candidate('b', {
+      sources: [source('d1', 'robin')],
+      proposal: { by: 'mcp:bot', reason: 'seen' },
+    })
+    expect(learningSourceKind(merged)).toBe('merged')
+    expect(learningConfidence(merged)).toBe(2)
+  })
+
+  test('confidence tops out at 5', () => {
+    const wide = candidate('c', {
+      sources: [
+        source('d1', 'robin'),
+        source('d2', 'lee', 'work:toys/yoyo'),
+        source('d3', 'sam', 'work:shop/till'),
+        source('d4', 'kim'),
+      ],
+    })
+    expect(learningSourceKind(wide)).toBe('merged')
+    expect(learningConfidence(wide)).toBe(5)
   })
 })

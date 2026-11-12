@@ -16,6 +16,7 @@ import {
   type MergeRequestRecord,
   type MergeRequestState,
   type Pipeline,
+  type PipelineJob,
   type PipelineRun,
   type PipelineStatus,
   type Repository,
@@ -111,6 +112,13 @@ const jobRunSchema = jobSchema.extend({
   queued_duration: seconds,
   allow_failure: z.boolean().optional(),
   retried: z.boolean().optional(),
+})
+
+const pipelineJobSchema = jobSchema.extend({
+  when: z.string().nullable().optional(),
+  environment: z.object({ name: z.string() }).nullable().optional(),
+  created_at: time,
+  finished_at: time,
 })
 
 const projectJobRunSchema = jobRunSchema.extend({
@@ -415,6 +423,18 @@ const toJob = (job: z.infer<typeof jobSchema>): Job => ({
   stage: job.stage,
   status: toStatus(job.status),
   webUrl: job.web_url,
+})
+
+const toPipelineJob = (
+  job: z.infer<typeof pipelineJobSchema>,
+  pipelineId: number,
+): PipelineJob => ({
+  ...toJob(job),
+  pipelineId,
+  manual: job.status === 'manual' || job.when === 'manual',
+  ...(job.environment?.name ? { environment: job.environment.name } : {}),
+  ...(job.created_at ? { createdAt: job.created_at } : {}),
+  ...(job.finished_at ? { finishedAt: job.finished_at } : {}),
 })
 
 const toMergeRequestRecord = (
@@ -989,6 +1009,27 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
         per_page: pageSize(query.limit),
       })
       return (await take(list, query.limit)).map(toDeployment)
+    },
+
+    async listPipelineJobs(repo, query = {}) {
+      let pipeline: z.infer<typeof pipelineSchema>
+      try {
+        pipeline = await client.json('GET', `${project(repo)}/pipelines/latest`, pipelineSchema, {
+          query: { ref: query.ref },
+        })
+      } catch (error) {
+        if (isNotFound(error)) return []
+        throw error
+      }
+      const list = client.paginate(
+        `${project(repo)}/pipelines/${pipeline.id}/jobs`,
+        pipelineJobSchema,
+        { per_page: perPage },
+      )
+      return (await take(list, undefined))
+        .toSorted((a, b) => a.id - b.id)
+        .slice(0, query.limit)
+        .map((job) => toPipelineJob(job, pipeline.id))
     },
 
     async listTags(repo, query = {}) {

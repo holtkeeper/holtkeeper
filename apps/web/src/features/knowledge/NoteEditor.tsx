@@ -21,20 +21,23 @@ import { ScopeEditor } from '../access/ScopeEditor.tsx'
 import { MarkdownEditor } from './parts.tsx'
 
 /**
- * Creates a note or edits one in place (accepting a proposal with the edits when asked). Title
- * and text are always visible; scope, tasks, topics, packages and evidence sit under Details.
+ * The Notes sheet's form: creates a note or edits one (accepting a proposal with the edits when
+ * asked). Title and text are always visible; scope, tasks, topics, packages and evidence sit
+ * under Details, open for a new note. `onSaved` gets the stored entry.
  */
 export function NoteEditor({
   entry,
   initialScope,
   groups,
-  onClose,
+  onSaved,
+  onCancel,
 }: {
   entry?: KnowledgeEntry
   /** Scope of a new note; defaults to everything. */
   initialScope?: Scope
   groups: readonly string[]
-  onClose: () => void
+  onSaved: (entry: KnowledgeEntry) => void
+  onCancel: () => void
 }) {
   const [draft, setDraft] = useState<KnowledgeDraft>(() =>
     entry ? draftOf(entry) : emptyDraft(initialScope),
@@ -49,16 +52,18 @@ export function NoteEditor({
 
   const save = (accept: boolean) => {
     const input = inputOf(draft)
-    const done = () => {
+    const done = (saved: KnowledgeEntry) => {
       notify.success(accept ? 'Note accepted' : entry ? 'Note saved' : 'Note added', input.title)
-      onClose()
+      onSaved(saved)
     }
     if (!entry) return create.mutate(input, { onSuccess: done })
     update.mutate(
       { id: entry.id, input },
       {
         onSuccess: (saved) =>
-          accept ? review.mutate({ id: saved.id, action: 'accept' }, { onSuccess: done }) : done(),
+          accept
+            ? review.mutate({ id: saved.id, action: 'accept' }, { onSuccess: done })
+            : done(saved),
       },
     )
   }
@@ -67,7 +72,7 @@ export function NoteEditor({
   const isProposal = entry?.status === 'proposed'
 
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-line-strong bg-panel p-4">
+    <div className="flex flex-col gap-3">
       {error ? (
         <Notice tone="danger" title="Not saved">
           {messageOf(error)}
@@ -97,7 +102,7 @@ export function NoteEditor({
       </button>
       {details ? (
         <div className="flex flex-col gap-4 border-l border-line pl-4">
-          <div className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+          <div className="grid gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
             <Select
               label="Kind"
               options={knowledgeKinds.map((k) => ({ id: k.id, label: k.label }))}
@@ -133,7 +138,7 @@ export function NoteEditor({
             placeholder="e.g. testing"
           />
           <PackagesEditor draft={draft} onChange={(packages) => set({ packages })} />
-          <div className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+          <div className="grid gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
             <Select
               label="Visible to"
               options={visibilityOptions.map((option) => ({ id: option.id, label: option.label }))}
@@ -157,7 +162,7 @@ export function NoteEditor({
             To save: {problems.join(' · ').toLowerCase()}
           </p>
         ) : null}
-        <Button variant="tertiary" size="sm" onPress={onClose}>
+        <Button variant="tertiary" size="sm" onPress={onCancel}>
           Cancel
         </Button>
         {isProposal ? (
@@ -202,7 +207,10 @@ function PackagesEditor({
       </legend>
       {rows.map((row, index) => (
         // oxlint-disable-next-line react/no-array-index-key
-        <div key={index} className="grid grid-cols-[6rem_minmax(0,1fr)_7rem_7rem_auto] gap-2">
+        <div
+          key={index}
+          className="grid grid-cols-[5rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 border-b border-line pb-2"
+        >
           <TextField
             label="Ecosystem"
             value={row.ecosystem}
@@ -271,7 +279,7 @@ function EvidenceEditor({
       <legend className="mb-1 text-sm font-medium">Evidence (optional)</legend>
       {rows.map((row, index) => (
         // oxlint-disable-next-line react/no-array-index-key
-        <div key={index} className="grid grid-cols-[10rem_minmax(0,1fr)_auto] gap-2">
+        <div key={index} className="grid grid-cols-[7rem_minmax(0,1fr)_auto] gap-2">
           <TextField
             label="Label"
             value={row.label}

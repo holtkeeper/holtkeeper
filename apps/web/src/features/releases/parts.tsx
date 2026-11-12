@@ -24,20 +24,15 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import {
-  bumpTones,
-  entryGroups,
-  issueTones,
-  type PlanTask,
-  stageTones,
-  stageText,
-} from '../../lib/releases.ts'
+import { overviewTag } from '../../lib/release-overview.ts'
+import { bumpTones, entryGroups, issueTones, type PlanTask } from '../../lib/releases.ts'
 import { Tag } from '../../ui/index.ts'
 
 export function StageTag({ row }: { row: ReleaseBoardRow }) {
+  const tag = overviewTag(row)
   return (
-    <Tag tone={row.error ? 'danger' : stageTones[row.stage]} dot>
-      {stageText(row)}
+    <Tag tone={tag.tone} dot>
+      {tag.label}
     </Tag>
   )
 }
@@ -119,7 +114,7 @@ export function TaskList({ tasks }: { tasks: readonly (PlanTask | ReleaseTask)[]
               {task.issue.status}
             </Tag>
           )}
-          <span className="tabular ml-auto shrink-0 text-xs text-dim">{task.commits}</span>
+          <span className="tabular ms-auto shrink-0 text-xs text-dim">{task.commits}</span>
         </li>
       ))}
     </ul>

@@ -6,7 +6,6 @@ import type {
 } from '@holtkeeper/api'
 import { formatBytes } from '@holtkeeper/api'
 import { Database, RotateCcw, TriangleAlert } from 'lucide-react'
-import { motion } from 'motion/react'
 import { useState } from 'react'
 
 import { messageOf } from '../../api/client.ts'
@@ -29,7 +28,13 @@ import {
   sessionAge,
   sortTables,
 } from '../../lib/database.ts'
-import { formatDate, formatDateTime, formatDuration, formatRelative } from '../../lib/format.ts'
+import {
+  formatDate,
+  formatDateTime,
+  formatDuration,
+  formatRelative,
+  plural,
+} from '../../lib/format.ts'
 import { shareOf } from '../../lib/storage.ts'
 import {
   Button,
@@ -44,15 +49,14 @@ import {
   Segmented,
   Table,
   Tabs,
+  Tag,
   Td,
   Th,
-  fadeItem,
   notify,
-  stagger,
 } from '../../ui/index.ts'
 import { Sparkline } from '../../ui/Sparkline.tsx'
-import { SettingsSection } from '../settings/SettingsSection.tsx'
 import { useSession } from '../shell/session.ts'
+import { SystemPanel } from '../storage/SystemPanel.tsx'
 
 type Loaded = Extract<DatabaseView, { available: true }>
 
@@ -60,11 +64,11 @@ const seriesColor = (index: number) => `var(--series-${(index % 8) + 1})`
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <motion.div {...fadeItem} className="rounded-2xl border border-border bg-surface p-4">
+    <div className="rounded-2xl border border-border bg-surface p-4">
       <div className="text-sm text-muted">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-tight tabular">{value}</div>
       {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}
-    </motion.div>
+    </div>
   )
 }
 
@@ -75,7 +79,7 @@ function Metrics({ view }: { view: Loaded }) {
   const growth = growthSince(view.history, overview.bytes)
   const connections = overview.connections
   return (
-    <motion.div {...stagger} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <Metric
         label="Size"
         value={formatBytes(overview.bytes)}
@@ -122,7 +126,7 @@ function Metrics({ view }: { view: Loaded }) {
           hint="Latest applied version"
         />
       )}
-    </motion.div>
+    </div>
   )
 }
 
@@ -296,12 +300,12 @@ function GrowthTab({ view }: { view: Loaded }) {
         title="By domain"
         description="What the space holds, and how it changed in the last 7 days"
       >
-        <motion.ul {...stagger} className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-3">
           {view.domains.map((domain, index) => {
             const delta =
               domain.weekAgoBytes !== undefined ? domain.bytes - domain.weekAgoBytes : undefined
             return (
-              <motion.li key={domain.domain} {...fadeItem} className="flex flex-col gap-1">
+              <li key={domain.domain} className="flex flex-col gap-1">
                 <div className="flex items-baseline justify-between gap-3 text-sm">
                   <span>
                     {domainLabel(domain.domain)}{' '}
@@ -329,10 +333,10 @@ function GrowthTab({ view }: { view: Loaded }) {
                     }}
                   />
                 </div>
-              </motion.li>
+              </li>
             )
           })}
-        </motion.ul>
+        </ul>
       </Panel>
     </div>
   )
@@ -675,61 +679,70 @@ function MigrationsTab({ view }: { view: Loaded }) {
 }
 
 /**
- * The store's database health; tables, growth, statements, sessions, indexes and migrations open
- * under Diagnostics.
+ * Settings › System › Database: the store's figures, findings worth a look, and tabs for tables,
+ * growth, slow queries and sessions (Postgres), indexes and migrations.
  */
 export function DatabaseHealth() {
   const database = useDatabase()
   const [tab, setTab] = useState('tables')
-  const [diagnostics, setDiagnostics] = useState(false)
   const view = database.data
+  const warnings = view?.available
+    ? view.advice.filter((entry) => entry.severity === 'warning').length
+    : 0
 
   return (
-    <SettingsSection
+    <SystemPanel
+      id="database"
       title="Database"
-      actions={
+      description={
         view?.available ? (
-          <Button variant="secondary" size="sm" onPress={() => setDiagnostics((open) => !open)}>
-            {diagnostics ? 'Hide diagnostics' : 'Diagnostics'}
-          </Button>
+          <span className="mono">{view.overview.version}</span>
+        ) : (
+          'Size, tables, slow statements and health of the store'
+        )
+      }
+      aside={
+        view?.available ? (
+          <Tag tone={warnings ? 'warning' : 'success'} dot>
+            {warnings ? plural(warnings, 'warning') : 'Healthy'}
+          </Tag>
         ) : null
       }
-      description={
-        view?.available
-          ? view.overview.version
-          : 'Size, tables, slow statements and health of the store'
-      }
     >
-      {database.isPending ? (
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[0, 1, 2, 3].map((key) => (
-              <Placeholder key={key} className="h-24" />
-            ))}
-          </div>
-          <Placeholder className="h-80" />
-        </div>
-      ) : database.isError ? (
-        <ErrorState error={database.error} />
-      ) : !view?.available ? (
-        <EmptyState icon={<Database />} title="No database to inspect" description={view?.reason} />
-      ) : (
-        <>
-          <Metrics view={view} />
-          <AdvicePanel advice={view.advice} />
-          {diagnostics ? (
+      <div className="flex flex-col gap-4 p-3.5">
+        {database.isPending ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {[0, 1, 2, 3].map((key) => (
+                <Placeholder key={key} className="h-24" />
+              ))}
+            </div>
+            <Placeholder className="h-80" />
+          </>
+        ) : database.isError ? (
+          <ErrorState error={database.error} />
+        ) : !view?.available ? (
+          <EmptyState
+            icon={<Database />}
+            title="No database to inspect"
+            description={view?.reason}
+          />
+        ) : (
+          <>
+            <Metrics view={view} />
+            <AdvicePanel advice={view.advice} />
             <Tabs
-              aria-label="Database sections"
+              aria-label="Database diagnostics"
               selected={tab}
               onSelect={setTab}
               items={[
-                { id: 'tables', label: 'Tables', content: <TablesTab view={view} /> },
+                { id: 'tables', label: 'Tables and size', content: <TablesTab view={view} /> },
                 { id: 'growth', label: 'Growth', content: <GrowthTab view={view} /> },
                 ...(view.overview.engine === 'postgres'
                   ? [
                       {
                         id: 'statements',
-                        label: 'Statements',
+                        label: 'Slow queries',
                         content: <StatementsTab view={view} active={tab === 'statements'} />,
                       },
                       {
@@ -743,9 +756,9 @@ export function DatabaseHealth() {
                 { id: 'migrations', label: 'Migrations', content: <MigrationsTab view={view} /> },
               ]}
             />
-          ) : null}
-        </>
-      )}
-    </SettingsSection>
+          </>
+        )}
+      </div>
+    </SystemPanel>
   )
 }

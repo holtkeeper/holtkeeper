@@ -2,6 +2,8 @@ import type {
   Family,
   FamilyStore,
   GuideFilter,
+  GuideGenerated,
+  GuideGeneratedInput,
   GuideRevision,
   GuideSection,
   GuideSectionInput,
@@ -35,12 +37,34 @@ export function assertNoFamilyConflict(family: Family, families: readonly Family
 /**
  * The row `GuideStore.put` stores for `input` over `previous`: the human layer bumps `version`
  * only when `rules` or `steering` changed; otherwise the stored version and byline stay.
- * `revision` is the previous human layer to keep in the history, when there is one.
+ * `revision` is the previous human layer to keep in the history, when there is one. Generated
+ * layers keep the version of the stored layer with the same `generatedAt` and `body`, others take
+ * the next one after `lastGenerated` (the highest version in the generated history); `generated`
+ * lists every layer of the input, to write to that history.
  */
 export function nextGuideSection(
   input: GuideSectionInput,
   previous: GuideSection | undefined,
-): { stored: GuideSection; revision?: GuideRevision } {
+  lastGenerated = 0,
+): { stored: GuideSection; revision?: GuideRevision; generated: GuideGenerated[] } {
+  const known = [previous?.generated, previous?.proposal].filter(
+    (layer): layer is GuideGenerated => layer !== undefined,
+  )
+  let last = Math.max(lastGenerated, ...known.map((layer) => layer.version))
+  const versioned = (layer: GuideGeneratedInput | undefined): GuideGenerated | undefined => {
+    if (!layer) return undefined
+    const match = known.find(
+      (stored) => stored.generatedAt === layer.generatedAt && stored.body === layer.body,
+    )
+    if (match) return { ...layer, version: match.version }
+    last += 1
+    return { ...layer, version: last }
+  }
+  const generated = versioned(input.generated)
+  const proposal = versioned(input.proposal)
+  const history = [generated, proposal].filter(
+    (layer): layer is GuideGenerated => layer !== undefined,
+  )
   const changed =
     (previous?.rules ?? '') !== input.rules || (previous?.steering ?? '') !== input.steering
   const base = {
@@ -48,8 +72,8 @@ export function nextGuideSection(
     section: input.section,
     rules: input.rules,
     steering: input.steering,
-    ...(input.generated && { generated: input.generated }),
-    ...(input.proposal && { proposal: input.proposal }),
+    ...(generated && { generated }),
+    ...(proposal && { proposal }),
     learnings: input.learnings,
   }
   if (!changed) {
@@ -60,6 +84,7 @@ export function nextGuideSection(
         ...(previous?.editedBy !== undefined && { editedBy: previous.editedBy }),
         ...(previous?.editedAt !== undefined && { editedAt: previous.editedAt }),
       },
+      generated: history,
     }
   }
   const revision: GuideRevision | undefined =
@@ -80,6 +105,7 @@ export function nextGuideSection(
       ...(input.editedAt !== undefined && { editedAt: input.editedAt }),
     },
     ...(revision && { revision }),
+    generated: history,
   }
 }
 
@@ -99,6 +125,8 @@ const byScopeAndSection = (a: GuideSection, b: GuideSection) =>
 export function memoryGuides(): GuideStore {
   const rows = new Map<string, GuideSection>()
   const histories = new Map<string, GuideRevision[]>()
+  const generatedHistories = new Map<string, Map<number, GuideGenerated>>()
+  const versionsOf = (id: string) => [...(generatedHistories.get(id)?.values() ?? [])]
   return {
     get: async (scope, section) => clone(rows.get(key(scope, section))),
     list: async (filter) =>
@@ -108,17 +136,26 @@ export function memoryGuides(): GuideStore {
         .map(clone),
     async put(input) {
       const id = key(input.scope, input.section)
-      const { stored, revision } = nextGuideSection(clone(input), rows.get(id))
+      const last = Math.max(0, ...versionsOf(id).map((layer) => layer.version))
+      const { stored, revision, generated } = nextGuideSection(clone(input), rows.get(id), last)
       if (revision) histories.set(id, [revision, ...(histories.get(id) ?? [])])
+      const versions = generatedHistories.get(id) ?? new Map<number, GuideGenerated>()
+      for (const layer of generated) versions.set(layer.version, clone(layer))
+      generatedHistories.set(id, versions)
       rows.set(id, stored)
       return clone(stored)
     },
     history: async (scope, section) => clone(histories.get(key(scope, section)) ?? []),
+    generatedHistory: async (scope, section) =>
+      versionsOf(key(scope, section))
+        .toSorted((a, b) => b.version - a.version)
+        .map(clone),
     async removeScope(scope) {
       for (const [id, row] of rows)
         if (row.scope === scope) {
           rows.delete(id)
           histories.delete(id)
+          generatedHistories.delete(id)
         }
     },
   }

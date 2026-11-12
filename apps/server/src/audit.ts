@@ -251,7 +251,7 @@ function isAudited(method: string, path: string, provider: string) {
  * provider get field-level `changes` from the stored user before and after. The event names a
  * repository (`target.repo`) only when the route sets it or a permission check of the request
  * allowed it (the `?repo=` one when several were): a denied request never names one, so nobody
- * can plant events in the History of a repository they cannot act on.
+ * can plant events in the audit log of a repository they cannot act on.
  */
 export function auditMiddleware(
   deps: Pick<ServerDeps, 'store' | 'auth' | 'now'>,

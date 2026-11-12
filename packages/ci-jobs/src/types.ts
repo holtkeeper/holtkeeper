@@ -36,6 +36,13 @@ export interface ChangePoint {
   href?: string
 }
 
+/** Final attempts (one per pipeline and job) by how they ended. */
+export interface CiOutcomes {
+  success: number
+  failed: number
+  canceled: number
+}
+
 export interface JobStats {
   name: string
   stage: string
@@ -51,6 +58,8 @@ export interface JobStats {
   retryRate: number
   /** Pipelines where an attempt failed and a retry passed. */
   flaky: number
+  /** Final attempts by outcome, allowed failures included; absent in records written before. */
+  outcomes?: CiOutcomes
   allowFailure: boolean
   /** Successful attempts. */
   duration: Spread
@@ -70,8 +79,16 @@ export interface PipelineStats {
   /** The branch they ran on: the default branch when it has pipelines; every ref when absent. */
   ref?: string
   count: number
-  /** Percent of pipelines where every final attempt of a job not allowed to fail passed. */
+  /**
+   * Percent of pipelines that passed: no final attempt of a job not allowed to fail failed or was
+   * canceled.
+   */
   successRate?: number
+  /**
+   * Pipelines by outcome: `failed` when such an attempt failed, else `canceled` when one was
+   * canceled, else `success`; absent in records written before.
+   */
+  outcomes?: CiOutcomes
   /** Pipeline time of passing pipelines: seconds any of their jobs ran, gaps left out. */
   duration: Spread
   /** Queue time of their job attempts. */

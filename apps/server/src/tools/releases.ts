@@ -4,9 +4,15 @@ import {
   ToolError,
   defineTool,
 } from '@holtkeeper/agent-tools'
-import type { ReleaseRepoView, ReleaseStepResult } from '@holtkeeper/api'
+import type { ReleaseBoardRow, ReleaseRepoView, ReleaseStepResult } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { ReleaseSettings, ReleaseStage, ReleaseTask } from '@holtkeeper/release'
+import type {
+  EnvironmentSummary,
+  GateResult,
+  ReleaseSettings,
+  ReleaseStage,
+  ReleaseTask,
+} from '@holtkeeper/release'
 import { z } from 'zod'
 
 import type { ReleaseStepPreview } from '../release-steps.ts'
@@ -21,7 +27,7 @@ export interface ReleaseStepInput {
   override?: boolean
   /** `propose` only: have the AI agent write the notes first. */
   writeNotes?: boolean
-  /** `accept` only: why. */
+  /** `accept`: why it is accepted; `deploy`: why it is deployed, kept on the attempt. */
   note?: string
 }
 
@@ -47,14 +53,35 @@ export interface ReleaseToolsAccess {
   }
 }
 
-/** What the release stage means, in a sentence. */
-export const stageText: Record<ReleaseStage, string> = {
+const stageSentences: Record<ReleaseStage, string> = {
   candidate: 'Changes wait for a release candidate',
   proposed: 'The release candidate is open',
   'awaiting-version': 'Merged changes wait for a version',
   released: 'Released; nothing waits',
   idle: 'Nothing released yet',
   external: 'Released by another tool',
+}
+
+/**
+ * Where a repository stands in a sentence, matching the Releases screen: a forge error, then a
+ * failed deploy, then the pending step (a version waits for acceptance while the flow asks for
+ * one nobody gave), then a deploy that is ready or running, else the stage.
+ */
+export function stageText(row: ReleaseBoardRow): string {
+  if (row.error) return 'Could not read the forge'
+  const env = (statuses: readonly string[]) =>
+    row.environments.find((candidate) => statuses.includes(candidate.status))
+  const failed = env(['failed'])
+  if (failed) return `Deploy to ${failed.name} failed`
+  if (row.stage === 'awaiting-version' && row.acceptanceRequired && !row.acceptance)
+    return 'Waiting for acceptance'
+  if (row.stage === 'awaiting-version' || row.stage === 'proposed' || row.stage === 'candidate')
+    return stageSentences[row.stage]
+  const ready = env(['ready'])
+  if (ready) return `Ready to deploy to ${ready.name}`
+  const running = env(['running', 'pending'])
+  if (running) return `Deploying to ${running.name}`
+  return stageSentences[row.stage]
 }
 
 /** A step a person may take next, from the release state alone (no permission check). */
@@ -66,7 +93,8 @@ export interface NextReleaseStep {
 }
 
 /**
- * The steps the release state allows next, in flow order: open or update the candidate, accept,
+ * The steps the release state allows next, in flow order: open or update the candidate, accept
+ * (only when the caller's `can.accept` holds, i.e. `releases:run` and an acceptance waits),
  * create the version, deploy environments that are ready or failed. Empty for external flows.
  */
 export function nextReleaseSteps(view: ReleaseRepoView): NextReleaseStep[] {
@@ -74,8 +102,7 @@ export function nextReleaseSteps(view: ReleaseRepoView): NextReleaseStep[] {
   const steps: NextReleaseStep[] = []
   if (view.proposal) steps.push({ action: 'propose', label: 'Open the release candidate' })
   if (view.version) {
-    if (view.settings.acceptance !== 'none' && !view.row.acceptance)
-      steps.push({ action: 'accept', label: 'Accept the changes' })
+    if (view.can.accept) steps.push({ action: 'accept', label: 'Accept the changes' })
     steps.push({ action: 'version', label: `Create ${view.version.tag ?? 'the version'}` })
   }
   const tag = view.deploy?.tag
@@ -158,17 +185,25 @@ function renderReleaseRules(repo: string, settings: ReleaseSettings, guide: stri
   ].join('\n\n')
 }
 
+/** A gate in a sentence, marked when failing it only warns. */
+const gateText = (gate: GateResult) =>
+  gate.severity === 'block' ? gate.message : `${gate.message} (${gate.severity})`
+
+/** What runs on an environment, e.g. `staging v1.2.0 (success)`. */
+const environmentText = (env: EnvironmentSummary) =>
+  `${env.name} ${env.tag ?? 'nothing yet'} (${env.status})`
+
 /** The release state of a repository, with the next allowed steps. */
 function renderReleaseStatus(repo: string, view: ReleaseRepoView, anonymous: boolean): string {
   const { row } = view
   const plan = view.version ?? view.proposal
   const failing = [...(view.proposal?.gates ?? []), ...(view.version?.gates ?? [])].filter(
-    (gate) => !gate.ok,
+    (gate) => !gate.ok && !(gate.severity === 'block' && row.blockers.includes(gate.message)),
   )
   const steps = nextReleaseSteps(view)
   const lines = [
     `# Release status of \`${repo}\``,
-    `${stageText[row.stage]}.${view.settings.enabled ? '' : ' Releases are off for this repository.'}${view.dryRun ? ' Dry run: steps change nothing.' : ''}`,
+    `${stageText(row)}.${view.settings.enabled ? '' : ' Releases are off for this repository.'}${view.dryRun ? ' Dry run: steps change nothing.' : ''}`,
     ...(row.error ? [`Error: ${row.error}`] : []),
     `- Latest: ${row.latest ? `\`${row.latest.tag}\`${row.latest.date ? ` (${row.latest.date.slice(0, 10)})` : ''}` : 'none'}`,
     ...(row.next
@@ -188,8 +223,10 @@ function renderReleaseStatus(repo: string, view: ReleaseRepoView, anonymous: boo
           `- Accepted by ${anonymous ? `a person (via ${row.acceptance.via})` : (row.acceptance.name ?? row.acceptance.by)} at ${row.acceptance.at}`,
         ]
       : []),
-    ...(failing.length
-      ? [`- Failing gates: ${failing.map((gate) => gate.message).join('; ')}`]
+    ...(row.blockers.length ? [`- Blockers: ${row.blockers.join('; ')}`] : []),
+    ...(failing.length ? [`- Failing gates: ${failing.map(gateText).join('; ')}`] : []),
+    ...(row.environments.length
+      ? [`- Environments: ${row.environments.map(environmentText).join(', ')}`]
       : []),
     ...(view.deploy?.environments.length
       ? [
@@ -230,7 +267,7 @@ const renderPreview = (preview: ReleaseStepPreview, confirm: string | undefined)
     `# ${preview.title}`,
     ...preview.fields.map((field) => `- ${field.label}: ${field.value}`),
     ...(preview.failing.length
-      ? [`Failing gates: ${preview.failing.map((gate) => gate.message).join('; ')}`]
+      ? [`Failing gates: ${preview.failing.map(gateText).join('; ')}`]
       : []),
     preview.blocked
       ? `Blocked: ${preview.blocked}`
@@ -259,7 +296,7 @@ function readTools(access: ReleaseToolsAccess): RegistryTool[] {
     defineTool({
       name: 'release_status',
       description:
-        'Where a repository is in its release flow: stage, latest version, suggested next version and why, unreleased commits, the release candidate merge request, acceptance, failing gates, deploy state per environment and the steps allowed next.',
+        'Where a repository is in its release flow: stage, latest version, suggested next version and why, unreleased commits, the release candidate merge request, acceptance, blockers and failing gates, the version on each environment, deploy state per environment and the steps allowed next.',
       input: z.object({ repo: repoArg }),
       run: async ({ repo }) =>
         renderReleaseStatus(repo, await access.status(repoOf(repo)), access.anonymous === true),
@@ -321,7 +358,11 @@ function stepTools(
           .boolean()
           .optional()
           .describe('propose: have the AI write the release notes first'),
-        note: z.string().max(500).optional().describe('accept: why the changes are accepted'),
+        note: z
+          .string()
+          .max(500)
+          .optional()
+          .describe('accept: why the changes are accepted; deploy: why it is deployed'),
         confirm: z
           .string()
           .min(1)

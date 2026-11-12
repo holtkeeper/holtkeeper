@@ -181,9 +181,10 @@ function coreStores(db: () => Promise<Db>): CoreStores {
       async add(record) {
         const { sql, t } = await db()
         const [row]: AnalysisRow[] = await sql`
-          INSERT INTO ${t.analyses} (id, repo_forge, repo_path, kind, ref, sha, created_at, actor, data)
+          INSERT INTO ${t.analyses} (id, repo_forge, repo_path, kind, ref, sha, created_at, actor, data, metrics)
           VALUES (${crypto.randomUUID()}, ${record.repo.forge}, ${record.repo.path}, ${record.kind},
-            ${orNull(record.ref)}, ${orNull(record.sha)}, ${record.createdAt}, ${orNull(record.actor)}, ${sql.json(record.data)})
+            ${orNull(record.ref)}, ${orNull(record.sha)}, ${record.createdAt}, ${orNull(record.actor)}, ${sql.json(record.data)},
+            ${record.metrics === undefined ? null : sql.json(record.metrics)})
           RETURNING *`
         return toAnalysis(inserted(row))
       },
@@ -192,7 +193,7 @@ function coreStores(db: () => Promise<Db>): CoreStores {
         const [row]: AnalysisRow[] = await sql`SELECT * FROM ${t.analyses} WHERE id = ${id}`
         return row ? toAnalysis(row) : undefined
       },
-      async list({ repo, kind, before, limit = 50 } = {}) {
+      async list({ repo, kind, before, since, limit = 50 } = {}) {
         const { sql, t } = await db()
         const rows: AnalysisRow[] = await sql`
           SELECT * FROM ${t.analyses}
@@ -200,18 +201,20 @@ function coreStores(db: () => Promise<Db>): CoreStores {
               OR (repo_forge = ${orNull(repo?.forge)}::text AND repo_path = ${orNull(repo?.path)}::text))
             AND (${orNull(kind)}::text IS NULL OR kind = ${orNull(kind)}::text)
             AND (${orNull(before)}::timestamptz IS NULL OR created_at < ${orNull(before)}::timestamptz)
+            AND (${orNull(since)}::timestamptz IS NULL OR created_at >= ${orNull(since)}::timestamptz)
           ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
         return rows.map(toAnalysis)
       },
-      async heads({ repo, kind, before, limit = 50 } = {}) {
+      async heads({ repo, kind, before, since, limit = 50 } = {}) {
         const { sql, t } = await db()
         const rows: AnalysisRow[] = await sql`
-          SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, NULL::jsonb AS data
+          SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, NULL::jsonb AS data, metrics
           FROM ${t.analyses}
           WHERE (${orNull(repo?.forge)}::text IS NULL
               OR (repo_forge = ${orNull(repo?.forge)}::text AND repo_path = ${orNull(repo?.path)}::text))
             AND (${orNull(kind)}::text IS NULL OR kind = ${orNull(kind)}::text)
             AND (${orNull(before)}::timestamptz IS NULL OR created_at < ${orNull(before)}::timestamptz)
+            AND (${orNull(since)}::timestamptz IS NULL OR created_at >= ${orNull(since)}::timestamptz)
           ORDER BY created_at DESC, seq DESC LIMIT ${limit}`
         return rows.map((row) => {
           const { data: _, ...head } = toAnalysis(row)
@@ -233,7 +236,7 @@ function coreStores(db: () => Promise<Db>): CoreStores {
       async latestHeads({ repo, kind } = {}) {
         const { sql, t } = await db()
         const rows: AnalysisRow[] = await sql`
-          SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, NULL::jsonb AS data
+          SELECT seq, id, repo_forge, repo_path, kind, ref, sha, created_at, actor, NULL::jsonb AS data, metrics
           FROM ${t.analyses} WHERE seq IN (
             SELECT DISTINCT ON (repo_forge, repo_path, kind) seq FROM ${t.analyses}
             WHERE (${orNull(repo?.forge)}::text IS NULL
@@ -272,21 +275,29 @@ function coreStores(db: () => Promise<Db>): CoreStores {
       async put(c) {
         const { sql, t } = await db()
         await sql`
-          INSERT INTO ${t.credentials} (id, name, kind, url, scope, secret, expires_at, rotation,
-            last_rotated_at, last_error, options, capabilities, created_at, updated_at)
+          INSERT INTO ${t.credentials} AS cur (id, name, kind, url, scope, secret, expires_at, rotation,
+            last_rotated_at, last_error, options, capabilities, created_at, updated_at, last_used_at)
           VALUES (${c.id}, ${c.name}, ${c.kind}, ${c.url}, ${sql.json(c.scope)}, ${c.secret},
             ${orNull(c.expiresAt)}, ${c.rotation ? sql.json(c.rotation) : null}, ${orNull(c.lastRotatedAt)},
             ${orNull(c.lastError)}, ${c.options ? sql.json(c.options) : null},
-            ${c.capabilities ? sql.json(c.capabilities) : null}, ${c.createdAt}, ${c.updatedAt})
+            ${c.capabilities ? sql.json(c.capabilities) : null}, ${c.createdAt}, ${c.updatedAt},
+            ${orNull(c.lastUsedAt)}::timestamptz)
           ON CONFLICT (id) DO UPDATE SET name = excluded.name, kind = excluded.kind, url = excluded.url,
             scope = excluded.scope, secret = excluded.secret, expires_at = excluded.expires_at,
             rotation = excluded.rotation, last_rotated_at = excluded.last_rotated_at,
             last_error = excluded.last_error, options = excluded.options,
-            capabilities = excluded.capabilities, created_at = excluded.created_at, updated_at = excluded.updated_at`
+            capabilities = excluded.capabilities, created_at = excluded.created_at, updated_at = excluded.updated_at,
+            last_used_at = GREATEST(cur.last_used_at, excluded.last_used_at)`
       },
       async remove(id) {
         const { sql, t } = await db()
         await sql`DELETE FROM ${t.credentials} WHERE id = ${id}`
+      },
+      async touch(id, at) {
+        const { sql, t } = await db()
+        await sql`
+          UPDATE ${t.credentials} SET last_used_at = ${at}::timestamptz
+          WHERE id = ${id} AND (last_used_at IS NULL OR last_used_at < ${at}::timestamptz)`
       },
     },
     settings: {
@@ -337,15 +348,22 @@ function coreStores(db: () => Promise<Db>): CoreStores {
       async putUser(u) {
         const { sql, t } = await db()
         await sql`
-          INSERT INTO ${t.users} (id, name, email, email_lower, grants, disabled, session_version,
-            created_at, created_by, avatar_seed)
+          INSERT INTO ${t.users} AS cur (id, name, email, email_lower, grants, disabled, session_version,
+            created_at, created_by, avatar_seed, last_seen_at)
           VALUES (${u.id}, ${u.name}, ${orNull(u.email)}, ${u.email?.toLowerCase() ?? null},
             ${sql.json(u.grants)}, ${u.disabled}, ${u.sessionVersion}, ${u.createdAt}, ${orNull(u.createdBy)},
-            ${orNull(u.avatarSeed)})
+            ${orNull(u.avatarSeed)}, ${orNull(u.lastSeenAt)}::timestamptz)
           ON CONFLICT (id) DO UPDATE SET name = excluded.name, email = excluded.email,
             email_lower = excluded.email_lower, grants = excluded.grants, disabled = excluded.disabled,
             session_version = excluded.session_version, created_at = excluded.created_at,
-            created_by = excluded.created_by, avatar_seed = excluded.avatar_seed`
+            created_by = excluded.created_by, avatar_seed = excluded.avatar_seed,
+            last_seen_at = GREATEST(cur.last_seen_at, excluded.last_seen_at)`
+      },
+      async touchUser(id, at) {
+        const { sql, t } = await db()
+        await sql`
+          UPDATE ${t.users} SET last_seen_at = ${at}::timestamptz
+          WHERE id = ${id} AND (last_seen_at IS NULL OR last_seen_at < ${at}::timestamptz)`
       },
       async removeUser(id) {
         const { sql, t } = await db()

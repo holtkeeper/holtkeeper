@@ -100,6 +100,49 @@ const defaultLimits: MediaLimits = {
 const isSvg = (file: string) => /\.svg$/i.test(file)
 const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
 
+/** Entries read when listing one folder for `existingPaths`. */
+const LIST_LIMIT = 10_000
+
+const folderOf = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf('/')))
+
+/**
+ * Whether each of `paths` exists at `ref` (the default branch when unset): one listing per folder
+ * when the forge lists files, else a read per path, also for paths of folders too large to list.
+ */
+async function existingPaths(
+  forge: GitForge,
+  repo: string,
+  paths: readonly string[],
+  ref?: string,
+): Promise<Record<string, boolean>> {
+  const found = new Set<string>()
+  const unsure: string[] = []
+  const folders = Map.groupBy(new Set(paths), folderOf)
+  if (forge.listFiles) {
+    const list = forge.listFiles.bind(forge)
+    await Promise.all(
+      [...folders].map(async ([folder, files]) => {
+        const entries = await list(repo, {
+          ...(folder ? { path: folder } : {}),
+          ...(ref ? { ref } : {}),
+          limit: LIST_LIMIT,
+        })
+        for (const entry of entries) if (entry.type === 'file') found.add(entry.path)
+        if (entries.length >= LIST_LIMIT) unsure.push(...files.filter((file) => !found.has(file)))
+      }),
+    )
+  } else unsure.push(...new Set(paths))
+  await Promise.all(
+    unsure.map(async (file) => {
+      const content = forge.readFileBytes
+        ? await forge.readFileBytes(repo, file, ref)
+        : await forge.readFile(repo, file, ref)
+      if (content !== undefined) found.add(file)
+    }),
+  )
+  return Object.fromEntries(paths.map((path) => [path, found.has(path)]))
+}
+
 /**
  * Responsive image variants and SVG optimization for files in repositories. Results are stored as
  * artifacts; `apply` turns chosen ones into a merge request or a ZIP download.
@@ -109,7 +152,7 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
   const limit = { ...defaultLimits, ...limits }
   const app = new Hono<Env>()
   const run = createLimiter(limit.concurrency, limit.maxQueued)
-  const cache = new Map<string, MediaVariantsResult>()
+  const cache = new Map<string, Omit<MediaVariantsResult, 'exists'>>()
   let engine: MediaEngine | undefined
   const engineOf = () =>
     (engine ??=
@@ -138,7 +181,7 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
     return data
   }
 
-  const remember = (key: string, result: MediaVariantsResult) => {
+  const remember = (key: string, result: Omit<MediaVariantsResult, 'exists'>) => {
     cache.delete(key)
     cache.set(key, result)
     while (cache.size > limit.cacheEntries) {
@@ -148,7 +191,7 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
     }
   }
 
-  const stillStored = async (result: MediaVariantsResult) => {
+  const stillStored = async (result: Omit<MediaVariantsResult, 'exists'>) => {
     const store = artifactsOf(deps)
     const ids = [...result.variants.map((v) => v.id), ...(result.svg ? [result.svg.id] : [])]
     for (const id of ids) if (!(await store.has(id))) return false
@@ -164,14 +207,24 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
     const sha256 = artifactId(data)
     const { repo: _repo, ref: _ref, ...options } = input
     const key = JSON.stringify([sha256, options])
+    const withExists = async (result: Omit<MediaVariantsResult, 'exists'>) =>
+      c.json<MediaVariantsResult>({
+        ...result,
+        exists: await existingPaths(
+          forge,
+          repo.path,
+          result.variants.map((variant) => variant.path),
+          input.ref,
+        ),
+      })
     const cached = cache.get(key)
     if (cached && (await stillStored(cached))) {
       remember(key, cached)
-      return c.json<MediaVariantsResult>(cached)
+      return withExists(cached)
     }
 
     const tags = { repo: repoKey(repo), kind: 'media', source: input.file }
-    const outcome = await run(async (): Promise<MediaVariantsResult> => {
+    const outcome = await run(async (): Promise<Omit<MediaVariantsResult, 'exists'>> => {
       const media = engineOf()
       if (isSvg(input.file)) {
         const svg = await media.optimizeSvg({
@@ -257,7 +310,7 @@ export function mediaRoutes(deps: ServerDeps, limits: Partial<MediaLimits> = {})
     if (outcome === 'busy')
       throw new HTTPException(429, { message: 'the image engine is busy, try again shortly' })
     remember(key, outcome)
-    return c.json<MediaVariantsResult>(outcome)
+    return withExists(outcome)
   })
 
   app.post('/media/apply', async (c) => {

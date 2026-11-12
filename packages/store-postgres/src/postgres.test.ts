@@ -158,6 +158,87 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     await store.close()
   })
 
+  test('migrations 24 and 25 add guide generated history and chat context; old rows read empty', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((step) => step.version <= 23),
+    )
+    const at = '2026-11-01T00:00:00.000Z'
+    const layer = {
+      body: '- Run `bun test`.',
+      inputHash: 'h1',
+      model: 'model-fast',
+      costUsd: 0,
+      status: 'proposed' as const,
+      generatedAt: at,
+    }
+    await admin!.unsafe(`INSERT INTO ${schema}.guides (scope, section, data) VALUES ($1, $2, $3)`, [
+      'repo:gl:acme/widget-kit',
+      'testing',
+      {
+        scope: 'repo:gl:acme/widget-kit',
+        section: 'testing',
+        rules: '',
+        steering: '',
+        version: 0,
+        generated: layer,
+        proposal: layer,
+        learnings: [],
+      },
+    ])
+    await admin!.unsafe(
+      `INSERT INTO ${schema}.chat_threads (id, updated_at, archived, data) VALUES ($1, $2, false, $3)`,
+      [
+        't1',
+        at,
+        {
+          id: 't1',
+          title: 'Widget rollout',
+          createdBy: 'user-1',
+          createdAt: at,
+          updatedAt: at,
+          archived: false,
+          autoReply: false,
+          participants: ['user-1'],
+        },
+      ],
+    )
+    await admin!.unsafe(
+      `INSERT INTO ${schema}.chat_messages (id, thread_id, author_id, created_at, data)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        'm1',
+        't1',
+        'user-1',
+        at,
+        {
+          id: 'm1',
+          threadId: 't1',
+          authorType: 'human',
+          authorId: 'user-1',
+          body: 'Hi',
+          mentions: [],
+          createdAt: at,
+        },
+      ],
+    )
+    expect(await migrate(admin!, schema)).toEqual(
+      migrations.filter((step) => step.version > 23).map((step) => step.version),
+    )
+    const store = postgresStore({ url: url!, schema })
+    expect(await store.guides.get('repo:gl:acme/widget-kit', 'testing')).toMatchObject({
+      generated: { ...layer, version: 0 },
+      proposal: { ...layer, version: 0 },
+    })
+    expect(await store.guides.generatedHistory('repo:gl:acme/widget-kit', 'testing')).toEqual([])
+    expect((await store.chat.getThread('t1'))?.contextRepos).toEqual([])
+    expect((await store.chat.getMessage('m1'))?.refs).toEqual([])
+    expect(await store.chat.context('t1')).toMatchObject({ messageCount: 1, repos: [] })
+    await store.close()
+  })
+
   test('migration 21 removes what retired analyzers and settings left behind', async () => {
     const schema = nextSchema()
     await migrate(
@@ -235,6 +316,37 @@ describe.skipIf(!url || !admin)('postgres store', () => {
     })
     expect((await config.history('schedule', 'mixed')).map((each) => each.version)).toEqual([1])
     expect(await config.get('trigger', 'new-repo')).toMatchObject({ version: 1 })
+    await store.close()
+  })
+
+  test('migration 23 adds ai usage origin and subject and indexes jobs by analysis', async () => {
+    const schema = nextSchema()
+    await migrate(
+      admin!,
+      schema,
+      migrations.filter((step) => step.version <= 22),
+    )
+    await admin!.unsafe(
+      `
+      INSERT INTO ${schema}.ai_usage (id, at, repo_forge, repo_path, groups, task_kind, actor, provider,
+        model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
+        cost_source, duration_ms, turns, outcome)
+      VALUES ('u1', $1, 'work', 'shapes/a', '[]', 'review', 'system', 'anthropic', 'm', 1, 1, 0, 0,
+        0.5, 'reported', 10, 1, 'ok')`,
+      ['2026-10-01T00:00:00.000Z'],
+    )
+    expect(await migrate(admin!, schema)).toContain(23)
+    const indexes =
+      (await admin!`SELECT indexname FROM pg_indexes WHERE schemaname = ${schema}`) as {
+        indexname: string
+      }[]
+    expect(indexes.map((row) => row.indexname)).toEqual(
+      expect.arrayContaining(['jobs_analysis', 'ai_usage_actor_at', 'ai_usage_job']),
+    )
+    const store = postgresStore({ url: url!, schema })
+    const [old] = await store.aiUsage.list()
+    expect(old).toMatchObject({ id: 'u1', interactive: false })
+    expect(old).not.toHaveProperty('subject')
     await store.close()
   })
 

@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite'
 import type {
   Family,
   FamilyStore,
+  GuideGenerated,
   GuideRevision,
   GuideSection,
   GuideSectionInput,
@@ -15,10 +16,14 @@ interface DataRow {
 }
 
 const toSection = (row: DataRow): GuideSection => JSON.parse(row.data)
+const toGenerated = (row: DataRow): GuideGenerated => JSON.parse(row.data)
 const toRevision = (row: DataRow): GuideRevision => JSON.parse(row.data)
 const toFamily = (row: DataRow): Family => JSON.parse(row.data)
 
-/** The SQLite `GuideStore`: one JSON row per scope and section in `guides`, revisions in `guide_history`. */
+/**
+ * The SQLite `GuideStore`: one JSON row per scope and section in `guides`, revisions in
+ * `guide_history`, generated layers by version in `guide_generated`.
+ */
 export function sqliteGuides(db: Database): GuideStore {
   const sql = {
     get: db.query<DataRow, [string, string]>(
@@ -35,22 +40,37 @@ export function sqliteGuides(db: Database): GuideStore {
     history: db.query<DataRow, [string, string]>(
       'SELECT data FROM guide_history WHERE scope = ? AND section = ? ORDER BY version DESC',
     ),
+    lastGenerated: db.query<{ version: number | null }, [string, string]>(
+      'SELECT max(version) AS version FROM guide_generated WHERE scope = ? AND section = ?',
+    ),
+    putGenerated: db.prepare(
+      `INSERT INTO guide_generated (scope, section, version, data) VALUES (?, ?, ?, ?)
+       ON CONFLICT (scope, section, version) DO UPDATE SET data = excluded.data`,
+    ),
+    generated: db.query<DataRow, [string, string]>(
+      'SELECT data FROM guide_generated WHERE scope = ? AND section = ? ORDER BY version DESC',
+    ),
     removeScope: db.prepare('DELETE FROM guides WHERE scope = ?'),
     removeHistory: db.prepare('DELETE FROM guide_history WHERE scope = ?'),
+    removeGenerated: db.prepare('DELETE FROM guide_generated WHERE scope = ?'),
   }
   const read = (row: DataRow | null): GuideSection | undefined => (row ? toSection(row) : undefined)
 
   const put = db.transaction((input: GuideSectionInput): GuideSection => {
     const previous = read(sql.get.get(input.scope, input.section))
-    const { stored, revision } = nextGuideSection(input, previous)
+    const last = sql.lastGenerated.get(input.scope, input.section)?.version ?? 0
+    const { stored, revision, generated } = nextGuideSection(input, previous, last)
     if (revision)
       sql.addRevision.run(input.scope, input.section, revision.version, JSON.stringify(revision))
+    for (const layer of generated)
+      sql.putGenerated.run(input.scope, input.section, layer.version, JSON.stringify(layer))
     sql.upsert.run(input.scope, input.section, JSON.stringify(stored))
     return stored
   })
   const removeScope = db.transaction((scope: string) => {
     sql.removeScope.run(scope)
     sql.removeHistory.run(scope)
+    sql.removeGenerated.run(scope)
   })
 
   return {
@@ -62,6 +82,7 @@ export function sqliteGuides(db: Database): GuideStore {
         .filter((row) => matchesGuideFilter(row, filter)),
     put: async (input) => put.immediate(input),
     history: async (scope, section) => sql.history.all(scope, section).map(toRevision),
+    generatedHistory: async (scope, section) => sql.generated.all(scope, section).map(toGenerated),
     async removeScope(scope) {
       removeScope.immediate(scope)
     },

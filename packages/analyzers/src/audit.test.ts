@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createFakeRunner } from '@holtkeeper/exec/testing'
 import type { AuditReport } from '@holtkeeper/vuln'
 
-import { auditAnalysis, auditAnalyzer } from './audit.ts'
+import { auditAnalysis, auditAnalyzer, auditFindingKey, auditMetrics } from './audit.ts'
 
 const finding = {
   id: 'GHSA-1',
@@ -75,4 +75,90 @@ test('scans the checkout with osv-scanner through the job runner', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+})
+
+test('metrics count active advisories per severity', () => {
+  const metrics = auditMetrics({
+    ...report,
+    findings: [
+      finding,
+      { ...finding, id: 'GHSA-2', severity: 'critical' },
+      { ...finding, id: 'GHSA-3' },
+    ],
+    ignored: [
+      { finding, entry: { id: 'GHSA-1', reason: 'not reachable' } },
+    ] as AuditReport['ignored'],
+  })
+  expect(metrics).toMatchObject({
+    findings: 3,
+    severities: { critical: 1, high: 2, medium: 0, low: 0, unknown: 0 },
+    ignored: 1,
+    expired: 0,
+    resolved: 0,
+    firstSeen: {},
+  })
+  expect(metrics.advisories).toHaveLength(4)
+})
+
+test('metrics keep every finding for fleet tables, allowlisted ones with their expiry', () => {
+  const metrics = auditMetrics({
+    ...report,
+    ignored: [
+      {
+        finding: { ...finding, id: 'GHSA-9' },
+        entry: { id: 'GHSA-9', reason: 'dev only', expires: '2026-12-01' },
+      },
+      { finding: { ...finding, id: 'GHSA-8' }, entry: { id: 'GHSA-8', reason: 'not shipped' } },
+    ],
+  })
+  expect(metrics.advisories).toEqual([
+    {
+      id: 'GHSA-1',
+      aliases: [],
+      summary: 'bad',
+      url: 'https://osv.dev/GHSA-1',
+      severity: 'high',
+      package: 'left-pad',
+      ecosystem: 'npm',
+      version: '1.0.0',
+      source: 'package-lock.json',
+      fixedIn: ['1.0.1'],
+    },
+    expect.objectContaining({ id: 'GHSA-9', allowlisted: { until: '2026-12-01' } }),
+    expect.objectContaining({ id: 'GHSA-8', allowlisted: {} }),
+  ])
+})
+
+test('first-seen times carry over from the previous record and start at the record time', () => {
+  const first = auditMetrics(report, { createdAt: '2026-11-01T00:00:00.000Z' })
+  expect(first.firstSeen).toEqual({
+    [auditFindingKey({ id: 'GHSA-1', ecosystem: 'npm', package: 'left-pad' })]:
+      '2026-11-01T00:00:00.000Z',
+  })
+
+  const second = auditMetrics(
+    {
+      ...report,
+      findings: [
+        { ...finding, package: { ...finding.package, version: '1.0.0-patched' } },
+        { ...finding, id: 'GHSA-2' },
+      ],
+    },
+    { previous: first, createdAt: '2026-11-05T00:00:00.000Z' },
+  )
+  expect(second.firstSeen).toEqual({
+    'GHSA-1|npm|left-pad': '2026-11-01T00:00:00.000Z',
+    'GHSA-2|npm|left-pad': '2026-11-05T00:00:00.000Z',
+  })
+
+  const gone = auditMetrics(
+    { ...report, findings: [] },
+    { previous: second, createdAt: '2026-11-06T00:00:00.000Z' },
+  )
+  expect(gone.firstSeen).toEqual({})
+})
+
+test('first-seen times are left out when the record time is unknown', () => {
+  const legacy = { ...auditMetrics(report), firstSeen: undefined } as never
+  expect(auditMetrics(report, { previous: legacy }).firstSeen).toEqual({})
 })

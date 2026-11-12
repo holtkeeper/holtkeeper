@@ -122,7 +122,10 @@ describe('reviewMergeRequest', () => {
       runOf({
         forge: requireReviewForge(forge),
         agent,
-        guide: async (docs) => `Guide with ${docs.length} docs. Check money.`,
+        guide: async (docs) => ({
+          text: `Guide with ${docs.length} docs. Check money.`,
+          scopes: ['all', 'group:web'],
+        }),
       }),
     )
 
@@ -146,7 +149,9 @@ describe('reviewMergeRequest', () => {
       invalid: 2,
     })
     expect(data.skipped).toEqual([{ path: 'bun.lock', reason: 'ignored' }])
-    expect(data.usage).toMatchObject({ turns: 2, inputTokens: 100 })
+    expect(data.usage).toMatchObject({ turns: 2, inputTokens: 100, model: 'fake-main' })
+    expect(data.guideScopes).toEqual(['all', 'group:web'])
+    expect(data.durationMs).toBeGreaterThanOrEqual(0)
 
     const [submission] = submissions
     expect(submission?.event).toBe('comment')
@@ -174,7 +179,16 @@ describe('reviewMergeRequest', () => {
           },
         ],
       })
-      const data = await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent, dir }))
+      const data = await reviewMergeRequest(
+        runOf({
+          forge: requireReviewForge(forge),
+          agent,
+          dir,
+          guide: async () => ({ text: 'Plain rules.', scopes: [] }),
+        }),
+      )
+      expect(tasks[0]?.context).toContain('Plain rules.')
+      expect(data.guideScopes).toBeUndefined()
 
       expect(tasks[0]?.prompt).toContain('- `src/**` (src/price.ts): money is integer cents.')
       expect(tasks[0]?.prompt).not.toContain('reversible only')
@@ -290,7 +304,7 @@ describe('reviewMergeRequest', () => {
       mergeRequest: {
         id: 7,
         title: 't',
-        webUrl: 'w',
+        webUrl: 'https://forge.example.com/acme/widget/-/merge_requests/7',
         sourceBranch: 's',
         targetBranch: 'main',
         author: 'jane',

@@ -33,7 +33,7 @@ export type FieldNode =
   | { kind: 'any' }
   | { kind: 'fixed'; value: unknown }
   | { kind: 'boolean' }
-  | { kind: 'enum'; options: string[] }
+  | { kind: 'enum'; options: string[]; labels?: Record<string, string> }
   | ({ kind: 'string' } & StringRules)
   | ({ kind: 'number' } & NumberRules)
   | { kind: 'credential'; of: string }
@@ -130,6 +130,14 @@ const stringRules = (schema: JsonSchema): StringRules => ({
   pattern: str(schema.pattern),
 })
 
+const optionLabels = (value: unknown): Record<string, string> | undefined => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string',
+  )
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
 const leafOf = (schema: JsonSchema): FieldNode | undefined => {
   const credential = schema['x-credential']
   if (typeof credential === 'string' && (schema.type ?? 'string') === 'string') {
@@ -137,9 +145,9 @@ const leafOf = (schema: JsonSchema): FieldNode | undefined => {
   }
   const values = schema.enum
   if (Array.isArray(values) && values.length > 0 && values.every((v) => typeof v === 'string')) {
-    return values.length === 1
-      ? { kind: 'fixed', value: values[0] }
-      : { kind: 'enum', options: values }
+    if (values.length === 1) return { kind: 'fixed', value: values[0] }
+    const labels = optionLabels(schema['x-labels'])
+    return { kind: 'enum', options: values, ...(labels ? { labels } : {}) }
   }
   switch (schema.type) {
     case 'boolean':

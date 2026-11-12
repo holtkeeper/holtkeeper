@@ -39,6 +39,7 @@ const tokenSetting = defineSetting({
   description: 'A secret setting',
   section: 'Test',
   schema: z.string().min(1),
+  default: null,
   secret: true,
 })
 const noteSetting = defineSetting({
@@ -47,6 +48,7 @@ const noteSetting = defineSetting({
   description: 'A plain text setting',
   section: 'Test',
   schema: z.string(),
+  default: '',
 })
 
 const setup = (auth: AuthProvider = noAuth()) => {

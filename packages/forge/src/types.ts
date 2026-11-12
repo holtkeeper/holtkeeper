@@ -189,6 +189,27 @@ export interface ForgeImage {
   contentType: string
 }
 
+/** One job of the latest pipeline of a ref, as `listPipelineJobs` reports it. */
+export interface PipelineJob extends Job {
+  pipelineId: number
+  /** The job waits for a person to start it (or was started by one), as far as the forge tells. */
+  manual: boolean
+  /** Environment the job deploys to, when the forge reports one. */
+  environment?: string
+  /** When the job was created, when the forge reports it. ISO 8601. */
+  createdAt?: string
+  /** When the job finished, if it did. ISO 8601. */
+  finishedAt?: string
+}
+
+/** Filters for `listPipelineJobs`; omitted fields use the defaults stated there. */
+export interface PipelineJobQuery {
+  /** Branch or tag whose latest pipeline is read; the default branch when omitted. */
+  ref?: string
+  /** At most this many jobs; all when omitted. */
+  limit?: number
+}
+
 /** Filters for `listProjectJobRuns`; omitted fields do not filter. */
 export interface JobRunQuery {
   /** Only jobs created at or after this ISO 8601 time. */
@@ -472,6 +493,11 @@ export interface GitForge {
    */
   listProjectJobRuns?(repo: string, query?: JobRunQuery): Promise<JobRun[]>
   listDeployments?(repo: string, query?: DeploymentQuery): Promise<Deployment[]>
+  /**
+   * Jobs of the latest pipeline of `query.ref` (latest attempts only, in pipeline order); empty when
+   * the ref has no pipeline.
+   */
+  listPipelineJobs?(repo: string, query?: PipelineJobQuery): Promise<PipelineJob[]>
   /** Tags, most recently updated first. */
   listTags?(repo: string, query?: { limit?: number }): Promise<TagRecord[]>
   /** Every branch of the repository, the default branch included, in no particular order. */

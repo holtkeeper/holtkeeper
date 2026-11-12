@@ -153,8 +153,8 @@ export type CardBlock =
   | { type: 'context'; text: string }
   /**
    * A code change: the repositories (`forge:path`) it touches, what it does, and the task group
-   * (`groupId`) people approve or cancel from the card; the server keeps `status` and
-   * `mergeRequests` current.
+   * (`groupId`) it belongs to; people approve it in the Inbox and may cancel it from the card. The
+   * server keeps `status`, `steps` (one per repository) and `mergeRequests` current.
    */
   | {
       type: 'task'
@@ -165,6 +165,8 @@ export type CardBlock =
       /** Spend cap of the whole group in USD, shown before approval. */
       budgetUsd?: number
       mergeRequests?: TaskCardMergeRequest[]
+      /** Where each repository's task stands, in the order of `repos` (see `taskSteps`). */
+      steps?: CardStep[]
     }
 
 /**
@@ -212,6 +214,62 @@ const taskTones: Record<TaskCardStatus, CardTone> = {
   cancelled: 'neutral',
 }
 
+/** One repository's task of a code change, as `taskSteps` reads it. */
+interface TaskStepInput {
+  /** `forge:path`. */
+  repo: string
+  status: TaskCardStatus
+  /** Why the task failed. */
+  error?: string
+  mergeRequest?: Omit<TaskCardMergeRequest, 'repo'>
+}
+
+const taskStepStatus: Record<TaskCardStatus, StepStatus> = {
+  proposed: 'waiting',
+  approved: 'pending',
+  queued: 'pending',
+  running: 'running',
+  'mr-open': 'active',
+  done: 'done',
+  failed: 'failed',
+  cancelled: 'skipped',
+}
+
+const taskStepDetail: Record<TaskCardStatus, string> = {
+  proposed: 'Waiting for approval',
+  approved: 'Approved',
+  queued: 'Queued on a write worker',
+  running: 'Agent at work',
+  'mr-open': 'Merge request open',
+  done: 'Done',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+}
+
+/**
+ * One step per repository's task, in the given order: the repository as label, its status as a
+ * `StepStatus` (`proposed` waits, `approved` and `queued` are pending, `mr-open` is active while
+ * people review), what happens in words (a failure's error, a draft merge request) and a link to
+ * its merge request once one is open.
+ */
+export function taskSteps(tasks: readonly TaskStepInput[]): CardStep[] {
+  return tasks.map((task) => {
+    const mr = task.mergeRequest
+    const detail =
+      task.status === 'failed' && task.error
+        ? task.error
+        : task.status === 'mr-open' && mr?.draft
+          ? 'Draft merge request open'
+          : taskStepDetail[task.status]
+    return {
+      label: task.repo,
+      status: taskStepStatus[task.status],
+      detail,
+      ...(mr && { url: mr.url, urlLabel: `!${mr.id}` }),
+    }
+  })
+}
+
 /** A card for a code change in `repos`: proposed until its group (`groupId`) is approved. */
 export const taskCard = (
   repos: readonly string[],
@@ -221,6 +279,7 @@ export const taskCard = (
     groupId?: string
     budgetUsd?: number
     mergeRequests?: TaskCardMergeRequest[]
+    steps?: CardStep[]
   } = {},
 ): Card => {
   const status = task.status ?? 'proposed'
@@ -237,6 +296,7 @@ export const taskCard = (
         ...(task.groupId && { groupId: task.groupId }),
         ...(task.budgetUsd !== undefined && { budgetUsd: task.budgetUsd }),
         ...(task.mergeRequests?.length && { mergeRequests: task.mergeRequests }),
+        ...(task.steps?.length && { steps: task.steps }),
       },
     ],
   }

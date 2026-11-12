@@ -1,6 +1,6 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { MessagesSquare } from 'lucide-react'
-import { useState } from 'react'
+import { useDeferredValue, useState } from 'react'
 
 import { useChatThreads } from '../../api/queries.ts'
 import { scopeThreads } from '../../lib/chat.ts'
@@ -10,14 +10,17 @@ import { ThreadList } from './ThreadList.tsx'
 import { ThreadPane } from './ThreadPane.tsx'
 
 /**
- * Team chat: threads the team shares with Holtkeeper, scoped like every list by the scope switch.
- * The open thread lives in the `thread` search parameter, so links point at one thread.
+ * Team chat: threads the team shares with Holtkeeper, scoped like every list by the scope switch,
+ * other teams' threads folded under the list. The open thread lives in the `thread` search
+ * parameter, so links point at one thread.
  */
 export function ChatPage() {
   const search = useSearch({ from: '/app/chat' })
   const navigate = useNavigate({ from: '/chat' })
   const [archived, setArchived] = useState(false)
-  const threads = useChatThreads(archived)
+  const [query, setQuery] = useState('')
+  const q = useDeferredValue(query)
+  const threads = useChatThreads(archived, q)
   const { view, setView, homeGroups } = useScope()
   const scoped = threads.data ? scopeThreads(threads.data.threads, view, homeGroups) : undefined
   const shown = scoped?.shown ?? []
@@ -25,14 +28,19 @@ export function ChatPage() {
   const select = (id: string) => void navigate({ search: { thread: id }, replace: true })
 
   return (
-    <div className="-mx-4 -my-5 flex h-[calc(100dvh-44px)] min-h-0 flex-col bg-background sm:-mx-6 md:flex-row">
+    <div className="flex h-[calc(100dvh-18px)] min-h-0 flex-col md:flex-row">
       <ThreadList
         threads={shown}
+        others={scoped?.others ?? []}
+        otherTeams={scoped?.teams ?? []}
         counts={scoped?.counts}
         view={view}
         onView={setView}
+        query={query}
+        onQuery={setQuery}
         archived={archived}
         onArchived={setArchived}
+        archivedCount={threads.data?.archivedCount ?? 0}
         groups={threads.data?.groups ?? []}
         selected={current}
         onSelect={select}

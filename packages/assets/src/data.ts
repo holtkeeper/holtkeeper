@@ -15,7 +15,7 @@ export const assetKinds = [
 
 export type AssetKind = (typeof assetKinds)[number]
 
-const kindSchema = z.enum(assetKinds)
+export const kindSchema = z.enum(assetKinds)
 
 const imageMetaSchema = z.object({
   width: z.number(),
@@ -359,7 +359,13 @@ export const assetsPolicySchema = z.object({
 export type AssetsPolicy = z.infer<typeof assetsPolicySchema>
 
 /** Rules of the asset policy. */
-const policyRules = ['format', 'max-bytes', 'max-dimension', 'modern-format', 'budget'] as const
+export const policyRules = [
+  'format',
+  'max-bytes',
+  'max-dimension',
+  'modern-format',
+  'budget',
+] as const
 
 const policyViolationSchema = z.object({
   /** Stable across runs: rule and path, or rule and kind for budgets. */

@@ -19,7 +19,7 @@ import { noAuth } from '@holtkeeper/auth-none'
 import type { CodeChange } from '@holtkeeper/changes'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
-import type { CommitInput } from '@holtkeeper/forge'
+import type { CommitInput, ListFilesOptions } from '@holtkeeper/forge'
 import { defineAnalysis } from '@holtkeeper/report'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
@@ -37,7 +37,15 @@ const bytesOf = (text: string) => new TextEncoder().encode(text)
 
 const repoFiles: Record<string, Uint8Array> = {}
 const commits: CommitInput[] = []
+const listed: ListFilesOptions[] = []
+const listFiles = async (_repo: string, options: ListFilesOptions = {}) => {
+  listed.push(options)
+  return Object.keys(repoFiles)
+    .filter((file) => file.slice(0, Math.max(0, file.lastIndexOf('/'))) === (options.path ?? ''))
+    .map((path) => ({ path, type: 'file' as const }))
+}
 const fakeForge = {
+  listFiles,
   kind: 'fake',
   getRepository: async () => ({ defaultBranch: 'main' }),
   readFile: async (_repo: string, file: string) => {
@@ -152,6 +160,7 @@ beforeEach(() => {
   store = memoryStore()
   artifacts = memoryArtifactStore()
   commits.length = 0
+  listed.length = 0
   engineCalls = 0
   for (const key of Object.keys(repoFiles)) delete repoFiles[key]
   repoFiles['img/hero.png'] = png
@@ -250,12 +259,48 @@ describe('media variants', () => {
     expect(engineCalls).toBe(2)
   })
 
+  test('says for every variant path whether it already exists at the ref', async () => {
+    repoFiles['img/hero-100w.webp'] = bytesOf('old')
+    const body = {
+      repo: 'work:games/a',
+      file: 'img/hero.png',
+      ref: 'feature',
+      formats: ['webp', 'avif'],
+      widths: [100],
+    }
+    const app = setup()
+    const result = (await (
+      await post(app, '/api/media/variants', body)
+    ).json()) as MediaVariantsResult
+    expect(result.exists).toEqual({ 'img/hero-100w.webp': true, 'img/hero-100w.avif': false })
+    expect(listed).toEqual([{ path: 'img', ref: 'feature', limit: 10_000 }])
+
+    delete repoFiles['img/hero-100w.webp']
+    const again = (await (
+      await post(app, '/api/media/variants', body)
+    ).json()) as MediaVariantsResult
+    expect(engineCalls).toBe(1)
+    expect(again.exists).toEqual({ 'img/hero-100w.webp': false, 'img/hero-100w.avif': false })
+
+    repoFiles['img/hero-100w.avif'] = bytesOf('old')
+    Reflect.deleteProperty(fakeForge, 'listFiles')
+    try {
+      const read = (await (
+        await post(app, '/api/media/variants', body)
+      ).json()) as MediaVariantsResult
+      expect(read.exists).toEqual({ 'img/hero-100w.webp': false, 'img/hero-100w.avif': true })
+    } finally {
+      Object.assign(fakeForge, { listFiles })
+    }
+  })
+
   test('optimizes SVGs and checks access and existence', async () => {
     const app = setup()
     const result = (await (
       await post(app, '/api/media/variants', { repo: 'work:games/a', file: 'img/logo.svg' })
     ).json()) as MediaVariantsResult
     expect(result.svg).toMatchObject({ before: svg.length, breakdown: { comments: 10 } })
+    expect(result.exists).toEqual({})
     expect(
       new TextDecoder().decode((await artifacts.get(result.svg?.id ?? ''))?.data),
     ).not.toContain('<!--')

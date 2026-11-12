@@ -1,10 +1,11 @@
-import type { AnalyzerArtifact, AnyAnalyzer } from '@holtkeeper/analyzer'
+import { type AnalyzerArtifact, type AnyAnalyzer, recordMetrics } from '@holtkeeper/analyzer'
 import { type ArtifactStore, memoryArtifactStore } from '@holtkeeper/artifacts'
 import type { RepoRef } from '@holtkeeper/forge'
-import type { AnalysisRecord, AnalysisStore, Job, JobStore } from '@holtkeeper/store'
+import type { AnalysisRecord, AnalysisStore, Job, JobStore, KvStore } from '@holtkeeper/store'
 
 import type { ContextFor } from './context.ts'
 import { type JobLog, type JobLogOptions, createJobLog } from './log.ts'
+import { removeWorker, touchWorker } from './registry.ts'
 import { claimRulesOf } from './wait.ts'
 
 export interface WorkerOptions {
@@ -39,6 +40,12 @@ export interface WorkerOptions {
   pollMs?: number
   /** Default 15 seconds. */
   heartbeatMs?: number
+  /**
+   * Where the worker announces itself (`touchWorker` under `WORKERS_KEY`) on `start` and every
+   * `heartbeatMs` while started, and leaves on `stop` or `drain`. Without it the worker stays
+   * unlisted. Registry failures are logged and never stop the worker.
+   */
+  registry?: Pick<KvStore, 'get' | 'set' | 'compareAndSet'>
   /**
    * Running jobs without a heartbeat for this long are recovered on `start` and then every
    * `staleMs`, so a job whose worker died (killed for memory, a lost node) runs again even when
@@ -215,6 +222,27 @@ export function createWorker(options: WorkerOptions): Worker {
   let filling = false
   let poll: ReturnType<typeof setInterval> | undefined
   let sweep: ReturnType<typeof setInterval> | undefined
+  let presence: ReturnType<typeof setInterval> | undefined
+
+  const announce = async () => {
+    if (!options.registry) return
+    try {
+      await touchWorker(options.registry, workerId, now())
+    } catch (error) {
+      say(`announcing worker ${workerId} failed: ${messageOf(error)}`)
+    }
+  }
+
+  const leave = async () => {
+    clearInterval(presence)
+    presence = undefined
+    if (!options.registry) return
+    try {
+      await removeWorker(options.registry, workerId)
+    } catch (error) {
+      say(`removing worker ${workerId} from the registry failed: ${messageOf(error)}`)
+    }
+  }
 
   const finished = async (job: Job, record?: AnalysisRecord) => {
     try {
@@ -367,14 +395,22 @@ export function createWorker(options: WorkerOptions): Worker {
       const sha = result.sha ?? prepared.sha
       const stored = result
       const record = await step('store', async () => {
+        const createdAt = stored.at ?? at()
+        const metrics = await recordMetrics(
+          store.analyses,
+          analyzer.analysis,
+          { repo: job.repo, ...(ref !== undefined && { ref }), createdAt, data: stored.data },
+          parsed.data,
+        )
         const added = await store.analyses.add({
           repo: job.repo,
           kind: analyzer.analysis.kind,
           ...(ref !== undefined && { ref }),
           ...(sha !== undefined && { sha }),
-          createdAt: stored.at ?? at(),
+          createdAt,
           ...(job.actor !== undefined && { actor: job.actor }),
           data: stored.data,
+          ...(metrics !== undefined && { metrics }),
         })
         log(`stored analysis ${added.id}`)
         if (analyzer.keepRecords) {
@@ -510,6 +546,8 @@ export function createWorker(options: WorkerOptions): Worker {
   return {
     async start() {
       stopped = false
+      await announce()
+      if (options.registry) presence ??= setInterval(() => void announce(), heartbeatMs)
       await recover()
       poll ??= setInterval(() => void fill(), options.pollMs ?? 5_000)
       sweep ??= setInterval(() => void sweepStale(), staleMs)
@@ -524,6 +562,7 @@ export function createWorker(options: WorkerOptions): Worker {
       for (const controller of controllers.keys())
         controller.abort(new JobAbort('stopped', 'worker stopped'))
       await Promise.allSettled(active)
+      await leave()
     },
     async runNext() {
       const job = await claim()
@@ -554,6 +593,7 @@ export function createWorker(options: WorkerOptions): Worker {
       clearTimeout(timer)
       if (timedOut) abort(() => true)
       await all
+      await leave()
       return { finished: total - requeued, requeued }
     },
     get running() {

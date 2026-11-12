@@ -1,4 +1,10 @@
-import type { StackConventionResult, StackGroupView, StackTool, StackUse } from '@holtkeeper/api'
+import type {
+  StackConventionResult,
+  StackCycle,
+  StackGroupView,
+  StackTool,
+  StackUse,
+} from '@holtkeeper/api'
 import { changeDiff } from '@holtkeeper/changes'
 import { type DirectDependency, directDependencies, latestDepgraphs } from '@holtkeeper/depgraph'
 import type { RepoRef } from '@holtkeeper/forge'
@@ -58,6 +64,17 @@ function stackTools(data: StackData, keep: (repo: string) => boolean): StackTool
         kind: component.kind,
         ...(component.latest ? { latest: component.latest } : {}),
         ...(component.latestLts ? { latestLts: component.latestLts } : {}),
+        ...(component.cycles?.length
+          ? {
+              cycles: component.cycles.map((cycle): StackCycle => ({
+                cycle: cycle.cycle,
+                ...(cycle.releaseDate ? { releaseDate: cycle.releaseDate } : {}),
+                eol: cycle.eol,
+                ...(cycle.lts !== undefined ? { lts: cycle.lts } : {}),
+                ...(cycle.latest ? { latest: cycle.latest } : {}),
+              })),
+            }
+          : {}),
         uses,
       },
     ]

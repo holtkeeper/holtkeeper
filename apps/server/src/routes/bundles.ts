@@ -1,19 +1,35 @@
-import type { BundleTargetReportView, BundleTargetsView } from '@holtkeeper/api'
+import type { BundleTargetReportView, BundleTargetsView, BundlesOverview } from '@holtkeeper/api'
 import {
   type BundleRecordLike,
-  isBundleAnalysisData,
   bundleSeries,
   findTargetPoint,
+  isBundleAnalysisData,
   targetReport,
 } from '@holtkeeper/bundles'
 import type { RepoRef } from '@holtkeeper/forge'
+import type { AnalysisHead } from '@holtkeeper/store'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
-import { type Env, type ServerDeps, authorize, parseRepo, repoTarget } from '../context.ts'
+import { LINE_SCAN, latestHeadsWithMetrics, mainLineRecords } from '../analyses.ts'
+import { OVERVIEW_RECORDS, bundlesRow } from '../bundles.ts'
+import {
+  type Env,
+  type ServerDeps,
+  authorize,
+  parseRepo,
+  principalOf,
+  repoKey,
+  repoTarget,
+} from '../context.ts'
+import { createFleetCache } from '../fleet-cache.ts'
+import { BUNDLE_SETTING } from '../repo-health.ts'
+import { canSee } from '../visibility.ts'
 
 /** Records a history is built from; older measurements drop out of the charts. */
 const MAX_RECORDS = 300
+
+const KIND = 'bundle'
 
 const repoParam = (value: string | undefined) => {
   const repo = parseRepo(value)
@@ -22,12 +38,56 @@ const repoParam = (value: string | undefined) => {
 }
 
 /**
- * Bundle sizes by target: the history of every app build and published package of a repository,
- * and the report of one point of it. Built from `bundle` analysis records.
+ * Bundle sizes by target: `GET /bundles` gives a row per repository the caller may read from the
+ * stored metrics of its newest main-line records; `/bundles/targets` the history of every app build and
+ * published package of one repository and `/bundles/report` the report of one point of it, both
+ * from record data.
  */
 export function bundleRoutes(deps: ServerDeps) {
   const { store, config } = deps
   const app = new Hono<Env>()
+  const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
+  const cache = createFleetCache()
+
+  const lineOf = async (newest: AnalysisHead) => {
+    const line = mainLineRecords(
+      await store.analyses.heads({ repo: newest.repo, kind: KIND, limit: LINE_SCAN }),
+      OVERVIEW_RECORDS,
+    )
+    return line.map((head) => (head.id === newest.id ? newest : head))
+  }
+
+  app.get('/bundles', async (c) => {
+    const principal = principalOf(c)
+    const [newest, settings] = await Promise.all([
+      latestHeadsWithMetrics(store.analyses, kinds, { kind: KIND }),
+      store.settings.list(BUNDLE_SETTING),
+    ])
+    const visible = newest.filter((head) =>
+      canSee(principal, 'analyses:read', repoTarget(config, head.repo)),
+    )
+    const repos = await cache.read(
+      {
+        endpoint: `bundles?settings=${settings
+          .map((entry) => `${entry.id}@${entry.updatedAt}`)
+          .toSorted()
+          .join(',')}`,
+        analysisIds: visible.map((head) => head.id),
+        repos: visible.map((head) => repoKey(head.repo)),
+      },
+      async () => {
+        const rows = await Promise.all(
+          visible.map(async (head) =>
+            bundlesRow(repoTarget(config, head.repo), await lineOf(head), settings),
+          ),
+        )
+        return rows
+          .filter((row) => row !== undefined)
+          .toSorted((a, b) => repoKey(a.repo).localeCompare(repoKey(b.repo)))
+      },
+    )
+    return c.json<BundlesOverview>({ repos })
+  })
 
   const recordsOf = async (repo: RepoRef): Promise<BundleRecordLike[]> =>
     (await store.analyses.list({ repo, kind: 'bundle', limit: MAX_RECORDS })).flatMap((record) =>

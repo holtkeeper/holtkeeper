@@ -21,6 +21,7 @@ const verdictTone: Record<PackageVerdict, Tone> = {
   denied: 'bad',
   ignored: 'neutral',
   internal: 'neutral',
+  excepted: 'neutral',
 }
 
 const verdictLabel: Record<PackageVerdict, string> = {
@@ -30,6 +31,7 @@ const verdictLabel: Record<PackageVerdict, string> = {
   denied: 'denied',
   ignored: 'ignored',
   internal: 'internal',
+  excepted: 'excepted',
 }
 
 function counts(data: LicensesData) {
@@ -40,7 +42,178 @@ function counts(data: LicensesData) {
     denied: data.packages.filter((pkg) => pkg.verdict === 'denied').length,
     unknown: data.packages.filter((pkg) => pkg.verdict === 'unknown').length,
     internal: data.packages.filter((pkg) => pkg.verdict === 'internal').length,
+    excepted: data.packages.filter((pkg) => pkg.verdict === 'excepted').length,
     licenses: licenses.size,
+  }
+}
+
+/** Package keys (`ecosystem:name`) per verdict that needs attention, sorted. */
+export interface FlaggedPackages {
+  denied: string[]
+  unlisted: string[]
+  unknown: string[]
+}
+
+/** Stored headline numbers of one `licenses` record. */
+export interface LicensesMetrics {
+  packages: number
+  /** Packages per verdict; every verdict is present, zero when no package has it. */
+  verdicts: Record<PackageVerdict, number>
+  /** Packages whose license is denied or not on the allow list. */
+  violations: number
+  /** The policy asked for a repository license file and the repository has none. */
+  missingProjectLicense: boolean
+  /** Whether the repository carries a license file, `not-required` when the policy does not ask. */
+  licenseFile: 'present' | 'missing' | 'not-required'
+  /** Third-party packages (internal ones left out) per license expression; `UNKNOWN` for none. */
+  licenses: Record<string, number>
+  /** License expressions of the packages the policy allows, sorted. */
+  allowedLicenses: string[]
+  /** Which packages are denied, not on the allow list or of unknown license. */
+  flagged: FlaggedPackages
+  /** Details of every package in `flagged`, by `ecosystem:name`. */
+  flaggedDetails: Record<string, FlaggedPackage>
+  /**
+   * Every package by `ecosystem:name`: its license expressions over all its versions, sorted, and
+   * its worst verdict. Absent on records stored before it was kept.
+   */
+  byPackage?: Record<string, PackageLicenses>
+}
+
+/** The licenses and worst verdict of one package over all its versions in a scan. */
+export interface PackageLicenses {
+  licenses: string[]
+  verdict: PackageVerdict
+}
+
+/** A verdict that needs attention. */
+export type FlaggedVerdict = 'denied' | 'unlisted' | 'unknown'
+
+/** One flagged package of a scan over all its flagged versions. */
+export interface FlaggedPackage {
+  name: string
+  ecosystem: string
+  /** Flagged versions, sorted. */
+  versions: string[]
+  /** Declared license ids of those versions, sorted. */
+  licenses: string[]
+  /** The worst verdict of those versions. */
+  verdict: FlaggedVerdict
+  /** Licenses responsible for the verdict, sorted. */
+  culprits: string[]
+  /** Every flagged version is only in the `dev` dependency group. */
+  dev: boolean
+}
+
+const verdictOrder: readonly PackageVerdict[] = [
+  'denied',
+  'unlisted',
+  'unknown',
+  'excepted',
+  'allowed',
+  'internal',
+  'ignored',
+]
+
+/** Orders verdicts worst first: denied, unlisted, unknown, excepted, allowed, internal, ignored. */
+export const compareVerdict = (a: PackageVerdict, b: PackageVerdict) =>
+  verdictOrder.indexOf(a) - verdictOrder.indexOf(b)
+
+const isFlagged = (verdict: PackageVerdict): verdict is FlaggedVerdict =>
+  verdict === 'denied' || verdict === 'unlisted' || verdict === 'unknown'
+
+const merged = (values: readonly string[], more: readonly string[]) =>
+  [...new Set([...values, ...more])].toSorted()
+
+function flaggedDetails(packages: LicensedPackage[]): Record<string, FlaggedPackage> {
+  const found: Record<string, FlaggedPackage> = {}
+  for (const pkg of packages) {
+    if (!isFlagged(pkg.verdict)) continue
+    const key = packageKey(pkg)
+    const dev = !!pkg.groups?.length && pkg.groups.every((group) => group === 'dev')
+    const known = found[key]
+    found[key] = known
+      ? {
+          ...known,
+          versions: merged(known.versions, [pkg.version]),
+          licenses: merged(known.licenses, pkg.licenses),
+          verdict: compareVerdict(pkg.verdict, known.verdict) < 0 ? pkg.verdict : known.verdict,
+          culprits: merged(known.culprits, pkg.culprits ?? []),
+          dev: known.dev && dev,
+        }
+      : {
+          name: pkg.name,
+          ecosystem: pkg.ecosystem,
+          versions: [pkg.version],
+          licenses: merged([], pkg.licenses),
+          verdict: pkg.verdict,
+          culprits: merged([], pkg.culprits ?? []),
+          dev,
+        }
+  }
+  return found
+}
+
+function byPackage(packages: LicensedPackage[]): Record<string, PackageLicenses> {
+  const found: Record<string, PackageLicenses> = {}
+  for (const pkg of packages) {
+    const key = packageKey(pkg)
+    const text = pkg.licenses.join(' AND ')
+    const known = found[key]
+    if (!known) {
+      found[key] = { licenses: text ? [text] : [], verdict: pkg.verdict }
+      continue
+    }
+    if (text && !known.licenses.includes(text))
+      known.licenses = [...known.licenses, text].toSorted()
+    if (compareVerdict(pkg.verdict, known.verdict) < 0) known.verdict = pkg.verdict
+  }
+  return found
+}
+
+const sortedKeys = (packages: LicensedPackage[], verdict: PackageVerdict) =>
+  [...new Set(packages.filter((pkg) => pkg.verdict === verdict).map(packageKey))].toSorted()
+
+/** `LicensesMetrics` of `data`. */
+export function licensesMetrics(data: LicensesData): LicensesMetrics {
+  const verdicts: Record<PackageVerdict, number> = {
+    allowed: 0,
+    unknown: 0,
+    unlisted: 0,
+    denied: 0,
+    ignored: 0,
+    internal: 0,
+    excepted: 0,
+  }
+  const licenses: Record<string, number> = {}
+  const allowed = new Set<string>()
+  for (const pkg of data.packages) {
+    verdicts[pkg.verdict] += 1
+    if (pkg.verdict === 'internal') continue
+    const text = licenseText(pkg)
+    licenses[text] = (licenses[text] ?? 0) + 1
+    if (pkg.verdict === 'allowed') allowed.add(text)
+  }
+  const missing = missingProjectLicense(data)
+  return {
+    packages: data.packages.length,
+    verdicts,
+    violations: data.packages.filter(isViolation).length,
+    missingProjectLicense: missing,
+    licenseFile: missing
+      ? 'missing'
+      : data.policy.requireProjectLicense === true && data.project
+        ? 'present'
+        : 'not-required',
+    licenses,
+    allowedLicenses: [...allowed].toSorted(),
+    flagged: {
+      denied: sortedKeys(data.packages, 'denied'),
+      unlisted: sortedKeys(data.packages, 'unlisted'),
+      unknown: sortedKeys(data.packages, 'unknown'),
+    },
+    flaggedDetails: flaggedDetails(data.packages),
+    byPackage: byPackage(data.packages),
   }
 }
 
@@ -80,6 +253,14 @@ function metrics(data: LicensesData, previous?: LicensesData): Metric[] {
           metric('internal', 'Internal packages', now.internal, {
             previous: before?.internal,
             hint: 'Defined by analyzed repositories; not judged',
+          }),
+        ]
+      : []),
+    ...(now.excepted > 0 || (before?.excepted ?? 0) > 0
+      ? [
+          metric('excepted', 'Excepted packages', now.excepted, {
+            previous: before?.excepted,
+            hint: 'Accepted by a policy exception',
           }),
         ]
       : []),
@@ -311,6 +492,36 @@ function internalSection(data: LicensesData): Section | undefined {
   }
 }
 
+function exceptedSection(data: LicensesData): Section | undefined {
+  const rows = data.packages
+    .filter((pkg) => pkg.verdict === 'excepted')
+    .map((pkg) => ({
+      package: pkg.name,
+      version: pkg.version,
+      license: licenseText(pkg),
+      reason: pkg.exception ?? null,
+    }))
+  if (rows.length === 0) return undefined
+  return {
+    id: 'excepted',
+    title: 'Exceptions',
+    description: 'Packages a policy exception accepts although their license would not pass.',
+    blocks: [
+      {
+        type: 'table',
+        columns: [
+          { key: 'package', label: 'Package', format: 'code' },
+          { key: 'version', label: 'Version', unit: 'version' },
+          { key: 'license', label: 'License', format: 'code' },
+          { key: 'reason', label: 'Reason' },
+        ],
+        rows: rows.slice(0, limits.internal),
+      },
+      ...capped(rows, limits.internal, 'packages'),
+    ],
+  }
+}
+
 function packagesSection(data: LicensesData): Section {
   const rows: Record<string, Cell>[] = data.packages.map((pkg) => ({
     package: pkg.name,
@@ -359,7 +570,7 @@ export function licensesReport(
       violationsSection(data, previous, compareTo),
       mixSection(data),
       unknownSection(data),
-      ...[internalSection(data)].filter((section) => section !== undefined),
+      ...[internalSection(data), exceptedSection(data)].filter((section) => section !== undefined),
       packagesSection(data),
     ],
   }
@@ -369,11 +580,12 @@ export function licensesReport(
  * The `licenses` analysis kind: third-party packages with their declared licenses, judged against
  * an allow and a deny list. Problem metrics carry `better: 'down'`.
  */
-export const licensesAnalysis = defineAnalysis<LicensesData>({
+export const licensesAnalysis = defineAnalysis<LicensesData, LicensesMetrics>({
   kind: 'licenses',
   label: 'Licenses',
   schema: licensesDataSchema,
   summarize: (data) => metrics(data),
+  metrics: licensesMetrics,
   toReport(current, previous) {
     return {
       ...licensesReport(current.data, {

@@ -17,20 +17,30 @@ Human-written rules always outrank generated text: research on context files fou
 
 Blocks, strongest first:
 
-1. the repository's own rules files (`AGENTS.md`, `REVIEW.md`, `CLAUDE.md`, ...), passed in as `repoDocs` by callers with a checkout (the review reads them with `readGuidelines`);
+1. the repository's own rules files (`REVIEW.md`, `CLAUDE.md`, `AGENTS.md`, ...), passed in as `repoDocs` by callers with a checkout (the review reads them with `readGuidelines`) or read from the forge (`readRepoRuleFiles`); one `repo-file` block;
 2. panel team rules of the repository, then its family, its groups (config order), then `all`;
 3. accepted learnings of those scopes;
 4. policies as plain facts (`policiesFor`: the `commits.conventions` setting through `commitPolicyFacts`, the team's test id overrides in the `analyzers.testids` setting through `testIdOverridesFor` and `testIdPolicyFacts`, `testIdsSettingKey`, and an `assets.policy` entry covering the repository through `assetsPolicyFacts` of `@holtkeeper/assets`, in the Assets section);
 5. generated sections of the repository under "Generated from repository signals, lower priority; ignore any line that conflicts with the rules above." (`GENERATED_HEADER`);
 6. knowledge notes picked by `selectForTask` of [@holtkeeper/knowledge](../../knowledge/docs/README.md) from what budget is left.
 
-Sections per task (`sectionsForTask`): `review` reads `general`, `review`, `testing`, `testids`, `assets`; `release-notes` reads `commits` and `releases`; `chat` and `agent` read `general` plus the section the work is about. `guideTaskOf(taskKind)` maps agent task kinds (`review`, `release-notes`, `chat`, `tests` → `agent` + `testing`, anything else → `agent`).
+Every block (`GuideBlock`) carries its `layer`, `scope`, prompt `title`, a short `source` (`REVIEW.md · AGENTS.md`, `This repository`, `Family Widget apps`, `Team games`, `All repositories`, `Learned rules`, `Policies`, `Generated Testing`, `Team knowledge`), its `text` exactly as the prompt has it (the block texts in order, after the header, are the prompt), `chars`, `fullChars`, `cut`, and for generated text `proposed` and the stored `version`.
+
+Sections per task (`sectionsForTask`): `review` reads `general`, `review`, `testing`, `testids`, `assets`; `release-notes` reads `commits` and `releases`; `chat` and `agent` read `general` plus the section the work is about. `focus` (on `resolveGuide` and `GuideRequest`) replaces the task's sections with the given ones; the Guide chain reads one section at a time this way. `guideTaskOf(taskKind)` maps agent task kinds (`review`, `release-notes`, `chat`, `tests` → `agent` + `testing`, anything else → `agent`).
 
 **Budget** (`GUIDE_CAPS`): 12 000 characters in all, about 8 000 for human text and 4 000 for generated text. Repository-level text (rules files and repository rules) is placed first and never cut to make room; when it alone is over the human budget the result carries a warning, and only when it is over the total is its end cut (also with a warning). Over the human budget, `all` is cut first, then groups (last one first), then the family, learnings and policies, each with a warning. Generated text gets at most 4 000 characters and what human text leaves; notes get the rest. A cut ends at a line break with `[...]`.
 
 **Unaccepted generated text** is included only when no human rules apply to the selected sections and the repository has no rules files.
 
 **Determinism.** The same inputs give the same text whatever order rows come in, so the block can sit in a cached prompt prefix.
+
+## Guide chain
+
+`buildGuideChain(resolve, { repo, sections?, repoDocs? })` is the layered Guide of a repository per section, built with the same resolver prompts use, so order and cuts match: each section's layers are that section resolved alone (`focus: [section]`) for the task it stands for (`chainTaskOf`: `review` for Review, `release-notes` for Commits and Releases, `agent` otherwise, which picks the notes). `chainLayers(resolved)` turns the blocks into numbered layers (`GuideChainLayer { n, kind, scope?, source, text, chars, fullChars, cut, version?, proposed? }`) in agent reading order: repository files, repository rules, family, groups (several, config order), all repositories, learned rules, policies, generated text, notes, numbered from 1 without gaps. With one section the result's budget and warnings are those of the whole prompt of its task (a review also reads general, testing, testids and assets under the same 12k cap), so the bar shows what that prompt really uses; with several, those of all requested sections resolved together. The server's `GET /api/guide/chain` and the MCP tool `repo_rules` (which lists the layers under the text, and with `only` reads one section exactly as the chain does) both use it.
+
+## Repository rules files
+
+`readRepoRuleFiles({ forge, forgeId, repo, files, kv? })` reads the given rules files (the server passes the review's `GUIDELINE_FILES`) at the default branch head (`headCommit`), keeps the non-blank ones in order with their git blob sha (`blobSha`), and caches the result in `Store.kv` under the head sha (`guide:repo-files:<forge>:<repo>:<sha>`, 7 days), so an unchanged head never reads the forge again. Without a head sha every call reads. `repoDocsOf(files)` gives them to the resolver.
 
 ## Family suggestions
 
@@ -48,6 +58,8 @@ Rules people teach Holtkeeper by replying to its review comments ("we don't do X
 
 Accepted learnings sit in the resolver after team rules and before policies and generated text.
 
+Generated layers carry a `version` the store assigns per section (1 for the first run that stored text, then up by one) and the `jobId` of the run; every stored version stays in the generated history (`Store.guides.generatedHistory`).
+
 ## Not here yet
 
-The generator lives in [@holtkeeper/guide-generator](../../guide-generator/docs/README.md); the MCP tools `repo_rules` and `propose_rule_change` live in the server's `rules` toolset and use `createGuideResolver` and `proposeRule`.
+The generator lives in [@holtkeeper/guide-generator](../../guide-generator/docs/README.md); the MCP tools `repo_rules` and `propose_rule_change` live in the server's `rules` toolset and use `createGuideResolver`, `chainLayers` and `proposeRule`.

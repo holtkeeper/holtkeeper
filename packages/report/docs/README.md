@@ -39,14 +39,24 @@ interface Report {
 ## AnalysisKind
 
 ```ts
-interface AnalysisKind<Data> {
+interface AnalysisKind<Data, Metrics extends object = object> {
   kind: string
   label: string
   schema: z.ZodType<Data> // validates uploads
   summarize(data: Data): Metric[] // for lists and trends
   toReport(current: AnalysisRecord<Data>, previous?: AnalysisRecord<Data>): Report
+  changes?(data: Data): CodeChange[]
+  metrics?(data: Data, context: MetricsContext<Metrics>): Metrics // stored with the record
+}
+
+interface MetricsContext<Metrics> {
+  options?: unknown // the analyzer's options for the repository, unvalidated, maybe partial
+  previous?: Metrics // metrics of the previous record on the same line of history
+  createdAt?: string // when the record was created, absent when unknown
 }
 ```
+
+`metrics` returns the kind's structured headline numbers as plain JSON. Runners store them with the record (`AnalysisRecord.metrics`), so lists, health and dashboards read them from heads without loading data; `analysisMetrics` and `recordMetrics` in [`@holtkeeper/analyzer`](../../analyzer/docs/README.md) call it safely. It must be deterministic for the same data and context, read the options it needs defensively (falling back to defaults) and derive deltas only from `previous` (and first-seen times from `previous` and `createdAt`). Kinds with metrics: `coverage`, `bundle`, `licenses`, `audit`, `ci-jobs`, `assets`, `branches`, `review`; each documents its shape in its package.
 
 The server stores records (`AnalysisRecord`: repo, kind, ref, time, data), validates uploads with `schema`, and renders `toReport` on request — comparing with the previous record of the same repository and kind, or any record the client picks. Reports are rendered when requested rather than stored, so improving a report improves it for all history.
 

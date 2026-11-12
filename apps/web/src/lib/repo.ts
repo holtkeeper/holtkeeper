@@ -1,4 +1,6 @@
-import type { GroupDocumentData, RepoAccessView, RepoRef } from '@holtkeeper/api'
+import type { GroupDocumentData, RepoAccessResult, RepoRef } from '@holtkeeper/api'
+
+import type { DotTone } from '../ui/Legend.tsx'
 
 /** `forge:path`, the form the API uses in query strings and audit targets. */
 export const repoKey = (repo: RepoRef): string => `${repo.forge}:${repo.path}`
@@ -9,6 +11,62 @@ export function parseRepoKey(key: string | undefined): RepoRef | undefined {
   const separator = key.indexOf(':')
   if (separator <= 0 || separator === key.length - 1) return undefined
   return { forge: key.slice(0, separator), path: key.slice(separator + 1) }
+}
+
+/** `forge/path`, the splat of the repository hub route `/repos/$`. */
+export const repoSplat = (repo: RepoRef): string => `${repo.forge}/${repo.path}`
+
+/** Parses a hub splat `forge/path`; `undefined` without a forge segment or path. */
+export function parseRepoSplat(splat: string | undefined): RepoRef | undefined {
+  const value = splat?.replace(/^\/+|\/+$/g, '')
+  if (!value) return undefined
+  const separator = value.indexOf('/')
+  if (separator <= 0) return undefined
+  const path = value.slice(separator + 1).replace(/^\/+/, '')
+  return path ? { forge: value.slice(0, separator), path } : undefined
+}
+
+const repoHubTabs = [
+  'overview',
+  'supply',
+  'quality',
+  'releases',
+  'activity',
+  'knowledge',
+  'settings',
+] as const
+
+/** Tabs of the repository hub, in display order; `overview` is the default. */
+export type RepoHubTab = (typeof repoHubTabs)[number]
+
+/**
+ * Search parameters of the repository hub: a tab, an area of it (`section`, e.g. `assets` or
+ * `updates`), and a file at a ref for areas that show one.
+ */
+export interface RepoHubSearch {
+  tab?: RepoHubTab
+  section?: string
+  file?: string
+  ref?: string
+}
+
+/** Whether `value` names a hub tab. */
+export const isRepoHubTab = (value: unknown): value is RepoHubTab =>
+  repoHubTabs.some((tab) => tab === value)
+
+const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined)
+
+/** The hub's search parameters from a URL; unknown tabs and empty values are dropped. */
+export function parseRepoHubSearch(search: Record<string, unknown>): RepoHubSearch {
+  const section = text(search.section)
+  const file = text(search.file)
+  const ref = text(search.ref)
+  return {
+    ...(isRepoHubTab(search.tab) ? { tab: search.tab } : {}),
+    ...(section ? { section } : {}),
+    ...(file ? { file } : {}),
+    ...(ref ? { ref } : {}),
+  }
 }
 
 /** Last path segment, for compact labels. */
@@ -29,18 +87,66 @@ export function validateRepoPath(path: string): string | undefined {
 export const validateGroupId = (id: string): string | undefined =>
   /^[a-z][a-z0-9-]*$/.test(id.trim()) ? undefined : 'Lowercase letters, digits and dashes'
 
-/** A group's data with `path` included (and no longer excluded); a new group when there is none. */
-export function withRepo(
+/** A group's data with `paths` included (and no longer excluded); a new group when there is none. */
+export function withRepos(
   group: GroupDocumentData | undefined,
   forge: string,
-  path: string,
+  paths: readonly string[],
 ): GroupDocumentData {
-  if (!group) return { forge, include: [path], exclude: [] }
+  if (!group) return { forge, include: [...new Set(paths)], exclude: [] }
   return {
     forge: group.forge,
-    include: group.include.includes(path) ? group.include : [...group.include, path],
-    exclude: group.exclude.filter((pattern) => pattern !== path),
+    include: [...new Set([...group.include, ...paths])],
+    exclude: group.exclude.filter((pattern) => !paths.includes(pattern)),
   }
+}
+
+/** Paths pasted into the add wizard, read line by line. */
+export interface PastedPaths {
+  /** Distinct valid paths in the order pasted. */
+  paths: string[]
+  /** Paths that were trimmed from a forge URL. */
+  fromUrl: string[]
+  /** Lines that are no repository path, with the reason. */
+  invalid: { line: string; error: string }[]
+}
+
+const urlPath = (line: string): string | undefined => {
+  const ssh = /^[\w.-]+@[\w.-]+:(.+)$/.exec(line)
+  if (ssh) return ssh[1]
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(line)) return undefined
+  let url: URL
+  try {
+    url = new URL(line)
+  } catch {
+    return undefined
+  }
+  const segments = url.pathname.split('/-/')[0]?.split('/').filter(Boolean) ?? []
+  return (url.hostname === 'github.com' ? segments.slice(0, 2) : segments).join('/')
+}
+
+/**
+ * Repository paths from pasted text: one per line (commas and spaces separate too), forge URLs and
+ * SSH clone addresses trimmed to their path (GitLab's `/-/…` and a `.git` suffix dropped), blank
+ * lines and repeats skipped, anything else that is no exact `team/app` path reported as invalid.
+ */
+export function parsePastedPaths(pasted: string): PastedPaths {
+  const paths: string[] = []
+  const fromUrl: string[] = []
+  const invalid: PastedPaths['invalid'] = []
+  for (const line of pasted.split(/[\s,]+/)) {
+    const value = line.trim()
+    if (!value) continue
+    const trimmed = urlPath(value)
+    const path = (trimmed ?? value).replace(/\.git$/, '').replace(/^\/+|\/+$/g, '')
+    const error = validateRepoPath(path)
+    if (error) invalid.push({ line: value, error })
+    else if (!paths.includes(path)) {
+      paths.push(path)
+      if (trimmed !== undefined) fromUrl.push(path)
+    }
+  }
+  return { paths, fromUrl, invalid }
 }
 
 /** `team/sub/app` → namespace `team/sub/` and name `app`, for two-tone labels. */
@@ -49,15 +155,6 @@ export function splitRepoPath(path: string): { namespace: string; name: string }
   return slash < 0
     ? { namespace: '', name: path }
     : { namespace: path.slice(0, slash + 1), name: path.slice(slash + 1) }
-}
-
-/** How recent an audit is: within a week, within a month, older, or never. */
-export type Freshness = 'fresh' | 'aging' | 'stale' | 'never'
-
-export function auditFreshness(finishedAt: string | undefined, now: Date = new Date()): Freshness {
-  if (!finishedAt) return 'never'
-  const days = (now.getTime() - new Date(finishedAt).getTime()) / 86_400_000
-  return days <= 7 ? 'fresh' : days <= 30 ? 'aging' : 'stale'
 }
 
 const firstLetter = (segment: string | undefined) =>
@@ -79,63 +176,120 @@ export function repoInitials(path: string): string {
   )
 }
 
-/** What the add dialog says about a repository access check. */
-export interface RepoAccessAdvice {
-  tone: 'success' | 'warning' | 'danger'
-  title: string
-  text: string
-  /** Whether the repository may be added. */
-  addable: boolean
+/** What the add wizard says about one checked path. */
+export interface PathCheck {
+  label: string
+  tone: DotTone
+  /** Why, or what to do about it. */
+  why: string
+  /** Whether the path can be added. */
+  ready: boolean
 }
 
 /**
- * Advice for an access check of `path`: who to invite when the token cannot see it, what to fix
- * when the token itself is wrong. A check the forge could not answer still lets the repository be
- * added.
+ * The verdict on one path of the add wizard: already added paths are skipped; otherwise the access
+ * check decides, naming whom to invite (`account`, the forge token's account) when the token cannot
+ * see the path. A check the forge could not answer still lets the path be added.
  */
-export function repoAccessAdvice(view: RepoAccessView, path: string): RepoAccessAdvice {
-  const who = view.account ? `@${view.account.username}` : 'the account of the forge token'
-  switch (view.status) {
+export function pathCheck(
+  result: RepoAccessResult | undefined,
+  options: { added?: boolean; fromUrl?: boolean; account?: { username: string } } = {},
+): PathCheck {
+  const who = options.account ? `@${options.account.username}` : 'the account of the forge token'
+  if (options.added)
+    return {
+      label: 'Already added',
+      tone: 'none',
+      why: 'Holtkeeper works on it already',
+      ready: false,
+    }
+  if (!result)
+    return {
+      label: 'Not checked',
+      tone: 'none',
+      why: options.fromUrl ? 'Trimmed from a forge URL' : 'Checked when you continue',
+      ready: false,
+    }
+  switch (result.status) {
     case 'ok':
       return {
+        label: 'Readable',
         tone: 'success',
-        title: 'Holtkeeper can read this repository',
-        text: view.account ? `Through ${who}.` : '',
-        addable: true,
+        why: options.fromUrl ? 'Trimmed from a forge URL' : `Through ${who}`,
+        ready: true,
       }
     case 'not-found':
       return {
+        label: 'Not found',
         tone: 'danger',
-        title: 'Repository not found',
-        text: `Either ${path} does not exist, or ${who} is not a member of it. Check the path, then invite ${who} to the project or its group: Reporter is enough for analyses, Developer lets it open merge requests.`,
-        addable: false,
+        why: `It does not exist or ${who} is not a member; invite it as Reporter (Developer to open merge requests)`,
+        ready: false,
       }
     case 'unauthorized':
       return {
+        label: 'Token rejected',
         tone: 'danger',
-        title: 'The forge token is not accepted',
-        text: 'It is invalid, revoked or expired. Replace it in Credentials.',
-        addable: false,
+        why: 'The forge token is invalid, revoked or expired; replace it in Integrations',
+        ready: false,
       }
     case 'forbidden':
       return {
-        tone: 'danger',
-        title: 'The forge token may not read this repository',
-        text: `Give the token the api or read_api scope, or ${who} a role in the project.`,
-        addable: false,
+        label: 'No access',
+        tone: 'warning',
+        why: `Give the token the api or read_api scope, or ${who} a role in the project`,
+        ready: false,
       }
     case 'archived':
       return {
+        label: 'Archived',
         tone: 'warning',
-        title: 'The repository is archived',
-        text: 'Holtkeeper skips archived repositories; unarchive it on the forge first.',
-        addable: false,
+        why: 'Holtkeeper skips archived repositories; unarchive it first',
+        ready: false,
       }
   }
   return {
+    label: 'Not checked',
     tone: 'warning',
-    title: 'Access could not be checked',
-    text: view.message ?? 'The forge did not answer.',
-    addable: true,
+    why: result.message ?? 'The forge did not answer; it can still be added',
+    ready: true,
   }
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i]
+    for (let j = 1; j <= b.length; j++)
+      current[j] = Math.min(
+        (previous[j] ?? 0) + 1,
+        (current[j - 1] ?? 0) + 1,
+        (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1),
+      )
+    previous = current
+  }
+  return previous[b.length] ?? 0
+}
+
+/**
+ * "Did you mean" for an address that names no repository: up to `limit` of `repos` (only those the
+ * viewer can see) whose `forge:path`, path or name is a few typos away from `wanted`, closest
+ * first. An exact match is not a suggestion.
+ */
+export function suggestRepos(wanted: string, repos: readonly RepoRef[], limit = 3): RepoRef[] {
+  const needle = wanted
+    .trim()
+    .replace(/^\/+|\/+$/g, '')
+    .toLowerCase()
+  if (!needle) return []
+  const allowed = Math.max(2, Math.floor(needle.length / 3))
+  return repos
+    .flatMap((repo) => {
+      const forms = [repoKey(repo), repo.path, repoName(repo)].map((form) => form.toLowerCase())
+      if (forms[0] === needle || forms[1] === needle) return []
+      const distance = Math.min(...forms.map((form) => editDistance(needle, form)))
+      return distance <= allowed ? [{ repo, distance }] : []
+    })
+    .toSorted((a, b) => a.distance - b.distance || a.repo.path.localeCompare(b.repo.path))
+    .slice(0, limit)
+    .map((entry) => entry.repo)
 }

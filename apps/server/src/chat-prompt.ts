@@ -1,5 +1,5 @@
 import type { Card } from '@holtkeeper/chat'
-import type { ChatMessage, ChatThreadSummary } from '@holtkeeper/store'
+import type { ChatMessage, ChatMessageRef, ChatThreadSummary } from '@holtkeeper/store'
 
 /** Above this many estimated tokens of unsummarized history a reply first refreshes the summary. */
 const SUMMARY_THRESHOLD_TOKENS = 20_000
@@ -38,6 +38,42 @@ export function parseMentions(body: string): string[] {
 
 /** Whether a message asks the agent for a reply. */
 export const mentionsAgent = (mentions: readonly string[]) => mentions.includes(AGENT_MENTION)
+
+const refKey = (ref: ChatMessageRef) =>
+  ref.kind === 'repo'
+    ? `repo:${ref.repo}`
+    : ref.kind === 'mr'
+      ? `mr:${ref.repo}!${ref.iid}`
+      : `${ref.kind}:${ref.id}`
+
+/** `refs` without repeats, first occurrence kept. */
+export function uniqueRefs(refs: readonly ChatMessageRef[]): ChatMessageRef[] {
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const key = refKey(ref)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+/**
+ * What a message body refers to, read once when the message is written: knowledge citations
+ * (`kb:<id>`, bracketed or not) as notes and `forge:path` keys whose forge `isForge` accepts as
+ * repositories, in order of first mention.
+ */
+export function textRefs(body: string, isForge: (forge: string) => boolean): ChatMessageRef[] {
+  const found: { at: number; ref: ChatMessageRef }[] = []
+  for (const match of body.matchAll(/(?<![\w/-])kb:([\w-]+)/g))
+    found.push({ at: match.index, ref: { kind: 'note', id: match[1] ?? '' } })
+  for (const match of body.matchAll(/(?<![\w/.:-])([\w-]+):([\w.-]+(?:\/[\w.-]+)+)/g)) {
+    const forge = match[1] ?? ''
+    const path = (match[2] ?? '').replace(/[.-]+$/, '')
+    if (forge !== 'kb' && isForge(forge))
+      found.push({ at: match.index, ref: { kind: 'repo', repo: `${forge}:${path}` } })
+  }
+  return uniqueRefs(found.toSorted((a, b) => a.at - b.at).map((entry) => entry.ref))
+}
 
 /** Someone whose identifiers must never reach the model. */
 export interface KnownPerson {
@@ -146,12 +182,15 @@ export interface ChatHistory {
   summary?: ChatThreadSummary
   /** The messages after the summary, oldest first. */
   messages: readonly ChatMessage[]
+  /** Repositories attached to the thread that the asker may read (`forge:path`). */
+  contextRepos?: readonly string[]
 }
 
 /**
- * The user prompt of a chat reply: the running summary, the conversation up to the agent's last
- * reply, then every message since merged into one block. Participants appear only as stable
- * `Participant X` labels; names, emails and user names never do.
+ * The user prompt of a chat reply: the repositories attached as context, the running summary, the
+ * conversation up to the agent's last reply, then every message since merged into one block.
+ * Participants appear only as stable `Participant X` labels; names, emails and user names never
+ * do.
  */
 export function buildChatPrompt(history: ChatHistory): string {
   const labels = labelsFor(history.participants, history.messages)
@@ -160,6 +199,11 @@ export function buildChatPrompt(history: ChatHistory): string {
   const earlier = lines.slice(0, lastReply + 1)
   const fresh = lines.slice(lastReply + 1)
   return [
+    ...(history.contextRepos?.length
+      ? [
+          `Repositories attached to this thread as context:\n${history.contextRepos.map((repo) => `- ${repo}`).join('\n')}`,
+        ]
+      : []),
     ...(history.summary
       ? [
           `Summary of the earlier conversation:\n${anonymize(history.summary.text, history.people, labels)}`,

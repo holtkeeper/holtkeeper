@@ -17,6 +17,7 @@
 | `@holtkeeper/web`                | Admin panel (Graphite design)                                                 | [apps/web/docs](../apps/web/docs/README.md)                                       |
 | `@holtkeeper/core`               | Config schema and loading, repository resolution                              | [packages/core/docs](../packages/core/docs/README.md)                             |
 | `@holtkeeper/api`                | HTTP contract shared by server and clients                                    | [packages/api/docs](../packages/api/docs/README.md)                               |
+| `@holtkeeper/web-paths`          | Paths of the panel's pages for links from server and packages                 | [packages/web-paths/docs](../packages/web-paths/docs/README.md)                   |
 | `@holtkeeper/access`             | Grants, scopes, permission checks, delegation                                 | [packages/access/docs](../packages/access/docs/README.md)                         |
 | `@holtkeeper/auth`               | Auth provider contract, sessions                                              | [packages/auth/docs](../packages/auth/docs/README.md)                             |
 | `@holtkeeper/auth-none`          | No sign-in, single root user                                                  | [packages/auth-none/docs](../packages/auth-none/docs/README.md)                   |
