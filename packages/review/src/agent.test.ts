@@ -102,6 +102,19 @@ describe('reviewSystemPrompt', () => {
     expect(mixed).toContain('package.json, lockfiles.resolve (Go code: the go.mod')
   })
 
+  test('sends version changes and public API changes to the catalog tools', () => {
+    const npm = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)]))
+    expect(npm).toContain('call upgrade_impact with `package`, `from` = a, `to` = b')
+    expect(npm).toContain('library_changes between the two versions')
+    expect(npm).toContain('call package_usage or find_usages for the changed export')
+    expect(npm).toContain('search_symbols for an organization package that already offers it')
+    expect(npm).not.toContain('Go: packages under `internal/`')
+    const go = reviewSystemPrompt(inputOf([fileOf('shapes/circle.go', 3)]))
+    expect(go).toContain('Go: packages under `internal/` and `main` packages cannot be imported')
+    expect(go).toContain('adding a method to an exported interface breaks every type')
+    expect(go).toContain('Pass it as `version` to get_package_api and get_symbol')
+  })
+
   test('forbids lockfile claims the computed section or lockfiles.resolve does not back', () => {
     const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)]))
     expect(prompt).toContain('Never claim that a lockfile lacks a package')

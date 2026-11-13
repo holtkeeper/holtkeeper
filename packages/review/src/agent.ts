@@ -123,9 +123,28 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       '- Check error paths, retries and idempotency, edge cases (empty, missing, boundary values), concurrency and ordering, and the contract with callers (types, return values, side effects).',
       '- Report every distinct problem you find, up to the comment limit; do not stop after the first one. A single comment on a large change is right only when the rest really is clean.',
     ].join('\n'),
+    packageRules(input),
     `Severity:\n${severityGuide(tests)}`,
   ]
   return parts.join('\n\n')
+}
+
+/** Prompt block on dependencies and public API: when to reach for the catalog tools and how. */
+function packageRules(input: ReviewPromptInput): string {
+  const paths = input.part?.files ?? input.files.map((file) => file.path)
+  const go = paths.some((path) => GO_FILE.test(path))
+  return [
+    'Packages and public API:',
+    '- A dependency version change (the computed dependency section lists `a → b`): for an organization package call upgrade_impact with `package`, `from` = a, `to` = b and `repo` = this repository, and diff_versions for what changed; for a third-party library call library_changes between the two versions. Report the uses in this checkout the change breaks or that need a check, at the changed manifest line, with the affected files named. No comment when nothing used changed.',
+    '- A change to the public API of a package other repositories import (exports removed, renamed or with a new signature, a type or interface changed, behavior a caller relies on): call package_usage or find_usages for the changed export and say which repositories and how many uses break. Without users outside this repository, judge it as an internal change. A breaking change needs a major version bump; say so when the change ships under a minor or patch release.',
+    '- Before flagging code as reinventing something, search_symbols for an organization package that already offers it; report only an exact equivalent the repository could import, as `minor`.',
+    ...(go
+      ? [
+          '- Go: packages under `internal/` and `main` packages cannot be imported by other modules, so their changes only reach callers in this module: find those with the search tools, not the catalog. Exported identifiers of other packages are public API: adding a method to an exported interface breaks every type outside the module that implements it, and removing or changing an exported function, method, field or constant breaks its callers. A new major version of a module changes its import path (`/v2`); a breaking change without it is a problem.',
+          '- Go: the version this repository uses is the `require` line of the go.mod that owns the file (a `replace` with a local path means the code is in this checkout). Pass it as `version` to get_package_api and get_symbol, so the signatures you check against are the ones this code compiles with.',
+        ]
+      : []),
+  ].join('\n')
 }
 
 /**

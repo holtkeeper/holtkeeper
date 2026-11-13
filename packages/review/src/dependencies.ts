@@ -476,8 +476,22 @@ function requireChanges(head: GoMod, base: GoMod | undefined): string[] {
     if (!after.has(path)) lines.push(`- removed \`${path}\` ${req.version}${tag(req.indirect)}`)
   const direct = lines.filter((line) => !line.endsWith('(indirect)'))
   const indirect = lines.filter((line) => line.endsWith('(indirect)'))
+  const bumped = [...after]
+    .filter(
+      ([path, req]) =>
+        !req.indirect && before.has(path) && before.get(path)?.version !== req.version,
+    )
+    .map(([path, req]) => `\`${path}\` ${before.get(path)?.version} → ${req.version}`)
   return lines.length
-    ? ['go.mod require changes:', ...listed([...direct, ...indirect], MAX_LIST, 'changes')]
+    ? [
+        'go.mod require changes:',
+        ...listed([...direct, ...indirect], MAX_LIST, 'changes'),
+        ...(bumped.length
+          ? [
+              `Check what these version changes do to this module's uses with upgrade_impact (organization modules) or library_changes (third-party ones): ${bumped.slice(0, MAX_LIST).join('; ')}.`,
+            ]
+          : []),
+      ]
     : ['go.mod requires: unchanged.']
 }
 
