@@ -308,6 +308,16 @@ describe('properties detection', () => {
   })
 })
 
-test('i18nAnalyzer runs in every repository, also those without a root package.json', () => {
-  expect(i18nAnalyzer.appliesTo).toBeUndefined()
+test('i18nAnalyzer applies to a frontend whose package.json sits in a subfolder', async () => {
+  const context = {
+    repo: { forge: 'work', path: 'shapes/site' },
+    forge: {
+      readFile: async () => undefined,
+      listFiles: async () => [
+        { path: 'frontend/package.json', type: 'file' as const },
+        { path: 'frontend/src/main.ts', type: 'file' as const },
+      ],
+    },
+  }
+  expect(await i18nAnalyzer.appliesTo?.(context)).toBe(true)
 })

@@ -1,4 +1,4 @@
-import { type AnalyzerPreset, defineAnalyzer } from '@holtkeeper/analyzer'
+import { type AnalyzerPreset, defineAnalyzer, hasTreeFile } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
 import { testIdsAnalysis } from './analysis.ts'
@@ -73,6 +73,9 @@ export const testIdsAnalyzer = defineAnalyzer<TestIdsData, TestIdsOptions>({
   analysis: testIdsAnalysis,
   scope: 'repo',
   refresh: { on: 'change', minInterval: '1d' },
+  appliesTo: hasTreeFile((path) =>
+    Object.values(builtinSources).some((source) => source.matches(path)),
+  ),
   needs: { checkout: true },
   options: testIdsOptionsSchema,
   flags: [

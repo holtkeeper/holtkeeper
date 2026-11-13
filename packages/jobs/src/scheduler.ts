@@ -1,7 +1,7 @@
 import { groupsMatch } from '@holtkeeper/access'
 import type { AnyAnalyzer, ApplicabilityContext } from '@holtkeeper/analyzer'
 import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core'
-import type { RepoRef } from '@holtkeeper/forge'
+import type { GitForge, RepoRef, TreeEntry } from '@holtkeeper/forge'
 import type { Job, JobStore } from '@holtkeeper/store'
 
 import { cronError } from './cron.ts'
@@ -105,9 +105,13 @@ function configForgeReaders(config: HoltkeeperConfig): ForgeReaderFor {
 }
 
 /** A reader that fetches each file of a repository once, so checks of several analyzers share reads. */
+const canList = (forge: object): forge is Required<Pick<GitForge, 'listFiles'>> =>
+  'listFiles' in forge && typeof forge.listFiles === 'function'
+
 function memoizedReader(forge: ApplicabilityContext['forge']): ApplicabilityContext['forge'] {
   const files = new Map<string, Promise<string | undefined>>()
-  return {
+  const trees = new Map<string, Promise<TreeEntry[]>>()
+  const reader: ApplicabilityContext['forge'] & Pick<GitForge, 'listFiles'> = {
     readFile(repo, file, ref) {
       const key = `${repo}\0${file}\0${ref ?? ''}`
       let read = files.get(key)
@@ -118,6 +122,18 @@ function memoizedReader(forge: ApplicabilityContext['forge']): ApplicabilityCont
       return read
     },
   }
+  const list = canList(forge) ? forge.listFiles.bind(forge) : undefined
+  if (list)
+    reader.listFiles = (repo, options) => {
+      const key = `${repo}\0${JSON.stringify(options ?? {})}`
+      let entries = trees.get(key)
+      if (!entries) {
+        entries = list(repo, options)
+        trees.set(key, entries)
+      }
+      return entries
+    }
+  return reader
 }
 
 /**

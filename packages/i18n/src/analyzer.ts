@@ -1,4 +1,4 @@
-import { defineAnalyzer } from '@holtkeeper/analyzer'
+import { defineAnalyzer, hasTreeFile } from '@holtkeeper/analyzer'
 import { z } from 'zod'
 
 import {
@@ -224,6 +224,7 @@ export const i18nAnalyzer = defineAnalyzer<I18nData, I18nOptions>({
   analysis: i18nAnalysis,
   scope: 'repo',
   refresh: { on: 'change', minInterval: '6h' },
+  appliesTo: hasTreeFile(isSourceFile),
   needs: { checkout: true },
   options: i18nOptions,
   requiredCheckouts: (options, repo) => requiredCheckouts(options, repo),

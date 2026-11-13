@@ -62,6 +62,15 @@ beforeEach(() => {
 const scheduler = () =>
   createScheduler({ config, store, analyzers, resolveRepos, now: () => clock, timezone: 'UTC' })
 
+const html = (kind: string): AnyAnalyzer => ({
+  ...analyzer(kind),
+  appliesTo: async ({ repo, forge: reader }) => {
+    const list = (reader as { listFiles?: (r: string) => Promise<{ path: string }[]> }).listFiles
+    const entries = (await list?.(repo.path)) ?? []
+    return entries.some((entry) => entry.path.endsWith('.html'))
+  },
+})
+
 describe('cron', () => {
   test('cronError and nextRun use croner', () => {
     expect(cronError('*/5 * * * *')).toBeUndefined()
@@ -251,6 +260,32 @@ describe('scheduler', () => {
     expect(reads).toEqual(['games/a:bun.lock', 'games/b:bun.lock'])
     expect(lines).toContain('browserslist: 1 repository does not use it')
     expect(lines.some((line) => line.includes('queued anyway: rate limited'))).toBe(true)
+  })
+
+  test('appliesTo checks can list the tree, once per repository', async () => {
+    const listed: string[] = []
+    const trees: Record<string, string[]> = { 'games/a': ['web/page.html'], 'games/b': ['main.go'] }
+    const requests = await planSchedule(
+      { analyzers: ['testids', 'i18n'], groups: ['games'] },
+      {
+        config,
+        analyzers: [html('testids'), html('i18n')],
+        resolveRepos,
+        forgeFor: () =>
+          ({
+            readFile: async () => undefined,
+            listFiles: async (repo: string) => {
+              listed.push(repo)
+              return (trees[repo] ?? []).map((path) => ({ path, type: 'file' as const }))
+            },
+          }) as never,
+      },
+    )
+    expect(requests.map((r) => `${r.analyzer} ${r.repo.path}`)).toEqual([
+      'testids games/a',
+      'i18n games/a',
+    ])
+    expect(listed).toEqual(['games/a', 'games/b'])
   })
 
   test('skip leaves a repository out of one analyzer and logs it once', async () => {

@@ -34,12 +34,13 @@ Analyzers without a checkout report the commit they read: `defaultBranchHead(for
 
 Building blocks, combinable:
 
-| Check                             | Applies when                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------------------- |
-| `hasFile(...paths)`               | any of the files exists                                                               |
-| `fileContains(paths, text \| re)` | any of the files contains the text or matches the expression                          |
-| `lockfileHasPackage(name)`        | a root JavaScript lockfile (`jsLockfiles`: bun, pnpm, yarn, npm) resolves the package |
-| `anyOf(...checks)`, `allOf(...)`  | any / every check applies, evaluated in order and stopping early                      |
+| Check                             | Applies when                                                                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hasFile(...paths)`               | any of the files exists                                                                                                                                                                                 |
+| `fileContains(paths, text \| re)` | any of the files contains the text or matches the expression                                                                                                                                            |
+| `lockfileHasPackage(name)`        | a root JavaScript lockfile (`jsLockfiles`: bun, pnpm, yarn, npm) resolves the package                                                                                                                   |
+| `hasTreeFile(matches)`            | a file in the tree satisfies `matches`, outside `node_modules/`, `vendor/`, `testdata/` and hidden folders; also applies when the forge cannot list the tree or the listing hits its 10 000-entry limit |
+| `anyOf(...checks)`, `allOf(...)`  | any / every check applies, evaluated in order and stopping early                                                                                                                                        |
 
 ```ts
 defineAnalyzer({

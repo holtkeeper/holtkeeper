@@ -1,10 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 
-import { allOf, anyOf, fileContains, hasFile, lockfileHasPackage } from './applies.ts'
+import { allOf, anyOf, fileContains, hasFile, hasTreeFile, lockfileHasPackage } from './applies.ts'
 
 const context = (files: Record<string, string>) => ({
   repo: { forge: 'work', path: 'games/app' },
   forge: { readFile: async (_repo: string, path: string) => files[path] },
+})
+
+const tree = (paths: string[]) => ({
+  repo: { forge: 'work', path: 'shapes/service' },
+  forge: {
+    readFile: async () => undefined,
+    listFiles: async () => paths.map((path) => ({ path, type: 'file' as const })),
+  },
 })
 
 describe('applicability checks', () => {
@@ -37,5 +45,21 @@ describe('applicability checks', () => {
     const files = context({ 'go.mod': 'module x' })
     expect(await anyOf(hasFile('package.json'), hasFile('go.mod'))(files)).toBe(true)
     expect(await allOf(hasFile('package.json'), hasFile('go.mod'))(files)).toBe(false)
+  })
+
+  test('hasTreeFile looks through the tree outside skipped folders', async () => {
+    const html = hasTreeFile((path) => path.endsWith('.html'))
+    expect(await html(tree(['go.mod', 'web/templates/index.html']))).toBe(true)
+    expect(await html(tree(['go.mod', 'cmd/app/main.go']))).toBe(false)
+    expect(await html(tree(['vendor/x/doc.html', 'node_modules/y/a.html', '.cache/z.html']))).toBe(
+      false,
+    )
+    expect(await html(tree(Array.from({ length: 10_000 }, (_, i) => `f${i}.go`)))).toBe(true)
+    expect(
+      await html({
+        repo: { forge: 'work', path: 'a/b' },
+        forge: { readFile: async () => undefined },
+      }),
+    ).toBe(true)
   })
 })

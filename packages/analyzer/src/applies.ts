@@ -48,6 +48,37 @@ export const lockfileHasPackage = (name: string): Applicability =>
     new RegExp(`(^|["'/\\s])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(@|"\\s*:)`, 'm'),
   )
 
+const treeLimit = 10_000
+
+const skippedFolder = (segment: string) =>
+  segment === 'node_modules' ||
+  segment === 'vendor' ||
+  segment === 'testdata' ||
+  segment.startsWith('.')
+
+const canList = (forge: object): forge is Required<Pick<GitForge, 'listFiles'>> =>
+  'listFiles' in forge && typeof forge.listFiles === 'function'
+
+/**
+ * Applies when a file anywhere in the default branch's tree, outside `node_modules/`, `vendor/`,
+ * `testdata/` and hidden folders, satisfies `matches`. Applies as well when the forge client cannot
+ * list the tree or the listing reaches the forge's entry limit, so an unknown answer never skips
+ * a repository.
+ */
+export const hasTreeFile =
+  (matches: (path: string) => boolean): Applicability =>
+  async ({ repo, forge }) => {
+    if (!canList(forge)) return true
+    const entries = await forge.listFiles(repo.path, { recursive: true, limit: treeLimit })
+    if (entries.length >= treeLimit) return true
+    return entries.some(
+      (entry) =>
+        entry.type === 'file' &&
+        matches(entry.path) &&
+        !entry.path.split('/').slice(0, -1).some(skippedFolder),
+    )
+  }
+
 /** Applies when any check applies; checks run in order and stop at the first that does. */
 export const anyOf =
   (...checks: Applicability[]): Applicability =>
