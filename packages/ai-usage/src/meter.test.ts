@@ -180,6 +180,28 @@ describe('meteredAgent', () => {
     ])
   })
 
+  test('the task estimate reaches the budget check', async () => {
+    const checks: unknown[] = []
+    const agent = meteredAgent(fakeAgent({ text: '', turns: 1 }), {
+      record: () => undefined,
+      budgets: {
+        check: async (run) => {
+          checks.push(run)
+          return { allowed: true, exceeded: [] }
+        },
+        note: () => {},
+      },
+      context,
+      now: fixedNow,
+    })
+    await agent.run({ dir: '/x', prompt: 'p', taskKind: 'knowledge-bootstrap', estimateUsd: 0.12 })
+    await agent.run({ dir: '/x', prompt: 'p' })
+    expect(checks).toEqual([
+      { repo, taskKind: 'knowledge-bootstrap', estimateUsd: 0.12 },
+      { repo, taskKind: 'agent' },
+    ])
+  })
+
   test('a failing record does not replace the result', async () => {
     const seen: unknown[] = []
     const agent = meteredAgent(fakeAgent({ text: 'ok', turns: 1 }), {

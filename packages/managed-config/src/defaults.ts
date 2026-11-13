@@ -8,8 +8,8 @@ export interface DefaultTrigger {
 
 /**
  * Triggers an install starts with: every new or moved tag gets a snapshot of the public API of its
- * packages; every new repository gets every analyzer that only reads, the Guide generator
- * included (once, on the default branch).
+ * packages; every new repository gets every analyzer that only reads, the Guide generator and
+ * starter knowledge included (once, on the default branch).
  */
 export const defaultTriggers: DefaultTrigger[] = [
   { id: 'tag', data: { on: 'tag', analyzers: ['api-surface'] } },
@@ -28,9 +28,13 @@ interface DefaultTriggerAddition {
   analyzers: string[]
 }
 
-/** Additions to the default triggers: the public API snapshot on every tag. */
+/**
+ * Additions to the default triggers: the public API snapshot on every tag, and starter knowledge
+ * for new repositories on installs whose new-repository trigger lists its analyzers.
+ */
 const defaultTriggerAdditions: DefaultTriggerAddition[] = [
   { id: 'tag+api-surface', trigger: 'tag', analyzers: ['api-surface'] },
+  { id: 'new-repo+knowledge-bootstrap', trigger: 'new-repo', analyzers: ['knowledge-bootstrap'] },
 ]
 
 /** Key in `Store.kv` marking that one default trigger was considered; never expires. */

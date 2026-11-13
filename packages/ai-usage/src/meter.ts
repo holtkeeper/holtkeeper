@@ -145,7 +145,8 @@ export function usageEntry(
 }
 
 /**
- * Wraps an agent so every run is checked against budgets and recorded. A run a `block` budget
+ * Wraps an agent so every run is checked against budgets (with the task's `estimateUsd` when it
+ * gives one) and recorded. A run a `block` budget
  * denies is recorded as `denied-budget` and throws `BudgetDeniedError` without calling the
  * agent; an allowed run is capped at the budget's remaining USD (`maxCostUsd`). Finished runs
  * are recorded as `ok`, failed ones as `error` with whatever usage the error carries; the
@@ -189,6 +190,7 @@ export function meteredAgent(agent: Agent, options: MeteredAgentOptions): Agent 
           repo: context.repo,
           taskKind,
           ...(context.interactive !== undefined && { interactive: context.interactive }),
+          ...(task.estimateUsd !== undefined && { estimateUsd: task.estimateUsd }),
         })
         if (!decision.allowed) {
           const error = new BudgetDeniedError(decision.exceeded)

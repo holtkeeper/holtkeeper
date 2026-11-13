@@ -1,6 +1,7 @@
 export * from './access.ts'
 export * from './classify.ts'
 export * from './model.ts'
+export * from './placement.ts'
 export * from './propose.ts'
 export * from './schema.ts'
 export * from './select.ts'

@@ -143,6 +143,8 @@ export interface JobAnalyzerInfo {
   appliesTo?: AnyAnalyzer['appliesTo']
   /** How the freshness sweeper keeps its records current; absent: never automatically. */
   refresh?: AnyAnalyzer['refresh']
+  /** Most automatic jobs per UTC day; triggers and schedules move the rest to later days. */
+  dailyLimit?: number
 }
 
 export interface Env {

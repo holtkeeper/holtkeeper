@@ -27,6 +27,11 @@ export interface ProposalInput {
   /** Default: see `sharingDefaults`. */
   visibility?: KnowledgeVisibility
   subject?: string
+  /**
+   * Id of the entry this proposal replaces, e.g. a repository entry a group-wide one generalises.
+   * That entry is left out of the duplicate check, and the new entry records it as `supersedes`.
+   */
+  supersedes?: string
 }
 
 /** The task that proposes; used for classification and the default scope. */
@@ -47,6 +52,13 @@ export interface ProposeEntryOptions {
   autoAccept?: readonly KnowledgeKind[]
   /** Word overlap (Jaccard, 0–1) from which a proposal counts as a duplicate. Default 0.8. */
   duplicateOverlap?: number
+  /**
+   * Ids of entries that never count as duplicates besides `input.supersedes`, e.g. every narrower
+   * entry a promotion generalises.
+   */
+  notDuplicates?: readonly string[]
+  /** Only entries it holds for count as duplicates, e.g. the entries of the proposing team. Default: every entry. */
+  duplicateScope?: (entry: KnowledgeEntry) => boolean
 }
 
 export interface ProposeResult {
@@ -99,10 +111,64 @@ function findDuplicate(
   return best?.entry
 }
 
+/** What `mergeEvidence` changes. */
+export interface MergeEvidenceOptions {
+  store: Pick<Store, 'knowledge'> & Partial<Pick<Store, 'audit'>>
+  entry: KnowledgeEntry
+  evidence: readonly KnowledgeLink[]
+  /** Stored as `updatedBy` and the audit actor. */
+  actor: string
+  /** `forge:path` the audit event names, when there is one. */
+  repo?: string
+  now: () => Date
+}
+
+/**
+ * Adds the links of `evidence` whose URL `entry` does not have yet, leaving its text and status
+ * alone. Resolves with the stored entry (unchanged when nothing was new) and the added links; an
+ * addition is audited as `knowledge.evidence` when the store has an audit log.
+ */
+export async function mergeEvidence({
+  store,
+  entry,
+  evidence,
+  actor,
+  repo,
+  now,
+}: MergeEvidenceOptions): Promise<{ entry: KnowledgeEntry; added: KnowledgeLink[] }> {
+  const known = new Set(entry.evidence.map((link) => link.url))
+  const added: KnowledgeLink[] = []
+  for (const link of evidence) {
+    if (known.has(link.url)) continue
+    known.add(link.url)
+    added.push(link)
+  }
+  if (!added.length) return { entry, added }
+  const at = now().toISOString()
+  const { version: _version, ...rest } = entry
+  const stored = await store.knowledge.put({
+    ...rest,
+    evidence: [...entry.evidence, ...added],
+    updatedAt: at,
+    updatedBy: actor,
+  })
+  await store.audit?.append({
+    at,
+    actor: { id: actor, name: actor, provider: 'agent' },
+    via: 'job',
+    action: 'knowledge.evidence',
+    target: { type: 'knowledge', id: stored.id, ...(repo && { repo }) },
+    outcome: 'ok',
+    details: { urls: added.map((link) => link.url) },
+  })
+  return { entry: stored, added }
+}
+
 /**
  * Records an agent's proposal. A proposal that repeats a proposed, accepted or rejected entry
  * creates nothing: its new evidence links are added to that entry and its id comes back as
- * `duplicateOf`. Otherwise the proposal is classified (`classifyProposal`), validated
+ * `duplicateOf`. The entry `input.supersedes` names and those in `notDuplicates` never count as
+ * duplicates, and with `duplicateScope` only the entries it holds for do. Otherwise the proposal is classified (`classifyProposal`), validated
  * (`validateEntry`, throwing `KnowledgeValidationError`) and stored as a `proposed` agent entry —
  * or `accepted` when its kind is in `autoAccept`. Both outcomes are audited (`knowledge.propose`,
  * `knowledge.accept`, `knowledge.evidence`) against the task's repository when the store has an
@@ -116,6 +182,8 @@ export async function proposeEntry({
   now,
   autoAccept = [],
   duplicateOverlap = 0.8,
+  notDuplicates = [],
+  duplicateScope,
 }: ProposeEntryOptions): Promise<ProposeResult> {
   const at = now().toISOString()
   const audit = (action: string, id: string, details: Record<string, unknown>) =>
@@ -132,23 +200,25 @@ export async function proposeEntry({
       outcome: 'ok',
       details,
     })
-  const candidates = await store.knowledge.list({ status: ['proposed', 'accepted', 'rejected'] })
+  const candidates = (
+    await store.knowledge.list({ status: ['proposed', 'accepted', 'rejected'] })
+  ).filter(
+    (candidate) =>
+      candidate.id !== input.supersedes &&
+      !notDuplicates.includes(candidate.id) &&
+      (duplicateScope?.(candidate) ?? true),
+  )
   const duplicate = findDuplicate(input, candidates, duplicateOverlap)
 
   if (duplicate) {
-    const known = new Set(duplicate.evidence.map((link) => link.url))
-    const added = (input.evidence ?? []).filter((link) => !known.has(link.url))
-    let entry = duplicate
-    if (added.length) {
-      const { version: _version, ...rest } = duplicate
-      entry = await store.knowledge.put({
-        ...rest,
-        evidence: [...duplicate.evidence, ...added],
-        updatedAt: at,
-        updatedBy: actor,
-      })
-      await audit('knowledge.evidence', entry.id, { urls: added.map((link) => link.url) })
-    }
+    const { entry } = await mergeEvidence({
+      store,
+      entry: duplicate,
+      evidence: input.evidence ?? [],
+      actor,
+      ...(task.repo && { repo: `${task.repo.forge}:${task.repo.path}` }),
+      now: () => new Date(at),
+    })
     return { entry, created: false, duplicateOf: duplicate.id }
   }
 
@@ -166,6 +236,7 @@ export async function proposeEntry({
     ...classification,
     ...(input.visibility && { visibility: input.visibility }),
     ...(input.subject && { subject: input.subject }),
+    ...(input.supersedes && { supersedes: input.supersedes }),
   })
   if (!validation.success) throw new KnowledgeValidationError(validation.issues)
 

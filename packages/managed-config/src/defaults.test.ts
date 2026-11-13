@@ -87,6 +87,33 @@ describe('seedDefaults', () => {
     })
     expect(await seedDefaults({ store, analyzers: kinds, now })).toEqual([])
   })
+  test('adds starter knowledge to a new-repo trigger that lists analyzers, never to one without a list', async () => {
+    const listed = memoryStore()
+    await listed.kv?.set(defaultMarker('new-repo'), { at: now().toISOString() })
+    await listed.config?.put({
+      type: 'trigger',
+      id: 'new-repo',
+      data: { on: 'newRepo', analyzers: ['depgraph'] },
+      updatedAt: now().toISOString(),
+    })
+    const withBootstrap = [...kinds, 'knowledge-bootstrap']
+    expect(await seedDefaults({ store: listed, analyzers: withBootstrap, now })).toEqual([
+      'trigger:tag',
+      'trigger:new-repo+knowledge-bootstrap',
+    ])
+    expect((await listed.config?.get('trigger', 'new-repo'))?.data).toEqual({
+      on: 'newRepo',
+      analyzers: ['depgraph', 'knowledge-bootstrap'],
+    })
+    expect(await seedDefaults({ store: listed, analyzers: withBootstrap, now })).toEqual([])
+
+    const open = memoryStore()
+    expect(await seedDefaults({ store: open, analyzers: withBootstrap, now })).toEqual([
+      'trigger:tag',
+      'trigger:new-repo',
+    ])
+    expect((await open.config?.get('trigger', 'new-repo'))?.data).toEqual({ on: 'newRepo' })
+  })
 })
 
 const schedule = (id: string) => ({

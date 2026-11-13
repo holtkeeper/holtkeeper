@@ -20,6 +20,7 @@
     "@holtkeeper/depgraph-js": "workspace:*",
     "@holtkeeper/guide-generator": "workspace:*",
     "@holtkeeper/i18n": "workspace:*",
+    "@holtkeeper/knowledge-bootstrap": "workspace:*",
     "@holtkeeper/libraries": "workspace:*",
     "@holtkeeper/licenses": "workspace:*",
     "@holtkeeper/propagate": "workspace:*",

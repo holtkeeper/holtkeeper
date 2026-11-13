@@ -82,26 +82,27 @@ This page follows the current definitions in the code, which are still moving. T
 
 Every analyzer with options has a key `analyzers.<kind>` (section Analyzers): a partial options object, validated field by field and stored without defaults. **Configure** on the page that owns the analyzer opens it; **Settings › Analyzers** lists them all.
 
-| Key                      | Analyzer              | Presets                                                                | Edited in                                         |
-| ------------------------ | --------------------- | ---------------------------------------------------------------------- | ------------------------------------------------- |
-| `analyzers.bundle`       | Bundle size           |                                                                        | Quality › Bundles                                 |
-| `analyzers.coverage`     | Test coverage         |                                                                        | Quality › Coverage                                |
-| `analyzers.branches`     | Branches              |                                                                        | Quality › Branches                                |
-| `analyzers.ci-jobs`      | CI jobs               |                                                                        | Quality › CI                                      |
-| `analyzers.review`       | Code review           |                                                                        | Quality › Reviews                                 |
-| `analyzers.depgraph`     | Dependencies          |                                                                        | Supply › Libraries                                |
-| `analyzers.renovate`     | Renovate              | `report`, `calm`, `fresh`, `security`                                  | Supply › Libraries                                |
-| `analyzers.api-surface`  | Public API            |                                                                        | Supply › Public API                               |
-| `analyzers.usages`       | Package usage         |                                                                        | Supply › Public API                               |
-| `analyzers.stack`        | Tech stack            |                                                                        | Supply › Stack                                    |
-| `analyzers.browserslist` | Browserslist database |                                                                        | Supply › Stack                                    |
-| `analyzers.audit`        | Vulnerability audit   |                                                                        | Supply › Security                                 |
-| `analyzers.licenses`     | Licenses              | `commercial`, `no-copyleft`, `open-source`, `internal`, `flag-missing` | Supply › Licenses, Settings › Policies            |
-| `analyzers.assets`       | Asset budgets         |                                                                        | Repository › Assets                               |
-| `analyzers.testids`      | Test ids              | `testing-library`, `cypress`, `react-native`                           | Knowledge › Guide (Test ids), Settings › Policies |
-| `analyzers.tracker`      | Tracker               |                                                                        | Settings › Integrations                           |
-| `analyzers.i18n`         | Translations          |                                                                        | Settings › Analyzers                              |
-| `analyzers.propagate`    | Package rollout       |                                                                        | Settings › Analyzers                              |
+| Key                             | Analyzer              | Presets                                                                | Edited in                                                                    |
+| ------------------------------- | --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `analyzers.bundle`              | Bundle size           |                                                                        | Quality › Bundles                                                            |
+| `analyzers.coverage`            | Test coverage         |                                                                        | Quality › Coverage                                                           |
+| `analyzers.branches`            | Branches              |                                                                        | Quality › Branches                                                           |
+| `analyzers.ci-jobs`             | CI jobs               |                                                                        | Quality › CI                                                                 |
+| `analyzers.review`              | Code review           |                                                                        | Quality › Reviews                                                            |
+| `analyzers.depgraph`            | Dependencies          |                                                                        | Supply › Libraries                                                           |
+| `analyzers.renovate`            | Renovate              | `report`, `calm`, `fresh`, `security`                                  | Supply › Libraries                                                           |
+| `analyzers.api-surface`         | Public API            |                                                                        | Supply › Public API                                                          |
+| `analyzers.usages`              | Package usage         |                                                                        | Supply › Public API                                                          |
+| `analyzers.stack`               | Tech stack            |                                                                        | Supply › Stack                                                               |
+| `analyzers.browserslist`        | Browserslist database |                                                                        | Supply › Stack                                                               |
+| `analyzers.audit`               | Vulnerability audit   |                                                                        | Supply › Security                                                            |
+| `analyzers.licenses`            | Licenses              | `commercial`, `no-copyleft`, `open-source`, `internal`, `flag-missing` | Supply › Licenses, Settings › Policies                                       |
+| `analyzers.assets`              | Asset budgets         |                                                                        | Repository › Assets                                                          |
+| `analyzers.testids`             | Test ids              | `testing-library`, `cypress`, `react-native`                           | Knowledge › Guide (Test ids), Settings › Policies                            |
+| `analyzers.tracker`             | Tracker               |                                                                        | Settings › Integrations                                                      |
+| `analyzers.i18n`                | Translations          |                                                                        | Settings › Analyzers                                                         |
+| `analyzers.propagate`           | Package rollout       |                                                                        | Settings › Analyzers                                                         |
+| `analyzers.knowledge-bootstrap` | Starter knowledge     |                                                                        | Settings › Analyzers, see [Notes](/guide/knowledge/notes/#starter-knowledge) |
 
 The defaults of each analyzer's options are in its module docs. The review options are listed on [The review agent](/agents/review-agent/#configure-it).
 

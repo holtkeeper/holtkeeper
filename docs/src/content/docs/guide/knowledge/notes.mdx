@@ -181,6 +181,42 @@ Agents propose notes through the MCP tool `propose_knowledge` and while working 
 
 Proposals wait under **Waiting for review** and in the Inbox. The `knowledge.autoAccept` policy can accept chosen kinds at once; <Ui>Configure</Ui> on this tab opens it in **Settings › Policies** at **Agent knowledge**. Proposals from coding agents over MCP always wait for a person.
 
+## Starter knowledge
+
+When Holtkeeper finds a new repository and the knowledge base has no notes naming it, the **Starter knowledge** analyzer (`knowledge-bootstrap`) writes a first set for it, the way a new teammate would after a week of reading: it reads the README, docs, ADRs, Makefile, CI and lint config, the merge requests merged in the last six months and their review threads, and proposes 3 to 10 concrete notes — decisions, conventions, quirks and how-tos — each with links to the merge requests and files that show it. People in review threads are named by role only (author, reviewer 1, …); bot accounts and dependency updates are left out.
+
+Every starter note is a proposal under **Waiting for review** and in the [Inbox](/guide/home/inbox/), authored by `agent:knowledge-bootstrap`. They are never accepted automatically, whatever **Agent knowledge** (`knowledge.autoAccept`) says.
+
+### Where a starter note goes
+
+Before proposing, Holtkeeper compares each note with the live notes of the repository's team (its root group) and agrees on a level:
+
+| The note…                                                                                              | Goes to                                                                |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| matches nothing, or only makes sense in this repository (its own paths, commands)                      | the repository                                                         |
+| says what a note of a **sibling repository in the same subgroup** says                                 | the **subgroup**, as one note for both; it replaces the sibling's note |
+| says what notes in **two or more subgroups** say, or a note sharing only the team with this repository | the **team** (root group)                                              |
+| is about team process (merge requests, reviews, releases, branches) and the team has it elsewhere      | the **team**                                                           |
+| is about how to use a library the fleet owns                                                           | the library's repository, **shared**, with the library as its subject  |
+| is already covered by a note of the subgroup or team                                                   | nothing new: its evidence links are added to that note                 |
+
+A note matches when the agent links it explicitly, or when the titles share at least half their words, or title and text a third of them. A note promoted to a subgroup or the team uses wording true for every repository involved and carries the evidence of the siblings it generalises. While a promotion waits for review, the next sibling's matching note counts as covered by it instead of starting a second one. Accepting it archives the sibling note it replaces; rejecting it keeps the sibling note, and later runs keep that lesson at their own repository instead of proposing the same promotion again.
+
+Promotions depend on subgroups: split a team into subgroups (Repos › Groups) before building starter knowledge for many repositories at once.
+
+### Run it by hand
+
+- **One repository**: Settings › Analyzers › **Starter knowledge** › Run on the repository. A repository that was already bootstrapped or has notes of its own is skipped; set `force` in the run's options to build it again.
+- **A whole team**: add a schedule with this analyzer for the group in [Automation](/guide/ops/automation/) and click **Run now**. Repositories already done are skipped.
+
+After a run the repository is marked, so starter knowledge never repeats on its own. The run's log lists every note with its level and why, for example `proposed [subgroup shapes.round] "Generate mocks with make gen" — a sibling in shapes.round has it`, and the run's record shows the same as a table.
+
+### Settings and cost
+
+The options live in **Settings › Analyzers › Starter knowledge** (`analyzers.knowledge-bootstrap`), per team or repository: `months` of merge requests to read (default 6), `maxEntries` (default 10), `promote` (default on; off keeps every note at the repository), `maxMergeRequests` (60), `discussionMergeRequests` (25), `tier` (`main` or `deep`). To keep it away from some repositories, turn it off under **Analyzers off** in [Policies](/guide/settings/policies/#turn-analyzers-off).
+
+One run makes one AI call: about $0.12 on `main` (capped at $0.40), about $0.21 on `deep` (capped at $1.00), counted under **Guide and learnings** in AI spend. At most 10 runs start per day: when many repositories arrive at once (a new team, **Run now** on the new-repository trigger), the rest wait in the queue for the following days, so starter knowledge costs at most about $4 a day. The estimate is checked against the weekly [AI budget](/guide/settings/ai/) before anything is spent; a run the budget refuses ends **blocked** in [Runs](/guide/ops/runs/), stores nothing and can be rerun later.
+
 ## Related
 
 - [Team guide](/guide/knowledge/guide/) — rules agents follow, and how notes fit in the prompt budget.

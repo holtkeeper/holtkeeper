@@ -70,6 +70,7 @@
         "@holtkeeper/issues-jira": "workspace:*",
         "@holtkeeper/jobs": "workspace:*",
         "@holtkeeper/knowledge": "workspace:*",
+        "@holtkeeper/knowledge-bootstrap": "workspace:*",
         "@holtkeeper/libraries": "workspace:*",
         "@holtkeeper/licenses": "workspace:*",
         "@holtkeeper/limits": "workspace:*",
@@ -219,6 +220,7 @@
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-js": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
         "zod": "^4.6.7",
       },
     },
@@ -273,6 +275,7 @@
         "@holtkeeper/depgraph-js": "workspace:*",
         "@holtkeeper/guide-generator": "workspace:*",
         "@holtkeeper/i18n": "workspace:*",
+        "@holtkeeper/knowledge-bootstrap": "workspace:*",
         "@holtkeeper/libraries": "workspace:*",
         "@holtkeeper/licenses": "workspace:*",
         "@holtkeeper/propagate": "workspace:*",
@@ -679,6 +682,25 @@
         "zod": "^4.6.7",
       },
     },
+    "packages/knowledge-bootstrap": {
+      "name": "@holtkeeper/knowledge-bootstrap",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/access": "workspace:*",
+        "@holtkeeper/agent": "workspace:*",
+        "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/guide-generator": "workspace:*",
+        "@holtkeeper/knowledge": "workspace:*",
+        "@holtkeeper/quality-tests": "workspace:*",
+        "@holtkeeper/report": "workspace:*",
+        "@holtkeeper/store": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@holtkeeper/exec": "workspace:*",
+      },
+    },
     "packages/libraries": {
       "name": "@holtkeeper/libraries",
       "version": "0.0.0",
@@ -830,8 +852,10 @@
         "@holtkeeper/agent-tools": "workspace:*",
         "@holtkeeper/analyzer": "workspace:*",
         "@holtkeeper/changes": "workspace:*",
+        "@holtkeeper/depgraph-js": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
         "@holtkeeper/quality": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "@holtkeeper/store": "workspace:*",
@@ -1318,6 +1342,8 @@
     "@holtkeeper/jobs": ["@holtkeeper/jobs@workspace:packages/jobs"],
 
     "@holtkeeper/knowledge": ["@holtkeeper/knowledge@workspace:packages/knowledge"],
+
+    "@holtkeeper/knowledge-bootstrap": ["@holtkeeper/knowledge-bootstrap@workspace:packages/knowledge-bootstrap"],
 
     "@holtkeeper/libraries": ["@holtkeeper/libraries@workspace:packages/libraries"],
 

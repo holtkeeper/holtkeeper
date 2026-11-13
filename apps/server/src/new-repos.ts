@@ -2,6 +2,7 @@ import { type HoltkeeperConfig, resolveRepo, rootGroups } from '@holtkeeper/core
 import type { RepoRef } from '@holtkeeper/forge'
 import {
   type ForgeReaderFor,
+  dailyLimitsOf,
   enqueueUnique,
   groupRepositories,
   planSchedule,
@@ -35,7 +36,8 @@ export function newRepoAnalyzers(
 /**
  * Queues the `jobs.onNewRepo` analyzers for `repos`, limited to its `groups` and to analyzers
  * whose `appliesTo` matches (a failing check counts as applying) and whose options are valid with
- * the repository's `analyzers.<kind>` setting. Jobs get trigger `new-repo`;
+ * the repository's `analyzers.<kind>` setting. Jobs get trigger `new-repo`, and kinds with a
+ * `dailyLimit` are spread over the next days;
  * one already queued or running for the same analyzer and repository is skipped. Without `actor`
  * (repositories polling found for the first time) it logs `job.new_repo` per repository that got
  * jobs; with `actor` (a run by hand) the jobs carry it and the caller logs the run. Does nothing
@@ -81,6 +83,7 @@ export async function queueNewRepoJobs(
         ...(options.actor && { actor: options.actor }),
       })),
     at,
+    { dailyLimits: dailyLimitsOf(deps.analyzers ?? []) },
   )
   const result = { queued: enqueued.length, skipped: skipped.length }
   if (options.actor) return result

@@ -1,5 +1,6 @@
 import type { ScheduleRunList, ScheduleRunResult, ScheduleRunStarted } from '@holtkeeper/api'
 import {
+  dailyLimitsOf,
   enqueueUnique,
   groupRepositories,
   nextRuns,
@@ -71,6 +72,7 @@ export function scheduleRoutes(deps: ServerDeps) {
         store.jobs,
         requests.map((request) => ({ ...request, actor: principal.id })),
         startedAt,
+        { dailyLimits: dailyLimitsOf(deps.analyzers ?? []) },
       )
       return { queued: enqueued.length, skipped: skipped.length }
     }

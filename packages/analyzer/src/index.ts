@@ -216,6 +216,12 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
    */
   after?: string[]
   /**
+   * Most automatic jobs of this kind (triggers and schedules) whose `runAfter` falls on one UTC
+   * day; the queue moves the rest to the next days with room, so an expensive analyzer queued for
+   * a whole fleet at once spreads its cost. Absent: no limit.
+   */
+  dailyLimit?: number
+  /**
    * After storing a new record, runners delete this kind's older records of the same `repo`,
    * keeping the newest `keepRecords`. Absent: every record is kept.
    */

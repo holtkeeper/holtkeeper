@@ -43,6 +43,7 @@
     "@holtkeeper/issues-jira": "workspace:*",
     "@holtkeeper/jobs": "workspace:*",
     "@holtkeeper/knowledge": "workspace:*",
+    "@holtkeeper/knowledge-bootstrap": "workspace:*",
     "@holtkeeper/libraries": "workspace:*",
     "@holtkeeper/licenses": "workspace:*",
     "@holtkeeper/limits": "workspace:*",

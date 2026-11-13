@@ -137,7 +137,8 @@ export const knowledgeAutoAccept = defineSetting({
 
 - \`quirk\` and \`howto\` are low risk: facts about the code agents found the hard way.
 - Keep \`decision\` and \`convention\` under review: they change how agents judge code.
-- The scope is the repository the agent worked on, so an entry for a group lets agents learn freely in that group only.`,
+- The scope is the repository the agent worked on, so an entry for a group lets agents learn freely in that group only.
+- Starter knowledge for new repositories (\`knowledge-bootstrap\`) is always proposed, whatever this says; its options are \`analyzers.knowledge-bootstrap\` under Settings › Analyzers.`,
   default: [],
   schema: z.array(
     z.enum(['decision', 'convention', 'migration', 'quirk', 'howto'] satisfies KnowledgeKind[]),

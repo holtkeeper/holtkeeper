@@ -6,27 +6,28 @@ The registry of analyzers Holtkeeper ships. The server's job engine runs them; e
 import { builtinAnalyzers } from '@holtkeeper/analyzers'
 ```
 
-| Kind          | Scope | What it produces                                                          |
-| ------------- | ----- | ------------------------------------------------------------------------- |
-| `bundle`      | repo  | app builds and published packages: size per entrypoint, asset, release    |
-| `depgraph`    | repo  | dependency graph (JavaScript, Go): cycles, duplicate versions, statistics |
-| `coverage`    | repo  | line, function and branch test coverage per source file                   |
-| `testids`     | repo  | test attributes frontend templates expose, per component                  |
-| `api-surface` | repo  | public API of every package per version, for agents and semver checks     |
-| `licenses`    | repo  | third-party licenses judged against allow and deny lists                  |
-| `stack`       | group | runtimes, images and tools with end of life, and the group's conventions  |
-| `assets`      | repo  | asset inventory checked against budgets, with smaller formats suggested   |
-| `branches`    | repo  | branches to clean up: merged, closed unmerged or stale, per author        |
-| `ci-jobs`     | repo  | CI job durations and failures over time                                   |
-| `i18n`        | repo  | translation gaps per locale                                               |
-| `propagate`   | group | package updates rolled out across a group, failures handed to fix tasks   |
-| `review`      | repo  | AI review of a merge request                                              |
-| `guide`       | repo  | generated Guide sections from repository evidence, hash-gated, proposed   |
-| `tracker`     | group | declared entities tracked across repositories and documents               |
-| `audit`       | repo  | vulnerability audit with osv-scanner (data is an `AuditReport`)           |
-| `write-task`  | repo  | a code change pushed as a branch with a merge request (write worker pool) |
+| Kind                  | Scope | What it produces                                                          |
+| --------------------- | ----- | ------------------------------------------------------------------------- |
+| `bundle`              | repo  | app builds and published packages: size per entrypoint, asset, release    |
+| `depgraph`            | repo  | dependency graph (JavaScript, Go): cycles, duplicate versions, statistics |
+| `coverage`            | repo  | line, function and branch test coverage per source file                   |
+| `testids`             | repo  | test attributes frontend templates expose, per component                  |
+| `api-surface`         | repo  | public API of every package per version, for agents and semver checks     |
+| `licenses`            | repo  | third-party licenses judged against allow and deny lists                  |
+| `stack`               | group | runtimes, images and tools with end of life, and the group's conventions  |
+| `assets`              | repo  | asset inventory checked against budgets, with smaller formats suggested   |
+| `branches`            | repo  | branches to clean up: merged, closed unmerged or stale, per author        |
+| `ci-jobs`             | repo  | CI job durations and failures over time                                   |
+| `i18n`                | repo  | translation gaps per locale                                               |
+| `propagate`           | group | package updates rolled out across a group, failures handed to fix tasks   |
+| `review`              | repo  | AI review of a merge request                                              |
+| `guide`               | repo  | generated Guide sections from repository evidence, hash-gated, proposed   |
+| `knowledge-bootstrap` | repo  | starter knowledge entries from code and merge requests, proposed once     |
+| `tracker`             | group | declared entities tracked across repositories and documents               |
+| `audit`               | repo  | vulnerability audit with osv-scanner (data is an `AuditReport`)           |
+| `write-task`          | repo  | a code change pushed as a branch with a merge request (write worker pool) |
 
-`guide` ([@holtkeeper/guide-generator](../../guide-generator/docs/README.md)), `review` and `write-task` ([@holtkeeper/write-task](../../write-task/docs/README.md), whose registry copy refuses every task) need server state; the server replaces these registry copies with ones built on its store.
+`guide` ([@holtkeeper/guide-generator](../../guide-generator/docs/README.md)), `knowledge-bootstrap` ([@holtkeeper/knowledge-bootstrap](../../knowledge-bootstrap/docs/README.md), whose registry copy refuses to run), `review` and `write-task` ([@holtkeeper/write-task](../../write-task/docs/README.md), whose registry copy refuses every task) need server state; the server replaces these registry copies with ones built on its store.
 
 `reviewChecks({ testids? })` returns the checks the review analyzer runs on changed lines: `secrets` and `testids`; `testids` takes the repository's `TestIdOverrides` from the `analyzers.testids` setting.
 

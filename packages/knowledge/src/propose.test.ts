@@ -4,7 +4,7 @@ import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
 import { entry, repo } from '../test/entries.ts'
-import { packageSubject, proposeEntry, sharingDefaults } from './propose.ts'
+import { mergeEvidence, packageSubject, proposeEntry, sharingDefaults } from './propose.ts'
 import { KnowledgeValidationError } from './schema.ts'
 
 const now = () => new Date('2026-10-30T12:00:00.000Z')
@@ -108,6 +108,98 @@ describe('proposeEntry', () => {
     expect(different.created).toBeTrue()
   })
 
+  test('the superseded entry is not a duplicate, every other entry still is', async () => {
+    await store.knowledge.put(
+      entry({
+        id: 'narrow',
+        title: 'Run generators through make gen',
+        body: 'Mocks come from make gen.',
+        scope: { repos: ['work:games/app'] },
+      }),
+    )
+    await store.knowledge.put(
+      entry({ id: 'other', title: 'Format with gofmt', body: 'Run gofmt before pushing.' }),
+    )
+    const promoted = await proposeEntry({
+      store,
+      input: {
+        title: 'Run generators through make gen',
+        body: 'Mocks come from make gen in every service.',
+        scope: { groups: ['games'] },
+        supersedes: 'narrow',
+      },
+      actor: 'agent:knowledge-bootstrap',
+      task: { repo: app },
+      now,
+    })
+    expect(promoted.created).toBeTrue()
+    expect(promoted.entry).toMatchObject({
+      status: 'proposed',
+      supersedes: 'narrow',
+      scope: { groups: ['games'] },
+    })
+    const blocked = await proposeEntry({
+      store,
+      input: { title: 'Format with gofmt', body: 'x', supersedes: 'narrow' },
+      actor: 'agent:knowledge-bootstrap',
+      task: { repo: app },
+      now,
+    })
+    expect(blocked).toMatchObject({ created: false, duplicateOf: 'other' })
+  })
+
+  test('notDuplicates and duplicateScope narrow what counts as a duplicate', async () => {
+    await store.knowledge.put(
+      entry({
+        id: 'sibling-a',
+        title: 'Run generators through make gen',
+        scope: { repos: ['games/a'] },
+      }),
+    )
+    await store.knowledge.put(
+      entry({
+        id: 'sibling-b',
+        title: 'Run generators through make gen',
+        scope: { repos: ['games/b'] },
+      }),
+    )
+    const input = {
+      title: 'Run generators through make gen',
+      body: 'Every service of the team generates code with make gen.',
+      scope: { groups: ['games'] },
+      supersedes: 'sibling-a',
+    }
+    const swallowed = await proposeEntry({
+      store,
+      input,
+      actor: 'agent:x',
+      task: { repo: app },
+      now,
+    })
+    expect(swallowed).toMatchObject({ created: false, duplicateOf: 'sibling-b' })
+
+    const promoted = await proposeEntry({
+      store,
+      input,
+      actor: 'agent:x',
+      task: { repo: app },
+      now,
+      notDuplicates: ['sibling-a', 'sibling-b'],
+    })
+    expect(promoted.created).toBeTrue()
+
+    const elsewhere = await proposeEntry({
+      store,
+      input: { title: 'Run generators through make gen', body: 'Other team.' },
+      actor: 'agent:x',
+      task: { repo: repo('tools/kit', ['tools']) },
+      now,
+      duplicateScope: (candidate) => candidate.scope.groups?.includes('tools') ?? false,
+    })
+    expect(elsewhere.created).toBeTrue()
+    expect(elsewhere.entry.scope).toEqual({ repos: ['work:tools/kit'] })
+  })
+
   test('archived entries do not block a new proposal', async () => {
     await store.knowledge.put(entry({ id: 'gone', title: 'Old rule', status: 'archived' }))
     const result = await proposeEntry({
@@ -141,6 +233,51 @@ describe('proposeEntry', () => {
     }).catch((caught: unknown) => caught)
     expect(String(migration)).toContain('packages: a migration must name its packages')
     expect(await store.knowledge.list()).toEqual([])
+  })
+})
+
+describe('mergeEvidence', () => {
+  test('adds only new links, keeps the text and audits the addition', async () => {
+    const stored = await store.knowledge.put(
+      entry({
+        id: 'e1',
+        status: 'proposed',
+        evidence: [{ label: 'MR !1', url: 'https://forge.test/mr/1' }],
+      }),
+    )
+    const nothing = await mergeEvidence({
+      store,
+      entry: stored,
+      evidence: [{ label: 'again', url: 'https://forge.test/mr/1' }],
+      actor: 'agent:knowledge-bootstrap',
+      now,
+    })
+    expect(nothing).toEqual({ entry: stored, added: [] })
+    const merged = await mergeEvidence({
+      store,
+      entry: stored,
+      evidence: [
+        { label: 'MR !2', url: 'https://forge.test/mr/2' },
+        { label: 'MR !2 twice', url: 'https://forge.test/mr/2' },
+      ],
+      actor: 'agent:knowledge-bootstrap',
+      repo: 'work:games/app',
+      now,
+    })
+    expect(merged.added).toEqual([{ label: 'MR !2', url: 'https://forge.test/mr/2' }])
+    expect(merged.entry).toMatchObject({
+      title: stored.title,
+      status: 'proposed',
+      version: 2,
+      updatedBy: 'agent:knowledge-bootstrap',
+    })
+    expect(merged.entry.evidence.map((link) => link.url)).toEqual([
+      'https://forge.test/mr/1',
+      'https://forge.test/mr/2',
+    ])
+    expect((await store.audit.list()).events.map((e) => [e.action, e.target])).toEqual([
+      ['knowledge.evidence', { type: 'knowledge', id: 'e1', repo: 'work:games/app' }],
+    ])
   })
 })
 

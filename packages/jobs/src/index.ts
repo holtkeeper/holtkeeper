@@ -30,7 +30,7 @@ export {
   toolchainSetting,
 } from '@holtkeeper/toolchain'
 export { type JobEngine, type JobEngineOptions, createJobEngine } from './engine.ts'
-export { type JobRequest, enqueueUnique } from './enqueue.ts'
+export { type EnqueueOptions, type JobRequest, dailyLimitsOf, enqueueUnique } from './enqueue.ts'
 export {
   FRESHNESS_DEBOUNCE_MS,
   type FreshnessContext,

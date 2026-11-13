@@ -9,6 +9,7 @@ describe('featureOf', () => {
     expect(featureOf('write-task')).toBe('tasks')
     expect(featureOf('chat-summary')).toBe('chat')
     expect(featureOf('learning')).toBe('knowledge')
+    expect(featureOf('knowledge-bootstrap')).toBe('knowledge')
     expect(featureOf('release-notes')).toBe('releases')
     expect(featureOf('widget-digest')).toBe('other')
     expect(featureOf('')).toBe('other')

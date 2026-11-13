@@ -5,7 +5,7 @@ import type { GitForge, RepoRef, TreeEntry } from '@holtkeeper/forge'
 import type { Job, JobStore } from '@holtkeeper/store'
 
 import { cronError } from './cron.ts'
-import { type JobRequest, enqueueUnique } from './enqueue.ts'
+import { type JobRequest, dailyLimitsOf, enqueueUnique } from './enqueue.ts'
 import { type ResolveRepos, groupRepositories, matchesRepoGlob } from './repos.ts'
 import { nextRuns, runWindowEnd } from './smart.ts'
 
@@ -307,7 +307,9 @@ export function createScheduler(options: SchedulerOptions): Scheduler {
     })
     if (actor) requests = requests.map((request) => ({ ...request, actor }))
     if (schedule.spread) requests = spreadRequests(requests, at, runWindowEnd(schedule, at, zone))
-    const { enqueued, skipped } = await enqueueUnique(store.jobs, requests, now().toISOString())
+    const { enqueued, skipped } = await enqueueUnique(store.jobs, requests, now().toISOString(), {
+      dailyLimits: dailyLimitsOf(analyzers),
+    })
     log(
       `schedule ${schedule.name}: ${enqueued.length} job(s) queued${skipped.length ? `, ${skipped.length} already pending` : ''}`,
     )

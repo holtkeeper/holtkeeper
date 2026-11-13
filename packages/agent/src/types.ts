@@ -32,6 +32,11 @@ export interface AgentTask<Output = unknown> {
    * `BudgetExceededError` carrying what the run used. Adapters that cannot price a run ignore it.
    */
   maxCostUsd?: number
+  /**
+   * Expected cost of the run in USD, for the budget check before it starts. Default: the mean cost
+   * of this week's runs of the task kind. Adapters ignore it.
+   */
+  estimateUsd?: number
   signal?: AbortSignal
   /**
    * A follow-up for a shallow answer: when the agent gives its final answer without having called

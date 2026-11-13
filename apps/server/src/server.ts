@@ -34,6 +34,7 @@ import { createGuideResolver, testIdOverridesFor, testIdsSettingKey } from '@hol
 import { createGuideAnalyzer } from '@holtkeeper/guide-generator'
 import { validateJiraCredentialOptions } from '@holtkeeper/issues-jira'
 import { knowledgeAccess } from '@holtkeeper/knowledge'
+import { createKnowledgeBootstrapAnalyzer } from '@holtkeeper/knowledge-bootstrap'
 import { createLimiter, limitsCredentialsSetting } from '@holtkeeper/limits'
 import {
   type DefaultTrigger,
@@ -69,6 +70,7 @@ import { WRITE_POOL, createWriteTaskAnalyzer } from '@holtkeeper/write-task'
 
 import { autoAcceptFrom, settingsAgentFor } from './agent.ts'
 import { builtinAnalyses } from './analyses.ts'
+import { createApiCatalog } from './api-surface/catalog.ts'
 import { createApp } from './app.ts'
 import { assetsPolicyFor } from './assets.ts'
 import { verifyAuditChainIfDue } from './audit-verify.ts'
@@ -78,6 +80,7 @@ import { startDatabaseSnapshots } from './database.ts'
 import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './documents.ts'
 import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
+import { fleetPackagesOf } from './fleet-packages.ts'
 import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
 import { goGuidelinesDuty, goGuidelinesSource } from './go-guidelines.ts'
 import { retiredReadOnlyCheck } from './health.ts'
@@ -365,6 +368,15 @@ export async function startServer(
       return parsed.success ? parsed.data : []
     },
   })
+  const knowledgeBootstrap = createKnowledgeBootstrapAnalyzer({
+    store: server.store,
+    groupsOf: (repo) => repoTarget(config, repo).groups,
+    botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
+    fleetPackages: async () =>
+      fleetPackagesOf(
+        await createApiCatalog({ analyses: server.store.analyses }).packages(() => true),
+      ),
+  })
   const conventionsOf = commitConventionsReader({
     forgeOf: (forge) => forgeFor(config, forge),
     settings: server.store.settings,
@@ -410,6 +422,7 @@ export async function startServer(
     propagate,
     tracker,
     guide,
+    'knowledge-bootstrap': knowledgeBootstrap,
     browserslist,
     'write-task': writeTask,
   }

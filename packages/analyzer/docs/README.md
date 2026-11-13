@@ -4,6 +4,8 @@ The contract between analyzers and the runner that runs them (the task engine of
 
 `keepRecords: n` makes runners delete the analyzer's older records of a repository after storing a new one, keeping the newest `n`; for snapshot analyzers whose history lives elsewhere (`ci-jobs` keeps 3).
 
+`dailyLimit: n` caps the automatic jobs (triggers and schedules) whose `runAfter` falls on one UTC day; the queue moves the rest to the next days with room (`enqueueUnique` of `@holtkeeper/jobs`), so an expensive analyzer queued for a whole fleet spreads its cost (`knowledge-bootstrap` allows 10).
+
 `pool: '<name>'` puts the analyzer's jobs in a worker pool: only workers started for that pool claim them (`DEFAULT_POOL`, `default`, is the pool of analyzers that name none). The `write-task` analyzer uses `write`, so code-changing agents run only on dedicated workers.
 
 `interactive: true` marks an analyzer a person waits on right now (`review`, which also answers replies in its threads). Its jobs become `ClaimRules.priority` kinds: the queue claims them before every other due job however long the queue is, claim delays never hold them back, and workers keep express slots (`prioritySlots`) for them while their regular slots are busy. Every other claim rule still applies.

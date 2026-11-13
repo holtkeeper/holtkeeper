@@ -475,6 +475,42 @@ describe('withServerDefaults', () => {
     expect(asked).toEqual([`${repo.forge}:${repo.path}`])
   })
 
+  test('hands the task estimate to the budget check; a bootstrap task mounts no toolsets', async () => {
+    const seen: AgentTask[] = []
+    const inner: Agent = {
+      name: 'fake',
+      async run(task) {
+        seen.push(task)
+        return { text: 'ok', turns: 1 }
+      },
+    }
+    const checks: unknown[] = []
+    const agent = withServerDefaults(inner, {
+      repo: target,
+      store,
+      now,
+      budgets: {
+        check: async (run) => {
+          checks.push(run)
+          return { allowed: true, exceeded: [], remainingUsd: 5 }
+        },
+      },
+    })
+    await agent.run({
+      dir: '/r',
+      prompt: 'p',
+      taskKind: 'knowledge-bootstrap',
+      estimateUsd: 0.12,
+      context: 'Own context',
+    })
+    await agent.run({ dir: '/r', prompt: 'p', taskKind: 'guide', context: 'Own context' })
+    expect(checks).toEqual([
+      expect.objectContaining({ taskKind: 'knowledge-bootstrap', estimateUsd: 0.12 }),
+      expect.not.objectContaining({ estimateUsd: expect.anything() }),
+    ])
+    expect(seen[0]?.toolsets ?? []).toEqual([])
+  })
+
   test('reports results and errors to onRun; task toolsets of the same name win', async () => {
     const seen: AgentTask[] = []
     let fail = false

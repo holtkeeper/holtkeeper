@@ -258,6 +258,7 @@ export function withServerDefaults(
           repo,
           taskKind,
           interactive: options.origin?.interactive ?? false,
+          ...(task.estimateUsd !== undefined && { estimateUsd: task.estimateUsd }),
         })
         if (!decision.allowed) {
           const error = new BudgetDeniedError(decision.exceeded)

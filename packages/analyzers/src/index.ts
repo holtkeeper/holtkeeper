@@ -10,6 +10,7 @@ import { goSource } from '@holtkeeper/depgraph-go'
 import { jsSources } from '@holtkeeper/depgraph-js'
 import { createGuideAnalyzer } from '@holtkeeper/guide-generator'
 import { i18nAnalyzer } from '@holtkeeper/i18n'
+import { createKnowledgeBootstrapAnalyzer } from '@holtkeeper/knowledge-bootstrap'
 import { licensesAnalyzer } from '@holtkeeper/licenses'
 import { propagateAnalyzer } from '@holtkeeper/propagate'
 import { secretsCheck } from '@holtkeeper/quality-secrets'
@@ -82,6 +83,7 @@ export const builtinAnalyzers: AnyAnalyzer[] = [
   propagateAnalyzer,
   createReviewAnalyzer({ checks: reviewChecks() }),
   createGuideAnalyzer(),
+  createKnowledgeBootstrapAnalyzer(),
   trackerAnalyzer,
   browserslistAnalyzer,
   renovateAnalyzer,

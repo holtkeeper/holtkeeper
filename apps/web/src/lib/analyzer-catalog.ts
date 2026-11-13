@@ -13,7 +13,7 @@ export const analyzerAreas: readonly { id: AnalyzerArea; label: string; feeds: s
     feeds: 'Libraries, Security, Licenses, Stack, Public API',
   },
   { id: 'quality', label: 'Quality', feeds: 'Coverage, Bundles, Assets, CI, Branches, Reviews' },
-  { id: 'releases', label: 'Releases and knowledge', feeds: 'Releases, Guide, Learnings' },
+  { id: 'releases', label: 'Releases and knowledge', feeds: 'Releases, Guide, Notes, Learnings' },
   { id: 'other', label: 'Other', feeds: 'Analyses' },
 ]
 
@@ -35,6 +35,7 @@ const areas: Readonly<Record<string, AnalyzerArea>> = {
   testids: 'quality',
   release: 'releases',
   guide: 'releases',
+  'knowledge-bootstrap': 'releases',
   tracker: 'releases',
   propagate: 'releases',
   'write-task': 'releases',

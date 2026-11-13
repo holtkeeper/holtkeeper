@@ -179,6 +179,7 @@ describe('mcpToolsets', () => {
     expect(taskToolsets('guide')).toEqual([])
     expect(taskToolsets('release-notes')).toEqual([])
     expect(taskToolsets('library-digest')).toEqual([])
+    expect(taskToolsets('knowledge-bootstrap')).toEqual([])
     expect(taskToolsets('chat')).toEqual([
       'knowledge',
       'libraries',

@@ -4,6 +4,7 @@ import { noAuth } from '@holtkeeper/auth-none'
 import { parseConfig } from '@holtkeeper/core'
 import { createCredentialService } from '@holtkeeper/credentials'
 import type { GitForge, Repository } from '@holtkeeper/forge'
+import { createKnowledgeBootstrapAnalyzer } from '@holtkeeper/knowledge-bootstrap'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -120,6 +121,56 @@ describe('jobs.onNewRepo', () => {
     expect(discovered.map((a) => a.target.repo)).toEqual(
       expect.arrayContaining(['work:games/a', 'work:games/b']),
     )
+  })
+
+  test('starter knowledge is queued only for new repositories without entries of their own', async () => {
+    await store.knowledge.put({
+      id: 'k1',
+      title: 'Widgets are cached for a minute',
+      body: 'The cache lives in the widget client.',
+      kind: 'quirk',
+      scope: { repos: ['work:games/b'] },
+      topics: [],
+      appliesTo: ['*'],
+      status: 'accepted',
+      source: 'human',
+      author: 'jane',
+      evidence: [],
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const p = poller(configWith({ onNewRepo: {} }), [
+      analyzer('quality'),
+      createKnowledgeBootstrapAnalyzer({ store }),
+    ])
+    listed = ['games/a', 'games/b']
+    await p.listGroup('games')
+    expect(await queued()).toEqual([
+      'games/a knowledge-bootstrap new-repo',
+      'games/a quality new-repo',
+      'games/b quality new-repo',
+    ])
+  })
+
+  test('kinds with a daily limit spread their jobs over the next days', async () => {
+    const p = poller(configWith({ onNewRepo: {} }), [
+      analyzer('quality'),
+      analyzer('starter', { dailyLimit: 2 }),
+    ])
+    listed = ['games/a', 'games/b', 'games/c']
+    await p.listGroup('games')
+    const jobs = await store.jobs.list({})
+    const runAfter = (kind: string) =>
+      jobs
+        .filter((job) => job.analyzer === kind)
+        .map((job) => job.runAfter)
+        .toSorted()
+    expect(runAfter('quality')).toEqual(Array(3).fill('2026-11-02T10:00:00.000Z'))
+    expect(runAfter('starter')).toEqual([
+      '2026-11-02T10:00:00.000Z',
+      '2026-11-02T10:00:00.000Z',
+      '2026-11-03T00:00:00.000Z',
+    ])
   })
 
   test('honors analyzers, exclude and groups', async () => {
