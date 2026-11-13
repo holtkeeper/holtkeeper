@@ -276,7 +276,8 @@ const currentUserSchema = z.object({
   web_url: z.string().nullable().optional(),
   bot: z.boolean().nullable().optional(),
 })
-const topGroupSchema = z.object({ full_path: z.string() })
+const fullPathSchema = z.object({ full_path: z.string() })
+const projectNamespaceSchema = z.object({ namespace: fullPathSchema })
 const anySchema = z.unknown()
 const awardSchema = z.object({
   name: z.string(),
@@ -712,12 +713,18 @@ function createGitLabForge(options: GitLabForgeOptions): GitForge {
     async getCurrentUser() {
       const serviceAccountsPage = async () => {
         try {
-          const [group] = await client.json('GET', 'groups', z.array(topGroupSchema), {
-            query: { top_level_only: true, min_access_level: 10, per_page: 1 },
+          const [group] = await client.json('GET', 'groups', z.array(fullPathSchema), {
+            query: { min_access_level: 10, per_page: 1 },
           })
-          return group
+          const [membership] = group
+            ? []
+            : await client.json('GET', 'projects', z.array(projectNamespaceSchema), {
+                query: { membership: true, simple: true, per_page: 1 },
+              })
+          const top = (group?.full_path ?? membership?.namespace.full_path)?.split('/')[0]
+          return top
             ? {
-                manageUrl: `${options.url.replace(/\/+$/, '')}/groups/${group.full_path}/-/settings/service_accounts`,
+                manageUrl: `${options.url.replace(/\/+$/, '')}/groups/${top}/-/settings/service_accounts`,
               }
             : {}
         } catch {

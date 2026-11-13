@@ -32,6 +32,13 @@ describe('current user', () => {
     expect((await forge.getCurrentUser!()).manageUrl).toBe(
       'https://gitlab.test/groups/acme/-/settings/service_accounts',
     )
+    server.groups = []
+    server.memberProjects = ['shapes/team']
+    expect((await forge.getCurrentUser!()).manageUrl).toBe(
+      'https://gitlab.test/groups/shapes/-/settings/service_accounts',
+    )
+    server.memberProjects = []
+    expect((await forge.getCurrentUser!()).manageUrl).toBeUndefined()
   })
 })
 

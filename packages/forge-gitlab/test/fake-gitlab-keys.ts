@@ -57,6 +57,9 @@ export class FakeGitLabKeys {
 
   /** Whether `GET /user` answers as a group's service account. */
   bot = false
+  /** Groups and project namespaces the account is a member of. */
+  groups: string[] = ['acme/web']
+  memberProjects: string[] = []
 
   private route(method: string, s: string[], body: Record<string, unknown>): Response {
     if (method === 'GET' && s.length === 1 && s[0] === 'user')
@@ -71,7 +74,15 @@ export class FakeGitLabKeys {
         bot: this.bot,
       })
     if (method === 'GET' && s.length === 1 && s[0] === 'groups')
-      return json(200, [{ full_path: 'acme' }])
+      return json(
+        200,
+        this.groups.map((full_path) => ({ full_path })),
+      )
+    if (method === 'GET' && s.length === 1 && s[0] === 'projects')
+      return json(
+        200,
+        this.memberProjects.map((full_path) => ({ namespace: { full_path } })),
+      )
     if (s[0] === 'user' && s[1] === 'keys') {
       if (method === 'GET' && s.length === 2) return json(200, [...this.userKeys.values()])
       if (method === 'POST' && s.length === 2) {
