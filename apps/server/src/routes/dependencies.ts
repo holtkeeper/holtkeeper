@@ -140,6 +140,11 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
   }
   const canReadAnalyses = (principal: Principal) => (repo: RepoRef) =>
     canSee(principal, 'analyses:read', repoTarget(config, repo))
+  const canReadBundles = async (principal: Principal) => {
+    const off = await analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'bundle')
+    const canRead = canReadAnalyses(principal)
+    return (repo: RepoRef) => canRead(repo) && !off(repo)
+  }
 
   const tableKey = async (principal: Principal) => {
     const scope = await context.reach(principal)
@@ -328,7 +333,9 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
       latestHeadsWithMetrics(store.analyses, kinds, { kind: 'audit' }),
       licenseSightings(store.analyses, canReadAnalyses(principal)),
       ref.ecosystem === 'npm'
-        ? bundleShares(store.analyses, canReadAnalyses(principal), ref.name)
+        ? canReadBundles(principal).then((readable) =>
+            bundleShares(store.analyses, readable, ref.name),
+          )
         : [],
       renovateMergeRequests(store.analyses, canReadAnalyses(principal)),
       libraryDecisions(

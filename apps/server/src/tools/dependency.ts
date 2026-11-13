@@ -35,6 +35,8 @@ export interface DependencyContext {
   canReadAudits: RepoFilter
   /** Repositories whose audit `repo.analyzers` turns off; their audit runs are left out. */
   auditOff?: () => Promise<RepoFilter>
+  /** Repositories whose `bundle` analyzer `repo.analyzers` turns off; their bundles are left out. */
+  bundleOff?: () => Promise<RepoFilter>
   knowledge: KnowledgeToolsContext
   libraries?: Pick<LibraryStore, 'getLibrary' | 'listVersions'>
   /** The teams of a repository (innermost config groups), named on every user. */
@@ -194,7 +196,12 @@ async function licenseSection(context: DependencyContext, query: Resolved) {
 
 async function bundleSection(context: DependencyContext, query: Resolved) {
   if (query.ecosystem !== 'npm') return []
-  const shares = await bundleShares(context.analyses, context.canReadAnalyses, query.package)
+  const off = (await context.bundleOff?.()) ?? (() => false)
+  const shares = await bundleShares(
+    context.analyses,
+    (repo) => context.canReadAnalyses(repo) && !off(repo),
+    query.package,
+  )
   return shares.length
     ? shares.map(
         (share) =>

@@ -156,6 +156,7 @@ A group can tighten the organization's allowlist rules but never loosen them: th
 
 - is never queued by events, policies, schedules or freshness for those repositories;
 - reads **Off** with the reason in repository health and on the hub's overview, never as failing;
+- leaves the fleet pages it feeds: with **Assets** off the repository drops out of Quality › Assets, with **Bundle size** off out of Quality › Bundles and the bundle share of libraries, and with the vulnerability audit off out of Security findings and library advisories;
 - still runs when someone starts it by hand, and stored records stay readable.
 
 A repository turns them back on in its own settings.

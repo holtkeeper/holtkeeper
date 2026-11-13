@@ -1360,6 +1360,19 @@ describe('evaluate_dependency', () => {
       'No advisory in the newest audits of 0 repositories',
     )
   })
+
+  test('bundles repo.analyzers turns off are left out', async () => {
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['work:games/a'] },
+      value: { off: ['bundle'] },
+      secret: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    })
+    const result = await callTool('evaluate_dependency', { package: 'moment' }, asAdmin)
+    expect(result.content[0]?.text ?? '').not.toContain('`work:games/a` build `app`')
+  })
 })
 
 describe('API catalog index', () => {

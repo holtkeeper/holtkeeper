@@ -297,6 +297,20 @@ describe('fleet assets', () => {
     expect(view.items[0]?.analysisId).toBe(view.repos[0]?.analysisId)
   })
 
+  test('leaves out repositories whose assets analyzer is turned off', async () => {
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['work:tools/lint'] },
+      value: { off: ['assets'], reason: 'Backend only' },
+      secret: false,
+      updatedAt: '2026-10-30T10:00:00.000Z',
+    })
+    const view = await overview('')
+    expect(view.repos.map((repo) => repo.repo.path)).toEqual(['shapes/circle'])
+    expect(paths(view)).toEqual(['public/hero.png'])
+  })
+
   test('filters by status, kind, format, problem, group and repository and sorts', async () => {
     expect(paths(await overview('?status=policy'))).toEqual(['public/hero.png'])
     expect(paths(await overview('?status=saving'))).toEqual(['public/hero.png', 'static/f.ttf'])

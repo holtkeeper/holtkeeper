@@ -18,6 +18,7 @@ import {
   repoTarget,
 } from '../context.ts'
 import { createFleetCache } from '../fleet-cache.ts'
+import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { canSee } from '../visibility.ts'
 
 const overviewQuery = z.object({
@@ -37,7 +38,8 @@ const overviewQuery = z.object({
 
 /**
  * `GET /assets`: the fleet Assets table over the newest `assets` record of every repository the
- * caller may read (`analyses:read`), from stored metrics only, one page at a time.
+ * caller may read (`analyses:read`) and whose `assets` analyzer `repo.analyzers` does not turn
+ * off, from stored metrics only, one page at a time.
  * `GET /assets/repo?repo=forge:path`: a repository's effective asset policy, the newest `assets`
  * record as a summary and the trend of recent records. Needs `analyses:read` on the repository;
  * the policy's entry is named only with `settings:read` on its scope.
@@ -52,17 +54,20 @@ export function assetsRoutes(deps: ServerDeps) {
     const { group, repo: repoParam, cursor, limit, ...filters } = readQuery(c, overviewQuery)
     const principal = principalOf(c)
     const repo = parseRepo(repoParam)
-    const newest = (
-      await latestHeadsWithMetrics(store.analyses, kinds, {
+    const [heads, off] = await Promise.all([
+      latestHeadsWithMetrics(store.analyses, kinds, {
         kind: 'assets',
         ...(repo ? { repo } : {}),
-      })
-    )
+      }),
+      analyzerOffFilter(store, (each) => repoTarget(config, each), 'assets'),
+    ])
+    const newest = heads
       .map((head) => ({ head, target: repoTarget(config, head.repo) }))
       .filter(
-        ({ target }) =>
+        ({ head, target }) =>
           canSee(principal, 'analyses:read', target) &&
-          (group === undefined || target.groups.includes(group)),
+          (group === undefined || target.groups.includes(group)) &&
+          !off(head.repo),
       )
     const table = await cache.read(
       {

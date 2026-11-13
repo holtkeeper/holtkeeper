@@ -23,6 +23,7 @@ import {
   repoTarget,
 } from '../context.ts'
 import { createFleetCache } from '../fleet-cache.ts'
+import { analyzerOffFilter } from '../repo-analyzers.ts'
 import { BUNDLE_SETTING } from '../repo-health.ts'
 import { canSee } from '../visibility.ts'
 
@@ -38,8 +39,9 @@ const repoParam = (value: string | undefined) => {
 }
 
 /**
- * Bundle sizes by target: `GET /bundles` gives a row per repository the caller may read from the
- * stored metrics of its newest main-line records; `/bundles/targets` the history of every app build and
+ * Bundle sizes by target: `GET /bundles` gives a row per repository the caller may read and whose
+ * `bundle` analyzer `repo.analyzers` does not turn off, from the stored metrics of its newest
+ * main-line records; `/bundles/targets` the history of every app build and
  * published package of one repository and `/bundles/report` the report of one point of it, both
  * from record data.
  */
@@ -59,12 +61,14 @@ export function bundleRoutes(deps: ServerDeps) {
 
   app.get('/bundles', async (c) => {
     const principal = principalOf(c)
-    const [newest, settings] = await Promise.all([
+    const [newest, settings, off] = await Promise.all([
       latestHeadsWithMetrics(store.analyses, kinds, { kind: KIND }),
       store.settings.list(BUNDLE_SETTING),
+      analyzerOffFilter(store, (repo) => repoTarget(config, repo), KIND),
     ])
-    const visible = newest.filter((head) =>
-      canSee(principal, 'analyses:read', repoTarget(config, head.repo)),
+    const visible = newest.filter(
+      (head) =>
+        canSee(principal, 'analyses:read', repoTarget(config, head.repo)) && !off(head.repo),
     )
     const repos = await cache.read(
       {

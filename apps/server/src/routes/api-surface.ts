@@ -573,6 +573,7 @@ export function createApiSurface(
       canReadAnalyses: analysesOf(principal),
       canReadAudits: (repo) => canSee(principal, 'audits:read', repoTarget(config, repo)),
       auditOff: () => analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'audit'),
+      bundleOff: () => analyzerOffFilter(store, (repo) => repoTarget(config, repo), 'bundle'),
       ...(client ? { client } : {}),
       ...(token ? { token } : {}),
       now: deps.now,

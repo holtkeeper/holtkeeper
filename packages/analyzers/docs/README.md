@@ -39,7 +39,7 @@ Measures what a repository ships as targets of one record ([@holtkeeper/bundles]
 - `source`: `auto` (default: both), `build` or `packages`. Flags: `--source`, `--dist`, `--build`, `--history`.
 - **Nothing found.** When detection finds no build and no package qualifies (and none was skipped as measured before), the record keeps `notes` that the report lists under a warning and the job log repeats: each package considered for a build and why it was passed over (no `build` script, or a `build` script that calls no bundler and no bundler config), why no package counts as published (private root, nothing public with a version, or `packages`/`excludePackages` matching none), and a pointer to `analyzers.bundle.targets`, the `build`/`dist` shorthand or `source: 'packages'`.
 - `budgets`: maximum JS and CSS gzip bytes per target name or glob, e.g. `{ app: 400000, '@acme/*': 50000 }`; the run ignores them, the stored metrics judge each target by them ([Metrics](../../bundles/docs/README.md#metrics)).
-- **Applies** when the root `package.json` names workspaces, `publishConfig`, `exports` or a bundler dependency, or a `pnpm-workspace.yaml` exists.
+- **Applies** when the root `package.json` names workspaces, `publishConfig`, `exports` or a bundler dependency, or a `pnpm-workspace.yaml` exists. Repositories where it makes no sense turn it off with `repo.analyzers` (`{ off: ['bundle'] }`, [Analyzers turned off](../../../apps/server/docs/policies.md#analyzers-turned-off)): it is never queued automatically there, and the repository leaves Quality › Bundles and bundle shares.
 
 ## audit
 

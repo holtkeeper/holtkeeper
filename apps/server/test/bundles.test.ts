@@ -183,6 +183,20 @@ describe('bundles overview', () => {
     expect(judged.repos[1]?.targets[0]).toMatchObject({ budget: 40, overBudget: true })
   })
 
+  test('leaves out repositories whose bundle analyzer is turned off', async () => {
+    await add('shapes/circle', [target('web', 1000)], '2026-10-20')
+    await add('tools/lint', [target('cli', 50)], '2026-10-20')
+    await store.settings.put({
+      id: 'off',
+      key: 'repo.analyzers',
+      scope: { repos: ['work:tools/lint'] },
+      value: { off: ['bundle'] },
+      secret: false,
+      updatedAt: '2026-10-30T10:00:00.000Z',
+    })
+    expect((await overview()).repos.map((row) => row.repo.path)).toEqual(['shapes/circle'])
+  })
+
   test('reads at most its record limit per repository, as heads, never data', async () => {
     for (let day = 1; day <= OVERVIEW_RECORDS + 5; day++)
       await add(

@@ -17,6 +17,8 @@ Asset budgets for games and frontends: inventories the images, audio, video, fon
 | `naming`      | —                                    | With `sharp`: `{ width?, density? }` variant file templates, default `{name}-{width}w.{ext}` / `{name}@{density}x.{ext}`      |
 | `inlineSvg`   | `true`                               | Check inline `<svg>`/`<path>` in markup and components (flag `--inline-svg`); off with `convert: 'off'`                       |
 
+Repositories that ship no assets (backends, infrastructure, contracts) turn it off with `repo.analyzers` (`{ off: ['assets'] }`, [Analyzers turned off](../../../apps/server/docs/policies.md#analyzers-turned-off)): it is never queued automatically there, the hub's Assets card reads **Off** and the repository leaves Quality › Assets.
+
 From the policy the analyzer takes `ignore` (left out of the inventory), `minSaving.bytes` (smallest suggested saving), AVIF when `formats.raster` asks for it, and passes the whole policy to `analyzeAssets`, which records `policy` and its `violations` in the data, drops suggestions below `minSaving` (percent and bytes), drops format changes and `missing-modern-formats` findings under `formats.raster: 'keep'`, and leaves SVG files and inline SVGs alone under `formats.svg: 'keep'`.
 
 ## Policy
