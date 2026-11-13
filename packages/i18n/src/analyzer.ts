@@ -223,7 +223,7 @@ export const i18nAnalyzer = defineAnalyzer<I18nData, I18nOptions>({
   kind: 'i18n',
   analysis: i18nAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '6h' },
+  refresh: { on: 'change', minInterval: '30m' },
   appliesTo: hasTreeFile(isSourceFile),
   needs: { checkout: true },
   options: i18nOptions,

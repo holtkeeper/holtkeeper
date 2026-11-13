@@ -211,7 +211,7 @@ export const auditAnalyzer = defineAnalyzer({
   kind: 'audit',
   analysis: auditAnalysis,
   scope: 'repo',
-  refresh: { on: 'time', cadence: '1d' },
+  refresh: { on: 'time', cadence: '12h' },
   needs: { checkout: true },
   options: z.object({
     fix: z.boolean().default(false),

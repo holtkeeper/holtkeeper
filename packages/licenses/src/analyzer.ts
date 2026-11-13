@@ -133,7 +133,7 @@ export const licensesAnalyzer = defineAnalyzer<LicensesData, LicensesOptions>({
   kind: 'licenses',
   analysis: licensesAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '1d', paths: dependencyPaths },
+  refresh: { on: 'change', minInterval: '12h', paths: dependencyPaths },
   needs: { checkout: true, history: true },
   after: ['depgraph'],
   options: licensesOptionsSchema,

@@ -48,16 +48,16 @@ See every analyzer with where and when it runs, how its last week went and which
   />
   <Scroll>
 
-| Analyzer                                       | State                                    | Scope · runs when                           | Last 7 days                          | Overrides |
-| ---------------------------------------------- | ---------------------------------------- | ------------------------------------------- | ------------------------------------ | --------- |
-| **Supply chain**                               |                                          |                                             |                                      |           |
-| **Dependency graph** · `depgraph`              | <Tag tone="ok">On</Tag>                  | Every repository · on change, 6h            | 312 runs, all fine                   | —         |
-| **Vulnerability audit** · `audit`              | <Tag tone="ok">On</Tag>                  | Every repository · every 1d · Nightly audit | <Tag tone="bad">7 of 14 failed</Tag> | 1         |
-| **Quality**                                    |                                          |                                             |                                      |           |
-| **Bundle size** · `bundle`                     | <Tag tone="warn">Some repositories</Tag> | Widgets · Bundle backfill                   | 4 runs, all fine                     | 2         |
-| **Review** · `review` <Tag tone="acc">AI</Tag> | <Tag tone="ok">On</Tag>                  | Every repository · Merge request opened     | 2 stopped by budget                  | 1         |
-| **Releases and knowledge**                     |                                          |                                             |                                      |           |
-| **Guide** · `guide` <Tag tone="acc">AI</Tag>   | <Tag>Off</Tag>                           | Only when started                           | No runs                              | —         |
+| Analyzer                                       | State                                    | Scope · runs when                            | Last 7 days                          | Overrides |
+| ---------------------------------------------- | ---------------------------------------- | -------------------------------------------- | ------------------------------------ | --------- |
+| **Supply chain**                               |                                          |                                              |                                      |           |
+| **Dependency graph** · `depgraph`              | <Tag tone="ok">On</Tag>                  | Every repository · on change, 30m            | 312 runs, all fine                   | —         |
+| **Vulnerability audit** · `audit`              | <Tag tone="ok">On</Tag>                  | Every repository · every 12h · Nightly audit | <Tag tone="bad">7 of 14 failed</Tag> | 1         |
+| **Quality**                                    |                                          |                                              |                                      |           |
+| **Bundle size** · `bundle`                     | <Tag tone="warn">Some repositories</Tag> | Widgets · Bundle backfill                    | 4 runs, all fine                     | 2         |
+| **Review** · `review` <Tag tone="acc">AI</Tag> | <Tag tone="ok">On</Tag>                  | Every repository · Merge request opened      | 2 stopped by budget                  | 1         |
+| **Releases and knowledge**                     |                                          |                                              |                                      |           |
+| **Guide** · `guide` <Tag tone="acc">AI</Tag>   | <Tag>Off</Tag>                           | Only when started                            | No runs                              | —         |
 
   </Scroll>
 </Screen>

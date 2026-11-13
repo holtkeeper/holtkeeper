@@ -72,7 +72,7 @@ export const testIdsAnalyzer = defineAnalyzer<TestIdsData, TestIdsOptions>({
   kind: 'testids',
   analysis: testIdsAnalysis,
   scope: 'repo',
-  refresh: { on: 'change', minInterval: '1d' },
+  refresh: { on: 'change', minInterval: '30m' },
   appliesTo: hasTreeFile((path) =>
     Object.values(builtinSources).some((source) => source.matches(path)),
   ),
