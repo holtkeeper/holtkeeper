@@ -207,10 +207,12 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
             label: 'Path',
             value: (
               <>
-                <span className="mono truncate">{repo.path}</span>
-                <CopyButton text={() => repo.path} variant="ghost">
-                  Copy
-                </CopyButton>
+                <span className="mono min-w-0 break-all">{repo.path}</span>
+                <span className="shrink-0">
+                  <CopyButton text={() => repo.path} variant="ghost">
+                    Copy
+                  </CopyButton>
+                </span>
               </>
             ),
           },
@@ -223,25 +225,29 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
           {
             label: 'HEAD',
             value: overview.head ? (
-              <>
+              <span className="flex flex-wrap items-baseline gap-x-1.5">
                 <span className="mono">{shortSha(overview.head.sha)}</span>
-                <span className="text-muted">since {formatRelative(overview.head.at)}</span>
-              </>
+                <span className="whitespace-nowrap text-muted">
+                  since {formatRelative(overview.head.at)}
+                </span>
+              </span>
             ) : null,
           },
           {
             label: 'Groups',
             value: overview.groups.length ? (
-              <span className="flex flex-wrap gap-1">
+              <span className="flex min-w-0 flex-wrap gap-1">
                 {leafGroups(overview.groups).map((group) => (
                   <Link
                     key={group}
                     to="/repos/groups/$groupId"
                     params={{ groupId: group }}
-                    className="no-underline"
+                    className="flex min-w-0 max-w-full no-underline"
                   >
-                    <Tag>
-                      <GroupName group={group} path />
+                    <Tag className="max-w-full">
+                      <span className="truncate">
+                        <GroupName group={group} path />
+                      </span>
                     </Tag>
                   </Link>
                 ))}
@@ -251,7 +257,7 @@ function Facts({ repo, overview }: { repo: RepoRef; overview: Overview }) {
           {
             label: 'Toolchain',
             value: overview.toolchain.length ? (
-              <span className="mono truncate">
+              <span className="mono min-w-0 break-words">
                 {overview.toolchain.map((tool) => `${tool.name} ${tool.version}`).join(' · ')}
               </span>
             ) : null,
