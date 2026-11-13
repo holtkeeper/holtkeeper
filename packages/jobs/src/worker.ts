@@ -22,6 +22,13 @@ export interface WorkerOptions {
   /** Jobs run at the same time. Default 2. */
   concurrency?: number
   /**
+   * Express slots on top of `concurrency` that only jobs of `Analyzer.interactive` kinds of the
+   * served pools may take: when every regular slot is busy the worker still claims up to this many
+   * such jobs. They take a free regular slot first like any job (and are claimed before other
+   * kinds); other jobs never take an express slot. 0 turns the lane off. Default 1.
+   */
+  prioritySlots?: number
+  /**
    * Claims only jobs queued for at least this long, so workers without a delay get new jobs first
    * (`ClaimRules.delayMs`). Keep it above their `pollMs`. Default 0.
    */
@@ -161,10 +168,14 @@ export function isBudgetStop(error: unknown): boolean {
 export const exponentialBackoff = (attempt: number) =>
   Math.min(60_000 * 2 ** Math.max(attempt - 1, 0), 3_600_000)
 
-/** A claimed job's place in the worker: `held` once it occupies a concurrency slot. */
+/**
+ * A claimed job's place in the worker: `held` once it occupies a slot, a regular one or, for
+ * `express` tickets, an express slot reserved when it was claimed.
+ */
 interface Ticket {
   held: boolean
   refill: boolean
+  express: boolean
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
@@ -221,6 +232,12 @@ export function createWorker(options: WorkerOptions): Worker {
     ? Math.max(1, options.maxWaiting ?? Math.max(4, 2 * concurrency))
     : Infinity
 
+  const prioritySlots = Math.max(0, options.prioritySlots ?? 1)
+  const urgentKinds = (rules.priority ?? []).filter((kind) =>
+    rules.only ? rules.only.includes(kind) : !(rules.except ?? []).includes(kind),
+  )
+  const expressRules = { ...rules, only: urgentKinds }
+
   const maxJobs = options.maxJobs ?? Infinity
   const active = new Set<Promise<Job | undefined>>()
   const controllers = new Map<AbortController, Ticket>()
@@ -228,6 +245,7 @@ export function createWorker(options: WorkerOptions): Worker {
   let claimed = 0
   let admitted = 0
   let waiting = 0
+  let express = 0
   let stopped = false
   let filling = false
   let poll: ReturnType<typeof setInterval> | undefined
@@ -289,7 +307,7 @@ export function createWorker(options: WorkerOptions): Worker {
    * Hands free slots to waiting jobs, oldest claim first. A job the admission hook refuses
    * (its forge or AI credential is busy) is passed over for younger ones, so one saturated
    * credential does not block the rest, but it never loses a free slot to a younger job that
-   * merely asked first.
+   * merely asked first. Express tickets already own their slot and only need admission.
    */
   function pump(): Promise<void> {
     pumping ??= drain().finally(() => {
@@ -300,14 +318,17 @@ export function createWorker(options: WorkerOptions): Worker {
 
   async function drain() {
     for (const entry of queue.slice()) {
-      if (admitted >= concurrency) return
+      const full = () => !entry.ticket.express && admitted >= concurrency
+      if (full()) continue
       // oxlint-disable-next-line no-await-in-loop -- strictly oldest first
-      if (!(await admit(entry.job)) || admitted >= concurrency) continue
+      if (!(await admit(entry.job)) || full()) continue
       const index = queue.indexOf(entry)
       if (index === -1) continue
       queue.splice(index, 1)
-      waiting--
-      admitted++
+      if (!entry.ticket.express) {
+        waiting--
+        admitted++
+      }
       entry.ticket.held = true
       if (entry.ticket.refill) void fill()
     }
@@ -515,19 +536,21 @@ export function createWorker(options: WorkerOptions): Worker {
     }
   }
 
-  const claim = async () => {
+  const claim = async (lane = rules) => {
     if (claimed >= maxJobs) return undefined
-    const job = await store.jobs.claim(workerId, at(), rules)
+    const job = await store.jobs.claim(workerId, at(), lane)
     if (job) claimed++
     return job
   }
 
-  const track = (job: Job, refill: boolean) => {
-    const ticket: Ticket = { held: !admission, refill }
-    if (ticket.held) admitted++
+  const track = (job: Job, refill: boolean, inExpress = false) => {
+    const ticket: Ticket = { held: !admission, refill, express: inExpress }
+    if (inExpress) express++
+    else if (ticket.held) admitted++
     else waiting++
     const run = execute(job, ticket).finally(() => {
-      if (ticket.held) {
+      if (inExpress) express--
+      else if (ticket.held) {
         admitted--
         if (queue.length) void pump()
       } else waiting--
@@ -559,14 +582,22 @@ export function createWorker(options: WorkerOptions): Worker {
     if (filling || stopped) return
     filling = true
     try {
-      const claimNext = async (): Promise<void> => {
-        if (stopped || admitted >= concurrency || waiting >= maxWaiting) return
+      const claimNext = async (): Promise<boolean> => {
+        if (stopped) return false
+        if (admitted >= concurrency || waiting >= maxWaiting) return true
         const job = await claim()
-        if (!job) return
+        if (!job) return false
         void track(job, true)
-        await claimNext()
+        return claimNext()
       }
-      await claimNext()
+      const claimExpress = async (): Promise<void> => {
+        if (stopped || express >= prioritySlots) return
+        const job = await claim(expressRules)
+        if (!job) return
+        void track(job, true, true)
+        await claimExpress()
+      }
+      if ((await claimNext()) && urgentKinds.length > 0) await claimExpress()
     } catch (error) {
       say(`claiming jobs failed: ${messageOf(error)}`)
     } finally {

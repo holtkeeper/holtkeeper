@@ -29,11 +29,13 @@ The persistence contract. Everything Holtkeeper stores goes through `Store`; imp
 `JobStore` is the queue of [@holtkeeper/jobs](../../jobs/docs/README.md). A `Job` is one analyzer run for one repository (or one config group: `repo` is `{ forge, path: <group> }` and `group` is set) with `status` `queued | running | succeeded | failed | blocked | canceled` (`blocked`: an AI budget refused or stopped the run; final, not retried, not a failure) and `trigger` `schedule | manual | command | webhook | tag | push | poll | new-repo | freshness` (`manual` and `command`, a merge request comment command, mean a person asked).
 
 - `enqueue` — defaults: `maxAttempts` 3, `runAfter` = `createdAt`, empty `options` and `log`.
-- `claim(workerId, now, rules?)` — atomically takes the first due queued job in `(runAfter, enqueue order)` that may start next to the running jobs of its repository, marks it running and counts the attempt. `ClaimRules` name analyzer kinds: `exclusive` kinds change their repository, `after` maps a kind to the kinds whose results it reads, `delayMs` limits the claim to jobs due at least that long before `now`, `only` to jobs of the listed kinds and `except` to jobs of other kinds (worker pools). A job is skipped while its repository:
+- `claim(workerId, now, rules?)` — atomically takes the first due queued job in `(priority kind first, runAfter, enqueue order)` that may start next to the running jobs of its repository, marks it running and counts the attempt. `ClaimRules` name analyzer kinds: `exclusive` kinds change their repository, `after` maps a kind to the kinds whose results it reads, `delayMs` limits the claim to jobs due at least that long before `now`, `only` to jobs of the listed kinds and `except` to jobs of other kinds (worker pools), `priority` lists latency-sensitive kinds whose due jobs go before every other job and ignore `delayMs`. "Queued ahead" below means `(runAfter, enqueue order)`. A job is skipped while its repository:
   - runs a job of the same analyzer;
   - runs anything, when the job is exclusive;
   - runs an exclusive job or has one queued ahead of it, so readers neither overtake nor starve it;
   - runs a job of a kind the job comes `after`, or has one queued ahead of it.
+
+  A priority job ignores the "queued ahead" parts of the last two rules: only a running exclusive or `after` job holds it back, so an exclusive job waiting deep in the queue never delays a review of its repository. The exclusive job then waits for the running review like for anything else. The SQL stores look for a startable priority job first and fall back to the plain claim, so both lookups walk the due index in claim order.
 
   Without `rules` only the first rule applies, so jobs of different analyzers of one repository run side by side.
 

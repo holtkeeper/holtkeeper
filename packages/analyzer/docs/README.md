@@ -6,6 +6,8 @@ The contract between analyzers and the runner that runs them (the task engine of
 
 `pool: '<name>'` puts the analyzer's jobs in a worker pool: only workers started for that pool claim them (`DEFAULT_POOL`, `default`, is the pool of analyzers that name none). The `write-task` analyzer uses `write`, so code-changing agents run only on dedicated workers.
 
+`interactive: true` marks an analyzer a person waits on right now (`review`, which also answers replies in its threads). Its jobs become `ClaimRules.priority` kinds: the queue claims them before every other due job however long the queue is, claim delays never hold them back, and workers keep express slots (`prioritySlots`) for them while their regular slots are busy. Every other claim rule still applies.
+
 `defaultBranchOnly: true` marks an analyzer whose run reads only the default branch and rejects a `ref`; event triggers and merge request policies, whose jobs carry one, leave it out instead of queuing a job bound to fail.
 
 ## Metrics

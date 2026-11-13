@@ -724,6 +724,41 @@ interface FailureRow {
   error: string | null
 }
 
+type ClaimParams = [string, string, string, string, string, string | null, string]
+
+const claimStatement = (urgent: boolean) =>
+  `UPDATE jobs SET status = 'running', attempts = attempts + 1, worker_id = ?1, started_at = ?2,
+     heartbeat_at = ?2, finished_at = NULL,
+     attempts_history = json_insert(attempts_history, '$[#]',
+       json_object('n', attempts + 1, 'status', 'running', 'startedAt', ?2, 'workerId', ?1))
+   WHERE id = (
+     SELECT j.id FROM jobs j
+     WHERE j.status = 'queued'
+       AND ${urgent ? `j.run_after <= ?2 AND j.analyzer IN (SELECT value FROM json_each(?3))` : `j.run_after <= ?3`}
+       AND (?6 IS NULL OR j.analyzer IN (SELECT value FROM json_each(?6)))
+       AND j.analyzer NOT IN (SELECT value FROM json_each(?7))
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs r
+         WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
+           AND (r.analyzer = j.analyzer OR j.analyzer IN (SELECT value FROM json_each(?4)))
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM jobs d
+         WHERE d.repo_forge = j.repo_forge AND d.repo_path = j.repo_path
+           AND (d.analyzer IN (SELECT value FROM json_each(?4))
+             OR d.analyzer IN (SELECT value FROM json_each(?5, '$.' || json_quote(j.analyzer))))
+           AND (d.status = 'running'${
+             urgent
+               ? ''
+               : `
+             OR (d.status = 'queued' AND (d.run_after < j.run_after
+               OR (d.run_after = j.run_after AND d.seq < j.seq)))`
+           })
+       )
+     ORDER BY j.run_after, j.seq LIMIT 1
+   )
+   RETURNING *`
+
 function sqliteJobs(db: Database): JobStore {
   const sql = {
     insert: db.query<
@@ -751,34 +786,8 @@ function sqliteJobs(db: Database): JobStore {
        RETURNING *`,
     ),
     // One statement, so picking and taking the job is atomic even across processes.
-    claim: db.query<JobRow, [string, string, string, string, string, string | null, string]>(
-      `UPDATE jobs SET status = 'running', attempts = attempts + 1, worker_id = ?1, started_at = ?2,
-         heartbeat_at = ?2, finished_at = NULL,
-         attempts_history = json_insert(attempts_history, '$[#]',
-           json_object('n', attempts + 1, 'status', 'running', 'startedAt', ?2, 'workerId', ?1))
-       WHERE id = (
-         SELECT j.id FROM jobs j
-         WHERE j.status = 'queued' AND j.run_after <= ?5
-           AND (?6 IS NULL OR j.analyzer IN (SELECT value FROM json_each(?6)))
-           AND j.analyzer NOT IN (SELECT value FROM json_each(?7))
-           AND NOT EXISTS (
-             SELECT 1 FROM jobs r
-             WHERE r.status = 'running' AND r.repo_forge = j.repo_forge AND r.repo_path = j.repo_path
-               AND (r.analyzer = j.analyzer OR j.analyzer IN (SELECT value FROM json_each(?3)))
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM jobs d
-             WHERE d.repo_forge = j.repo_forge AND d.repo_path = j.repo_path
-               AND (d.analyzer IN (SELECT value FROM json_each(?3))
-                 OR d.analyzer IN (SELECT value FROM json_each(?4, '$.' || json_quote(j.analyzer))))
-               AND (d.status = 'running'
-                 OR (d.status = 'queued' AND (d.run_after < j.run_after
-                   OR (d.run_after = j.run_after AND d.seq < j.seq))))
-           )
-         ORDER BY j.run_after, j.seq LIMIT 1
-       )
-       RETURNING *`,
-    ),
+    claim: db.query<JobRow, ClaimParams>(claimStatement(false)),
+    claimUrgent: db.query<JobRow, ClaimParams>(claimStatement(true)),
     heartbeat: db.query<{ id: string }, [string, string, string]>(
       `UPDATE jobs SET heartbeat_at = ?3 WHERE id = ?1 AND worker_id = ?2 AND status = 'running'
        RETURNING id`,
@@ -919,18 +928,22 @@ function sqliteJobs(db: Database): JobStore {
       if (!row) throw new Error('job insert returned nothing')
       return toJob(row)
     },
-    async claim(workerId, now, { exclusive = [], after = {}, delayMs, only, except = [] } = {}) {
-      return one(
-        sql.claim.get(
-          workerId,
-          now,
-          JSON.stringify(exclusive),
-          JSON.stringify(after),
-          claimDueBy(now, delayMs),
-          only ? JSON.stringify(only) : null,
-          JSON.stringify(except),
-        ),
-      )
+    async claim(
+      workerId,
+      now,
+      { exclusive = [], after = {}, delayMs, only, except = [], priority = [] } = {},
+    ) {
+      const shared = [
+        JSON.stringify(exclusive),
+        JSON.stringify(after),
+        only ? JSON.stringify(only) : null,
+        JSON.stringify(except),
+      ] as const
+      const urgent =
+        priority.length > 0
+          ? sql.claimUrgent.get(workerId, now, JSON.stringify(priority), ...shared)
+          : null
+      return one(urgent ?? sql.claim.get(workerId, now, claimDueBy(now, delayMs), ...shared))
     },
     async heartbeat(id, workerId, now) {
       return sql.heartbeat.get(id, workerId, now) !== null

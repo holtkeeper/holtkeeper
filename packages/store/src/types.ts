@@ -453,6 +453,14 @@ export interface ClaimRules {
   only?: string[]
   /** Never jobs of these kinds (they belong to another worker pool). */
   except?: string[]
+  /**
+   * Latency-sensitive kinds: a due job of one of them is claimed before every other due job,
+   * however long the queue, and `delayMs` does not hold it back. Only running jobs hold it back:
+   * an exclusive job or a job it comes `after` that is merely queued ahead of it does not, so a
+   * deep queue in front of that blocker never delays it. The pool, same-analyzer and
+   * exclusive-self rules still apply.
+   */
+  priority?: string[]
 }
 
 /**
@@ -464,12 +472,13 @@ export interface ClaimRules {
 export interface JobStore {
   enqueue(job: NewJob): Promise<Job>
   /**
-   * Takes the first queued job in `(runAfter, enqueue order)` with `runAfter <= now` that may start
+   * Takes the first queued job in `(priority kind first, runAfter, enqueue order)` with
+   * `runAfter <= now` that may start
    * next to the running jobs of its repository, marks it running for `workerId` and counts the
    * attempt. A job may start unless its repository runs a job of the same analyzer, the job is
    * exclusive and anything runs there, or an exclusive job or a job it comes `after` runs there or
-   * is queued ahead of it, so readers neither overtake nor starve an exclusive job. Without `rules`
-   * no kind is exclusive or ordered.
+   * (except for `priority` kinds) is queued ahead of it, so readers neither overtake nor starve an
+   * exclusive job. Without `rules` no kind is exclusive or ordered.
    */
   claim(workerId: string, now: Timestamp, rules?: ClaimRules): Promise<Job | undefined>
   /** Records that `workerId` still works on the job; `false` when it no longer runs it (canceled). */

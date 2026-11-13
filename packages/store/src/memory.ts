@@ -284,8 +284,13 @@ function memoryJobs(): JobStore {
       order.set(job.id, seq++)
       return clone(job)
     },
-    async claim(workerId, now, { exclusive = [], after = {}, delayMs, only, except = [] } = {}) {
+    async claim(
+      workerId,
+      now,
+      { exclusive = [], after = {}, delayMs, only, except = [], priority = [] } = {},
+    ) {
       const dueBy = claimDueBy(now, delayMs)
+      const urgent = (job: Job) => priority.includes(job.analyzer)
       const inPool = (job: Job) =>
         (!only || only.includes(job.analyzer)) && !except.includes(job.analyzer)
       const all = [...jobs.values()]
@@ -299,13 +304,17 @@ function memoryJobs(): JobStore {
               ((exclusive.includes(other.analyzer) ||
                 (after[job.analyzer] ?? []).includes(other.analyzer)) &&
                 (other.status === 'running' ||
-                  (other.status === 'queued' && ahead(other, job) < 0)))),
+                  (!urgent(job) && other.status === 'queued' && ahead(other, job) < 0)))),
         )
       const next = all
         .filter(
-          (job) => job.status === 'queued' && job.runAfter <= dueBy && inPool(job) && !blocked(job),
+          (job) =>
+            job.status === 'queued' &&
+            job.runAfter <= (urgent(job) ? now : dueBy) &&
+            inPool(job) &&
+            !blocked(job),
         )
-        .toSorted(ahead)[0]
+        .toSorted((a, b) => Number(urgent(b)) - Number(urgent(a)) || ahead(a, b))[0]
       if (!next) return undefined
       next.status = 'running'
       next.attempts += 1

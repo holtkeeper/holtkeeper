@@ -199,6 +199,13 @@ export interface Analyzer<Data = unknown, Options = Record<string, unknown>> {
    */
   pool?: string
   /**
+   * A person waits for the result right now (a merge request review, a reply in its thread). The
+   * queue claims its due jobs before every other job however long the queue is, workers keep
+   * express slots free for them and claim delays never hold them back. Every other claim rule
+   * (`exclusive`, `after`, `pool`, one job per analyzer and repository) still applies.
+   */
+  interactive?: boolean
+  /**
    * The run reads only the default branch and rejects a `ref`, so event triggers and merge request
    * policies, whose jobs carry one, never queue it.
    */

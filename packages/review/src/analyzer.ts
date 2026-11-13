@@ -137,6 +137,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
     analysis: reviewAnalysis,
     scope: 'repo',
     needs: { checkout: true, forge: true, agent: 'optional', history: true },
+    interactive: true,
     options: reviewOptionsSchema,
     flags: [
       { flag: 'mr', option: 'mergeRequest', description: 'merge request number (required)' },

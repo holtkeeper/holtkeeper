@@ -21,6 +21,12 @@ const claimLockKey = (repo: { forge: string; path: string }) =>
 
 class ClaimConflict extends Error {}
 
+interface Candidate {
+  id: string
+  repo_forge: string
+  repo_path: string
+}
+
 /** Whether `error` is the server rejecting a row that breaks a unique index. */
 export const isUniqueViolation = (error: unknown) =>
   error instanceof SQL.PostgresError && error.errno === '23505'
@@ -117,10 +123,14 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
       if (!stored) throw new Error('job insert returned nothing')
       return stored
     },
-    async claim(workerId, now, { exclusive = [], after = {}, delayMs, only, except = [] } = {}) {
+    async claim(
+      workerId,
+      now,
+      { exclusive = [], after = {}, delayMs, only, except = [], priority = [] } = {},
+    ) {
       const { sql, t } = await db()
       const dueBy = claimDueBy(now, delayMs)
-      const startable = () => sql`
+      const startable = (urgent: boolean) => sql`
         (${only === undefined}::boolean
           OR j.analyzer IN (SELECT jsonb_array_elements_text(${sql.json(only ?? [])}::jsonb)))
         AND j.analyzer NOT IN (SELECT jsonb_array_elements_text(${sql.json(except)}::jsonb))
@@ -136,19 +146,31 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
             AND (d.analyzer IN (SELECT jsonb_array_elements_text(${sql.json(exclusive)}::jsonb))
               OR d.analyzer IN (SELECT jsonb_array_elements_text(
                 COALESCE(${sql.json(after)}::jsonb -> j.analyzer, '[]'::jsonb))))
-            AND (d.status = 'running'
-              OR (d.status = 'queued' AND (d.run_after, d.seq) < (j.run_after, j.seq)))
+            AND (d.status = 'running' ${
+              urgent
+                ? sql``
+                : sql`OR (d.status = 'queued' AND (d.run_after, d.seq) < (j.run_after, j.seq))`
+            })
         )`
+      const due = (urgent: boolean) =>
+        urgent
+          ? sql`j.run_after <= ${now}::timestamptz
+              AND j.analyzer IN (SELECT jsonb_array_elements_text(${sql.json(priority)}::jsonb))`
+          : sql`j.run_after <= ${dueBy}::timestamptz`
       for (let attempt = 0; attempt <= CLAIM_RETRIES; attempt++) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- a retry runs only after the previous attempt lost a race
           return await sql.begin(async (tx) => {
-            const [next]: { id: string; repo_forge: string; repo_path: string }[] = await tx`
-              SELECT j.id, j.repo_forge, j.repo_path FROM ${t.jobs} j
-              WHERE j.status = 'queued' AND j.run_after <= ${dueBy}::timestamptz AND ${startable()}
-              ORDER BY j.run_after, j.seq
-              LIMIT 1
-              FOR UPDATE SKIP LOCKED`
+            const pick = async (urgent: boolean) => {
+              const [row]: Candidate[] = await tx`
+                SELECT j.id, j.repo_forge, j.repo_path FROM ${t.jobs} j
+                WHERE j.status = 'queued' AND ${due(urgent)} AND ${startable(urgent)}
+                ORDER BY j.run_after, j.seq
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED`
+              return row && { ...row, urgent }
+            }
+            const next = (priority.length > 0 && (await pick(true))) || (await pick(false))
             if (!next) return undefined
             const key = claimLockKey({ forge: next.repo_forge, path: next.repo_path })
             await tx`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`
@@ -159,7 +181,7 @@ export function postgresJobs(db: () => Promise<Db>): JobStore {
                 attempts_history = j.attempts_history || jsonb_build_array(jsonb_build_object(
                   'n', j.attempts + 1, 'status', 'running', 'startedAt', ${now}::text,
                   'workerId', ${workerId}::text))
-              WHERE j.id = ${next.id} AND j.status = 'queued' AND ${startable()}
+              WHERE j.id = ${next.id} AND j.status = 'queued' AND ${startable(next.urgent)}
               RETURNING j.*`
             const claimed = one(rows)
             if (!claimed) throw new ClaimConflict()

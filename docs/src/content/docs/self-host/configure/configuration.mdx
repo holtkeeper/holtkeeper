@@ -128,13 +128,14 @@ artifacts: {
 
 ## `jobs`
 
-| Field            | Default             | Meaning                                                                                                            |
-| ---------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `execution`      | `{ mode: 'host' }`  | Where job commands run; see [Job execution](/self-host/configure/job-execution/). The starting configs use `mise`. |
-| `concurrency`    | `2`                 | Jobs one worker process runs at once. `--concurrency` overrides it per process.                                    |
-| `cacheDir`       | `.holtkeeper/cache` | Bare git mirrors of analyzed repositories, reused between jobs.                                                    |
-| `timeoutMinutes` | `30`                | A job running longer is stopped; that counts as a failed attempt.                                                  |
-| `webhookSecret`  | none                | The secret GitLab webhooks must send; webhooks are refused without it.                                             |
+| Field            | Default             | Meaning                                                                                                                                     |
+| ---------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `execution`      | `{ mode: 'host' }`  | Where job commands run; see [Job execution](/self-host/configure/job-execution/). The starting configs use `mise`.                          |
+| `concurrency`    | `2`                 | Jobs one worker process runs at once. `--concurrency` overrides it per process.                                                             |
+| `prioritySlots`  | `1`                 | Extra slots per worker process that only merge request reviews take, so a review starts at once however long the queue. `0` turns them off. |
+| `cacheDir`       | `.holtkeeper/cache` | Bare git mirrors of analyzed repositories, reused between jobs.                                                                             |
+| `timeoutMinutes` | `30`                | A job running longer is stopped; that counts as a failed attempt.                                                                           |
+| `webhookSecret`  | none                | The secret GitLab webhooks must send; webhooks are refused without it.                                                                      |
 
 The job engine always runs, with these defaults when the file has no `jobs` section.
 

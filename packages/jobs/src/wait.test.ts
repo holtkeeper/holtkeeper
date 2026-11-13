@@ -22,6 +22,8 @@ const job = (overrides: Partial<Job> = {}): Job => ({
   ...overrides,
 })
 
+const at = (time: string) => ({ createdAt: time, runAfter: time })
+
 const rules = claimRulesOf([
   { kind: 'widgets', after: ['graph'] },
   { kind: 'graph' },
@@ -32,6 +34,14 @@ describe('claimRulesOf', () => {
   test('collects exclusive kinds and after lists', () => {
     expect(rules).toEqual({ exclusive: ['fixer'], after: { widgets: ['graph'] } })
     expect(claimRulesOf([], 5000)).toEqual({ exclusive: [], after: {}, delayMs: 5000 })
+  })
+
+  test('makes interactive kinds the priority kinds', () => {
+    expect(claimRulesOf([{ kind: 'widgets' }, { kind: 'answer', interactive: true }])).toEqual({
+      exclusive: [],
+      after: {},
+      priority: ['answer'],
+    })
   })
 
   test('keeps workers to the pools they serve', () => {
@@ -98,6 +108,25 @@ describe('waitReasons', () => {
     expect(waitReasons(later, [fixer], rules, now).reasons).toEqual([
       { kind: 'exclusive', analyzer: 'fixer', state: 'queued' },
     ])
+  })
+
+  test('counts priority jobs ahead of every other job', () => {
+    const urgentRules = { ...rules, priority: ['answer'] }
+    const square = { forge: 'work', path: 'shapes/square' }
+    const early = job({ repo: square, ...at('2026-03-04T08:00:00.000Z') })
+    const answer = job({ analyzer: 'answer', repo: square, ...at('2026-03-04T09:50:00.000Z') })
+    expect(waitReasons(job(), [early, answer], urgentRules, now).ahead).toBe(2)
+    expect(waitReasons(answer, [early, job()], urgentRules, now).ahead).toBe(0)
+  })
+
+  test('a priority job waits only for running exclusive jobs, not queued ones', () => {
+    const urgentRules = { ...rules, priority: ['answer'] }
+    const fixer = job({ analyzer: 'fixer', ...at('2026-03-04T08:00:00.000Z') })
+    const answer = job({ analyzer: 'answer', ...at('2026-03-04T09:30:00.000Z') })
+    expect(waitReasons(answer, [fixer], urgentRules, now).reasons).toEqual([])
+    expect(
+      waitReasons(answer, [{ ...fixer, status: 'running' }], urgentRules, now).reasons,
+    ).toEqual([{ kind: 'exclusive', analyzer: 'fixer', state: 'running' }])
   })
 
   test('a due job with nothing in its way only waits for a worker', () => {

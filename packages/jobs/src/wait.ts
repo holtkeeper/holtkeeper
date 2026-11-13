@@ -2,19 +2,21 @@ import { type AnyAnalyzer, DEFAULT_POOL } from '@holtkeeper/analyzer'
 import type { ClaimRules, Job } from '@holtkeeper/store'
 
 /**
- * The claim rules the analyzers declare: exclusive kinds, the kinds each one runs `after` and,
+ * The claim rules the analyzers declare: exclusive kinds, `interactive` kinds as `priority`, the
+ * kinds each one runs `after` and,
  * for a worker serving `pools` (default `[DEFAULT_POOL]`), the kinds of the pools it does not
  * serve (`except`). A worker that serves no `DEFAULT_POOL` takes only the kinds of its pools
  * (`only`), so it never claims jobs of unknown analyzers either.
  */
 export function claimRulesOf(
-  analyzers: readonly Pick<AnyAnalyzer, 'kind' | 'exclusive' | 'after' | 'pool'>[],
+  analyzers: readonly Pick<AnyAnalyzer, 'kind' | 'exclusive' | 'after' | 'pool' | 'interactive'>[],
   delayMs?: number,
   pools: readonly string[] = [DEFAULT_POOL],
 ): ClaimRules {
   const served = (analyzer: Pick<AnyAnalyzer, 'pool'>) =>
     pools.includes(analyzer.pool ?? DEFAULT_POOL)
   const others = analyzers.filter((analyzer) => !served(analyzer)).map((a) => a.kind)
+  const priority = analyzers.filter((analyzer) => analyzer.interactive).map((a) => a.kind)
   return {
     ...(pools.includes(DEFAULT_POOL)
       ? others.length > 0 && { except: others }
@@ -23,6 +25,7 @@ export function claimRulesOf(
     after: Object.fromEntries(
       analyzers.flatMap((analyzer) => (analyzer.after ? [[analyzer.kind, analyzer.after]] : [])),
     ),
+    ...(priority.length > 0 && { priority }),
     ...(delayMs && { delayMs }),
   }
 }
@@ -45,7 +48,10 @@ export type WaitReason =
 export interface JobWait {
   /** Empty when nothing holds the job back but free worker slots. */
   reasons: WaitReason[]
-  /** Due queued jobs ahead of it in claim order, across every repository. */
+  /**
+   * Due queued jobs ahead of it in claim order (`ClaimRules.priority` kinds first), across every
+   * repository.
+   */
   ahead: number
 }
 
@@ -69,10 +75,13 @@ export function waitReasons(
   if (job.status !== 'queued') return { reasons: [], ahead: 0 }
   const others = queue.filter((other) => other.id !== job.id)
   const isAhead = (other: Job) => other.status === 'queued' && claimOrder(other, job) < 0
-  const ahead = others.filter((other) => isAhead(other) && other.runAfter <= now).length
+  const urgent = (other: Job) => Number(rules.priority?.includes(other.analyzer) ?? false)
+  const claimedFirst = (other: Job) =>
+    other.status === 'queued' && (urgent(other) - urgent(job) || -claimOrder(other, job)) > 0
+  const ahead = others.filter((other) => claimedFirst(other) && other.runAfter <= now).length
   const here = others.filter((other) => sameTarget(other, job))
   const running = here.filter((other) => other.status === 'running')
-  const queuedAhead = here.filter(isAhead)
+  const queuedAhead = urgent(job) ? [] : here.filter(isAhead)
   const exclusive = new Set(rules.exclusive ?? [])
   const after = new Set(rules.after?.[job.analyzer] ?? [])
   const reasons: WaitReason[] = []

@@ -22,13 +22,13 @@ export default defineConfig({
 })
 ```
 
-| Field    | Description                                                                                                                                                                                    |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `server` | Sign-in, store, vault key, listener, `publicUrl`, artifacts and their retention, the egress rules secret, credential rotation; see [@holtkeeper/server](../../../apps/server/docs/README.md).  |
-| `jobs`   | The worker: `execution` (mode, image, limits, egress proxy, environment allowlist), `concurrency`, `cacheDir`, `timeoutMinutes`, and the shared `webhookSecret`. Always present after parsing. |
-| `limits` | `distributed`: keep credential limiter counters in the store so several processes share them.                                                                                                  |
-| `ai`     | `providers`: AI provider plugins (`AiProviderPlugin` of [@holtkeeper/agent](../../agent/docs/README.md#provider-plugins)) that `ai-sdk` credentials may name by `package`, each package once.  |
-| `dryRun` | When `true`, jobs report what they would do without changing anything. Default `false`.                                                                                                        |
+| Field    | Description                                                                                                                                                                                                     |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server` | Sign-in, store, vault key, listener, `publicUrl`, artifacts and their retention, the egress rules secret, credential rotation; see [@holtkeeper/server](../../../apps/server/docs/README.md).                   |
+| `jobs`   | The worker: `execution` (mode, image, limits, egress proxy, environment allowlist), `concurrency`, `prioritySlots`, `cacheDir`, `timeoutMinutes`, and the shared `webhookSecret`. Always present after parsing. |
+| `limits` | `distributed`: keep credential limiter counters in the store so several processes share them.                                                                                                                   |
+| `ai`     | `providers`: AI provider plugins (`AiProviderPlugin` of [@holtkeeper/agent](../../agent/docs/README.md#provider-plugins)) that `ai-sdk` credentials may name by `package`, each package once.                   |
+| `dryRun` | When `true`, jobs report what they would do without changing anything. Default `false`.                                                                                                                         |
 
 ### Removed keys
 

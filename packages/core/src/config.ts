@@ -280,6 +280,12 @@ const jobsFileSchema = z.object({
   execution: executionSchema.optional(),
   /** Jobs run at the same time; one repository never runs two jobs at once. */
   concurrency: z.number().int().positive().default(2),
+  /**
+   * Extra slots per worker that only interactive jobs (merge request review) may take, so they
+   * start at once however long the queue and however busy the regular slots. 0 turns them off.
+   * Default 1.
+   */
+  prioritySlots: z.number().int().min(0).optional(),
   /** Bare mirrors of analyzed repositories, reused between jobs. */
   cacheDir: z.string().default('.holtkeeper/cache'),
   timeoutMinutes: z.number().positive().default(30),

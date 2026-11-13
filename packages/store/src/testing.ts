@@ -683,6 +683,62 @@ export function describeStoreContract(name: string, create: () => Store | Promis
       expect((await store.jobs.claim('w1', t(11), rules))?.id).toBeDefined()
     })
 
+    test('jobs: priority kinds are claimed first and ignore delayMs', async () => {
+      const old = await store.jobs.enqueue(job('games/a', t(1)))
+      await store.jobs.enqueue(job('games/b', t(2)))
+      const later = await store.jobs.enqueue(job('games/c', t(8), { analyzer: 'answer' }))
+      const fresh = await store.jobs.enqueue(job('games/d', t(10), { analyzer: 'answer' }))
+      await store.jobs.enqueue(job('games/e', t(5), { analyzer: 'answer', runAfter: t(30) }))
+      const rules = { priority: ['answer'], delayMs: 5 * 60_000 }
+
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(later.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(fresh.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(old.id)
+      expect((await store.jobs.claim('w1', t(10), { priority: ['answer'] }))?.analyzer).toBe(
+        'bundle',
+      )
+      expect(await store.jobs.claim('w1', t(10), rules)).toBeUndefined()
+    })
+
+    test('jobs: priority kinds keep the pool, same-analyzer and running-blocker rules', async () => {
+      const port = await store.jobs.enqueue(job('games/a', t(1), { analyzer: 'port' }))
+      const reader = await store.jobs.enqueue(job('games/b', t(3), { analyzer: 'answer' }))
+      const busy = await store.jobs.enqueue(job('games/c', t(4), { analyzer: 'answer' }))
+      const twin = await store.jobs.enqueue(job('games/c', t(5), { analyzer: 'answer' }))
+      const plain = await store.jobs.enqueue(job('games/d', t(6)))
+      const read = await store.jobs.enqueue(job('games/b', t(0)))
+      const rules = { priority: ['answer'], exclusive: ['port'], after: { answer: ['bundle'] } }
+
+      expect((await store.jobs.claim('w1', t(10), { ...rules, except: ['answer'] }))?.id).toBe(
+        read.id,
+      )
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(busy.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(port.id)
+      expect((await store.jobs.claim('w1', t(10), rules))?.id).toBe(plain.id)
+      expect(await store.jobs.claim('w1', t(10), rules)).toBeUndefined()
+      for (const waiting of [reader, twin])
+        expect((await store.jobs.get(waiting.id))?.status).toBe('queued')
+    })
+
+    test('jobs: a priority job overtakes exclusive and after jobs that are only queued', async () => {
+      for (let i = 0; i < 3; i++) await store.jobs.enqueue(job(`games/x${i}`, t(0)))
+      const port = await store.jobs.enqueue(job('games/a', t(1), { analyzer: 'port' }))
+      const graph = await store.jobs.enqueue(job('games/b', t(1), { analyzer: 'graph' }))
+      const answer = await store.jobs.enqueue(job('games/a', t(5), { analyzer: 'answer' }))
+      const reader = await store.jobs.enqueue(job('games/b', t(5), { analyzer: 'answer' }))
+      const rules = { priority: ['answer'], exclusive: ['port'], after: { answer: ['graph'] } }
+      const express = { ...rules, only: ['answer'] }
+
+      expect((await store.jobs.claim('w1', t(10), express))?.id).toBe(answer.id)
+      expect((await store.jobs.claim('w1', t(10), express))?.id).toBe(reader.id)
+      expect(await store.jobs.claim('w1', t(10), express)).toBeUndefined()
+      const rest = []
+      for (let i = 0; i < 4; i++) rest.push((await store.jobs.claim('w1', t(10), rules))?.id)
+      expect(rest).not.toContain(port.id)
+      expect(rest).toContain(graph.id)
+      expect((await store.jobs.get(port.id))?.status).toBe('queued')
+    })
+
     test('jobs: only and except limit a claim to the kinds of a worker pool', async () => {
       const bundle = await store.jobs.enqueue(job('games/a', t(1)))
       const task = await store.jobs.enqueue(job('games/b', t(2), { analyzer: 'write-task' }))

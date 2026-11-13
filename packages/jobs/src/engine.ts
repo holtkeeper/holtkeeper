@@ -106,6 +106,7 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
         ...(options.cache && { cache: options.cache }),
       }),
     concurrency: jobs.concurrency,
+    ...(jobs.prioritySlots !== undefined && { prioritySlots: jobs.prioritySlots }),
     timeoutMs: jobs.timeoutMinutes * 60_000,
     ...(options.onFinished && { onFinished: options.onFinished }),
     ...(options.onCanceled && { onCanceled: options.onCanceled }),
