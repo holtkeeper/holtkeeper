@@ -67,8 +67,19 @@ The server uses the defaults; there is no setting for them.
 | `code.dependencies` | `path`, `depth?` (1–3)                                       | Files and workspace packages the file imports                                                               |
 
 - Languages: the parsers built into `@ast-grep/napi` — `typescript`, `tsx`, `javascript`, `css`, `html` for `code.search`; outline, symbol and references cover the JavaScript family. No dynamic languages are registered, so this package never conflicts with another package's one-time `registerDynamicLanguage` call.
-- Files are walked from the task directory; `node_modules`, `.git`, `dist`, `build`, `coverage`, `vendor`, hidden directories, symlinks, binary files and files over 1 MB are skipped. Paths are resolved with symlinks and refused outside the checkout.
+- Files are walked from the task directory; `node_modules`, `.git`, `dist`, `build`, `coverage`, `vendor`, hidden directories, symlinks and binary files are skipped. Paths are resolved with symlinks and refused outside the checkout.
+- Files over 1 MB (`MAX_FILE_BYTES`) are not searched, but never silently: `code.grep` and `code.search` name them in a `not searched: N files over 1.0 MB: <path> (<size>), …` line (first line after the match count, or after `no matches`), pointing lockfiles (`LOCKFILE_NAMES`: `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lock`, `go.sum`) at `lockfiles.resolve` and other files at `code.read`. `code.read` reads files up to 32 MB (`MAX_READ_BYTES`) in slices; for one over 1 MB its first line says so (and names `lockfiles.resolve` for a lockfile). It fails with `<path> is missing`, `<path> is binary` or `<path> is <size>, too large to read`.
 - `code.dependents`/`code.dependencies` use the module layer of `@holtkeeper/depgraph-js` (files under each workspace's `src/`, type-only imports excluded). It is built on first use and cached for the toolset's lifetime: create one toolset per run. `moduleGraph` replaces the loader.
+
+### `lockfiles` — `lockfileTools()`
+
+`lockfiles.resolve { package, path? }` answers which versions the lockfiles resolve for one package, so agents never grep a lockfile that is too large to search or marked binary in the diff. Every lockfile is parsed in full whatever its size (up to 32 MB) with the parsers of `@holtkeeper/depgraph-js` and `@holtkeeper/go-source`; the answer names each file with its format and size and says `parsed in full`.
+
+- npm packages: every `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock` (classic and berry), `pnpm-lock.yaml` and `bun.lock` in the repository (at most 8), or with `path` only the nearest one covering that directory or file. Per lockfile: the resolved versions or `<name> is not present in this lockfile (N packages)` with similar names, and per workspace (at most 15) the range its `package.json` declares, the range the lockfile recorded and the version it resolves, or `the lockfile does not resolve it`.
+- Go modules and packages (a name with `/` that is not `@scope/…`): every `go.mod`, or the nearest one covering `path`. The `require` owning the path (with `// indirect` and `replace` targets) and the matching `go.sum` lines with their kind (`module` tree hash, `go.mod` hash), or `not required by go.mod` / `go.sum has no entry for it`.
+- No lockfile in reach is a `ToolError` (`no go.mod covers <path>`).
+
+The review mounts this toolset on every pass; its `instructions` tell the agent to use it instead of grepping lockfiles.
 
 ### `docs` — `docsTools({ budget?, runner? })`
 

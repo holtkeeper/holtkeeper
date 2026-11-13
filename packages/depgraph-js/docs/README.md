@@ -17,6 +17,9 @@ const data = await analyzeDependencies({ dir, sources: jsSources() })
 - `jsModuleSource()` — layer `modules`, source `imports`.
 - `readJsWorkspaces(dir)`, `findLockfile(dir)`, `lockfiles`, `resolveImport(files, importer, specifier)`, `sourceExtensions`.
 - Pure lockfile parsers `parseNpmLock`, `parseBunLock`, `parsePnpmLock`, `parseYarnLock`: `(content, workspaces) => DepGraph`.
+- `indexLockfile(lockfile, content, workspaces): LockIndex` — what one lockfile resolves: `packages` (name → sorted versions) and `importers` (path → dependencies with the range the lockfile recorded as `specifier` and the resolved `version`, `workspace:<path>` for a workspace). `recorded` says whether the lockfile has its own entry for the importer; yarn classic never does, so its resolutions come from the `package.json` ranges. A dependency without `version` is not resolved by the lockfile.
+- `declaredDependencies(manifest)` — every `dependencies`, `optionalDependencies`, `peerDependencies` and `devDependencies` entry of a manifest-shaped object as `{ name, range, kind }`.
+- `lockfileOf(file)` — the supported lockfile format of a file name; `workspacesOf(manifests)` — a `JsWorkspaces` from manifests already read (by directory), for files read from another commit.
 
 Node ids: workspaces use the package name in every layer; packages are `name@version`; source files are paths relative to the repository.
 

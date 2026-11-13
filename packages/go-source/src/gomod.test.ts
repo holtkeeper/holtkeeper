@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { discoverGoModules, findGoModules, parseGoMod, parseGoWork } from './gomod.ts'
+import { discoverGoModules, findGoModules, parseGoMod, parseGoSum, parseGoWork } from './gomod.ts'
 
 describe('parseGoMod', () => {
   test('parses module, go and require directives in both forms', () => {
@@ -124,6 +124,20 @@ describe('module discovery', () => {
     expect(work.workspace).toBe(true)
     expect(work.modules.map((module) => [module.module, module.dir])).toEqual([
       ['example.com/acme/widgets/tools', 'tools'],
+    ])
+  })
+})
+
+describe('parseGoSum', () => {
+  test('separates tree hashes from go.mod hashes and skips malformed lines', () => {
+    expect(
+      parseGoSum(
+        'example.com/shapes v1.2.0 h1:abc=\nexample.com/shapes v1.2.0/go.mod h1:def=\n\nbroken line\nexample.com/colors v0.3.1/go.mod h1:ghi=\n',
+      ),
+    ).toEqual([
+      { path: 'example.com/shapes', version: 'v1.2.0', kind: 'module' },
+      { path: 'example.com/shapes', version: 'v1.2.0', kind: 'go.mod' },
+      { path: 'example.com/colors', version: 'v0.3.1', kind: 'go.mod' },
     ])
   })
 })

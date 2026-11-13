@@ -1,4 +1,5 @@
 import type { Agent, AgentResult, AgentTask, Toolset } from '@holtkeeper/agent'
+import { lockfileTools } from '@holtkeeper/agent-tools'
 import { z } from 'zod'
 
 import type { OpenThread } from './dedupe.ts'
@@ -60,6 +61,8 @@ export interface ReviewPromptInput {
   tests?: false
   /** The modern Go guidelines section (`goGuidelinesSection`), placed before the diff. */
   goGuidelines?: string
+  /** The computed dependency section (`dependencySection`), placed before the diff. */
+  dependencies?: string
 }
 
 const severityGuide = (tests: boolean) =>
@@ -80,7 +83,7 @@ const NPM_FILE = /(^|\/)package\.json$|\.(?:[cm]?[jt]sx?|vue|svelte|astro)$/
 /** Where the agent reads dependency versions: npm manifests, Go module files, or both. */
 function dependencySources(input: ReviewPromptInput): string {
   const paths = input.part?.files ?? input.files.map((file) => file.path)
-  const npm = 'package.json, the lockfile'
+  const npm = 'package.json, lockfiles.resolve'
   const goSources = 'the go.mod of the module owning the file (go.sum for the exact version)'
   if (!paths.some((path) => GO_FILE.test(path))) return npm
   return paths.some((path) => NPM_FILE.test(path)) ? `${npm} (Go code: ${goSources})` : goSources
@@ -108,6 +111,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
       `- At most ${input.maxComments} comments; when there are more, keep the most severe.`,
       `- Categories: ${listed.join(', ')}.${requestedTests ? ' Use `tests` only for the lines the checks flagged with it.' : ''}`,
       '- Do not repeat open threads listed in the prompt.',
+      '- Lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock, go.sum) are usually left out of the diff and too large for the search tools, so a search that finds nothing in them proves nothing. Never claim that a lockfile lacks a package, has a wrong entry or must be updated unless the computed dependency section or lockfiles.resolve says so; when the section says a lockfile is consistent, do not ask to update it.',
       '- verdict is `needs-changes` when any major or critical problem remains, `looks-good` otherwise.',
       '- `walkthrough`: the changes in scope grouped by logical change, most important first; each entry lists its files and says in one or two sentences what changed and why. Group related files instead of listing each one.',
       '- `effort`: how hard this change is for a human to review, 1 (trivial) to 5 (large or subtle, needs a careful look).',
@@ -174,6 +178,7 @@ export function reviewPrompt(input: ReviewPromptInput): string {
       ? `The diff is split for review; this is part ${input.part.index} of ${input.part.count}. Comment only on lines of the diff below, and read the other files of the merge request when the change depends on them. Every file in scope:\n${input.part.files.map((path) => `- ${path}`).join('\n')}`
       : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
+    input.dependencies?.trim() ?? '',
     input.goGuidelines?.trim() ?? '',
     `Diff:\n\n${diff}`,
   ]
@@ -295,6 +300,12 @@ type ReviewPass = Pick<AgentReview, 'summary' | 'verdict' | 'walkthrough' | 'eff
   candidates: Candidate[]
 }
 
+/** `toolsets` plus the `lockfiles` toolset, unless one of that name is already there. */
+const withLockfileTools = (toolsets: readonly Toolset[] = []): Toolset[] =>
+  toolsets.some((toolset) => toolset.name === 'lockfiles')
+    ? [...toolsets]
+    : [...toolsets, lockfileTools()]
+
 async function reviewPass(options: AgentReviewOptions, input: ReviewPromptInput) {
   const context = reviewContext(input)
   const investigate =
@@ -311,7 +322,7 @@ async function reviewPass(options: AgentReviewOptions, input: ReviewPromptInput)
       output: agentReviewSchema,
       taskKind: 'review',
       tier: options.deep ? 'deep' : 'main',
-      ...(options.toolsets ? { toolsets: options.toolsets } : {}),
+      toolsets: withLockfileTools(options.toolsets),
       maxTurns: options.maxTurns ?? 40,
       ...(investigate ? { followUpWithoutTools: INVESTIGATE_FOLLOW_UP } : {}),
       ...(options.signal ? { signal: options.signal } : {}),

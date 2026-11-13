@@ -70,6 +70,19 @@ const finding = (line: number, source: string) => ({
   source,
 })
 
+const depManifest = (deps: Record<string, string>) =>
+  JSON.stringify({ name: 'shapes-app', dependencies: deps })
+const depLock = (deps: Record<string, string>, versions: Record<string, string>) =>
+  JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'shapes-app', dependencies: deps },
+      ...Object.fromEntries(
+        Object.entries(versions).map(([name, version]) => [`node_modules/${name}`, { version }]),
+      ),
+    },
+  })
+
 const runOf = (extra: Partial<ReviewRun> & Pick<ReviewRun, 'forge'>): ReviewRun => ({
   repo,
   runner: createFakeRunner().runner,
@@ -287,12 +300,51 @@ describe('reviewMergeRequest', () => {
       const npm = await runGo(files)
       expect(npm.pins).toEqual([])
       expect(npm.task?.prompt).not.toContain('Modern Go guidelines')
-      expect(npm.task?.system).toContain('from package.json, the lockfile or repo_packages')
+      expect(npm.task?.system).toContain('from package.json, lockfiles.resolve or repo_packages')
 
       const off = await runGo(goFiles, { enabled: false })
       expect(off.pins).toEqual([])
       expect(off.task?.prompt).not.toContain('Modern Go guidelines')
     })
+  })
+
+  test('computes the dependency section from base and head when the lockfile diff is binary', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'review-deps-'))
+    try {
+      await writeFile(join(dir, 'package.json'), depManifest({ 'color-kit': '^2.0.0' }))
+      await writeFile(
+        join(dir, 'package-lock.json'),
+        depLock({ 'color-kit': '^2.0.0' }, { 'color-kit': '2.3.0' }),
+      )
+      const { forge } = fakeForge({
+        files: [
+          {
+            oldPath: 'package.json',
+            newPath: 'package.json',
+            status: 'modified',
+            diff: '@@ -1 +1 @@\n-{}\n+{"dependencies":{"color-kit":"^2.0.0"}}\n',
+          },
+          {
+            oldPath: 'package-lock.json',
+            newPath: 'package-lock.json',
+            status: 'modified',
+            diff: '',
+            binary: true,
+          },
+        ],
+        discussions: [],
+        contents: { 'package.json': depManifest({}), 'package-lock.json': depLock({}, {}) },
+      })
+      const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })
+      await reviewMergeRequest(runOf({ forge: requireReviewForge(forge), agent, dir }))
+      const prompt = tasks[0]?.prompt ?? ''
+      expect(prompt).toContain('## Dependency changes (computed from the lockfiles)')
+      expect(prompt).toContain('added dependencies `color-kit` ^2.0.0, lockfile resolves 2.3.0')
+      expect(prompt).toContain('Consistency: OK.')
+      expect(prompt.indexOf('Consistency: OK.')).toBeLessThan(prompt.indexOf('Diff:'))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   test('a deep review runs on the deep model tier', async () => {

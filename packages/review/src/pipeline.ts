@@ -23,6 +23,7 @@ import {
   reviewCheckNames,
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
+import { dependencySection } from './dependencies.ts'
 import { commentBody, isSummaryNote, summaryNote, threadNote } from './format.ts'
 import { changedGoModules, goGuidelinesSection } from './go-guidelines/prompt.ts'
 import type { GoGuidelineSet } from './go-guidelines/schema.ts'
@@ -341,9 +342,28 @@ async function goGuidelinesFor(run: ReviewRun, files: readonly FileScope[]): Pro
   }
 }
 
+/** The computed dependency section for the merge request; `''` when it touches no dependency file. */
+async function dependenciesFor(run: ReviewRun, loaded: LoadedReview): Promise<string> {
+  if (!run.dir) return ''
+  const { baseSha } = loaded.diff.refs
+  try {
+    const section = await dependencySection({
+      files: loaded.diff.files,
+      dir: run.dir,
+      readBase: (path) => run.forge.readFile(run.repo.path, path, baseSha),
+    })
+    if (section) run.log?.(`dependency changes computed: ${section.length} characters`)
+    return section
+  } catch (error) {
+    run.log?.(`dependency changes skipped: ${errorText(error)}`)
+    return ''
+  }
+}
+
 const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usage, requests) => {
   if (!run.agent || !run.dir) return undefined
   const goGuidelines = await goGuidelinesFor(run, planned.scope.files)
+  const dependencies = await dependenciesFor(run, loaded)
   const instructions = run.options.instructions?.trim()
   const guide = run.guide
     ? await run
@@ -400,6 +420,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       maxComments: run.options.maxComments,
       ...(run.options.language ? { language: run.options.language } : {}),
       ...(goGuidelines ? { goGuidelines } : {}),
+      ...(dependencies ? { dependencies } : {}),
     },
     ...(run.options.depth === 'deep' ? { deep: true } : {}),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),

@@ -4,7 +4,7 @@ import type { AgentTool } from '@holtkeeper/agent'
 import { z } from 'zod'
 
 import { type Budget, clip, renderBlocks } from '../budget.ts'
-import { listFiles, readText, splitLines } from '../files.ts'
+import { listFiles, readFileText, skippedForSize, splitLines } from '../files.ts'
 import { defineTool } from '../tool.ts'
 import { LANGUAGE_EXTENSIONS, LANGUAGES, linesOf, parseSource } from './syntax.ts'
 
@@ -42,10 +42,15 @@ export function searchTool(budget: Budget): AgentTool {
         ...(globs ? { globs } : {}),
       })
       const blocks: string[][] = []
+      const large: { path: string; size: number }[] = []
       for (const file of files) {
         signal.throwIfAborted()
-        const text = await readText(join(dir, file))
-        if (text === undefined) continue
+        const read = await readFileText(join(dir, file))
+        if (!('text' in read)) {
+          if (read.skipped === 'large') large.push({ path: file, size: read.size })
+          continue
+        }
+        const { text } = read
         let matches
         try {
           matches = parseSource(language, text).findAll(pattern)
@@ -58,8 +63,11 @@ export function searchTool(budget: Budget): AgentTool {
         for (const match of matches)
           blocks.push([`${file}:${linesOf(match).start}`, ...snippet(match.text(), budget)])
       }
-      if (blocks.length === 0) return `no matches in ${files.length} ${language} files`
-      return renderBlocks(blocks, budget, 'matches')
+      const note = skippedForSize(large)
+      if (blocks.length === 0)
+        return [`no matches in ${files.length} ${language} files`, note].filter(Boolean).join('\n')
+      if (!note) return renderBlocks(blocks, budget, 'matches')
+      return `${note}\n${renderBlocks(blocks, { ...budget, maxResultLines: budget.maxResultLines - 1 }, 'matches')}`
     },
   })
 }
@@ -73,7 +81,7 @@ export function grepTool(budget: Budget): AgentTool {
   return defineTool({
     name: 'code.grep',
     description:
-      'Text search over repository files (node_modules, build output and hidden directories skipped). Returns matching lines as "line: text" grouped by file, with optional context lines ("line- text"). Use it for strings, comments and config; use code.search or code.references for code.',
+      'Text search over repository files (node_modules, build output and hidden directories skipped). Returns matching lines as "line: text" grouped by file, with optional context lines ("line- text"). Use it for strings, comments and config; use code.search or code.references for code. Files over 1 MB are not searched and are listed in the result; for versions in lockfiles use lockfiles.resolve.',
     input: z.object({
       query: z.string().min(1),
       regex: z.boolean().optional().describe('Treat query as a JavaScript regular expression'),
@@ -93,11 +101,17 @@ export function grepTool(budget: Budget): AgentTool {
       }
       const files = await listFiles(dir, { signal, ...(globs ? { globs } : {}) })
       const blocks: string[][] = []
+      const large: { path: string; size: number }[] = []
       let total = 0
       for (const file of files) {
         signal.throwIfAborted()
-        const text = await readText(join(dir, file))
-        if (text === undefined || !matcher.test(text)) continue
+        const read = await readFileText(join(dir, file))
+        if (!('text' in read)) {
+          if (read.skipped === 'large') large.push({ path: file, size: read.size })
+          continue
+        }
+        const { text } = read
+        if (!matcher.test(text)) continue
         const lines = splitLines(text)
         const hits = lines.flatMap((line, index) => (matcher.test(line) ? [index] : []))
         if (hits.length === 0) continue
@@ -121,8 +135,13 @@ export function grepTool(budget: Budget): AgentTool {
         }
         blocks.push(block)
       }
-      if (blocks.length === 0) return `no matches in ${files.length} files`
-      return `${total} matches in ${blocks.length} files\n${renderBlocks(blocks, { ...budget, maxResultLines: budget.maxResultLines - 1 }, 'files with matches')}`
+      const note = skippedForSize(large)
+      if (blocks.length === 0)
+        return [`no matches in ${files.length - large.length} files`, note]
+          .filter(Boolean)
+          .join('\n')
+      const header = [`${total} matches in ${blocks.length} files`, note].filter(Boolean)
+      return `${header.join('\n')}\n${renderBlocks(blocks, { ...budget, maxResultLines: budget.maxResultLines - header.length }, 'files with matches')}`
     },
   })
 }

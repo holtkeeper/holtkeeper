@@ -15,8 +15,21 @@ const IGNORED_DIRECTORIES: ReadonlySet<string> = new Set([
   '.cache',
 ])
 
-/** Files larger than this are not searched. */
-const MAX_FILE_BYTES = 1_000_000
+/** Files larger than this are not searched; `code.read` still reads them in slices. */
+export const MAX_FILE_BYTES = 1_000_000
+
+/** Files larger than this are not read at all. */
+export const MAX_READ_BYTES = 32_000_000
+
+/** Lockfile names; agents query them with `lockfiles.resolve` instead of searching them. */
+export const LOCKFILE_NAMES: readonly string[] = [
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lock',
+  'go.sum',
+]
 
 const MAX_FILES = 50_000
 
@@ -94,16 +107,57 @@ export function extensionOf(file: string): string {
   return dot > 0 ? name.slice(dot).toLowerCase() : ''
 }
 
-/** Text of a searchable file, or `undefined` for large or binary files. */
-export async function readText(path: string): Promise<string | undefined> {
+/** A file's text, or why it was not read (with its size in bytes when it exists). */
+export type FileText =
+  | { text: string; size: number }
+  | { skipped: 'missing' | 'binary' | 'large'; size: number }
+
+/** The text of the file at `path` when it is a text file of at most `maxBytes`. */
+export async function readFileText(path: string, maxBytes = MAX_FILE_BYTES): Promise<FileText> {
+  let size = 0
   try {
     const info = await stat(path)
-    if (!info.isFile() || info.size > MAX_FILE_BYTES) return undefined
+    if (!info.isFile()) return { skipped: 'missing', size: 0 }
+    size = info.size
+    if (size > maxBytes) return { skipped: 'large', size }
     const text = await Bun.file(path).text()
-    return text.slice(0, 8000).includes('\0') ? undefined : text
+    return text.slice(0, 8000).includes('\0') ? { skipped: 'binary', size } : { text, size }
   } catch {
-    return undefined
+    return { skipped: 'missing', size }
   }
+}
+
+/** Text of a searchable file, or `undefined` for large or binary files. */
+export async function readText(path: string): Promise<string | undefined> {
+  const read = await readFileText(path)
+  return 'text' in read ? read.text : undefined
+}
+
+/** `1.4 MB`, `820 KB`, `12 B`. */
+export function formatSize(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
+  if (bytes >= 1000) return `${Math.round(bytes / 1000)} KB`
+  return `${bytes} B`
+}
+
+/** Whether `path` is a lockfile by its base name. */
+export const isLockfile = (path: string) => LOCKFILE_NAMES.includes(basename(path))
+
+/**
+ * One line telling the agent which files a search left out for size, with what to use instead;
+ * `''` when none were.
+ */
+export function skippedForSize(files: readonly { path: string; size: number }[]): string {
+  if (files.length === 0) return ''
+  const shown = files
+    .slice(0, 5)
+    .map((file) => `${file.path} (${formatSize(file.size)})`)
+    .join(', ')
+  const more = files.length > 5 ? ` and ${files.length - 5} more` : ''
+  const hint = files.some((file) => isLockfile(file.path))
+    ? 'query lockfiles with lockfiles.resolve instead, read other files in parts with code.read'
+    : 'read them in parts with code.read'
+  return `not searched: ${files.length} ${files.length === 1 ? 'file' : 'files'} over ${formatSize(MAX_FILE_BYTES)}: ${shown}${more}; ${hint}`
 }
 
 /** The lines of `text` without a trailing empty line. */

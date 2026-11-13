@@ -19,6 +19,7 @@ const where = resolveGoImport(sites[0].importPath, owningModule, modules)
 ## Modules and go.mod
 
 - `parseGoMod(content): GoMod` — `module`, `go`, `require` (`{ path, version, indirect? }`, `indirect` only for a `// indirect` marker), `replace` (`{ path, version?, to, toVersion?, local }`; `local` when the target is a directory: `./`, `../` or absolute) and `exclude` (`{ path, version }`), from both the single-line and the block forms.
+- `parseGoSum(content): GoSumEntry[]` — the lines of a `go.sum` as `{ path, version, kind }`, `kind` `go.mod` for `v1.2.3/go.mod` lines (hash of the `go.mod` only) and `module` for the tree hash; malformed lines are skipped.
 - `parseGoWork(content)` — the `use` directories of a `go.work`, normalized.
 - `findGoModules(dir, depth = 4)` — directories holding a `go.mod`, `.` first, skipping `node_modules`, `vendor`, `testdata` and hidden directories.
 - `readGoModules(dir, dirs): GoWorkspaceModule[]` — `{ module, dir, mod }` per directory with a `go.mod` that names a module.

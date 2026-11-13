@@ -94,12 +94,31 @@ describe('reviewSystemPrompt', () => {
 
   test('points dependency versions at the manifests of the languages in scope', () => {
     const npm = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3), fileOf('README.md', 1)]))
-    expect(npm).toContain('from package.json, the lockfile or repo_packages')
+    expect(npm).toContain('from package.json, lockfiles.resolve or repo_packages')
     const go = reviewSystemPrompt(inputOf([fileOf('shapes/circle.go', 3), fileOf('go.sum', 1)]))
     expect(go).toContain('from the go.mod of the module owning the file (go.sum')
     expect(go).not.toContain('package.json')
     const mixed = reviewSystemPrompt(inputOf([fileOf('web/app.tsx', 2), fileOf('api/main.go', 2)]))
-    expect(mixed).toContain('package.json, the lockfile (Go code: the go.mod')
+    expect(mixed).toContain('package.json, lockfiles.resolve (Go code: the go.mod')
+  })
+
+  test('forbids lockfile claims the computed section or lockfiles.resolve does not back', () => {
+    const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)]))
+    expect(prompt).toContain('Never claim that a lockfile lacks a package')
+    expect(prompt).toContain(
+      'when the section says a lockfile is consistent, do not ask to update it',
+    )
+  })
+
+  test('places the computed dependency section before the diff', () => {
+    const prompt = reviewPrompt(
+      inputOf([fileOf('src/widget.ts', 3)], {
+        dependencies: '## Dependency changes (computed from the lockfiles)\nConsistency: OK.',
+      }),
+    )
+    expect(prompt.indexOf('Consistency: OK.')).toBeGreaterThan(0)
+    expect(prompt.indexOf('Consistency: OK.')).toBeLessThan(prompt.indexOf('Diff:'))
+    expect(reviewPrompt(inputOf([fileOf('src/widget.ts', 3)]))).not.toContain('Dependency changes')
   })
 
   test('writes prose in the configured language and keeps code and terms in English', () => {
@@ -166,6 +185,7 @@ describe('runAgentReview', () => {
       usage: usage(),
     })
     expect(tasks).toHaveLength(1)
+    expect(tasks[0]?.toolsets?.map((toolset) => toolset.name)).toEqual(['lockfiles'])
     expect(tasks[0]?.followUpWithoutTools).toBeUndefined()
     expect(tasks[0]?.prompt).not.toContain('The diff is split')
     expect(result.candidates.map((c) => c.path)).toEqual(['src/widget.ts'])

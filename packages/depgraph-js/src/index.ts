@@ -10,8 +10,9 @@ export { parsePnpmLock } from './lockfiles/pnpm.ts'
 export type { LockfileParser } from './lockfiles/shared.ts'
 export { parseYarnLock } from './lockfiles/yarn.ts'
 export * from './lockfile.ts'
+export * from './locked.ts'
 export * from './modules.ts'
-export { jsWorkspaceSource, readJsWorkspaces } from './workspaces.ts'
+export { declaredDependencies, jsWorkspaceSource, readJsWorkspaces } from './workspaces.ts'
 export type { JsWorkspace, JsWorkspaces, Manifest } from './workspaces.ts'
 
 /** Every JavaScript source: workspaces, the lockfile package graph and source-file imports. */

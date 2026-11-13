@@ -10,8 +10,9 @@ export {
   sections,
   type Section,
 } from './docs/markdown.ts'
-export { insideDir, listFiles } from './files.ts'
+export { insideDir, listFiles, LOCKFILE_NAMES } from './files.ts'
 export * from './knowledge.ts'
 export * from './libraries.ts'
+export { lockfileTools } from './lockfiles.ts'
 export * from './registry.ts'
 export { defineTool, ToolError, type RegistryTool, type RegistryToolset } from './tool.ts'

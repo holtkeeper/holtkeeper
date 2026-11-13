@@ -120,6 +120,25 @@ export function parseGoMod(content: string): GoMod {
   return { module, ...(go ? { go } : {}), require, replace, exclude }
 }
 
+/** One line of a `go.sum`: the hash of a module version's tree, or of its `go.mod` only. */
+export interface GoSumEntry {
+  path: string
+  version: string
+  /** `go.mod` when the line hashes only the module's `go.mod` (`v1.2.3/go.mod`). */
+  kind: 'module' | 'go.mod'
+}
+
+/** Parses the `module version[/go.mod] hash` lines of a `go.sum`; malformed lines are skipped. */
+export function parseGoSum(content: string): GoSumEntry[] {
+  return content.split(/\r?\n/).flatMap((line): GoSumEntry[] => {
+    const [path, version, hash] = line.trim().split(/\s+/)
+    if (!path || !version || !hash) return []
+    return version.endsWith('/go.mod')
+      ? [{ path, version: version.slice(0, -'/go.mod'.length), kind: 'go.mod' }]
+      : [{ path, version, kind: 'module' }]
+  })
+}
+
 /** Directories listed by the `use` directives of a `go.work`, normalized relative paths. */
 export function parseGoWork(content: string): string[] {
   return directive(content, 'use').map((line) =>

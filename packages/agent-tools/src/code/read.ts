@@ -2,7 +2,16 @@ import type { AgentTool } from '@holtkeeper/agent'
 import { z } from 'zod'
 
 import { type Budget, clip } from '../budget.ts'
-import { insideDir, readText, relativePath, splitLines } from '../files.ts'
+import {
+  MAX_FILE_BYTES,
+  MAX_READ_BYTES,
+  formatSize,
+  insideDir,
+  isLockfile,
+  readFileText,
+  relativePath,
+  splitLines,
+} from '../files.ts'
 import { defineTool } from '../tool.ts'
 
 /** `code.read`: a line range of one file, never more than the budget's line limit. */
@@ -23,15 +32,26 @@ export function readTool(budget: Budget): AgentTool {
     }),
     async run({ path, start = 1, end }, { dir }) {
       const absolute = insideDir(dir, path)
-      const text = await readText(absolute)
-      if (text === undefined) throw new Error(`${path} is missing, binary or too large`)
-      const lines = splitLines(text)
+      const lockfileHint = isLockfile(path) ? '; query it with lockfiles.resolve' : ''
+      const read = await readFileText(absolute, MAX_READ_BYTES)
+      if (!('text' in read)) {
+        if (read.skipped === 'missing') throw new Error(`${path} is missing`)
+        if (read.skipped === 'binary') throw new Error(`${path} is binary`)
+        throw new Error(`${path} is ${formatSize(read.size)}, too large to read${lockfileHint}`)
+      }
+      const lines = splitLines(read.text)
       const name = relativePath(dir, absolute)
-      if (start > lines.length) return `${name} has ${lines.length} lines`
-      const wanted = Math.min(end ?? start + max - 1, lines.length)
-      const last = Math.min(wanted, start + max - 1)
+      const note =
+        read.size > MAX_FILE_BYTES
+          ? `${name} is ${formatSize(read.size)}: the search tools skip it, read it in slices${lockfileHint}`
+          : ''
+      if (start > lines.length)
+        return [note, `${name} has ${lines.length} lines`].filter(Boolean).join('\n')
+      const limit = note ? max - 1 : max
+      const wanted = Math.min(end ?? start + limit - 1, lines.length)
+      const last = Math.min(wanted, start + limit - 1)
       const width = String(last).length
-      const out = [`${name} ${start}-${last} of ${lines.length}`]
+      const out = [...(note ? [note] : []), `${name} ${start}-${last} of ${lines.length}`]
       for (let line = start; line <= last; line++)
         out.push(
           `${String(line).padStart(width)}| ${clip(lines[line - 1] ?? '', budget.maxLineLength)}`,
