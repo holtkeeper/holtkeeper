@@ -39,6 +39,11 @@ export interface LibraryRegistry {
   library(ref: LibraryRef): Promise<PublishedLibrary | undefined>
   /** The published archive of one version, unpacked; `undefined` when it does not exist. */
   archive(ref: LibraryRef, version: string): Promise<ArchiveFiles | undefined>
+  /**
+   * The text files of one version's full source as the registry serves it (the Go module zip),
+   * for source snapshots; left out by registries whose archives are not the source.
+   */
+  source?(ref: LibraryRef, version: string): Promise<ArchiveFiles | undefined>
 }
 
 /** The indexed versions of one library with why each is kept. */

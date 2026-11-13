@@ -46,10 +46,11 @@ export const depgraphAnalyzer = defineAnalyzer({
   refresh: { on: 'change', minInterval: '6h', paths: dependencyPaths },
   needs: { checkout: true },
   options: z.object({}),
-  async run({ dir, ref, runner }) {
+  async run({ dir, ref, runner, log }) {
     const data = await analyzeDependencies({
       dir: checkoutOf(dir),
       sources: [...jsSources(), goSource({ runner })],
+      ...(log ? { log } : {}),
     })
     return { data, ...(ref ? { ref } : {}) }
   },

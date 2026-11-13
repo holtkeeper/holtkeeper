@@ -39,6 +39,10 @@ export interface RunnerSpec {
   /** Runs `mise` or the container engine on the host. */
   hostRunner: CommandRunner
   log: (line: string) => void
+  /** From `RunnerFactoryOptions.egressEnv`; applied only with `execution.egress`. */
+  egressEnv?: Record<string, string>
+  /** From `RunnerFactoryOptions.jobEnv`; applied with or without `execution.egress`. */
+  jobEnv?: Record<string, string>
 }
 
 /** Builds a runner for a checkout; replaceable in tests. */
@@ -49,7 +53,20 @@ export const defaultWorkerImage = 'holtkeeper-worker:latest'
 
 const egressDir = '/etc/holtkeeper/egress'
 
-/** The default `CreateRunner`: `localMiseRunner` for `mise`, `containerRunner` for `container`. */
+/**
+ * Go variables every job command gets behind an egress proxy: no toolchain download. `GOFLAGS`
+ * stays unset because Go refuses `-mod=mod` in `go.work` checkouts; callers that run per module
+ * set it themselves.
+ */
+const egressGoEnv: Readonly<Record<string, string>> = {
+  GOTOOLCHAIN: 'local',
+}
+
+/**
+ * The default `CreateRunner`: `localMiseRunner` for `mise`, `containerRunner` for `container`.
+ * With `execution.egress`, commands get the proxy variables, `egressGoEnv` and `spec.egressEnv`;
+ * `spec.jobEnv` comes on top in every mode, and the toolchain setting's `env` above all.
+ */
 export const createRunner: CreateRunner = (spec) => {
   const { execution, toolchain, hostRunner, log } = spec
   const egress = execution.egress
@@ -59,7 +76,14 @@ export const createRunner: CreateRunner = (spec) => {
       )
     : undefined
   if (execution.egress) log(`egress proxy: ${new URL(execution.egress.url).host}`)
-  const env = { ...egress?.env, ...toolchain.env }
+  const env = {
+    ...egress?.env,
+    ...(egress && { ...egressGoEnv, ...spec.egressEnv }),
+    ...spec.jobEnv,
+    ...toolchain.env,
+  }
+  if (env.GOPRIVATE && (egress || spec.jobEnv?.GOPRIVATE))
+    log(`${egress ? 'egress: ' : ''}GOPRIVATE=${env.GOPRIVATE}`)
   if (spec.mode === 'mise')
     return localMiseRunner({
       toolchain,
@@ -100,6 +124,19 @@ export interface RunnerFactoryOptions {
   createRunner?: CreateRunner
   /** Default: `detectToolchain` from `@holtkeeper/toolchain`. */
   detect?: (dir: string) => Promise<Toolchain>
+  /**
+   * More variables for job commands behind `execution.egress`, read for every runner, e.g.
+   * `GOPRIVATE` for the forges the proxy adds credentials for. Never pass secrets: commands and
+   * their logs see these. Not called without an egress proxy; a failure is logged and skipped.
+   */
+  egressEnv?: () => Record<string, string> | Promise<Record<string, string>>
+  /**
+   * More variables for every job command in `mise` and `container` mode, with or without an
+   * egress proxy, read for every runner, e.g. `GOPRIVATE` for the private Go modules. They win over
+   * `egressEnv`. Never pass secrets: commands and their logs see these. A failure is logged and
+   * skipped.
+   */
+  jobEnv?: () => Record<string, string> | Promise<Record<string, string>>
 }
 
 /**
@@ -121,6 +158,8 @@ export function runnerFactory(
     const tools = miseToolSpecs(toolchain)
     log(`toolchain (${mode}): ${tools.length ? tools.join(' ') : 'no tools'}`)
     for (const note of toolchain.notes) log(`toolchain: ${note}`)
+    const egressEnv = execution.egress && (await readEnv(options.egressEnv, log, 'egress'))
+    const jobEnv = await readEnv(options.jobEnv, log, 'job')
     return create({
       mode,
       execution,
@@ -133,7 +172,24 @@ export function runnerFactory(
       })),
       hostRunner,
       log,
+      ...(egressEnv && { egressEnv }),
+      ...(jobEnv && { jobEnv }),
     })
+  }
+}
+
+async function readEnv(
+  read: RunnerFactoryOptions['egressEnv'],
+  log: (line: string) => void,
+  what: 'egress' | 'job',
+): Promise<Record<string, string> | undefined> {
+  if (!read) return undefined
+  try {
+    return await read()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    log(what === 'egress' ? `egress: job environment: ${message}` : `job environment: ${message}`)
+    return undefined
   }
 }
 

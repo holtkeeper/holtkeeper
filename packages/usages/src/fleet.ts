@@ -1,11 +1,14 @@
 import { compareVersions } from '@holtkeeper/depgraph'
+import { libraryOfModule } from '@holtkeeper/go-source'
 
 import {
   type NameCount,
+  type UsageEcosystem,
   type UsageKind,
   type UsageSite,
   type UsagesData,
   type UsedExport,
+  type UsedPackage,
   usageKinds,
 } from './model.ts'
 
@@ -40,7 +43,15 @@ export interface FleetExport<Origin = string> {
 
 /** Who uses a package, which versions, and which of its exports, members and props. */
 export interface PackageUsage<Origin = string> {
+  /** The package as records name it: for Go, the module path. */
   name: string
+  /** Absent for npm. */
+  ecosystem?: UsageEcosystem
+  /**
+   * Set when the query named a Go package inside a module (`example.com/m/sub` → `./sub`): only
+   * that package's exports are counted.
+   */
+  subpath?: string
   /** Versions in use, highest first. */
   versions: string[]
   repos: RepoPackageUsage<Origin>[]
@@ -60,14 +71,83 @@ const top = (counts: Map<string, number>, limit = 100): NameCount[] =>
 const sortVersions = (versions: Iterable<string>) =>
   [...new Set(versions)].toSorted((a, b) => compareVersions(b, a))
 
+/** A package name as a query gave it, mapped onto the names records use. */
+export interface ResolvedPackage {
+  name: string
+  ecosystem?: UsageEcosystem
+  /** The Go package inside the module `name` the query named; absent for the whole package. */
+  subpath?: string
+  /**
+   * Go: `name` is a module path without `/vN` and records hold other majors of it
+   * (`name/v2`, ...), so every major counts as one package.
+   */
+  family?: true
+}
+
+/**
+ * Maps a queried name onto the records: a package some record names exactly is taken as is (for
+ * a Go module that means every package of the module); otherwise a Go import path resolves to the
+ * longest Go module path any record names that is a prefix at a `/` boundary, with the rest as
+ * `subpath` (`./sub/pkg`). A Go module path without `/vN` that records also hold other majors of
+ * comes back as a `family`, all majors merged. Names nothing matches come back unchanged.
+ */
+export function resolveUsedPackage<Origin>(
+  entries: readonly UsageEntry<Origin>[],
+  name: string,
+): ResolvedPackage {
+  let best: UsedPackage | undefined
+  let exact: UsedPackage | undefined
+  let family = false
+  for (const { data } of entries)
+    for (const pkg of data.packages) {
+      if (pkg.name === name) exact ??= pkg
+      else if (pkg.ecosystem === 'Go' && libraryOfModule(pkg.name) === name) family = true
+      else if (
+        pkg.ecosystem === 'Go' &&
+        name.startsWith(`${pkg.name}/`) &&
+        (!best || pkg.name.length > best.name.length)
+      )
+        best = pkg
+    }
+  if (family) return { name, ecosystem: 'Go', family: true }
+  if (exact) return { name, ...(exact.ecosystem ? { ecosystem: exact.ecosystem } : {}) }
+  return best
+    ? { name: best.name, ecosystem: 'Go', subpath: `./${name.slice(best.name.length + 1)}` }
+    : { name }
+}
+
+/** The record's use of a resolved package; every major merged into one for a Go `family`. */
+function usedIn(data: UsagesData, resolved: ResolvedPackage): UsedPackage | undefined {
+  if (!resolved.family) return data.packages.find((pkg) => pkg.name === resolved.name)
+  const majors = data.packages.filter(
+    (pkg) => pkg.ecosystem === 'Go' && libraryOfModule(pkg.name) === resolved.name,
+  )
+  if (majors.length < 2) return majors[0]
+  return {
+    name: resolved.name,
+    ecosystem: 'Go',
+    versions: sortVersions(majors.flatMap((pkg) => pkg.versions)),
+    ranges: [...new Set(majors.flatMap((pkg) => pkg.ranges))].toSorted(),
+    workspaces: [...new Set(majors.flatMap((pkg) => pkg.workspaces))].toSorted(),
+    ...(majors.every((pkg) => pkg.local) ? { local: true } : {}),
+    count: majors.reduce((sum, pkg) => sum + pkg.count, 0),
+    files: majors.reduce((sum, pkg) => sum + pkg.files, 0),
+    exports: majors.flatMap((pkg) => pkg.exports),
+  }
+}
+
 /**
  * Every repository whose newest record uses `name`, most uses first, and its exports summed over
- * them. Repositories that only define the package themselves are left out of `repos`.
+ * them. Repositories that only define the package themselves are left out of `repos`. `name` may
+ * also be a Go import path inside a module (see `resolveUsedPackage`): then only that package's
+ * exports count, and each repository's `files` is the most files any of them is used in.
  */
 export function packageUsage<Origin>(
   entries: readonly UsageEntry<Origin>[],
-  name: string,
+  query: string,
 ): PackageUsage<Origin> {
+  const resolved = resolveUsedPackage(entries, query)
+  const { name, subpath } = resolved
   const repos: RepoPackageUsage<Origin>[] = []
   const exports = new Map<
     string,
@@ -83,18 +163,21 @@ export function packageUsage<Origin>(
     }
   >()
   for (const { origin, data } of entries) {
-    const used = data.packages.find((pkg) => pkg.name === name)
+    const used = usedIn(data, resolved)
     if (!used) continue
+    const picked =
+      subpath === undefined ? used.exports : used.exports.filter((item) => item.subpath === subpath)
+    if (!picked.length) continue
     repos.push({
       origin,
       versions: used.versions,
       ranges: used.ranges,
       workspaces: used.workspaces,
-      count: used.count,
-      files: used.files,
-      exports: used.exports,
+      count: subpath === undefined ? used.count : picked.reduce((sum, item) => sum + item.count, 0),
+      files: subpath === undefined ? used.files : Math.max(...picked.map((item) => item.files)),
+      exports: picked,
     })
-    for (const item of used.exports) {
+    for (const item of picked) {
       const key = `${item.subpath}\0${item.name}`
       const current =
         exports.get(key) ??
@@ -123,6 +206,8 @@ export function packageUsage<Origin>(
   }
   return {
     name,
+    ...(resolved.ecosystem ? { ecosystem: resolved.ecosystem } : {}),
+    ...(subpath !== undefined ? { subpath } : {}),
     versions: sortVersions(repos.flatMap((repo) => repo.versions)),
     repos: repos.toSorted((a, b) => b.count - a.count),
     exports: [...exports.values()]
@@ -136,6 +221,7 @@ export function packageUsage<Origin>(
 
 /** Which sites `findSites` returns. */
 export interface SiteQuery<Origin = string> {
+  /** Package name; for Go a module path or any import path inside it (see `resolveUsedPackage`). */
   package: string
   /** Exported name; every export when absent. */
   export?: string
@@ -180,12 +266,15 @@ export function findSites<Origin>(
 ): { sites: FoundSite<Origin>[]; total: number; more: number } {
   const limit = query.limit ?? 50
   const found: FoundSite<Origin>[] = []
+  const resolved = resolveUsedPackage(entries, query.package)
+  const { subpath } = resolved
   let total = 0
   for (const { origin, data } of entries) {
     if (query.origins && !query.origins.includes(origin)) continue
-    const used = data.packages.find((pkg) => pkg.name === query.package)
+    const used = usedIn(data, resolved)
     if (!used) continue
     for (const item of used.exports) {
+      if (subpath !== undefined && item.subpath !== subpath) continue
       if (query.export !== undefined && item.name !== query.export) continue
       const matching = item.sites.filter(
         (site) =>
@@ -246,6 +335,8 @@ export interface ImpactItem<Origin = string> {
 /** What upgrading a package does to the repositories using it. */
 export interface UpgradeImpact<Origin = string> {
   package: string
+  /** Ecosystem of the used package; absent for npm. */
+  ecosystem?: UsageEcosystem
   items: ImpactItem<Origin>[]
   /** Repositories with at least one affected use. */
   affected: Origin[]
@@ -255,13 +346,42 @@ export interface UpgradeImpact<Origin = string> {
 
 const memberLine = /^\s*(?:readonly\s+)?(?:get\s+|set\s+)?([A-Za-z_$][\w$]*)\??\s*[:(<]/
 
-/** Names of the members a declaration lists one per line, e.g. an interface's properties. */
+const goIdent = '[\\p{L}_][\\p{L}\\p{N}_]*'
+const goDeclaration = new RegExp(
+  `^type\\s+${goIdent}(?:\\[[^\\]]*\\])?\\s+(?:struct|interface)\\s*\\{`,
+  'u',
+)
+const goMethod = new RegExp(`^\\s*(${goIdent})\\s*\\(`, 'u')
+const goFields = new RegExp(`^\\s*(${goIdent}(?:\\s*,\\s*${goIdent})*)\\s+[^\\s/]`, 'u')
+const goEmbedded = new RegExp(
+  `^\\s*\\*?(?:${goIdent}\\.)?(${goIdent})(?:\\[.*\\])?\\s*(?:\x60[^\x60]*\x60)?\\s*$`,
+  'u',
+)
+
+/** Member names one line of a Go struct or interface body declares: fields, methods or embeds. */
+function goMembers(line: string): string[] {
+  if (/^\s*(?:\/\/|~)/.test(line)) return []
+  const method = goMethod.exec(line)?.[1]
+  if (method) return [method]
+  const fields = goFields.exec(line)?.[1]
+  if (fields) return fields.split(',').map((name) => name.trim())
+  const embedded = goEmbedded.exec(line)?.[1]
+  return embedded ? [embedded] : []
+}
+
+/**
+ * Names of the members a declaration lists one per line, e.g. an interface's properties; for a Go
+ * `type X struct {…}` or `type X interface {…}`, its field names (embedded types by their type
+ * name) and interface methods.
+ */
 export function declaredMembers(signature: string | undefined): Set<string> {
   const names = new Set<string>()
   if (!signature) return names
+  const go = goDeclaration.test(signature)
   let depth = 0
   for (const line of signature.split('\n')) {
-    const match = depth === 1 ? memberLine.exec(line) : null
+    if (depth === 1 && go) for (const name of goMembers(line)) names.add(name)
+    const match = depth === 1 && !go ? memberLine.exec(line) : null
     if (match?.[1]) names.add(match[1])
     for (const char of line) {
       if (char === '{') depth += 1
@@ -273,6 +393,55 @@ export function declaredMembers(signature: string | undefined): Set<string> {
 
 const sitesLimit = 10
 
+const onlySubpath = <Origin>(
+  usage: PackageUsage<Origin>,
+  subpath: string,
+): PackageUsage<Origin> => ({
+  ...usage,
+  repos: usage.repos.flatMap((repo) => {
+    const exports = repo.exports.filter((item) => item.subpath === subpath)
+    return exports.length ? [{ ...repo, exports }] : []
+  }),
+})
+
+function methodImpact<Origin>(
+  repos: readonly RepoPackageUsage<Origin>[],
+  change: UpgradeChange,
+  type: string,
+  method: string,
+): ImpactItem<Origin> | undefined {
+  const hits: RepoImpact<Origin>[] = []
+  for (const repo of repos)
+    for (const item of repo.exports) {
+      if (item.name !== type) continue
+      const count = item.members
+        .filter((m) => firstSegment(m.name) === method)
+        .reduce((sum, m) => sum + m.count, 0)
+      if (!count) continue
+      hits.push({
+        origin: repo.origin,
+        versions: repo.versions,
+        ...(change.change === 'removed' ? { members: [method] } : {}),
+        count,
+        sites: item.sites
+          .filter((site) => firstSegment(site.member) === method)
+          .slice(0, sitesLimit),
+      })
+    }
+  if (!hits.length) return undefined
+  return {
+    change,
+    level:
+      change.change === 'removed'
+        ? 'breaking'
+        : change.change === 'deprecated'
+          ? 'deprecated'
+          : 'check',
+    repos: hits.toSorted((a, b) => b.count - a.count),
+    count: hits.reduce((sum, repo) => sum + repo.count, 0),
+  }
+}
+
 const firstSegment = (member: string | undefined) =>
   member?.replace(/^\(\)\.?/, '').split(/[.(]/)[0] ?? ''
 
@@ -282,6 +451,12 @@ const firstSegment = (member: string | undefined) =>
  * member or prop the new declaration lacks (also through exports whose old declaration mentions
  * the changed one, e.g. props of `Button` for a changed `ButtonProps`), and `check` for its other
  * uses; deprecations are `deprecated`. Added exports are ignored. Matching is by export name.
+ *
+ * For Go, `package` is the import path of one package (`ApiPackage.name`): uses count only where
+ * `importPath(module, subpath)` equals it. A method symbol `Type.Method` matches uses of export
+ * `Type` reading member `Method` (method expressions such as `pkg.Type.Method`); removing it is
+ * `breaking` for them, changing it `check`. Struct fields and interface methods are members
+ * (`declaredMembers`), and keyed composite literal fields are props.
  */
 export function upgradeImpact<Origin>(input: {
   entries: readonly UsageEntry<Origin>[]
@@ -290,12 +465,27 @@ export function upgradeImpact<Origin>(input: {
   /** Declarations of the old version by export name, to find exports that use a changed type. */
   declarations?: ReadonlyMap<string, string>
 }): UpgradeImpact<Origin> {
-  const usage = packageUsage(input.entries, input.package)
+  const found = packageUsage(input.entries, input.package)
+  const go = found.ecosystem === 'Go'
+  const usage = go ? onlySubpath(found, found.subpath ?? '.') : found
   const items: ImpactItem<Origin>[] = []
   const affected = new Set<Origin>()
 
   for (const change of input.changes) {
     if (change.change === 'added') continue
+    const dot = go ? change.name.indexOf('.') : -1
+    if (dot > 0) {
+      const item = methodImpact(
+        usage.repos,
+        change,
+        change.name.slice(0, dot),
+        change.name.slice(dot + 1),
+      )
+      if (!item) continue
+      for (const repo of item.repos) affected.add(repo.origin)
+      items.push(item)
+      continue
+    }
     const removed =
       change.change === 'changed'
         ? [...declaredMembers(change.before)].filter(
@@ -359,6 +549,7 @@ export function upgradeImpact<Origin>(input: {
   const rank: Record<ImpactLevel, number> = { breaking: 0, check: 1, deprecated: 2 }
   return {
     package: input.package,
+    ...(found.ecosystem ? { ecosystem: found.ecosystem } : {}),
     items: items.toSorted((a, b) => rank[a.level] - rank[b.level] || b.count - a.count),
     affected: [...affected],
     unaffected: usage.repos.map((repo) => repo.origin).filter((origin) => !affected.has(origin)),
@@ -369,6 +560,7 @@ export function upgradeImpact<Origin>(input: {
 export function repoPackages(data: UsagesData) {
   return data.packages.map((pkg) => ({
     name: pkg.name,
+    ecosystem: pkg.ecosystem ?? 'npm',
     versions: pkg.versions,
     ranges: pkg.ranges,
     local: pkg.local ?? false,

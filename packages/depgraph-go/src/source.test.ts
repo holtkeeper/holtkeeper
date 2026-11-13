@@ -136,11 +136,47 @@ describe('goSource', () => {
   test('reports a failing go command as an analysis error', async () => {
     await Bun.write(join(dir, 'go.mod'), 'module example.com/x\n')
     const { runner } = createFakeRunner(() => ({ exitCode: 1, stderr: 'go: no network' }))
-    const data = await analyzeDependencies({ dir, sources: [goSource({ runner })] })
-    expect(data.layers).toEqual([])
+    const lines: string[] = []
+    const data = await analyzeDependencies({
+      dir,
+      sources: [goSource({ runner })],
+      log: (line) => lines.push(line),
+    })
+    expect(data.layers.map((layer) => [layer.id, layer.source])).toEqual([['workspaces', 'go.mod']])
+    expect(data.layers[0]?.graph.nodes.map((node) => node.id)).toEqual(['example.com/x'])
     expect(data.errors).toEqual([
       { source: 'go', message: '`go mod graph` exited with 1:\ngo: no network' },
     ])
+    expect(lines).toEqual(['go: `go mod graph` exited with 1:\ngo: no network'])
+  })
+
+  test('keeps the modules whose go mod graph worked and names the ones that failed', async () => {
+    await Bun.write(join(dir, 'a/go.mod'), 'module example.com/a\n')
+    await Bun.write(join(dir, 'b/go.mod'), 'module example.com/b\n')
+    const { runner } = createFakeRunner((_, options) =>
+      options.cwd.endsWith('/b')
+        ? { exitCode: 1, stderr: 'go: example.org/zz@v1.0.0: 410 Gone' }
+        : { stdout: '' },
+    )
+    const data = await analyzeDependencies({ dir, sources: [goSource({ runner })] })
+    expect(data.layers.map((layer) => layer.source)).toEqual(['go.mod', 'go mod graph (a)'])
+    expect(data.errors).toEqual([
+      {
+        source: 'go',
+        message: 'b: `go mod graph` exited with 1:\ngo: example.org/zz@v1.0.0: 410 Gone',
+      },
+    ])
+  })
+
+  test('keeps the go.work layer when go mod graph fails', async () => {
+    await Bun.write(join(dir, 'go.work'), 'go 1.22\n\nuse ./a\n')
+    await Bun.write(join(dir, 'a/go.mod'), 'module example.com/a\n')
+    const { runner } = createFakeRunner(() => ({ exitCode: 1, stderr: 'go: no network' }))
+    const data = await analyzeDependencies({ dir, sources: [goSource({ runner })] })
+    expect(data.layers.map((layer) => [layer.id, layer.source])).toEqual([
+      ['workspaces', 'go.work'],
+    ])
+    expect(data.errors).toHaveLength(1)
   })
 
   test('detects nothing without Go files', async () => {

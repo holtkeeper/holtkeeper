@@ -7,7 +7,13 @@ import { memoryStore } from '@holtkeeper/store/memory'
 import { z } from 'zod'
 
 import type { JobAnalyzerInfo } from '../src/context.ts'
-import { freshnessStatus, freshnessSummary, noteHead, sweepFreshness } from '../src/freshness.ts'
+import {
+  freshnessStatus,
+  freshnessSummary,
+  lastSweepVerdicts,
+  noteHead,
+  sweepFreshness,
+} from '../src/freshness.ts'
 import { opsToolset } from '../src/tools/ops.ts'
 
 let store: Store
@@ -213,6 +219,10 @@ describe('freshness sweeper', () => {
     await putSetting('analyzers.setup', { command: 'make' }, { groups: ['tools'] })
     await sweep(list)
     expect(await queued()).toEqual(['go-only games/a', 'setup tools/b'])
+    const verdicts = await lastSweepVerdicts({ store })
+    expect(verdicts.get('work:tools/b\0go-only')).toEqual({ action: 'skip', applies: false })
+    expect(verdicts.get('work:games/a\0setup')).toEqual({ action: 'skip' })
+    expect(verdicts.get('work:games/a\0go-only')).toEqual({ action: 'run' })
     const status = await freshnessStatus(deps(list), { repo: { forge: 'work', path: 'games/a' } })
     expect(status.find((entry) => entry.analyzer === 'setup')?.decision.reason).toBe(
       'its options are not set up for this repository',

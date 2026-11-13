@@ -1,5 +1,7 @@
+import { modulePathOf } from '@holtkeeper/go-source'
 import type { LibraryChunk, LibraryRef, LibraryStore } from '@holtkeeper/store'
 
+import { goPackageDocs } from '../go-docs.ts'
 import { documentChunks } from '../markdown.ts'
 import type { ArchiveFiles } from '../types.ts'
 import { type SourceOutcome, type SourceTarget, refOf, sourceStatus } from './shared.ts'
@@ -24,10 +26,15 @@ export function archiveFileUrl(ref: LibraryRef, version: string, path: string): 
   return ref.ecosystem === 'npm' ? `https://unpkg.com/${ref.name}@${version}/${path}` : undefined
 }
 
+const maxPackageDocs = 300
+
 const maxDocs = 300
 const maxChunks = 4000
 
-/** Chunks of every documentation file of a package archive, in path order. */
+/**
+ * Chunks of every documentation file of a package archive, in path order; for a Go module also
+ * the package doc comments (under the path of the file they come from, linked to pkg.go.dev).
+ */
 export function archiveChunks(
   ref: LibraryRef,
   version: string,
@@ -39,10 +46,23 @@ export function archiveChunks(
     const url = archiveFileUrl(ref, version, path)
     return documentChunks(ref, 'archive', path, decoder.decode(files.get(path)), url ? { url } : {})
   })
+  if (ref.ecosystem === 'Go')
+    for (const doc of goPackageDocs(files, modulePathOf(ref.name, version)).slice(
+      0,
+      maxPackageDocs,
+    ))
+      chunks.push(
+        ...documentChunks(ref, 'archive', doc.path, doc.markdown, {
+          url: `https://pkg.go.dev/${doc.importPath}@${version}`,
+        }),
+      )
   return chunks.slice(0, maxChunks)
 }
 
-/** Source `archive`: the README, changelog, migration guides and docs a package ships. */
+/**
+ * Source `archive`: the README, changelog, migration guides and docs a package ships, and the
+ * package docs of a Go module.
+ */
 export async function archiveSource(
   store: LibraryStore,
   target: SourceTarget,

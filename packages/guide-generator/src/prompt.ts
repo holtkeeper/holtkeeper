@@ -27,9 +27,9 @@ export const SECTION_CHARS = 1_200
 
 const focus: Record<LlmSection, string> = {
   general:
-    'how to install, build, run, lint, format and type-check here (exact commands), which tool versions to use, which CI jobs a change must pass, where code of each kind goes, and which existing docs to read first (point to them, do not restate them).',
+    'how to install, build, run, lint, format and type-check here (exact commands, including the Makefile targets that wrap them and the linters a lint config enables), which tool versions to use, which CI jobs a change must pass, where code of each kind goes, and which existing docs and doc folders to read first (point to them, do not restate them).',
   testing:
-    'which framework and import new tests use, where test files go and how they are named, the command that runs one test file and the whole suite, and folders where coverage is weak.',
+    'which framework and import new tests use, where test files go and how they are named, the command that runs one test file and the whole suite, the build tags or flags tests behind tags need, and folders where coverage is weak.',
   testids:
     'which attribute to use, the naming pattern of values with two or three real examples from the evidence, and which elements carry the attribute.',
 }

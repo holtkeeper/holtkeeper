@@ -39,6 +39,19 @@ Rules come from a JSON file (`EGRESS_RULES`, default `/etc/egress/rules.json`, u
 
 A rule needs `headers`, `replace` or both. The first matching rule sets its headers; every matching rule applies its replacements, so clients holding only a placeholder get the real value on the hosts the rule names and nowhere else. In the file, `${NAME}` reads the proxy's environment, and a variable that is not set stops the proxy at start. Rules from the URL are taken literally. Header values are never logged.
 
+**Private Go modules.** Holtkeeper's rules URL also serves two read-only git rules per panel GitLab forge: `GET`/`HEAD` of `<project>?go-get=1` and `<project>[.git]/info/refs?service=git-upload-pack`, and `POST` (only) of `<project>[.git]/git-upload-pack`, with `Authorization: Basic base64(oauth2:<token>)`. `git-receive-pack`, `/api/` and paths with a `-` segment (GitLab's web routes) never match, so a client can clone and `go mod download` but never push. Jobs get `GOPRIVATE` for those forges, so `go` asks the forge (through the proxy) instead of `proxy.golang.org`. The same rules by hand:
+
+```json
+{
+  "host": "gitlab.example",
+  "paths": ["^/(?!api/)(?!-(?:/|$))[^/?#%]+(?:/(?!-(?:/|$))[^/?#%]+)+/git-upload-pack$"],
+  "methods": ["POST"],
+  "headers": { "Authorization": "Basic ${GITLAB_GIT_BASIC}" }
+}
+```
+
+Trade-off: every job can read every repository the token can read, not only packages. Scope the forge token accordingly.
+
 The URL is read with `Authorization: Bearer $EGRESS_RULES_TOKEN` at start, every `EGRESS_RULES_REFRESH` seconds (default 60), and at once (at most every 5 seconds) when an upstream answers a request it added URL credentials to with 401 or 403, which is how a rotated token is picked up. A failed read is logged and keeps the previous rules.
 
 ## Download cache

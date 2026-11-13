@@ -92,6 +92,16 @@ describe('reviewSystemPrompt', () => {
     expect(prompt).toContain('Comment only on lines marked `+`')
   })
 
+  test('points dependency versions at the manifests of the languages in scope', () => {
+    const npm = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3), fileOf('README.md', 1)]))
+    expect(npm).toContain('from package.json, the lockfile or repo_packages')
+    const go = reviewSystemPrompt(inputOf([fileOf('shapes/circle.go', 3), fileOf('go.sum', 1)]))
+    expect(go).toContain('from the go.mod of the module owning the file (go.sum')
+    expect(go).not.toContain('package.json')
+    const mixed = reviewSystemPrompt(inputOf([fileOf('web/app.tsx', 2), fileOf('api/main.go', 2)]))
+    expect(mixed).toContain('package.json, the lockfile (Go code: the go.mod')
+  })
+
   test('writes prose in the configured language and keeps code and terms in English', () => {
     const prompt = reviewSystemPrompt(inputOf([fileOf('src/widget.ts', 3)], { language: 'German' }))
     expect(prompt).toContain('the summary and the walkthrough in German')

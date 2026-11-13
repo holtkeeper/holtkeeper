@@ -55,6 +55,7 @@ describe('detectChecks', () => {
       'pnpm run lint',
       'pnpm run fmt:check',
       'pnpm run test',
+      'gofmt -l',
       'go vet ./...',
       'go test ./...',
     ])
@@ -83,6 +84,7 @@ describe('detectChecks', () => {
     expect((await detectChecks(dir, undefined, { tests: false })).map((c) => c.command)).toEqual([
       'bun install --frozen-lockfile',
       'bun run lint',
+      'gofmt -l',
       'go vet ./...',
     ])
     expect(await detectChecks(dir, ['make test'], { tests: false })).toEqual([

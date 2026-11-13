@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
-import { goFilePath, parseGoCoverFunc, parseGoCoverProfile, withGoFunctions } from './gocover.ts'
+import {
+  goFilePath,
+  goPackageDir,
+  parseGoCoverFunc,
+  parseGoCoverProfile,
+  withGoFunctions,
+} from './gocover.ts'
 
 // `go test ./... -coverprofile=cover.out` (Go 1.25) on a module with one tested function.
 const PROFILE = `mode: set
@@ -68,4 +74,16 @@ describe('Go coverage', () => {
     expect(report.files[0]?.functions).toHaveLength(2)
     expect(report.summary.functions).toEqual({ covered: 1, total: 2 })
   })
+})
+
+test('goPackageDir maps package import paths to folders, module roots included', () => {
+  const nested = [
+    { path: 'example.com/acme/widgets', dir: '' },
+    { path: 'example.com/acme/widgets/tools', dir: 'tools' },
+  ]
+  expect(goPackageDir('example.com/acme/widgets', nested)).toBe('')
+  expect(goPackageDir('example.com/acme/widgets/gear', nested)).toBe('gear')
+  expect(goPackageDir('example.com/acme/widgets/tools', nested)).toBe('tools')
+  expect(goPackageDir('example.com/acme/widgets/tools/lint', nested)).toBe('tools/lint')
+  expect(goPackageDir('example.org/other', nested)).toBeUndefined()
 })

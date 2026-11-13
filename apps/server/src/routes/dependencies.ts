@@ -16,6 +16,7 @@ import type { RepoRef } from '@holtkeeper/forge'
 import {
   type LatestVersion,
   latestVersions,
+  libraryOfModule,
   majorsBehind,
   sameVersion,
 } from '@holtkeeper/libraries'
@@ -25,7 +26,7 @@ import { HTTPException } from 'hono/http-exception'
 
 import { latestHeadsWithMetrics } from '../analyses.ts'
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
-import { type UsageIndex, impactOfChanges } from '../api-surface/usages.ts'
+import { type UsageIndex, impactOfChanges, impactOfGoChanges } from '../api-surface/usages.ts'
 import {
   type AppContext,
   type Env,
@@ -131,6 +132,45 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     const latestOf = (key: string) =>
       fleet.internal.has(key) ? fleet.defined.get(key) : latest.get(key)?.latest
     return { scope, canRead, fleet, libraries: groupUses(fleet.uses), latest, latestOf }
+  }
+
+  /** API changes of every catalog package of the fleet's Go module `name` (any major) between two versions. */
+  const goModuleDiffs = async (canRead: RepoFilter, name: string, from: string, to: string) => {
+    const family = libraryOfModule(name)
+    const representatives = new Map<string, string>()
+    for (const pkg of await context.catalog.packages(canRead)) {
+      if (pkg.ecosystem !== 'Go' || !pkg.module || libraryOfModule(pkg.module) !== family) continue
+      const key = family + pkg.name.slice(pkg.module.length)
+      if (!representatives.has(key)) representatives.set(key, pkg.name)
+    }
+    const packages: {
+      name: string
+      module?: string
+      before: ApiPackage | undefined
+      changes: ApiChange[]
+    }[] = []
+    for (const representative of representatives.values()) {
+      // oxlint-disable-next-line no-await-in-loop -- the catalog reads from its in-memory index
+      const found = await context.catalog.diff(canRead, representative, { from, to })
+      if (!found) continue
+      // oxlint-disable-next-line no-await-in-loop
+      const old = await context.catalog.resolve(canRead, representative, {
+        version: found.from.analysisId,
+        repo: `${found.repo.forge}:${found.repo.path}`,
+      })
+      packages.push({
+        name: old?.package.name ?? representative,
+        ...(old?.package.module ? { module: old.package.module } : {}),
+        before: old?.package,
+        changes: found.diff.changes,
+      })
+    }
+    return packages.toSorted((a, b) => a.name.localeCompare(b.name))
+  }
+
+  const definedIn = async (canRead: RepoFilter, ref: LibraryRef) => {
+    const found = await context.catalog.resolve(canRead, ref.name)
+    return found && (found.package.ecosystem ?? 'npm') === ref.ecosystem ? found : undefined
   }
 
   const canReadAudits = async (principal: Principal) => {
@@ -300,10 +340,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
     const users = libraries.get(key)
     const index = context.libraryIndex(principal, canRead)
     const record = await index?.store.getLibrary(ref)
-    const defined =
-      users || record || ref.ecosystem !== 'npm'
-        ? undefined
-        : await context.catalog.resolve(canRead, ref.name)
+    const defined = users || record ? undefined : await definedIn(canRead, ref)
     if (!users && !record && !defined)
       throw new HTTPException(404, { message: `no repository you can read uses ${ref.name}` })
     const versions = (await index?.store.listVersions(ref)) ?? []
@@ -414,8 +451,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
       if (version) result.version = version
     }
 
-    const defined =
-      ref.ecosystem === 'npm' ? await context.catalog.resolve(canRead, ref.name) : undefined
+    const defined = await definedIn(canRead, ref)
     if (defined) {
       result.definedIn = {
         repo: defined.record.repo,
@@ -468,15 +504,42 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
       return c.json<DependencyUpgrade>(result)
     }
 
-    let diff: { before: ApiPackage | undefined; changes: ApiChange[] } | undefined
-    if (fleet.internal.has(key)) {
-      const found = await context.catalog.diff(canRead, ref.name, { from, to })
+    let diff:
+      | {
+          before: ApiPackage | undefined
+          changes: ApiChange[]
+          /** Package whose uses the changes affect, when it differs from `ref.name`. */
+          name?: string
+          /** Go: the changes per package of the module. */
+          packages?: { name: string; before: ApiPackage | undefined; changes: ApiChange[] }[]
+          /** Go: the module path the packages' uses import, when it differs from `ref.name`. */
+          module?: string
+        }
+      | undefined
+    if (fleet.internal.has(key) && ref.ecosystem === 'Go') {
+      const packages = await goModuleDiffs(canRead, ref.name, from, to)
+      if (packages.length) {
+        const module = packages.find((pkg) => pkg.module)?.module
+        diff = {
+          before: packages[0]?.before,
+          changes: packages.flatMap((pkg) => pkg.changes),
+          packages,
+          ...(module && module !== ref.name ? { module } : {}),
+        }
+      } else notes.push(`The API catalog has no two versions of ${ref.name} to compare.`)
+    } else if (fleet.internal.has(key)) {
+      const own = await definedIn(canRead, ref)
+      const found = own && (await context.catalog.diff(canRead, own.package.name, { from, to }))
       if (found) {
-        const old = await context.catalog.resolve(canRead, ref.name, {
+        const old = await context.catalog.resolve(canRead, own.package.name, {
           version: found.from.analysisId,
           repo: `${found.repo.forge}:${found.repo.path}`,
         })
-        diff = { before: old?.package, changes: found.diff.changes }
+        diff = {
+          before: old?.package,
+          changes: found.diff.changes,
+          ...(old && old.package.name !== ref.name ? { name: old.package.name } : {}),
+        }
       } else notes.push(`The API catalog has no two versions of ${ref.name} to compare.`)
     } else {
       const index = context.libraryIndex(principal, canRead)
@@ -503,15 +566,18 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
             index.api.get(ref, toVersion),
           ])
           const names = [...new Set([...(before ?? []), ...(after ?? [])].map((pkg) => pkg.name))]
+          const packages = names.map((pkgName) => ({
+            name: pkgName,
+            before: before?.find((pkg) => pkg.name === pkgName),
+            changes: diffPackage(
+              before?.find((pkg) => pkg.name === pkgName),
+              after?.find((pkg) => pkg.name === pkgName),
+            ).changes,
+          }))
           diff = {
             before: before?.find((pkg) => pkg.name === ref.name) ?? before?.[0],
-            changes: names.flatMap(
-              (pkgName) =>
-                diffPackage(
-                  before?.find((pkg) => pkg.name === pkgName),
-                  after?.find((pkg) => pkg.name === pkgName),
-                ).changes,
-            ),
+            changes: packages.flatMap((pkg) => pkg.changes),
+            ...(ref.ecosystem === 'Go' ? { packages } : {}),
           }
         }
       }
@@ -532,13 +598,21 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
               },
             ],
       )
-      if (ref.ecosystem === 'npm')
-        result.impact = await impactOfChanges(context.usages, scope.snippets, ref.name, {
-          before: diff.before,
-          changes: diff.changes,
-          target: to,
-        })
-      else notes.push('Call sites are indexed for npm packages only; see the API changes.')
+      result.impact =
+        ref.ecosystem === 'Go' && diff.packages
+          ? await impactOfGoChanges(context.usages, scope.snippets, diff.module ?? ref.name, {
+              packages: diff.packages,
+              target: to,
+            })
+          : await impactOfChanges(context.usages, scope.snippets, diff.name ?? ref.name, {
+              before: diff.before,
+              changes: diff.changes,
+              target: to,
+            })
+      if (ref.ecosystem === 'Go')
+        notes.push(
+          'Go call sites are read without types: methods called on returned values are not seen.',
+        )
     }
     return c.json<DependencyUpgrade>(result)
   })

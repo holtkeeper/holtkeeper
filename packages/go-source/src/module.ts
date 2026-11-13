@@ -7,7 +7,7 @@ export const isPseudoVersion = (version: string) =>
   /[-.]\d{14}-[0-9a-f]{12}(\+incompatible)?$/.test(version)
 
 /** Library name of a module path: the path without its `/vN` major suffix. */
-export const libraryOfModule = (path: string) => path.replace(/\/v[2-9]\d*$/, '')
+export const libraryOfModule = (path: string) => path.replace(/\/v(?:[2-9]|[1-9]\d+)$/, '')
 
 /**
  * Module path that publishes `version` of the library `name`: `name/vN` for majors from 2 up,

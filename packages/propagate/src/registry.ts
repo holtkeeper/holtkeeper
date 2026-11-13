@@ -7,6 +7,11 @@ export interface HttpRegistryOptions {
   npmUrl?: string
   /** Default `https://proxy.golang.org`. */
   goProxyUrl?: string
+  /**
+   * Go module paths that must never reach the module proxy (`GOPRIVATE`-style private modules):
+   * `latest` answers `undefined` for them without a request.
+   */
+  isPrivateGo?: (path: string) => boolean | Promise<boolean>
 }
 
 const field = (value: unknown, key: string): unknown =>
@@ -18,13 +23,14 @@ const escapeModulePath = (path: string) =>
 
 /**
  * Latest versions from the npm registry (`dist-tags.latest`) and the Go module proxy (`@latest`).
- * Answers are cached per instance; failed lookups resolve to `undefined`.
+ * Answers are cached per instance; failed lookups and private Go modules resolve to `undefined`.
  */
 export function createHttpRegistry(options: HttpRegistryOptions = {}): VersionRegistry {
   const {
     fetch: get = globalThis.fetch,
     npmUrl = 'https://registry.npmjs.org',
     goProxyUrl = 'https://proxy.golang.org',
+    isPrivateGo = () => false,
   } = options
   const cache = new Map<string, Promise<string | undefined>>()
   const json = async (url: string, init?: RequestInit): Promise<unknown> => {
@@ -39,6 +45,7 @@ export function createHttpRegistry(options: HttpRegistryOptions = {}): VersionRe
       const latest = field(field(body, 'dist-tags'), 'latest')
       return typeof latest === 'string' ? latest : undefined
     }
+    if (await isPrivateGo(name)) return undefined
     const version = field(await json(`${goProxyUrl}/${escapeModulePath(name)}/@latest`), 'Version')
     return typeof version === 'string' ? version : undefined
   }
@@ -68,7 +75,12 @@ export async function resolveTargets(
       let resolved = version
       if (version === 'latest') {
         const latest = await registry?.latest(ecosystem, name)
-        if (!latest) throw new Error(`cannot resolve the latest version of ${name}`)
+        if (!latest)
+          throw new Error(
+            ecosystem === 'Go'
+              ? `cannot resolve the latest version of ${name}; private Go modules are never looked up on the module proxy, so pass an exact version for them`
+              : `cannot resolve the latest version of ${name}`,
+          )
         resolved = latest
       }
       resolved = ecosystem === 'Go' ? `v${resolved.replace(/^v/, '')}` : resolved.replace(/^v/, '')

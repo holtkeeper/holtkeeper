@@ -17,7 +17,7 @@ An agent on your laptop edits the repository in front of it. When a change has t
 1. The agent calls `start_task` with the repositories, a one-line title and a plan.
 2. Holtkeeper stores a **task group** with one task per repository, proposed by you through your MCP client.
 3. A person with `tasks:run` approves it in the [Inbox](/guide/home/inbox/) or **Ops › Tasks**. With a **Run tasks** token, the agent's own call approves it where you may run tasks.
-4. A write worker checks out each repository, makes a branch `holtkeeper/<task id>-<slug>`, lets an agent work with the repository's checks (install, type check, lint, format, tests) and commits.
+4. A write worker checks out each repository, makes a branch `holtkeeper/<task id>-<slug>`, lets an agent work with the repository's checks (for JavaScript: install, type check, lint, format, tests; for Go: `gofmt -l` on the changed files, `go vet`, `go test`, and `make lint` or `golangci-lint run`) and commits.
 5. A draft merge request opens per repository. Failing checks keep it a draft and list the failing output in the description.
 6. The agent polls `task_status` for merge requests, CI and spend, and can ask for a review with `request_review`.
 
@@ -145,7 +145,7 @@ See [Ops › Tasks](/guide/ops/tasks/) for the whole screen.
 
 - Merge. Merge requests stay drafts until a person decides.
 - Approve other proposals. `start_task` with `run` approves only the group it just proposed.
-- Read secrets. The worker agent gets the repository and the network through the egress proxy, never credentials; it may run only the detected checks and `git status`, `git diff` and `git log`.
+- Read secrets. The worker agent gets the repository and the network through the egress proxy, never credentials; it may run only the detected checks, `gofmt -w` when the checks include `gofmt`, and `git status`, `git diff` and `git log`.
 
 ## Related
 

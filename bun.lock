@@ -325,6 +325,9 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/analyzer": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/forge": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "oxc-parser": "^0.155.0",
         "zod": "^4.6.7",
@@ -534,6 +537,7 @@
       "dependencies": {
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
       },
     },
     "packages/depgraph-js": {
@@ -566,6 +570,14 @@
         "@holtkeeper/credentials": "workspace:*",
         "@holtkeeper/forge": "workspace:*",
         "zod": "^4.6.7",
+      },
+    },
+    "packages/go-source": {
+      "name": "@holtkeeper/go-source",
+      "version": "0.0.0",
+      "dependencies": {
+        "@holtkeeper/api-surface": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
       },
     },
     "packages/guide": {
@@ -673,6 +685,7 @@
       "dependencies": {
         "@holtkeeper/api-surface": "workspace:*",
         "@holtkeeper/artifacts": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
         "@holtkeeper/store": "workspace:*",
         "fflate": "^0.8.3",
       },
@@ -773,6 +786,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
       },
     },
     "packages/release": {
@@ -928,6 +942,8 @@
         "@holtkeeper/coverage": "workspace:*",
         "@holtkeeper/depgraph": "workspace:*",
         "@holtkeeper/depgraph-js": "workspace:*",
+        "@holtkeeper/exec": "workspace:*",
+        "@holtkeeper/go-source": "workspace:*",
         "@holtkeeper/report": "workspace:*",
         "oxc-parser": "^0.155.0",
         "typescript": "7.0.2",
@@ -1284,6 +1300,8 @@
     "@holtkeeper/forge": ["@holtkeeper/forge@workspace:packages/forge"],
 
     "@holtkeeper/forge-gitlab": ["@holtkeeper/forge-gitlab@workspace:packages/forge-gitlab"],
+
+    "@holtkeeper/go-source": ["@holtkeeper/go-source@workspace:packages/go-source"],
 
     "@holtkeeper/guide": ["@holtkeeper/guide@workspace:packages/guide"],
 

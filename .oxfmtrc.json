@@ -9,6 +9,7 @@
     "bun.lock",
     "fixtures/**/*.json",
     "fixtures/**/*.yaml",
-    "deploy/helm/*/templates/**"
+    "deploy/helm/*/templates/**",
+    "packages/review/src/go-guidelines/upstream/**"
   ]
 }

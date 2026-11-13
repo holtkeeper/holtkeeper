@@ -307,3 +307,7 @@ describe('properties detection', () => {
     }
   })
 })
+
+test('i18nAnalyzer runs in every repository, also those without a root package.json', () => {
+  expect(i18nAnalyzer.appliesTo).toBeUndefined()
+})

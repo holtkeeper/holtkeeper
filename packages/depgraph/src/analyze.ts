@@ -86,6 +86,23 @@ export const depgraphDataSchema: z.ZodType<DepgraphData> = z.object({
   errors: z.array(z.object({ source: z.string(), message: z.string() })),
 })
 
+/**
+ * Thrown by `GraphSource.load` when part of a source failed: `layers` are what it could still
+ * read, `messages` say what failed (one per failure). `analyzeDependencies` keeps the layers and
+ * reports every message in `errors`.
+ */
+export class PartialLoadError extends Error {
+  readonly layers: GraphLayer[]
+  readonly messages: string[]
+
+  constructor(layers: GraphLayer[], messages: string[]) {
+    super(messages.join('\n'))
+    this.name = 'PartialLoadError'
+    this.layers = layers
+    this.messages = messages
+  }
+}
+
 /** Runs the analyses on one layer. */
 export function analyzeLayer(layer: GraphLayer): LayerData {
   return {
@@ -100,31 +117,42 @@ export function analyzeLayer(layer: GraphLayer): LayerData {
 
 /**
  * Loads every layer from the sources that detect `dir` and analyzes it. A source that throws is
- * reported in `errors` instead of failing the whole analysis. Layers keep the order of `sources`.
+ * reported in `errors` instead of failing the whole analysis; one that throws `PartialLoadError`
+ * keeps the layers it could read. Every error also goes to `log`. Layers keep the order of
+ * `sources`.
  */
 export async function analyzeDependencies(options: {
   dir: string
   sources: readonly GraphSource[]
+  log?: (line: string) => void
 }): Promise<DepgraphData> {
   const { dir, sources } = options
   const results = await Promise.all(
-    sources.map(async (source) => {
-      try {
-        if (!(await source.detect(dir))) return { layers: [] }
-        return { layers: await source.load(dir) }
-      } catch (error) {
-        return {
-          layers: [],
-          error: {
-            source: source.name,
-            message: error instanceof Error ? error.message : String(error),
-          },
+    sources.map(
+      async (source): Promise<{ layers: GraphLayer[]; errors: DepgraphData['errors'] }> => {
+        try {
+          if (!(await source.detect(dir))) return { layers: [], errors: [] }
+          return { layers: await source.load(dir), errors: [] }
+        } catch (error) {
+          if (error instanceof PartialLoadError)
+            return {
+              layers: error.layers,
+              errors: error.messages.map((message) => ({ source: source.name, message })),
+            }
+          return {
+            layers: [],
+            errors: [
+              {
+                source: source.name,
+                message: error instanceof Error ? error.message : String(error),
+              },
+            ],
+          }
         }
-      }
-    }),
+      },
+    ),
   )
-  return {
-    layers: results.flatMap((result) => result.layers.map(analyzeLayer)),
-    errors: results.flatMap((result) => (result.error ? [result.error] : [])),
-  }
+  const errors = results.flatMap((result) => result.errors)
+  for (const error of errors) options.log?.(`${error.source}: ${error.message}`)
+  return { layers: results.flatMap((result) => result.layers.map(analyzeLayer)), errors }
 }

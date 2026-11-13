@@ -45,7 +45,7 @@ Packages the analyzed repositories define, for analyses that must tell them from
 
 ## Running sources
 
-`analyzeDependencies({ dir, sources }): Promise<DepgraphData>` runs every source whose `detect` is true. A source that throws ends up in `errors`; the other layers are kept.
+`analyzeDependencies({ dir, sources, log? }): Promise<DepgraphData>` runs every source whose `detect` is true. A source that throws ends up in `errors`; the other layers are kept. A source that could read part of its input throws `PartialLoadError(layers, messages)`: its `layers` are kept and each message becomes an entry of `errors`. Every error is also passed to `log` as `<source>: <message>`, so it shows in the job log.
 
 ```ts
 interface DepgraphData {

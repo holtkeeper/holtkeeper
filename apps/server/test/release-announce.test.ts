@@ -123,6 +123,13 @@ const pkg = (name: string, version: string, exports: Record<string, string>): Ap
   ],
 })
 
+const goPkg = (name: string, dir: string, version: string, exports: Record<string, string>) => ({
+  ...pkg(name, version, exports),
+  dir,
+  ecosystem: 'Go' as const,
+  module: 'gitlab.example/shapes/paint',
+})
+
 const indexRecord = async (ref: string, packages: ApiPackage[]) =>
   store.analyses.add({
     repo: app,
@@ -470,6 +477,30 @@ describe('impact', () => {
     expect(message).toContain('https://git.acme.test/g/shop/-/blob/main/src/Cart.tsx#L12')
     expect(message).toContain('`Widget` was removed')
     expect(message).not.toContain('Compatibility analysis')
+  })
+
+  test('a Go module tag announces the changes of every package the tag versioned', async () => {
+    await announce({ notes: false })
+    const sha = (name: string) => fake.tags.find((tag) => tag.name === name)!.sha
+    await indexRecord(sha('v0.9.0'), [
+      goPkg('gitlab.example/shapes/paint', '.', 'v0.9.0', { Mix: 'func Mix()' }),
+      goPkg('gitlab.example/shapes/paint/brush', 'brush', 'v0.9.0', {
+        Stroke: 'func Stroke()',
+        Dab: 'func Dab()',
+      }),
+    ])
+    fake.commitTo('main', 'feat!: [ABC-21] brushes drop dabs')
+    await tagNow('v1.2.0')
+    await indexRecord(sha('v1.2.0'), [
+      goPkg('gitlab.example/shapes/paint', '.', 'v1.2.0', { Mix: 'func Mix()' }),
+      goPkg('gitlab.example/shapes/paint/brush', 'brush', 'v1.2.0', { Stroke: 'func Stroke()' }),
+    ])
+    tick(10)
+    await announcer.advance(app)
+    const message = posts()
+      .map((entry) => shown(entry))
+      .find((text) => text.includes('1.2.0'))
+    expect(message).toContain('`Dab` was removed')
   })
 
   test('no connected repository affected, and no block when nothing breaks', async () => {

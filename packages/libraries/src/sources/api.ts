@@ -4,10 +4,9 @@ import { dirname, join } from 'node:path'
 
 import { type ApiPackage, extractApi } from '@holtkeeper/api-surface'
 import type { ArtifactStore } from '@holtkeeper/artifacts'
+import { goApi, modulePathOf } from '@holtkeeper/go-source'
 import type { LibraryEcosystem, LibraryRef } from '@holtkeeper/store'
 
-import { goApi } from '../go/api.ts'
-import { modulePathOf } from '../go/module.ts'
 import type { ArchiveFiles } from '../types.ts'
 import {
   type SourceOutcome,

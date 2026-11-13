@@ -115,6 +115,7 @@ Options are the `analyzers.review` setting, per repository, group or everywhere;
 | `language`       | the description's       | Language of comments, summary and replies.                                |
 | `maxDiffLines`   | 3000                    | Larger diffs are skipped with a note.                                     |
 | `ignore`         | lockfiles, generated, … | Path globs never reviewed.                                                |
+| `goGuidelines`   | on                      | Modern Go guidelines for Go changes; `tag` pins an upstream release.      |
 
 `REVIEW.md` at the repository root goes first into the agent's context. A `## Ignore` section lists globs to skip, and a `## Paths` section gives rules for files matching a glob:
 

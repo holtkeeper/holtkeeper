@@ -11,6 +11,8 @@
     "@holtkeeper/coverage": "workspace:*",
     "@holtkeeper/depgraph": "workspace:*",
     "@holtkeeper/depgraph-js": "workspace:*",
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/go-source": "workspace:*",
     "@holtkeeper/report": "workspace:*",
     "oxc-parser": "^0.155.0",
     "typescript": "7.0.2",

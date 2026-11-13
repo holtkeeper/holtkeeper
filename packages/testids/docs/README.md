@@ -6,7 +6,7 @@ Recommending test ids on new code is the job of the `testids` check (`testIdsChe
 
 ## Public API
 
-- `testIdsAnalyzer` — `Analyzer<TestIdsData, TestIdsOptions>`, kind `testids`, scope `repo`, needs `checkout`. Options (`testIdsOptionsSchema`; lists also accept a comma-separated string, as the flags pass them):
+- `testIdsAnalyzer` — `Analyzer<TestIdsData, TestIdsOptions>`, kind `testids`, scope `repo`, needs `checkout`; it has no `appliesTo`: test ids may sit in any folder or in server-rendered `.html` templates (a Go service with its UI in `web/`), so every repository is analyzed. Options (`testIdsOptionsSchema`; lists also accept a comma-separated string, as the flags pass them):
   - `attributes: string[]` (`--attributes`) — test attribute names, case-insensitive; each also covers names extending it with `-`, so `data-test` covers `data-test-id` and `data-test-state`. Default `defaultAttributes`: `data-testid`, `data-test`, `data-qa`, `data-cy`, `testID`, `testId`. Set in the `analyzers.testids` setting, it also picks the attribute new ids use: the listed name the repository uses most (literal values first), or the first item when the repository uses none of them; order does not matter otherwise.
   - `sources: string[]` (`--sources`) — template sources by name from `builtinSources`: `jsx`, `vue`, `svelte`, `html`.
   - `exclude: string[]` (`--exclude`) — glob patterns of files to skip.

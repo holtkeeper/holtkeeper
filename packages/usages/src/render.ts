@@ -1,7 +1,9 @@
 import type { FoundSite, PackageUsage, UpgradeImpact } from './fleet.ts'
 import { type UsageSite, importPath } from './model.ts'
 
-const languageOf = (file: string) => (/\.[mc]?tsx?$/.test(file) ? 'tsx' : 'jsx')
+/** Code fence language of a snippet from `file`: `go`, `tsx` or `jsx`. */
+export const snippetLanguage = (file: string) =>
+  file.endsWith('.go') ? 'go' : /\.[mc]?tsx?$/.test(file) ? 'tsx' : 'jsx'
 
 const counts = (items: readonly { name: string; count: number }[], limit = 12) =>
   items
@@ -22,7 +24,7 @@ export function renderSite(site: UsageSite, label?: string): string {
     .join(' ')
   return [
     `${label ? `${label} ` : ''}\`${site.file}:${site.line}\` — ${how}`,
-    `\`\`\`${languageOf(site.file)}\n${site.snippet}\n\`\`\``,
+    `\`\`\`${snippetLanguage(site.file)}\n${site.snippet}\n\`\`\``,
   ].join('\n')
 }
 
@@ -38,14 +40,15 @@ export function renderPackageUsage<Origin>(
     originLabel: String,
   },
 ): string {
-  if (!usage.repos.length) return `No analyzed repository uses ${usage.name}.`
+  const title = usage.subpath ? importPath(usage.name, usage.subpath) : usage.name
+  if (!usage.repos.length) return `No analyzed repository uses ${title}.`
   const label = options.originLabel
   const team = (origin: Origin) => {
     const owner = options.teamOf?.(origin)
     return owner ? ` (team ${owner})` : ''
   }
   const lines = [
-    `# ${usage.name}: ${usage.repos.length} repositor${usage.repos.length === 1 ? 'y' : 'ies'}`,
+    `# ${title}${usage.ecosystem === 'Go' ? ' (Go)' : ''}: ${usage.repos.length} repositor${usage.repos.length === 1 ? 'y' : 'ies'}`,
     `Versions in use: ${usage.versions.join(', ') || 'unknown'}.`,
     '',
     '## Repositories',
@@ -105,6 +108,7 @@ export function renderImpact<Origin>(
 ): string {
   if (!impact.items.length)
     return `No analyzed use of ${impact.package} is affected by these changes${impact.unaffected.length ? ` (${impact.unaffected.length} repositories use the package)` : ''}.`
+  const fence = impact.ecosystem === 'Go' ? 'go' : 'ts'
   const lines = [
     `# Upgrading ${impact.package}`,
     `Affected repositories: ${impact.affected.map((o) => `\`${originLabel(o)}\``).join(', ')}.`,
@@ -119,8 +123,8 @@ export function renderImpact<Origin>(
     )
     if (item.removedMembers?.length)
       lines.push(`Members removed: ${item.removedMembers.map((m) => `\`${m}\``).join(', ')}.`)
-    if (item.change.before) lines.push(`Before:\n\`\`\`ts\n${item.change.before}\n\`\`\``)
-    if (item.change.after) lines.push(`After:\n\`\`\`ts\n${item.change.after}\n\`\`\``)
+    if (item.change.before) lines.push(`Before:\n\`\`\`${fence}\n${item.change.before}\n\`\`\``)
+    if (item.change.after) lines.push(`After:\n\`\`\`${fence}\n${item.change.after}\n\`\`\``)
     for (const repo of item.repos) {
       lines.push(
         `### \`${originLabel(repo.origin)}\` (${repo.versions.join(', ') || 'version unknown'}) — ${repo.count} uses${repo.via ? ` through ${repo.via}` : ''}${repo.members ? `, touching ${repo.members.map((m) => `\`${m}\``).join(', ')}` : ''}`,

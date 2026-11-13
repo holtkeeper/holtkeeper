@@ -58,6 +58,8 @@ export interface ReviewPromptInput {
    * `tests` category stays only for `requests` of that category.
    */
   tests?: false
+  /** The modern Go guidelines section (`goGuidelinesSection`), placed before the diff. */
+  goGuidelines?: string
 }
 
 const severityGuide = (tests: boolean) =>
@@ -72,6 +74,18 @@ const severityGuide = (tests: boolean) =>
 export const KEEP_ENGLISH =
   'Keep code, identifiers, file paths, suggestion replacements and code comments inside them, commit messages and established technical terms (API, hook, race condition, retry, ...) in English, whatever the prose language.'
 
+const GO_FILE = /(^|\/)(go\.mod|go\.sum|go\.work)$|\.go$/
+const NPM_FILE = /(^|\/)package\.json$|\.(?:[cm]?[jt]sx?|vue|svelte|astro)$/
+
+/** Where the agent reads dependency versions: npm manifests, Go module files, or both. */
+function dependencySources(input: ReviewPromptInput): string {
+  const paths = input.part?.files ?? input.files.map((file) => file.path)
+  const npm = 'package.json, the lockfile'
+  const goSources = 'the go.mod of the module owning the file (go.sum for the exact version)'
+  if (!paths.some((path) => GO_FILE.test(path))) return npm
+  return paths.some((path) => NPM_FILE.test(path)) ? `${npm} (Go code: ${goSources})` : goSources
+}
+
 /** The system prompt: role, rules for lines and suggestions, severities, language. */
 export function reviewSystemPrompt(input: ReviewPromptInput): string {
   const language = `${
@@ -85,7 +99,7 @@ export function reviewSystemPrompt(input: ReviewPromptInput): string {
     tests || requestedTests ? categories : categories.filter((name) => name !== 'tests')
   const parts = [
     `You review merge request !${input.mergeRequest.id} of ${input.repo}. The checkout is at the merge request head; use the read and search tools to look at surrounding code${tests ? ', callers and tests' : ' and callers'} instead of guessing.`,
-    'Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages are in the API catalog (search_symbols by export name, then get_symbol or get_package_api, passing `version` = the version this repository depends on, from package.json, the lockfile or repo_packages), third-party libraries in the library tools. Packages defined in this checkout: read their source here; the catalog shows indexed versions, not this merge request.',
+    `Dependencies are usually not installed (node_modules or the module cache may be missing). Check how the change uses a dependency with the package tools you have before saying it cannot be checked: the organization’s own packages are in the API catalog (search_symbols by export name, then get_symbol or get_package_api, passing \`version\` = the version this repository depends on, from ${dependencySources(input)} or repo_packages), third-party libraries in the library tools. Packages defined in this checkout: read their source here; the catalog shows indexed versions, not this merge request.`,
     [
       'Rules:',
       '- Report only real problems the change introduces or exposes. No praise, no restating the diff, no nitpicks a formatter or linter would catch.',
@@ -160,6 +174,7 @@ export function reviewPrompt(input: ReviewPromptInput): string {
       ? `The diff is split for review; this is part ${input.part.index} of ${input.part.count}. Comment only on lines of the diff below, and read the other files of the merge request when the change depends on them. Every file in scope:\n${input.part.files.map((path) => `- ${path}`).join('\n')}`
       : '',
     threads.length ? `Open threads (do not repeat them):\n${threads.join('\n')}` : '',
+    input.goGuidelines?.trim() ?? '',
     `Diff:\n\n${diff}`,
   ]
     .filter(Boolean)

@@ -24,6 +24,8 @@ import {
 } from './checks.ts'
 import { type OpenThread, dedupe, openThreads, rankAndCap, severityRank } from './dedupe.ts'
 import { commentBody, isSummaryNote, summaryNote, threadNote } from './format.ts'
+import { changedGoModules, goGuidelinesSection } from './go-guidelines/prompt.ts'
+import type { GoGuidelineSet } from './go-guidelines/schema.ts'
 import {
   type Guideline,
   type PathInstruction,
@@ -73,6 +75,11 @@ export interface ReviewOptions {
   reviewOwn?: boolean
   /** Review even what `releaseBranches` and `reviewOwn` would skip. */
   force?: boolean
+  /**
+   * Modern Go guidelines in the prompt of merge requests changing Go modules; on unless `enabled`
+   * is `false`. `tag` pins an upstream release.
+   */
+  goGuidelines?: { enabled: boolean; tag?: string }
 }
 
 /** A forge with every method a review needs; `compareCommits`, replies and resolving stay optional. */
@@ -133,6 +140,11 @@ export interface ReviewRun {
   botUsername?: string
   /** Reviews images when `options.media` is on. Default: a reviewer that reports nothing. */
   mediaReviewer?: MediaReviewer
+  /**
+   * The modern Go guidelines to use, for an optional pinned tag; without it the prompt never gets
+   * a guidelines section.
+   */
+  goGuidelines?: (tag?: string) => Promise<GoGuidelineSet>
   /** Replaces pipeline steps, e.g. in tests or for another review strategy. */
   steps?: Partial<ReviewSteps>
   log?: (line: string) => void
@@ -300,8 +312,38 @@ const deterministic: ReviewSteps['deterministic'] = async (run, planned) => {
   return { candidates, checks: tools }
 }
 
+/** The modern Go guidelines section for the Go modules the scope changes; `''` when none apply. */
+async function goGuidelinesFor(run: ReviewRun, files: readonly FileScope[]): Promise<string> {
+  const settings = run.options.goGuidelines
+  if (!run.goGuidelines || !run.dir || settings?.enabled === false) return ''
+  const goFiles = files.filter((file) => file.path.endsWith('.go'))
+  if (!goFiles.length) return ''
+  try {
+    const modules = await changedGoModules(
+      run.dir,
+      goFiles.map((file) => file.path),
+    )
+    if (!modules.length) return ''
+    const set = await run.goGuidelines(settings?.tag)
+    if (settings?.tag && set.tag !== settings.tag)
+      run.log?.(`go guidelines ${settings.tag} are not available; using ${set.tag}`)
+    const addedCode = goFiles
+      .flatMap((file) => [...file.lines].map((line) => file.visible.get(line) ?? ''))
+      .join('\n')
+    const section = goGuidelinesSection({ set, modules, addedCode })
+    run.log?.(
+      `go guidelines ${set.tag} (${set.source}${set.fetchedAt ? `, fetched ${set.fetchedAt}` : ''}) for ${modules.map((module) => `${module.dir} go ${module.go}`).join(', ')}: ${section ? `${section.length} characters` : 'none apply'}`,
+    )
+    return section
+  } catch (error) {
+    run.log?.(`go guidelines skipped: ${errorText(error)}`)
+    return ''
+  }
+}
+
 const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usage, requests) => {
   if (!run.agent || !run.dir) return undefined
+  const goGuidelines = await goGuidelinesFor(run, planned.scope.files)
   const instructions = run.options.instructions?.trim()
   const guide = run.guide
     ? await run
@@ -357,6 +399,7 @@ const agentReview: ReviewSteps['agentReview'] = async (run, loaded, planned, usa
       threads: loaded.threads,
       maxComments: run.options.maxComments,
       ...(run.options.language ? { language: run.options.language } : {}),
+      ...(goGuidelines ? { goGuidelines } : {}),
     },
     ...(run.options.depth === 'deep' ? { deep: true } : {}),
     ...(run.toolsets ? { toolsets: run.toolsets } : {}),

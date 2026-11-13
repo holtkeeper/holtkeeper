@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 
 import type {
   CreateMcpTokenResult,
+  DependencyUpgrade,
   McpTokenList,
   McpUsageOverview,
   PublicApiDiff,
@@ -1434,5 +1435,266 @@ describe('commit conventions', () => {
     expect((await callTool('commit_conventions', { repo: 'work:libs/ui' }, asGames)).isError).toBe(
       true,
     )
+  })
+})
+
+const geomModule = 'gitlab.example/shapes/geom'
+
+const goPackage = (
+  name: string,
+  module: string,
+  version: string | undefined,
+  names: string[],
+  internal = false,
+): ApiPackage => ({
+  name,
+  ...(version ? { version } : {}),
+  private: internal,
+  dir: name === module ? '.' : name.slice(module.length + 1),
+  ecosystem: 'Go',
+  module,
+  entries: [
+    {
+      subpath: '.',
+      symbols: names.map((symbol) => ({
+        name: symbol,
+        kind: 'function',
+        signature: `func ${symbol}(s Shape) float64`,
+        doc: `${symbol} measures a shape.`,
+        file: 'geom.go',
+        line: 1,
+      })),
+    },
+  ],
+})
+
+const geomUsage = (version: string): UsagesData => ({
+  packages: [
+    {
+      name: geomModule,
+      ecosystem: 'Go',
+      versions: [version],
+      ranges: [version],
+      workspaces: ['example.com/games/a'],
+      count: 2,
+      files: 1,
+      exports: [
+        {
+          name: 'Scale',
+          subpath: '.',
+          count: 2,
+          files: 1,
+          kinds: { call: 2 },
+          members: [],
+          props: [],
+          spread: 0,
+          sites: [
+            {
+              file: 'board/size.go',
+              line: 7,
+              column: 9,
+              kind: 'call',
+              snippet: 'geom.Scale(square)',
+              snippetLine: 7,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  files: 3,
+  types: { status: 'skipped', reason: 'go: syntactic only' },
+})
+
+describe('Go packages', () => {
+  const v2 = `${geomModule}/v2`
+  beforeEach(async () => {
+    const release = (createdAt: string, ref: string, packages: ApiPackage[]) =>
+      add('libs/geom', { packages }, createdAt, ref)
+    await release('2026-10-22T00:00:00.000Z', 'v1.2.0', [
+      goPackage(geomModule, geomModule, 'v1.2.0', ['Area', 'Scale']),
+    ])
+    await release('2026-10-24T00:00:00.000Z', 'v1.3.0', [
+      goPackage(geomModule, geomModule, 'v1.3.0', ['Area', 'Rotate']),
+    ])
+    await release('2026-10-26T00:00:00.000Z', 'v2.0.0', [
+      goPackage(v2, v2, 'v2.0.0', ['Area', 'Rotate', 'Mirror']),
+    ])
+    await release('2026-10-27T00:00:00.000Z', 'tools/v0.1.0', [
+      goPackage(v2, v2, undefined, ['Area', 'Rotate', 'Mirror']),
+      goPackage(`${geomModule}/tools`, `${geomModule}/tools`, 'v0.1.0', ['Lint']),
+    ])
+    await add(
+      'libs/geom',
+      {
+        packages: [
+          goPackage(v2, v2, undefined, ['Area', 'Rotate', 'Mirror', 'Skew']),
+          goPackage(`${v2}/internal/calc`, v2, undefined, ['Round'], true),
+        ],
+      },
+      '2026-10-28T00:00:00.000Z',
+    )
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: '2026-10-29T00:00:00.000Z',
+      data: geomUsage('v1.2.0'),
+    })
+  })
+
+  test('versions come from module tags only, every major of a module listed together', async () => {
+    const catalog = createApiCatalog({ analyses: store.analyses })
+    const found = await catalog.resolve(everything, v2, { version: 'head' })
+    expect(found?.versions.map((v) => [v.version, v.package ?? '', v.ecosystem])).toEqual([
+      ['head', '', 'Go'],
+      ['v2.0.0', '', 'Go'],
+      ['v1.3.0', geomModule, 'Go'],
+      ['v1.2.0', geomModule, 'Go'],
+    ])
+    const diff = await catalog.diff(everything, v2, { from: 'v1.3.0', to: 'v2.0.0' })
+    expect(diff?.diff.changes.map((change) => [change.change, change.name])).toEqual([
+      ['added', 'Mirror'],
+    ])
+    const fromV1 = await catalog.resolve(everything, geomModule, { version: '1.3.0' })
+    expect(fromV1?.version.version).toBe('v1.3.0')
+    expect(fromV1?.versions.map((v) => v.version)).toEqual(['head', 'v2.0.0', 'v1.3.0', 'v1.2.0'])
+    const upgrade = await catalog.diff(everything, geomModule, { from: '1.3.0', to: '2.0.0' })
+    expect(upgrade?.diff.changes.map((change) => [change.change, change.name])).toEqual([
+      ['added', 'Mirror'],
+    ])
+    const summary = (await catalog.packages(everything)).find((pkg) => pkg.name === v2)
+    expect(summary).toMatchObject({ ecosystem: 'Go', module: v2, versions: 4 })
+    const tools = await catalog.resolve(everything, `${geomModule}/tools`)
+    expect(tools?.versions.map((v) => v.version)).toEqual(['v0.1.0'])
+  })
+
+  test('MCP tools read Go packages from the catalog with Go imports and fences', async () => {
+    const api = await callTool('get_package_api', { package: v2, ecosystem: 'Go' }, asAdmin)
+    expect(api.isError).toBeUndefined()
+    expect(api.content[0]?.text).toContain(`import "${v2}"`)
+    expect(api.content[0]?.text).toContain('```go')
+
+    const symbol = await callTool('get_symbol', { package: v2, name: 'Mirror' }, asAdmin)
+    expect(symbol.content[0]?.text).toContain(`import "${v2}"\n\n// geom.Mirror`)
+    expect(symbol.content[0]?.text).toContain('```go\nfunc Mirror(s Shape) float64')
+
+    const versions = await callTool('list_versions', { package: v2 }, asAdmin)
+    expect(versions.content[0]?.text).toContain('- head (default branch),')
+    expect(versions.content[0]?.text).toContain(`- v1.3.0 as ${geomModule} tag \`v1.3.0\``)
+
+    const listed = await callTool('list_packages', { query: 'internal/calc' }, asAdmin)
+    expect(listed.content[0]?.text).toContain(`(Go, module ${v2}, internal)`)
+
+    const search = await callTool('search_symbols', { query: 'Skew' }, asAdmin)
+    expect(search.content[0]?.text).toContain('```go\nfunc Skew')
+
+    const missing = await callTool('get_package_api', { package: `${v2}/shapes` }, asAdmin)
+    expect(missing.isError).toBe(true)
+    expect(missing.content[0]?.text).toContain(`Module ${v2} has 2 indexed packages`)
+  })
+
+  test('upgrade impact joins a Go API diff with the uses of that package', async () => {
+    const text = await callTool(
+      'upgrade_impact',
+      { package: geomModule, from: 'v1.2.0', to: 'v1.3.0' },
+      asAdmin,
+    )
+    expect(text.isError).toBeUndefined()
+    expect(text.content[0]?.text).toContain(`## breaking: removed \`${geomModule}\` → Scale`)
+    expect(text.content[0]?.text).toContain('```go')
+
+    const impact = await get<UpgradeImpactView>(
+      `/api/api-surface/usages/impact?package=${geomModule}&from=v1.2.0&to=v1.3.0`,
+    )
+    expect(impact.impact.ecosystem).toBe('Go')
+    expect(impact.impact.items.map((item) => [item.level, item.change.name])).toEqual([
+      ['breaking', 'Scale'],
+    ])
+
+    const usage = await get<PackageUsageView>(`/api/api-surface/usages/package?name=${geomModule}`)
+    expect(usage).toMatchObject({ name: geomModule, ecosystem: 'Go', versions: ['v1.2.0'] })
+
+    const published = await get<PublishedPackagesView>(
+      '/api/api-surface/usages/published?repo=work:libs/geom',
+    )
+    expect(published.packages.find((pkg) => pkg.name === geomModule)).toMatchObject({
+      ecosystem: 'Go',
+      repos: 1,
+      count: 2,
+      files: 1,
+    })
+    expect(published.packages.find((pkg) => pkg.name === v2)).toMatchObject({ repos: 0 })
+  })
+
+  test('upgrade of an internal Go module without a root package diffs every package', async () => {
+    const kit = 'gitlab.example/shapes/kit'
+    const kitPackages = (version: string, names: string[]) => [
+      goPackage(`${kit}/log`, kit, version, names),
+      goPackage(`${kit}/http`, kit, version, ['Serve']),
+    ]
+    await add(
+      'libs/kit',
+      { packages: kitPackages('v1.0.0', ['Info', 'Debug']) },
+      '2026-10-22T00:00:00.000Z',
+      'v1.0.0',
+    )
+    await add(
+      'libs/kit',
+      { packages: kitPackages('v1.1.0', ['Info']) },
+      '2026-10-24T00:00:00.000Z',
+      'v1.1.0',
+    )
+    const usage = geomUsage('v1.0.0').packages[0]
+    if (!usage) throw new Error('fixture')
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/b' },
+      kind: 'usages',
+      createdAt: '2026-10-29T00:00:00.000Z',
+      data: {
+        packages: [
+          {
+            ...usage,
+            name: kit,
+            versions: ['v1.0.0'],
+            ranges: ['v1.0.0'],
+            exports: usage.exports.map((item) => ({ ...item, name: 'Debug', subpath: './log' })),
+          },
+        ],
+        files: 1,
+        types: { status: 'skipped', reason: 'go: syntactic only' },
+      },
+    })
+    const upgrade = await get<DependencyUpgrade>(
+      `/api/dependencies/upgrade?ecosystem=Go&name=${kit}&from=1.0.0&to=v1.1.0`,
+    )
+    expect(upgrade.api?.map((change) => [change.change, change.name])).toEqual([
+      ['removed', 'Debug'],
+    ])
+    expect(upgrade.impact?.affected).toEqual(['work:games/b'])
+  })
+
+  test('dependency views, who_uses and evaluate_dependency count Go uses as Go', async () => {
+    const upgrade = await get<DependencyUpgrade>(
+      `/api/dependencies/upgrade?ecosystem=Go&name=${geomModule}&from=v1.2.0&to=v1.3.0`,
+    )
+    expect(upgrade.api?.map((change) => [change.change, change.name])).toEqual([
+      ['removed', 'Scale'],
+    ])
+    expect(upgrade.impact?.affected).toEqual(['work:games/a'])
+    expect(upgrade.notes).toEqual([
+      'Go call sites are read without types: methods called on returned values are not seen.',
+    ])
+
+    const who = await callTool('who_uses', { subject: geomModule }, asAdmin)
+    expect(who.content[0]?.text).toContain(`# ${geomModule} (Go, internal package)`)
+    expect(who.content[0]?.text).toContain('`work:games/a` v1.2.0')
+
+    const evaluated = await callTool(
+      'evaluate_dependency',
+      { package: geomModule, ecosystem: 'Go' },
+      asAdmin,
+    )
+    expect(evaluated.content[0]?.text).toContain('an internal Go package')
+    expect(evaluated.content[0]?.text).toContain('2 uses in 1 files')
   })
 })

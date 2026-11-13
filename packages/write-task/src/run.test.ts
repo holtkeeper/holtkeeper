@@ -244,6 +244,36 @@ describe('runWriteTask', () => {
     expect(task?.commands).not.toContain('bun install --frozen-lockfile; curl')
   })
 
+  test('a Go module formats the changed files before checks and gives the agent the Go env', async () => {
+    const { forge } = fakeForge()
+    const space = await workspace({ status: ' M widget.go\0' })
+    await writeFile(join(space.dir, 'go.mod'), 'module example.com/acme/widgets\n\ngo 1.23\n')
+    const { agent, tasks } = fakeAgent()
+    const data = await runWriteTask({
+      repo,
+      forge,
+      checkout: space.checkout,
+      agent,
+      policy: enabled,
+      env: { HTTPS_PROXY: 'http://proxy.test:8080' },
+      options: options({ prompt: 'Make it 4.' }),
+    })
+    expect(tasks[0]?.env).toEqual({
+      HTTPS_PROXY: 'http://proxy.test:8080',
+      GOTOOLCHAIN: 'local',
+      GOFLAGS: '-mod=mod',
+    })
+    expect(tasks[0]?.commands).toEqual(
+      expect.arrayContaining(['gofmt -l', 'gofmt -w', 'go vet ./...']),
+    )
+    expect(tasks[0]?.prompt).toContain('`gofmt -w`')
+    const commands = space.calls.map((call) => call.command.join(' '))
+    expect(commands.indexOf('gofmt -w widget.go')).toBeLessThan(
+      commands.indexOf('gofmt -l widget.go'),
+    )
+    expect(data.checks.map((check) => check.command)).toContain('go test ./...')
+  })
+
   test('a repository with no tests by design runs no test checks and tells the agent', async () => {
     const { forge } = fakeForge()
     const space = await workspace()

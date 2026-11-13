@@ -78,3 +78,20 @@ test('diffApi leaves out unchanged packages and covers added ones', () => {
   expect(added).toMatchObject({ name: 'other', added: 1, required: 'minor' })
   expect(added?.from).toBeUndefined()
 })
+
+test('versionBump leaves Go pseudo-versions and +incompatible versions out', () => {
+  expect(versionBump('v1.2.3', 'v1.3.0')).toBe('minor')
+  expect(versionBump('v0.0.0-20240101000000-abcdef123456', 'v0.1.0')).toBeUndefined()
+  expect(versionBump('v1.2.3', 'v1.2.4-0.20240101000000-abcdef123456')).toBeUndefined()
+  expect(versionBump('v2.0.0+incompatible', 'v3.0.0+incompatible')).toBeUndefined()
+})
+
+test('diffPackage carries the Go ecosystem', () => {
+  const go = (version: string): ApiPackage => ({
+    ...pkg(version, [symbol('New', 'func New() int')]),
+    name: 'example.com/acme/widgets',
+    ecosystem: 'Go',
+  })
+  expect(diffPackage(go('v1.0.0'), go('v1.1.0')).ecosystem).toBe('Go')
+  expect(diffPackage(pkg('1.0.0', []), pkg('1.1.0', [])).ecosystem).toBeUndefined()
+})

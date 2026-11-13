@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@holtkeeper/depgraph": "workspace:*",
-    "@holtkeeper/exec": "workspace:*"
+    "@holtkeeper/exec": "workspace:*",
+    "@holtkeeper/go-source": "workspace:*"
   }
 }

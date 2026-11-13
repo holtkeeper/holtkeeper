@@ -140,7 +140,7 @@ The server's `GET /api/jobs/stats` and the `queue_stats` tool read the registry 
 
 ## Context
 
-`createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, gitKeyFor?, readOnly?, workDir?, toolchainFor?, createRunner?, detectToolchain?, cache? })` gives each analyzer what its `needs` ask for:
+`createContextFactory({ config, store, cacheDir, runner?, agentFor?, resolveRepos?, checkout?, gitKeyFor?, readOnly?, workDir?, toolchainFor?, createRunner?, detectToolchain?, egressEnv?, jobEnv?, cache? })` gives each analyzer what its `needs` ask for:
 
 | Need / member         | Provided                                                                                                                                                                                                                                                                      |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -182,6 +182,10 @@ execution: {
 - **`container`**: one sandboxed container per checkout (`containerRunner` from `@holtkeeper/exec-container`): read-only root, no capabilities, non-root, resource limits, network per policy, tools installed by mise into a shared cache volume. See [docker/worker](../../../docker/worker/README.md) for the image and the security model.
 
 `egress` routes the HTTP(S) traffic of every command in `mise` and `container` mode through a forward proxy (`egressEnvironment` of `@holtkeeper/exec-container`; the CA files are mounted at `/etc/holtkeeper/egress` in containers). The scoped `toolchain` setting's `env` wins over the proxy variables. The job log names the proxy's `host:port`, never credentials in its URL.
+
+Behind a proxy every command also gets `GOTOOLCHAIN=local` (no toolchain download; `GOFLAGS` stays unset because Go refuses `-mod=mod` in `go.work` checkouts, so analyzers that run per module set it themselves), plus whatever `egressEnv()` returns (an option of `createContextFactory`, `createJobEngine` and `runnerFactory`, read for every runner and only when `egress` is set; a failure is logged and skipped). The server passes `GOPRIVATE` there, computed from the panel GitLab forges and their groups (`host/<top group>`, or the whole host), so `go` fetches those modules directly through the proxy, which adds the forge token to git and `go get` requests, instead of `proxy.golang.org` and the checksum database (`GOPRIVATE` implies `GONOPROXY` and `GONOSUMDB`). The job log shows the `GOPRIVATE` value. Analyzers that run `go` (coverage, depgraph-go, vuln-go) inherit all of it. The toolchain setting's `env` still wins. Never return secrets from `egressEnv`: commands and logs see it.
+
+`jobEnv()` (an option of the same three) is read for every runner in `mise` and `container` mode, with or without `egress`, and its variables win over `egressEnv` (the toolchain setting's `env` still wins over both; a failure is logged as `job environment: …` and skipped). The server passes `GOPRIVATE` there: the egress patterns joined with every private Go module pattern (forge hosts, top-level groups and namespaces on public hosts, the `libraries.goPrivate` setting), so `go` in jobs never asks `proxy.golang.org` or `sum.golang.org` about private modules, behind a proxy or not. The job log shows the `GOPRIVATE` value. Host mode builds no runner and gets neither.
 
 For each checkout the factory runs `detectToolchain` (`@holtkeeper/toolchain`) on it, applies the scoped `toolchain` setting for that repository (`toolchainFor(repo)`, wired by the server; it can override tool versions, `image`, `network` and add `env`) with `mergeToolchain`, logs the tools and detection notes to the job log, and builds the runner with `createRunner`:
 

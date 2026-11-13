@@ -24,6 +24,7 @@ import { aesVault } from '@holtkeeper/vault'
 import { builtinAnalyses } from '../src/analyses.ts'
 import { createApp } from '../src/app.ts'
 import { githubUsageFor } from '../src/github-usage.ts'
+import { goPrivatePatterns } from '../src/go-private.ts'
 import {
   fleetLibraryUses,
   githubClientFor,
@@ -647,7 +648,90 @@ describe('library MCP tools', () => {
     expect(missing.isError).toBe(true)
     expect(missing.text).toContain('indexed: 4.0.0, 3.22.0')
   })
+
+  test('Go library API tools take module and package paths and pair packages across majors', async () => {
+    const kit = { ecosystem: 'Go', name: 'example.com/acme/kit' } as const
+    await libraries.putLibrary({ ...kit, latest: 'v2.0.0', sources: {}, updatedAt: at })
+    await libraries.putVersion({
+      ...kit,
+      version: 'v1.5.0',
+      roles: ['used'],
+      usedBy: ['work:games/a'],
+      api: await putGoApi('v1.5.0', [
+        goPackage('example.com/acme/kit', '.', ['Run']),
+        goPackage('example.com/acme/kit', 'draw', ['Line', 'Dot']),
+      ]),
+      sources: {},
+      updatedAt: at,
+    })
+    await libraries.putVersion({
+      ...kit,
+      version: 'v2.0.0',
+      roles: ['latest', 'major'],
+      usedBy: [],
+      api: await putGoApi('v2.0.0', [
+        goPackage('example.com/acme/kit/v2', '.', ['Run']),
+        goPackage('example.com/acme/kit/v2', 'draw', ['Line']),
+      ]),
+      sources: {},
+      updatedAt: at,
+    })
+
+    const api = await callTool('get_package_api', { package: 'example.com/acme/kit/v2/draw' })
+    expect(api.isError).toBeUndefined()
+    expect(api.text).toContain('example.com/acme/kit@v2.0.0')
+    expect(api.text).toContain('func Line()')
+    expect(api.text).not.toContain('func Run()')
+
+    const diff = await callTool('diff_versions', { package: 'example.com/acme/kit' })
+    expect(diff.text).toContain('v1.5.0 → v2.0.0')
+    expect(diff.text).toContain('Dot')
+    expect(diff.text).not.toContain('Run')
+
+    const missing = await callTool('get_package_api', { package: 'example.com/acme/kit/v2/paint' })
+    expect(missing.isError).toBe(true)
+    expect(missing.text).toContain('has no package example.com/acme/kit/v2/paint')
+
+    const evaluated = await callTool('evaluate_dependency', {
+      package: 'example.com/acme/kit/v2',
+      version: '1.5.0',
+    })
+    expect(evaluated.text).toContain('# example.com/acme/kit/v2@1.5.0 (Go)')
+    expect(evaluated.text).toContain('Newest release v2.0.0')
+  })
 })
+
+const goPackage = (module: string, dir: string, names: string[]): ApiPackage => ({
+  name: dir === '.' ? module : `${module}/${dir}`,
+  private: false,
+  dir,
+  ecosystem: 'Go',
+  module,
+  entries: [
+    {
+      subpath: '.',
+      file: 'kit.go',
+      symbols: names.map((name) => ({
+        name,
+        kind: 'function',
+        signature: `func ${name}()`,
+        file: 'kit.go',
+        line: 1,
+      })),
+    },
+  ],
+})
+const putGoApi = async (version: string, packages: ApiPackage[]) =>
+  (
+    await artifacts.put(new TextEncoder().encode(JSON.stringify(packages)), {
+      name: `Go/kit/${version}/api.json`,
+    })
+  ).id
+
+const goUsed = (name: string, version: string) =>
+  usage(name, version, 'Draw').packages.map((pkg) =>
+    Object.assign(pkg, { ecosystem: 'Go' as const }),
+  )
 
 const registry = (): LibraryRegistry => ({
   async library(ref) {
@@ -830,6 +914,232 @@ describe('library index duty', () => {
     })
     expect(games.uses.map((use) => use.repo)).toEqual(['work:games/a', 'work:games/a'])
     expect(games.internal).toEqual(internal)
+  })
+
+  test('tags Go usages and Go catalog packages as Go, not npm', async () => {
+    const goUsage = (name: string, version: string, local?: boolean) =>
+      usage(name, version, 'Draw').packages.map((pkg) => ({
+        ...pkg,
+        ecosystem: 'Go' as const,
+        ...(local ? { local } : {}),
+      }))
+    const data: UsagesData = {
+      packages: [
+        ...goUsage('example.com/acme/widgets/v2', 'v2.3.0'),
+        ...goUsage('example.com/games/a/tools', 'v0.0.0', true),
+        ...goUsage('example.com/net', 'v1.0.0', true).map((pkg) => ({
+          ...pkg,
+          replaced: true as const,
+        })),
+        ...usage('tiny', '1.0.0', 'x').packages,
+      ],
+      files: 2,
+      types: { status: 'skipped', reason: 'go: syntactic only' },
+    }
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: at,
+      data,
+    })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'libs/geom' },
+      kind: 'api-surface',
+      createdAt: at,
+      data: {
+        packages: [
+          {
+            name: 'gitlab.example/shapes/geom/v3/circle',
+            private: false,
+            dir: 'circle',
+            ecosystem: 'Go',
+            module: 'gitlab.example/shapes/geom/v3',
+            entries: [{ subpath: '.', symbols: [] }],
+          },
+        ],
+      },
+    })
+    const { uses, internal } = await fleetLibraryUses(store.analyses)
+    expect(
+      uses
+        .filter((use) => use.repo === 'work:games/a')
+        .toSorted((a, b) => a.name.localeCompare(b.name)),
+    ).toEqual([
+      {
+        ecosystem: 'Go',
+        name: 'example.com/acme/widgets/v2',
+        version: 'v2.3.0',
+        repo: 'work:games/a',
+      },
+      { ecosystem: 'npm', name: 'tiny', version: '1.0.0', repo: 'work:games/a' },
+    ])
+    expect([...internal].toSorted()).toEqual([
+      'Go:example.com/games/a/tools',
+      'Go:gitlab.example/shapes/geom',
+      'Go:gitlab.example/shapes/geom/v3',
+    ])
+  })
+
+  test('Go uses come from imported modules even without a depgraph, deduplicated with it', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        packages: [
+          ...goUsed('example.com/acme/pgdriver/v5', 'v5.2.0'),
+          ...goUsed('example.com/acme/assert', 'v1.9.0'),
+        ],
+        files: 2,
+        types: { status: 'skipped', reason: 'go: syntactic only' },
+      },
+    })
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'depgraph',
+      createdAt: at,
+      data: {
+        layers: [
+          layer(
+            [
+              { id: 'a', name: 'example.com/games/a', ecosystem: 'Go', kind: 'workspace' },
+              {
+                id: 'pg',
+                name: 'example.com/acme/pgdriver/v5',
+                version: 'v5.2.0',
+                ecosystem: 'Go',
+                kind: 'package',
+              },
+            ],
+            [{ from: 'a', to: 'pg', kind: 'prod' }],
+          ),
+        ],
+        errors: [],
+      },
+    })
+    const { uses } = await fleetLibraryUses(store.analyses)
+    expect(
+      uses
+        .filter((use) => use.ecosystem === 'Go')
+        .map((use) => `${use.name}@${use.version}`)
+        .toSorted(),
+    ).toEqual(['example.com/acme/assert@v1.9.0', 'example.com/acme/pgdriver/v5@v5.2.0'])
+  })
+
+  test('private Go module patterns: whole hosts of self-hosted forges, top groups on public hosts', () => {
+    expect(
+      goPrivatePatterns(
+        [
+          { id: 'self', url: 'https://git.example.com/gitlab/' },
+          { id: 'saas', url: 'https://gitlab.com' },
+          { id: 'hub', url: 'https://github.com' },
+          { id: 'broken', url: 'not a url' },
+        ],
+        [
+          { forge: 'self', include: ['*'] },
+          { forge: 'saas', include: ['shapes/*', '/widgets'] },
+          { forge: 'hub', include: ['*'] },
+        ],
+        ['example.org/acme-private/*'],
+        [
+          { forge: 'hub', path: 'acme-private/kit' },
+          { forge: 'saas', path: 'gears/round/cog' },
+          { forge: 'self', path: 'ignored/repo' },
+        ],
+      ),
+    ).toEqual([
+      'example.org/acme-private/*',
+      'git.example.com/gitlab',
+      'github.com/acme-private',
+      'gitlab.com/gears',
+      'gitlab.com/shapes',
+      'gitlab.com/widgets',
+    ])
+  })
+
+  test('private Go modules also come from config-file forges and analyzed repositories', async () => {
+    await store.analyses.add({
+      repo: { forge: 'saas', path: 'gears/cog' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        packages: [
+          ...goUsed('gitlab.example/shapes/geom', 'v1.0.0'),
+          ...goUsed('gitlab.com/gears/teeth', 'v0.2.0'),
+          ...goUsed('example.com/acme/assert', 'v1.9.0'),
+        ],
+        files: 1,
+        types: { status: 'skipped', reason: 'go: syntactic only' },
+      },
+    })
+    await store.config?.put({
+      type: 'forge',
+      id: 'saas',
+      updatedAt: at,
+      data: { kind: 'gitlab', url: 'https://gitlab.com', credentialId: 'c1' },
+    })
+    await enable({ enabled: true, sources: { repository: false, releases: false, issues: false } })
+    const asked: string[] = []
+    const go: LibraryRegistry = {
+      async library(ref) {
+        asked.push(ref.name)
+        return undefined
+      },
+      async archive() {
+        return undefined
+      },
+    }
+    await runLibraryIndex(
+      {
+        ...indexDeps(),
+        config: { groups: {}, forges: { self: { url: 'https://gitlab.example' } } },
+      },
+      { registries: { npm: registry(), Go: go } },
+    )
+    expect(asked).toEqual(['example.com/acme/assert'])
+  })
+
+  test('private Go modules are internal and never reach the Go registry', async () => {
+    await store.analyses.add({
+      repo: { forge: 'work', path: 'games/a' },
+      kind: 'usages',
+      createdAt: at,
+      data: {
+        packages: [
+          ...goUsed('git.example.com/shapes/geom/v2', 'v2.0.1'),
+          ...goUsed('example.org/hidden/kit', 'v0.4.0'),
+          ...goUsed('example.com/acme/assert', 'v1.9.0'),
+        ],
+        files: 2,
+        types: { status: 'skipped', reason: 'go: syntactic only' },
+      },
+    })
+    await store.config?.put({
+      type: 'forge',
+      id: 'lab',
+      updatedAt: at,
+      data: { kind: 'gitlab', url: 'https://git.example.com', credentialId: 'c1' },
+    })
+    await enable({
+      enabled: true,
+      goPrivate: ['example.org/hidden'],
+      sources: { repository: false, releases: false, issues: false },
+    })
+    const asked: string[] = []
+    const go: LibraryRegistry = {
+      async library(ref) {
+        asked.push(ref.name)
+        return undefined
+      },
+      async archive() {
+        return undefined
+      },
+    }
+    await runLibraryIndex(indexDeps(), { registries: { npm: registry(), Go: go } })
+    expect(asked).toEqual(['example.com/acme/assert'])
+    expect(librariesConfig({ goPrivate: ['example.org/hidden'] })?.goPrivate).toEqual([
+      'example.org/hidden',
+    ])
   })
 
   test('the index leaves internal packages to the API catalog and records latest versions', async () => {

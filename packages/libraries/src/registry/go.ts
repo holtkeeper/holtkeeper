@@ -1,13 +1,15 @@
-import type { LibraryRepository } from '@holtkeeper/store'
-import { unzipSync } from 'fflate'
-
 import {
   compareGoVersions,
   escapeModulePath,
   isPseudoVersion,
   isStableGoVersion,
   modulePathOf,
-} from '../go/module.ts'
+} from '@holtkeeper/go-source'
+import type { LibraryRepository } from '@holtkeeper/store'
+import { unzipSync } from 'fflate'
+
+import { isText } from '../archive.ts'
+import { limitStream } from '../github/client.ts'
 import type {
   ArchiveFiles,
   LibraryRef,
@@ -20,10 +22,43 @@ export interface GoRegistryOptions {
   fetch?: typeof fetch
   /** Default `https://proxy.golang.org`. */
   proxyUrl?: string
+  /**
+   * Module paths that must never reach the proxy or their `go-get` host (see `goPrivateMatcher`):
+   * the registry answers `undefined` for them without a request.
+   */
+  isPrivate?: (path: string) => boolean
+  /**
+   * Largest module zip read, default 200 MB: a bigger one fails with `DownloadTooLargeError`
+   * (up front from `Content-Length`, else once that many bytes arrived) before it is unzipped.
+   */
+  maxDownloadBytes?: number
+}
+
+/**
+ * Whether a module path matches one of `GOPRIVATE`-style patterns: comma-separated globs (`*`, `?`,
+ * `[...]` inside one path element) that each match a prefix of whole path elements, so
+ * `gitlab.example/shapes` covers `gitlab.example/shapes/geom/v2` but not `gitlab.example/shapes2`.
+ * Empty patterns match nothing.
+ */
+export function goPrivateMatcher(patterns: readonly string[]): (path: string) => boolean {
+  const globs = patterns
+    .flatMap((pattern) => pattern.split(','))
+    .map((pattern) => pattern.trim().replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+    .map((pattern) => ({ elements: pattern.split('/').length, glob: new Bun.Glob(pattern) }))
+  return (path) => {
+    const elements = path.split('/')
+    return globs.some(
+      (item) =>
+        elements.length >= item.elements &&
+        item.glob.match(elements.slice(0, item.elements).join('/')),
+    )
+  }
 }
 
 const maxMajor = 100
 const maxFileSize = 1_000_000
+const maxSourceBytes = 100_000_000
 const infoConcurrency = 8
 
 const directRepositoryHosts = new Set(['github.com', 'gitlab.com', 'bitbucket.org'])
@@ -88,19 +123,26 @@ export function moduleDeprecation(mod: string) {
   return deprecated === undefined ? undefined : deprecated.replace(/\s+/g, ' ').trim()
 }
 
+/** Keeps the files of a module zip worth reading as source: everything outside `vendor/`. */
+const keepSourceFile = (path: string) => !path.split('/').includes('vendor')
+
 /**
  * `LibraryRegistry` over the Go module proxy. A library is a module path without `/vN`; its
  * versions are joined from every major path that exists (probed upward from `/v2` until the
  * proxy answers 404 or 410). Pseudo-versions are left out. Repository comes from the module
  * path for GitHub, GitLab and Bitbucket, else from the `go-source`/`go-import` meta tags of
  * `https://<path>?go-get=1`. Deprecation is the `// Deprecated:` comment in the `go.mod` of each
- * major's newest version and applies to every version of that major.
+ * major's newest version and applies to every version of that major. `archive` keeps the docs and
+ * non-test `.go` files of the module zip, `source` every text file outside `vendor/`. Paths
+ * `isPrivate` matches are never requested.
  */
 export function goRegistry(options: GoRegistryOptions = {}): LibraryRegistry {
   const get = options.fetch ?? globalThis.fetch
+  const isPrivate = options.isPrivate ?? (() => false)
   const proxy = (options.proxyUrl ?? 'https://proxy.golang.org').replace(/\/$/, '')
   const moduleUrl = (path: string) => `${proxy}/${escapeModulePath(path)}`
   const headers = { 'user-agent': 'holtkeeper' }
+  const maxDownloadBytes = options.maxDownloadBytes ?? 200_000_000
 
   const request = async (url: string) => {
     try {
@@ -168,6 +210,7 @@ export function goRegistry(options: GoRegistryOptions = {}): LibraryRegistry {
 
   const library = async (ref: LibraryRef): Promise<PublishedLibrary | undefined> => {
     const name = ref.name
+    if (isPrivate(name)) return undefined
     const majors: { path: string; versions: string[] }[] = []
     const base = await listOf(name)
     if (base.exists) majors.push({ path: name, versions: base.versions })
@@ -223,24 +266,45 @@ export function goRegistry(options: GoRegistryOptions = {}): LibraryRegistry {
     }
   }
 
-  const archive = async (ref: LibraryRef, version: string): Promise<ArchiveFiles | undefined> => {
+  const moduleZip = async (
+    ref: LibraryRef,
+    version: string,
+    keep: (path: string, size: number) => boolean,
+  ): Promise<ArchiveFiles | undefined> => {
     const path = modulePathOf(ref.name, version)
+    if (isPrivate(path)) return undefined
     const response = await request(`${moduleUrl(path)}/@v/${escapeModulePath(version)}.zip`)
     if (!response || response.status === 404 || response.status === 410) return undefined
     if (!response.ok) throw new Error(`Go proxy answered ${response.status} for ${path}@${version}`)
     const prefix = `${path}@${version}/`
     const strip = (name: string) =>
       name.startsWith(prefix) ? name.slice(prefix.length) : name.slice(name.indexOf('/') + 1)
-    const entries = unzipSync(new Uint8Array(await response.arrayBuffer()), {
+    const body = limitStream(response, maxDownloadBytes, `module zip of ${path}@${version}`)
+    const entries = unzipSync(new Uint8Array(await new Response(body).arrayBuffer()), {
       filter: (file) =>
         !file.name.endsWith('/') &&
         file.originalSize <= maxFileSize &&
-        keepModuleFile(strip(file.name)),
+        keep(strip(file.name), file.originalSize),
     })
     const files: ArchiveFiles = new Map()
     for (const [name, bytes] of Object.entries(entries)) files.set(strip(name), bytes)
     return files
   }
 
-  return { library, archive }
+  const archive = (ref: LibraryRef, version: string) =>
+    moduleZip(ref, version, (path) => keepModuleFile(path))
+
+  const source = async (ref: LibraryRef, version: string) => {
+    let budget = maxSourceBytes
+    const files = await moduleZip(ref, version, (path, size) => {
+      if (!keepSourceFile(path) || size > budget) return false
+      budget -= size
+      return true
+    })
+    if (!files) return undefined
+    for (const [path, bytes] of files) if (!isText(bytes)) files.delete(path)
+    return files
+  }
+
+  return { library, archive, source }
 }

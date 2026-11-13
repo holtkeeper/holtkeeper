@@ -11,6 +11,7 @@ import type {
   RepoRef,
 } from '@holtkeeper/api'
 import {
+  type ApiEcosystem,
   type ApiPackage,
   type ApiSurfaceData,
   type ApiSymbol,
@@ -21,6 +22,7 @@ import {
   diffPackage,
   importPath,
 } from '@holtkeeper/api-surface'
+import { libraryOfModule } from '@holtkeeper/libraries'
 import type { AnalysisStore } from '@holtkeeper/store'
 
 import type { FleetCache } from '../fleet-cache.ts'
@@ -37,6 +39,8 @@ interface IndexedPackage {
   version?: string
   description?: string
   private: boolean
+  ecosystem?: ApiEcosystem
+  module?: string
   dir: string
   subpaths: string[]
   exports: number
@@ -55,6 +59,15 @@ export interface IndexedRecord {
 }
 
 const repoKey = (repo: RepoRef) => `${repo.forge}:${repo.path}`
+
+/**
+ * What versions of a package share: its name for npm; for Go its import path with the module's
+ * `/vN` dropped, so every major of a module lists its versions together.
+ */
+const packageFamily = (pkg: { name: string; ecosystem?: string; module?: string }) => {
+  if (pkg.ecosystem !== 'Go' || !pkg.module || !pkg.name.startsWith(pkg.module)) return pkg.name
+  return libraryOfModule(pkg.module) + pkg.name.slice(pkg.module.length)
+}
 
 function indexRecord(record: {
   id: string
@@ -77,6 +90,8 @@ function indexRecord(record: {
         ...(pkg.version ? { version: pkg.version } : {}),
         ...(pkg.description ? { description: pkg.description } : {}),
         private: pkg.private,
+        ...(pkg.ecosystem ? { ecosystem: pkg.ecosystem } : {}),
+        ...(pkg.module ? { module: pkg.module } : {}),
         dir: pkg.dir,
         subpaths: pkg.entries.map((entry) => entry.subpath),
         exports: totals.symbols,
@@ -101,6 +116,18 @@ export interface ResolvedPackage {
   /** Set when the repository no longer has the package. */
   removed?: PublicApiPackageRemoval
 }
+
+/**
+ * The package of `record` that is a version of `name`: `name` itself first, else a Go package of
+ * the same family (another major of the module).
+ */
+const memberOf = <T extends { name: string; ecosystem?: string; module?: string }>(
+  packages: T[],
+  name: string,
+  family: string,
+) =>
+  packages.find((p) => p.name === name) ??
+  packages.find((p) => p.ecosystem === 'Go' && packageFamily(p) === family)
 
 /** Options of `createApiCatalog`. */
 export interface ApiCatalogOptions {
@@ -274,25 +301,60 @@ export function createApiCatalog(options: ApiCatalogOptions) {
       .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
   }
 
-  /** Versions of `name` in `repo`, newest first: one per released version, plus the newest head. */
+  /** The family of the package called `name` in the records, `name` itself when none is Go. */
+  const familyOf = (all: IndexedRecord[], name: string) => {
+    for (const record of all) {
+      const pkg = record.packages.find((p) => p.name === name)
+      if (pkg) return packageFamily(pkg)
+    }
+    return name
+  }
+
+  /**
+   * A Go package recorded under another major of the module `name` points at (`example.com/kit`
+   * finds `example.com/kit/v2`), newest record first; `undefined` when there is none.
+   */
+  const goAliasOf = (all: IndexedRecord[], name: string) => {
+    for (const record of all)
+      for (const pkg of record.packages)
+        if (pkg.ecosystem === 'Go' && pkg.name !== name && packageFamily(pkg) === name)
+          return pkg.name
+    return undefined
+  }
+
+  /**
+   * Versions of `name` in `repo`, newest first: one per released version, plus the newest head.
+   * Go packages take versions only from module tags: a release record whose module was not tagged
+   * is skipped, and the head is `head`.
+   */
   const versionsOf = (all: IndexedRecord[], name: string, repo: string) => {
-    const versions: (PublicApiVersion & { record: IndexedRecord })[] = []
+    const versions: (PublicApiVersion & { record: IndexedRecord; name: string })[] = []
     const seen = new Set<string>()
+    const family = familyOf(all, name)
     let head = false
     for (const record of all) {
       if (repoKey(record.repo) !== repo) continue
-      const pkg = record.packages.find((p) => p.name === name)
+      const pkg = memberOf(record.packages, name, family)
       if (!pkg) continue
+      const go = pkg.ecosystem === 'Go'
+      if (go && record.ref && !pkg.version) continue
       if (!record.ref) {
         if (head) continue
         head = true
       }
-      const version = pkg.version ?? record.ref ?? 'head'
+      const version = go
+        ? record.ref
+          ? (pkg.version ?? 'head')
+          : 'head'
+        : (pkg.version ?? record.ref ?? 'head')
       const key = record.ref ? `v:${version}` : 'head'
       if (seen.has(key)) continue
       seen.add(key)
       versions.push({
         version,
+        ...(go ? { ecosystem: 'Go' as const } : {}),
+        ...(pkg.name === name ? {} : { package: pkg.name }),
+        name: pkg.name,
         ...(record.ref ? { ref: record.ref } : {}),
         head: !record.ref,
         analysisId: record.id,
@@ -344,8 +406,12 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     }
   }
 
-  const strip = (version: PublicApiVersion & { record: IndexedRecord }): PublicApiVersion => ({
+  const strip = (
+    version: PublicApiVersion & { record: IndexedRecord; name: string },
+  ): PublicApiVersion => ({
     version: version.version,
+    ...(version.ecosystem ? { ecosystem: version.ecosystem } : {}),
+    ...(version.package ? { package: version.package } : {}),
     ...(version.ref ? { ref: version.ref } : {}),
     head: version.head,
     analysisId: version.analysisId,
@@ -354,7 +420,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
   })
 
   const pick = (
-    versions: (PublicApiVersion & { record: IndexedRecord })[],
+    versions: (PublicApiVersion & { record: IndexedRecord; name: string })[],
     wanted: string | undefined,
   ) => {
     const query = wanted?.replace(/^v(?=\d)/, '')
@@ -364,6 +430,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     const matches = (version: PublicApiVersion) =>
       version.version === query ||
       version.version === wanted ||
+      (version.ecosystem === 'Go' && version.version === `v${query}`) ||
       version.ref === wanted ||
       version.analysisId === wanted ||
       version.ref?.endsWith(`@${query}`)
@@ -377,6 +444,10 @@ export function createApiCatalog(options: ApiCatalogOptions) {
   ): Promise<ResolvedPackage | undefined> => {
     const all = await visible(filter)
     const repos = reposOf(all, name)
+    if (!repos.length) {
+      const alias = goAliasOf(all, name)
+      return alias ? resolve(filter, alias, query) : undefined
+    }
     const repo = query.repo
       ? repos.find((r) => repoKey(r) === query.repo)
       : (repos.find((r) => !missingHeads(all, name, repoKey(r))) ?? repos[0])
@@ -385,7 +456,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
     const versions = versionsOf(all, name, repoKey(repo))
     const chosen = pick(versions, query.version)
     if (!chosen) return undefined
-    const found = (await data(chosen.record.id))?.packages.find((p) => p.name === name)
+    const found = (await data(chosen.record.id))?.packages.find((p) => p.name === chosen.name)
     if (!found) return undefined
     return {
       record: chosen.record,
@@ -452,7 +523,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
       const batch = await Promise.all(
         compared.slice(start, start + readConcurrency).map(async (version) =>
           (await data(version.record.id))?.packages
-            .find((pkg) => pkg.name === query.package)
+            .find((pkg) => pkg.name === version.name)
             ?.entries.find((entry) => entry.subpath === query.subpath)
             ?.symbols.find((symbol) => symbol.name === query.name),
         ),
@@ -585,6 +656,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
               found.push({
                 package: pkg.name,
                 ...(pkg.version ? { version: pkg.version } : {}),
+                ...(pkg.ecosystem ? { ecosystem: pkg.ecosystem } : {}),
                 repo: record.repo,
                 subpath: entry.subpath,
                 importPath: importPath(pkg.name, entry.subpath),
@@ -678,6 +750,7 @@ export function createApiCatalog(options: ApiCatalogOptions) {
       return {
         package: found.package.name,
         ...(found.package.version ? { version: found.package.version } : {}),
+        ...(found.package.ecosystem ? { ecosystem: found.package.ecosystem } : {}),
         repo: found.record.repo,
         ...(found.record.ref ? { ref: found.record.ref } : {}),
         analysisId: found.record.id,

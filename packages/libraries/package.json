@@ -9,6 +9,7 @@
   "dependencies": {
     "@holtkeeper/api-surface": "workspace:*",
     "@holtkeeper/artifacts": "workspace:*",
+    "@holtkeeper/go-source": "workspace:*",
     "@holtkeeper/store": "workspace:*",
     "fflate": "^0.8.3"
   }

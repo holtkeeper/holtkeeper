@@ -72,6 +72,8 @@ The whole fleet in one table — every repository of your groups with its health
 | Fresh      | How current the newest analyses are.                                                                                      |
 | Updates    | How Holtkeeper learns about changes: by webhook or by polling.                                                            |
 
+A cell with no analysis yet reads **no record**, with two exceptions: **Bundles** reads **n/a** when the repository has no app build or published package to measure (a Go service, for example), and **Deps** reads **Pending**, **Queued**, **Running** or **Failed** with _first run_ until Renovate's first check succeeds.
+
 A cell opens the hub area that explains it; **Jobs** opens the repository's runs in [Ops › Runs](/guide/ops/runs/). The strip counts repositories per state and ends with how many get updates by webhook and by polling.
 
 ## Filter and sort

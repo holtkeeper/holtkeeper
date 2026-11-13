@@ -1,16 +1,18 @@
 import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
 import type { PublicApiPackageRemoval, RepoRef } from '@holtkeeper/api'
 import {
+  type ApiEcosystem,
   type ApiPackage,
   type PackageDiff,
   apiSymbolKinds,
   diffPackage,
+  fenceLanguage,
   importPath,
   renderDiff,
   renderPackage,
   renderSymbol,
 } from '@holtkeeper/api-surface'
-import { type LatestVersions, sameVersion, thirdParty } from '@holtkeeper/libraries'
+import { type LatestVersions, resolveLibrary, sameVersion, thirdParty } from '@holtkeeper/libraries'
 import type { LibraryEcosystem, LibraryRef, Store } from '@holtkeeper/store'
 import {
   findSites,
@@ -24,7 +26,12 @@ import {
 import { z } from 'zod'
 
 import type { ApiCatalog, RepoFilter } from '../api-surface/catalog.ts'
-import { type UsageIndex, impactOf, impactOfChanges } from '../api-surface/usages.ts'
+import {
+  type UsageIndex,
+  impactOf,
+  impactOfChanges,
+  impactOfGoChanges,
+} from '../api-surface/usages.ts'
 import { repoKey } from '../context.ts'
 import { evaluateDependency } from './dependency.ts'
 import type { KnowledgeToolsContext } from './knowledge.ts'
@@ -81,10 +88,41 @@ const removalNote = (name: string, repo: RepoRef, removed: PublicApiPackageRemov
       : []),
   ].join(' ')
 
+/** npm names hold a `/` only after an `@scope`; a slash without one is a Go module or package path. */
+const looksLikeGo = (name: string) => !name.startsWith('@') && name.includes('/')
+
 const refOf = (name: string, ecosystem: LibraryEcosystem | undefined): LibraryRef => ({
-  ecosystem: ecosystem ?? 'npm',
+  ecosystem: ecosystem ?? (looksLikeGo(name) ? 'Go' : 'npm'),
   name,
 })
+
+/** A Go import path inside library `library` without the major suffix that follows the library path. */
+const withoutMajor = (path: string, library: string) =>
+  path === library || path.startsWith(`${library}/`)
+    ? library + path.slice(library.length).replace(/^\/v\d+(?=\/|$)/, '')
+    : path
+
+/** The packages of a Go module API that `name` names when it is a package path inside the module. */
+const packagesNamed = <T extends { name: string }>(
+  ref: LibraryRef,
+  name: string,
+  packages: T[],
+) => {
+  const wanted = withoutMajor(name, ref.name)
+  if (ref.ecosystem !== 'Go' || wanted === ref.name) return packages
+  return packages.filter((pkg) => withoutMajor(pkg.name, ref.name) === wanted)
+}
+
+/** The name Go code refers to an imported package by: its last path element without `/vN`. */
+const goPackageName = (path: string) => {
+  const parts = path.split('/')
+  const last = parts.at(-1) ?? path
+  const name = /^v\d+$/.test(last) && parts.length > 1 ? (parts.at(-2) ?? last) : last
+  return name
+    .replace(/\.v\d+$/, '')
+    .replace(/^go-/, '')
+    .replace(/[^\w]/g, '_')
+}
 
 const renderExternal = (
   ref: LibraryRef,
@@ -127,8 +165,24 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       return new ToolError(
         `${name} has no version ${version}; call list_versions for the recorded ones.`,
       )
+    const goModule = known
+      .filter(
+        (pkg) =>
+          pkg.ecosystem === 'Go' &&
+          pkg.module &&
+          (name === pkg.module || name.startsWith(`${pkg.module}/`)),
+      )
+      .toSorted((a, b) => (b.module ?? '').length - (a.module ?? '').length)[0]?.module
+    if (goModule) {
+      const inModule = known
+        .filter((pkg) => pkg.module === goModule && !pkg.removed)
+        .map((pkg) => pkg.name)
+      return new ToolError(
+        `No Go package ${name} in the catalog. Module ${goModule} has ${inModule.length} indexed package${inModule.length === 1 ? '' : 's'}${inModule.length ? `: ${inModule.slice(0, 15).join(', ')}${inModule.length > 15 ? ', …' : ''}` : ''}. Go packages are named by their full import path.`,
+      )
+    }
     const owner = known
-      .filter((pkg) => name.startsWith(`${pkg.name}/`))
+      .filter((pkg) => pkg.ecosystem !== 'Go' && name.startsWith(`${pkg.name}/`))
       .toSorted((a, b) => b.name.length - a.name.length)[0]
     if (owner)
       return new ToolError(
@@ -144,6 +198,11 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       `No package ${name} in the catalog.${close.length ? ` Similar: ${close.join(', ')}.` : ' Call list_packages to see what is indexed.'}`,
     )
   }
+
+  const externalRef = async (name: string, ecosystem: LibraryEcosystem | undefined) =>
+    library
+      ? (await resolveLibrary(library.store, { package: name, ecosystem })).ref
+      : refOf(name, ecosystem)
 
   const externalVersion = async (
     ref: LibraryRef,
@@ -199,13 +258,14 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       externalApi(ref, fromVersion),
       externalApi(ref, to.version),
     ])
-    const names = [...new Set([...before, ...after].map((pkg) => pkg.name))].toSorted()
-    const diffs: PackageDiff[] = names.map((pkgName) =>
-      diffPackage(
-        before.find((pkg) => pkg.name === pkgName),
-        after.find((pkg) => pkg.name === pkgName),
-      ),
-    )
+    const keyOf = (pkg: ApiPackage) =>
+      ref.ecosystem === 'Go' ? withoutMajor(pkg.name, ref.name) : pkg.name
+    const keys = [...new Set([...before, ...after].map(keyOf))].toSorted()
+    const diffs: PackageDiff[] = keys.map((key) => {
+      const old = before.find((pkg) => keyOf(pkg) === key)
+      const next = after.find((pkg) => keyOf(pkg) === key)
+      return Object.assign(diffPackage(old, next), { name: old?.name ?? next?.name ?? key })
+    })
     return { from: fromVersion, to: to.version, before, diffs }
   }
 
@@ -215,6 +275,20 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
     .describe(
       'Version such as 1.4.0, a tag, `latest` (newest release, default) or `head` (default branch)',
     )
+  /**
+   * The catalog version of `name`, unless `ecosystem` names another ecosystem than the package's;
+   * Go packages of the organization's repositories come from the catalog too.
+   */
+  const resolveOwn = async (
+    name: string,
+    query: { version?: string; repo?: string },
+    ecosystem: ApiEcosystem | undefined,
+  ) => {
+    const found = await catalog.resolve(canRead, name, query)
+    if (!found || (ecosystem && (found.package.ecosystem ?? 'npm') !== ecosystem)) return undefined
+    return found
+  }
+
   const repoArg = z
     .string()
     .optional()
@@ -225,9 +299,10 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
   return {
     name: 'catalog',
     instructions: [
-      'Holtkeeper indexes the public API of the packages in this organization’s repositories: every',
-      'exported name with its declaration and doc comment, for each released version and the default',
-      'branch. Prefer it over reading package sources or node_modules.',
+      'Holtkeeper indexes the public API of the packages in this organization’s repositories (npm',
+      'packages and Go packages, the latter named by their full import path): every exported name',
+      'with its declaration and doc comment, for each released version and the default branch.',
+      'Prefer it over reading package sources, node_modules or the Go module cache.',
       'Start with search_symbols or list_packages, read get_package_api (narrow with subpath or',
       'docs: false for big packages), and use list_versions / diff_versions to see what changed',
       'between versions before upgrading. Packages marked removed were dropped from their repository:',
@@ -250,7 +325,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       defineTool({
         name: 'list_packages',
         description:
-          'Lists the indexed packages (newest version of each) with their repository, description, entry points and how many versions are recorded. Filter with a substring of the name, description or repository.',
+          'Lists the indexed packages (newest version of each) with their repository, description, entry points and how many versions are recorded. npm packages by name, Go packages by import path with their module. Filter with a substring of the name, description or repository.',
         input: z.object({
           query: z
             .string()
@@ -262,7 +337,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
           if (!packages.length)
             return query ? `No package matches "${query}".` : 'No package is indexed yet.'
           const line = (pkg: (typeof packages)[number]) =>
-            `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded${pkg.removed ? `\n  ${removalNote(pkg.name, pkg.repo, pkg.removed)}` : ''}`
+            `- **${pkg.name}**${pkg.version ? `@${pkg.version}` : ''}${pkg.ecosystem === 'Go' ? ` (Go${pkg.module && pkg.module !== pkg.name ? `, module ${pkg.module}` : ''}${pkg.private ? ', internal' : ''})` : pkg.private ? ' (private)' : ''}${pkg.description ? ` — ${pkg.description}` : ''}\n  repo \`${repoKey(pkg.repo)}\`${pkg.dir !== '.' ? ` folder \`${pkg.dir}\`` : ''}, ${pkg.exports} exports, entry points ${pkg.subpaths.map((s) => `\`${importPath(pkg.name, s)}\``).join(', ')}, ${pkg.versions} version${pkg.versions === 1 ? '' : 's'} recorded${pkg.removed ? `\n  ${removalNote(pkg.name, pkg.repo, pkg.removed)}` : ''}`
           const removed = packages.filter((pkg) => pkg.removed)
           return [
             ...packages.filter((pkg) => !pkg.removed).map(line),
@@ -281,9 +356,13 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       defineTool({
         name: 'get_package_api',
         description:
-          'The public API of one package version as Markdown: each entry point (import path) with every exported name, its doc comment and declaration. For large packages pass `subpath` or `docs: false`.',
+          'The public API of one package version as Markdown: each entry point (import path) with every exported name, its doc comment and declaration. Covers npm packages and Go packages (pass the full import path) of the organization, then third-party libraries. For large packages pass `subpath` or `docs: false`.',
         input: z.object({
-          package: z.string().describe('Package name, e.g. @acme/ui'),
+          package: z
+            .string()
+            .describe(
+              'Package name, e.g. @acme/ui, or a Go import path such as example.com/kit/log',
+            ),
           version: versionArg,
           subpath: z.string().optional().describe('Entry point such as `.` or `./button`'),
           docs: z.boolean().optional().describe('Include doc comments (default true)'),
@@ -291,18 +370,25 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
           ecosystem: ecosystemArg,
         }),
         run: async ({ package: name, version, subpath, docs, repo, ecosystem }) => {
-          const found =
-            ecosystem === 'Go'
-              ? undefined
-              : await catalog.resolve(canRead, name, {
-                  ...(version ? { version } : {}),
-                  ...(repo ? { repo } : {}),
-                })
+          const found = await resolveOwn(
+            name,
+            { ...(version ? { version } : {}), ...(repo ? { repo } : {}) },
+            ecosystem,
+          )
           if (!found) {
-            const ref = refOf(name, ecosystem)
+            const ref = await externalRef(name, ecosystem)
             const external = await externalVersion(ref, version, repo)
             if (!external) throw await notFound(name, version)
-            const packages = (await externalApi(ref, external.version)).filter(
+            const all = await externalApi(ref, external.version)
+            const named = packagesNamed(ref, name, all)
+            if (!named.length)
+              throw new ToolError(
+                `${ref.name}@${external.version} has no package ${name}; its packages: ${all
+                  .slice(0, 20)
+                  .map((pkg) => pkg.name)
+                  .join(', ')}${all.length > 20 ? ', …' : ''}.`,
+              )
+            const packages = named.filter(
               (pkg) => !subpath || pkg.entries.some((entry) => entry.subpath === subpath),
             )
             if (!packages.length)
@@ -365,9 +451,9 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
                 : hit.symbol.signature
             return [
               `### \`${hit.importPath}\` → ${hit.symbol.name} (${hit.symbol.kind})`,
-              `${hit.package}${hit.version ? `@${hit.version}` : ''}, repo \`${repoKey(hit.repo)}\`${hit.symbol.deprecated !== undefined ? ', **deprecated**' : ''}`,
+              `${hit.package}${hit.version ? `@${hit.version}` : ''}${hit.ecosystem === 'Go' ? ' (Go)' : ''}, repo \`${repoKey(hit.repo)}\`${hit.symbol.deprecated !== undefined ? ', **deprecated**' : ''}`,
               ...(doc ? [doc] : []),
-              `\`\`\`ts\n${signature}\n\`\`\``,
+              `\`\`\`${fenceLanguage(hit.ecosystem)}\n${signature}\n\`\`\``,
             ].join('\n\n')
           })
           if (result.more)
@@ -407,15 +493,20 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
               `${pkgName}${found.package.version ? `@${found.package.version}` : ''} exports no ${name}${subpath ? ` from ${subpath}` : ''}; try search_symbols.`,
             )
           const from = importPath(pkgName, entry.subpath)
-          const statement =
-            name === 'default'
+          const go = found.package.ecosystem === 'Go'
+          const statement = go
+            ? `import "${from}"\n\n// ${goPackageName(from)}.${name}`
+            : name === 'default'
               ? `import ${pkgName.split('/').pop()?.replace(/\W+/g, '_') ?? 'value'} from '${from}'`
               : `import ${['interface', 'type'].includes(symbol.kind) ? 'type ' : ''}{ ${name} } from '${from}'`
           return [
             `${pkgName}${found.package.version ? `@${found.package.version}` : ''}, repo \`${repoKey(found.record.repo)}\``,
             ...(found.removed ? [removalNote(pkgName, found.record.repo, found.removed)] : []),
-            `\`\`\`ts\n${statement}\n\`\`\``,
-            renderSymbol(symbol),
+            `\`\`\`${fenceLanguage(found.package.ecosystem)}\n${statement}\n\`\`\``,
+            renderSymbol(
+              symbol,
+              found.package.ecosystem ? { ecosystem: found.package.ecosystem } : {},
+            ),
           ].join('\n\n')
         },
         subject: ({ package: name }) => name,
@@ -427,12 +518,9 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
           'Recorded versions of a package, newest first, with the release tag, date, number of exports and for the newest ones how the API changed from the version before (removed / changed / added).',
         input: z.object({ package: z.string(), repo: repoArg, ecosystem: ecosystemArg }),
         run: async ({ package: name, repo, ecosystem }) => {
-          const found =
-            ecosystem === 'Go'
-              ? undefined
-              : await catalog.resolve(canRead, name, repo ? { repo } : {})
+          const found = await resolveOwn(name, repo ? { repo } : {}, ecosystem)
           if (!found) {
-            const ref = refOf(name, ecosystem)
+            const ref = await externalRef(name, ecosystem)
             const external = await externalVersion(ref, undefined, repo)
             if (!external) throw await notFound(name)
             const lines = [
@@ -494,8 +582,13 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
                 change = ` — since ${previous.version}: ${diff.removed} removed, ${diff.changed} changed, ${diff.added} added${diff.semverWarning ? ` (semver: ${diff.semverWarning})` : ''}`
               }
             }
+            const label = version.head
+              ? version.ecosystem === 'Go'
+                ? 'head (default branch)'
+                : `head (default branch, package.json ${version.version})`
+              : version.version
             lines.push(
-              `- ${version.head ? `head (default branch, package.json ${version.version})` : version.version}${version.ref ? ` tag \`${version.ref}\`` : ''}, ${version.analyzedAt.slice(0, 10)}, ${version.exports} exports${change}`,
+              `- ${label}${version.package ? ` as ${version.package}` : ''}${version.ref ? ` tag \`${version.ref}\`` : ''}, ${version.analyzedAt.slice(0, 10)}, ${version.exports} exports${change}`,
             )
           }
           if (found.alsoIn.length)
@@ -524,17 +617,17 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
             ...(to ? { to } : {}),
             ...(repo ? { repo } : {}),
           }
-          const result = ecosystem === 'Go' ? undefined : await catalog.diff(canRead, name, query)
+          const own = await resolveOwn(name, repo ? { repo } : {}, ecosystem)
+          const result = own ? await catalog.diff(canRead, name, query) : undefined
           if (!result) {
-            const found =
-              ecosystem === 'Go'
-                ? undefined
-                : await catalog.resolve(canRead, name, repo ? { repo } : {})
+            const found = own
             if (!found) {
-              const ref = refOf(name, ecosystem)
+              const ref = await externalRef(name, ecosystem)
               const external = await externalDiff(ref, query)
               if (!external) throw await notFound(name)
-              const changed = external.diffs.filter((diff) => diff.changes.length)
+              const changed = packagesNamed(ref, name, external.diffs).filter(
+                (diff) => diff.changes.length,
+              )
               return changed.length
                 ? thirdParty(
                     `${name} ${external.from} → ${external.to} (${ref.ecosystem}, API from the published packages)`,
@@ -556,8 +649,12 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       defineTool({
         name: 'package_usage',
         description:
-          'Who uses a package across the organization’s repositories: versions in use per repository and every export used with how often, how (call, jsx, type, member, …), the JSX props passed and members read. Start here before changing or upgrading a package.',
-        input: z.object({ package: z.string().describe('Package name, e.g. @acme/ui') }),
+          'Who uses a package across the organization’s repositories: versions in use per repository and every export used with how often, how (call, jsx, type, member, …), the JSX props passed and members read. For Go, pass a module path (every package of it) or a package import path (only that package). Start here before changing or upgrading a package.',
+        input: z.object({
+          package: z
+            .string()
+            .describe('Package name, e.g. @acme/ui, or a Go module or package import path'),
+        }),
         run: async ({ package: name }) => {
           const usage = packageUsage(await usages.entries(canRead), name)
           return renderPackageUsage(usage, { originLabel: String, teamOf })
@@ -605,7 +702,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       defineTool({
         name: 'upgrade_impact',
         description:
-          'What upgrading a package breaks in the repositories that use it: the API diff between two recorded versions joined with their uses. Removed exports and removed members or props of changed declarations are `breaking`, other uses of changed declarations `check`, deprecations `deprecated`; each comes with the affected code. Repositories already on `to` are left out.',
+          'What upgrading a package breaks in the repositories that use it: the API diff between two recorded versions joined with their uses. Removed exports and removed members or props of changed declarations are `breaking`, other uses of changed declarations `check`, deprecations `deprecated`; each comes with the affected code. Repositories already on `to` are left out. For Go, pass the package import path; Go uses are read syntactically (no types), so methods called on returned values are not seen.',
         input: z.object({
           package: z.string(),
           from: z.string().optional().describe('Older version; default the release before `to`'),
@@ -614,27 +711,36 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
           ecosystem: ecosystemArg,
         }),
         run: async ({ package: name, from, to, repo, ecosystem }) => {
-          if (ecosystem === 'Go')
-            throw new ToolError(
-              'upgrade_impact covers npm packages (the usage index reads TypeScript and JavaScript); use diff_versions for Go modules.',
-            )
           const query = {
             ...(from ? { from } : {}),
             ...(to ? { to } : {}),
             ...(repo ? { repo } : {}),
           }
-          const result = await impactOf(catalog, usages, canReadSnippets, name, query)
+          const found = await resolveOwn(name, repo ? { repo } : {}, ecosystem)
+          const result = found
+            ? await impactOf(catalog, usages, canReadSnippets, name, query)
+            : undefined
           if (!result) {
-            const found = await catalog.resolve(canRead, name, repo ? { repo } : {})
             if (!found) {
-              const ref = refOf(name, 'npm')
+              const ref = await externalRef(name, ecosystem)
               const external = await externalDiff(ref, query)
               if (!external) throw await notFound(name)
-              const impact = await impactOfChanges(usages, canReadSnippets, name, {
-                before: external.before.find((pkg) => pkg.name === name) ?? external.before[0],
-                changes: external.diffs.flatMap((diff) => diff.changes),
-                target: external.to,
-              })
+              const impact =
+                ref.ecosystem === 'Go'
+                  ? await impactOfGoChanges(usages, canReadSnippets, name, {
+                      packages: external.diffs.map((diff) => ({
+                        name: diff.name,
+                        before: external.before.find((pkg) => pkg.name === diff.name),
+                        changes: diff.changes,
+                      })),
+                      target: external.to,
+                    })
+                  : await impactOfChanges(usages, canReadSnippets, name, {
+                      before:
+                        external.before.find((pkg) => pkg.name === name) ?? external.before[0],
+                      changes: external.diffs.flatMap((diff) => diff.changes),
+                      target: external.to,
+                    })
               return [
                 `${name} ${external.from} → ${external.to} (third-party)`,
                 renderImpact(impact),
@@ -672,7 +778,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
             `# \`${repo}\`: ${packages.length} packages, ${entry.data.files} files read, type checker ${entry.data.types.status}`,
             ...packages.map(
               (pkg) =>
-                `- **${pkg.name}** ${pkg.versions.join(', ') || pkg.ranges.join(', ') || 'version unknown'}${pkg.local ? ' (defined here)' : ''} — ${pkg.count} uses in ${pkg.files} files, ${pkg.exports} exports`,
+                `- **${pkg.name}**${pkg.ecosystem === 'Go' ? ' (Go)' : ''} ${pkg.versions.join(', ') || pkg.ranges.join(', ') || 'version unknown'}${pkg.local ? ' (defined here)' : ''} — ${pkg.count} uses in ${pkg.files} files, ${pkg.exports} exports`,
             ),
           ].join('\n')
         },

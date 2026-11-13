@@ -2,7 +2,13 @@ import { defineAnalysis, metric } from '@holtkeeper/report'
 import type { Block, Cell, Issue, Metric, Report, Section, Tone } from '@holtkeeper/report'
 
 import { type PackageDiff, diffApi } from './diff.ts'
-import { type ApiSurfaceData, apiSurfaceDataSchema, apiTotals, documentedPercent } from './model.ts'
+import {
+  type ApiGoModule,
+  type ApiSurfaceData,
+  apiSurfaceDataSchema,
+  apiTotals,
+  documentedPercent,
+} from './model.ts'
 import { importPath } from './render.ts'
 
 const limits = { packages: 200, changes: 300, undocumented: 30 }
@@ -14,6 +20,36 @@ function tone(percent: number | undefined): Tone {
   if (percent === undefined) return 'neutral'
   if (percent >= thresholds.good) return 'good'
   return percent >= thresholds.bad ? 'warning' : 'bad'
+}
+
+function goMetrics(data: ApiSurfaceData): Metric[] {
+  const modules = data.go?.modules
+  if (!modules?.length) return []
+  const sum = (pick: (module: ApiGoModule) => number) =>
+    modules.reduce((total, module) => total + pick(module), 0)
+  return [
+    metric(
+      'goImportable',
+      'Go importable packages',
+      sum((module) => module.packages),
+      {
+        hint: 'Go packages outside internal/ that other modules can import',
+      },
+    ),
+    metric(
+      'goInternal',
+      'Go internal packages',
+      sum((module) => module.internalPackages),
+    ),
+    metric(
+      'goMain',
+      'Go main packages',
+      sum((module) => module.mainPackages),
+      {
+        hint: 'Commands (package main); never part of the public API',
+      },
+    ),
+  ]
 }
 
 function metrics(data: ApiSurfaceData, previous?: ApiSurfaceData): Metric[] {
@@ -33,7 +69,7 @@ function metrics(data: ApiSurfaceData, previous?: ApiSurfaceData): Metric[] {
               unit: 'percent',
               previous: before ? documentedPercent(before) : undefined,
               better: 'up',
-              hint: 'Exports with a TSDoc or JSDoc comment',
+              hint: 'Exports with a doc comment (TSDoc, JSDoc or Go doc)',
             }),
             tone: tone(share),
           },
@@ -42,6 +78,7 @@ function metrics(data: ApiSurfaceData, previous?: ApiSurfaceData): Metric[] {
       previous: before?.deprecated,
       better: 'down',
     }),
+    ...goMetrics(data),
     ...(removed === undefined
       ? []
       : [
@@ -56,12 +93,37 @@ function metrics(data: ApiSurfaceData, previous?: ApiSurfaceData): Metric[] {
   ]
 }
 
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+
+/**
+ * One line on a checkout whose Go modules have no package other modules can import, e.g. a service
+ * made of `cmd/` and `internal/`; `undefined` when there is no Go module or one is importable.
+ */
+export function goInternalOnly(data: ApiSurfaceData): string | undefined {
+  const modules = data.go?.modules ?? []
+  if (!modules.length || modules.some((module) => module.packages > 0)) return undefined
+  const main = modules.reduce((sum, module) => sum + module.mainPackages, 0)
+  const internal = modules.reduce((sum, module) => sum + module.internalPackages, 0)
+  return `Internal only: ${plural(main, 'main package')}, ${plural(internal, 'internal package')}; no Go package here can be imported by other modules.`
+}
+
 function packagesSection(data: ApiSurfaceData): Section {
+  const go = data.packages.some((pkg) => pkg.ecosystem === 'Go')
   const rows: Record<string, Cell>[] = data.packages.slice(0, limits.packages).map((pkg) => {
     const totals = apiTotals([pkg])
     const share = documentedPercent(totals)
     return {
       name: pkg.name,
+      ...(go
+        ? {
+            ecosystem:
+              pkg.ecosystem === 'Go'
+                ? pkg.private
+                  ? 'Go, internal'
+                  : 'Go'
+                : (pkg.ecosystem ?? 'npm'),
+          }
+        : {}),
       version: pkg.version ?? '',
       dir: pkg.dir,
       entries: pkg.entries.length,
@@ -73,27 +135,81 @@ function packagesSection(data: ApiSurfaceData): Section {
       deprecated: totals.deprecated,
     }
   })
+  const internalOnly = goInternalOnly(data)
   return {
     id: 'packages',
     title: 'Packages',
     description: `Green from ${thresholds.good}% of exports documented, red below ${thresholds.bad}%.`,
-    blocks: rows.length
-      ? [
-          {
-            type: 'table',
-            columns: [
-              { key: 'name', label: 'Package', format: 'code' },
-              { key: 'version', label: 'Version' },
-              { key: 'dir', label: 'Folder', format: 'code' },
-              { key: 'entries', label: 'Entry points', unit: 'count', align: 'end' },
-              { key: 'exports', label: 'Exports', unit: 'count', align: 'end' },
-              { key: 'documented', label: 'Documented', align: 'end' },
-              { key: 'deprecated', label: 'Deprecated', unit: 'count', align: 'end' },
-            ],
-            rows,
-          },
-        ]
-      : [{ type: 'markdown', text: 'No package with a resolvable entry point was found.' }],
+    blocks: [
+      ...(internalOnly ? [{ type: 'markdown' as const, text: internalOnly }] : []),
+      ...(rows.length
+        ? [
+            {
+              type: 'table' as const,
+              columns: [
+                { key: 'name', label: 'Package', format: 'code' as const },
+                ...(go ? [{ key: 'ecosystem', label: 'Ecosystem' }] : []),
+                { key: 'version', label: 'Version' },
+                { key: 'dir', label: 'Folder', format: 'code' as const },
+                {
+                  key: 'entries',
+                  label: 'Entry points',
+                  unit: 'count' as const,
+                  align: 'end' as const,
+                },
+                { key: 'exports', label: 'Exports', unit: 'count' as const, align: 'end' as const },
+                { key: 'documented', label: 'Documented', align: 'end' as const },
+                {
+                  key: 'deprecated',
+                  label: 'Deprecated',
+                  unit: 'count' as const,
+                  align: 'end' as const,
+                },
+              ],
+              rows,
+            },
+          ]
+        : internalOnly
+          ? []
+          : [
+              {
+                type: 'markdown' as const,
+                text: 'No npm package with a resolvable entry point and no Go package was found.',
+              },
+            ]),
+    ],
+  }
+}
+
+function goModulesSection(data: ApiSurfaceData): Section | undefined {
+  const modules = data.go?.modules ?? []
+  if (!modules.length) return undefined
+  return {
+    id: 'go-modules',
+    title: 'Go modules',
+    description:
+      'Importable packages are the ones outside internal/ that are not package main; versions come from module tags on the analyzed commit.',
+    blocks: [
+      {
+        type: 'table',
+        columns: [
+          { key: 'path', label: 'Module', format: 'code' },
+          { key: 'version', label: 'Version' },
+          { key: 'dir', label: 'Folder', format: 'code' },
+          { key: 'packages', label: 'Importable', unit: 'count', align: 'end' },
+          { key: 'internal', label: 'Internal', unit: 'count', align: 'end' },
+          { key: 'main', label: 'Main', unit: 'count', align: 'end' },
+        ],
+        rows: modules.map((module) => ({
+          path: module.path,
+          version: module.version ?? '',
+          dir: module.dir,
+          packages: module.packages,
+          internal: module.internalPackages,
+          main: module.mainPackages,
+        })),
+      },
+    ],
   }
 }
 
@@ -236,7 +352,7 @@ export function apiSurfaceReport(
     sections: [
       packagesSection(data),
       ...(previous ? [changesSection(diffApi(previous.packages, data.packages), compareTo)] : []),
-      ...[undocumentedSection(data), problemsSection(data)].filter(
+      ...[goModulesSection(data), undocumentedSection(data), problemsSection(data)].filter(
         (section): section is Section => section !== undefined,
       ),
     ],

@@ -11,7 +11,7 @@ For a walkthrough with example calls, see [What agents can ask](/agents/tools/).
 
 ## Packages and usage (catalog)
 
-The public API of the organization's packages and how every repository uses its dependencies. `version` is a version, a tag, `latest` (newest release, the default) or `head` (default branch). `repo` picks one of several repositories with a package of the same name; for third-party packages, the repository whose version is the default. `ecosystem` is `npm` (default) or `Go`.
+The public API of the organization's packages and how every repository uses its dependencies. `version` is a version, a tag, `latest` (newest release, the default) or `head` (default branch). `repo` picks one of several repositories with a package of the same name; for third-party packages, the repository whose version is the default. `ecosystem` is `npm` or `Go` (default: Go for a name with a `/` and no `@scope`, else npm).
 
 | Tool                  | Description                                                                                                              | Arguments                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
@@ -30,7 +30,7 @@ The public API of the organization's packages and how every repository uses its 
 | `security_findings`   | Vulnerability findings from the newest audits: severity, fixed versions, affected repositories, fixing or allowlisted.   | `repo?`, `severity?`, `status?`, `limit?` (1–200, default 50)                            |
 | `license_overview`    | License compliance: totals, the license policy, denied or review packages, a row per repository and the license mix.     | `repo?`                                                                                  |
 
-Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type`, `variable`, `enum`, `namespace` or `reexport`. `find_usages` `kind` is `call`, `new`, `jsx`, `member`, `type`, `extends`, `reexport`, `reference` or `import`. `security_findings` `severity` is `critical`, `high`, `medium`, `low` or `unknown`; `status` is `open`, `fixing` or `allowlisted`. `upgrade_impact` covers npm packages; use `diff_versions` for Go modules.
+Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type`, `variable`, `enum`, `namespace` or `reexport`. `find_usages` `kind` is `call`, `new`, `jsx`, `member`, `type`, `extends`, `reexport`, `reference` or `import`. `security_findings` `severity` is `critical`, `high`, `medium`, `low` or `unknown`; `status` is `open`, `fixing` or `allowlisted`. Go packages of the organization's repositories are named by their full import path (`example.com/kit/log`); the catalog answers for them first, then the library index. `package_usage` takes a Go module path (all its packages) or a package import path, and `upgrade_impact` covers Go too, from syntactic uses and, when the usages job has the `go` toolchain, the methods and fields reached through values (`typed: true` sites).
 
 ## Stack
 
@@ -71,7 +71,7 @@ Enumerations: `search_symbols` `kind` is `function`, `class`, `interface`, `type
 
 ## Third-party libraries
 
-`package` is the library (`zod`, `github.com/spf13/cobra`); `version` defaults to the version `repo` uses, else the newest indexed one. Offered when the instance indexes library docs.
+`package` is the library (`zod`, `github.com/spf13/cobra`); a Go module path with its `/vN` suffix or a package path inside the module finds the module, and `ecosystem` defaults to Go for such paths, else npm. `version` defaults to the version `repo` uses, else the newest indexed one. Go modules carry their package docs, and `library_source` reads the module zip. Offered when the instance indexes library docs.
 
 | Tool                    | Description                                                                                                          | Arguments                                                                           |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |

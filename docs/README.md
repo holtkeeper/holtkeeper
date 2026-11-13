@@ -59,6 +59,7 @@
 | `@holtkeeper/depgraph`           | Dependency graphs, cycles, duplicate versions                                 | [packages/depgraph/docs](../packages/depgraph/docs/README.md)                     |
 | `@holtkeeper/depgraph-js`        | JS workspaces, lockfiles, module imports                                      | [packages/depgraph-js/docs](../packages/depgraph-js/docs/README.md)               |
 | `@holtkeeper/depgraph-go`        | Go workspaces and module graph                                                | [packages/depgraph-go/docs](../packages/depgraph-go/docs/README.md)               |
+| `@holtkeeper/go-source`          | Go source knowledge: modules, go.mod, API scan, import usages, tags           | [packages/go-source/docs](../packages/go-source/docs/README.md)                   |
 | `@holtkeeper/quality`            | Contract for checks on a checkout and the runner that merges them             | [packages/quality/docs](../packages/quality/docs/README.md)                       |
 | `@holtkeeper/quality-tests`      | Test framework detection and coverage collection                              | [packages/quality-tests/docs](../packages/quality-tests/docs/README.md)           |
 | `@holtkeeper/quality-secrets`    | Leaked secrets (gitleaks)                                                     | [packages/quality-secrets/docs](../packages/quality-secrets/docs/README.md)       |

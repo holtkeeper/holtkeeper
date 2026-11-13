@@ -17,7 +17,9 @@ export interface LibraryIndex {
 export const ecosystemArg = z
   .enum(['npm', 'Go'])
   .optional()
-  .describe('Ecosystem of a third-party package from the library index (default npm)')
+  .describe(
+    'Ecosystem of a third-party package from the library index (default: Go for a module path such as github.com/acme/lib, else npm)',
+  )
 
 const optional = <T extends Record<string, unknown>>(input: T) =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- drops undefined fields only
@@ -45,7 +47,12 @@ export function libraryToolset(library: LibraryIndex, canRead: RepoFilter): Regi
       canRead: (key: string) => readableRepo(canRead, key) !== undefined,
     }
   }
-  const libraryArg = z.string().min(1).describe('Package name, e.g. zod or github.com/spf13/cobra')
+  const libraryArg = z
+    .string()
+    .min(1)
+    .describe(
+      'Package name, e.g. zod, or a Go module or package path such as github.com/spf13/cobra (a /vN suffix or package path resolves to its module)',
+    )
   const versionArg = z
     .string()
     .min(1)
@@ -80,7 +87,7 @@ export function libraryToolset(library: LibraryIndex, canRead: RepoFilter): Regi
       defineTool({
         name: 'search_library_docs',
         description:
-          'Full-text search over the docs third-party libraries ship (README, docs folders, llms.txt), their repository docs at the version tag and release notes. Search by API names and error messages; each hit names the library, versions, source and URL.',
+          'Full-text search over the docs third-party libraries ship (README, docs folders, llms.txt, Go package docs), their repository docs at the version tag and release notes. Search by API names and error messages; each hit names the library, versions, source and URL.',
         input: z.object({
           query: z.string().min(1),
           package: z.string().min(1).optional().describe('Only this library'),

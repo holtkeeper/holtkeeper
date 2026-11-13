@@ -1,22 +1,40 @@
-import type { PackageDiff } from './diff.ts'
-import type { ApiPackage, ApiSymbol } from './model.ts'
+import { defaultPackageName } from '@holtkeeper/go-source'
 
-/** The specifier code imports an entry with, e.g. `@acme/ui/button` for subpath `./button`. */
+import type { PackageDiff } from './diff.ts'
+import type { ApiEcosystem, ApiPackage, ApiSymbol } from './model.ts'
+
+/**
+ * The specifier code imports an entry with, e.g. `@acme/ui/button` for subpath `./button`. For a
+ * Go module and a package subpath it is the package's import path.
+ */
 export const importPath = (pkg: string, subpath: string) =>
   subpath === '.' ? pkg : `${pkg}/${subpath.replace(/^\.\//, '')}`
 
-const fence = (code: string) => {
+/** Code fence language of an ecosystem's declarations: `go` for Go, `ts` otherwise. */
+export const fenceLanguage = (ecosystem: ApiEcosystem | undefined) =>
+  ecosystem === 'Go' ? 'go' : 'ts'
+
+const fence = (code: string, ecosystem?: ApiEcosystem) => {
   const ticks = code.includes('```') ? '````' : '```'
-  return `${ticks}ts\n${code}\n${ticks}`
+  return `${ticks}${fenceLanguage(ecosystem)}\n${code}\n${ticks}`
 }
 
-/** One symbol as Markdown: heading, deprecation, doc comment and declaration. */
-export function renderSymbol(symbol: ApiSymbol, options: { docs?: boolean } = {}): string {
+/**
+ * One symbol as Markdown: heading, deprecation, doc comment and declaration, fenced as Go when
+ * `ecosystem` is `Go`, else as TypeScript.
+ */
+export function renderSymbol(
+  symbol: ApiSymbol,
+  options: { docs?: boolean; ecosystem?: ApiEcosystem } = {},
+): string {
   const lines = [`### ${symbol.name} (${symbol.kind})`]
   if (symbol.deprecated !== undefined)
     lines.push(`**Deprecated**${symbol.deprecated ? `: ${symbol.deprecated}` : ''}`)
   if (options.docs !== false && symbol.doc) lines.push(symbol.doc)
-  lines.push(fence(symbol.signature), `Source: \`${symbol.file}:${symbol.line}\``)
+  lines.push(
+    fence(symbol.signature, options.ecosystem),
+    `Source: \`${symbol.file}:${symbol.line}\``,
+  )
   return lines.join('\n\n')
 }
 
@@ -29,10 +47,25 @@ export interface RenderContext {
   analyzedAt?: string
 }
 
+const internalRoot = (path: string) => {
+  const segments = path.split('/')
+  return segments.slice(0, segments.lastIndexOf('internal')).join('/')
+}
+
+function goUsage(pkg: ApiPackage): string {
+  const name = defaultPackageName(pkg.name)
+  const module = pkg.module && pkg.module !== pkg.name ? ` of module \`${pkg.module}\`` : ''
+  const internal = pkg.private
+    ? ` Internal package: only code inside \`${internalRoot(pkg.name)}\` can import it.`
+    : ''
+  return `Go package${module}. Import it with \`import "${pkg.name}"\` and refer to its names as \`${name}.Name\`; methods are listed as \`Type.Method\`.${internal}`
+}
+
 /**
  * A package's public API as one Markdown document for LLM agents: what to import from where,
- * every exported name with its doc comment and declaration. `subpath` limits it to one entry,
- * `docs: false` leaves doc comments out for a compact overview.
+ * every exported name with its doc comment and declaration. Go packages also say how to import
+ * them and fence declarations as Go. `subpath` limits it to one entry, `docs: false` leaves doc
+ * comments out for a compact overview.
  */
 export function renderPackage(
   pkg: ApiPackage,
@@ -49,6 +82,7 @@ export function renderPackage(
     ]
       .filter(Boolean)
       .join(', '),
+    ...(pkg.ecosystem === 'Go' ? [goUsage(pkg)] : []),
   ].filter(Boolean)
   const entries = pkg.entries.filter(
     (entry) => !options.subpath || entry.subpath === options.subpath,
@@ -57,7 +91,9 @@ export function renderPackage(
     const lines = [
       `## \`${importPath(pkg.name, entry.subpath)}\``,
       `${entry.symbols.length} export${entry.symbols.length === 1 ? '' : 's'}${entry.file ? ` from \`${entry.file}\`` : ''}${entry.truncated ? `, ${entry.truncated} more not listed` : ''}.`,
-      ...entry.symbols.map((symbol) => renderSymbol(symbol, options)),
+      ...entry.symbols.map((symbol) =>
+        renderSymbol(symbol, { ...options, ecosystem: pkg.ecosystem }),
+      ),
     ]
     return lines.join('\n\n')
   })
@@ -75,10 +111,13 @@ export function renderDiff(diff: PackageDiff): string {
     const name = `${importPath(diff.name, change.subpath)} → ${change.name}`
     lines.push(`## ${change.change}: \`${name}\` (${change.kind})`)
     if (change.change === 'changed' && change.before && change.after)
-      lines.push(`Before:\n\n${fence(change.before)}`, `After:\n\n${fence(change.after)}`)
+      lines.push(
+        `Before:\n\n${fence(change.before, diff.ecosystem)}`,
+        `After:\n\n${fence(change.after, diff.ecosystem)}`,
+      )
     else {
       const code = change.after ?? change.before
-      if (code) lines.push(fence(code))
+      if (code) lines.push(fence(code, diff.ecosystem))
     }
   }
   return lines.join('\n\n')

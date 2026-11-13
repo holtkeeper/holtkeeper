@@ -2,9 +2,19 @@ export type * from './access.ts'
 export * from './api.ts'
 export * from './archive.ts'
 export * from './docs.ts'
+export * from './go-docs.ts'
 export * from './github/client.ts'
-export * from './go/api.ts'
-export * from './go/module.ts'
+export {
+  compareGoVersions,
+  escapeModulePath,
+  type GoApiOptions,
+  goApi,
+  isPseudoVersion,
+  isStableGoVersion,
+  libraryOfModule,
+  modulePathOf,
+  parseGoDoc,
+} from '@holtkeeper/go-source'
 export * from './indexer.ts'
 export * from './issues/digest.ts'
 export * from './issues/index-issues.ts'
@@ -16,6 +26,7 @@ export * from './markdown.ts'
 export * from './matrix.ts'
 export * from './registry/go.ts'
 export * from './registry/npm.ts'
+export * from './resolve.ts'
 export * from './semver.ts'
 export * from './sources/api.ts'
 export * from './sources/archive.ts'

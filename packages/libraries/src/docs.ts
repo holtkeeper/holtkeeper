@@ -1,7 +1,6 @@
 import { type ArtifactStore, unzipArtifacts } from '@holtkeeper/artifacts'
 import type {
   LibraryChunk,
-  LibraryEcosystem,
   LibraryRecord,
   LibraryRef,
   LibraryStore,
@@ -10,6 +9,7 @@ import type {
 
 import type { LibraryCaller, LibraryDocs, LibraryQuery } from './access.ts'
 import { headingMajors, headingVersion } from './markdown.ts'
+import { resolveLibrary } from './resolve.ts'
 import { compareSemver, inRange, majorOf, parseSemver, sameVersion } from './semver.ts'
 import { tagOfReleasePath } from './sources/releases.ts'
 import type { SourceSnapshot } from './sources/source.ts'
@@ -103,9 +103,6 @@ const date = (at: string | undefined) => (at ? at.slice(0, 10) : '')
 const label = (library: LibraryRef, version?: string) =>
   `${library.name}${version ? `@${version}` : ''}`
 
-const ecosystemOf = (query: { ecosystem?: LibraryEcosystem }): LibraryEcosystem =>
-  query.ecosystem ?? 'npm'
-
 const indexedList = (versions: LibraryVersionRecord[]) =>
   versions
     .filter((record) => record.roles.length)
@@ -158,12 +155,11 @@ export function libraryDocs(options: LibraryDocsOptions): LibraryDocs {
   const findLibrary = async (
     query: LibraryQuery,
   ): Promise<{ library: LibraryRecord; versions: LibraryVersionRecord[] } | string> => {
-    const ref = { ecosystem: ecosystemOf(query), name: query.package.trim() }
-    const library = await store.getLibrary(ref)
+    const { ref, library } = await resolveLibrary(store, query)
     if (!library) {
-      const own = await options.ownPackage?.(ref.name)
+      const own = await options.ownPackage?.(query.package.trim())
       if (own)
-        return `${ref.name}${own === ref.name ? '' : ` belongs to ${own}, which`} is a package of this organization, not a third-party library, so the library tools do not cover it. Its API is in the catalog: search_symbols by export name, then get_symbol or get_package_api ${own} with \`version\` set to the version this repository depends on (default is the newest release).`
+        return `${query.package.trim()}${own === query.package.trim() ? '' : ` belongs to ${own}, which`} is a package of this organization, not a third-party library, so the library tools do not cover it. Its API is in the catalog: search_symbols by export name, then get_symbol or get_package_api ${own} with \`version\` set to the version this repository depends on (default is the newest release).`
       const similar = (await store.listLibraries({ ecosystem: ref.ecosystem, query: ref.name }))
         .slice(0, 10)
         .map((item) => item.name)

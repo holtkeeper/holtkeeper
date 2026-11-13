@@ -21,8 +21,17 @@ export interface TagTarget {
   commit?: string
 }
 
-/** Prefixes a tag of `name` may carry before the version, most common first. */
+/** Whether `name` is a Go module path: a dotted first element, a `/` and no npm `@scope`. */
+export const isGoModuleName = (name: string) =>
+  !name.startsWith('@') && name.includes('/') && (name.split('/')[0] ?? '').includes('.')
+
+/**
+ * Prefixes a tag of `name` may carry before the version, most common first. A Go module's tags
+ * are exactly `v<version>`, or `<directory>/v<version>` for a module in a repository folder, so a
+ * submodule never takes the root module's tags.
+ */
 export function tagPrefixes(name: string, directory?: string): string[] {
+  if (isGoModuleName(name)) return [directory ? `${directory}/v` : 'v']
   const short = name.split('/').at(-1) ?? name
   const prefixes = ['v', '', `${name}@`, `${name}-v`, `${short}@`, `${short}-v`]
   if (directory) prefixes.push(`${directory}/v`)
@@ -32,7 +41,7 @@ export function tagPrefixes(name: string, directory?: string): string[] {
 /**
  * Tag names version `version` of `name` may have: `v<version>`, `<version>`, `<name>@<version>`,
  * `<name>-v<version>`, the same with the last segment of a scoped name, and `<directory>/v<version>`
- * for packages in a repository folder (Go submodules).
+ * for packages in a repository folder; for a Go module only the tag `tagPrefixes` allows.
  */
 export function tagCandidates(name: string, version: string, directory?: string): string[] {
   const bare = version.replace(/^v/, '')

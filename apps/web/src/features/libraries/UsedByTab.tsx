@@ -323,7 +323,7 @@ function ExportsAndCode({
                 {open && (item.props.length || item.members.length) ? (
                   <div className="grid gap-3 pb-1 sm:grid-cols-2">
                     <NameBars
-                      title="Props"
+                      title={usage.ecosystem === 'Go' ? 'Fields' : 'Props'}
                       items={item.props}
                       {...(selection.prop ? { selected: selection.prop } : {})}
                       onSelect={(prop) => setSelection(selection.prop === prop ? {} : { prop })}
@@ -472,7 +472,16 @@ function UsedByBody({ usage, ...props }: UsedByProps & { usage: PackageUsageView
                 ]
               : []),
             ...(uses !== undefined
-              ? [{ value: uses, label: 'uses', caption: '· calls, JSX, types, members' }]
+              ? [
+                  {
+                    value: uses,
+                    label: 'uses',
+                    caption:
+                      detail.ecosystem === 'Go'
+                        ? '· calls, literals, types, members'
+                        : '· calls, JSX, types, members',
+                  },
+                ]
               : []),
             {
               value: rows.filter((row) => row.majorsBehind > 0).length,
@@ -536,7 +545,7 @@ function UsedByBody({ usage, ...props }: UsedByProps & { usage: PackageUsageView
       />
       {usage?.exports.length ? (
         <ExportsAndCode
-          name={detail.name}
+          name={usage.name}
           usage={usage}
           repo={repo}
           exportName={props.exportName}
@@ -548,7 +557,7 @@ function UsedByBody({ usage, ...props }: UsedByProps & { usage: PackageUsageView
   )
 }
 
-function NpmUsedBy(props: UsedByProps) {
+function IndexedUsedBy(props: UsedByProps) {
   const usage = usePackageUsage(props.detail.name)
   if (usage.isPending) return <Placeholder className="h-96" />
   if (usage.isError) return <ErrorState error={usage.error} />
@@ -557,13 +566,9 @@ function NpmUsedBy(props: UsedByProps) {
 
 /**
  * Who uses the library: a summary, one chip per repository with its versions, the consumers
- * table with other teams folded, and for npm the exports they use with the code of the picked
+ * table with other teams folded, and the exports they use (npm and Go) with the code of the picked
  * export, prop or member.
  */
 export function UsedByTab(props: UsedByProps) {
-  return props.detail.ecosystem === 'npm' ? (
-    <NpmUsedBy {...props} />
-  ) : (
-    <UsedByBody {...props} usage={undefined} />
-  )
+  return <IndexedUsedBy {...props} />
 }

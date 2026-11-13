@@ -146,3 +146,59 @@ test('reports headline coverage, folders and changes', () => {
     ],
   })
 })
+
+test('go: skips the JavaScript steps without package.json and explains packages that did not run', async () => {
+  const go = await mkdtemp(join(tmpdir(), 'coverage-go-'))
+  try {
+    const sources: Record<string, string> = {
+      'go.mod': 'module example.com/acme/widgets\n',
+      'gear/gear.go': 'package gear\n\nfunc Spin(n int) int {\n\treturn n * 2\n}\n',
+      'cog/cog.go': 'package cog\n\nfunc Mesh() int {\n\treturn 1\n}\n',
+      'tools/lint/lint.go': 'package lint\n\nfunc Run() int {\n\treturn 1\n}\n',
+      'tools/lint/fmt/fmt.go': 'package fmt\n\nfunc Run() int {\n\treturn 1\n}\n',
+    }
+    for (const [file, text] of Object.entries(sources)) {
+      await mkdir(dirname(join(go, file)), { recursive: true })
+      await writeFile(join(go, file), text)
+    }
+    const { runner, calls } = createFakeRunner(() => ({ exitCode: 1 }))
+    const lines: string[] = []
+    const data = await analyzeCoverage({
+      dir: go,
+      runner,
+      log: (line) => lines.push(line),
+      collectors: [
+        {
+          name: 'go test -coverprofile',
+          collect: async () => ({
+            format: 'go',
+            languages: ['go'],
+            files: [
+              {
+                file: 'gear/gear.go',
+                lines: [{ line: 4, hits: 1 }],
+                functions: [],
+                branches: [],
+              },
+            ],
+            summary: {},
+            notRun: [
+              { dir: 'cog', reason: 'build failed' },
+              { dir: 'tools', reason: 'setup failed', recursive: true, except: ['tools/lint/fmt'] },
+            ],
+          }),
+        },
+      ],
+    })
+    expect(calls).toEqual([])
+    expect(lines).toEqual([])
+    expect(data.files.map((file) => [file.file, file.reason])).toEqual([
+      ['cog/cog.go', 'did not build'],
+      ['gear/gear.go', undefined],
+      ['tools/lint/fmt/fmt.go', undefined],
+      ['tools/lint/lint.go', 'dependencies did not load'],
+    ])
+  } finally {
+    await rm(go, { recursive: true, force: true })
+  }
+})

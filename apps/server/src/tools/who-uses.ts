@@ -50,11 +50,24 @@ export function parseSubject(
   return { kind: 'package', name: value }
 }
 
+/** The library key of the Go module `name` names: the module itself, else the longest module path prefixing a package import path. */
+const goModuleKey = (keys: Iterable<string>, name: string) => {
+  const exact = libraryKeyOf({ ecosystem: 'Go', name })
+  let best: string | undefined
+  for (const key of keys) {
+    if (key === exact) return key
+    if (key.startsWith('Go:') && exact.startsWith(`${key}/`) && key.length > (best?.length ?? 0))
+      best = key
+  }
+  return best ?? exact
+}
+
 /**
  * Markdown of who uses a library, an internal package or a stack tool: teams → repositories →
  * versions, with how far each is behind the latest release, in at most `MAX_ROWS` rows. A bare
- * name is looked up as an npm package, then a Go module, then a stack tool. Reads stored records
- * only.
+ * name is looked up as an npm package, then a Go module (a name with a `/` and no `@scope` is
+ * tried as Go first; a Go package import path counts as its module), then a stack tool. Reads
+ * stored records only.
  */
 export async function whoUses(context: WhoUsesContext, subject: string): Promise<string> {
   const parsed = parseSubject(subject)
@@ -66,9 +79,17 @@ export async function whoUses(context: WhoUsesContext, subject: string): Promise
       catalog: context.catalog,
     })
     const libraries = groupUses(fleet.uses)
-    const candidates: LibraryEcosystem[] = parsed.ecosystem ? [parsed.ecosystem] : ['npm', 'Go']
+    const goFirst = !parsed.name.startsWith('@') && parsed.name.includes('/')
+    const candidates: LibraryEcosystem[] = parsed.ecosystem
+      ? [parsed.ecosystem]
+      : goFirst
+        ? ['Go', 'npm']
+        : ['npm', 'Go']
     for (const ecosystem of candidates) {
-      const key = libraryKeyOf({ ecosystem, name: parsed.name })
+      const key =
+        ecosystem === 'Go'
+          ? goModuleKey(libraries.keys(), parsed.name)
+          : libraryKeyOf({ ecosystem, name: parsed.name })
       const users = libraries.get(key)
       if (!users) continue
       const internal = fleet.internal.has(key)

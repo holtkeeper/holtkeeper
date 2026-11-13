@@ -377,7 +377,15 @@ function Files({
                   <div className="flex min-w-0 flex-col leading-tight" title={file.file}>
                     <span className="mono truncate text-xs">
                       {name}
-                      {file.loaded === false ? (
+                      {file.reason ? (
+                        <Tag
+                          tone="warning"
+                          className="ml-2"
+                          title="The tests of its package could not run, so coverage was not measured"
+                        >
+                          {file.reason.charAt(0).toUpperCase() + file.reason.slice(1)}
+                        </Tag>
+                      ) : file.loaded === false ? (
                         <Tag tone="danger" className="ml-2">
                           No tests
                         </Tag>

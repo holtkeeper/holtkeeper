@@ -10,6 +10,7 @@ import {
   filterHits,
   groupSymbols,
   hitCounts,
+  openedSymbol,
   parseDocTags,
   parsePublicApiSearch,
   parseSymbolKey,
@@ -65,6 +66,17 @@ test('groupSymbols filters by name or doc and orders kinds', () => {
 test('versionLabel shows refs that differ from the version', () => {
   const base = { analysisId: 'a', analyzedAt: '2026-10-01T00:00:00Z', exports: 3 }
   expect(versionLabel({ ...base, version: '1.4.0', ref: 'v1.4.0', head: false })).toBe('1.4.0')
+  expect(versionLabel({ ...base, version: 'head', head: true, ecosystem: 'Go' })).toBe('head')
+  expect(
+    versionLabel({
+      ...base,
+      version: 'v1.3.0',
+      ref: 'v1.3.0',
+      head: false,
+      ecosystem: 'Go',
+      package: 'example.com/acme/widgets',
+    }),
+  ).toBe('v1.3.0 · example.com/acme/widgets')
   expect(versionLabel({ ...base, version: '1.4.0', ref: '@acme/ui@1.4.0', head: false })).toBe(
     '1.4.0 · @acme/ui@1.4.0',
   )
@@ -179,6 +191,15 @@ test('import paths and symbol keys split into package, entry point and name', ()
   })
   expect(splitImportPath('some-lib')).toEqual({ package: 'some-lib', subpath: '.' })
   expect(splitImportPath('some-lib/a/b')).toEqual({ package: 'some-lib', subpath: './a/b' })
+  expect(splitImportPath('gitlab.example/shapes/geom/v2')).toEqual({
+    package: 'gitlab.example/shapes/geom/v2',
+    subpath: '.',
+  })
+  expect(parseSymbolKey('example.com/acme/widgets:Draw')).toEqual({
+    package: 'example.com/acme/widgets',
+    subpath: '.',
+    name: 'Draw',
+  })
   const key = symbolKey(hit('createWidget', '@acme/widget-kit/legacy'))
   expect(key).toBe('@acme/widget-kit/legacy:createWidget')
   expect(parseSymbolKey(key)).toEqual({
@@ -188,6 +209,40 @@ test('import paths and symbol keys split into package, entry point and name', ()
   })
   expect(parseSymbolKey('createWidget')).toBeUndefined()
   expect(parseSymbolKey(undefined)).toBeUndefined()
+  expect(parseSymbolKey('widgets/internal/log:Info', 'Go')).toEqual({
+    package: 'widgets/internal/log',
+    subpath: '.',
+    name: 'Info',
+  })
+  expect(splitImportPath('acme.ui/button', 'npm')).toEqual({
+    package: 'acme.ui',
+    subpath: './button',
+  })
+})
+
+test('an opened symbol takes package and ecosystem from its hit, not from the path shape', () => {
+  const dotless = hit('Info', 'widgets/internal/log', {
+    package: 'widgets/internal/log',
+    subpath: '.',
+    ecosystem: 'Go',
+  })
+  expect(openedSymbol(symbolKey(dotless), dotless)).toEqual({
+    package: 'widgets/internal/log',
+    subpath: '.',
+    name: 'Info',
+    ecosystem: 'Go',
+  })
+  const dotted = hit('Button', 'acme.ui/button', { package: 'acme.ui', subpath: './button' })
+  expect(openedSymbol(symbolKey(dotted), dotted)).toEqual({
+    package: 'acme.ui',
+    subpath: './button',
+    name: 'Button',
+    ecosystem: 'npm',
+  })
+  expect(openedSymbol('example.com/acme/widgets:Draw', undefined)).toMatchObject({
+    package: 'example.com/acme/widgets',
+    ecosystem: 'Go',
+  })
 })
 
 describe('hits', () => {

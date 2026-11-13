@@ -171,3 +171,157 @@ describe('usedByCounts', () => {
     expect(counts.get('@acme/unused')).toEqual({ repos: 0, count: 0, files: 0 })
   })
 })
+
+const goRecord = (version: string, exports: UsedExport[]): UsagesData => ({
+  packages: [
+    {
+      name: 'gitlab.example/shapes/libs/geom',
+      ecosystem: 'Go',
+      versions: [version],
+      ranges: [version],
+      workspaces: ['example.com/acme/widgets'],
+      count: exports.reduce((sum, item) => sum + item.count, 0),
+      files: 2,
+      exports,
+    },
+  ],
+  files: 4,
+  types: { status: 'skipped', reason: 'go: syntactic only' },
+})
+
+const goSite = (file: string, kind: UsageSite['kind'], extra: Partial<UsageSite> = {}) =>
+  site(file, { kind, snippet: 'geom.Rect{Min: p}', ...extra })
+
+const goEntries = [
+  {
+    origin: 'gitlab:shapes/editor',
+    data: goRecord('v1.4.0', [
+      used('Rect', [
+        goSite('draw.go', 'new', { props: ['Min', 'Max'] }),
+        goSite('draw.go', 'member', { member: 'Area' }),
+      ]),
+      used('NewPoint', [goSite('main.go', 'call')]),
+      used('Cells', [goSite('grid.go', 'call')], { subpath: './grid' }),
+    ]),
+  },
+  {
+    origin: 'gitlab:shapes/viewer',
+    data: goRecord('v1.2.0', [used('Cells', [goSite('view.go', 'call')], { subpath: './grid' })]),
+  },
+]
+
+describe('Go usage records', () => {
+  test('packageUsage takes a module path for every package and an import path for one', () => {
+    const module = packageUsage(goEntries, 'gitlab.example/shapes/libs/geom')
+    expect(module).toMatchObject({ name: 'gitlab.example/shapes/libs/geom', ecosystem: 'Go' })
+    expect(module.subpath).toBeUndefined()
+    expect(module.repos.map((repo) => repo.origin)).toEqual([
+      'gitlab:shapes/editor',
+      'gitlab:shapes/viewer',
+    ])
+
+    const grid = packageUsage(goEntries, 'gitlab.example/shapes/libs/geom/grid')
+    expect(grid).toMatchObject({
+      name: 'gitlab.example/shapes/libs/geom',
+      ecosystem: 'Go',
+      subpath: './grid',
+      versions: ['v1.4.0', 'v1.2.0'],
+    })
+    expect(grid.exports.map((item) => `${item.subpath} ${item.name} ${item.count}`)).toEqual([
+      './grid Cells 2',
+    ])
+    expect(grid.repos.map((repo) => repo.count)).toEqual([1, 1])
+    expect(renderPackageUsage(grid, { originLabel: String })).toContain(
+      '# gitlab.example/shapes/libs/geom/grid (Go): 2 repositories',
+    )
+    expect(packageUsage(goEntries, 'gitlab.example/shapes/libs/geometry').repos).toEqual([])
+  })
+
+  test('a module path without /vN counts every major of the module', () => {
+    const v2 = goRecord('v2.1.0', [used('Rect', [goSite('pane.go', 'new')])])
+    const [pkg] = v2.packages
+    if (!pkg) throw new Error('fixture')
+    const both: UsagesData = {
+      ...v2,
+      packages: [
+        { ...pkg, name: 'gitlab.example/shapes/libs/geom/v2' },
+        ...goRecord('v1.4.0', [used('NewPoint', [goSite('old.go', 'call')])]).packages,
+      ],
+    }
+    const majors = [
+      {
+        origin: 'gitlab:shapes/panes',
+        data: { ...v2, packages: [{ ...pkg, name: 'gitlab.example/shapes/libs/geom/v2' }] },
+      },
+      { origin: 'gitlab:shapes/mixed', data: both },
+    ]
+    const usage = packageUsage(majors, 'gitlab.example/shapes/libs/geom')
+    expect(usage).toMatchObject({ ecosystem: 'Go', versions: ['v2.1.0', 'v1.4.0'] })
+    expect(usage.repos.map((repo) => [repo.origin, repo.versions])).toEqual([
+      ['gitlab:shapes/mixed', ['v2.1.0', 'v1.4.0']],
+      ['gitlab:shapes/panes', ['v2.1.0']],
+    ])
+    expect(usage.exports.map((item) => item.name).toSorted()).toEqual(['NewPoint', 'Rect'])
+    expect(findSites(majors, { package: 'gitlab.example/shapes/libs/geom' }).total).toBe(3)
+  })
+
+  test('findSites narrows a Go import path to its package', () => {
+    const found = findSites(goEntries, { package: 'gitlab.example/shapes/libs/geom/grid' })
+    expect(found.sites.map((item) => `${item.origin} ${item.export} ${item.site.file}`)).toEqual([
+      'gitlab:shapes/editor Cells grid.go',
+      'gitlab:shapes/viewer Cells view.go',
+    ])
+    expect(renderSites(found)).toContain('```go')
+    expect(findSites(goEntries, { package: 'gitlab.example/shapes/libs/geom' }).total).toBe(5)
+  })
+
+  test('upgradeImpact matches the package by import path, method symbols and struct fields', () => {
+    const impact = upgradeImpact({
+      entries: goEntries,
+      package: 'gitlab.example/shapes/libs/geom',
+      changes: [
+        { change: 'removed', subpath: '.', name: 'Rect.Area', kind: 'function' },
+        {
+          change: 'changed',
+          subpath: '.',
+          name: 'Rect',
+          kind: 'type',
+          before: 'type Rect struct {\n\tMin, Max Point\n\tLabel string // shown\n}',
+          after: 'type Rect struct {\n\tMin Point\n\tLabel string\n}',
+        },
+        { change: 'removed', subpath: '.', name: 'Cells', kind: 'function' },
+      ],
+    })
+    expect(impact.ecosystem).toBe('Go')
+    expect(impact.items.map((item) => `${item.level}:${item.change.name}:${item.count}`)).toEqual([
+      'breaking:Rect.Area:1',
+      'breaking:Rect:1',
+    ])
+    expect(impact.items[0]?.repos[0]).toMatchObject({
+      origin: 'gitlab:shapes/editor',
+      members: ['Area'],
+    })
+    expect(impact.items[1]?.removedMembers).toEqual(['Max'])
+    expect(impact.unaffected).toEqual([])
+    expect(renderImpact(impact)).toContain('```go')
+
+    const grid = upgradeImpact({
+      entries: goEntries,
+      package: 'gitlab.example/shapes/libs/geom/grid',
+      changes: [{ change: 'removed', subpath: '.', name: 'Cells', kind: 'function' }],
+    })
+    expect(grid.items.map((item) => `${item.level}:${item.count}`)).toEqual(['breaking:2'])
+    expect(grid.affected.toSorted()).toEqual(['gitlab:shapes/editor', 'gitlab:shapes/viewer'])
+  })
+
+  test('declaredMembers lists Go struct fields, embeds and interface methods', () => {
+    expect([
+      ...declaredMembers(
+        'type Shape struct {\n\tName, Tag string `json:"name"`\n\t*geom.Base\n\tSides int\n\t// Hidden note\n}',
+      ),
+    ]).toEqual(['Name', 'Tag', 'Base', 'Sides'])
+    expect([
+      ...declaredMembers('type Drawer interface {\n\tfmt.Stringer\n\tDraw(c Canvas) error\n}'),
+    ]).toEqual(['Stringer', 'Draw'])
+  })
+})

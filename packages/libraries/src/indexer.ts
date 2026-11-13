@@ -1,4 +1,5 @@
 import type { ArtifactStore } from '@holtkeeper/artifacts'
+import { libraryOfModule } from '@holtkeeper/go-source'
 import type {
   LibraryEcosystem,
   LibraryRecord,
@@ -10,7 +11,6 @@ import type {
 } from '@holtkeeper/store'
 
 import type { GitHubClient } from './github/client.ts'
-import { libraryOfModule } from './go/module.ts'
 import { indexIssues } from './issues/index-issues.ts'
 import type { LatestVersion, LatestVersions } from './latest.ts'
 import { versionMatrix } from './matrix.ts'

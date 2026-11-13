@@ -20,6 +20,8 @@ import { auditReportSchema } from '@holtkeeper/vuln'
 import { z } from 'zod'
 
 import { assetsPolicyFor } from './assets.ts'
+import { egressJobEnv, goPrivateJobEnv } from './go-private.ts'
+import { librariesConfigOf } from './libraries.ts'
 import { reviewCancelReason } from './mr-comments.ts'
 import { type ReadOnlyRepos, readOnlyRepos } from './read-only.ts'
 import { analyzerOffFor } from './repo-analyzers.ts'
@@ -368,6 +370,21 @@ export function persistArtifactsTo(store: ArtifactStore): PersistArtifacts {
   }
 }
 
+function cachedFor<T>(ms: number, now: () => Date, read: () => Promise<T>): () => Promise<T> {
+  let value: { at: number; result: Promise<T> } | undefined
+  return () => {
+    const at = now().getTime()
+    if (!value || at - value.at >= ms) {
+      const result = read()
+      value = { at, result }
+      result.catch(() => {
+        if (value?.result === result) value = undefined
+      })
+    }
+    return value.result
+  }
+}
+
 /**
  * Starts the scheduler and worker (`run` picks which). Job outcomes stay on the job records; they
  * are not audited.
@@ -385,6 +402,10 @@ export async function startJobs(options: JobsOptions): Promise<JobEngine> {
     log,
     settingOptions: (job) => scopedAnalyzerOptions(config, store, job),
     toolchainFor: (repo) => scopedToolchain(config, store, repo),
+    egressEnv: () => egressJobEnv(store, config),
+    jobEnv: cachedFor(60_000, now, async () =>
+      goPrivateJobEnv(store, config, (await librariesConfigOf(store.settings))?.goPrivate ?? []),
+    ),
     skip: automaticSkip(store, config, options.analyzers),
     ...(options.artifacts && {
       logs: options.artifacts,

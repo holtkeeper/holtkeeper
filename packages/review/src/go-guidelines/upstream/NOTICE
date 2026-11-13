@@ -1,0 +1,4 @@
+guidelines.json is copied unchanged from go-modern-guidelines v0.1.1
+(https://github.com/JetBrains/go-modern-guidelines, internal/guidelines/guidelines.json),
+Copyright 2000-2026 JetBrains s.r.o., licensed under the Apache License, Version 2.0 (see LICENSE
+in this directory). Holtkeeper refreshes it from the latest upstream release at run time.

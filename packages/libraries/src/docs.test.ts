@@ -237,6 +237,58 @@ describe('libraryDocs', () => {
     expect(await docs.source({ package: 'lib', version: '2.0.0' })).toContain('no tag or commit')
   })
 
+  test('Go libraries resolve from module and package paths and snapshot the module zip', async () => {
+    const store = memoryStore().libraries
+    if (!store) throw new Error('no libraries store')
+    const kit = { ecosystem: 'Go', name: 'example.com/acme/kit' } as const
+    await store.putLibrary({ ...kit, latest: 'v2.1.0', sources: {}, updatedAt: at })
+    await store.putVersion({
+      ...kit,
+      version: 'v2.1.0',
+      roles: ['latest'],
+      usedBy: ['gl:a'],
+      sources: {},
+      updatedAt: at,
+    })
+    await store.replaceChunks(
+      kit,
+      'v2.1.0',
+      'archive',
+      documentChunks(
+        kit,
+        'archive',
+        'draw/doc.go',
+        '# Package example.com/acme/kit/v2/draw\n\nPaints.',
+      ),
+    )
+    const artifacts = memoryArtifactStore()
+    const asked: string[] = []
+    const docs = libraryDocs({
+      store,
+      artifacts,
+      source: sourceSnapshots({
+        store,
+        artifacts,
+        registries: {
+          Go: {
+            async source(library, revision) {
+              asked.push(`${library.name}@${revision}`)
+              return new Map([['draw/draw.go', new TextEncoder().encode('package draw')]])
+            },
+          },
+        },
+      }),
+    })
+    expect(await docs.versions({ package: 'example.com/acme/kit/v2/draw' })).toContain(
+      '# example.com/acme/kit (Go)',
+    )
+    expect(await docs.read({ package: 'example.com/acme/kit/v2' })).toContain('draw/doc.go')
+    expect(await docs.source({ package: 'example.com/acme/kit', path: 'draw/draw.go' })).toContain(
+      '    1 package draw',
+    )
+    expect(asked).toEqual(['example.com/acme/kit@v2.1.0'])
+  })
+
   test('issues delegate or explain', async () => {
     const store = await seed()
     expect(

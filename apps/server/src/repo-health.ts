@@ -30,6 +30,7 @@ import type { AnalysisHead, Job, SettingEntry } from '@holtkeeper/store'
 
 import { latestHeadsWithMetrics } from './analyses.ts'
 import { type ServerDeps, repoKey } from './context.ts'
+import { type SweepVerdict, lastSweepVerdicts } from './freshness.ts'
 import { OFF_FALLBACK } from './repo-analyzers.ts'
 import { TEST_ANALYZERS } from './repo-tests.ts'
 import { canSee } from './visibility.ts'
@@ -103,6 +104,11 @@ export interface HealthSources {
   releases: readonly ReleaseCard[]
   /** Audit runs, also those ingested without an `audit` record; none when absent. */
   audits?: readonly AuditRunSummary[]
+  /**
+   * What the last freshness sweep decided per repository and analyzer, keyed by `repoKey` and kind
+   * joined with `\0`; none when absent.
+   */
+  sweep?: ReadonlyMap<string, SweepVerdict>
 }
 
 /** Which of the cell permissions the caller holds on one repository. */
@@ -121,6 +127,32 @@ const cell = (value: string, sub: string, tone: HealthTone): RepoHealthCell => (
 })
 
 const noRecord = () => cell('—', 'no record', 'none')
+
+/** The sub line of a cell whose analyzer has not finished its first run yet. */
+export const FIRST_RUN = 'first run'
+
+/** The neutral cell of an analyzer whose `appliesTo` says the repository has nothing for it. */
+const notApplicableCell = () => cell('n/a', 'not applicable', 'none')
+
+/** What the newest job and the last sweep say about an analyzer with no record yet. */
+interface Pending {
+  job?: Job
+  sweep?: SweepVerdict
+}
+
+/**
+ * The cell of an analyzer with no record yet: not applicable when the last sweep skipped it for
+ * its `appliesTo`, its first run queued, running, failed or due when the newest job or the sweep
+ * says so, else no record.
+ */
+function withoutRecord({ job, sweep }: Pending): RepoHealthCell {
+  if (sweep?.applies === false) return notApplicableCell()
+  if (job?.status === 'running') return cell('Running', FIRST_RUN, 'none')
+  if (job?.status === 'queued') return cell('Queued', FIRST_RUN, 'none')
+  if (job?.status === 'failed') return cell('Failed', FIRST_RUN, 'none')
+  if (sweep?.action === 'run' || sweep?.action === 'wait') return cell('Pending', FIRST_RUN, 'none')
+  return noRecord()
+}
 
 /** The neutral cell of an analyzer `repo.analyzers` turns off. */
 const offCell = (reason: string | undefined) => cell('Off', reason ?? OFF_FALLBACK, 'none')
@@ -194,9 +226,10 @@ const updateKinds = ({ minor, patch }: { minor?: number; patch?: number }) => {
   return 'minor or patch'
 }
 
-function dependenciesCell(head: AnalysisHead | undefined): RepoHealthCell {
-  const metrics = head && metricsOf(renovateAnalysis, head)
-  if (metrics?.outdated === undefined) return head ? cell('—', 'no counts', 'none') : noRecord()
+function dependenciesCell(head: AnalysisHead | undefined, pending: Pending): RepoHealthCell {
+  if (!head) return withoutRecord(pending)
+  const metrics = metricsOf(renovateAnalysis, head)
+  if (metrics?.outdated === undefined) return cell('—', 'no counts', 'none')
   const { outdated, major, security } = metrics
   if (outdated === 0) return cell('Up to date', '', 'ok')
   if (security)
@@ -230,8 +263,9 @@ function coverageCell(
 function bundlesCell(
   head: AnalysisHead | undefined,
   budgets: Record<string, number> | undefined,
+  pending: Pending,
 ): RepoHealthCell {
-  if (!head) return noRecord()
+  if (!head) return pending.sweep?.applies === false ? notApplicableCell() : noRecord()
   const metrics = metricsOf(bundleAnalysis, head)
   const targets = (metrics?.targets ?? []).filter((target) => target.gzip !== undefined)
   if (!targets.length)
@@ -430,7 +464,9 @@ type IndexedSources = ReturnType<typeof indexSources>
  * `analyzers.coverage` and `analyzers.bundle` settings, and a repository with no tests by design
  * (`repo.tests`) gets a neutral coverage cell and its test analyses are left out of freshness. A
  * cell whose analyzer `repo.analyzers` turns off is a neutral `Off` with the reason, and that
- * analyzer's records are left out of freshness.
+ * analyzer's records are left out of freshness. Without a record, the bundles cell reads `n/a` when
+ * the last freshness sweep found the bundle analyzer does not apply, and the dependencies cell
+ * names its first run (`FIRST_RUN`) while a job or the sweep has it queued, running or due.
  */
 export function repoHealth(
   indexed: IndexedSources,
@@ -442,11 +478,16 @@ export function repoHealth(
   const heads = indexed.heads.get(key) ?? new Map<string, AnalysisHead>()
   let judged: ReturnType<typeof judgedBy> | undefined
   const options = () => (judged ??= judgedBy(sources.settings, repo))
+  const pending = (kind: string): Pending => {
+    const job = indexed.jobs.get(key)?.find((each) => each.analyzer === kind)
+    const sweep = sources.sweep?.get(`${key}\0${kind}`)
+    return { ...(job && { job }), ...(sweep && { sweep }) }
+  }
   const build: Record<RepoHealthCellKey, () => RepoHealthCell> = {
     security: () => securityCell(heads.get('audit'), indexed.audits.get(key)),
-    dependencies: () => dependenciesCell(heads.get('renovate')),
+    dependencies: () => dependenciesCell(heads.get('renovate'), pending('renovate')),
     coverage: () => coverageCell(heads.get('coverage'), options().target, options().tests),
-    bundles: () => bundlesCell(heads.get('bundle'), options().budgets),
+    bundles: () => bundlesCell(heads.get('bundle'), options().budgets, pending('bundle')),
     jobs: () => jobsCell(indexed.jobs.get(key) ?? [], sources.now),
     ci: () => ciCell(heads.get('ci-jobs')),
     licenses: () => licensesCell(heads.get('licenses')),
@@ -497,7 +538,8 @@ const AUDITS_READ = 500
  * Reads `HealthSources` once per request: every setting entry, the newest main-line heads (of
  * `repo` when given) with read-time metrics, the newest jobs of `jobRepos` (none when it is an
  * empty list, all when absent), the cards `releases` gives (none without it) and, with `audits`,
- * the newest audit runs (of `repo` when given). Heads of kinds `known` rejects are left out.
+ * the newest audit runs (of `repo` when given), and the last freshness sweep's decisions. Heads of
+ * kinds `known` rejects are left out.
  */
 export async function readHealthSources(
   deps: Pick<ServerDeps, 'store' | 'analyses' | 'now'>,
@@ -512,7 +554,7 @@ export async function readHealthSources(
 ): Promise<HealthSources> {
   const { store } = deps
   const kinds = new Map(deps.analyses.map((kind) => [kind.kind, kind]))
-  const [settings, heads, jobs, releases, runs] = await Promise.all([
+  const [settings, heads, jobs, releases, runs, sweep] = await Promise.all([
     store.settings.list(),
     latestHeadsWithMetrics(store.analyses, kinds, options.repo ? { repo: options.repo } : {}),
     options.jobRepos?.length === 0
@@ -522,6 +564,7 @@ export async function readHealthSources(
     options.audits
       ? store.auditRuns.list({ ...(options.repo && { repo: options.repo }), limit: AUDITS_READ })
       : [],
+    lastSweepVerdicts(deps),
   ])
   const known = options.known ?? (() => true)
   return {
@@ -531,5 +574,6 @@ export async function readHealthSources(
     jobs,
     releases,
     audits: runs.map(summarizeRun),
+    sweep,
   }
 }

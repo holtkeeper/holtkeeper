@@ -19,7 +19,10 @@ import {
   agentCommands,
   applyPatch,
   changedFiles,
+  checksEnv,
   detectChecks,
+  fixCommands,
+  formatGoFiles,
   runChecks,
   taskBranch,
 } from './workspace.ts'
@@ -120,7 +123,7 @@ function taskPrompt(input: {
     )
   if (input.checks.length)
     parts.push(
-      `You may run only these commands: ${input.checks.map((check) => `\`${check.command}\``).join(', ')}, and \`git status\`, \`git diff\`, \`git log\`.`,
+      `You may run only these commands: ${[...input.checks.map((check) => check.command), ...fixCommands(input.checks)].map((command) => `\`${command}\``).join(', ')}, and \`git status\`, \`git diff\`, \`git log\`.`,
     )
   if (input.conventions)
     parts.push(
@@ -170,11 +173,13 @@ export async function runWriteTask(input: RunWriteTaskInput): Promise<WriteTaskD
     const { dir, runner } = workspace
     if (!runner) throw new Error('the checkout has no command runner')
     await runChecked(runner, ['git', 'switch', '--quiet', '-C', branch], { cwd: dir, signal })
-    const specs = await detectChecks(dir, options.checks, { tests: !policy.noTests })
+    const specs = await detectChecks(dir, options.checks, { tests: !policy.noTests, log })
     const check = () =>
-      step('checks', () =>
-        runChecks(dir, runner, specs, { signal, log, ...(input.env && { env: input.env }) }),
-      )
+      step('checks', async () => {
+        await formatGoFiles(dir, runner, specs, { signal, log })
+        return runChecks(dir, runner, specs, { signal, log, ...(input.env && { env: input.env }) })
+      })
+    const agentEnv = { ...input.env, ...checksEnv(specs) }
 
     let patch: 'applied' | 'conflict' | undefined
     let checks: CheckResult[] = []
@@ -229,7 +234,7 @@ export async function runWriteTask(input: RunWriteTaskInput): Promise<WriteTaskD
               },
             }),
           ],
-          ...(input.env && { env: input.env }),
+          ...(Object.keys(agentEnv).length && { env: agentEnv }),
           output: agentReportSchema,
           tier: 'main',
           taskKind: WRITE_TASK_KIND,

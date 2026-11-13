@@ -62,6 +62,10 @@ Holtkeeper reads the public API of every package in your repositories: each entr
 A package marked **removed** was dropped from its repository: two default-branch reads in a row no longer found it. It stays listed so old versions resolve, but do not add new uses. Agents are warned the same way.
 :::
 
+### Go packages
+
+Go modules are read too. Each Go package is listed under its full import path (for example `example.com/acme/widgets/shapes`) with a **Go** tag; packages under `internal/` are tagged **internal**, and commands (`package main`) are counted but never listed. A Go package gets a version only from a module tag on the analysed commit (`v1.2.0` for the root module, `shapes/v1.2.0` for a module in `shapes/`); the default branch shows as `head`. Versions of every major (`/v2`, `/v3`) are listed together, so you can compare across a major upgrade. The declaration sheet shows the Go import line, and **Used by** shows which packages of a module other repositories call. A Go service with nothing importable shows **Internal only** on its repository overview instead of an empty catalog.
+
 ## Find an export
 
 **Symbol search** finds exports by name or by words in their doc comments.

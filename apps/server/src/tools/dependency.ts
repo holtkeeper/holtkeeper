@@ -1,5 +1,11 @@
 import type { RepoRef } from '@holtkeeper/forge'
-import { type LatestVersions, majorsBehind } from '@holtkeeper/libraries'
+import {
+  type LatestVersions,
+  isGoModuleName,
+  majorsBehind,
+  resolveLibrary,
+  sameVersion,
+} from '@holtkeeper/libraries'
 import { evaluatePackages } from '@holtkeeper/licenses'
 import type {
   AnalysisStore,
@@ -68,16 +74,28 @@ const kb = (bytes: number) =>
 
 async function fleetSection(context: DependencyContext, query: Resolved) {
   const lines: string[] = []
-  const internal = (await context.catalog.packages(context.canRead, query.package)).filter(
-    (pkg) => pkg.name === query.package,
+  const ref =
+    query.ecosystem === 'Go' && context.libraries
+      ? (await resolveLibrary(context.libraries, { package: query.package, ecosystem: 'Go' })).ref
+      : { ecosystem: query.ecosystem, name: query.package }
+  const key = libraryKeyOf(ref)
+  const sameGoModule = (module: string | undefined) =>
+    module !== undefined && libraryKeyOf({ ecosystem: 'Go', name: module }) === key
+  const internal = (await context.catalog.packages(context.canRead, query.package)).filter((pkg) =>
+    query.ecosystem === 'Go'
+      ? pkg.ecosystem === 'Go' && (pkg.name === query.package || sameGoModule(pkg.module))
+      : pkg.ecosystem !== 'Go' && pkg.name === query.package,
   )
-  for (const pkg of internal)
+  const published = new Map<string, (typeof internal)[number]>()
+  for (const pkg of internal) {
+    const at = `${repoKey(pkg.repo)}\u0000${pkg.module ?? pkg.name}`
+    if (!published.has(at) || pkg.name === query.package) published.set(at, pkg)
+  }
+  for (const pkg of published.values())
     lines.push(
-      `- Published by ${code(repoKey(pkg.repo))}${pkg.version ? ` at ${pkg.version}` : ''}: an internal package, see get_package_api.${pkg.removed ? ' **Removed** from its repository: do not add it.' : ''}`,
+      `- Published by ${code(repoKey(pkg.repo))}${pkg.version ? ` at ${pkg.version}` : ''}: an internal ${pkg.ecosystem === 'Go' ? `Go ${pkg.name === query.package ? 'package' : `module (${pkg.module})`}` : 'package'}, see get_package_api.${pkg.removed ? ' **Removed** from its repository: do not add it.' : ''}`,
     )
 
-  const ref = { ecosystem: query.ecosystem, name: query.package }
-  const key = libraryKeyOf(ref)
   const [record, versions, fleet, latest] = await Promise.all([
     context.libraries?.getLibrary(ref),
     context.libraries?.listVersions(ref) ?? [],
@@ -94,7 +112,9 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
     lines.push(
       `- ${record?.description ? `${record.description}. ` : ''}Newest release ${newest ?? 'unknown'}${record?.homepage ? `, ${record.homepage}` : ''}.`,
     )
-  const wanted = versions.find((item) => item.version === query.version)
+  const wanted = query.version
+    ? versions.find((item) => sameVersion(item.version, query.version))
+    : undefined
   if (wanted?.deprecated) lines.push(`- **${query.version} is deprecated:** ${wanted.deprecated}`)
   for (const item of versions.filter((entry) => entry.deprecated && entry !== wanted).slice(0, 3))
     lines.push(`- ${item.version} is deprecated: ${item.deprecated}`)
@@ -103,14 +123,18 @@ async function fleetSection(context: DependencyContext, query: Resolved) {
   for (const [origin, used] of groupUses(fleet.uses).get(key)?.repos ?? [])
     users.set(origin, [...used])
   const counts = new Map<string, string>()
-  if (query.ecosystem === 'npm')
-    for (const entry of await context.usages.entries(context.canRead)) {
-      const used = entry.data.packages.find((pkg) => pkg.name === query.package && !pkg.local)
-      if (!used) continue
-      counts.set(entry.origin, `${used.count} uses in ${used.files} files`)
-      if (!users.has(entry.origin))
-        users.set(entry.origin, used.versions.length ? used.versions : used.ranges)
-    }
+  for (const entry of await context.usages.entries(context.canRead)) {
+    const used = entry.data.packages.find(
+      (pkg) =>
+        !pkg.local &&
+        (pkg.ecosystem ?? 'npm') === query.ecosystem &&
+        (query.ecosystem === 'Go' ? sameGoModule(pkg.name) : pkg.name === query.package),
+    )
+    if (!used) continue
+    counts.set(entry.origin, `${used.count} uses in ${used.files} files`)
+    if (!users.has(entry.origin))
+      users.set(entry.origin, used.versions.length ? used.versions : used.ranges)
+  }
   if (users.size) {
     const teams = new Set<string>()
     const rows = [...users]
@@ -222,7 +246,7 @@ export async function evaluateDependency(
 ): Promise<string> {
   const query: Resolved = {
     package: input.package,
-    ecosystem: input.ecosystem ?? 'npm',
+    ecosystem: input.ecosystem ?? (isGoModuleName(input.package) ? 'Go' : 'npm'),
     version: input.version ?? '',
     repo: input.repo ?? '',
   }

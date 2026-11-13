@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { strToU8, zipSync } from 'fflate'
 
-import { goRegistry, keepModuleFile, moduleDeprecation } from './go.ts'
+import { goPrivateMatcher, goRegistry, keepModuleFile, moduleDeprecation } from './go.ts'
 
 const fakeFetch = (routes: Record<string, string | Uint8Array>) => {
   const calls: string[] = []
@@ -160,6 +160,95 @@ describe('goRegistry.archive', () => {
     )
     expect(files).toBeUndefined()
     expect(calls).toEqual([`${proxy}/github.com/acme/lib/@v/v3.0.0+incompatible.zip`])
+  })
+})
+
+describe('goRegistry.source', () => {
+  test('keeps every text file of the module zip but vendor', async () => {
+    const zip = zipSync({
+      'example.com/acme/kit@v1.0.0/kit.go': strToU8('package kit'),
+      'example.com/acme/kit@v1.0.0/kit_test.go': strToU8('package kit'),
+      'example.com/acme/kit@v1.0.0/testdata/in.json': strToU8('{}'),
+      'example.com/acme/kit@v1.0.0/vendor/x/x.go': strToU8('package x'),
+      'example.com/acme/kit@v1.0.0/logo.png': new Uint8Array([137, 80, 0, 71]),
+    })
+    const { fetch } = fakeFetch({ [`${proxy}/example.com/acme/kit/@v/v1.0.0.zip`]: zip })
+    const files = await goRegistry({ fetch, proxyUrl: proxy }).source?.(
+      { ecosystem: 'Go', name: 'example.com/acme/kit' },
+      'v1.0.0',
+    )
+    expect([...(files?.keys() ?? [])].toSorted()).toEqual([
+      'kit.go',
+      'kit_test.go',
+      'testdata/in.json',
+    ])
+  })
+
+  test('refuses a module zip larger than maxDownloadBytes before unzipping it', async () => {
+    const zip = zipSync({
+      'example.com/acme/kit@v1.0.0/kit.go': strToU8('package kit '.repeat(50)),
+    })
+    const url = `${proxy}/example.com/acme/kit/@v/v1.0.0.zip`
+    const { fetch } = fakeFetch({ [url]: zip })
+    const ref = { ecosystem: 'Go' as const, name: 'example.com/acme/kit' }
+    const small = goRegistry({ fetch, proxyUrl: proxy, maxDownloadBytes: zip.length - 1 })
+    expect(small.source?.(ref, 'v1.0.0')).rejects.toThrow('larger than')
+    expect(small.archive(ref, 'v1.0.0')).rejects.toThrow('larger than')
+
+    const streamed = (async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(zip)
+            controller.close()
+          },
+        }),
+      )) as unknown as typeof globalThis.fetch
+    expect(
+      goRegistry({ fetch: streamed, proxyUrl: proxy, maxDownloadBytes: 10 }).source?.(
+        ref,
+        'v1.0.0',
+      ),
+    ).rejects.toThrow('larger than')
+    expect(
+      (
+        await goRegistry({ fetch, proxyUrl: proxy, maxDownloadBytes: zip.length }).source?.(
+          ref,
+          'v1.0.0',
+        )
+      )?.has('kit.go'),
+    ).toBe(true)
+  })
+})
+
+describe('private modules', () => {
+  test('goPrivateMatcher matches whole path elements with globs', () => {
+    const matches = goPrivateMatcher([
+      'git.example.com',
+      'example.com/acme-*/x,',
+      ' example.org/kit/ ',
+    ])
+    expect(matches('git.example.com/shapes/geom/v2')).toBe(true)
+    expect(matches('git.example.com.evil/x')).toBe(false)
+    expect(matches('example.com/acme-private/x/sub')).toBe(true)
+    expect(matches('example.com/acme-private/y')).toBe(false)
+    expect(matches('example.org/kit')).toBe(true)
+    expect(matches('example.org/kitchen')).toBe(false)
+    expect(goPrivateMatcher([])('example.org/kit')).toBe(false)
+  })
+
+  test('the registry never asks for a private module', async () => {
+    const { fetch, calls } = fakeFetch({})
+    const registry = goRegistry({
+      fetch,
+      proxyUrl: proxy,
+      isPrivate: goPrivateMatcher(['git.example.com']),
+    })
+    const ref = { ecosystem: 'Go' as const, name: 'git.example.com/shapes/geom' }
+    expect(await registry.library(ref)).toBeUndefined()
+    expect(await registry.archive(ref, 'v2.0.0')).toBeUndefined()
+    expect(await registry.source?.(ref, 'v2.0.0')).toBeUndefined()
+    expect(calls).toEqual([])
   })
 })
 

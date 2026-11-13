@@ -52,6 +52,9 @@ async function readText(dir: string, file: string, limit = 64 * 1024) {
   }
 }
 
+const readMakefile = async (dir: string) =>
+  (await readText(dir, 'Makefile')) ?? (await readText(dir, 'GNUmakefile'))
+
 async function names(dir: string, folder: string): Promise<string[]> {
   try {
     return (await readdir(join(dir, folder))).toSorted()
@@ -110,17 +113,53 @@ const dependencyNames = (manifest: Record<string, unknown>) =>
     })
     .toSorted()
 
-/** Make targets with the first line of their recipe. */
+const isEcho = (line: string) => /^@?(echo|printf)\b/.test(line)
+
+/** Make targets with the first line of their recipe that is not an `echo`. */
 export function makeTargets(text: string): [string, string][] {
   const targets: [string, string][] = []
   const lines = text.split('\n')
   for (const [index, line] of lines.entries()) {
     const match = /^([A-Za-z0-9][\w.-]*)\s*:(?!=)/.exec(line)
     if (!match?.[1] || match[1] === '.PHONY') continue
-    const recipe = lines[index + 1]?.startsWith('\t') ? (lines[index + 1]?.trim() ?? '') : ''
+    let recipe = ''
+    for (let next = index + 1; lines[next]?.startsWith('\t'); next++) {
+      const command = lines[next]!.trim()
+      if (command && !isEcho(command)) {
+        recipe = command
+        break
+      }
+    }
     targets.push([match[1], recipe])
   }
   return targets
+}
+
+const KEY_TARGETS =
+  /^(test|tests|unit|integration|e2e|lint|vet|fmt|format|check|build|run|generate|gen|mocks?|tidy|cover(age)?)([-_.].*)?$/
+
+/** `targets` with the ones agents most need (test, lint, build, run, generate, ...) first, each group in file order. */
+export function keyTargetsFirst(targets: readonly [string, string][]): [string, string][] {
+  return [
+    ...targets.filter(([name]) => KEY_TARGETS.test(name)),
+    ...targets.filter(([name]) => !KEY_TARGETS.test(name)),
+  ]
+}
+
+/** `use` directories and the `go` line of a `go.work`, on one line. */
+export function goWorkSummary(text: string): string {
+  const go = /^go\s+(\S+)/m.exec(text)?.[1]
+  const uses: string[] = []
+  const block = /^use\s*\(([^)]*)\)/m.exec(text)?.[1]
+  for (const line of (block ?? '').split('\n')) {
+    const use = line
+      .replace(/\/\/.*$/, '')
+      .trim()
+      .split(/\s+/)[0]
+    if (use) uses.push(use)
+  }
+  for (const match of text.matchAll(/^use\s+([^\s(]\S*)/gm)) if (match[1]) uses.push(match[1])
+  return `go.work${go ? `, go ${go}` : ''}${uses.length ? `, use: ${uses.slice(0, 15).join(', ')}` : ''}`
 }
 
 function goModule(text: string): string[] {
@@ -157,9 +196,11 @@ async function manifests(dir: string, files: readonly string[]): Promise<Evidenc
   }
   const goMod = await readText(dir, 'go.mod')
   if (goMod) lines.push(`go.mod: ${goModule(goMod).filter(Boolean).join('; ')}`)
-  const makefile = await readText(dir, 'Makefile')
+  const goWork = await readText(dir, 'go.work')
+  if (goWork) lines.push(goWorkSummary(goWork))
+  const makefile = await readMakefile(dir)
   if (makefile) {
-    const targets = makeTargets(makefile)
+    const targets = keyTargetsFirst(makeTargets(makefile))
     lines.push(
       `Makefile targets: ${targets
         .slice(0, 20)
@@ -222,6 +263,21 @@ const firstCommand = (script: unknown): string | undefined => {
   return undefined
 }
 
+/** One GitLab CI `include` entry as text: a project include names its files and ref. */
+export function includeName(entry: unknown): string {
+  if (typeof entry === 'string') return entry
+  if (!isRecord(entry)) return ''
+  if (typeof entry.project === 'string') {
+    const files = (Array.isArray(entry.file) ? entry.file : [entry.file]).filter(
+      (file): file is string => typeof file === 'string',
+    )
+    const ref = typeof entry.ref === 'string' ? `@${entry.ref}` : ''
+    return `${entry.project}${files.length ? `:${files.join('+')}` : ''}${ref}`
+  }
+  const value = entry.local ?? entry.template ?? entry.remote ?? entry.component
+  return typeof value === 'string' ? value : ''
+}
+
 function gitlabCi(text: string): string[] {
   const parsed = parseYaml(text)
   if (!parsed) {
@@ -232,13 +288,10 @@ function gitlabCi(text: string): string[] {
   }
   const stages = Array.isArray(parsed.stages) ? parsed.stages.map(String) : []
   const include = parsed.include
-  const includes = (Array.isArray(include) ? include : include ? [include] : []).map((entry) =>
-    typeof entry === 'string'
-      ? entry
-      : isRecord(entry)
-        ? String(entry.local ?? entry.template ?? entry.project ?? entry.remote ?? entry.component)
-        : '',
-  )
+  const includes = (Array.isArray(include) ? include : include ? [include] : []).map(includeName)
+  const templates = Object.keys(parsed)
+    .filter((name) => name.startsWith('.') && isRecord(parsed[name]))
+    .slice(0, 15)
   const jobs = Object.entries(parsed)
     .filter(([name, value]) => !GITLAB_KEYS.has(name) && !name.startsWith('.') && isRecord(value))
     .slice(0, 25)
@@ -251,6 +304,7 @@ function gitlabCi(text: string): string[] {
   return [
     `.gitlab-ci.yml${stages.length ? `, stages: ${stages.join(', ')}` : ''}`,
     includes.filter(Boolean).length ? `  includes: ${includes.filter(Boolean).join(', ')}` : '',
+    templates.length ? `  job templates: ${templates.join(', ')}` : '',
     ...jobs,
   ]
 }
@@ -307,7 +361,7 @@ const LINT_CONFIGS: [RegExp, string][] = [
   [/^biome\.jsonc?$/, 'Biome'],
   [/^(\.prettierrc(\.[a-z]+)?|prettier\.config\.[cm]?[jt]s)$/, 'Prettier'],
   [/^(\.stylelintrc(\.[a-z]+)?|stylelint\.config\.[cm]?[jt]s)$/, 'Stylelint'],
-  [/^\.golangci\.ya?ml$/, 'golangci-lint'],
+  [/^\.golangci\.(ya?ml|toml|json)$/, 'golangci-lint'],
   [/^(ruff\.toml|\.ruff\.toml)$/, 'Ruff'],
   [/^\.editorconfig$/, 'EditorConfig'],
   [/^(commitlint\.config\.[cm]?[jt]s|\.commitlintrc(\.[a-z]+)?)$/, 'commitlint'],
@@ -330,11 +384,63 @@ const TS_OPTIONS = [
   'baseUrl',
 ]
 
+const stringList = (value: unknown) =>
+  Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+
+/** What a golangci-lint config sets (v1 or v2): version, default set, enabled linters and formatters, build tags. */
+export function golangciSummary(file: string, text: string): string {
+  let parsed: Record<string, unknown> | undefined
+  if (file.endsWith('.json')) parsed = parseJson(text)
+  else if (file.endsWith('.toml')) {
+    try {
+      const value: unknown = Bun.TOML.parse(text)
+      parsed = isRecord(value) ? value : undefined
+    } catch {
+      parsed = undefined
+    }
+  } else parsed = parseYaml(text)
+  if (!parsed) return ''
+  const linters = isRecord(parsed.linters) ? parsed.linters : {}
+  const formatters = isRecord(parsed.formatters) ? parsed.formatters : {}
+  const run = isRecord(parsed.run) ? parsed.run : {}
+  const enabled = stringList(linters.enable)
+  const disabled = stringList(linters.disable)
+  const defaults =
+    typeof linters.default === 'string'
+      ? linters.default
+      : linters['enable-all'] === true
+        ? 'all'
+        : linters['disable-all'] === true
+          ? 'none'
+          : undefined
+  const parts = [
+    typeof parsed.version === 'string' || typeof parsed.version === 'number'
+      ? `version ${parsed.version}`
+      : '',
+    defaults ? `default ${defaults}` : '',
+    enabled.length ? `linters: ${enabled.slice(0, 25).join(', ')}` : '',
+    disabled.length ? `disabled: ${disabled.slice(0, 10).join(', ')}` : '',
+    stringList(formatters.enable).length
+      ? `formatters: ${stringList(formatters.enable).join(', ')}`
+      : '',
+    stringList(run['build-tags']).length
+      ? `build tags: ${stringList(run['build-tags']).join(', ')}`
+      : '',
+  ].filter(Boolean)
+  return parts.join('; ')
+}
+
 async function lintConfig(dir: string, files: readonly string[]): Promise<Evidence[]> {
   const lines: string[] = []
   for (const file of files.filter((path) => depth(path) === 0)) {
     const tool = LINT_CONFIGS.find(([pattern]) => pattern.test(file))?.[1]
-    if (tool) lines.push(`${tool}: ${file}`)
+    if (!tool) continue
+    const summary =
+      tool === 'golangci-lint'
+        ? // oxlint-disable-next-line no-await-in-loop -- at most one golangci-lint config
+          golangciSummary(file, (await readText(dir, file)) ?? '')
+        : ''
+    lines.push(`${tool}: ${file}${summary ? ` — ${summary}` : ''}`)
   }
   if ((await names(dir, '.husky')).length) lines.push('git hooks: .husky/')
   const manifest = parseJson(await readText(dir, 'package.json'))
@@ -422,12 +528,30 @@ async function docs(dir: string, files: readonly string[]): Promise<Evidence[]> 
     lines.push(`${file}${title ? ` — ${short(title, 80)}` : ''}`)
   }
   if (found.length > 40) lines.push(`+${found.length - 40} more`)
+  const folders = [
+    ...new Set(
+      files
+        .filter((file) => /^docs?\//i.test(file))
+        .flatMap((file) => {
+          const parts = file.split('/')
+          return Array.from({ length: Math.min(depth(file), 3) - 1 }, (_, index) =>
+            parts.slice(0, index + 2).join('/'),
+          )
+        }),
+    ),
+  ].toSorted()
+  if (folders.length)
+    lines.push(
+      `doc folders: ${folders.slice(0, 25).join(', ')}${folders.length > 25 ? `, +${folders.length - 25} more` : ''}`,
+    )
   return item('docs', 'Existing docs (point to them, do not restate them)', lines)
 }
 
 /**
- * Evidence for the `general` section: manifests and scripts, CI config, lint/format/TypeScript
- * config, toolchain, top-level layout and the list of existing docs. `files` lists the checkout
+ * Evidence for the `general` section: manifests and scripts (package.json, go.mod, go.work,
+ * Makefile targets with test/lint/build/run first), CI config (jobs, includes, job templates),
+ * lint/format/TypeScript config (with a golangci-lint config's linters), toolchain, top-level
+ * layout and the existing docs with their folders. `files` lists the checkout
  * (repository-relative), e.g. from `listFiles` of `@holtkeeper/quality-tests`.
  */
 export async function collectGeneral(dir: string, files: readonly string[]): Promise<Evidence[]> {
@@ -485,9 +609,39 @@ function coverageLines(coverage: CoverageData): string[] {
   ]
 }
 
+const GO_TAG_FILES = 400
+const PLATFORM_TAGS =
+  /^(linux|darwin|windows|freebsd|openbsd|netbsd|android|ios|js|wasip1|plan9|solaris|aix|unix|amd64|arm64|386|arm|wasm|riscv64|ppc64le|s390x|cgo|ignore|go1\.\d+)$/
+
+/** Constraint names of a `//go:build` line that a test run would need `-tags` for (platform tags left out). */
+export function buildTags(line: string): string[] {
+  return [...line.matchAll(/(!?)([A-Za-z_][\w.]*)/g)]
+    .filter((match) => !match[1] && match[2] !== 'go' && !PLATFORM_TAGS.test(match[2] ?? ''))
+    .map((match) => match[2] ?? '')
+}
+
+async function goTestTags(dir: string, files: readonly string[]): Promise<string> {
+  const counts = new Map<string, number>()
+  const tests = files.filter((file) => file.endsWith('_test.go') && !/(^|\/)vendor\//.test(file))
+  for (const file of tests.slice(0, GO_TAG_FILES)) {
+    // oxlint-disable-next-line no-await-in-loop -- file heads only, in a stable order
+    const head = await readText(dir, file, 2048)
+    const line = head ? /^\/\/go:build\s+(.+)$/m.exec(head)?.[1] : undefined
+    for (const tag of new Set(line ? buildTags(line) : []))
+      counts.set(tag, (counts.get(tag) ?? 0) + 1)
+  }
+  const ranked = [...counts].toSorted((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  return ranked.length
+    ? `Go test files behind build tags (run with go test -tags): ${ranked
+        .slice(0, 8)
+        .map(([tag, count]) => `${tag} (${approx(count)} files)`)
+        .join(', ')}`
+    : ''
+}
+
 /**
- * Evidence for the `testing` section: the detected frameworks and conventions, test scripts, the
- * first lines of up to three sample tests, and line coverage by folder when a coverage analysis
+ * Evidence for the `testing` section: the detected frameworks and conventions, the build tags Go
+ * test files need, test scripts and Makefile targets, the first lines of up to three sample tests, and line coverage by folder when a coverage analysis
  * exists. Empty when the repository has no tests, no framework and no coverage.
  */
 export async function collectTesting(
@@ -504,7 +658,7 @@ export async function collectTesting(
     for (const [name, command] of manifest ? scriptsOf(manifest) : [])
       if (TEST_SCRIPT.test(name)) scripts.push(`${file} ${name}: ${short(command)}`)
   }
-  const makefile = await readText(dir, 'Makefile')
+  const makefile = await readMakefile(dir)
   for (const [name, recipe] of makefile ? makeTargets(makefile) : [])
     if (TEST_SCRIPT.test(name)) scripts.push(`make ${name}${recipe ? `: ${short(recipe)}` : ''}`)
 
@@ -531,6 +685,7 @@ export async function collectTesting(
         (conventions) =>
           `${conventions.language}: layout ${conventions.layout}${conventions.testDir ? ` (${conventions.testDir}/)` : ''}, file name ${conventions.fileName}${conventions.frameworkImport ? `, import \`${conventions.frameworkImport}\`` : ''}${conventions.localImportExtension ? `, local imports ${conventions.localImportExtension}` : ''}`,
       ),
+      await goTestTags(dir, files),
     ]),
     ...item('test-scripts', 'Test commands', scripts.slice(0, 15)),
     ...heads,

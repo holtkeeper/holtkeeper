@@ -212,6 +212,8 @@ const postAll = async (
 }
 
 /** Minutes before the next try after `attempts` refused posts: 1, 2, 4, … up to an hour. */
+const bare = (version: string | undefined) => version?.replace(/^v(?=\d)/, '')
+
 const retryDelayMs = (attempts: number) => Math.min(2 ** Math.max(attempts - 1, 0), 60) * 60_000
 
 /** Whether two repositories share a team: a config group, or neither has one. */
@@ -746,14 +748,25 @@ export function createReleaseAnnouncer(
     const now = await apiOf(repo, tag)
     const before = tag.previous ? await apiOf(repo, tag.previous) : undefined
     if (!now) return undefined
-    const names = tag.package
-      ? [tag.package]
-      : (() => {
-          const matching = now.packages.filter((pkg) => pkg.version === tag.version)
-          return (matching.length ? matching : now.packages.length === 1 ? now.packages : []).map(
-            (pkg) => pkg.name,
-          )
-        })()
+    const goReleased = now.packages.filter(
+      (pkg) =>
+        pkg.ecosystem === 'Go' &&
+        bare(pkg.version) === bare(tag.version) &&
+        (!tag.package || pkg.dir === tag.package || pkg.dir.startsWith(`${tag.package}/`)),
+    )
+    const names =
+      tag.package && now.packages.some((pkg) => pkg.name === tag.package)
+        ? [tag.package]
+        : goReleased.length
+          ? goReleased.map((pkg) => pkg.name)
+          : tag.package
+            ? [tag.package]
+            : (() => {
+                const matching = now.packages.filter((pkg) => pkg.version === tag.version)
+                return (
+                  matching.length ? matching : now.packages.length === 1 ? now.packages : []
+                ).map((pkg) => pkg.name)
+              })()
     const packages: {
       name: string
       breaking: ApiChange[]

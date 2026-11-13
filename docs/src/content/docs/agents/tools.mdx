@@ -60,7 +60,7 @@ A second index records how every repository uses its dependencies: which exports
     …
 ```
 
-`upgrade_impact` covers npm packages; use `diff_versions` for Go modules.
+`upgrade_impact` covers npm packages and Go modules; for Go it sees syntactic uses, plus the methods and fields reached through values (a method called on a returned value) when the usages job has the `go` toolchain.
 
 ## Third-party libraries
 

@@ -1,0 +1,13 @@
+{
+  "name": "@holtkeeper/go-source",
+  "version": "0.0.0",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@holtkeeper/api-surface": "workspace:*",
+    "@holtkeeper/exec": "workspace:*"
+  }
+}

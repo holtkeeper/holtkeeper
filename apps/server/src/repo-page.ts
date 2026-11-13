@@ -53,7 +53,13 @@ import { summarizeAnalysis } from './analyses.ts'
 import { type ServerDeps, repoKey } from './context.ts'
 import { readHead } from './freshness.ts'
 import { OFF_FALLBACK } from './repo-analyzers.ts'
-import { type HealthAccess, indexSources, readHealthSources, repoHealth } from './repo-health.ts'
+import {
+  FIRST_RUN,
+  type HealthAccess,
+  indexSources,
+  readHealthSources,
+  repoHealth,
+} from './repo-health.ts'
 import { repoDependencies, stackGroupViews } from './stack.ts'
 import { tasksWriteSettings } from './write-tasks.ts'
 
@@ -389,6 +395,8 @@ interface CardInputs {
   toolchain: RepoToolchainEntry[]
   judged: ReturnType<typeof judgedBy>
   may: (action: Action) => boolean
+  /** Whether the last freshness sweep found the analyzer `kind` does not apply to the repository. */
+  notApplicable: (kind: string) => boolean
 }
 
 const notAnalysed = (
@@ -478,7 +486,14 @@ function librariesCard({
   const updatesOff = judged.analyzers.off.includes('renovate')
   const renovate = updatesOff ? undefined : heads.get('renovate')
   const metrics = renovate ? metricsOf(renovateAnalysis, renovate) : undefined
-  if (!graph && !metrics) return notAnalysed('libraries', 'supply', 'direct dependencies')
+  const pending = cells.dependencies?.sub === FIRST_RUN ? cells.dependencies : undefined
+  if (!graph && !metrics)
+    return notAnalysed(
+      'libraries',
+      'supply',
+      'direct dependencies',
+      pending ? [`Update check: first run ${pending.value.toLowerCase()}`] : [],
+    )
   const total = metricValue(graph, 'packages')
   const major = metrics?.major ?? 0
   const behind = metrics ? metrics.outdated - major : 0
@@ -486,7 +501,11 @@ function librariesCard({
   return card('libraries', 'supply', {
     ...(fromCell(cells.dependencies) ?? {
       tone: 'none',
-      status: updatesOff ? 'Updates off' : 'Not checked for updates',
+      status: updatesOff
+        ? 'Updates off'
+        : pending
+          ? `Update check ${pending.value.toLowerCase()}`
+          : 'Not checked for updates',
     }),
     value: direct === undefined ? '—' : String(direct),
     unit: total === undefined ? 'direct' : `direct · ${total.toLocaleString('en-US')} total`,
@@ -563,15 +582,37 @@ function publicApiCard({ summaries, now }: CardInputs): RepoOverviewCard {
   const exports = metricValue(surface, 'exports') ?? 0
   const packages = metricValue(surface, 'packages') ?? 0
   const documented = metricValue(surface, 'documented')
+  const goImportable = metricValue(surface, 'goImportable')
+  const goInternal = metricValue(surface, 'goInternal') ?? 0
+  const goMain = metricValue(surface, 'goMain') ?? 0
+  const indexed = `Indexed ${ago(surface.createdAt, now)}`
+  if (goImportable === 0 && packages <= goInternal)
+    return card('public-api', 'supply', {
+      tone: 'none',
+      status: 'Internal only',
+      value: '0',
+      unit: 'importable packages',
+      lines: [
+        `Go service: ${plural(goMain, 'main package')}, ${plural(goInternal, 'internal package')}`,
+        indexed,
+      ],
+      analysisId: surface.id,
+    })
+  if (packages === 0)
+    return card('public-api', 'supply', {
+      tone: 'none',
+      status: 'No packages',
+      value: '—',
+      unit: 'exports',
+      lines: ['No package with a resolvable entry point', indexed],
+      analysisId: surface.id,
+    })
   return card('public-api', 'supply', {
     tone: 'ok',
     status: 'Indexed',
     value: exports.toLocaleString('en-US'),
     unit: `exports in ${plural(packages, 'package')}`,
-    lines: [
-      documented !== undefined && `${Math.round(documented)}% documented`,
-      `Indexed ${ago(surface.createdAt, now)}`,
-    ],
+    lines: [documented !== undefined && `${Math.round(documented)}% documented`, indexed],
     analysisId: surface.id,
   })
 }
@@ -629,9 +670,19 @@ function coverageCard({ heads, judged }: CardInputs): RepoOverviewCard {
   })
 }
 
-function bundlesCard({ heads, judged }: CardInputs): RepoOverviewCard {
+function bundlesCard({ heads, judged, notApplicable }: CardInputs): RepoOverviewCard {
   const head = heads.get('bundle')
   const metrics = head ? metricsOf(bundleAnalysis, head) : undefined
+  if (!head && notApplicable('bundle'))
+    return {
+      key: 'bundles',
+      section: 'quality',
+      tone: 'none',
+      status: 'Not applicable',
+      value: '—',
+      unit: 'gzip',
+      lines: ['No app build or published package to measure'],
+    }
   if (!head || !metrics) return notAnalysed('bundles', 'quality', 'gzip')
   const targets = metrics.targets.filter((target) => target.gzip !== undefined)
   const total = targets.reduce((sum, target) => sum + (target.gzip ?? 0), 0)
@@ -869,6 +920,7 @@ export async function repoOverview(
       toolchain: toolchain.toolchain,
       judged: judgedBy(sources.settings, repo),
       may,
+      notApplicable: (kind) => sources.sweep?.get(`${key}\0${kind}`)?.applies === false,
     }),
     ...(head ? { head: { sha: head.sha, at: head.at } } : {}),
     ...(defaultBranch ? { defaultBranch } : {}),

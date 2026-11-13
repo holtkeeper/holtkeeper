@@ -8,7 +8,12 @@ import type {
   EgressRulesResponse,
 } from '@holtkeeper/api'
 import { resolveSecret } from '@holtkeeper/forge'
-import { gitlabPackageFiles, gitlabPackageRegistry } from '@holtkeeper/forge-gitlab'
+import {
+  gitlabGitAuthorization,
+  gitlabGitRead,
+  gitlabPackageFiles,
+  gitlabPackageRegistry,
+} from '@holtkeeper/forge-gitlab'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -24,7 +29,9 @@ const sameSecret = (given: string, expected: string) =>
 /**
  * Egress proxy rules from the panel GitLab forges (all but those with `packages: false`): GET and
  * HEAD requests to their package registries get `Authorization: Bearer <token>` with the forge
- * credential's current token; forges with `cachePackages` add a private cache rule for their
+ * credential's current token, and read-only git smart-HTTP and `go get` discovery requests to
+ * them (`gitlabGitRead`: fetches, never pushes) get `Authorization: Basic` with the same token, so
+ * jobs download private Go modules; forges with `cachePackages` add a private cache rule for their
  * package files. Then every `egress-secret` credential's replacement rules. Forges and secrets
  * that cannot be read are left out.
  */
@@ -44,6 +51,9 @@ async function egressRules(
         methods: ['GET', 'HEAD'],
         headers: { Authorization: `Bearer ${token}` },
       })
+      const git = { Authorization: gitlabGitAuthorization(token) }
+      for (const location of gitlabGitRead(forge.data.url))
+        rules.push({ ...location, headers: git })
       if (forge.data.cachePackages === true)
         cache.push({ kind: 'packages', ...gitlabPackageFiles(forge.data.url), private: true })
     } catch (error) {

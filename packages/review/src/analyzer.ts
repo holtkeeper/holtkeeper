@@ -7,6 +7,8 @@ import { z } from 'zod'
 
 import { reviewAnalysis } from './analysis.ts'
 import { type ReviewCheckName, reviewCheckNames } from './checks.ts'
+import { GO_GUIDELINES_TAG, type GoGuidelineSet } from './go-guidelines/schema.ts'
+import { bundledGoGuidelines } from './go-guidelines/snapshot.ts'
 import { type Guideline, readGuidelines } from './guidelines.ts'
 import type { MediaReviewer } from './media.ts'
 import {
@@ -58,6 +60,15 @@ export const reviewOptionsSchema = z.object({
   releaseBranches: list(z.string().regex(/^[^:]+:[^:]+$/)).default([...DEFAULT_RELEASE_BRANCHES]),
   reviewOwn: flag.default(false),
   force: flag.default(false),
+  goGuidelines: z
+    .object({
+      enabled: flag.default(true),
+      tag: z.string().regex(GO_GUIDELINES_TAG).optional(),
+    })
+    .default({ enabled: true })
+    .describe(
+      'Modern Go guidelines (JetBrains/go-modern-guidelines) for merge requests changing Go modules: enabled (default true) and an optional release tag to pin, e.g. v0.1.1.',
+    ),
 })
 
 /** What the host provides besides the analyzer context. All optional. */
@@ -91,6 +102,11 @@ export interface ReviewAnalyzerDeps {
    */
   toolsetsFor?: (context: { repo: RepoRef; dir: string }) => readonly Toolset[]
   mediaReviewer?: MediaReviewer
+  /**
+   * The modern Go guidelines, for an optional pinned tag (falling back to another set when that
+   * tag is not available). Default: the bundled snapshot.
+   */
+  goGuidelines?: (tag?: string) => Promise<GoGuidelineSet>
   /**
    * Username Holtkeeper posts as, or a function giving it per repository (forges differ);
    * markers in note bodies identify our notes either way.
@@ -278,6 +294,7 @@ export function createReviewAnalyzer(deps: ReviewAnalyzerDeps = {}) {
         ...(!tests && { tests: false as const }),
         ...(botUsername ? { botUsername } : {}),
         ...(deps.mediaReviewer ? { mediaReviewer: deps.mediaReviewer } : {}),
+        goGuidelines: deps.goGuidelines ?? (() => bundledGoGuidelines()),
         ...(deps.steps ? { steps: deps.steps } : {}),
         ...(context.log ? { log: context.log } : {}),
         ...(context.signal ? { signal: context.signal } : {}),

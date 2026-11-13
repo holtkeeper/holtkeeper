@@ -1,4 +1,6 @@
-import type { ApiPackage, ApiSymbol, ApiSymbolKind } from './model.ts'
+import { isPseudoVersion } from '@holtkeeper/go-source'
+
+import type { ApiEcosystem, ApiPackage, ApiSymbol, ApiSymbolKind } from './model.ts'
 
 /** How one exported name differs between two versions. */
 export interface ApiChange {
@@ -16,6 +18,8 @@ export type Bump = 'major' | 'minor' | 'patch' | 'none'
 /** How a package's API changed between two versions. */
 export interface PackageDiff {
   name: string
+  /** Set to `Go` for Go packages; absent for npm. */
+  ecosystem?: ApiEcosystem
   from?: string
   to?: string
   added: number
@@ -41,11 +45,15 @@ export const normalizeSignature = (signature: string) =>
     .trim()
 
 const parseSemver = (version: string | undefined) => {
-  const match = version ? /^v?(\d+)\.(\d+)\.(\d+)/.exec(version) : null
+  if (!version || version.endsWith('+incompatible') || isPseudoVersion(version)) return undefined
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version)
   return match ? match.slice(1, 4).map(Number) : undefined
 }
 
-/** Which part of the version moved from `from` to `to`; `undefined` when either is not semver. */
+/**
+ * Which part of the version moved from `from` to `to`; `undefined` when either is not semver,
+ * including Go pseudo-versions (`v0.0.0-20240101000000-abcdef123456`) and `+incompatible` ones.
+ */
 export function versionBump(from: string | undefined, to: string | undefined): Bump | undefined {
   const a = parseSemver(from)
   const b = parseSemver(to)
@@ -119,8 +127,10 @@ export function diffPackage(
     bumped !== undefined && rank[bumped] < rank[required] && required === 'major'
       ? `${removed} export${removed === 1 ? '' : 's'} removed, but ${from} → ${to} is not a ${zero ? 'minor (0.x)' : 'major'} bump`
       : undefined
+  const ecosystem = after?.ecosystem ?? before?.ecosystem
   return {
     name: after?.name ?? before?.name ?? '',
+    ...(ecosystem === 'Go' ? { ecosystem } : {}),
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
     added,

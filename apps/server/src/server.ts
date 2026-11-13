@@ -42,7 +42,7 @@ import {
   seedDefaults,
 } from '@holtkeeper/managed-config'
 import { mergeRequestPoliciesSetting } from '@holtkeeper/mr-policies'
-import { createPropagateAnalyzer } from '@holtkeeper/propagate'
+import { createHttpRegistry, createPropagateAnalyzer } from '@holtkeeper/propagate'
 import {
   releaseAnnounceDefinition,
   releaseNotifyDefinition,
@@ -79,6 +79,7 @@ import { documentSinksFor, documentSourcesFor, trackerDefinitionsFor } from './d
 import { validateEgressSecretOptions } from './egress-secrets.ts'
 import { createEventDispatcher } from './events.ts'
 import { freshnessSetting, freshnessSweepSetting, startFreshness } from './freshness.ts'
+import { goGuidelinesDuty, goGuidelinesSource } from './go-guidelines.ts'
 import { retiredReadOnlyCheck } from './health.ts'
 import {
   type AgentFor,
@@ -89,7 +90,12 @@ import {
   startJobs,
 } from './jobs.ts'
 import { periodicDuty } from './leader.ts'
-import { librariesSetting, noteLibraryUses, startLibraryIndex } from './libraries.ts'
+import {
+  librariesSetting,
+  noteLibraryUses,
+  privateGoModules,
+  startLibraryIndex,
+} from './libraries.ts'
 import { limiterOptionsFor } from './limiter-state.ts'
 import { serverLimits } from './limits.ts'
 import { startManagedConfig } from './managed.ts'
@@ -313,6 +319,7 @@ export async function startServer(
         ),
       }),
     testsExpected,
+    goGuidelines: goGuidelinesSource(server.store.kv),
     botUsername: (repo) => config.jobs.botUsernames?.[repo.forge],
     mediaReviewer: createMediaReviewer({
       cache: mediaCache,
@@ -387,6 +394,13 @@ export async function startServer(
   const propagate = createPropagateAnalyzer({
     fixes: { propose: (input) => proposePropagateFixes(taskDeps, input) },
     testsExpected,
+    registry: () => {
+      let matcher: Promise<(path: string) => boolean> | undefined
+      return createHttpRegistry({
+        isPrivateGo: async (path) =>
+          (await (matcher ??= privateGoModules(server.store, config)))(path),
+      })
+    },
   })
   const browserslist = createBrowserslistAnalyzer({
     conventions: (repo) => conventionsOf(repoTarget(config, repo)),
@@ -591,6 +605,12 @@ export async function startServer(
       ),
       periodicDuty('audit chain check', () => verifyAuditChainIfDue(server.store, deps.now()), {
         intervalMs: 3_600_000,
+        log,
+      }),
+      goGuidelinesDuty({
+        kv: server.store.kv,
+        settings: server.store.settings,
+        now: deps.now,
         log,
       }),
       () => releaseServiceFor(deps).startBoardRefresh(),

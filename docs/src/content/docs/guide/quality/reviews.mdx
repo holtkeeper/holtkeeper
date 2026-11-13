@@ -347,6 +347,7 @@ Nothing is posted when the repository has merge request reviews turned off, the 
 | `media`           | on                                            | Review images the merge request adds or changes.                                                                                      |
 | `releaseBranches` | release and back-merge pairs                  | `source:target` branch globs that are not reviewed; an empty list reviews them all.                                                   |
 | `reviewOwn`       | off                                           | Review Holtkeeper's own merge requests.                                                                                               |
+| `goGuidelines`    | on                                            | Modern Go guidelines for merge requests that change Go code; `{ "enabled": false }` turns them off, `tag` pins a release.             |
 
 ```json title="analyzers.review · one group"
 {
@@ -358,6 +359,16 @@ Nothing is posted when the repository has merge request reviews turned off, the 
 ```
 
 Rules about what to flag belong in the [team guide](/guide/knowledge/guide/), which every review reads first: the Review, General, Testing, Test ids and Assets sections, and the repository's own `REVIEW.md`, `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md`.
+
+### Modern Go guidelines
+
+When a merge request changes `.go` files of a Go module, the review also gets the [modern Go guidelines](https://github.com/JetBrains/go-modern-guidelines) by JetBrains (Apache-2.0): newer standard library functions and language features to prefer, such as `slices.Contains`, `min` and `max`, or `for i := range n`. Only guidelines the module's `go` version supports are used, read from the `go.mod` that owns each changed file, so the review never suggests code that would not compile there. They apply to changed lines only, never ask to rewrite untouched code, and their findings are at most _minor_. Merge requests without Go code are reviewed as before.
+
+Holtkeeper refreshes the guidelines from the newest upstream release once a day and keeps the last good copy when a refresh fails; a copy ships with Holtkeeper for the first start or an offline instance. Each review's job log names the version it used.
+
+```json title="analyzers.review · pin or turn off"
+{ "goGuidelines": { "enabled": true, "tag": "v0.1.1" } }
+```
 
 ### REVIEW.md
 

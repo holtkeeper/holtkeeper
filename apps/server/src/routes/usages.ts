@@ -8,6 +8,7 @@ import type {
   UsageSitesView,
 } from '@holtkeeper/api'
 import {
+  type UsageEntry,
   type UsedExport,
   findSites,
   isUsageKind,
@@ -31,6 +32,30 @@ const required = (c: AppContext, name: string) => {
 }
 
 const optional = (c: AppContext, name: string) => c.req.query(name) || undefined
+
+/** Repositories, uses and files of one Go package (an import path inside a used module). */
+const goUsedBy = (entries: UsageEntry<RepoRef>[], importPath: string) => {
+  const total = { repos: 0, count: 0, files: 0 }
+  for (const { data } of entries) {
+    let picked: UsedExport[] = []
+    for (const pkg of data.packages) {
+      if (pkg.ecosystem !== 'Go') continue
+      const subpath =
+        importPath === pkg.name
+          ? '.'
+          : importPath.startsWith(`${pkg.name}/`)
+            ? `./${importPath.slice(pkg.name.length + 1)}`
+            : undefined
+      if (subpath) picked = pkg.exports.filter((item) => item.subpath === subpath)
+      if (picked.length) break
+    }
+    if (!picked.length) continue
+    total.repos += 1
+    total.count += picked.reduce((sum, item) => sum + item.count, 0)
+    total.files += Math.max(...picked.map((item) => item.files))
+  }
+  return total
+}
 
 const withoutSites = (item: UsedExport): Omit<UsedExport, 'sites' | 'truncated'> => ({
   name: item.name,
@@ -74,7 +99,9 @@ export function usageRoutes(options: {
     )
     const indexedAt = usages.indexedAt()
     return c.json<PackageUsageView>({
-      name,
+      name: usage.name,
+      ...(usage.ecosystem ? { ecosystem: usage.ecosystem } : {}),
+      ...(usage.subpath ? { subpath: usage.subpath } : {}),
       versions: usage.versions,
       repos: usage.repos.flatMap((repo) => {
         const record = byOrigin.get(`${repo.origin.forge}:${repo.origin.path}`)
@@ -139,7 +166,9 @@ export function usageRoutes(options: {
       analyzedAt: record.createdAt,
       files: record.data.files,
       types: record.data.types,
-      packages: repoPackages(record.data),
+      packages: repoPackages(record.data).map(({ ecosystem, ...pkg }) =>
+        ecosystem === 'npm' ? pkg : { ...pkg, ecosystem },
+      ),
     })
   })
 
@@ -150,15 +179,19 @@ export function usageRoutes(options: {
       (repo) => `${repo.forge}:${repo.path}` === origin && filter(repo),
     )
     const records = await usages.records(filter)
+    const entries = records.map((record) => ({ origin: record.repo, data: record.data }))
     const counts = usedByCounts(
-      records.map((record) => ({ origin: record.repo, data: record.data })),
-      defined.map((pkg) => pkg.name),
+      entries,
+      defined.filter((pkg) => pkg.ecosystem !== 'Go').map((pkg) => pkg.name),
     )
+    for (const pkg of defined)
+      if (pkg.ecosystem === 'Go') counts.set(pkg.name, goUsedBy(entries, pkg.name))
     return c.json<PublishedPackagesView>({
       packages: defined
         .map((pkg) => ({
           name: pkg.name,
           ...(pkg.version ? { version: pkg.version } : {}),
+          ...(pkg.ecosystem ? { ecosystem: pkg.ecosystem } : {}),
           ...(pkg.description ? { description: pkg.description } : {}),
           private: pkg.private,
           dir: pkg.dir,
@@ -194,6 +227,7 @@ export function usageRoutes(options: {
       to: result.to,
       impact: {
         package: result.impact.package,
+        ...(result.impact.ecosystem ? { ecosystem: result.impact.ecosystem } : {}),
         affected: result.impact.affected.map(toRef),
         unaffected: result.impact.unaffected.map(toRef),
         items: result.impact.items.map((item) => ({

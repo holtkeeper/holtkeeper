@@ -1,7 +1,10 @@
+import { join } from 'node:path'
+
 import { defineAnalyzer } from '@holtkeeper/analyzer'
 import { installDependencies } from '@holtkeeper/coverage'
 import { z } from 'zod'
 
+import { usagesApplies } from './applies.ts'
 import { extractUsages } from './extract.ts'
 import type { UsagesData } from './model.ts'
 import { usagesAnalysis } from './report.ts'
@@ -24,8 +27,9 @@ export const usagesOptionsSchema = z.object({
   /** Glob patterns of files to skip, e.g. `**\/*.stories.tsx`; a comma-separated string works too. */
   exclude: list,
   /**
-   * Resolve names with the TypeScript checker: `auto` when a `tsconfig.json` and installed
-   * dependencies exist (after `install`), `off` to follow imports only.
+   * Resolve names with the type checkers: `auto` runs the TypeScript checker when a `tsconfig.json`
+   * and installed dependencies exist (after `install`) and the Go type checker when `go` is
+   * available; `off` follows imports only.
    */
   types: z.enum(['auto', 'off']).default('auto'),
   /** Install dependencies from the lockfile, without lifecycle scripts, so the checker sees them. */
@@ -36,8 +40,10 @@ export type UsagesOptions = z.output<typeof usagesOptionsSchema>
 
 /**
  * The `usages` analyzer: reads which exports, members and JSX props of its dependencies a
- * repository's code uses and where, with snippets. Run on the default branch it keeps the fleet's
- * "used by" index current for people and for agents planning migrations.
+ * repository's JavaScript, TypeScript and Go code uses and where, with snippets. Run on the
+ * default branch it keeps the fleet's "used by" index current for people and for agents planning
+ * migrations. Schedules skip repositories without a root `package.json` and without a Go module
+ * (`hasGoModule`).
  */
 export const usagesAnalyzer = defineAnalyzer<UsagesData, UsagesOptions>({
   kind: 'usages',
@@ -45,6 +51,7 @@ export const usagesAnalyzer = defineAnalyzer<UsagesData, UsagesOptions>({
   scope: 'repo',
   refresh: { on: 'change', minInterval: '6h' },
   needs: { checkout: true },
+  appliesTo: usagesApplies,
   options: usagesOptionsSchema,
   flags: [
     { flag: 'packages', option: 'packages', description: 'comma-separated package name globs' },
@@ -53,7 +60,11 @@ export const usagesAnalyzer = defineAnalyzer<UsagesData, UsagesOptions>({
   ],
   async run({ dir, ref, options, runner, signal, log }) {
     if (!dir) throw new Error('the usages analyzer needs a checkout')
-    if (options.types === 'auto' && options.install) {
+    if (
+      options.types === 'auto' &&
+      options.install &&
+      (await Bun.file(join(dir, 'package.json')).exists())
+    ) {
       const install = await installDependencies({ dir, runner, ...(signal ? { signal } : {}) })
       log?.(
         install.status === 'skipped'
@@ -66,6 +77,7 @@ export const usagesAnalyzer = defineAnalyzer<UsagesData, UsagesOptions>({
       packages: options.packages,
       exclude: options.exclude,
       types: options.types === 'auto',
+      runner,
       ...(signal ? { signal } : {}),
       ...(log ? { log } : {}),
     })

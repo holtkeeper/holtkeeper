@@ -106,12 +106,21 @@ export interface CoverageReport {
   languages: TestLanguage[]
   files: FileCoverage[]
   summary: CoverageSummary
+  /**
+   * Folders (relative, `''` for the root) whose tests produced no coverage because they did not
+   * build, could not load their dependencies or timed out. With `recursive` the reason covers every
+   * folder below too (a whole module that could not run), except the folders in `except` and
+   * below them (nested modules that ran on their own).
+   */
+  notRun?: { dir: string; reason: string; recursive?: true; except?: string[] }[]
 }
 
 export interface CoverageContext {
   dir: string
   runner: CommandRunner
   signal?: AbortSignal
+  /** Receives notes worth showing in the job log, such as packages whose tests did not run. */
+  log?: (line: string) => void
 }
 
 /**

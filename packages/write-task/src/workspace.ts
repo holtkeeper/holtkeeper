@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { type CommandRunner, runChecked } from '@holtkeeper/exec'
 
+import { GOFMT_CHECK, detectGoChecks } from './go-checks.ts'
 import type { CheckResult } from './schema.ts'
 
 /** Lowercase words joined by `-`, at most 40 characters; `task` when nothing is left. */
@@ -101,6 +102,10 @@ export async function applyPatch(
 export interface CheckSpec {
   name: string
   command: string
+  /** Variables the check (and the agent's commands) run with, on top of the task's. */
+  env?: Record<string, string>
+  /** Run `command` over the `.go` files the task changed; passes when there are none, fails when it prints any. */
+  changedGoFiles?: boolean
 }
 
 type Manager = 'bun' | 'pnpm' | 'yarn' | 'npm'
@@ -136,14 +141,15 @@ async function managerOf(dir: string): Promise<Manager> {
 
 /**
  * The repository's own checks: `install`, then the `typecheck`, `lint`, format check and `test`
- * scripts of the root `package.json` through its package manager (from the lockfile), and
- * `go vet ./...` plus `go test ./...` for a Go module. With `tests: false` (no tests by design)
- * the `test` script and `go test` are left out. `configured` replaces the detection.
+ * scripts of the root `package.json` through its package manager (from the lockfile), then the
+ * Go checks of `detectGoChecks` (`gofmt -l` on changed files, `go vet`, `go test`, the linter).
+ * With `tests: false` (no tests by design) the `test` script and `go test` are left out. Checks
+ * the detection skips are reported through `log`. `configured` replaces the detection.
  */
 export async function detectChecks(
   dir: string,
   configured?: readonly string[],
-  { tests = true }: { tests?: boolean } = {},
+  { tests = true, log }: { tests?: boolean; log?: (line: string) => void } = {},
 ): Promise<CheckSpec[]> {
   if (configured)
     return configured.map((command, index) => ({ name: `check ${index + 1}`, command }))
@@ -165,20 +171,59 @@ export async function detectChecks(
     }
     if (checks.length) checks.unshift({ name: 'install', command: installCommands[manager] })
   }
-  if (await exists(dir, 'go.mod'))
-    checks.push(
-      { name: 'go vet', command: 'go vet ./...' },
-      ...(tests ? [{ name: 'go test', command: 'go test ./...' }] : []),
-    )
-  return checks
+  const go = await detectGoChecks(dir, { tests })
+  for (const note of go.notes) log?.(note)
+  return [...checks, ...go.checks]
+}
+
+/** The variables every check declares, merged: what the agent's commands need to behave like the checks. */
+export function checksEnv(checks: readonly CheckSpec[]): Record<string, string> {
+  return Object.assign({}, ...checks.map((check) => check.env ?? {}))
+}
+
+/** Extra commands the agent may run besides the checks: `gofmt -w` when the checks run `gofmt`. */
+export function fixCommands(checks: readonly CheckSpec[]): string[] {
+  return checks.some((check) => check.changedGoFiles) ? ['gofmt -w'] : []
+}
+
+const formattable = (file: ChangedFile) =>
+  file.action !== 'delete' &&
+  file.path.endsWith('.go') &&
+  !/(^|\/)(vendor|testdata)\//.test(file.path)
+
+/** The changed `.go` files `gofmt` covers: not deleted, not under `vendor/` or `testdata/`. */
+async function changedGoFiles(dir: string, runner: CommandRunner): Promise<string[]> {
+  return (await changedFiles(dir, runner)).filter(formattable).map((file) => file.path)
 }
 
 /**
- * The only commands the agent may run in the checkout: the checks (also through `mise exec --`)
- * and read-only git.
+ * Runs `gofmt -w` over the changed `.go` files when `checks` include the `gofmt` check, so a
+ * patch or an agent edit never fails on formatting alone. A file `gofmt` cannot parse is left
+ * as it is for `go vet` to report.
+ */
+export async function formatGoFiles(
+  dir: string,
+  runner: CommandRunner,
+  checks: readonly CheckSpec[],
+  options: { signal?: AbortSignal; log: (line: string) => void },
+): Promise<void> {
+  if (!checks.some((check) => check.name === GOFMT_CHECK && check.changedGoFiles)) return
+  const files = await changedGoFiles(dir, runner)
+  if (!files.length) return
+  const result = await runner.run(['gofmt', '-w', ...files], {
+    cwd: dir,
+    ...(options.signal && { signal: options.signal }),
+  })
+  if (result.exitCode !== 0)
+    options.log(`gofmt -w failed: ${(result.stderr || result.stdout).trim().split('\n')[0] ?? ''}`)
+}
+
+/**
+ * The only commands the agent may run in the checkout: the checks and `fixCommands` (also through
+ * `mise exec --`) and read-only git.
  */
 export function agentCommands(checks: readonly CheckSpec[]): string[] {
-  const commands = checks.map((check) => check.command)
+  const commands = [...checks.map((check) => check.command), ...fixCommands(checks)]
   return [
     ...commands,
     ...commands.map((command) => `mise exec -- ${command}`),
@@ -193,7 +238,42 @@ const tail = (text: string, lines = 80) => {
   return kept.length > 8000 ? kept.slice(-8000) : kept
 }
 
-/** Runs `checks` in order through `runner` with `CI=1`; a failing `install` stops the rest. */
+const combined = (result: { stdout: string; stderr: string }) =>
+  [result.stdout, result.stderr].filter(Boolean).join('\n')
+
+async function runOne(
+  dir: string,
+  runner: CommandRunner,
+  check: CheckSpec,
+  options: { signal?: AbortSignal; env?: Record<string, string> },
+): Promise<{ command: string; exitCode: number; output: string }> {
+  const run = (command: string[]) =>
+    runner.run(command, {
+      cwd: dir,
+      env: { ...options.env, ...check.env, CI: '1' },
+      ...(options.signal && { signal: options.signal }),
+    })
+  if (!check.changedGoFiles) {
+    const result = await run(['sh', '-c', check.command])
+    return { command: check.command, exitCode: result.exitCode, output: combined(result) }
+  }
+  const files = await changedGoFiles(dir, runner)
+  if (!files.length) return { command: check.command, exitCode: 0, output: 'no changed Go files' }
+  const words = check.command.split(/\s+/).filter(Boolean)
+  const result = await run([...words, ...files])
+  const listed = result.stdout.trim()
+  return {
+    command: `${check.command} ${files.join(' ')}`,
+    exitCode: result.exitCode || (listed ? 1 : 0),
+    output: listed ? `not formatted (run gofmt -w):\n${combined(result)}` : combined(result),
+  }
+}
+
+/**
+ * Runs `checks` in order through `runner` with `CI=1` and each check's `env`; a failing `install`
+ * stops the rest. A `changedGoFiles` check runs over the changed `.go` files and fails when it
+ * prints any.
+ */
 export async function runChecks(
   dir: string,
   runner: CommandRunner,
@@ -203,19 +283,15 @@ export async function runChecks(
   const results: CheckResult[] = []
   for (const check of checks) {
     const started = Date.now()
-    const result = await runner.run(['sh', '-c', check.command], {
-      cwd: dir,
-      env: { ...options.env, CI: '1' },
-      ...(options.signal && { signal: options.signal }),
-    })
+    const result = await runOne(dir, runner, check, options)
     const ok = result.exitCode === 0
     options.log(`${check.name}: ${ok ? 'passed' : `failed (exit ${result.exitCode})`}`)
     results.push({
       name: check.name,
-      command: check.command,
+      command: result.command,
       ok,
       exitCode: result.exitCode,
-      output: tail([result.stdout, result.stderr].filter(Boolean).join('\n')),
+      output: tail(result.output),
       durationMs: Date.now() - started,
     })
     if (!ok && check.name === 'install') break

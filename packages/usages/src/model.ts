@@ -64,9 +64,15 @@ export interface NameCount {
 
 /** One export of a package as the repository uses it. */
 export interface UsedExport {
-  /** Exported name; `default` for the default export, `*` for the module as a whole. */
+  /**
+   * Exported name; `default` for the default export, `*` for the module as a whole (for Go, an
+   * import with no qualified use: blank, dot or unused).
+   */
   name: string
-  /** Entry point imported from, `.` for the package itself, `./button` for `pkg/button`. */
+  /**
+   * Entry point imported from, `.` for the package itself, `./button` for `pkg/button`; for Go,
+   * the package directory inside the module (`.` for the module's root package).
+   */
   subpath: string
   /** Total sites, including those left out of `sites`. */
   count: number
@@ -84,17 +90,41 @@ export interface UsedExport {
   truncated?: number
 }
 
-/** A package the repository's code imports and what it uses of it. */
+/** Package ecosystem of a used package; records without one are `npm`. */
+export type UsageEcosystem = 'npm' | 'Go'
+
+/**
+ * A package the repository's code imports and what it uses of it. For Go, one entry per module:
+ * `name` is the module path (with its `/vN`), and each export's `subpath` is the package directory
+ * inside the module, so `importPath(name, subpath)` is the Go import path.
+ */
 export interface UsedPackage {
   name: string
-  /** Versions the lockfile resolves for the importing workspaces, highest first; empty when unknown. */
+  /** Absent for npm. */
+  ecosystem?: UsageEcosystem
+  /**
+   * Versions the lockfile (npm) or the owning `go.mod` `require`/`replace` (Go) resolve for the
+   * importing workspaces, highest first; empty when unknown.
+   */
   versions: string[]
-  /** Ranges the importing workspaces declare in `package.json`. */
+  /** Ranges the importing workspaces declare in `package.json`; for Go, the `require` versions. */
   ranges: string[]
-  /** Workspaces whose code imports it, by package name (`root` for an unnamed root). */
+  /**
+   * Workspaces whose code imports it, by package name (`root` for an unnamed root); for Go, the
+   * module paths of the importing modules.
+   */
   workspaces: string[]
-  /** The repository defines the package itself, as one of its workspaces. */
+  /**
+   * The repository holds the package itself: one of its workspaces, or for Go one of its own,
+   * nested or `go.work` modules or a module replaced by a local directory (see `replaced`).
+   */
   local?: boolean
+  /**
+   * Go: the module is local only because the owning `go.mod` replaces it with a directory the
+   * repository's module discovery did not find (a fork or a sibling checkout), so it is not a
+   * module the repository defines.
+   */
+  replaced?: true
   count: number
   files: number
   exports: UsedExport[]
@@ -139,10 +169,12 @@ export const usagesDataSchema: z.ZodType<UsagesData> = z.object({
   packages: z.array(
     z.object({
       name: z.string(),
+      ecosystem: z.enum(['npm', 'Go']).optional(),
       versions: z.array(z.string()),
       ranges: z.array(z.string()),
       workspaces: z.array(z.string()),
       local: z.boolean().optional(),
+      replaced: z.literal(true).optional(),
       count: z.number(),
       files: z.number(),
       exports: z.array(
@@ -171,6 +203,9 @@ export const usagesDataSchema: z.ZodType<UsagesData> = z.object({
   problems: z.array(z.string()).optional(),
 })
 
-/** The import specifier of an entry point, e.g. `@acme/ui/button` for `./button`. */
+/**
+ * The import specifier of an entry point, e.g. `@acme/ui/button` for `./button`; for a Go module
+ * and package directory, the Go import path.
+ */
 export const importPath = (name: string, subpath: string) =>
   subpath === '.' ? name : `${name}/${subpath.replace(/^\.\//, '')}`

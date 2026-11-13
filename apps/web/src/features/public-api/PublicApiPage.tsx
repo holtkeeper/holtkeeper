@@ -30,8 +30,8 @@ import {
   filterHits,
   hitCounts,
   matchLabels,
+  openedSymbol,
   parseDocTags,
-  parseSymbolKey,
   publicApiTab,
   symbolKey,
   symbolKinds,
@@ -322,13 +322,14 @@ function PackageRow({ pkg }: { pkg: PublicApiPackageSummary }) {
         <div className="flex flex-wrap items-center gap-1.5">
           <Link
             to="/supply/libraries/$ecosystem/$"
-            params={{ ecosystem: 'npm', _splat: pkg.name }}
+            params={{ ecosystem: pkg.ecosystem ?? 'npm', _splat: pkg.name }}
             search={{ tab: 'api', repo: repoKey(pkg.repo) }}
             className="mono font-medium hover:underline"
           >
             {pkg.name}
           </Link>
-          {pkg.private ? <Tag>private</Tag> : null}
+          {pkg.ecosystem === 'Go' ? <Tag tone="accent">Go</Tag> : null}
+          {pkg.private ? <Tag>{pkg.ecosystem === 'Go' ? 'internal' : 'private'}</Tag> : null}
           {pkg.removed ? (
             <Tag
               tone="danger"
@@ -665,10 +666,14 @@ function HitRow({
   )
 }
 
-const libraryLink = (pkg: string, search: { tab: string; export?: string; repo?: string }) =>
+const libraryLink = (
+  pkg: string,
+  ecosystem: 'npm' | 'Go',
+  search: { tab: string; export?: string; repo?: string },
+) =>
   ({
     to: '/supply/libraries/$ecosystem/$',
-    params: { ecosystem: 'npm', _splat: pkg },
+    params: { ecosystem, _splat: pkg },
     search,
   }) as const
 
@@ -699,7 +704,7 @@ function SymbolSheet({
   onNext?: () => void
 }) {
   const navigate = useNavigate()
-  const parsed = parseSymbolKey(key)
+  const parsed = openedSymbol(key, hit)
   const detail = usePublicApiSymbol(
     parsed
       ? {
@@ -732,7 +737,7 @@ function SymbolSheet({
                 icon: Users,
                 onPress: () =>
                   void navigate(
-                    libraryLink(parsed.package, {
+                    libraryLink(parsed.package, parsed.ecosystem, {
                       tab: 'used-by',
                       export: parsed.name,
                       ...(repo ? { repo } : {}),
@@ -744,7 +749,10 @@ function SymbolSheet({
                 icon: GitCompare,
                 onPress: () =>
                   void navigate(
-                    libraryLink(parsed.package, { tab: 'changes', ...(repo ? { repo } : {}) }),
+                    libraryLink(parsed.package, parsed.ecosystem, {
+                      tab: 'changes',
+                      ...(repo ? { repo } : {}),
+                    }),
                   ),
               },
             ] as const,
@@ -783,12 +791,15 @@ function Declaration({ data }: { data: PublicApiSymbol }) {
   const { symbol } = data
   const tags = parseDocTags(symbol.doc)
   const deprecated = symbol.deprecated ?? tags.deprecated
-  const importLine =
-    symbol.kind === 'reexport'
+  const go = data.ecosystem === 'Go'
+  const importLine = go
+    ? `import "${data.importPath}"`
+    : symbol.kind === 'reexport'
       ? undefined
       : `import ${symbol.name === 'default' ? 'value' : `{ ${symbol.name} }`} from '${data.importPath}'`
+  const fence = go ? 'go' : 'ts'
   const examples = tags.examples.map((code) =>
-    code.startsWith('```') ? code : `\`\`\`ts\n${code}\n\`\`\``,
+    code.startsWith('```') ? code : `\`\`\`${fence}\n${code}\n\`\`\``,
   )
   return (
     <div className="flex flex-col gap-4">

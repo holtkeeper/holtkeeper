@@ -124,6 +124,8 @@ Failures are `GitLabApiError` with `status` and a message like `GitLab POST /api
 
 `gitlabPackageFiles(url)` returns the same shape for the registry files that do not change once published, for caching proxies: npm tarballs (`…/npm/<name>/-/<file>.tgz`), Maven files of release versions (not `maven-metadata.xml`, not `-SNAPSHOT`), PyPI files (`…/pypi/files/<sha256>/<file>`) and generic package files (`…/generic/<name>/<version>/<file>`), on instance, group and project level. Package metadata, `/simple` indexes and version lists never match. GitLab lets generic files be uploaded again under the same version unless duplicates are turned off for the project; a cache keeps the copy it has. The server serves these as private cache rules for forges with **Cache packages**.
 
+`gitlabGitRead(url)` returns two `{ host, paths, methods }` locations for fetching private Go modules and git repositories through such a proxy: `GET`/`HEAD` of `go get` discovery (`<project>?go-get=1`, exactly that query) and of `<project>[.git]/info/refs?service=git-upload-pack`, and `POST` of `<project>[.git]/git-upload-pack`. Projects need at least two path segments under the instance's sub-path; `/api/`, `..`, `-` (GitLab's web routes such as `/-/blob/`) and percent-encoded segments never match, and neither does `git-receive-pack`, so a token added there can fetch but never push. `gitlabGitAuthorization(token)` is the header value GitLab accepts for those requests: `Basic` with `oauth2` as user and the token as password (personal, group and project access tokens).
+
 ## Token rotation
 
 ```ts

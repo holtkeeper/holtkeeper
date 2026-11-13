@@ -4,6 +4,7 @@ import type { EgressCacheView, EgressRule, EgressRulesResponse } from '@holtkeep
 import { noAuth } from '@holtkeeper/auth-none'
 import { type HoltkeeperConfig, parseConfig } from '@holtkeeper/core'
 import { type CredentialService, createCredentialService } from '@holtkeeper/credentials'
+import { gitlabGitAuthorization, gitlabGitRead } from '@holtkeeper/forge-gitlab'
 import { builtinSettings } from '@holtkeeper/settings'
 import type { Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
@@ -94,10 +95,43 @@ describe('egress rules', () => {
         methods: ['GET', 'HEAD'],
         headers: { Authorization: 'Bearer glpat-first' },
       },
+      ...gitlabGitRead('https://gitlab.com').map((location) => ({
+        ...location,
+        headers: { Authorization: gitlabGitAuthorization('glpat-first') },
+      })),
     ])
     await credentials.update(tokenId, { secret: 'glpat-rotated' })
     const next = (await (await rules(app, `Bearer ${secret}`)).json()) as EgressRulesResponse
     expect(next.rules[0]?.headers?.Authorization).toBe('Bearer glpat-rotated')
+    expect(next.rules[1]?.headers?.Authorization).toBe(gitlabGitAuthorization('glpat-rotated'))
+  })
+
+  test('lets jobs fetch git and go-get from the forge with the token, never push', async () => {
+    const body = (await (
+      await rules(appWith({ egress: { secret } }), `Bearer ${secret}`)
+    ).json()) as EgressRulesResponse
+    const headersFor = (method: string, host: string, path: string) =>
+      body.rules.find(
+        (rule) =>
+          rule.host === host &&
+          (rule.methods ?? ['GET', 'HEAD']).includes(method) &&
+          (rule.paths ?? []).some((pattern) => new RegExp(pattern).test(path)),
+      )?.headers?.Authorization
+    const basic = `Basic ${Buffer.from('oauth2:glpat-first').toString('base64')}`
+    expect(headersFor('GET', 'gitlab.com', '/shapes/libs/geom?go-get=1')).toBe(basic)
+    expect(
+      headersFor('GET', 'gitlab.com', '/shapes/libs/geom.git/info/refs?service=git-upload-pack'),
+    ).toBe(basic)
+    expect(headersFor('POST', 'gitlab.com', '/shapes/libs/geom.git/git-upload-pack')).toBe(basic)
+    expect(
+      headersFor('GET', 'gitlab.com', '/shapes/libs/geom.git/info/refs?service=git-receive-pack'),
+    ).toBeUndefined()
+    expect(
+      headersFor('POST', 'gitlab.com', '/shapes/libs/geom.git/git-receive-pack'),
+    ).toBeUndefined()
+    expect(headersFor('POST', 'gitlab.com', '/api/v4/projects/1/git-upload-pack')).toBeUndefined()
+    expect(headersFor('GET', 'gitlab.com', '/api/v4/user')).toBeUndefined()
+    expect(headersFor('GET', 'other.test', '/shapes/libs/geom?go-get=1')).toBeUndefined()
   })
 
   test('adds a private cache rule for the package files of forges that cache packages', async () => {

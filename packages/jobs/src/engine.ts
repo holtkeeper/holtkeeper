@@ -33,6 +33,10 @@ export interface JobEngineOptions {
   readOnly?: ContextFactoryOptions['readOnly']
   /** Scoped `toolchain` setting per repository, for `jobs.execution` modes `mise` and `container`. */
   toolchainFor?: ToolchainFor
+  /** Variables for job commands behind an egress proxy; see `ContextFactoryOptions.egressEnv`. */
+  egressEnv?: ContextFactoryOptions['egressEnv']
+  /** Variables for every job command, with or without a proxy; see `ContextFactoryOptions.jobEnv`. */
+  jobEnv?: ContextFactoryOptions['jobEnv']
   /** Scoped `analyzers.<kind>` setting for a job; see `WorkerOptions.settingOptions`. */
   settingOptions?: WorkerOptions['settingOptions']
   /** Repositories a schedule leaves out of an analyzer; see `SchedulerOptions.skip`. */
@@ -95,6 +99,8 @@ export function createJobEngine(options: JobEngineOptions): JobEngine {
         ...(options.runner && { runner: options.runner }),
         ...(options.agentFor && { agentFor: options.agentFor }),
         ...(options.toolchainFor && { toolchainFor: options.toolchainFor }),
+        ...(options.egressEnv && { egressEnv: options.egressEnv }),
+        ...(options.jobEnv && { jobEnv: options.jobEnv }),
         ...(options.gitKeyFor && { gitKeyFor: options.gitKeyFor }),
         ...(options.readOnly && { readOnly: options.readOnly }),
         ...(options.cache && { cache: options.cache }),

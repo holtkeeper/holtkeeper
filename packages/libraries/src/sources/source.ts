@@ -1,9 +1,10 @@
 import { type ArtifactStore, zipArtifacts } from '@holtkeeper/artifacts'
-import type { LibraryRef, LibraryStore } from '@holtkeeper/store'
+import type { LibraryEcosystem, LibraryRef, LibraryStore } from '@holtkeeper/store'
 
 import { readTarball } from '../archive.ts'
 import { DownloadTooLargeError, type GitHubClient } from '../github/client.ts'
 import { encodeRef, githubPath, tagResolver } from '../tags.ts'
+import type { ArchiveFiles, LibraryRegistry } from '../types.ts'
 import { artifactName, artifactTags, errorText, refOf, sourceStatus } from './shared.ts'
 
 /** Outcome of a source snapshot request: the ZIP artifact id, or why there is none. */
@@ -19,6 +20,8 @@ export interface SourceSnapshotOptions {
   store: LibraryStore
   artifacts: ArtifactStore
   github?: GitHubClient
+  /** Registries whose `source` serves a version's code (the Go module proxy); asked before GitHub. */
+  registries?: Partial<Record<LibraryEcosystem, Pick<LibraryRegistry, 'source'>>>
   /** Repositories larger than this (GitHub's `size`) are not snapshotted. Default 200 MB. */
   maxRepositoryKb?: number
   /** Files kept up to this total. Default 100 MB. */
@@ -33,10 +36,11 @@ export interface SourceSnapshotOptions {
 const skippedFolder = new Set(['node_modules', '.git', 'vendor', 'dist', 'build', 'coverage'])
 
 /**
- * Source `source`: on first request, the version's GitHub tarball at its tag (or commit) as a ZIP
- * artifact of its text files, recorded as `sourceArchive` with status `source`. For a package in
- * a repository folder only that folder and the root files are kept. Later requests return the
- * stored artifact. Answers with a `message` instead of throwing.
+ * Source `source`: on first request, the version's code as a ZIP artifact of its text files,
+ * recorded as `sourceArchive` with status `source`: the registry's `source` when it has one and
+ * serves the version (the exact Go module zip), else the GitHub tarball at its tag (or commit),
+ * where for a package in a repository folder only that folder and the root files are kept. Later
+ * requests return the stored artifact. Answers with a `message` instead of throwing.
  */
 export function sourceSnapshots(options: SourceSnapshotOptions): SourceSnapshot {
   const now = options.now ?? (() => new Date())
@@ -65,8 +69,35 @@ export function sourceSnapshots(options: SourceSnapshotOptions): SourceSnapshot 
       })
       return result
     }
+    const persist = async (files: ArchiveFiles) => {
+      const zip = zipArtifacts([...files].map(([file, data]) => ({ path: file, data })))
+      const { id } = await options.artifacts.put(zip, {
+        contentType: 'application/zip',
+        name: artifactName(refOf(ref), version, 'source.zip'),
+        tags: artifactTags(ref, version, 'source'),
+      })
+      return save({ id }, 'ok')
+    }
+    const registry = options.registries?.[ref.ecosystem]
+    if (registry?.source) {
+      try {
+        const files = await registry.source(ref, version)
+        if (files?.size) return await persist(files)
+      } catch (error) {
+        if (!path && error instanceof DownloadTooLargeError)
+          return save({ message: `snapshot skipped: ${error.message}` }, 'skipped')
+        if (!path) return save({ message: `snapshot failed: ${errorText(error)}` }, 'failed')
+      }
+    }
     if (!path || !repository)
-      return save({ message: 'the source is only snapshotted from GitHub' }, 'skipped')
+      return save(
+        {
+          message: registry?.source
+            ? 'the registry has no source of this version and it is not on GitHub'
+            : 'the source is only snapshotted from GitHub',
+        },
+        registry?.source ? 'missing' : 'skipped',
+      )
     if (!options.github || !resolve)
       return save({ message: 'no GitHub client configured' }, 'skipped')
     try {
@@ -91,13 +122,7 @@ export function sourceSnapshots(options: SourceSnapshotOptions): SourceSnapshot 
           (!directory || !file.includes('/') || file.startsWith(`${directory}/`)),
       })
       if (!files.size) return save({ message: `no text files at ${gitRef}` }, 'missing')
-      const zip = zipArtifacts([...files].map(([file, data]) => ({ path: file, data })))
-      const { id } = await options.artifacts.put(zip, {
-        contentType: 'application/zip',
-        name: artifactName(refOf(ref), version, 'source.zip'),
-        tags: artifactTags(ref, version, 'source'),
-      })
-      return save({ id }, 'ok')
+      return await persist(files)
     } catch (error) {
       if (error instanceof DownloadTooLargeError)
         return save({ message: `snapshot skipped: ${error.message}` }, 'skipped')

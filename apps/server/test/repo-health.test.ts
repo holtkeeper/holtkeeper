@@ -7,6 +7,7 @@ import { coverageAnalysis } from '@holtkeeper/coverage'
 import type { AnalysisHead, Job, SettingEntry, Store } from '@holtkeeper/store'
 import { memoryStore } from '@holtkeeper/store/memory'
 
+import type { SweepVerdict } from '../src/freshness.ts'
 import {
   type HealthAccess,
   type HealthSources,
@@ -122,6 +123,11 @@ const sources = (patch: Partial<HealthSources> = {}): HealthSources => ({
 })
 
 const all = () => true
+
+const sweepOf = (entries: Record<string, SweepVerdict>) =>
+  new Map(
+    Object.entries(entries).map(([kind, verdict]) => [`work:shapes/circle\0${kind}`, verdict]),
+  )
 
 const classify = (patch: Partial<HealthSources>, repo = circle, access: HealthAccess = all) =>
   repoHealth(indexSources(sources(patch)), repo, access)
@@ -283,6 +289,50 @@ describe('repoHealth cells', () => {
       sub: '+20%',
       tone: 'warn',
     })
+  })
+
+  test('a cell without a record reads n/a or the first run from jobs and the last sweep', () => {
+    const skipped = sweepOf({ bundle: { action: 'skip', applies: false } })
+    expect(cellOf('bundles', { sweep: skipped })).toEqual({
+      value: 'n/a',
+      sub: 'not applicable',
+      tone: 'none',
+    })
+    expect(cellOf('bundles', { sweep: sweepOf({ bundle: { action: 'skip' } }) })).toEqual({
+      value: '—',
+      sub: 'no record',
+      tone: 'none',
+    })
+    expect(
+      cellOf('bundles', {
+        sweep: skipped,
+        settings: [setting('repo.analyzers', { groups: ['shapes'] }, { off: ['bundle'] })],
+      }),
+    ).toMatchObject({ value: 'Off' })
+
+    const due = sweepOf({ renovate: { action: 'wait' } })
+    expect(cellOf('dependencies', { sweep: due })).toEqual({
+      value: 'Pending',
+      sub: 'first run',
+      tone: 'none',
+    })
+    expect(
+      cellOf('dependencies', { sweep: due, jobs: [job('running', { analyzer: 'renovate' })] }),
+    ).toEqual({ value: 'Running', sub: 'first run', tone: 'none' })
+    expect(
+      cellOf('dependencies', {
+        jobs: [job('queued', { analyzer: 'renovate' }), job('failed', { analyzer: 'renovate' })],
+      }),
+    ).toMatchObject({ value: 'Queued', sub: 'first run' })
+    expect(
+      cellOf('dependencies', { jobs: [job('failed', { analyzer: 'renovate' })] }),
+    ).toMatchObject({ value: 'Failed', sub: 'first run' })
+    expect(cellOf('dependencies', { sweep: sweepOf({ renovate: { action: 'skip' } }) })).toEqual({
+      value: '—',
+      sub: 'no record',
+      tone: 'none',
+    })
+    expect(classify({ sweep: new Map([...skipped, ...due]) }).health).toBe('not-analysed')
   })
 
   test('jobs count analyzers whose latest run of the last day failed', () => {
@@ -574,6 +624,24 @@ describe('readHealthSources', () => {
     expect(repoHealth(indexed, circle, all).cells.security).toMatchObject({ value: '1 high' })
     expect(repoHealth(indexed, square, all).cells.security).toMatchObject({ tone: 'none' })
     expect(lists).toBe(1)
+  })
+
+  test('reads the last freshness sweep for cells without a record', async () => {
+    await store.kv?.set('freshness:summary', {
+      at: hoursAgo(1),
+      entries: [
+        { analyzer: 'bundle', repo: 'work:shapes/circle', action: 'skip', applies: false },
+        { analyzer: 'renovate', repo: 'work:shapes/circle', action: 'run' },
+        { analyzer: 'renovate', repo: 'work:shapes', group: 'shapes', action: 'run' },
+      ],
+    })
+    const read = await readHealthSources({ store, analyses: [], now: () => NOW }, { jobRepos: [] })
+    const { cells } = repoHealth(indexSources(read), circle, all)
+    expect(cells.bundles).toMatchObject({ value: 'n/a' })
+    expect(cells.dependencies).toMatchObject({ value: 'Pending', sub: 'first run' })
+    expect(repoHealth(indexSources(read), square, all).cells.dependencies).toMatchObject({
+      sub: 'no record',
+    })
   })
 
   test('a newer run on another branch does not become the repository health', async () => {

@@ -1,6 +1,8 @@
 export * from './analyzer.ts'
+export { hasGoModule, usagesApplies } from './applies.ts'
 export * from './extract.ts'
 export * from './fleet.ts'
+export { extractGoUsages, type GoUsages } from './go.ts'
 export * from './model.ts'
 export * from './render.ts'
 export * from './report.ts'

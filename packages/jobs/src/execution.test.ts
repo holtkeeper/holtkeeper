@@ -327,6 +327,69 @@ describe('createRunner', () => {
     ])
   })
 
+  test('adds the Go variables and the egress environment only behind a proxy', async () => {
+    const recorded = createFakeRunner()
+    const lines: string[] = []
+    const run = async (overrides: Partial<RunnerSpec>) => {
+      const runner = createRunner(
+        spec({
+          mode: 'mise',
+          hostRunner: recorded.runner,
+          log: (line) => lines.push(line),
+          egressEnv: { GOPRIVATE: 'gitlab.example/shapes' },
+          ...overrides,
+        }),
+      )
+      await runner.run(['go', 'mod', 'download'], { cwd: '/co/0' })
+      return recorded.calls.at(-1)?.options.env ?? {}
+    }
+    const behind = await run({
+      execution: { mode: 'mise', egress: { url: 'http://proxy:8080' } },
+      toolchain: { tools: [], notes: [], env: { GOFLAGS: '-mod=vendor' } },
+    })
+    expect(behind).toMatchObject({
+      GOPRIVATE: 'gitlab.example/shapes',
+      GOTOOLCHAIN: 'local',
+      GOFLAGS: '-mod=vendor',
+    })
+    expect(lines).toContain('egress: GOPRIVATE=gitlab.example/shapes')
+    const plain = await run({ execution: { mode: 'mise', egress: { url: 'http://proxy:8080' } } })
+    expect(plain.GOFLAGS).toBeUndefined()
+    const direct = await run({ execution: { mode: 'mise' } })
+    expect(direct.GOPRIVATE).toBeUndefined()
+    expect(direct.GOTOOLCHAIN).toBeUndefined()
+  })
+
+  test('adds the job environment with or without a proxy, over the egress environment', async () => {
+    const recorded = createFakeRunner()
+    const lines: string[] = []
+    const run = async (overrides: Partial<RunnerSpec>) => {
+      await createRunner(
+        spec({
+          mode: 'mise',
+          hostRunner: recorded.runner,
+          log: (line) => lines.push(line),
+          egressEnv: { GOPRIVATE: 'gitlab.example/shapes' },
+          jobEnv: { GOPRIVATE: 'gitlab.example/shapes,example.org/hidden' },
+          ...overrides,
+        }),
+      ).run(['go', 'list'], { cwd: '/co/0' })
+      return recorded.calls.at(-1)?.options.env ?? {}
+    }
+    expect((await run({ execution: { mode: 'mise' } })).GOPRIVATE).toBe(
+      'gitlab.example/shapes,example.org/hidden',
+    )
+    expect(lines).toContain('GOPRIVATE=gitlab.example/shapes,example.org/hidden')
+    const behind = await run({ execution: { mode: 'mise', egress: { url: 'http://proxy:8080' } } })
+    expect(behind.GOPRIVATE).toBe('gitlab.example/shapes,example.org/hidden')
+    expect(lines).toContain('egress: GOPRIVATE=gitlab.example/shapes,example.org/hidden')
+    const pinned = await run({
+      execution: { mode: 'mise' },
+      toolchain: { tools: [], notes: [], env: { GOPRIVATE: 'pinned.example' } },
+    })
+    expect(pinned.GOPRIVATE).toBe('pinned.example')
+  })
+
   test('mise mode hides the worker secrets and keeps envAllowlist', async () => {
     const names = ['HOLTKEEPER_VAULT_KEY', 'HOLTKEEPER_DATABASE_URL', 'GOPROXY']
     const previous = names.map((name) => Bun.env[name])
@@ -361,6 +424,79 @@ test('runnerFactory is off in host mode', () => {
   expect(runnerFactory({ execution: undefined, hostRunner: host })).toBeUndefined()
   expect(runnerFactory({ execution: { mode: 'host' }, hostRunner: host })).toBeUndefined()
   expect(runnerFactory({ execution: { mode: 'mise' }, hostRunner: host })).toBeFunction()
+})
+
+test('runnerFactory reads the egress environment only behind a proxy', async () => {
+  const specs: RunnerSpec[] = []
+  const lines: string[] = []
+  let reads = 0
+  const factory = (execution: RunnerSpec['execution'], fail = false) =>
+    runnerFactory({
+      execution,
+      hostRunner: createFakeRunner().runner,
+      detect: async () => ({ tools: [], notes: [] }),
+      createRunner: (spec) => {
+        specs.push(spec)
+        return startOnFirstRun({
+          start: async () => {},
+          run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+          stop: async () => {},
+        })
+      },
+      egressEnv: () => {
+        reads += 1
+        if (fail) throw new Error('store down')
+        return { GOPRIVATE: 'gitlab.example' }
+      },
+    })
+  const request = {
+    repo: { forge: 'work', path: 'games/a' },
+    dir: '/co/0',
+    log: (line: string) => lines.push(line),
+  }
+  await factory({ mode: 'mise' })?.(request)
+  expect(reads).toBe(0)
+  expect(specs.at(-1)?.egressEnv).toBeUndefined()
+  await factory({ mode: 'mise', egress: { url: 'http://proxy:8080' } })?.(request)
+  expect(specs.at(-1)?.egressEnv).toEqual({ GOPRIVATE: 'gitlab.example' })
+  await factory({ mode: 'mise', egress: { url: 'http://proxy:8080' } }, true)?.(request)
+  expect(specs.at(-1)?.egressEnv).toBeUndefined()
+  expect(lines).toContain('egress: job environment: store down')
+})
+
+test('runnerFactory reads the job environment with or without a proxy', async () => {
+  const specs: RunnerSpec[] = []
+  const lines: string[] = []
+  const factory = (execution: RunnerSpec['execution'], fail = false) =>
+    runnerFactory({
+      execution,
+      hostRunner: createFakeRunner().runner,
+      detect: async () => ({ tools: [], notes: [] }),
+      createRunner: (spec) => {
+        specs.push(spec)
+        return startOnFirstRun({
+          start: async () => {},
+          run: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+          stop: async () => {},
+        })
+      },
+      jobEnv: () => {
+        if (fail) throw new Error('settings down')
+        return { GOPRIVATE: 'example.org/hidden' }
+      },
+    })
+  const request = {
+    repo: { forge: 'work', path: 'games/a' },
+    dir: '/co/0',
+    log: (line: string) => lines.push(line),
+  }
+  await factory({ mode: 'mise' })?.(request)
+  expect(specs.at(-1)?.jobEnv).toEqual({ GOPRIVATE: 'example.org/hidden' })
+  await factory({ mode: 'container', egress: { url: 'http://proxy:8080' } })?.(request)
+  expect(specs.at(-1)?.jobEnv).toEqual({ GOPRIVATE: 'example.org/hidden' })
+  await factory({ mode: 'mise' }, true)?.(request)
+  expect(specs.at(-1)?.jobEnv).toBeUndefined()
+  expect(lines).toContain('job environment: settings down')
 })
 
 test('startOnFirstRun shares one start and skips stop when never started', async () => {

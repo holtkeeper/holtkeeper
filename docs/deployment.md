@@ -190,7 +190,7 @@ egressProxy:
     certManager: true # or existingSecret: a kubernetes.io/tls Secret with the CA
 ```
 
-With `forgeRules` (the default) the proxy reads its rules from the web pods (`GET /api/egress/rules`, authenticated with `HOLTKEEPER_EGRESS_SECRET` from the top-level `existingSecret`, which the bundled config also turns into `server.egress`). Every panel GitLab forge then has its token, the same credential the forge uses, added to downloads from its package registries, always the current one after a rotation; the forge's **Packages for jobs** switch turns that off. Static `rules` can be added for other registries:
+With `forgeRules` (the default) the proxy reads its rules from the web pods (`GET /api/egress/rules`, authenticated with `HOLTKEEPER_EGRESS_SECRET` from the top-level `existingSecret`, which the bundled config also turns into `server.egress`). Every panel GitLab forge then has its token, the same credential the forge uses, added to downloads from its package registries, always the current one after a rotation; the forge's **Packages for jobs** switch turns that off. The same switch also adds read-only git rules for the forge (`go get` discovery, `info/refs` and `git-upload-pack`, never `git-receive-pack`), and workers give jobs `GOPRIVATE` (the forge host or its top-level groups, joined with every private Go module pattern of the instance, which jobs get even without an egress proxy) and `GOTOOLCHAIN=local`, so `go` downloads private modules of the forge through the proxy without the token entering the job. Trade-off: through the proxy, every job can read every repository the forge token can read, over git. Give the forge a token scoped to what the fleet needs. Static `rules` can be added for other registries:
 
 ```yaml
 egressProxy:

@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { goApi } from './api.ts'
+import { goApi, goModuleApi } from './api.ts'
 
 const files = (entries: Record<string, string>) =>
   new Map(Object.entries(entries).map(([path, text]) => [path, new TextEncoder().encode(text)]))
@@ -201,6 +201,61 @@ describe('goApi', () => {
     })
     expect(pkg?.entries[0]?.symbols.map((symbol) => symbol.name)).toEqual(['A', 'B'])
     expect(pkg?.entries[0]?.truncated).toBe(1)
+  })
+})
+
+describe('goModuleApi', () => {
+  const service = files({
+    'go.mod': 'module gitlab.example/shapes/svc\n',
+    'cmd/server/main.go': 'package main\n\nfunc main() {}\n',
+    'cmd/worker/main.go': 'package main\n\nfunc main() {}\n',
+    'internal/store/store.go': '// Package store keeps shapes.\npackage store\n\nfunc Open() {}\n',
+    'internal/store/store_test.go': 'package store\n\nfunc TestOpen() {}\n',
+    'internal/api/v1/api.go': 'package v1\n\ntype Handler struct{}\n',
+    'pkg/geom/geom.go': 'package geom\n\nfunc Area() float64 { return 0 }\n',
+    'onlytests/x_test.go': 'package onlytests\n',
+    'tools/go.mod': 'module gitlab.example/shapes/svc/tools\n',
+    'tools/gen/gen.go': 'package gen\n\nfunc Gen() {}\n',
+  })
+
+  test('counts main and internal packages and lists only importable ones by default', () => {
+    const api = goModuleApi(service)
+    expect(api.module).toBe('gitlab.example/shapes/svc')
+    expect(api.mainPackages).toBe(2)
+    expect(api.internalPackages).toBe(2)
+    expect(api.packages.map((pkg) => [pkg.name, pkg.private])).toEqual([
+      ['gitlab.example/shapes/svc/pkg/geom', false],
+    ])
+    expect(api.packages[0]).toMatchObject({ ecosystem: 'Go', module: 'gitlab.example/shapes/svc' })
+  })
+
+  test('lists internal packages as private with includeInternal', () => {
+    const api = goModuleApi(service, { includeInternal: true, version: 'v1.4.0' })
+    expect(api.internalPackages).toBe(2)
+    expect(api.packages.map((pkg) => [pkg.name, pkg.dir, pkg.private])).toEqual([
+      ['gitlab.example/shapes/svc/internal/api/v1', 'internal/api/v1', true],
+      ['gitlab.example/shapes/svc/internal/store', 'internal/store', true],
+      ['gitlab.example/shapes/svc/pkg/geom', 'pkg/geom', false],
+    ])
+    const store = api.packages[1]
+    expect(store?.description).toBe('Package store keeps shapes.')
+    expect(store?.version).toBe('v1.4.0')
+    expect(store?.entries[0]?.symbols.map((symbol) => symbol.name)).toEqual(['Open'])
+  })
+
+  test('goApi stays importable-only', () => {
+    expect(goApi(service).map((pkg) => pkg.name)).toEqual(['gitlab.example/shapes/svc/pkg/geom'])
+  })
+
+  test('a service with only main and internal packages has no importable packages', () => {
+    const api = goModuleApi(
+      files({
+        'go.mod': 'module example.com/acme/orders',
+        'main.go': 'package main\n\nfunc main() {}\n',
+        'internal/queue/queue.go': 'package queue\n\nfunc Push() {}\n',
+      }),
+    )
+    expect(api).toMatchObject({ packages: [], mainPackages: 1, internalPackages: 1 })
   })
 })
 

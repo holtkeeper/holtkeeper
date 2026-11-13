@@ -2,6 +2,7 @@ import { defineAnalysis, metric } from '@holtkeeper/report'
 import type { Block, Cell, Issue, Metric, Report, Section } from '@holtkeeper/report'
 
 import { type UsagesData, importPath, usagesDataSchema } from './model.ts'
+import { snippetLanguage } from './render.ts'
 
 const limits = { packages: 300, exports: 60 }
 
@@ -29,7 +30,7 @@ function metrics(data: UsagesData, previous?: UsagesData): Metric[] {
       ? [
           metric('typed', 'Found by types', now.typed, {
             previous: before?.typed,
-            hint: 'Uses the TypeScript checker found beyond what imports show',
+            hint: 'Uses the type checkers found beyond what imports show',
           }),
         ]
       : []),
@@ -101,7 +102,11 @@ function exportsSection(data: UsagesData): Section | undefined {
       title: `${importPath(pkg.name, item.subpath)} → ${item.name}: ${item.count} uses in ${item.files} files`,
       detail: [
         ...names,
-        ...(site ? [`\`${site.file}:${site.line}\`\n\n\`\`\`tsx\n${site.snippet}\n\`\`\``] : []),
+        ...(site
+          ? [
+              `\`${site.file}:${site.line}\`\n\n\`\`\`${snippetLanguage(site.file)}\n${site.snippet}\n\`\`\``,
+            ]
+          : []),
       ].join('\n\n'),
       tags: Object.keys(item.kinds),
     }
@@ -111,10 +116,15 @@ function exportsSection(data: UsagesData): Section | undefined {
 
 function typesSection(data: UsagesData): Section {
   const { types } = data
+  const go = data.packages.some((pkg) => pkg.ecosystem === 'Go')
+  const js = data.packages.some((pkg) => pkg.ecosystem !== 'Go')
+  const reason = types.reason ? ` (${types.reason})` : ''
+  const projects = (types.projects ?? []).map((p) => `\`${p}\``).join(', ')
+  const used = `The type checker read ${types.projects?.length ?? 0} project(s) or module(s) (${projects}) and found ${types.sites ?? 0} uses that imports alone do not show, such as methods of values a package returns.${types.reason ? ` Problems: ${types.reason}.` : ''}`
+  const jsText = `Uses come from imports only: the type checker was ${types.status}${reason}. Methods of values a package returns and components imported through local re-exports are not counted.`
+  const goText = `Go uses come from imports and qualified names (\`pkg.Name\`) alone, with versions from \`go.mod\`: the Go type checker was ${types.status}${reason}, so methods called on values a package returned are not counted.`
   const text =
-    types.status === 'used'
-      ? `The TypeScript checker read ${types.projects?.length ?? 0} project(s) (${(types.projects ?? []).map((p) => `\`${p}\``).join(', ')}) and found ${types.sites ?? 0} uses that imports alone do not show, such as methods of objects a hook returns.`
-      : `Uses come from imports only: the type checker was ${types.status}${types.reason ? ` (${types.reason})` : ''}. Methods of values a package returns and components imported through local re-exports are not counted.`
+    types.status === 'used' ? used : go && !js ? goText : go ? `${jsText}\n\n${goText}` : jsText
   const blocks: Block[] = [{ type: 'markdown', text }]
   if (data.problems?.length)
     blocks.push({

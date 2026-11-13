@@ -4,8 +4,10 @@ import { compareVersions } from '@holtkeeper/depgraph'
 import type { AnalysisStore } from '@holtkeeper/store'
 import { newestRecords } from '@holtkeeper/store'
 import {
+  type UpgradeImpact,
   type UsageEntry,
   type UsagesData,
+  resolveUsedPackage,
   upgradeImpact,
   usagesDataSchema,
 } from '@holtkeeper/usages'
@@ -102,7 +104,8 @@ export type UsageIndex = ReturnType<typeof createUsageIndex>
 /**
  * The uses of `name` that `changes` (from `before` to version `target`) affect, over the newest
  * usage record of every readable repository; repositories already on `target` or later are left
- * out. Without `target` (a default branch) every user counts.
+ * out. Without `target` (a default branch) every user counts. A Go import path counts the uses of
+ * that package inside its module, with the module's versions.
  */
 export async function impactOfChanges(
   usages: UsageIndex,
@@ -116,18 +119,28 @@ export async function impactOfChanges(
     ),
   )
   const { target } = input
-  const entries = (await usages.entries(filter)).filter(({ data }) => {
-    const used = data.packages.find((pkg) => pkg.name === name)
+  const all = await usages.entries(filter)
+  const resolved = resolveUsedPackage(all, name)
+  const usedName = resolved.name
+  const entries = all.filter(({ data }) => {
+    const used = data.packages.find((pkg) => pkg.name === usedName)
     if (!used || !target || !used.versions.length) return true
     return used.versions.some((version) => compareVersions(version, target) < 0)
   })
-  return upgradeImpact({ entries, package: name, changes: input.changes, declarations })
+  const impact = upgradeImpact({ entries, package: name, changes: input.changes, declarations })
+  const { subpath } = resolved
+  if (impact.ecosystem !== 'Go' || !subpath) return impact
+  return {
+    ...impact,
+    items: impact.items.map((item) => ({ ...item, change: { ...item.change, subpath } })),
+  }
 }
 
 /**
  * The uses an upgrade of `name` affects: the API diff between two recorded versions joined with
  * the newest usage record of every readable repository. Repositories already on `to` or later are
- * left out. `undefined` when the catalog has no two versions to compare.
+ * left out. `undefined` when the catalog has no two versions to compare. For a Go upgrade across
+ * majors, the uses counted are those of the package at `from` (its import path before the move).
  */
 export async function impactOf(
   catalog: ApiCatalog,
@@ -146,10 +159,51 @@ export async function impactOf(
     repo: diff.repo,
     from: diff.from,
     to: diff.to,
-    impact: await impactOfChanges(usages, filter, name, {
+    impact: await impactOfChanges(usages, filter, old?.package.name ?? name, {
       before: old?.package,
       changes: diff.diff.changes,
       target: diff.to.head ? undefined : diff.to.version,
     }),
+  }
+}
+
+/**
+ * `impactOfChanges` for a Go module whose API is split into packages: each package's changes are
+ * joined with the uses of that package only, and the results merge into one impact named `module`.
+ * A change's `subpath` becomes the package directory inside the module (`.` for its root package).
+ */
+export async function impactOfGoChanges(
+  usages: UsageIndex,
+  filter: RepoFilter,
+  module: string,
+  input: {
+    packages: { name: string; before: ApiPackage | undefined; changes: ApiChange[] }[]
+    target: string | undefined
+  },
+): Promise<UpgradeImpact> {
+  const items: UpgradeImpact['items'] = []
+  const affected = new Set<string>()
+  const users = new Set<string>()
+  for (const pkg of input.packages) {
+    if (!pkg.changes.some((change) => change.change !== 'added')) continue
+    const subpath = pkg.name.startsWith(`${module}/`)
+      ? `./${pkg.name.slice(module.length + 1)}`
+      : '.'
+    // oxlint-disable-next-line no-await-in-loop -- usage records come from an in-memory index
+    const impact = await impactOfChanges(usages, filter, pkg.name, {
+      before: pkg.before,
+      changes: pkg.changes,
+      target: input.target,
+    })
+    for (const item of impact.items) items.push({ ...item, change: { ...item.change, subpath } })
+    for (const origin of impact.affected) affected.add(origin)
+    for (const origin of impact.unaffected) users.add(origin)
+  }
+  return {
+    package: module,
+    ecosystem: 'Go',
+    items,
+    affected: [...affected].toSorted(),
+    unaffected: [...users].filter((origin) => !affected.has(origin)).toSorted(),
   }
 }

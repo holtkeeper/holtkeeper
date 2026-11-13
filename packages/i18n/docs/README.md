@@ -14,7 +14,7 @@ Translation gaps of a repository: keys missing per locale, keys only some locale
 4. **Layers** (optional) — catalogs merged in order from several places, later layers overriding earlier ones per key; see below.
 5. **Usage** — `scanSource` runs ast-grep over JS/TS/TSX (regex for Vue/Svelte/Astro/HTML) for the `functions` patterns: `t`, `i18n.t`, `$t`, `this.$t`, `useTranslation().t`, `<Trans i18nKey>`, `<FormattedMessage id>`, `formatMessage({ id })`, `intl.formatMessage`. Static keys (with `ns:key` and `{ ns }`) are matched against base keys (a key that prefixes nested keys uses them all); computed keys are dynamic usages, and their static prefix (`` `errors.${code}` `` → `errors.`) keeps keys under it from being reported unused.
 6. **`analyzeCatalogs`** — pure. Compares every locale with the base: missing, extra, empty / fuzzy / identical-to-base (`looksTranslatable` skips short tokens, acronyms, brand-like words, URLs), placeholders (`{{name}}`, ICU `{name}` and `{n, plural, ...}`, `%s`/`%1$s`, `<0>`/`<b>` tags), plural forms by CLDR category (embedded table for en, ru, uk, pl, de, fr, es, it, pt, tr, ja, zh, ko, ar, he, cs; `Intl.PluralRules` otherwise) for i18next `_one/_few/...` keys and ICU plurals, and gettext form counts. In `suggest` mode it also produces changes.
-7. **`analyzeI18n`** wires everything; **`i18nAnalyzer`** is the `Analyzer` (`kind: 'i18n'`, `scope: 'repo'`, `needs: { checkout: true }`).
+7. **`analyzeI18n`** wires everything; **`i18nAnalyzer`** is the `Analyzer` (`kind: 'i18n'`, `scope: 'repo'`, `needs: { checkout: true }`); it has no `appliesTo`: catalogs and sources may sit in any folder (a Go service with its UI in `web/`), so every repository is analyzed.
 
 ## Options
 

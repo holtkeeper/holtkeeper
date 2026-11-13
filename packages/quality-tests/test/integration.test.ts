@@ -25,6 +25,9 @@ afterAll(async () => {
   await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })))
 })
 
+const goTestFile = (pkg: string, fn: string) =>
+  `package ${pkg}\n\nimport "testing"\n\nfunc Test${fn}(t *testing.T) {\n\tif ${fn}(2) != 4 {\n\t\tt.Fatal("bad")\n\t}\n}\n`
+
 describe('coverage of real projects', () => {
   test.skipIf(!Bun.which('bun'))(
     'bun project: the untested module has no covered lines',
@@ -121,6 +124,74 @@ describe('coverage of real projects', () => {
         lines: { covered: 1, total: 4 },
         functions: { covered: 1, total: 2 },
       })
+    },
+    120_000,
+  )
+
+  test.skipIf(!Bun.which('go'))(
+    'go.work: one run over every member module',
+    async () => {
+      const dir = await project({
+        'go.work': 'go 1.22\n\nuse (\n\t./gear\n\t./cog\n)\n',
+        'gear/go.mod': 'module example.com/acme/gear\n\ngo 1.22\n',
+        'gear/gear.go': 'package gear\n\nfunc Spin(n int) int {\n\treturn n * 2\n}\n',
+        'gear/gear_test.go': goTestFile('gear', 'Spin'),
+        'cog/go.mod': 'module example.com/acme/cog\n\ngo 1.22\n',
+        'cog/cog.go': 'package cog\n\nfunc Mesh(n int) int {\n\treturn n + 2\n}\n',
+        'cog/cog_test.go': goTestFile('cog', 'Mesh'),
+      })
+      const report = await collectCoverage(await coverageCollectors(dir), {
+        dir,
+        runner: localRunner,
+      })
+      expect(report.notRun).toBeUndefined()
+      expect(
+        report.files
+          .filter((file) => file.lines.some((line) => line.hits > 0))
+          .map((file) => file.file)
+          .toSorted(),
+      ).toEqual(['cog/cog.go', 'gear/gear.go'])
+    },
+    120_000,
+  )
+
+  test.skipIf(!Bun.which('go'))(
+    'go: packages that did not build are reported, tagged tests run only with tags',
+    async () => {
+      const dir = await project({
+        'go.mod': 'module example.com/acme/widgets\n\ngo 1.22\n',
+        'gear/gear.go': 'package gear\n\nfunc Spin(n int) int {\n\treturn n * 2\n}\n',
+        'gear/gear_test.go':
+          'package gear\n\nimport "testing"\n\nfunc TestSpin(t *testing.T) {\n\tif Spin(2) != 4 {\n\t\tt.Fatal("bad")\n\t}\n}\n',
+        'bolt/bolt.go': 'package bolt\n\nfunc Turn(n int) int {\n\treturn n + 1\n}\n',
+        'bolt/bolt_test.go':
+          '//go:build integration\n\npackage bolt\n\nimport "testing"\n\nfunc TestTurn(t *testing.T) {\n\tif Turn(1) != 2 {\n\t\tt.Fatal("bad")\n\t}\n}\n',
+        'cog/cog.go': 'package cog\n\nfunc Mesh() int {\n\treturn 1\n}\n',
+        'cog/cog_test.go':
+          'package cog\n\nimport "testing"\n\nfunc TestMesh(t *testing.T) {\n\tMissing()\n}\n',
+      })
+      const lines: string[] = []
+      const plain = await collectCoverage(await coverageCollectors(dir), {
+        dir,
+        runner: localRunner,
+        log: (line) => lines.push(line),
+      })
+      expect(plain.notRun).toEqual([{ dir: 'cog', reason: 'build failed' }])
+      expect(lines.some((line) => line.includes('integration (1)'))).toBe(true)
+      expect(
+        lines.some((line) => line.includes('example.com/acme/widgets/cog (build failed')),
+      ).toBe(true)
+      const bolt = (report: typeof plain) =>
+        report.files
+          .find((file) => file.file === 'bolt/bolt.go')
+          ?.lines.some((line) => line.hits > 0)
+      expect(bolt(plain)).toBeFalsy()
+
+      const tagged = await collectCoverage(
+        await coverageCollectors(dir, 'run', { go: { tags: ['integration'] } }),
+        { dir, runner: localRunner },
+      )
+      expect(bolt(tagged)).toBe(true)
     },
     120_000,
   )

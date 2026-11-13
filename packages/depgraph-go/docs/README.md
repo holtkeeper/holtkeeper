@@ -13,12 +13,17 @@ const data = await analyzeDependencies({ dir, sources: [goSource({ runner })] })
 
 - `goSource({ runner?, depth?, timeoutMs? }): GraphSource` — named `go`. `runner` defaults to `localRunner`.
 - `goEnv` — environment of every `go` command.
-- Pure helpers: `parseGoMod`, `parseGoWork`, `parseGoModGraph(output, modules)`, `goWorkspaceGraph(modules)`, `findGoModules(dir, depth)`, `readGoModules(dir, dirs)`.
+- Pure helpers: `parseGoModGraph(output, modules)`, `goWorkspaceGraph(modules)`.
+- Re-exported from `@holtkeeper/go-source`, which owns them: `parseGoMod` (`module`, `go`, `require` with `indirect`, `replace`, `exclude`), `parseGoWork`, `findGoModules(dir, depth)`, `readGoModules(dir, dirs)` and the `GoMod`, `GoRequire`, `GoReplace`, `GoWorkspaceModule` types.
 
 ## Layers
 
 - **workspaces** — with `go.work`, its `use` directives; otherwise every `go.mod` found up to `depth` (default 4) directories deep, skipping `node_modules`, `vendor`, `testdata` and hidden directories. Nodes are module paths (`kind: 'workspace'`, ecosystem `Go`); an edge means one workspace module `require`s another.
 - **packages** — `go mod graph`. With `go.work` it runs once at the root (`GOWORK` set to that file); otherwise once per module with `GOWORK=off`, one layer each (`go mod graph (<dir>)` when there are several), because separate modules are separate builds. Main and workspace modules are workspace nodes whatever version they are referenced by; other modules are `path@version` package nodes. The `go` and `toolchain` pseudo-modules are dropped.
+
+## Errors
+
+The `workspaces` layer comes from `go.work`/`go.mod` files alone, so it is kept when `go mod graph` fails (no network, a private module the job cannot fetch, a broken `go.mod`): `load` throws `PartialLoadError` from `@holtkeeper/depgraph` with that layer, the `packages` layers of modules that did load, and one message per failed run (`<dir>: ...` when there are several modules). `analyzeDependencies` keeps those layers, stores the messages in `errors` and writes them to the job log.
 
 ## Duplicates
 

@@ -120,7 +120,8 @@ export function groupSymbols(
 
 /** How a version reads in pickers: `1.4.0 · @acme/ui@1.4.0`, `head · 1.5.0-dev`. */
 export function versionLabel(version: PublicApiVersion): string {
-  if (version.head) return `head · ${version.version}`
+  if (version.head) return version.version === 'head' ? 'head' : `head · ${version.version}`
+  if (version.package) return `${version.version} · ${version.package}`
   const ref = version.ref
   return ref && ref !== version.version && ref !== `v${version.version}`
     ? `${version.version} · ${formatRef(ref)}`
@@ -153,9 +154,25 @@ export function catalogTotals(packages: readonly PublicApiPackageSummary[]) {
   }
 }
 
-/** The package and entry point an import specifier names: `@acme/ui/button` is `@acme/ui`, `./button`. */
-export function splitImportPath(importPath: string): { package: string; subpath: string } {
+/**
+ * A Go import path starts with a host (`example.com/kit/log`); the catalog names a Go package by
+ * its whole import path, with the single entry point `.`.
+ */
+const isGoImportPath = (path: string) =>
+  !path.startsWith('@') && /^[a-z0-9-]+(\.[a-z0-9-]+)+\/./i.test(path)
+
+/**
+ * The package and entry point an import specifier names: `@acme/ui/button` is `@acme/ui`,
+ * `./button`; a Go import path is the whole package with entry `.`. Without `ecosystem` the path's
+ * shape decides, which misreads Go modules without a dot and npm names with one.
+ */
+export function splitImportPath(
+  importPath: string,
+  ecosystem?: 'npm' | 'Go',
+): { package: string; subpath: string } {
   const parts = importPath.split('/')
+  if (ecosystem === 'Go' || (ecosystem === undefined && isGoImportPath(importPath)))
+    return { package: importPath, subpath: '.' }
   const size = importPath.startsWith('@') ? 2 : 1
   const rest = parts.slice(size).join('/')
   return { package: parts.slice(0, size).join('/'), subpath: rest ? `./${rest}` : '.' }
@@ -165,13 +182,33 @@ export function splitImportPath(importPath: string): { package: string; subpath:
 export const symbolKey = (hit: Pick<PublicApiSymbolHit, 'importPath' | 'symbol'>): string =>
   `${hit.importPath}:${hit.symbol.name}`
 
-/** Reads `symbolKey` back into the package, entry point and name it names. */
+/** Reads `symbolKey` back into the package, entry point and name it names (see `splitImportPath`). */
 export function parseSymbolKey(
   value: string | undefined,
+  ecosystem?: 'npm' | 'Go',
 ): { package: string; subpath: string; name: string } | undefined {
   const at = value?.lastIndexOf(':') ?? -1
   if (!value || at <= 0 || at === value.length - 1) return undefined
-  return { ...splitImportPath(value.slice(0, at)), name: value.slice(at + 1) }
+  return { ...splitImportPath(value.slice(0, at), ecosystem), name: value.slice(at + 1) }
+}
+
+/**
+ * The symbol `key` names with its ecosystem: taken from `hit` when it is the hit the key names,
+ * else read from the key's shape.
+ */
+export function openedSymbol(
+  key: string | undefined,
+  hit: PublicApiSymbolHit | undefined,
+): { package: string; subpath: string; name: string; ecosystem: 'npm' | 'Go' } | undefined {
+  if (key && hit && symbolKey(hit) === key)
+    return {
+      package: hit.package,
+      subpath: hit.subpath,
+      name: hit.symbol.name,
+      ecosystem: hit.ecosystem ?? 'npm',
+    }
+  const parsed = parseSymbolKey(key)
+  return parsed && { ...parsed, ecosystem: isGoImportPath(parsed.package) ? 'Go' : 'npm' }
 }
 
 /** The filters symbol search applies to its hits on the page. */

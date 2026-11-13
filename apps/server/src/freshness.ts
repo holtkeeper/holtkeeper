@@ -95,6 +95,7 @@ const summarySchema = z.object({
       repo: z.string(),
       group: z.string().optional(),
       action: z.enum(['run', 'wait', 'fresh', 'skip']),
+      applies: z.literal(false).optional(),
     }),
   ),
 })
@@ -339,6 +340,7 @@ async function evaluate(
 }
 
 const UNCHECKED = Symbol('unchecked')
+const NOT_APPLICABLE = 'the repository does not use what it analyzes'
 
 /**
  * Why freshness leaves the analyzer out on the target, or `undefined` when it may run there.
@@ -379,7 +381,7 @@ async function notApplicable(
       HEAD_TTL_SECONDS,
     )
   }
-  return applies ? undefined : 'the repository does not use what it analyzes'
+  return applies ? undefined : NOT_APPLICABLE
 }
 
 /**
@@ -572,6 +574,8 @@ export async function sweepFreshness(
         repo: repoKey(entry.repo),
         ...(entry.group !== undefined && { group: entry.group }),
         action: entry.decision.action,
+        ...(entry.decision.action === 'skip' &&
+          entry.decision.reason === NOT_APPLICABLE && { applies: false as const }),
       })),
     } satisfies SweepSummary,
     SUMMARY_TTL_SECONDS,
@@ -636,6 +640,33 @@ export async function freshnessStatus(
     ...entry,
     wouldRun: entry.decision.action === 'run' && room && (aiRoom || !aiKinds.has(entry.analyzer)),
   }))
+}
+
+/** What the last sweep decided about one analyzer on one repository. */
+export interface SweepVerdict {
+  action: 'run' | 'wait' | 'fresh' | 'skip'
+  /** Set when the skip is the analyzer's `appliesTo` answering no. */
+  applies?: false
+}
+
+/**
+ * The last sweep's decisions on repositories, by `repoKey(repo)` and analyzer kind joined with
+ * `\0`; empty before the first sweep, a day after the last or without a key-value store.
+ */
+export async function lastSweepVerdicts(
+  deps: Pick<ServerDeps, 'store'>,
+): Promise<Map<string, SweepVerdict>> {
+  const summary = deps.store.kv
+    ? summarySchema.safeParse(await deps.store.kv.get(SUMMARY_KEY)).data
+    : undefined
+  const verdicts = new Map<string, SweepVerdict>()
+  for (const entry of summary?.entries ?? [])
+    if (entry.group === undefined)
+      verdicts.set(`${entry.repo}\0${entry.analyzer}`, {
+        action: entry.action,
+        ...(entry.applies === false && { applies: false }),
+      })
+  return verdicts
 }
 
 /** Counts of one analyzer's targets by what the last sweep decided. */

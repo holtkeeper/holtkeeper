@@ -234,6 +234,11 @@ const overviewOf = async (headers = asAdmin) => {
   return body as RepoOverview
 }
 
+const surface = (data: unknown) =>
+  store.analyses.add({ repo: circle, kind: 'api-surface', createdAt: at, data })
+
+const publicApi = async () => (await overviewOf()).cards.find((card) => card.key === 'public-api')
+
 const librariesCard = async () =>
   (await overviewOf()).cards.find((card) => card.key === 'libraries')
 
@@ -300,6 +305,34 @@ describe('repository hub overview', () => {
     expect(reader.cells.coverage?.tone).toBe('bad')
     expect(reader.knowledge).toBeUndefined()
     expect(reader.release).toBeUndefined()
+  })
+
+  test('the public API card tells a Go service and an empty snapshot apart from indexed packages', async () => {
+    const goModule = { path: 'example.com/acme/painter', dir: '.' }
+
+    await surface({
+      packages: [
+        {
+          name: 'example.com/acme/painter/internal/brush',
+          private: true,
+          dir: 'internal/brush',
+          ecosystem: 'Go',
+          module: goModule.path,
+          entries: [{ subpath: '.', symbols: [] }],
+        },
+      ],
+      go: { modules: [{ ...goModule, packages: 0, internalPackages: 1, mainPackages: 2 }] },
+    })
+    expect(await publicApi()).toMatchObject({
+      tone: 'none',
+      status: 'Internal only',
+      value: '0',
+      unit: 'importable packages',
+      lines: ['Go service: 2 main packages, 1 internal package', expect.any(String)],
+    })
+
+    await surface({ packages: [] })
+    expect(await publicApi()).toMatchObject({ tone: 'none', status: 'No packages', value: '—' })
   })
 
   test('the coverage card judges by the repository’s coverage target', async () => {
@@ -389,6 +422,37 @@ describe('repository hub overview', () => {
     const off = await librariesCard()
     expect(off?.status).toBe('Not analysed')
     expect(off?.segments).toBeUndefined()
+  })
+
+  test('the Bundles card reads not applicable and Libraries the pending first update check', async () => {
+    await store.kv?.set('freshness:summary', {
+      at,
+      entries: [
+        { analyzer: 'bundle', repo: 'work:shapes/circle', action: 'skip', applies: false },
+        { analyzer: 'renovate', repo: 'work:shapes/circle', action: 'run' },
+      ],
+    })
+    const { cards, cells } = await overviewOf()
+    expect(cells.bundles).toEqual({ value: 'n/a', sub: 'not applicable', tone: 'none' })
+    expect(cells.dependencies).toEqual({ value: 'Pending', sub: 'first run', tone: 'none' })
+    expect(cards.find((card) => card.key === 'bundles')).toEqual({
+      key: 'bundles',
+      section: 'quality',
+      tone: 'none',
+      status: 'Not applicable',
+      value: '—',
+      unit: 'gzip',
+      lines: ['No app build or published package to measure'],
+    })
+    expect(cards.find((card) => card.key === 'libraries')).toMatchObject({
+      status: 'Not analysed',
+      lines: ['Update check: first run pending'],
+    })
+    await store.analyses.add({ repo: circle, kind: 'depgraph', createdAt: at, data: {} })
+    expect((await overviewOf()).cards.find((card) => card.key === 'libraries')).toMatchObject({
+      tone: 'none',
+      status: 'Update check pending',
+    })
   })
 
   test('reviews of 30 days, this week’s work, knowledge, default branch and access', async () => {

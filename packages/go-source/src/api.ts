@@ -1,7 +1,11 @@
 import type { ApiPackage, ApiSymbol, ApiSymbolKind } from '@holtkeeper/api-surface'
 
-import type { ArchiveFiles } from '../types.ts'
+import { depthDelta, mask } from './mask.ts'
 
+/** Files of one Go module by path relative to the module root, `/`-separated. */
+export type GoFiles = ReadonlyMap<string, Uint8Array>
+
+/** Options of `goApi`. */
 export interface GoApiOptions {
   /** Module path (with its `/vN` suffix); read from `go.mod` when left out. */
   module?: string
@@ -16,60 +20,6 @@ const ident = /^[\p{L}_][\p{L}\p{N}_]*/u
 const isExported = (name: string) => /^\p{Lu}/u.test(name)
 const platformSuffix =
   /_(aix|android|darwin|dragonfly|freebsd|illumos|ios|js|linux|netbsd|openbsd|plan9|solaris|wasip1|windows|386|amd64|arm|arm64|loong64|mips\w*|ppc64\w*|riscv64|s390x|wasm)\.go$/
-
-interface Masks {
-  /** Strings, runes and comments blanked: for structure. */
-  structure: string
-  /** Only comments blanked: for signatures. */
-  code: string
-}
-
-const blank = (target: string[], from: number, to: number) => {
-  for (let k = from; k < to; k++) if (target[k] !== '\n') target[k] = ' '
-}
-
-function mask(source: string): Masks {
-  const structure = source.split('')
-  const code = source.split('')
-  let i = 0
-  while (i < source.length) {
-    const char = source[i]
-    const next = source[i + 1]
-    let end = i + 1
-    if (char === '/' && next === '/') {
-      end = source.indexOf('\n', i)
-      if (end < 0) end = source.length
-      blank(structure, i, end)
-      blank(code, i, end)
-    } else if (char === '/' && next === '*') {
-      end = source.indexOf('*/', i + 2)
-      end = end < 0 ? source.length : end + 2
-      blank(structure, i, end)
-      blank(code, i, end)
-    } else if (char === '"' || char === "'") {
-      end = i + 1
-      while (end < source.length && source[end] !== char && source[end] !== '\n')
-        end += source[end] === '\\' ? 2 : 1
-      end = Math.min(end + 1, source.length)
-      blank(structure, i + 1, end - 1)
-    } else if (char === '`') {
-      end = source.indexOf('`', i + 1)
-      end = end < 0 ? source.length : end + 1
-      blank(structure, i + 1, end - 1)
-    }
-    i = end
-  }
-  return { structure: structure.join(''), code: code.join('') }
-}
-
-const depthDelta = (line: string) => {
-  let delta = 0
-  for (const char of line) {
-    if (char === '(' || char === '[' || char === '{') delta++
-    else if (char === ')' || char === ']' || char === '}') delta--
-  }
-  return delta
-}
 
 const collapse = (text: string) =>
   text
@@ -353,32 +303,48 @@ const firstSentence = (doc: string) => {
   return sentence.length > 300 ? `${sentence.slice(0, 300)}…` : sentence
 }
 
-const skippedDir = (dir: string) =>
-  dir
-    .split('/')
-    .some(
-      (segment) =>
-        segment === 'internal' ||
-        segment === 'vendor' ||
-        segment === 'testdata' ||
-        segment.startsWith('_') ||
-        segment.startsWith('.'),
-    )
+const skippedSegment = (segment: string) =>
+  segment === 'vendor' ||
+  segment === 'testdata' ||
+  segment.startsWith('_') ||
+  segment.startsWith('.')
+
+const isInternalDir = (dir: string) => dir.split('/').includes('internal')
+
+/** Options of `goModuleApi`. */
+export interface GoModuleApiOptions extends GoApiOptions {
+  /** List packages under `internal/` too, with `private: true`. Default false. */
+  includeInternal?: boolean
+}
+
+/** Go API of one module plus counts of the packages it did not list as importable. */
+export interface GoModuleApi {
+  /** Module path used for the package names; empty when neither given nor found in `go.mod`. */
+  module: string
+  packages: ApiPackage[]
+  /** `package main` directories; never listed. */
+  mainPackages: number
+  /** Library packages under `internal/`, listed or not. */
+  internalPackages: number
+}
 
 /**
- * Go API of one module version from the files of its module zip: one `ApiPackage` per importable
- * package directory (named by its import path, `dir` relative to the module root), each with a
- * single entry `.` listing exported functions, methods (`Type.Method`), types (`interface` or
- * `type`), constants and variables (`variable`, the signature starts with `const` or `var`).
- * Doc comments are kept, `Deprecated:` paragraphs become `deprecated`, and package docs become
- * `description`. Skips `internal/`, `vendor/`, `testdata/`, `_test.go` files, `package main` and
- * files with `//go:build ignore`.
+ * Go API of one module from its files (paths relative to the module root): one `ApiPackage` per
+ * library package directory, named by its import path (`dir` relative to the module root,
+ * `ecosystem: 'Go'`, `module` set), each with a single entry `.` listing exported functions,
+ * methods (`Type.Method`), types (`interface` or `type`), constants and variables (`variable`, the
+ * signature starts with `const` or `var`). Doc comments are kept, `Deprecated:` paragraphs become
+ * `deprecated`, and package docs become `description`. Packages under `internal/` are counted and
+ * listed with `private: true` only with `includeInternal`; `package main` directories are counted
+ * and never listed. Skips `vendor/`, `testdata/`, `_` and `.` directories, directories of nested
+ * modules (another `go.mod` below the root), `_test.go` files, `*_test` packages and files with
+ * `//go:build ignore`.
  *
  * This is a line and bracket scan of gofmt-formatted source, not a Go parser: it does not apply
  * build constraints other than `ignore` (a symbol declared per platform appears once), and
  * unformatted code (several declarations on one line) may be read incompletely.
  */
-export function goApi(files: ArchiveFiles, options: GoApiOptions = {}): ApiPackage[] {
+export function goModuleApi(files: GoFiles, options: GoModuleApiOptions = {}): GoModuleApi {
   const decoder = new TextDecoder()
   const goMod = files.get('go.mod')
   const module =
@@ -386,18 +352,24 @@ export function goApi(files: ArchiveFiles, options: GoApiOptions = {}): ApiPacka
     (goMod ? /^\s*module\s+"?([^\s"]+)"?/m.exec(decoder.decode(goMod))?.[1] : undefined) ??
     ''
   const maxSymbols = options.maxSymbols ?? 2000
+  const nested = [...files.keys()]
+    .filter((path) => path.endsWith('/go.mod'))
+    .map((path) => path.slice(0, -'/go.mod'.length))
+  const inNested = (dir: string) =>
+    nested.some((root) => dir === root || dir.startsWith(`${root}/`))
 
   const byDir = new Map<string, string[]>()
   for (const path of files.keys()) {
     if (!path.endsWith('.go') || path.endsWith('_test.go')) continue
     const slash = path.lastIndexOf('/')
     const dir = slash < 0 ? '' : path.slice(0, slash)
-    if (skippedDir(dir)) continue
+    if (dir.split('/').some(skippedSegment) || inNested(dir)) continue
     byDir.set(dir, [...(byDir.get(dir) ?? []), path])
   }
 
-  const packages: ApiPackage[] = []
+  const result: GoModuleApi = { module, packages: [], mainPackages: 0, internalPackages: 0 }
   for (const dir of [...byDir.keys()].toSorted()) {
+    const internal = isInternalDir(dir)
     const paths = (byDir.get(dir) ?? []).toSorted(
       (a, b) =>
         Number(platformSuffix.test(a)) - Number(platformSuffix.test(b)) || a.localeCompare(b),
@@ -406,6 +378,7 @@ export function goApi(files: ArchiveFiles, options: GoApiOptions = {}): ApiPacka
     const problems: string[] = []
     let packageDoc: string | undefined
     let library = false
+    let main = false
     for (const path of paths) {
       const bytes = files.get(path)
       if (!bytes) continue
@@ -416,9 +389,14 @@ export function goApi(files: ArchiveFiles, options: GoApiOptions = {}): ApiPacka
         problems.push(`${path}: ${error instanceof Error ? error.message : String(error)}`)
         continue
       }
-      if (scan.ignored || !scan.packageName || scan.packageName === 'main') continue
+      if (scan.ignored || !scan.packageName) continue
+      if (scan.packageName === 'main') {
+        main = true
+        continue
+      }
       if (scan.packageName.endsWith('_test')) continue
       library = true
+      if (internal && !options.includeInternal) continue
       if (scan.packageDoc && (!packageDoc || path.endsWith('/doc.go') || path === 'doc.go'))
         packageDoc = scan.packageDoc
       for (const symbol of scan.symbols) {
@@ -426,15 +404,24 @@ export function goApi(files: ArchiveFiles, options: GoApiOptions = {}): ApiPacka
         if (!existing || (!existing.doc && symbol.doc)) symbols.set(symbol.name, symbol)
       }
     }
-    if (!library) continue
+    if (!library) {
+      if (main) result.mainPackages++
+      continue
+    }
+    if (internal) {
+      result.internalPackages++
+      if (!options.includeInternal) continue
+    }
     const all = [...symbols.values()]
     const kept = all.slice(0, maxSymbols)
-    packages.push({
+    result.packages.push({
       name: dir ? `${module}/${dir}` : module,
       ...(options.version ? { version: options.version } : {}),
       ...(packageDoc ? { description: firstSentence(packageDoc) } : {}),
-      private: false,
+      private: internal,
       dir: dir || '.',
+      ecosystem: 'Go',
+      module,
       entries: [
         {
           subpath: '.',
@@ -445,5 +432,13 @@ export function goApi(files: ArchiveFiles, options: GoApiOptions = {}): ApiPacka
       ...(problems.length ? { problems } : {}),
     })
   }
-  return packages
+  return result
+}
+
+/**
+ * Importable Go API of one module version from the files of its module zip: `goModuleApi`
+ * without `internal/` packages and without the counts.
+ */
+export function goApi(files: GoFiles, options: GoApiOptions = {}): ApiPackage[] {
+  return goModuleApi(files, { ...options, includeInternal: false }).packages
 }

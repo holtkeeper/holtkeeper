@@ -15,6 +15,11 @@ export interface FileCoverageData {
   branches?: Counts
   /** `false` when no test loaded the file; its code lines count as uncovered. */
   loaded?: false
+  /**
+   * Why tests could not measure the file although it has some: `did not build`,
+   * `dependencies did not load` or `tests timed out`. Absent when its tests ran or it has none.
+   */
+  reason?: string
 }
 
 /** Everything a `coverage` analysis found; serializable, stored as analysis data. */
@@ -46,6 +51,7 @@ export const coverageDataSchema: z.ZodType<CoverageData> = z.object({
       functions: counts.optional(),
       branches: counts.optional(),
       loaded: z.literal(false).optional(),
+      reason: z.string().optional(),
     }),
   ),
 })

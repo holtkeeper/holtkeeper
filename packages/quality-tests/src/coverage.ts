@@ -1,4 +1,9 @@
-import { collectorFor, coverageFileCollector, mergeReports } from './collect.ts'
+import {
+  type CollectorOptions,
+  collectorFor,
+  coverageFileCollector,
+  mergeReports,
+} from './collect.ts'
 import { detectTestSetup } from './detect.ts'
 import type {
   CoverageCollector,
@@ -46,13 +51,14 @@ export async function collectCoverage(
 
 /**
  * The collectors for a project: one per language with the language's primary framework, or a
- * reader of `coverage.file` when given.
+ * reader of `coverage.file` when given. `options` tune the collectors that run tests.
  */
 export async function coverageCollectors(
   dir: string,
   coverage: 'run' | { file: string } = 'run',
+  options: CollectorOptions = {},
 ): Promise<CoverageCollector[]> {
   if (typeof coverage === 'object') return [coverageFileCollector(coverage.file)]
   const frameworks = primaryFrameworks(await detectTestSetup(dir))
-  return Object.values(frameworks).map((framework) => collectorFor(framework, dir))
+  return Object.values(frameworks).map((framework) => collectorFor(framework, dir, options))
 }

@@ -214,6 +214,87 @@ describe('reviewMergeRequest', () => {
     expect(tasks[0]?.system).toContain('search_symbols by export name')
   })
 
+  describe('modern Go guidelines', () => {
+    const goFiles = [
+      {
+        oldPath: 'cmd/shapes/main.go',
+        newPath: 'cmd/shapes/main.go',
+        status: 'added' as const,
+        diff: addedFile(['package main', '', 'func main() {}']),
+      },
+    ]
+    const goSet = {
+      tag: 'v9.9.9',
+      source: 'github' as const,
+      guidelines: [
+        {
+          id: 'shape_range',
+          since_version: '1.22',
+          guideline: 'Range over an integer count.',
+          details: 'Shorter.',
+          examples: [{ before: ['for i := 0; i < n; i++ {}'], after: ['for i := range n {}'] }],
+        },
+        {
+          id: 'shape_future',
+          since_version: '1.40',
+          guideline: 'Use the future form.',
+          details: 'Newer.',
+          examples: [{ before: ['old()'], after: ['fresh()'] }],
+        },
+      ],
+    }
+
+    const runGo = async (
+      diffFiles: typeof files,
+      goGuidelines: ReviewOptions['goGuidelines'] = { enabled: true },
+    ) => {
+      const dir = await mkdtemp(join(tmpdir(), 'review-go-'))
+      try {
+        await writeFile(join(dir, 'go.mod'), 'module example.com/acme/shapes\n\ngo 1.23\n')
+        const { forge } = fakeForge({ files: diffFiles, discussions: [] })
+        const { agent, tasks } = fakeAgent({ review: [review([])] })
+        const pins: (string | undefined)[] = []
+        await reviewMergeRequest(
+          runOf({
+            forge: requireReviewForge(forge),
+            agent,
+            dir,
+            options: { ...options, goGuidelines },
+            goGuidelines: async (tag) => {
+              pins.push(tag)
+              return goSet
+            },
+          }),
+        )
+        return { task: tasks[0], pins }
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    }
+
+    test('adds the guidelines for the module go version when Go files change', async () => {
+      const { task, pins } = await runGo(goFiles, { enabled: true, tag: 'v9.9.9' })
+      expect(pins).toEqual(['v9.9.9'])
+      expect(task?.prompt).toContain('Modern Go guidelines: third-party reference data')
+      expect(task?.prompt).toContain('`.` go 1.23 (1 changed file)')
+      expect(task?.prompt).toContain('[Go 1.22+] shape_range')
+      expect(task?.prompt).not.toContain('shape_future')
+      expect(task?.system).toContain('the go.mod of the module owning the file')
+      expect(task?.system).not.toContain('package.json')
+    })
+
+    test('leaves the prompt unchanged without Go files or when turned off', async () => {
+      const npm = await runGo(files)
+      expect(npm.pins).toEqual([])
+      expect(npm.task?.prompt).not.toContain('Modern Go guidelines')
+      expect(npm.task?.system).toContain('from package.json, the lockfile or repo_packages')
+
+      const off = await runGo(goFiles, { enabled: false })
+      expect(off.pins).toEqual([])
+      expect(off.task?.prompt).not.toContain('Modern Go guidelines')
+    })
+  })
+
   test('a deep review runs on the deep model tier', async () => {
     const { forge } = fakeForge({ files, discussions: [] })
     const { agent, tasks } = fakeAgent({ review: [review([], 'looks-good')] })

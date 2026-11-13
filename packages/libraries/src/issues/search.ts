@@ -2,6 +2,7 @@ import type { LibraryIssue, LibraryRecord, LibraryStore } from '@holtkeeper/stor
 import { compareLibraryVersions } from '@holtkeeper/store'
 
 import type { LibraryDocs } from '../access.ts'
+import { resolveLibrary } from '../resolve.ts'
 import type { DigestOnDemand } from './digest.ts'
 import type { LiveIssueSearch } from './live.ts'
 import { trimText } from './shared.ts'
@@ -122,9 +123,8 @@ async function defaultVersion(
 export function libraryIssues(options: LibraryIssuesOptions): LibraryDocs['issues'] {
   const budget = options.budgetChars ?? 20_000
   const answer: LibraryDocs['issues'] = async (input, caller) => {
-    const ecosystem = input.ecosystem ?? 'npm'
-    const ref = { ecosystem, name: input.package }
-    const library = await options.store.getLibrary(ref)
+    const { ref, library } = await resolveLibrary(options.store, input)
+    const ecosystem = ref.ecosystem
     if (!library)
       return `No library \`${input.package}\` (${ecosystem}) is indexed, so it has no issue threads here. Check the package name and ecosystem.`
     const query = input.query.trim()

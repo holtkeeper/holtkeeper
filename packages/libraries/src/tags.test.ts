@@ -14,7 +14,11 @@ test('candidates and versions of tags', () => {
     'lib@1.2.3',
     'lib-v1.2.3',
   ])
-  expect(tagCandidates('github.com/acme/mono/sub', 'v1.0.0', 'sub')).toContain('sub/v1.0.0')
+  expect(tagCandidates('github.com/acme/mono/sub', 'v1.0.0', 'sub')).toEqual(['sub/v1.0.0'])
+  expect(tagCandidates('example.com/shapes/geom', 'v1.4.0')).toEqual(['v1.4.0'])
+  expect(versionOfTag('v1.0.0', 'github.com/acme/mono/sub', 'sub')).toBeUndefined()
+  expect(versionOfTag('sub/v1.2.0', 'github.com/acme/mono/sub', 'sub')).toBe('1.2.0')
+  expect(versionOfTag('other/v1.2.0', 'github.com/acme/mono')).toBeUndefined()
   expect(versionOfTag('@acme/lib@1.2.3', '@acme/lib')).toBe('1.2.3')
   expect(versionOfTag('v2.0.0-rc.1', '@acme/lib')).toBe('2.0.0-rc.1')
   expect(versionOfTag('other@1.0.0', '@acme/lib')).toBeUndefined()

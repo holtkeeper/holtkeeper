@@ -29,12 +29,12 @@ Libraries your own repositories publish are left out: their API already comes fr
 ## Before you start
 
 - **A store and an artifact store.** Every store (SQLite, Postgres) supports the index; the artifact store is `.holtkeeper/artifacts` by default or S3 (`server.artifacts`). Nothing else to deploy.
-- **Outbound HTTPS from the server process** (the scheduler leader runs the index, not the job workers): `registry.npmjs.org`, `proxy.golang.org`, `api.github.com`, `codeload.github.com`, and, for Go modules on vanity paths such as `golang.org/x/…`, those hosts. Bun honours `HTTPS_PROXY`/`HTTP_PROXY`, so a forward proxy works.
+- **Outbound HTTPS from the server process** (the scheduler leader runs the index, not the job workers): `registry.npmjs.org`, `proxy.golang.org`, `api.github.com`, `codeload.github.com`, and, for Go modules on vanity paths such as `golang.org/x/…`, those hosts. Bun honours `HTTPS_PROXY`/`HTTP_PROXY`, so a forward proxy works. Private Go modules (see `goPrivate` below) are never asked on `proxy.golang.org` or their own host.
 - **Dependency records.** The index starts from what repositories use:
   - `depgraph` records (npm and Go, the resolved version of every direct dependency);
-  - `usages` records (npm, exact versions of the packages the code imports).
+  - `usages` records (exact versions of the npm packages and Go modules the code imports).
 
-  Freshness keeps both current. On a fresh install, run them once instead of waiting: **Ops › Runs → Run analyzer → `depgraph`** (and `usages`) for your repositories. Go modules come from `depgraph`.
+  Freshness keeps both current. On a fresh install, run them once instead of waiting: **Ops › Runs → Run analyzer → `depgraph`** (and `usages`) for your repositories. Go modules come from both, so a repository whose `depgraph` cannot resolve its private modules still contributes the public modules its code imports.
 
 ## Setup
 
@@ -76,11 +76,14 @@ Everything else has defaults:
 | `digests`      | `false`                                           | Summarize issue threads agents hit with the configured LLM (see [Issue digests](#issue-digests))                                           |
 | `exclude`      | `["@types/*"]`                                    | Globs of library names never indexed; `Go:` limits a glob to Go, e.g. `Go:github.com/acme/**`                                              |
 | `include`      | `[]`                                              | Globs indexed even when no repository uses them                                                                                            |
+| `goPrivate`    | `[]`                                              | Go module path patterns in `GOPRIVATE` syntax, e.g. `github.com/acme-private/*`, that are private besides the forges' hosts                |
 | `maxVersions`  | `8`                                               | Versions kept per library (1–50); the ones in use are always kept                                                                          |
 | `firstOfMajor` | `true`                                            | Also index the `x.0.0` release of each crossed major                                                                                       |
 | `sources`      | `repository`, `releases`, `issues` on; `site` off | Turn single sources off, or docs sites on                                                                                                  |
 | `graceDays`    | `28`                                              | Days a version (or library) stays after nothing needs it any more                                                                          |
 | `concurrency`  | `3`                                               | Libraries indexed at the same time (1–8); a run mostly waits for the network, so a few at once make it faster while the GitHub limit lasts |
+
+**Private Go modules.** Modules under the host of a forge (panel or config file) are private; on github.com, gitlab.com and bitbucket.org only the top-level groups your groups include and the top-level namespaces of the repositories Holtkeeper analyzes there. The `goPrivate` patterns are private too. They count as your own packages: the index never asks `proxy.golang.org` or their host about them, so their paths stay inside your network. Their API is in the catalog. Jobs get the same patterns as `GOPRIVATE` (in `mise` and `container` mode), so `go` in jobs does not ask `proxy.golang.org` or `sum.golang.org` about them either, and `propagate` asks for an exact version instead of looking up `latest`. On a public host with no specific group and no analyzed repository, list your private modules in `goPrivate`.
 
 ### 3. Watch the first run
 
@@ -121,7 +124,7 @@ kubectl -n holtkeeper logs deploy/holtkeeper-web | grep libraries:
 | `library_source`                                                      | Browsing and reading the library's source at the exact version                                                   |
 | `get_package_api`, `list_versions`, `diff_versions`, `upgrade_impact` | The public API of a version, what changed between versions, and which of your call sites an upgrade breaks (npm) |
 
-Every library tool takes an optional `repo` (`forge:path`, e.g. `work:games/app`). With it, the version defaults to the one that repository uses, so "how does `useQuery` handle retries" is answered for your version, not the newest. Without it, the newest indexed version is used. `ecosystem` is `npm` unless you say `Go`.
+Every library tool takes an optional `repo` (`forge:path`, e.g. `work:games/app`). With it, the version defaults to the one that repository uses, so "how does `useQuery` handle retries" is answered for your version, not the newest. Without it, the newest indexed version is used. `ecosystem` is Go for a module path such as `github.com/acme/lib` and npm otherwise; a Go module path with its `/v2` suffix or a package path inside the module finds the module. Go modules get their package docs (`doc.go` and package comments) besides the README, release notes and changelog from GitHub for `github.com` modules (and vanity paths that point there), and `library_source` reads the exact module zip.
 
 Examples of prompts that use them well:
 

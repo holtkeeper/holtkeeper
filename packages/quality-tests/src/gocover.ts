@@ -18,6 +18,14 @@ export function goFilePath(importPath: string, modules: readonly GoModule[]): st
   return importPath
 }
 
+/** Folder of a Go package relative to the analyzed directory; `undefined` outside `modules`. */
+export function goPackageDir(importPath: string, modules: readonly GoModule[]): string | undefined {
+  const own = modules.find((module) => module.path === importPath)
+  if (own) return own.dir
+  const file = goFilePath(importPath, modules)
+  return file === importPath ? undefined : file
+}
+
 /**
  * Parses a Go cover profile (`go test -coverprofile`). Every block's count is spread over the
  * lines it spans (a line covered by several blocks keeps the highest count). The summary's

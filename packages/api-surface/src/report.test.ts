@@ -66,3 +66,81 @@ test('the report counts documented exports and removals since the previous recor
     'deprecated',
   ])
 })
+
+const geom = (name: string, extra: Partial<ApiPackage> = {}): ApiPackage => ({
+  name,
+  private: false,
+  dir: 'geom',
+  ecosystem: 'Go',
+  module: 'example.com/acme/widgets',
+  entries: [
+    {
+      subpath: '.',
+      symbols: [
+        {
+          name: 'Point.Move',
+          kind: 'function',
+          signature: 'func (p *Point) Move(dx int)',
+          file: 'geom/point.go',
+          line: 3,
+        },
+      ],
+    },
+  ],
+  ...extra,
+})
+
+test('renderPackage tells how to import a Go package and fences Go', () => {
+  const text = renderPackage(geom('example.com/acme/widgets/geom', { version: 'v1.4.0' }))
+  expect(text).toContain('# example.com/acme/widgets/geom@v1.4.0')
+  expect(text).toContain(
+    'Go package of module `example.com/acme/widgets`. Import it with `import "example.com/acme/widgets/geom"` and refer to its names as `geom.Name`',
+  )
+  expect(text).toContain('```go\nfunc (p *Point) Move(dx int)\n```')
+  const internal = renderPackage(geom('example.com/acme/widgets/internal/cache', { private: true }))
+  expect(internal).toContain('only code inside `example.com/acme/widgets` can import it')
+  const diff = renderDiff(diffPackage(geom('example.com/acme/widgets/geom'), undefined))
+  expect(diff).toContain('```go\n')
+})
+
+test('the report says a Go service is internal only', () => {
+  const report = apiSurfaceReport({
+    packages: [geom('gitlab.example/shapes/painter/internal/canvas', { private: true })],
+    go: {
+      modules: [
+        {
+          path: 'gitlab.example/shapes/painter',
+          dir: '.',
+          packages: 0,
+          internalPackages: 1,
+          mainPackages: 2,
+        },
+      ],
+    },
+  })
+  expect(report.sections.map((section) => section.id)).toEqual([
+    'packages',
+    'go-modules',
+    'undocumented',
+  ])
+  const [first] = report.sections[0]?.blocks ?? []
+  expect(first).toEqual({
+    type: 'markdown',
+    text: 'Internal only: 2 main packages, 1 internal package; no Go package here can be imported by other modules.',
+  })
+  const empty = apiSurfaceReport({
+    packages: [],
+    go: {
+      modules: [
+        {
+          path: 'gitlab.example/shapes/painter',
+          dir: '.',
+          packages: 0,
+          internalPackages: 0,
+          mainPackages: 1,
+        },
+      ],
+    },
+  })
+  expect(empty.sections[0]?.blocks).toHaveLength(1)
+})

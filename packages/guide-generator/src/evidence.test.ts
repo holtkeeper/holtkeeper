@@ -1,17 +1,22 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { cp, mkdtemp, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import type { CommitConventions } from '@holtkeeper/commit-conventions'
 import { listFiles } from '@holtkeeper/quality-tests'
 
 import {
   approx,
+  buildTags,
   collectGeneral,
   collectTestIds,
   collectTesting,
   commitsText,
+  golangciSummary,
+  goWorkSummary,
+  includeName,
+  keyTargetsFirst,
   makeTargets,
 } from './evidence.ts'
 
@@ -48,7 +53,7 @@ describe('collectGeneral', () => {
     expect(textOf(items, 'ci')).toBe(
       '.gitlab-ci.yml, stages: check, build\n  lint (check): make lint\n  test (check): make test\n  build (build): make build',
     )
-    expect(textOf(items, 'lint')).toBe('golangci-lint: .golangci.yml')
+    expect(textOf(items, 'lint')).toBe('golangci-lint: .golangci.yml — linters: errcheck, govet')
     expect(textOf(items, 'toolchain')).toContain('go 1.27.2 (from mise.toml)')
     expect(textOf(items, 'layout')).toContain('internal/ (2 files): widget')
     expect(textOf(items, 'docs')).toBe(
@@ -59,6 +64,95 @@ describe('collectGeneral', () => {
 
   test('gives the same evidence for the same checkout', async () => {
     expect(await collectGeneral(dir, files)).toEqual(await collectGeneral(dir, files))
+  })
+})
+
+describe('Go evidence', () => {
+  let goDir = ''
+  beforeAll(async () => {
+    goDir = await mkdtemp(join(tmpdir(), 'guide-go-'))
+    const write = async (file: string, text: string) => {
+      await mkdir(dirname(join(goDir, file)), { recursive: true })
+      await writeFile(join(goDir, file), text)
+    }
+    await write('go.work', 'go 1.24\n\nuse (\n\t./gears // main\n\t./shapes\n)\n')
+    await write('gears/go.mod', 'module example.com/acme/gears\n\ngo 1.24\n')
+    await write('shapes/go.mod', 'module example.com/acme/shapes\n\ngo 1.24\n')
+    await write(
+      'GNUmakefile',
+      'release:\n\tgoreleaser\nlint:\n\t@echo linting\n\tgolangci-lint run ./...\ntest-integration:\n\tgo test -tags=integration ./...\n',
+    )
+    await write(
+      '.golangci.yaml',
+      'version: "2"\nlinters:\n  default: standard\n  enable: [revive, gosec]\nformatters:\n  enable: [gofumpt, goimports]\nrun:\n  build-tags: [integration]\n',
+    )
+    await write(
+      '.gitlab-ci.yml',
+      'include:\n  - project: shapes/ci-templates\n    ref: v3\n    file: [go/lint.yml, go/test.yml]\n  - local: ci/extra.yml\n.go-test:\n  image: golang\ntest:\n  extends: .go-test\n',
+    )
+    await write('docs/adr/0001-gears.md', '# Use gears\n')
+    await write('docs/runbooks/deploy/rollback.md', '# Rollback\n')
+    await write('gears/gear_test.go', '//go:build integration && !windows\n\npackage gears\n')
+    await write('gears/spin_test.go', '//go:build integration || e2e\n\npackage gears\n')
+    await write('shapes/shape_test.go', 'package shapes\n')
+  })
+  afterAll(() => rm(goDir, { recursive: true, force: true }))
+
+  test('general evidence reads go.work, key Makefile targets, golangci-lint, CI includes and doc folders', async () => {
+    const items = await collectGeneral(goDir, await listFiles(goDir))
+    const manifests = textOf(items, 'manifests')
+    expect(manifests).toContain('go.work, go 1.24, use: ./gears, ./shapes')
+    expect(manifests).toContain(
+      'Makefile targets: lint (golangci-lint run ./...), test-integration (go test -tags=integration ./...), release (goreleaser)',
+    )
+    expect(textOf(items, 'lint')).toBe(
+      'golangci-lint: .golangci.yaml — version 2; default standard; linters: revive, gosec; formatters: gofumpt, goimports; build tags: integration',
+    )
+    expect(textOf(items, 'ci')).toContain(
+      'includes: shapes/ci-templates:go/lint.yml+go/test.yml@v3, ci/extra.yml',
+    )
+    expect(textOf(items, 'ci')).toContain('job templates: .go-test')
+    expect(textOf(items, 'ci')).toContain('test: extends .go-test')
+    expect(textOf(items, 'docs')).toContain(
+      'doc folders: docs/adr, docs/runbooks, docs/runbooks/deploy',
+    )
+  })
+
+  test('testing evidence lists the build tags Go test files need', async () => {
+    const items = await collectTesting(goDir, await listFiles(goDir))
+    expect(textOf(items, 'test-setup')).toContain(
+      'Go test files behind build tags (run with go test -tags): integration (2 files), e2e (1 files)',
+    )
+    expect(textOf(items, 'test-scripts')).toContain(
+      'make test-integration: go test -tags=integration ./...',
+    )
+  })
+
+  test('helpers', () => {
+    expect(buildTags('integration && !windows && (linux || e2e) && go1.22')).toEqual([
+      'integration',
+      'e2e',
+    ])
+    expect(goWorkSummary('go 1.23\nuse ./one\n')).toBe('go.work, go 1.23, use: ./one')
+    expect(includeName({ project: 'shapes/ci', file: 'go.yml' })).toBe('shapes/ci:go.yml')
+    expect(includeName({ template: 'Jobs/SAST.gitlab-ci.yml' })).toBe('Jobs/SAST.gitlab-ci.yml')
+    expect(
+      golangciSummary('.golangci.toml', '[linters]\ndisable-all = true\nenable = ["govet"]\n'),
+    ).toBe('default none; linters: govet')
+    expect(
+      golangciSummary('.golangci.json', '{"linters":{"enable-all":true,"disable":["lll"]}}'),
+    ).toBe('default all; disabled: lll')
+    expect(
+      keyTargetsFirst([
+        ['docker', ''],
+        ['build', 'go build'],
+        ['run', ''],
+      ]),
+    ).toEqual([
+      ['build', 'go build'],
+      ['run', ''],
+      ['docker', ''],
+    ])
   })
 })
 
@@ -188,8 +282,10 @@ test('commitsText renders inferred rules without examples or counts', () => {
   ).toBe('')
 })
 
-test('makeTargets reads targets with the first recipe line', () => {
-  expect(makeTargets('.PHONY: a\nbuild:\n\tgo build\nVAR := 1\ncheck: build\n')).toEqual([
+test('makeTargets reads targets with the first recipe line that is not an echo', () => {
+  expect(
+    makeTargets('.PHONY: a\nbuild:\n\t@echo building\n\tgo build\nVAR := 1\ncheck: build\n'),
+  ).toEqual([
     ['build', 'go build'],
     ['check', ''],
   ])

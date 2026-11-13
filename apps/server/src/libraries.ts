@@ -24,6 +24,7 @@ import {
   createGitHubClient,
   defaultLibraryIndexSettings,
   digestOnDemand,
+  goPrivateMatcher,
   goRegistry,
   indexLibraries,
   latestVersions,
@@ -38,6 +39,7 @@ import {
 import { defineSetting } from '@holtkeeper/settings'
 import type {
   AnalysisStore,
+  ConfigStore,
   KvStore,
   LibraryEcosystem,
   LibraryRef,
@@ -53,6 +55,7 @@ import { type ApiCatalog, type RepoFilter, createApiCatalog } from './api-surfac
 import { type UsageIndex, createUsageIndex } from './api-surface/usages.ts'
 import { libraryKeyOf } from './dependencies.ts'
 import { githubReferences, githubUsageFor, resolveGitHubTokens } from './github-usage.ts'
+import { type GoPrivateConfig, type GoPrivateSources, privateGoPatterns } from './go-private.ts'
 import { libraryProgressWriter } from './library-progress.ts'
 
 const intervalPattern = /^([1-9]\d*)(m|h|d)$/
@@ -98,6 +101,11 @@ const librariesSchema = z.object({
   digests: z.boolean().optional(),
   exclude: globSchema.optional(),
   include: globSchema.optional(),
+  /**
+   * Go module path patterns (`GOPRIVATE` syntax) that are private besides the panel forges' hosts:
+   * never asked on the public module proxy, treated as internal.
+   */
+  goPrivate: globSchema.optional(),
   maxVersions: z.number().int().min(1).max(50).optional(),
   firstOfMajor: z.boolean().optional(),
   sources: z
@@ -127,6 +135,7 @@ export const librariesSetting = defineSetting({
 - **digests**: summarize issue threads agents hit with the configured LLM, charged to the AI budget under task kind \`library-digest\`. They run on the fast tier: the newest Haiku the provider lists.
 - **concurrency** (default 3, at most 8): libraries indexed at the same time; a run mostly waits for the network, so a few at once make it several times faster while the GitHub limit lasts.
 - **exclude** / **include**: globs such as \`@types/*\` or \`Go:github.com/acme/**\`; included names are indexed even without uses.
+- **goPrivate**: Go module path patterns in \`GOPRIVATE\` syntax (\`git.example.com\`, \`github.com/acme-private/*\`) that are private. Modules under the host of a forge are private already (on github.com, gitlab.com and bitbucket.org only the top-level groups the forge's groups include and the namespaces of analyzed repositories); private modules are never asked on proxy.golang.org, by the index or by \`go\` in jobs, and count as the organization's own.
 - **sources**: \`repository\`, \`releases\` and \`issues\` are on by default, \`site\` (docs sites) is off.`,
   default: { ...defaultLibraryIndexSettings, interval: DEFAULT_INTERVAL, digests: false },
   schema: librariesSchema,
@@ -153,6 +162,8 @@ export interface LibrariesConfig {
   /** Credential references of the GitHub tokens, without duplicates; every `github` credential when unset. */
   github?: string[]
   digests: boolean
+  /** Go module path patterns that are private, from the setting. */
+  goPrivate: string[]
 }
 
 /** The effective config of a stored value; `undefined` when unset or invalid (nothing is indexed). */
@@ -175,6 +186,7 @@ export function librariesConfig(value: unknown): LibrariesConfig | undefined {
     intervalMs: intervalMs(data.interval ?? DEFAULT_INTERVAL) ?? 86_400_000,
     ...(data.github ? { github: [...new Set(data.github)] } : {}),
     digests: data.digests ?? false,
+    goPrivate: data.goPrivate ?? [],
   }
 }
 
@@ -192,6 +204,18 @@ export function librariesConfigFrom(entries: readonly SettingEntry[]): Libraries
 /** `librariesConfigFrom` over the setting store. */
 export const librariesConfigOf = async (settings: SettingStore) =>
   librariesConfigFrom(await settings.list())
+
+/**
+ * Whether a Go module path is private: `privateGoPatterns` with the `libraries` setting's
+ * `goPrivate`, read once per call.
+ */
+export async function privateGoModules(
+  store: GoPrivateSources & { settings: SettingStore },
+  config: GoPrivateConfig | undefined,
+): Promise<(path: string) => boolean> {
+  const settings = await librariesConfigOf(store.settings)
+  return goPrivateMatcher(await privateGoPatterns(store, config, settings?.goPrivate ?? []))
+}
 
 /** Whether the server indexes libraries: a store with `libraries` and the setting enabled. */
 export const librariesEnabled = (config: LibrariesConfig | undefined) =>
@@ -262,7 +286,8 @@ export interface FleetLibraryUses {
   /**
    * `<ecosystem>:<name>` of packages the fleet defines: workspaces of every repository's newest
    * `depgraph` record (Go modules also without their `/vN` suffix), local packages of `usages`
-   * records and the API catalog's packages. Computed over every repository, whatever `accept` says.
+   * records, the API catalog's packages and Go modules `isPrivateGo` matches. Computed over every
+   * repository, whatever `accept` says.
    */
   internal: Set<string>
   /**
@@ -284,11 +309,16 @@ const ecosystemOf = (value: string): LibraryEcosystem | undefined =>
   value === 'npm' ? 'npm' : value.toLowerCase() === 'go' ? 'Go' : undefined
 
 /**
- * Who uses which library at which exact version, one entry per repository and version: direct
- * dependencies (npm and Go, the resolved version) from the newest `depgraph` record of every
- * repository, and packages the code imports (npm, resolved versions) from the newest `usages`
- * record. Only repositories `accept` allows contribute uses; uses of internal packages stay in
- * `uses`, so callers decide whether to drop them (the index does) or show them as internal.
+ * Who uses which library at which exact version, one entry per repository, module path and
+ * version: direct dependencies (npm and Go, the resolved version) from the newest `depgraph`
+ * record of every repository, and packages the code imports (npm resolved versions; Go modules
+ * the code imports, under their module path with `/vN`, at their `go.mod` versions) from the
+ * newest `usages` record, so a repository whose `depgraph` failed still contributes its imported
+ * Go modules. Go modules the fleet defines (depgraph workspaces, local usages modules other than
+ * `replaced` ones, Go packages of the API catalog) and modules `isPrivateGo` matches count as
+ * internal under their module path and without `/vN`. Only repositories `accept` allows
+ * contribute uses; uses of internal packages stay in `uses`, so callers decide whether to drop
+ * them (the index does) or show them as internal.
  */
 export async function fleetLibraryUses(
   analyses: AnalysisStore,
@@ -297,6 +327,8 @@ export async function fleetLibraryUses(
     /** Reused instead of reading the `usages` and `api-surface` records again. */
     usages?: UsageIndex
     catalog?: ApiCatalog
+    /** Private Go module paths (`privateGoPatterns`), internal even when nothing defines them. */
+    isPrivateGo?: (path: string) => boolean
   } = {},
 ): Promise<FleetLibraryUses> {
   const accept = options.accept ?? (() => true)
@@ -309,13 +341,16 @@ export async function fleetLibraryUses(
     if (!uses.has(key)) uses.set(key, { ecosystem, name, version, repo })
   }
 
+  const markInternal = (ecosystem: LibraryEcosystem, name: string) => {
+    internal.add(`${ecosystem}:${name}`)
+    if (ecosystem === 'Go') internal.add(`Go:${libraryOfModule(name)}`)
+  }
+
   const required = new Map<string, string>()
   for (const { record, data } of (await latestDepgraphs(analyses)).values()) {
     for (const own of definedPackages(data)) {
       const ecosystem = ecosystemOf(own.ecosystem)
-      if (!ecosystem) continue
-      internal.add(`${ecosystem}:${own.name}`)
-      if (ecosystem === 'Go') internal.add(`Go:${libraryOfModule(own.name)}`)
+      if (ecosystem) markInternal(ecosystem, own.name)
     }
     for (const own of ownPackages(data)) {
       const ecosystem = ecosystemOf(own.ecosystem)
@@ -338,17 +373,23 @@ export async function fleetLibraryUses(
     const repo = `${record.repo.forge}:${record.repo.path}`
     const accepted = accept(record.repo)
     for (const pkg of record.data.packages) {
+      const ecosystem = pkg.ecosystem ?? 'npm'
       if (pkg.local) {
-        internal.add(`npm:${pkg.name}`)
+        if (!pkg.replaced) markInternal(ecosystem, pkg.name)
         continue
       }
-      if (!accepted || pkg.name.startsWith('node:')) continue
-      for (const version of pkg.versions) add('npm', pkg.name, version, repo)
+      if (!accepted || (ecosystem === 'npm' && pkg.name.startsWith('node:'))) continue
+      for (const version of pkg.versions) add(ecosystem, pkg.name, version, repo)
     }
   }
 
   const catalog = options.catalog ?? createApiCatalog({ analyses })
-  for (const pkg of await catalog.packages(() => true)) internal.add(`npm:${pkg.name}`)
+  for (const pkg of await catalog.packages(() => true))
+    if (pkg.ecosystem === 'Go') markInternal('Go', pkg.module ?? pkg.name)
+    else internal.add(`npm:${pkg.name}`)
+  if (options.isPrivateGo)
+    for (const use of uses.values())
+      if (use.ecosystem === 'Go' && options.isPrivateGo(use.name)) markInternal('Go', use.name)
   for (const [key, version] of required)
     if (internal.has(key) && !defined.has(key)) defined.set(key, version)
 
@@ -411,7 +452,11 @@ export interface LibraryIndexDeps {
     analyses: AnalysisStore
     settings: SettingStore
     kv?: KvStore
+    /** Panel forges and groups, whose hosts hold private Go modules. */
+    config?: Pick<ConfigStore, 'list'>
   }
+  /** Forges and groups of the config file, for the private Go module patterns. */
+  config?: GoPrivateConfig
   artifacts?: ArtifactStore
   credentials: CredentialSource
   now: () => Date
@@ -431,7 +476,8 @@ export interface LibraryIndexOptions {
 
 /**
  * One indexing run with the current `libraries` setting: uses from `depgraph` and `usages` records,
- * npm and Go registries, GitHub from the setting's credential. Records the run in `store.kv`
+ * npm and Go registries, GitHub from the setting's credential. Private Go modules
+ * (`privateGoPatterns`) are internal: never indexed and never asked on the module proxy. Records the run in `store.kv`
  * (`libraries:last-run`) and returns it; `undefined` when indexing is off or impossible.
  */
 export async function runLibraryIndex(
@@ -455,7 +501,10 @@ export async function runLibraryIndex(
   let run: LibraryIndexRun
   const progress = libraryProgressWriter({ kv: store.kv, now: deps.now })
   try {
-    const { uses, internal } = await fleetLibraryUses(store.analyses)
+    const isPrivateGo = goPrivateMatcher(
+      await privateGoPatterns(store, deps.config, config.goPrivate),
+    )
+    const { uses, internal } = await fleetLibraryUses(store.analyses, { isPrivateGo })
     const github =
       options.github ??
       (await githubClientFor(deps.credentials, config.github, {
@@ -470,11 +519,16 @@ export async function runLibraryIndex(
     const summary = await indexLibraries({
       store: libraries,
       artifacts,
-      registries: options.registries ?? { npm: npmRegistry(), Go: goRegistry() },
+      registries: options.registries ?? {
+        npm: npmRegistry(),
+        Go: goRegistry({ isPrivate: isPrivateGo }),
+      },
       github,
       uses,
       settings: config.index,
-      isInternal: (ref) => internal.has(`${ref.ecosystem}:${ref.name}`),
+      isInternal: (ref) =>
+        internal.has(`${ref.ecosystem}:${ref.name}`) ||
+        (ref.ecosystem === 'Go' && isPrivateGo(ref.name)),
       ...(store.kv ? { latest: latestVersions(store.kv) } : {}),
       ...(config.index.sources.site ? { siteSource: siteSource() } : {}),
       now: deps.now,
@@ -639,6 +693,8 @@ export interface ServerLibraryDocsOptions {
   summarize?: (repo: string | undefined) => Promise<Summarize | undefined>
   /** The organization package a name belongs to (`ownPackageOf`); such names get a pointer to the catalog. */
   ownPackage?: (name: string) => Promise<string | undefined>
+  /** Serves Go module zips for source snapshots; default the public module proxy. */
+  goRegistry?: Pick<LibraryRegistry, 'source'>
 }
 
 /**
@@ -659,7 +715,8 @@ export function ownPackageOf(
 
 /**
  * `libraryDocs` for the MCP endpoint and agents: issue search with live GitHub search (cached in
- * `kv`) and optional digests, and source snapshots made on demand.
+ * `kv`) and optional digests, and source snapshots made on demand (Go from the module zip, else
+ * GitHub).
  */
 export function serverLibraryDocs(options: ServerLibraryDocsOptions): LibraryDocs {
   const { libraries: store, artifacts } = options
@@ -682,7 +739,12 @@ export function serverLibraryDocs(options: ServerLibraryDocsOptions): LibraryDoc
       })(input, caller)
     },
     async source(ref, version) {
-      snapshots ??= sourceSnapshots({ store, artifacts, github: await github() })
+      snapshots ??= sourceSnapshots({
+        store,
+        artifacts,
+        github: await github(),
+        registries: { Go: options.goRegistry ?? goRegistry() },
+      })
       return snapshots(ref, version)
     },
   })

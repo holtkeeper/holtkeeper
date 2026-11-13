@@ -15,6 +15,7 @@ import {
 
 import {
   type CreateRunner,
+  type RunnerFactoryOptions,
   type ToolchainFor,
   runnerFactory,
   startOnFirstRun,
@@ -123,6 +124,10 @@ export interface ContextFactoryOptions {
   createRunner?: CreateRunner
   /** Default: `detectToolchain` from `@holtkeeper/toolchain`. */
   detectToolchain?: (dir: string) => Promise<Toolchain>
+  /** Variables for job commands behind an egress proxy; see `RunnerFactoryOptions.egressEnv`. */
+  egressEnv?: RunnerFactoryOptions['egressEnv']
+  /** Variables for every job command, with or without a proxy; see `RunnerFactoryOptions.jobEnv`. */
+  jobEnv?: RunnerFactoryOptions['jobEnv']
   /** Shared between runs and handed to every analyzer as `context.cache`. */
   cache?: RunCache
 }
@@ -189,6 +194,8 @@ export function createContextFactory(factory: ContextFactoryOptions): ContextFor
     ...(factory.toolchainFor && { toolchainFor: factory.toolchainFor }),
     ...(factory.createRunner && { createRunner: factory.createRunner }),
     ...(factory.detectToolchain && { detect: factory.detectToolchain }),
+    ...(factory.egressEnv && { egressEnv: factory.egressEnv }),
+    ...(factory.jobEnv && { jobEnv: factory.jobEnv }),
   })
 
   const forges = new Map<string, GitForge>()

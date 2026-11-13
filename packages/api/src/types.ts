@@ -1,6 +1,6 @@
 import type { Action, Grant, GroupMatch, Principal, Role, Scope } from '@holtkeeper/access'
 import type { TranscriptLine } from '@holtkeeper/agent'
-import type { ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
+import type { ApiEcosystem, ApiPackage, ApiSymbol, PackageDiff } from '@holtkeeper/api-surface'
 import type {
   AssetKind,
   AssetProblem,
@@ -105,6 +105,7 @@ import type {
   FoundSite,
   TypeResolution,
   UpgradeImpact,
+  UsageEcosystem,
   UsedExport,
 } from '@holtkeeper/usages'
 import type { AllowlistEntry, Severity } from '@holtkeeper/vuln'
@@ -2823,7 +2824,8 @@ export interface EgressRule {
 /**
  * `GET /api/egress/rules` with `Authorization: Bearer <server.egress.secret>`: the rules for the
  * panel GitLab forges (all but those with `packages: false`), carrying their credential's current
- * token, and one replacement rule per host of every `egress-secret` credential. Never cache it
+ * token: package registry reads, and read-only git fetches and `go get` discovery (never pushes);
+ * then one replacement rule per host of every `egress-secret` credential. Never cache it
  * longer than a minute: rotation revokes the previous token at once. `cache` lists the private
  * cache rules of forges with `cachePackages`: their package files, downloaded with the token.
  */
@@ -4151,10 +4153,15 @@ export interface PublicApiPackageRemoval {
 
 /** A package as the newest `api-surface` record of its repository describes it. */
 export interface PublicApiPackageSummary {
+  /** npm package name, or for Go the full import path of the package. */
   name: string
   version?: string
   description?: string
   private: boolean
+  /** Absent for npm. */
+  ecosystem?: ApiEcosystem
+  /** Go only: module path that owns the package, with its `/vN` suffix. */
+  module?: string
   repo: RepoRef
   /** Folder of the package in the repository. */
   dir: string
@@ -4214,8 +4221,18 @@ export interface PublicApiPackageList {
 
 /** One recorded version of a package. */
 export interface PublicApiVersion {
-  /** The package's `version`, or the ref when it has none. */
+  /**
+   * The package's `version`, or the ref when it has none; Go packages carry only versions from
+   * module tags, else `head`.
+   */
   version: string
+  /** Absent for npm. */
+  ecosystem?: ApiEcosystem
+  /**
+   * Go only, set when the version belongs to another major of the module (`/v2` and so on): the
+   * package's import path at that version. Go versions of all majors are listed together.
+   */
+  package?: string
   /** Release the record describes; absent for the default branch. */
   ref?: string
   /** The newest default branch run, which may hold unreleased changes. */
@@ -4252,6 +4269,8 @@ export interface PublicApiDiff {
 export interface PublicApiSymbolHit {
   package: string
   version?: string
+  /** Absent for npm. */
+  ecosystem?: ApiEcosystem
   repo: RepoRef
   subpath: string
   /** What code imports it from, e.g. `@acme/ui/button`. */
@@ -4292,6 +4311,8 @@ export interface PublicApiSymbolChange {
 export interface PublicApiSymbol {
   package: string
   version?: string
+  /** Absent for npm. */
+  ecosystem?: ApiEcosystem
   repo: RepoRef
   /** Release the record describes; absent for a default branch run. */
   ref?: string
@@ -4335,7 +4356,12 @@ export interface PackageUsageRepo {
 
 /** `GET /api/api-surface/usages/package?name=`: who uses a package and which parts of it. */
 export interface PackageUsageView {
+  /** npm package name, or Go module path when the query named a module or one of its packages. */
   name: string
+  /** Absent for npm. */
+  ecosystem?: UsageEcosystem
+  /** Go only, set when the query named a package inside the module: its directory, `./sub/pkg`. */
+  subpath?: string
   /** Versions in use across repositories, highest first. */
   versions: string[]
   repos: PackageUsageRepo[]
@@ -4356,6 +4382,8 @@ export interface UsageSitesView {
 /** A package one repository uses, as `GET /api/api-surface/usages/repo` lists them. */
 export interface RepoPackageView {
   name: string
+  /** Absent for npm. */
+  ecosystem?: UsageEcosystem
   versions: string[]
   ranges: string[]
   /** The repository defines the package itself. */
@@ -4379,6 +4407,8 @@ export interface RepoUsageView {
 export interface PublishedPackageView {
   name: string
   version?: string
+  /** Absent for npm. */
+  ecosystem?: ApiEcosystem
   description?: string
   private: boolean
   /** Folder of the package in the repository. */

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import type { GraphLayer, GraphSource } from '@holtkeeper/depgraph'
+import { type GraphLayer, type GraphSource, PartialLoadError } from '@holtkeeper/depgraph'
 import { localRunner, runChecked } from '@holtkeeper/exec'
 import type { CommandRunner } from '@holtkeeper/exec'
 
@@ -22,11 +22,15 @@ export interface GoSourceOptions {
  */
 export const goEnv: Readonly<Record<string, string>> = { GOTOOLCHAIN: 'local', GOFLAGS: '-mod=mod' }
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
 /**
  * Go modules: a `workspaces` layer from `go.work` (or every `go.mod` in the tree when there is
  * none) and a `packages` layer from `go mod graph`: one for the whole `go.work`, or one per module
- * otherwise, since separate modules are separate builds. `go mod graph` may download module
- * metadata and, with `-mod=mod`, update `go.mod`/`go.sum`, so run it on a disposable checkout.
+ * otherwise, since separate modules are separate builds. The `workspaces` layer needs no `go`
+ * command, so when `go mod graph` fails `load` throws `PartialLoadError` with that layer and the
+ * `packages` layers that did load. `go mod graph` may download module metadata and, with
+ * `-mod=mod`, update `go.mod`/`go.sum`, so run it on a disposable checkout.
  */
 export function goSource(options: GoSourceOptions = {}): GraphSource {
   const { runner = localRunner, depth = 4, timeoutMs } = options
@@ -49,21 +53,48 @@ export function goSource(options: GoSourceOptions = {}): GraphSource {
       const work = Bun.file(join(dir, 'go.work'))
       if (await work.exists()) {
         const modules = await readGoModules(dir, parseGoWork(await work.text()))
-        const output = await graph(dir, { GOWORK: join(dir, 'go.work') })
+        const workspaces: GraphLayer = {
+          id: 'workspaces',
+          source: 'go.work',
+          graph: goWorkspaceGraph(modules),
+        }
+        let output: string
+        try {
+          output = await graph(dir, { GOWORK: join(dir, 'go.work') })
+        } catch (error) {
+          throw new PartialLoadError([workspaces], [messageOf(error)])
+        }
         return [
-          { id: 'workspaces', source: 'go.work', graph: goWorkspaceGraph(modules) },
+          workspaces,
           { id: 'packages', source: 'go mod graph', graph: parseGoModGraph(output, modules) },
         ]
       }
       const modules = await readGoModules(dir, await findGoModules(dir, depth))
-      const packages = await Promise.all(
-        modules.map(async (module): Promise<GraphLayer> => ({
-          id: 'packages',
-          source: modules.length === 1 ? 'go mod graph' : `go mod graph (${module.dir})`,
-          graph: parseGoModGraph(await graph(join(dir, module.dir), { GOWORK: 'off' }), modules),
-        })),
+      const results = await Promise.all(
+        modules.map(async (module) => {
+          const source = modules.length === 1 ? 'go mod graph' : `go mod graph (${module.dir})`
+          try {
+            const output = await graph(join(dir, module.dir), { GOWORK: 'off' })
+            const layer: GraphLayer = {
+              id: 'packages',
+              source,
+              graph: parseGoModGraph(output, modules),
+            }
+            return { layer }
+          } catch (error) {
+            return {
+              error: modules.length === 1 ? messageOf(error) : `${module.dir}: ${messageOf(error)}`,
+            }
+          }
+        }),
       )
-      return [{ id: 'workspaces', source: 'go.mod', graph: goWorkspaceGraph(modules) }, ...packages]
+      const layers: GraphLayer[] = [
+        { id: 'workspaces', source: 'go.mod', graph: goWorkspaceGraph(modules) },
+        ...results.flatMap((result) => (result.layer ? [result.layer] : [])),
+      ]
+      const errors = results.flatMap((result) => (result.error ? [result.error] : []))
+      if (errors.length) throw new PartialLoadError(layers, errors)
+      return layers
     },
   }
 }

@@ -55,22 +55,49 @@ export interface ApiEntry {
   truncated?: number
 }
 
-/** A package of the checkout and its public API. */
+/** Package ecosystem an `ApiPackage` belongs to; absent on a package means `npm`. */
+export type ApiEcosystem = 'npm' | 'Go'
+
+/**
+ * A package of the checkout and its public API. An npm package is one `package.json`; a Go
+ * package is one package directory, named by its full import path with the single entry `.`.
+ */
 export interface ApiPackage {
   name: string
   version?: string
   description?: string
+  /** npm: `private` in `package.json`. Go: the package sits under an `internal/` directory. */
   private: boolean
-  /** Folder of its `package.json`, relative to the checkout; `.` for the root. */
+  /** Folder of its `package.json` (Go: of the package), relative to the checkout; `.` for the root. */
   dir: string
+  /** Absent for npm packages. */
+  ecosystem?: ApiEcosystem
+  /** Go only: path of the module that owns the package, with its `/vN` suffix. */
+  module?: string
   entries: ApiEntry[]
   /** Files that could not be read or parsed, as `file: message`. */
   problems?: string[]
 }
 
+/** A Go module of the checkout and how many of its packages are importable, internal or `main`. */
+export interface ApiGoModule {
+  /** Module path with its `/vN` suffix. */
+  path: string
+  /** Folder of its `go.mod`, relative to the checkout; `.` for the root. */
+  dir: string
+  version?: string
+  /** Packages outside `internal/` that other modules can import. */
+  packages: number
+  internalPackages: number
+  /** `package main` directories, never listed in `packages`. */
+  mainPackages: number
+}
+
 /** Everything an `api-surface` analysis found; serializable, stored as analysis data. */
 export interface ApiSurfaceData {
   packages: ApiPackage[]
+  /** Go modules found in the checkout; absent when there are none or the analysis predates Go. */
+  go?: { modules: ApiGoModule[] }
 }
 
 const symbolSchema = z.object({
@@ -91,6 +118,8 @@ export const apiSurfaceDataSchema: z.ZodType<ApiSurfaceData> = z.object({
       description: z.string().optional(),
       private: z.boolean(),
       dir: z.string(),
+      ecosystem: z.enum(['npm', 'Go']).optional(),
+      module: z.string().optional(),
       entries: z.array(
         z.object({
           subpath: z.string(),
@@ -102,6 +131,20 @@ export const apiSurfaceDataSchema: z.ZodType<ApiSurfaceData> = z.object({
       problems: z.array(z.string()).optional(),
     }),
   ),
+  go: z
+    .object({
+      modules: z.array(
+        z.object({
+          path: z.string(),
+          dir: z.string(),
+          version: z.string().optional(),
+          packages: z.number(),
+          internalPackages: z.number(),
+          mainPackages: z.number(),
+        }),
+      ),
+    })
+    .optional(),
 })
 
 /** Counts over a package or a whole analysis. */
