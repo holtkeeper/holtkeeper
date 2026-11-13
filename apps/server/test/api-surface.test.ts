@@ -1682,7 +1682,7 @@ describe('Go packages', () => {
     ])
     expect(upgrade.impact?.affected).toEqual(['work:games/a'])
     expect(upgrade.notes).toEqual([
-      'Go call sites are read without types: methods called on returned values are not seen.',
+      'Go call sites in `work:games/a` (go: syntactic only) were read without types: methods called on values the package returns are not seen there.',
     ])
 
     const who = await callTool('who_uses', { subject: geomModule }, asAdmin)

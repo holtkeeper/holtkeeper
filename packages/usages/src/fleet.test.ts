@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 
-import { declaredMembers, findSites, packageUsage, upgradeImpact, usedByCounts } from './fleet.ts'
+import {
+  addedInterfaceMethods,
+  declaredMembers,
+  findSites,
+  packageUsage,
+  upgradeImpact,
+  usedByCounts,
+} from './fleet.ts'
 import type { UsageSite, UsagesData, UsedExport } from './model.ts'
-import { renderImpact, renderPackageUsage, renderSites } from './render.ts'
+import { impactNotes, renderImpact, renderPackageUsage, renderSites } from './render.ts'
 
 const site = (file: string, extra: Partial<UsageSite> = {}): UsageSite => ({
   file,
@@ -312,6 +319,78 @@ describe('Go usage records', () => {
     })
     expect(grid.items.map((item) => `${item.level}:${item.count}`)).toEqual(['breaking:2'])
     expect(grid.affected.toSorted()).toEqual(['gitlab:shapes/editor', 'gitlab:shapes/viewer'])
+  })
+
+  test('addedInterfaceMethods finds methods an interface only gains', () => {
+    const before = 'type Drawer interface {\n\tfmt.Stringer\n\tDraw(c Canvas) error\n}'
+    expect(
+      addedInterfaceMethods(
+        before,
+        'type Drawer interface {\n\tfmt.Stringer\n\tDraw(c Canvas) error\n\t// Bounds of the shape.\n\tBounds() Rect\n}',
+      ),
+    ).toEqual(['Bounds'])
+    expect(
+      addedInterfaceMethods(
+        before,
+        'type Drawer interface {\n\tfmt.Stringer\n\tDraw(c Canvas, scale int) error\n\tBounds() Rect\n}',
+      ),
+    ).toEqual([])
+    expect(
+      addedInterfaceMethods(
+        'type Rect struct {\n\tMin Point\n}',
+        'type Rect struct {\n\tMin Point\n\tMax Point\n}',
+      ),
+    ).toEqual([])
+  })
+
+  test('an interface that only gains methods breaks no use and is reported as widened', () => {
+    const drawerUse = used('Drawer', [
+      goSite('paint.go', 'type'),
+      goSite('paint.go', 'call', { member: 'Draw' }),
+    ])
+    const typed = goRecord('v1.4.0', [drawerUse])
+    const drawers = [
+      {
+        origin: 'gitlab:shapes/editor',
+        data: { ...typed, types: { status: 'used' as const, sites: 3 } },
+      },
+      { origin: 'gitlab:shapes/viewer', data: goRecord('v1.4.0', [drawerUse]) },
+    ]
+    const impact = upgradeImpact({
+      entries: drawers,
+      package: 'gitlab.example/shapes/libs/geom',
+      changes: [
+        {
+          change: 'changed',
+          subpath: '.',
+          name: 'Drawer',
+          kind: 'type',
+          before: 'type Drawer interface {\n\tDraw(c Canvas) error\n}',
+          after: 'type Drawer interface {\n\tDraw(c Canvas) error\n\tBounds() Rect\n}',
+        },
+      ],
+    })
+    expect(impact.items).toEqual([])
+    expect(impact.affected).toEqual([])
+    expect(impact.widened).toEqual([
+      {
+        name: 'Drawer',
+        subpath: '.',
+        members: ['Bounds'],
+        repos: ['gitlab:shapes/editor', 'gitlab:shapes/viewer'],
+      },
+    ])
+    expect(impact.untyped).toEqual([
+      { origin: 'gitlab:shapes/viewer', reason: 'go: syntactic only' },
+    ])
+    expect(impactNotes(impact)).toEqual([
+      '`gitlab.example/shapes/libs/geom`.Drawer gains `Bounds`: no use of it breaks, but types implementing it outside the library must add it; implementations are not visible here. 2 repositories use it.',
+      'Go call sites in `gitlab:shapes/viewer` (go: syntactic only) were read without types: methods called on values the package returns are not seen there.',
+    ])
+    expect(renderImpact(impact)).toContain(
+      'No analyzed use of gitlab.example/shapes/libs/geom is affected',
+    )
+    expect(renderImpact(impact)).toContain('Drawer gains `Bounds`')
   })
 
   test('declaredMembers lists Go struct fields, embeds and interface methods', () => {

@@ -702,7 +702,7 @@ export function catalogToolset(context: CatalogToolsContext): RegistryToolset {
       defineTool({
         name: 'upgrade_impact',
         description:
-          'What upgrading a package breaks in the repositories that use it: the API diff between two recorded versions joined with their uses. Removed exports and removed members or props of changed declarations are `breaking`, other uses of changed declarations `check`, deprecations `deprecated`; each comes with the affected code. Repositories already on `to` are left out. For Go, pass the package import path; Go uses are read syntactically (no types), so methods called on returned values are not seen.',
+          'What upgrading a package breaks in the repositories that use it: the API diff between two recorded versions joined with their uses. Removed exports and removed members or props of changed declarations are `breaking`, other uses of changed declarations `check`, deprecations `deprecated`; each comes with the affected code. Repositories already on `to` are left out. For Go, pass the package import path; an interface that only gains methods breaks no use, only implementations outside the library, and repositories whose uses were read without the type checker are named.',
         input: z.object({
           package: z.string(),
           from: z.string().optional().describe('Older version; default the release before `to`'),

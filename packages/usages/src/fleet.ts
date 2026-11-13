@@ -342,6 +342,33 @@ export interface UpgradeImpact<Origin = string> {
   affected: Origin[]
   /** Repositories using the package without any affected use. */
   unaffected: Origin[]
+  /**
+   * Go interfaces whose new declaration only adds methods, with the repositories using them. No
+   * use of them breaks, so they are not `items`; types implementing them outside the library must
+   * add `members`, and usage records do not show implementations.
+   */
+  widened?: WidenedInterface<Origin>[]
+  /**
+   * Go: repositories using the package whose newest record was read without the type checker,
+   * so methods called on values the package returns are missing from their uses.
+   */
+  untyped?: UntypedUser<Origin>[]
+}
+
+/** A Go interface an upgrade only adds methods to. */
+export interface WidenedInterface<Origin = string> {
+  name: string
+  subpath: string
+  /** Methods the new declaration adds. */
+  members: string[]
+  /** Repositories using the interface. */
+  repos: Origin[]
+}
+
+/** A repository whose uses were read without types, and why when the record says. */
+export interface UntypedUser<Origin = string> {
+  origin: Origin
+  reason?: string
 }
 
 const memberLine = /^\s*(?:readonly\s+)?(?:get\s+|set\s+)?([A-Za-z_$][\w$]*)\??\s*[:(<]/
@@ -389,6 +416,26 @@ export function declaredMembers(signature: string | undefined): Set<string> {
     }
   }
   return names
+}
+
+const goInterface = new RegExp(`^type\\s+${goIdent}(?:\\[[^\\]]*\\])?\\s+interface\\s*\\{`, 'u')
+
+const bodyLines = (signature: string) =>
+  signature
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('//'))
+
+/**
+ * Methods a Go interface gained when its new declaration keeps every line of the old one and
+ * only adds members; empty for anything else, such as a changed or removed method.
+ */
+export function addedInterfaceMethods(before: string | undefined, after: string | undefined) {
+  if (!before || !after || !goInterface.test(before) || !goInterface.test(after)) return []
+  const kept = new Set(bodyLines(after))
+  if (!bodyLines(before).every((line) => kept.has(line))) return []
+  const old = declaredMembers(before)
+  return [...declaredMembers(after)].filter((name) => !old.has(name))
 }
 
 const sitesLimit = 10
@@ -456,7 +503,9 @@ const firstSegment = (member: string | undefined) =>
  * `importPath(module, subpath)` equals it. A method symbol `Type.Method` matches uses of export
  * `Type` reading member `Method` (method expressions such as `pkg.Type.Method`); removing it is
  * `breaking` for them, changing it `check`. Struct fields and interface methods are members
- * (`declaredMembers`), and keyed composite literal fields are props.
+ * (`declaredMembers`), and keyed composite literal fields are props. An interface that only gains
+ * methods (`addedInterfaceMethods`) breaks no use, only implementations, so it goes to `widened`
+ * instead of `items`. Users whose record ran without the type checker are listed in `untyped`.
  */
 export function upgradeImpact<Origin>(input: {
   entries: readonly UsageEntry<Origin>[]
@@ -470,9 +519,23 @@ export function upgradeImpact<Origin>(input: {
   const usage = go ? onlySubpath(found, found.subpath ?? '.') : found
   const items: ImpactItem<Origin>[] = []
   const affected = new Set<Origin>()
+  const widened: WidenedInterface<Origin>[] = []
 
   for (const change of input.changes) {
     if (change.change === 'added') continue
+    const gained =
+      go && change.change === 'changed' ? addedInterfaceMethods(change.before, change.after) : []
+    if (gained.length) {
+      widened.push({
+        name: change.name,
+        subpath: change.subpath,
+        members: gained,
+        repos: usage.repos
+          .filter((repo) => repo.exports.some((item) => item.name === change.name))
+          .map((repo) => repo.origin),
+      })
+      continue
+    }
     const dot = go ? change.name.indexOf('.') : -1
     if (dot > 0) {
       const item = methodImpact(
@@ -547,12 +610,22 @@ export function upgradeImpact<Origin>(input: {
   }
 
   const rank: Record<ImpactLevel, number> = { breaking: 0, check: 1, deprecated: 2 }
+  const users = new Set(usage.repos.map((repo) => repo.origin))
+  const untyped = go
+    ? input.entries.flatMap(({ origin, data }): UntypedUser<Origin>[] =>
+        users.has(origin) && data.types.status !== 'used'
+          ? [{ origin, ...(data.types.reason ? { reason: data.types.reason } : {}) }]
+          : [],
+      )
+    : []
   return {
     package: input.package,
     ...(found.ecosystem ? { ecosystem: found.ecosystem } : {}),
     items: items.toSorted((a, b) => rank[a.level] - rank[b.level] || b.count - a.count),
     affected: [...affected],
     unaffected: usage.repos.map((repo) => repo.origin).filter((origin) => !affected.has(origin)),
+    ...(widened.length ? { widened } : {}),
+    ...(untyped.length ? { untyped } : {}),
   }
 }
 

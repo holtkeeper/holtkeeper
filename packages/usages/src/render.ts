@@ -101,13 +101,45 @@ export function renderSites<Origin>(
   return lines.join('\n\n')
 }
 
+const namedLimit = 5
+
+const named = (labels: readonly string[]) =>
+  labels.slice(0, namedLimit).join(', ') +
+  (labels.length > namedLimit ? ` and ${labels.length - namedLimit} more` : '')
+
+/**
+ * What an impact cannot show, one sentence each: Go interfaces that only gained methods (their
+ * implementations elsewhere must add them) and users whose uses were read without types.
+ */
+export function impactNotes<Origin>(
+  impact: UpgradeImpact<Origin>,
+  originLabel: (origin: Origin) => string = String,
+): string[] {
+  const notes = (impact.widened ?? []).map((item) => {
+    const methods = item.members.map((member) => `\`${member}\``).join(', ')
+    const name = `\`${importPath(impact.package, item.subpath)}\`.${item.name}`
+    const used = item.repos.length ? ` ${item.repos.length} repositories use it.` : ''
+    return `${name} gains ${methods}: no use of it breaks, but types implementing it outside the library must add ${item.members.length > 1 ? 'them' : 'it'}; implementations are not visible here.${used}`
+  })
+  const untyped = impact.untyped ?? []
+  if (untyped.length)
+    notes.push(
+      `Go call sites in ${named(untyped.map((user) => `\`${originLabel(user.origin)}\`${user.reason ? ` (${user.reason})` : ''}`))} were read without types: methods called on values the package returns are not seen there.`,
+    )
+  return notes
+}
+
 /** What an upgrade breaks, as Markdown for agents planning a migration. */
 export function renderImpact<Origin>(
   impact: UpgradeImpact<Origin>,
   originLabel: (origin: Origin) => string = String,
 ): string {
+  const notes = impactNotes(impact, originLabel)
   if (!impact.items.length)
-    return `No analyzed use of ${impact.package} is affected by these changes${impact.unaffected.length ? ` (${impact.unaffected.length} repositories use the package)` : ''}.`
+    return [
+      `No analyzed use of ${impact.package} is affected by these changes${impact.unaffected.length ? ` (${impact.unaffected.length} repositories use the package)` : ''}.`,
+      ...notes,
+    ].join('\n\n')
   const fence = impact.ecosystem === 'Go' ? 'go' : 'ts'
   const lines = [
     `# Upgrading ${impact.package}`,
@@ -132,5 +164,6 @@ export function renderImpact<Origin>(
       for (const site of repo.sites) lines.push(renderSite(site))
     }
   }
+  if (notes.length) lines.push('', '## Not visible here', ...notes.map((note) => `- ${note}`))
   return lines.join('\n\n')
 }

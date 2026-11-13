@@ -21,6 +21,7 @@ import {
   sameVersion,
 } from '@holtkeeper/libraries'
 import type { LibraryChunk, LibraryEcosystem, LibraryRef } from '@holtkeeper/store'
+import { impactNotes } from '@holtkeeper/usages'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 
@@ -609,10 +610,7 @@ export function dependencyRoutes(deps: ServerDeps, context: DependencyRouteConte
               changes: diff.changes,
               target: to,
             })
-      if (ref.ecosystem === 'Go')
-        notes.push(
-          'Go call sites are read without types: methods called on returned values are not seen.',
-        )
+      notes.push(...impactNotes(result.impact))
     }
     return c.json<DependencyUpgrade>(result)
   })

@@ -133,6 +133,9 @@ export async function impactOfChanges(
   return {
     ...impact,
     items: impact.items.map((item) => ({ ...item, change: { ...item.change, subpath } })),
+    ...(impact.widened
+      ? { widened: impact.widened.map((widened) => ({ ...widened, subpath })) }
+      : {}),
   }
 }
 
@@ -170,7 +173,8 @@ export async function impactOf(
 /**
  * `impactOfChanges` for a Go module whose API is split into packages: each package's changes are
  * joined with the uses of that package only, and the results merge into one impact named `module`.
- * A change's `subpath` becomes the package directory inside the module (`.` for its root package).
+ * A change's `subpath` becomes the package directory inside the module (`.` for its root package),
+ * and so does that of a `widened` interface; `untyped` users merge by repository.
  */
 export async function impactOfGoChanges(
   usages: UsageIndex,
@@ -182,6 +186,8 @@ export async function impactOfGoChanges(
   },
 ): Promise<UpgradeImpact> {
   const items: UpgradeImpact['items'] = []
+  const widened: NonNullable<UpgradeImpact['widened']> = []
+  const untyped = new Map<string, NonNullable<UpgradeImpact['untyped']>[number]>()
   const affected = new Set<string>()
   const users = new Set<string>()
   for (const pkg of input.packages) {
@@ -196,6 +202,8 @@ export async function impactOfGoChanges(
       target: input.target,
     })
     for (const item of impact.items) items.push({ ...item, change: { ...item.change, subpath } })
+    for (const item of impact.widened ?? []) widened.push({ ...item, subpath })
+    for (const user of impact.untyped ?? []) untyped.set(user.origin, user)
     for (const origin of impact.affected) affected.add(origin)
     for (const origin of impact.unaffected) users.add(origin)
   }
@@ -205,5 +213,9 @@ export async function impactOfGoChanges(
     items,
     affected: [...affected].toSorted(),
     unaffected: [...users].filter((origin) => !affected.has(origin)).toSorted(),
+    ...(widened.length ? { widened } : {}),
+    ...(untyped.size
+      ? { untyped: [...untyped.values()].toSorted((a, b) => a.origin.localeCompare(b.origin)) }
+      : {}),
   }
 }
