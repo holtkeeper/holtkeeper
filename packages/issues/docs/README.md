@@ -1,6 +1,6 @@
 # @holtkeeper/issues
 
-The contract for issue trackers: what Holtkeeper reads about a ticket key such as `ABC-123` when a tracker is connected. Release pages and the release MCP tools use it to show a task's title, status and type; without a tracker they show plain keys. Trackers are read-only: nothing here writes to them.
+The contract for issue trackers: what Holtkeeper reads about a ticket key such as `ABC-123` when a tracker is connected. Release pages and the release tools of chat use it to show a task's title, status and type; without a tracker they show plain keys. Trackers are read-only: nothing here writes to them.
 
 ## Public API
 

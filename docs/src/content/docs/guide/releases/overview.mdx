@@ -168,7 +168,7 @@ Releases are off for every repository until someone sets them up.
 it finishes.
 
 :::note
-Holtkeeper never creates a version or starts a deploy on its own. Every step is a person's click, a CI call or an agent with the release scope.
+Holtkeeper never creates a version or starts a deploy on its own. Every step is a person's click, a confirmation in Chat or a CI call. Agents connected over MCP can read how a repository releases (`release_rules`), not its release state, and never run steps.
 :::
 
 ## Announce new versions in Slack
@@ -239,4 +239,4 @@ The impact block needs the new version's API to be read first, so a message can 
 - [Timeline](/guide/releases/timeline/) — one repository's next version, environments and past versions.
 - [Flow setup](/guide/releases/flow-setup/) — branches, versions, gates and environments.
 - [Slack](/guide/settings/slack/) — connect the Slack app.
-- [Agents › Tools](/agents/tools/) — `release_rules`, `release_status` and `release_changes`.
+- [Agents › Tools](/agents/tools/) — `release_rules` for coding agents; release state stays here and in Chat.

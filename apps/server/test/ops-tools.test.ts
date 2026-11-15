@@ -236,14 +236,7 @@ describe('ops toolset', () => {
       grants: [{ scope: { teams: ['shapes'] }, actions: ['analyses:read'] }],
     }
     const toolsets = mcpToolsets({ ops: principalOpsAccess(deps(), reader) } as never)
-    expect(toolsets.find((toolset) => toolset.name === 'ops')?.tools.map((t) => t.name)).toEqual([
-      'jobs',
-      'job_log',
-      'queue_stats',
-      'why_job',
-      'analysis_status',
-      'fleet_health',
-    ])
+    expect(toolsets.map((toolset) => toolset.name)).not.toContain('ops')
   })
 
   test('budget_status adds the forecast and the week split by task kind, analyzer and provider', async () => {

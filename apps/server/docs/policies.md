@@ -17,7 +17,7 @@ Server side of Settings › Policies: policy drafts saved as one change, the lic
 
 ## License policy
 
-`analyzers.licenses` options are the `licenses` analyzer's (see [@holtkeeper/licenses](../../../packages/licenses/docs/README.md)), including `review`, `devDependencies` and `exceptions`. `GET /api/licenses` (and the `license_overview` tool) read the organization's entry, the newest scoped `{ all: true }` (`orgEntry`), and send `review`, `devDependencies` and `exceptions` along with the policy summary (`LicensePolicyRules`); repository rows count `excepted` packages.
+`analyzers.licenses` options are the `licenses` analyzer's (see [@holtkeeper/licenses](../../../packages/licenses/docs/README.md)), including `review`, `devDependencies` and `exceptions`. `GET /api/licenses` (and chat's `license_overview` tool) read the organization's entry, the newest scoped `{ all: true }` (`orgEntry`), and send `review`, `devDependencies` and `exceptions` along with the policy summary (`LicensePolicyRules`); repository rows count `excepted` packages.
 
 ## `POST /api/commit-conventions/check`
 
@@ -33,7 +33,7 @@ Server side of Settings › Policies: policy drafts saved as one change, the lic
 
 - `automaticJobReady` refuses coverage, so webhook, tag and push events and new repositories never queue it; freshness reads the same check once (`automaticJobBlocker`) and decides it `skip` with the reason `the repository has no tests by design` and `repoHealth` leaves coverage heads out of its `freshness` counts; the scheduler leaves it out through `skip`. Manual runs (Run job dialog, MCP `run_job`) still go ahead, and stored records stay readable.
 - `GET /api/repos` sets `RepoSummary.noTests` (`{ reason? }`); `GET /api/coverage/repo` returns `tests` (`RepoCoverageTests`: `expected`, `reason`, the deciding entry's `scope` for callers with `settings:read` on that scope, and `configurable` for callers with `settings:write` on the scope `{ repos: ['forge:path'] }` and on the repository's own entry, plus for them `entryId`, the own entry scoped to exactly `forge:path` whether or not it decides, and `inherited`, what applies without it) whenever tests are off or the caller may change them. A forge-less path entry is never the own entry.
-- Repository health gives coverage the neutral cell `No tests` with the reason (or `by design`), so Home, the Repos page and MCP `repo_health` / `fleet_health` never count it as failing; the hub overview card reads **No tests by design**.
+- Repository health gives coverage the neutral cell `No tests` with the reason (or `by design`), so Home, the Repos page and chat's `analysis_status` / `fleet_health` never count it as failing; the hub overview card reads **No tests by design**.
 - The Guide leaves out its `testing` sections and adds a General policy line; the Guide generator skips `testing`; AI reviews get `tests: false`; write tasks get the policy's `noTests` (no test checks, a prompt line); propagation verifies with `withoutTests`; `createTaskGroup` refuses kind `tests` with 409 `<forge:path> has no tests by design (repo.tests)`, which covers the MCP and chat task tools, and `assertMayRun` refuses the same when a `tests` group proposed earlier is approved or retried.
 - Test ids (`analyzers.testids`) stay as they are.
 

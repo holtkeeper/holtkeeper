@@ -25,7 +25,6 @@ import {
   requestRepository,
   taskJobFinished,
   taskStarted,
-  taskToolsAccess,
 } from '../src/tasks.ts'
 import { writePoolStatus, writeTaskPolicy } from '../src/write-tasks.ts'
 
@@ -905,40 +904,6 @@ describe('propagate fix tasks', () => {
     await setting('tasks.write', { enabled: true })
     expect(await proposePropagateFixes(deps(), oneFix('other:shapes/a'))).toBeUndefined()
     expect(await store.tasks.listGroups()).toEqual([])
-  })
-})
-
-describe('MCP task tools', () => {
-  test('start_task only proposes without the tasks scope, and runs with it', async () => {
-    await setting('tasks.write', { enabled: true })
-    const input = {
-      kind: 'fix' as const,
-      title: 'Fix the widget',
-      prompt: 'Fix it.',
-      repos: ['work:shapes/a'],
-      run: true,
-    }
-    const proposedOnly = await taskToolsAccess(deps(), jane, { mayRun: false }).start(input)
-    expect(proposedOnly).toMatchObject({ started: false, group: { status: 'proposed' } })
-    expect(proposedOnly.reason).toContain('tasks scope')
-
-    const access = taskToolsAccess(deps(), jane, { mayRun: true, client: 'some-agent' })
-    const started = await access.start(input)
-    expect(started).toMatchObject({
-      started: true,
-      group: { status: 'queued', source: { type: 'mcp', client: 'some-agent' } },
-    })
-    expect((await store.jobs.list())[0]?.trigger).toBe('command')
-    expect((await access.status(started.group.tasks[0]!.id))?.id).toBe(started.group.id)
-
-    expect(access.requestReview(started.group.id)).rejects.toThrow('no open merge request')
-    const [job] = await store.jobs.list()
-    await finished(job!, { mergeRequest: { id: 9, url: 'https://gitlab.test/mr/9', draft: true } })
-    expect(await access.requestReview(started.group.id)).toContain('!9')
-    expect((await store.jobs.list({ analyzer: 'review' }))[0]).toMatchObject({
-      options: { mergeRequest: 9, reviewOwn: true },
-      trigger: 'command',
-    })
   })
 })
 

@@ -11,7 +11,7 @@ Analyzers read; **tasks** change code. A task group is one request (a dependency
 
 ```mermaid
 flowchart LR
-  A["Proposed<br/>Chat, MCP, Roll out,<br/>an analyzer"] --> B{"Approved<br/>in the Inbox?"}
+  A["Proposed<br/>Chat, Roll out, API,<br/>an analyzer"] --> B{"Approved<br/>in the Inbox?"}
   B -- Reject --> X["Cancelled"]
   B -- Approve --> C["Running<br/>one task per repository"]
   C --> D["Draft merge request<br/>holtkeeper/id-slug branch"]
@@ -27,9 +27,11 @@ A group has a kind, a title, a prompt or plan (sometimes a ready patch) and its 
 Tasks come from several places:
 
 - **Chat**: ask for a change and turn the answer into a task.
-- **Coding agents** over MCP, with `start_task`.
+- **Ops › Tasks** and the API (`POST /api/task-groups`).
 - **Supply chain › Libraries**: <Ui>Roll out</Ui> an upgrade of a library across the repositories that use it.
 - **Analyzers** that find something they can fix, such as an internal package bump whose checks fail.
+
+Coding agents connected over MCP cannot start or follow task groups; they can read Holtkeeper's review of a task's merge request with `review_status` on its branch. See [Changing code through tasks](/agents/tasks/).
 
 ## Waves
 

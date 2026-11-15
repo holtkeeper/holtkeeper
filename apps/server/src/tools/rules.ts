@@ -52,6 +52,7 @@ import { webPaths } from '@holtkeeper/web-paths'
 import { z } from 'zod'
 
 import { applyingEntry } from '../setting-rules.ts'
+import { type ReleaseRulesAccess, releaseRulesTool } from './releases.ts'
 
 /** Commit conventions as the rules tools read them, for one caller. */
 export interface CommitConventionsAccess {
@@ -193,6 +194,8 @@ export interface RulesAccess {
   proposals?: RuleProposalAccess
   /** `test_ids` and `suggest_test_ids`. */
   testIds?: TestIdsAccess
+  /** `release_rules` (the MCP endpoint; internal agents get it from the `releases` toolset). */
+  releases?: ReleaseRulesAccess
 }
 
 const repoArg = z.string().min(1).describe('The repository, as forge:path')
@@ -499,7 +502,8 @@ function commitTools(access: CommitConventionsAccess): RegistryTool[] {
 /**
  * The `rules` toolset: `repo_rules` (with `guide`), `propose_rule_change` (with `proposals`),
  * `commit_conventions` and `check_commit_message` (with `commits`), `test_ids` and
- * `suggest_test_ids` (with `testIds`), over the repositories `access` lets the caller read.
+ * `suggest_test_ids` (with `testIds`) and `release_rules` (with `releases`), over the repositories
+ * `access` lets the caller read.
  * `undefined` when `access` has no part.
  */
 export function rulesToolset(access: RulesAccess): RegistryToolset | undefined {
@@ -508,6 +512,7 @@ export function rulesToolset(access: RulesAccess): RegistryToolset | undefined {
     ...(access.proposals ? proposalTools(access.proposals) : []),
     ...(access.commits ? commitTools(access.commits) : []),
     ...(access.testIds ? testIdTools(access.testIds) : []),
+    ...(access.releases ? [releaseRulesTool(access.releases)] : []),
   ]
   if (!tools.length) return undefined
   const instructions = [
@@ -531,6 +536,11 @@ export function rulesToolset(access: RulesAccess): RegistryToolset | undefined {
     ...(access.testIds
       ? [
           'For end-to-end tests and new UI, test_ids gives the test id convention and existing ids, and suggest_test_ids proposes ids for a file.',
+        ]
+      : []),
+    ...(access.releases
+      ? [
+          'release_rules explains how a repository releases: branches, tag format and how commits bump the version.',
         ]
       : []),
   ]

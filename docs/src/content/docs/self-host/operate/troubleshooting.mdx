@@ -56,7 +56,7 @@ The body has a `status` (`unavailable` or `draining`) and, per check, `ok` or th
 
 **Settings › System shows "no worker reported in 15 minutes".** No worker is running, or none reaches the store. Check the worker pods or the `worker` service and their logs.
 
-**Workers run, the queue stays high.** Look at a waiting job's reason in the panel, or ask `why_job` over MCP. Common reasons:
+**Workers run, the queue stays high.** Look at a waiting job's reason in the panel, or ask Chat why the job waits (its `why_job` tool). Common reasons:
 
 - the job's forge or AI credential is at its rate or concurrency limit (`holtkeeper_limiter_saturated`);
 - another job of the same analyzer, or an analyzer that changes the repository, is running on that repository;

@@ -159,7 +159,7 @@ Ideas next: a task engine (queue, scheduler, workspace clones) so analyses run o
 ## Interfaces
 
 - **Web panel** — the primary interface for people. _Started: Home, audit reports, repositories, credentials, settings, users, history, automation, releases._
-- **MCP** — the interface for AI agents: package APIs, usages, library docs, knowledge, commit conventions (`POST /mcp`, see [apps/server](../apps/server/docs/README.md)).
+- **MCP** — the interface for developers' AI agents: package APIs, usages, library docs, knowledge, repository rules and commit conventions, and the review state of their merge requests (`POST /mcp`, see [apps/server](../apps/server/docs/README.md)); see [MCP for developers](#mcp-for-developers) for open points.
 - **CLI** — only the server's entrypoint: `holtkeeper serve` (the Helm chart's command) and `holtkeeper users` for operator account tasks such as an agent's login link ([agent-access.md](agent-access.md)).
 - **Server** — webhook intake, scheduler, queue, API for the web app and bot. _Started: API for audits, repositories, credentials, settings and history; audit ingestion; credential rotation._
 - **Chat bot** — notifications, confirmation buttons (release, allowlist), commands (`/holtkeeper release games/app-x`), replies in threads. Slack first, the rest through Chat SDK adapters. _Started: [@holtkeeper/chat](../packages/chat/docs/README.md) with commands, cards, forms and the merge request surface; `release`, `verify` and `jobs.commands` run through it; the Slack integration was removed for now and will come back differently: its stored app credential and the Block Kit rendering in [@holtkeeper/chat-slack](../packages/chat-slack/docs/README.md) remain, and the Slack app marks merge request links in bound channels with a review status emoji ([Slack review status](../apps/server/docs/slack.md))._
@@ -211,6 +211,14 @@ After milestone 0 every next milestone is immediately useful at work: plug it in
 - Where the server is hosted and where tasks run: a dedicated machine/container or GitLab CI runners (then the CLI mode stays primary for a long time).
 - Authentication: a bot account with a PAT, a GitLab group access token or an OAuth app (GitHub App) — this determines permissions and API limits.
 - Web interface access: is SSO via GitLab OAuth enough?
+
+### MCP for developers
+
+The MCP endpoint serves developers at work in one repository: read tools plus two reviewed proposals (`propose_knowledge`, `propose_rule_change`), and `review_status` for their merge requests. Open points:
+
+- **Token scopes `release` and `tasks`.** The API still accepts them and old tokens keep them, but no MCP tool uses them and Account › Connect agents no longer offers them. Remove them from `McpTokenScope`, the stored tokens and the docs, or keep them in case write tools come back.
+- **Task merge requests.** `task_status` left MCP; `review_status` on the task's branch covers the review but not the CI status or the task group's spend. Decide whether `review_status` should show the pipeline status of the head.
+- **Agents in review threads.** Let a developer's agent answer Holtkeeper's review threads (explain why a finding is wrong, or say it is fixed) and get Holtkeeper's answer. Open: whether the agent posts through the developer's own forge access (honest authorship, Holtkeeper already answers replies) or through a Holtkeeper write tool (posts as the bot, which Holtkeeper ignores today); how agent-written replies are marked so 👍/👎 counts, review quality and review learnings keep measuring people; and how an agent waits for a review (`wait` on `review_status`, an MCP prompt) since MCP cannot wake it.
 
 ## Decisions
 

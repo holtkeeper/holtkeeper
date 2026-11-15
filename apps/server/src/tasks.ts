@@ -1,5 +1,4 @@
 import { type Principal, type RepoTarget, can } from '@holtkeeper/access'
-import { ToolError } from '@holtkeeper/agent-tools'
 import type { AgentTaskGroupView, AgentTaskView, ForbiddenError } from '@holtkeeper/api'
 import { type TaskCardMergeRequest, taskCard, taskSteps } from '@holtkeeper/chat'
 import type { RepoRef } from '@holtkeeper/forge'
@@ -32,22 +31,13 @@ import {
 } from '@holtkeeper/write-task'
 import { z } from 'zod'
 
-import {
-  type ServerDeps,
-  forgeFor,
-  teamLabeler,
-  repoKey,
-  repoTarget,
-  ForbiddenToolError,
-} from './context.ts'
-import { REVIEW_ANALYZER, commentsOffFor } from './mr-comments.ts'
+import { type ServerDeps, forgeFor, teamLabeler, repoKey, repoTarget } from './context.ts'
 import type { ReadOnlyRepos } from './read-only.ts'
-import type { TaskToolsAccess } from './tools/tasks.ts'
 import { canSeeCatalog, crossTeamPolicy } from './visibility.ts'
 import { tasksWriteSettings, weeklyWriteSpend } from './write-tasks.ts'
 
 /** Kinds of agent tasks, in the order forms list them. */
-export const agentTaskKinds = [
+const agentTaskKinds = [
   'fix',
   'port',
   'upgrade',
@@ -1272,106 +1262,4 @@ export function canSeeGroup(
       can(principal, 'repos:read', { kind: 'repo', repo: repoTarget(deps.config, repo) })
     )
   })
-}
-
-/** The group of a group id or of a task id, when `principal` may see it (`canSeeGroup`). */
-async function findGroup(deps: TaskDeps, principal: Principal, id: string) {
-  const task = id.startsWith('g') ? undefined : await deps.store.tasks.get(id)
-  const group = await deps.store.tasks.getGroup(task?.groupId ?? id)
-  return group && canSeeGroup(deps, principal, group) ? { group, task } : undefined
-}
-
-/**
- * The `tasks` tools for one MCP caller. `start_task` proposes a group (source `mcp`) and, when
- * `mayRun` (a token with the `tasks` scope) and asked to run, approves it as a `command` (an
- * interactive run for the owner); refusals keep the proposal and say why. `request_review` queues
- * a `review` job for the merge request of one of the group's tasks and needs `tasks:run` on its
- * repository plus `mayRun`.
- */
-export function taskToolsAccess(
-  deps: TaskDeps,
-  principal: Principal,
-  options: { mayRun: boolean; client?: string },
-): TaskToolsAccess {
-  const status = async (id: string) => {
-    const found = await findGroup(deps, principal, id)
-    if (!found) return undefined
-    await refreshTaskGroup(deps, found.group.id).catch(() => {})
-    const current = (await deps.store.tasks.getGroup(found.group.id)) ?? found.group
-    return groupView(deps, principal, current)
-  }
-  return {
-    async start(input) {
-      try {
-        const proposed = await createTaskGroup(
-          deps,
-          principal,
-          { kind: input.kind, title: input.title, prompt: input.prompt, repos: input.repos },
-          {
-            source: { type: 'mcp', ...(options.client && { client: options.client }) },
-            trigger: 'command',
-          },
-        )
-        if (!input.run) return { group: proposed, started: false }
-        if (!options.mayRun)
-          return {
-            group: proposed,
-            started: false,
-            reason: 'this token cannot run tasks (needs the tasks scope)',
-          }
-        try {
-          return {
-            group: await approveTaskGroup(deps, principal, proposed.id, 'command'),
-            started: true,
-          }
-        } catch (error) {
-          if (!(error instanceof TaskError)) throw error
-          return { group: proposed, started: false, reason: error.message }
-        }
-      } catch (error) {
-        if (error instanceof TaskError)
-          throw error.missing
-            ? new ForbiddenToolError(error.message, error.missing.action, error.missing.target)
-            : new ToolError(error.message)
-        throw error
-      }
-    },
-    status,
-    async requestReview(id, repo) {
-      const found = await findGroup(deps, principal, id)
-      if (!found) throw new ToolError(`No task ${id} you may see.`)
-      const tasks = await deps.store.tasks.list({ groupIds: [found.group.id] })
-      const task =
-        found.task ??
-        (repo
-          ? tasks.find((each) => each.repo === repo)
-          : tasks.length === 1
-            ? tasks[0]
-            : undefined)
-      if (!task) throw new ToolError('Pass the repository (forge:path) of the task to review.')
-      if (!task.mergeRequest || task.status !== 'mr-open')
-        throw new ToolError(`The task in ${task.repo} has no open merge request.`)
-      const target = targetOf(deps, task.repo)
-      if (!options.mayRun || !(await canRunTask(deps, principal, target)))
-        throw new ForbiddenToolError(
-          `You may not request reviews in ${task.repo} (needs tasks:run).`,
-          'tasks:run',
-          task.repo,
-        )
-      if (await commentsOffFor(deps.store, deps.config, target))
-        throw new ToolError(
-          `Merge request reviews are off in ${task.repo} (mergeRequests.comments).`,
-        )
-      const job = await deps.store.jobs.enqueue({
-        analyzer: REVIEW_ANALYZER,
-        repo: target,
-        options: { mergeRequest: task.mergeRequest.id, reviewOwn: true, force: true },
-        trigger: 'command',
-        createdAt: deps.now().toISOString(),
-        actor: principal.id,
-        reason: `review of task ${task.id}`,
-      })
-      return `Queued review job ${job.id} for !${task.mergeRequest.id} in ${task.repo}.`
-    },
-  }
 }

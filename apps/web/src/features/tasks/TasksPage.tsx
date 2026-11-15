@@ -579,7 +579,7 @@ export function TasksPage() {
             description={
               all.length
                 ? 'Change the scope, the view or the filters to see more task groups.'
-                : 'Tasks start from a chat task card, Roll out on a dependency upgrade or the MCP start_task tool.'
+                : 'Tasks start from a chat task card or Roll out on a dependency upgrade.'
             }
           />
         ) : (

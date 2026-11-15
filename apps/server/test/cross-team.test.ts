@@ -17,7 +17,9 @@ import { builtinAnalyses } from '../src/analyses.ts'
 import { createApiCatalog } from '../src/api-surface/catalog.ts'
 import { createUsageIndex } from '../src/api-surface/usages.ts'
 import { createApp } from '../src/app.ts'
-import { agentCatalogContext } from '../src/tools/registry.ts'
+import { repoTarget } from '../src/context.ts'
+import { agentCatalogContext, storedStackTools } from '../src/tools/registry.ts'
+import { stackToolset } from '../src/tools/stack.ts'
 import { parseSubject } from '../src/tools/who-uses.ts'
 import {
   canReadShared,
@@ -269,6 +271,9 @@ describe('grant matrix', () => {
   })
 })
 
+const shapesOnly = (other: { forge: string; path: string }) =>
+  repoTarget(config, other).teams.includes('shapes')
+
 describe('MCP cross-team tools', () => {
   test('who_uses lists teams, repositories and versions', async () => {
     const result = await callTool('who_uses', { subject: 'npm:widget-kit' }, asShapes)
@@ -286,15 +291,22 @@ describe('MCP cross-team tools', () => {
     expect(result.text).not.toContain('colors/red')
   })
 
-  test('stack_usage narrows to a release line and names end of life', async () => {
-    const result = await callTool('stack_usage', { tool: 'node', version: '18' }, asShapes)
-    expect(result.text).toContain('## team shapes')
-    expect(result.text).toContain(
-      '- `work:shapes/circle` 18 in `.nvmrc` (version-file), end of life',
-    )
-    expect(result.text).not.toContain('colors/red')
-    const missing = await callTool('stack_usage', { tool: 'deno' }, asShapes)
-    expect(missing.text).toContain('Known tools: node')
+  test('stack_usage narrows to a release line and names end of life; MCP leaves it out', async () => {
+    const usage = stackToolset(
+      storedStackTools(store.analyses, {
+        canRead: shapesOnly,
+        canDetail: shapesOnly,
+        teamsOf: (other) => repoTarget(config, other).teams,
+      }),
+    ).tools.find((tool) => tool.name === 'stack_usage')!
+    const ctx = { dir: '.', signal: new AbortController().signal }
+    const result = await usage.run({ tool: 'node', version: '18' }, ctx)
+    expect(result).toContain('## team shapes')
+    expect(result).toContain('- `work:shapes/circle` 18 in `.nvmrc` (version-file), end of life')
+    expect(result).not.toContain('colors/red')
+    expect(await usage.run({ tool: 'deno' }, ctx)).toContain('Known tools: node')
+    const viaMcp = await callTool('stack_usage', { tool: 'node' }, asShapes)
+    expect(viaMcp.text).toContain('Tool stack_usage not found')
   })
 
   test('repo_stack shows runtimes, conventions and key dependencies', async () => {

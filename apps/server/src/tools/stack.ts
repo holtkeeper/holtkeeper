@@ -1,4 +1,9 @@
-import { type RegistryToolset, ToolError, defineTool } from '@holtkeeper/agent-tools'
+import {
+  type RegistryTool,
+  type RegistryToolset,
+  ToolError,
+  defineTool,
+} from '@holtkeeper/agent-tools'
 import type { StackTeamView, StackUse } from '@holtkeeper/api'
 import type { RepoRef } from '@holtkeeper/forge'
 import { z } from 'zod'
@@ -182,37 +187,49 @@ const parseRepo = (value: string): RepoRef | undefined => {
   return { forge: value.slice(0, separator), path: value.slice(separator + 1) }
 }
 
+/** `stack_usage`: which repositories use a tool, at which versions, across the fleet. */
+function stackUsageTool(context: StackToolsContext): RegistryTool {
+  return defineTool({
+    name: 'stack_usage',
+    description:
+      'Which repositories use a runtime, package manager, base image or chart (node, go, pnpm, postgres, an image name), at which versions and release lines, grouped by team with end-of-life status. Narrow with `version` (a version or release line such as 20).',
+    input: z.object({
+      tool: z.string().min(1).describe('Tool id or name: node, go, pnpm, an image name'),
+      version: z.string().min(1).optional().describe('Version or release line, e.g. 20'),
+    }),
+    run: async ({ tool, version }) =>
+      renderStackUsage(stackUseRows(await context.views()), context.ownerOf, {
+        tool,
+        version,
+      }),
+    subject: ({ tool }) => tool,
+  })
+}
+
 /**
  * The `stack` toolset over the newest stack records: `stack_usage` (which repositories use a
  * runtime, image or tool, at which versions, with end-of-life status) and `repo_stack` (one
  * repository's runtimes, images, conventions status and key dependencies). Read-only, deterministic,
- * limited to what `context` lets the caller see; every row names its team.
+ * limited to what `context` lets the caller see; every row names its team. With `fleet: false`
+ * only `repo_stack` (people's MCP clients need one repository, not the fleet).
  */
-export function stackToolset(context: StackToolsContext): RegistryToolset {
+export function stackToolset(
+  context: StackToolsContext,
+  options: { fleet?: boolean } = {},
+): RegistryToolset {
+  const fleet = options.fleet ?? true
   return {
     name: 'stack',
-    instructions: [
-      'Holtkeeper records which runtimes, package managers, base images and charts every repository',
-      'uses: stack_usage shows who uses a tool at which version with end-of-life status (copy what',
-      'the organization already uses when writing a Dockerfile or CI config); repo_stack shows one',
-      'repository’s stack, conventions status and key dependencies.',
-    ].join(' '),
+    instructions: fleet
+      ? [
+          'Holtkeeper records which runtimes, package managers, base images and charts every repository',
+          'uses: stack_usage shows who uses a tool at which version with end-of-life status (copy what',
+          'the organization already uses when writing a Dockerfile or CI config); repo_stack shows one',
+          'repository’s stack, conventions status and key dependencies.',
+        ].join(' ')
+      : 'repo_stack shows one repository’s runtimes, images, conventions status and key dependencies.',
     tools: [
-      defineTool({
-        name: 'stack_usage',
-        description:
-          'Which repositories use a runtime, package manager, base image or chart (node, go, pnpm, postgres, an image name), at which versions and release lines, grouped by team with end-of-life status. Narrow with `version` (a version or release line such as 20).',
-        input: z.object({
-          tool: z.string().min(1).describe('Tool id or name: node, go, pnpm, an image name'),
-          version: z.string().min(1).optional().describe('Version or release line, e.g. 20'),
-        }),
-        run: async ({ tool, version }) =>
-          renderStackUsage(stackUseRows(await context.views()), context.ownerOf, {
-            tool,
-            version,
-          }),
-        subject: ({ tool }) => tool,
-      }),
+      ...(fleet ? [stackUsageTool(context)] : []),
       defineTool({
         name: 'repo_stack',
         description:

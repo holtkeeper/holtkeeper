@@ -6,7 +6,7 @@ import type { Job, Store } from '@holtkeeper/store'
 import { repoTarget } from './context.ts'
 
 /** The built-in review analyzer, which `mergeRequests.comments` keeps off merge requests. */
-export const REVIEW_ANALYZER = 'review'
+const REVIEW_ANALYZER = 'review'
 
 /**
  * Whether `kind` reviews merge requests: the built-in `review` or the analyzer the `review`

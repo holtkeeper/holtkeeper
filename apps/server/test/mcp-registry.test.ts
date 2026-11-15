@@ -166,6 +166,44 @@ describe('mcpToolsets', () => {
     expect(rules?.instructions).toStartWith('Call repo_rules before changing code in a repository')
   })
 
+  test('offers no write tools besides the proposals, and no fleet, ops or release state', () => {
+    const toolsets = mcpToolsets({
+      ...base,
+      guide: { resolve: async () => undefined },
+      proposals: { propose: async () => undefined },
+      releases: {
+        repoOf: () => undefined,
+        settings: async () => ({}),
+        guide: async () => '',
+        status: async () => ({}),
+        changes: async () => ({}),
+        steps: { preview: async () => ({}), run: async () => ({}) },
+      },
+      reviews: { status: async () => ({}) },
+      stack: { views: async () => [], ownerOf: () => [] },
+      ops: {},
+      tasks: {},
+    } as never)
+    expect(toolsets.map((toolset) => toolset.name)).toEqual([
+      'catalog',
+      'stack',
+      'knowledge',
+      'rules',
+      'reviews',
+    ])
+    const tools = toolsets.flatMap((toolset) => toolset.tools)
+    expect(tools.filter((tool) => tool.readOnly === false).map((tool) => tool.name)).toEqual([
+      'propose_knowledge',
+      'propose_rule_change',
+    ])
+    const names = tools.map((tool) => tool.name)
+    expect(names).toContain('release_rules')
+    expect(names).toContain('repo_stack')
+    expect(names).toContain('review_status')
+    for (const name of ['stack_usage', 'release_status', 'release_step', 'start_task', 'jobs'])
+      expect(names).not.toContain(name)
+  })
+
   test('internal tasks mount catalog for reviews, a checkout-free set for chat and nothing for one-shots', () => {
     expect(taskToolsets('review')).toEqual([
       'code',

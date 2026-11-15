@@ -274,6 +274,30 @@ const renderPreview = (preview: ReleaseStepPreview, confirm: string | undefined)
       : `Nothing has changed yet. To run it, call release_step again with the same arguments and confirm: "${confirm}" (valid 10 minutes, once). Ask the user first.`,
   ].join('\n')
 
+/** What `release_rules` reads: a readable repository, its release settings and its Guide. */
+export type ReleaseRulesAccess = Pick<ReleaseToolsAccess, 'repoOf' | 'settings' | 'guide'>
+
+/**
+ * `release_rules`: how a repository the caller may read releases, from its release settings and
+ * the Guide's `releases` and `commits` sections. The `releases` toolset carries it, and the MCP
+ * `rules` toolset too.
+ */
+export function releaseRulesTool(access: ReleaseRulesAccess): RegistryTool {
+  return defineTool({
+    name: 'release_rules',
+    description:
+      "How a repository releases, in plain language: branches, merge request or trunk flow, tag format and version scheme, how the bump is derived from commit conventions, acceptance, gates, environments in order, and the team's notes on releases from its Guide.",
+    input: z.object({ repo: repoArg }),
+    run: async ({ repo }) => {
+      const target = access.repoOf(repo)
+      if (!target) throw noRepo(repo)
+      const [settings, guide] = await Promise.all([access.settings(target), access.guide(target)])
+      return renderReleaseRules(repo, settings, guide)
+    },
+    subject: ({ repo }) => repo,
+  })
+}
+
 function readTools(access: ReleaseToolsAccess): RegistryTool[] {
   const repoOf = (value: string) => {
     const repo = access.repoOf(value)
@@ -281,18 +305,7 @@ function readTools(access: ReleaseToolsAccess): RegistryTool[] {
     return repo
   }
   return [
-    defineTool({
-      name: 'release_rules',
-      description:
-        "How a repository releases, in plain language: branches, merge request or trunk flow, tag format and version scheme, how the bump is derived from commit conventions, acceptance, gates, environments in order, and the team's notes on releases from its Guide.",
-      input: z.object({ repo: repoArg }),
-      run: async ({ repo }) => {
-        const target = repoOf(repo)
-        const [settings, guide] = await Promise.all([access.settings(target), access.guide(target)])
-        return renderReleaseRules(repo, settings, guide)
-      },
-      subject: ({ repo }) => repo,
-    }),
+    releaseRulesTool(access),
     defineTool({
       name: 'release_status',
       description:

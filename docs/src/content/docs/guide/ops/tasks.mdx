@@ -31,7 +31,7 @@ import {
 
 Approve, follow and retry agent tasks that change code in one or many repositories, each ending in a draft merge request, and decide whether agents may write code at all.
 
-A **task** is one request ("bump `@acme/widget-kit` to 6.0 and fix the breaking calls"). It becomes one task per repository, and each opens a draft merge request. Tasks come from Chat, from coding agents over MCP and from Holtkeeper itself (fixes and upgrades).
+A **task** is one request ("bump `@acme/widget-kit` to 6.0 and fix the breaking calls"). It becomes one task per repository, and each opens a draft merge request. Tasks come from Chat, from <Ui>Roll out</Ui> in Supply chain › Libraries, from the API and from Holtkeeper itself (fixes and upgrades). Coding agents cannot start or follow task groups over MCP; they read Holtkeeper's review of a task's merge request with `review_status` on its branch.
 
 <Screen title="Ops › Tasks" caption="Groups land in sections by state; the Ended section folds into one row in the Open view.">
   <Toolbar title="Tasks" crumbs={['Ops']}>
@@ -49,17 +49,17 @@ A **task** is one request ("bump `@acme/widget-kit` to 6.0 and fix the breaking 
   </Toolbar>
   <Scroll>
 
-| Status                          | Task                                                         | Repositories        | Progress                    | Merge requests | CI                                    | Spend   | Updated   |                          |
-| ------------------------------- | ------------------------------------------------------------ | ------------------- | --------------------------- | -------------- | ------------------------------------- | ------- | --------- | ------------------------ |
-| **Needs approval**              |                                                              |                     |                             |                |                                       |         |           |                          |
-| <Tag tone="warn">Proposed</Tag> | **Upgrade @acme/widget-kit to 6.0** · upgrade · MCP · Jon D. | `acme/admin-ui` +4  | 0 of 5                      | —              | —                                     | ≤ $7.50 | 4 min ago | <Button>Approve</Button> |
-| **Running**                     |                                                              |                     |                             |                |                                       |         |           |                          |
-| <Tag tone="info">Running</Tag>  | **Add test ids to checkout forms** · tests · Chat · Mira K.  | `acme/checkout-web` | 1 MR · 1 running · 1 queued | `!221`         | <Tag tone="info">Running</Tag>        | $1.12   | 1 min ago | <Button>Cancel</Button>  |
-| **Opened MR**                   |                                                              |                     |                             |                |                                       |         |           |                          |
-| <Tag tone="ok">Opened MR</Tag>  | **Fix ABC-123 date parsing** · fix · Chat · Jon D.           | `acme/widget-kit`   | 1 of 1                      | `!88`          | <Tag tone="ok">Passed</Tag>           | $0.64   | 2 h ago   | <Button>Open MR</Button> |
-| **Failed**                      |                                                              |                     |                             |                |                                       |         |           |                          |
-| <Tag tone="bad">Failed</Tag>    | `lockfile is out of date after install`                      | `acme/admin-ui` +2  | 2 MR · 1 failed             | `!301` `!57`   | <Tag tone="bad">Failed · 1 of 2</Tag> | $3.40   | yesterday | <Button>Retry</Button>   |
-| _Ended · 41 done, 6 cancelled_  |                                                              |                     |                             |                |                                       |         |           |                          |
+| Status                          | Task                                                             | Repositories        | Progress                    | Merge requests | CI                                    | Spend   | Updated   |                          |
+| ------------------------------- | ---------------------------------------------------------------- | ------------------- | --------------------------- | -------------- | ------------------------------------- | ------- | --------- | ------------------------ |
+| **Needs approval**              |                                                                  |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="warn">Proposed</Tag> | **Upgrade @acme/widget-kit to 6.0** · upgrade · Rollout · Jon D. | `acme/admin-ui` +4  | 0 of 5                      | —              | —                                     | ≤ $7.50 | 4 min ago | <Button>Approve</Button> |
+| **Running**                     |                                                                  |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="info">Running</Tag>  | **Add test ids to checkout forms** · tests · Chat · Mira K.      | `acme/checkout-web` | 1 MR · 1 running · 1 queued | `!221`         | <Tag tone="info">Running</Tag>        | $1.12   | 1 min ago | <Button>Cancel</Button>  |
+| **Opened MR**                   |                                                                  |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="ok">Opened MR</Tag>  | **Fix ABC-123 date parsing** · fix · Chat · Jon D.               | `acme/widget-kit`   | 1 of 1                      | `!88`          | <Tag tone="ok">Passed</Tag>           | $0.64   | 2 h ago   | <Button>Open MR</Button> |
+| **Failed**                      |                                                                  |                     |                             |                |                                       |         |           |                          |
+| <Tag tone="bad">Failed</Tag>    | `lockfile is out of date after install`                          | `acme/admin-ui` +2  | 2 MR · 1 failed             | `!301` `!57`   | <Tag tone="bad">Failed · 1 of 2</Tag> | $3.40   | yesterday | <Button>Retry</Button>   |
+| _Ended · 41 done, 6 cancelled_  |                                                                  |                     |                             |                |                                       |         |           |                          |
 
   </Scroll>
 </Screen>
@@ -178,7 +178,7 @@ Click a row, or press <Kbd>J</Kbd> to open the first row and <Kbd>K</Kbd> the la
     <Tabs items={['Plan', 'Repositories:5', 'Diff', 'Agent runs', 'Request', 'Flow']} />
     <Facts
       items={[
-        ['Kind', 'upgrade · MCP · patch first'],
+        ['Kind', 'upgrade · Rollout · patch first'],
         ['Proposed by', 'Jon D. · 4 min ago'],
         ['May approve', 'anyone with tasks:run on every repository'],
         ['Branch', 'holtkeeper/widget-kit-6'],
@@ -210,9 +210,9 @@ The ⋯ menu has <Ui>Open the chat thread</Ui> for chat requests and <Ui>Copy li
 ## Start a task
 
 <Ui>New task in Chat</Ui> opens [Chat](/guide/chat/threads/), where you describe the change and
-Holtkeeper proposes the task. Coding agents start tasks with the `start_task` MCP tool and poll
-`task_status` ([Agent tasks](/agents/tasks/)). <Ui>Configure</Ui> opens [Settings ›
-AI](/guide/settings/ai/).
+Holtkeeper proposes the task. Coding agents cannot start tasks over MCP; they follow a task's merge
+request with the read-only `review_status` tool on its branch ([Agent tasks](/agents/tasks/)).
+<Ui>Configure</Ui> opens [Settings › AI](/guide/settings/ai/).
 
 :::note
 Every task spends from the same weekly AI budget as reviews and chat. Its own caps stop it earlier: by default $1.50 per repository and $5 per task, both changed with <Ui>Edit caps</Ui>.
@@ -221,7 +221,7 @@ Every task spends from the same weekly AI budget as reviews and chat. Its own ca
 ## Related
 
 - [Tasks and Inbox](/start/concepts/tasks-and-inbox/) — what a task is and where approvals land.
-- [Agent tasks](/agents/tasks/) — starting tasks from a coding agent.
+- [Agent tasks](/agents/tasks/) — following tasks from a coding agent.
 - [AI spend](/guide/ops/ai-spend/) — the weekly budget tasks spend from.
 - [Inbox](/guide/home/inbox/) — proposals waiting for your approval.
 - [Write tasks](/modules/write-task/) — how a task checks out, edits, verifies and pushes.

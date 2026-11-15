@@ -271,7 +271,7 @@ const toolNames = (toolsets: ReturnType<typeof mcpToolsets>) =>
   toolsets.flatMap((toolset) => toolset.tools.map((tool) => tool.name))
 
 describe('registration', () => {
-  test('the MCP catalog toolset offers the tools only with supply', () => {
+  test('the MCP catalog toolset never offers the fleet tables', () => {
     const context = {
       ...base(),
       knowledge: { store, canReadScope: () => true, repoOf: () => undefined, actor: 'x', now },
@@ -280,9 +280,7 @@ describe('registration', () => {
       canReadAudits: () => true,
     }
     expect(toolNames(mcpToolsets(context))).not.toContain('security_findings')
-    expect(toolNames(mcpToolsets({ ...context, supply: supplyFor(principalOf('web')) }))).toContain(
-      'license_overview',
-    )
+    expect(toolNames(mcpToolsets(context))).not.toContain('license_overview')
   })
 
   test('chat gets the requester’s supply, internal agents none', () => {
