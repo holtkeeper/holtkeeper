@@ -88,4 +88,42 @@ describe('withMirrorLock', () => {
     release()
     await hung
   })
+
+  test('takes over a lock with a future mtime that nobody refreshes', async () => {
+    // What an exclusive create on NFS leaves when its process dies at once: no owner, and the
+    // create verifier as timestamps.
+    const mirror = await mirrorIn()
+    await writeFile(`${mirror}.lock`, '')
+    const future = new Date('2035-04-07T15:28:39Z')
+    await utimes(`${mirror}.lock`, future, future)
+    const lines: string[] = []
+    const started = Date.now()
+    const ran = await withMirrorLock(mirror, async () => 'ran', {
+      pollMs: 5,
+      staleMs: 100,
+      log: (line) => lines.push(line),
+    })
+    expect(ran).toBe('ran')
+    expect(Date.now() - started).toBeGreaterThanOrEqual(100)
+    expect(lines.some((line) => line.startsWith('taking over the stale mirror lock'))).toBeTrue()
+  })
+
+  test('keeps waiting for a lock its holder refreshes, whatever its clock says', async () => {
+    const mirror = await mirrorIn()
+    await writeFile(`${mirror}.lock`, 'skewed-host 7 x')
+    let tick = 0
+    const refresh = setInterval(() => {
+      const ahead = new Date(Date.now() + 3_600_000 + ++tick * 1000)
+      void utimes(`${mirror}.lock`, ahead, ahead)
+    }, 20)
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 400)
+    const outcome = await withMirrorLock(mirror, async () => 'ran', {
+      pollMs: 5,
+      staleMs: 100,
+      signal: controller.signal,
+    }).catch(() => 'still waiting')
+    clearInterval(refresh)
+    expect(outcome).toBe('still waiting')
+  })
 })

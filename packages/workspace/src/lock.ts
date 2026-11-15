@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 
 export interface MirrorLockOptions {
-  /** A lock not refreshed for this long is taken over. Default 5 minutes. */
+  /** A lock not refreshed for this long (by its mtime or as seen by the waiter) is taken over. Default 5 minutes. */
   staleMs?: number
   /** How often the holder refreshes it. Default 30 seconds. */
   refreshMs?: number
@@ -43,7 +43,9 @@ const sleep = (ms: number, signal: AbortSignal | undefined) =>
  * Runs `task` while holding `<mirror>.lock`, created with `O_EXCL`, so no two tasks run git in one
  * mirror at once, whether they are in this process or on other hosts sharing the cache directory
  * (an NFS or other ReadWriteMany volume). The holder refreshes the file for at most `maxHoldMs`;
- * a lock left by a killed or hung holder is taken over once stale. While holding it, git's own
+ * a lock left by a killed or hung holder is taken over once stale: its mtime is older than
+ * `staleMs`, or the waiter saw it unchanged for `staleMs` (which also covers future or garbage
+ * mtimes). While holding it, git's own
  * `*.lock` files in the mirror can only be leftovers of a killed git and are removed first.
  * Waiting ends with the signal's reason when `signal` aborts.
  */
@@ -59,6 +61,7 @@ export async function withMirrorLock<T>(
   const owner = `${hostname()} ${process.pid} ${crypto.randomUUID()}`
   await mkdir(dirname(path), { recursive: true })
   let told = false
+  let observed: { signature: string; since: number } | undefined
   for (;;) {
     signal?.throwIfAborted()
     try {
@@ -70,9 +73,18 @@ export async function withMirrorLock<T>(
       if (!exists(error)) throw error
     }
     const info = await stat(path).catch(() => undefined)
-    if (info && Date.now() - info.mtimeMs > staleMs) {
-      await rm(path, { force: true })
-      continue
+    if (info) {
+      // The mtime comes from another host's clock, and when a holder dies right after an
+      // exclusive create on NFS it keeps the create verifier: garbage, even years ahead. So a
+      // lock that did not change for `staleMs` by this process's own clock is stale as well.
+      const signature = `${info.ino}:${info.size}:${info.mtimeMs}`
+      if (observed?.signature !== signature) observed = { signature, since: Date.now() }
+      if (Date.now() - info.mtimeMs > staleMs || Date.now() - observed.since > staleMs) {
+        log?.(`taking over the stale mirror lock ${path}`)
+        await rm(path, { force: true })
+        observed = undefined
+        continue
+      }
     }
     if (!told && log) {
       told = true
