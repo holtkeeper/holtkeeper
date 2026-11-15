@@ -1,4 +1,11 @@
-import type { CreateJobInput, RepoRef, ReviewFindingCounts, ReviewRow } from '@holtkeeper/api'
+import type {
+  CreateJobInput,
+  RepoRef,
+  ReviewFindingCounts,
+  ReviewQuality,
+  ReviewQualityRow,
+  ReviewRow,
+} from '@holtkeeper/api'
 
 import { repoKey } from './repo.ts'
 import { searchEntry, searchEnum, searchText } from './search-params.ts'
@@ -25,6 +32,24 @@ export const reviewPeriods = [7, 30, 90] as const
 /** Days Quality › Reviews looks back over. */
 export type ReviewPeriod = (typeof reviewPeriods)[number]
 
+/** Days the outcomes card looks back over; 90 is the server's default. */
+export const outcomePeriods = [30, 90, 180] as const
+
+/** Days the outcomes card looks back over. */
+export type OutcomePeriod = (typeof outcomePeriods)[number]
+
+/** What the outcomes card groups comments by, in display order, with the words for it. */
+export const outcomeGroups = [
+  { id: 'category', label: 'Category' },
+  { id: 'severity', label: 'Severity' },
+  { id: 'model', label: 'Model' },
+  { id: 'promptVersion', label: 'Prompt version' },
+  { id: 'source', label: 'Source' },
+] as const satisfies readonly { id: ReviewQuality['by']; label: string }[]
+
+/** A grouping of the outcomes card. */
+type OutcomeGroup = (typeof outcomeGroups)[number]['id']
+
 const reviewSheetTabs = ['findings', 'summary', 'learnings'] as const
 
 /** A tab of the review sheet. */
@@ -35,8 +60,8 @@ export type ReviewSortKey = 'when' | 'findings' | 'cost'
 
 /**
  * Search parameters of Quality › Reviews: `repo` (`forge:path`) picks one repository; `q`,
- * `verdict`, `mode`, `author` and `days` filter the rows; `review` opens a run in the sheet on its
- * `tab`.
+ * `verdict`, `mode`, `author` and `days` filter the rows; `by` and `outcomes` set the grouping and
+ * the period of the outcomes card; `review` opens a run in the sheet on its `tab`.
  */
 export interface ReviewsSearch {
   repo?: string
@@ -45,6 +70,10 @@ export interface ReviewsSearch {
   mode?: ReviewRow['mode']
   author?: string
   days?: ReviewPeriod
+  /** What the outcomes card groups by; `category` when absent. */
+  by?: OutcomeGroup
+  /** Days the outcomes card covers; 90 when absent. */
+  outcomes?: OutcomePeriod
   review?: string
   tab?: ReviewSheetTab
 }
@@ -52,6 +81,11 @@ export interface ReviewsSearch {
 const period = (value: unknown): ReviewPeriod | undefined => {
   const days = typeof value === 'string' ? Number(value) : value
   return reviewPeriods.find((option) => option === days)
+}
+
+const outcomePeriod = (value: unknown): OutcomePeriod | undefined => {
+  const days = typeof value === 'string' ? Number(value) : value
+  return outcomePeriods.find((option) => option === days)
 }
 
 /** `ReviewsSearch` from raw search values; unknown and empty values are dropped. */
@@ -62,6 +96,14 @@ export const parseReviewsSearch = (search: Record<string, unknown>): ReviewsSear
   ...searchEntry('mode', searchEnum(search.mode, reviewModes)),
   ...searchEntry('author', searchText(search.author)),
   ...searchEntry('days', period(search.days)),
+  ...searchEntry(
+    'by',
+    searchEnum(
+      search.by,
+      outcomeGroups.map((group) => group.id),
+    ),
+  ),
+  ...searchEntry('outcomes', outcomePeriod(search.outcomes)),
   ...searchEntry('review', searchText(search.review)),
   ...searchEntry('tab', searchEnum(search.tab, reviewSheetTabs)),
 })
@@ -242,3 +284,26 @@ export const tokenText = (usage: { inputTokens?: number; outputTokens?: number; 
   ]
     .filter((part) => part !== undefined)
     .join(' · ')
+
+/**
+ * The `since` of `GET /api/reviews/quality` for `days`: midnight UTC that many days ago, so the
+ * query key stays the same all day instead of changing with every render.
+ */
+export const outcomeSince = (days: OutcomePeriod, now: Date = new Date()) =>
+  new Date(Math.floor(now.getTime() / 86_400_000) * 86_400_000 - days * 86_400_000).toISOString()
+
+/** The bar of one group: what became of its comments, fixed first. */
+export const outcomeSegments = (row: ReviewQualityRow) => [
+  { value: row.fixed, tone: 'success' as const, label: 'fixed' },
+  { value: row.resolved, tone: 'info' as const, label: 'resolved' },
+  { value: row.ignored, tone: 'warning' as const, label: 'ignored' },
+  { value: row.unknown, tone: 'default' as const, label: 'unknown' },
+]
+
+/** A share as a whole percent; a dash when nothing was judged. */
+export const shareText = (share: number | undefined) =>
+  share === undefined ? '—' : `${Math.round(share * 100)}%`
+
+/** Tone of the acceptance tag: most comments fixed is good, few is a warning. */
+export const acceptanceTone = (share: number | undefined) =>
+  share === undefined ? 'default' : share >= 0.7 ? 'success' : share >= 0.4 ? 'warning' : 'danger'

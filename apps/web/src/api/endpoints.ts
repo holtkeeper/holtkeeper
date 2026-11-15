@@ -41,6 +41,8 @@ import type {
   LearningStatus,
   PutGuideSectionInput,
   ReactionTotalsList,
+  ReviewQuality,
+  ReviewQualityQuery,
   RegenerateGuideInput,
   AnalysisBackfillInput,
   AnalysisBackfillStarted,
@@ -677,6 +679,8 @@ export const api = {
     request<RepoOverview>('GET', '/api/repos/overview', { query: { repo: repoKey(repo) } }),
   reviews: (query: ReviewQuery) =>
     request<ReviewList>('GET', '/api/reviews', { query: toQuery(query) }),
+  reviewQuality: (query: ReviewQualityQuery) =>
+    request<ReviewQuality>('GET', '/api/reviews/quality', { query: toQuery(query) }),
   review: (analysisId: string) => request<ReviewDetail>('GET', `/api/reviews/${id(analysisId)}`),
   branches: () => request<BranchesOverview>('GET', '/api/branches'),
 

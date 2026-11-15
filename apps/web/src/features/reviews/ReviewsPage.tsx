@@ -49,6 +49,7 @@ import {
 import { useConfigure } from '../settings/SettingsSheet.tsx'
 import { useScope } from '../shell/scope.ts'
 import { ReviewMergeRequestDialog, useCanReview } from './ReviewDialogs.tsx'
+import { ReviewOutcomes } from './ReviewOutcomes.tsx'
 import { ReviewReactions } from './ReviewReactions.tsx'
 import { ReviewSheet } from './ReviewSheet.tsx'
 
@@ -334,6 +335,7 @@ export function ReviewsBody({
           Show older reviews
         </LoadMore>
       ) : null}
+      <ReviewOutcomes {...(repo ? { repo } : {})} search={search} update={update} />
       <ReviewReactions {...(repo ? { repo } : {})} />
       <ReviewSheet
         row={current}

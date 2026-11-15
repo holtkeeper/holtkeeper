@@ -3,14 +3,18 @@ import { expect, test } from 'bun:test'
 import type { ReviewRow } from '@holtkeeper/api'
 
 import {
+  acceptanceTone,
   filterReviews,
   mergeRequestNumber,
+  outcomeSegments,
+  outcomeSince,
   parseReviewsSearch,
   reviewAuthors,
   reviewJobInput,
   reviewSince,
   reviewTotals,
   severitySegments,
+  shareText,
   severityText,
   sortReviews,
   tokenText,
@@ -159,4 +163,45 @@ test('token usage reads compactly', () => {
   )
   expect(tokenText({ inputTokens: 2_350_000, turns: 1 })).toBe('2.4M in · 1 turn')
   expect(tokenText({ turns: 0 })).toBe('')
+})
+
+test('Reviews search keeps the outcomes card settings and drops unknown ones', () => {
+  expect(parseReviewsSearch({ by: 'promptVersion', outcomes: '180' })).toEqual({
+    by: 'promptVersion',
+    outcomes: 180,
+  })
+  expect(parseReviewsSearch({ by: 'color', outcomes: 7 })).toEqual({})
+})
+
+test('the outcomes period starts at midnight so the query stays the same all day', () => {
+  const morning = new Date('2026-11-15T01:00:00.000Z')
+  const evening = new Date('2026-11-15T23:30:00.000Z')
+  expect(outcomeSince(90, morning)).toBe('2026-08-17T00:00:00.000Z')
+  expect(outcomeSince(90, evening)).toBe(outcomeSince(90, morning))
+  expect(outcomeSince(30, morning)).toBe('2026-10-16T00:00:00.000Z')
+})
+
+test('outcome bars list fixed first and shares read as whole percents', () => {
+  const segments = outcomeSegments({
+    key: 'bug',
+    comments: 10,
+    fixed: 5,
+    resolved: 2,
+    ignored: 2,
+    unknown: 1,
+    up: 0,
+    down: 0,
+  })
+  expect(segments.map((segment) => [segment.label, segment.value])).toEqual([
+    ['fixed', 5],
+    ['resolved', 2],
+    ['ignored', 2],
+    ['unknown', 1],
+  ])
+  expect(shareText(0.4166)).toBe('42%')
+  expect(shareText(undefined)).toBe('—')
+  expect(acceptanceTone(0.7)).toBe('success')
+  expect(acceptanceTone(0.5)).toBe('warning')
+  expect(acceptanceTone(0.1)).toBe('danger')
+  expect(acceptanceTone(undefined)).toBe('default')
 })

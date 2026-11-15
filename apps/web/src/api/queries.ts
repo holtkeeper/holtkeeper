@@ -46,6 +46,7 @@ import type {
   PutConfigInput,
   PutSettingInput,
   RepoRef,
+  ReviewQualityQuery,
   ReviewQuery,
   Scope,
   UpdateCredentialInput,
@@ -1178,6 +1179,20 @@ export const useReviews = (query: Omit<ReviewQuery, 'before'> = {}, enabled = tr
     getNextPageParam: (last) => last.nextBefore,
     placeholderData: keepPreviousData,
     staleTime: 60_000,
+    enabled,
+  })
+
+/**
+ * What became of Holtkeeper's review comments on merged merge requests, grouped by `query.by`.
+ * Fails quietly for callers without `analyses:read`; the card then renders nothing.
+ */
+export const useReviewQuality = (query: ReviewQualityQuery, enabled = true) =>
+  useQuery({
+    queryKey: ['reviews', 'quality', query],
+    queryFn: () => api.reviewQuality(query),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,
+    retry: false,
     enabled,
   })
 
